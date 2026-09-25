@@ -7,6 +7,8 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -48,21 +50,41 @@ public final class RevisionJournal implements ConflictResolver {
             schema.entityType()));
   }
 
-  /** Comparable snapshot of the current state, or null if the entity is absent/deleted. */
+  /**
+   * Comparable snapshot of the current state, or null if the entity is absent/deleted. It carries
+   * the recorded author as {@code _actor} — the row's own when its schema has an author column,
+   * otherwise the journal head's — so every replica records the same author for the revision.
+   */
   public Map<String, Object> comparableSnapshot(String id) {
     var map = schema.snapshotMap(id);
-    return map == null ? null : schema.comparable(map);
+    if (map == null) {
+      return null;
+    }
+    var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor).orElse(null);
+    return authored(schema.comparable(map), author);
   }
 
-  /** Comparable snapshot recorded at a given revision (the merge base), or null if not recorded. */
+  /**
+   * Comparable snapshot recorded at a given revision (the merge base), or null if not recorded.
+   * Like {@link #comparableSnapshot} it carries that revision's author.
+   */
   public Map<String, Object> comparableAtRev(String id, String rev) {
     if (Strings.isBlank(rev)) {
       return null;
     }
     return changeLog
         .at(schema.entityType(), id, rev)
-        .map(e -> schema.comparable(YamlUtil.parseMap(e.snapshot())))
+        .map(e -> authored(schema.comparable(YamlUtil.parseMap(e.snapshot())), e.actor()))
         .orElse(null);
+  }
+
+  private static Map<String, Object> authored(Map<String, Object> comparable, String author) {
+    if (author == null || comparable.containsKey(Snapshots.ACTOR)) {
+      return comparable;
+    }
+    var snapshot = new LinkedHashMap<>(comparable);
+    snapshot.put(Snapshots.ACTOR, author);
+    return snapshot;
   }
 
   /** The current revision of a live row, or null if the row is absent. */
@@ -114,17 +136,24 @@ public final class RevisionJournal implements ConflictResolver {
 
   /** Appends a revision for the current state of {@code id}, minting a rev from the counter. */
   public String recordRevision(String id, String origin, boolean deleted) {
-    return recordRevision(id, null, origin, deleted, false);
+    return recordRevision(id, null, null, origin, deleted, false);
   }
 
   /**
-   * Appends a revision for the current state of {@code id}. With {@code explicitRev} null the rev
-   * is minted from the current counter; otherwise the caller-supplied rev is used verbatim (sync
-   * adopting main's authoritative rev). {@code setBaseRev} records that this revision is the new
-   * synced ancestor — set only when adopting from main, never on a local edit.
+   * Appends a revision for the current state of {@code id}, authored by the bound actor. With
+   * {@code explicitRev} null the rev is minted from the current counter; otherwise the
+   * caller-supplied rev is used verbatim (sync adopting main's authoritative rev). {@code
+   * offeredAuthor} is the {@code _actor} a synced revision carries. {@code setBaseRev} records that
+   * this revision is the new synced ancestor — set only when adopting from main, never on a local
+   * edit.
    */
-  public String recordRevision(
-      String id, String explicitRev, String origin, boolean deleted, boolean setBaseRev) {
+  private String recordRevision(
+      String id,
+      String explicitRev,
+      String offeredAuthor,
+      String origin,
+      boolean deleted,
+      boolean setBaseRev) {
     var map = schema.snapshotMap(id);
     if (map == null) {
       return null;
@@ -142,7 +171,7 @@ public final class RevisionJournal implements ConflictResolver {
         db.execute("UPDATE " + schema.table() + " SET rev = ? WHERE id = ?", rev, id);
       }
     }
-    changeLog.append(schema.entityType(), id, rev, schema.author(id), origin, deleted, snapshot);
+    changeLog.appendSynced(schema.entityType(), id, rev, offeredAuthor, origin, deleted, snapshot);
     return rev;
   }
 
@@ -163,14 +192,14 @@ public final class RevisionJournal implements ConflictResolver {
         () -> {
           if (snapshot == null) {
             if (schema.exists(id)) {
-              recordRevision(id, rev, "sync", true, false);
+              recordRevision(id, rev, null, "sync", true, false);
               schema.deleteRow(id);
             } else {
-              changeLog.append(schema.entityType(), id, rev, null, "sync", true, EMPTY_SNAPSHOT);
+              changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
             }
           } else {
             schema.apply(id, snapshot);
-            recordRevision(id, rev, "sync", false, true);
+            recordRevision(id, rev, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, true);
           }
           return null;
         });
@@ -193,12 +222,14 @@ public final class RevisionJournal implements ConflictResolver {
             if (!schema.exists(id)) {
               return new PushOutcome.Accepted(latestRev(id));
             }
-            var rev = recordRevision(id, null, "sync", true, false);
+            var rev = recordRevision(id, null, null, "sync", true, false);
             schema.deleteRow(id);
             return new PushOutcome.Accepted(rev);
           }
           schema.apply(id, snapshot);
-          return new PushOutcome.Accepted(recordRevision(id, null, "sync", false, false));
+          return new PushOutcome.Accepted(
+              recordRevision(
+                  id, null, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, false));
         });
   }
 
@@ -209,13 +240,14 @@ public final class RevisionJournal implements ConflictResolver {
    * chosen} differs from {@code remote} the row becomes a forward local edit the next sync pushes;
    * when they match the row simply adopts main's value, and the earlier local version is still in
    * the {@link ChangeLog}. A {@code null} side is a deletion. Returns the rev the row now carries.
-   * No work is ever lost: every state is journaled.
+   * No work is ever lost: every state is journaled. The base is main's revision, adopted as {@link
+   * Actor#main()} so it keeps the author main recorded; only {@code chosen} is the resolver's.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
     return db.transaction(
         () -> {
-          var baseRev = adoptBase(id, remote);
+          var baseRev = Actor.call(Actor.main(), () -> adoptBase(id, remote));
           if (sameContent(chosen, remote)) {
             return baseRev;
           }
@@ -226,16 +258,16 @@ public final class RevisionJournal implements ConflictResolver {
   private String adoptBase(String id, Map<String, Object> remote) {
     if (remote == null) {
       if (schema.exists(id)) {
-        var rev = recordRevision(id, null, "sync", true, false);
+        var rev = recordRevision(id, null, null, "sync", true, false);
         schema.deleteRow(id);
         return rev;
       }
       var rev = Revisions.next(currentRev(id), EMPTY_SNAPSHOT);
-      changeLog.append(schema.entityType(), id, rev, null, "sync", true, EMPTY_SNAPSHOT);
+      changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
       return rev;
     }
     schema.apply(id, remote);
-    return recordRevision(id, null, "sync", false, true);
+    return recordRevision(id, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true);
   }
 
   private String writeChosen(String id, Map<String, Object> chosen) {
@@ -243,12 +275,12 @@ public final class RevisionJournal implements ConflictResolver {
       if (!schema.exists(id)) {
         return latestRev(id);
       }
-      var rev = recordRevision(id, null, "resolve", true, false);
+      var rev = recordRevision(id, null, null, "resolve", true, false);
       schema.deleteRow(id);
       return rev;
     }
     schema.apply(id, chosen);
-    return recordRevision(id, null, "resolve", false, false);
+    return recordRevision(id, null, null, "resolve", false, false);
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

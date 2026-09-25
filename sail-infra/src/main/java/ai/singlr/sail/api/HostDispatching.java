@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;

@@ -2,6 +2,15 @@
 
 ## 0.46.2
 
+- **Every write names who is acting.** One `Actor` (handle, role, lane) is the identity of every write, bound by the entry point that makes it, and the change log reads it for every revision, tombstone and erasure. This changes no authority rule; it is where the next release enforces them.
+  - Lanes: `CLI` (the box's operator), `API` (an HTTP token), `AGENT` and `ROOM` (a run's principal on the socket), `SYNC` (an FDE pushing to main), `MAIN` (a node adopting main's revisions) and `SYSTEM` (this box's machinery, recorded as `sail`).
+  - The author in `sail spec history` and in `updated_by` is always the one who made that revision. A status-only or content-only change, a delete, a restore and a project move used to keep the previous editor's name; a synced row with no author used to read `sync`, and retention's erasures `sail-retention` (they now say `sail`, with origin `retention`).
+  - A write with no actor bound is refused and leaves nothing behind.
+  - A run, review or shared file keeps its author on every box. These have no author column, so a push used to record the pushing FDE on main and every box that pulled it recorded `main`.
+  - On a node, the CLI writes as the box's FDE with the role main's roster gives it, and conflict resolution no longer runs as a hard-coded admin. Dispatch and stop admission still decide as admin, as before. A node whose roster has not synced yet refuses the write before touching anything and asks for `sail sync`; a preview (`run`, `agent sweep`, `agent stop --dry-run`) needs no identity. The CLI now prints a refusal's fix with its message.
+  - Resolving a conflict keeps main's author on main's version. `--theirs`, or a merge identical to it, records the author main recorded; keeping mine or a different merge records the resolver.
+  - A spec or room created through a machine token (one with no FDE, such as the host CLI's `admin` token that `sail server init` mints) records no author and is left unassigned, so any member may claim it. It used to be assigned to the token's name.
+  - Resolving the findings a follow-up spec addressed is journaled in one transaction, like every other review mutation.
 - **A merge applies only to the conflict it was made from.** A merged record is a full record. A merge started before a round re-recorded the conflict with main's news used to revert that news: every field main had moved since read as a local edit back to its old value, and won main's compare-and-set.
   - `sail conflicts show <id> --template` prints the record to merge. Its `_conflict` key names the version of the conflict it was made from. `--merge` opens the same template in `$EDITOR`.
   - A merge without `_conflict` is refused (`400`). One made from an earlier version is refused (`409`) with nothing written. A round that brings no news keeps a template valid.

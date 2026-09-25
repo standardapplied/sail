@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.Test;
  * lists as {@code List<?>}), and these turn one key into the typed value a row field wants — null
  * for an absent or wrong-typed value, never a class-cast.
  */
+@ActingAs
 class SnapshotsTest {
 
   @Test
@@ -70,9 +73,16 @@ class SnapshotsTest {
   }
 
   @Test
-  void actorReadsTheReservedKeyAndDefaultsToSync() {
+  @ActingAs(value = Actor.Lane.SYNC, handle = "node")
+  void aSyncedSnapshotIsAuthoredByItsReservedKeyOrThePushingFde() {
     assertEquals("uday", Snapshots.actor(Map.of("_actor", "uday")));
-    assertEquals("sync", Snapshots.actor(Map.of("title", "no author here")));
-    assertEquals("sync", Snapshots.actor(null));
+    assertEquals("node", Snapshots.actor(Map.of("title", "no author here")));
+    assertEquals("node", Snapshots.actor(null));
+  }
+
+  @Test
+  @ActingAs(value = Actor.Lane.CLI, handle = "uday")
+  void aLocalWriteIsAuthoredByTheActorWhateverTheSnapshotSays() {
+    assertEquals("uday", Snapshots.actor(Map.of("_actor", "someone-else")));
   }
 }

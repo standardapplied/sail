@@ -14,6 +14,9 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -36,6 +39,7 @@ import org.junit.jupiter.api.io.TempDir;
  * running row, tears down the agent it just started, and surfaces the conflict — it must never
  * overwrite the stop's terminal record or report a successful dispatch.
  */
+@ActingAs
 class DispatchLaunchCancelRaceTest {
 
   private static final String HANDLE = "me";
@@ -91,24 +95,27 @@ class DispatchLaunchCancelRaceTest {
     db = Sqlite.open(tempDir.resolve("race.db"));
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Add auth",
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of(),
+                    List.of())));
     specStore.setContent("auth", "Do auth", "");
     new FdeStore(db).add(HANDLE, null, null, "admin");
     var runStore = new RunStore(db);

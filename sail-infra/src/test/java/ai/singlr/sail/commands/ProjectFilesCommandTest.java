@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -102,7 +103,7 @@ class ProjectFilesCommandTest {
   }
 
   @Test
-  void addSymlinkPreservesTargetPermissions() throws Exception {
+  void addSymlinkPreservesTargetPermissionsAndRmUnsharesIt() throws Exception {
     var data = Files.createDirectories(tempDir.resolve("isolated"));
     var output = tempDir.resolve("add-output.txt");
     var builder =
@@ -146,6 +147,9 @@ class ProjectFilesCommandTest {
       assertEquals(
           1, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", big.toString()));
       assertTrue(new FileStore(database).find("acme", "big.bin").isEmpty());
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Rm()).execute("-p", "acme", "linked.txt"));
+      assertTrue(new FileStore(database).find("acme", "linked.txt").isEmpty());
     }
   }
 
@@ -213,7 +217,9 @@ class ProjectFilesCommandTest {
               return new FileLimits(5);
             });
 
-    var report = ProjectFilesCommand.Add.share(shared, new HostFileSource(), root, selected);
+    var report =
+        Acting.system(
+            () -> ProjectFilesCommand.Add.share(shared, new HostFileSource(), root, selected));
 
     assertEquals(1, loads.get());
     assertEquals(3, report.count());
@@ -238,7 +244,9 @@ class ProjectFilesCommandTest {
     var failure =
         assertThrows(
             IllegalArgumentException.class,
-            () -> ProjectFilesCommand.Add.share(corrupt, untouchable(), root, selected));
+            () ->
+                Acting.system(
+                    () -> ProjectFilesCommand.Add.share(corrupt, untouchable(), root, selected)));
 
     assertTrue(failure.getMessage().contains("limits.file_max"));
     assertTrue(files.list("acme").isEmpty());
@@ -368,7 +376,8 @@ class ProjectFilesCommandTest {
     new FileMaterializer(files, projectsDir).materialize("acme");
     assertTrue(Files.exists(filesDir("acme").resolve("a.txt")));
 
-    var removed = ProjectFilesCommand.Rm.unshare(files, projectsDir, "acme", "a.txt");
+    var removed =
+        Acting.system(() -> ProjectFilesCommand.Rm.unshare(files, projectsDir, "acme", "a.txt"));
 
     assertTrue(removed);
     assertTrue(files.find("acme", "a.txt").isEmpty());
@@ -403,10 +412,13 @@ class ProjectFilesCommandTest {
 
   private String share(FileStore files, String project, String path, Path source)
       throws IOException {
-    if (!Files.exists(source)) Files.writeString(source, "x");
-    try (var input = Files.newInputStream(source)) {
-      return new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults())
-          .put(path, input, Files.size(source), 0644);
-    }
+    return Acting.system(
+        () -> {
+          if (!Files.exists(source)) Files.writeString(source, "x");
+          try (var input = Files.newInputStream(source)) {
+            return new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults())
+                .put(path, input, Files.size(source), 0644);
+          }
+        });
   }
 }

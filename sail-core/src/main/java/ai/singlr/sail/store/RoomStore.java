@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -58,13 +59,17 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       String updatedAt,
       String updatedBy) {}
 
-  /** Creates a room as a local edit, stamping creation and update times. */
+  /**
+   * Creates a room as a local edit, stamping creation and update times, created and last updated by
+   * the bound {@link Actor} whatever the row names.
+   */
   public void create(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
     Strings.requireNonBlank(room.title(), "A room needs a title");
     var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
+          var author = author();
           db.execute(
               """
               INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,
@@ -76,10 +81,10 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               room.assignee(),
               room.wake(),
               room.roster(),
-              room.createdBy(),
+              author,
               now,
               now,
-              room.updatedBy());
+              author);
           journal.recordRevision(room.id(), "local", false);
         });
   }
@@ -88,28 +93,28 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * Seats a new roster as a local edit — a single-column write, so a concurrent wake edit is never
    * clobbered by a stale full-row rewrite.
    */
-  public void updateRoster(String id, String roster, String actor) {
+  public void updateRoster(String id, String roster) {
     db.transaction(
         () -> {
           db.execute(
               "UPDATE rooms SET roster = ?, updated_at = ?, updated_by = ? WHERE id = ?",
               roster,
               DateTimeUtils.now().toString(),
-              actor,
+              author(),
               id);
           journal.recordRevision(id, "local", false);
         });
   }
 
   /** Stores a new wake mode as a local edit — single-column, mirror of {@link #updateRoster}. */
-  public void updateWake(String id, String wake, String actor) {
+  public void updateWake(String id, String wake) {
     db.transaction(
         () -> {
           db.execute(
               "UPDATE rooms SET wake = ?, updated_at = ?, updated_by = ? WHERE id = ?",
               wake,
               DateTimeUtils.now().toString(),
-              actor,
+              author(),
               id);
           journal.recordRevision(id, "local", false);
         });
@@ -122,6 +127,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           if (findById(id).isEmpty()) {
             return false;
           }
+          stampAuthor(id);
           journal.recordRevision(id, "local", true);
           db.execute("DELETE FROM rooms WHERE id = ?", id);
           return true;
@@ -142,16 +148,18 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           }
           var schema = new RoomSchema();
           schema.apply(id, schema.comparable(YamlUtil.parseMap(head.snapshot())));
+          stampAuthor(id);
           journal.recordRevision(id, "restore", false);
           return true;
         });
   }
 
   /**
-   * Writes a row verbatim — timestamps included — and journals it as a LOCAL revision with no
-   * synced ancestor. The backfill's write: every field derives from the synced spec row, so each
-   * box mints a byte-identical revision, and a room main never minted pushes up on first sync
-   * instead of reading as a remote deletion (which a synced-ancestor write would).
+   * Writes a row verbatim — timestamps and creator included, last updated by the bound {@link
+   * Actor} — and journals it as a LOCAL revision with no synced ancestor. The backfill's write:
+   * every field derives from the synced spec row, so each box mints a byte-identical revision, and
+   * a room main never minted pushes up on first sync instead of reading as a remote deletion (which
+   * a synced-ancestor write would).
    */
   public void createJournaled(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
@@ -174,7 +182,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               room.createdBy(),
               room.createdAt(),
               room.updatedAt(),
-              room.updatedBy());
+              author());
           journal.recordRevision(room.id(), "local", false);
         });
   }
@@ -183,8 +191,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * The room for {@code id}, created on demand from the identity fields when absent — the seam that
    * keeps membership writes safe for a spec whose room predates or postdates the backfill.
    */
-  public RoomRow ensureFor(
-      String id, String project, String title, String assignee, String wake, String actor) {
+  public RoomRow ensureFor(String id, String project, String title, String assignee, String wake) {
     return db.transaction(
         () ->
             findById(id)
@@ -192,9 +199,17 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
                     () -> {
                       create(
                           new RoomRow(
-                              id, project, title, assignee, wake, null, actor, null, null, actor));
+                              id, project, title, assignee, wake, null, null, null, null, null));
                       return findById(id).orElseThrow();
                     }));
+  }
+
+  private void stampAuthor(String id) {
+    db.execute("UPDATE rooms SET updated_by = ? WHERE id = ?", author(), id);
+  }
+
+  private static String author() {
+    return Actor.current().handle();
   }
 
   /**
@@ -369,11 +384,6 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     @Override
     public Map<String, Object> snapshotMap(String id) {
       return findById(id).map(RoomStore.this::snapshotMap).orElse(null);
-    }
-
-    @Override
-    public String author(String id) {
-      return findById(id).map(RoomRow::updatedBy).orElse(null);
     }
 
     @Override

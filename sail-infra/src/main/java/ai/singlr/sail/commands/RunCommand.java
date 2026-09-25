@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -308,18 +309,22 @@ public final class RunCommand implements Runnable {
       DispatchOperations.AdhocSession session;
       try {
         session =
-            operations
-                .dispatching()
-                .startAdhoc(
-                    name,
-                    request,
-                    handle,
-                    () -> {
-                      if (!noRegen) {
-                        regenContext(shell, config);
-                      }
-                      prepareContainer(shell, workDir, snapshotTaken, label, branchName);
-                    });
+            CliOperator.actingUnlessPreview(
+                describeOnly,
+                operations.identity()::operator,
+                () ->
+                    operations
+                        .dispatching()
+                        .startAdhoc(
+                            name,
+                            request,
+                            handle,
+                            () -> {
+                              if (!noRegen) {
+                                regenContext(shell, config);
+                              }
+                              prepareContainer(shell, workDir, snapshotTaken, label, branchName);
+                            }));
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null

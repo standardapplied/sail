@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -51,8 +52,8 @@ class AgentReportCommandTest {
     var dbPath = tempDir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
-      new SpecStore(db).create(specRow("auth", "acme", "Add auth"));
-      new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated"));
+      Acting.system(() -> new SpecStore(db).create(specRow("auth", "acme", "Add auth")));
+      Acting.system(() -> new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated")));
     }
     var command = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
 

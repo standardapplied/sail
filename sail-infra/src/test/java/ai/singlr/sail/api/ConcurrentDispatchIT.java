@@ -14,6 +14,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -148,34 +150,41 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
 
   private DispatchOperations.Dispatched dispatchBackground(DispatchOperations ops, String specId) {
     var outcome =
-        ops.dispatch(
-            CONTAINER,
-            new DispatchOperations.Request(specId, "background", false, null, false),
+        Acting.by(
             OPERATOR,
-            HANDLE);
+            () ->
+                ops.dispatch(
+                    CONTAINER,
+                    new DispatchOperations.Request(specId, "background", false, null, false),
+                    OPERATOR,
+                    HANDLE));
     return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
   }
 
   private static void seedSpec(SpecStore store, String id, List<String> repos) {
-    store.create(
-        new SpecStore.SpecRow(
-            id,
-            CONTAINER,
-            "Title " + id,
-            SpecStatus.PENDING,
-            HANDLE,
-            "codex",
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            null,
-            null,
-            HANDLE,
-            List.of(),
-            repos));
-    store.setContent(id, "Do " + id, "");
+    Acting.as(
+        HANDLE,
+        () -> {
+          store.create(
+              new SpecStore.SpecRow(
+                  id,
+                  CONTAINER,
+                  "Title " + id,
+                  SpecStatus.PENDING,
+                  HANDLE,
+                  "codex",
+                  null,
+                  null,
+                  null,
+                  0,
+                  HANDLE,
+                  null,
+                  null,
+                  HANDLE,
+                  List.of(),
+                  repos));
+          store.setContent(id, "Do " + id, "");
+        });
   }
 
   /**

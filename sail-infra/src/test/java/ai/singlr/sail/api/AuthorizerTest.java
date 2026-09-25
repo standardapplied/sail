@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.identity.Capability;
 import org.junit.jupiter.api.Test;
 
 class AuthorizerTest {

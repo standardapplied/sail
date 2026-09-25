@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
@@ -17,6 +18,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class ContentMigrationTest {
   @TempDir Path dir;
 
@@ -274,7 +276,6 @@ class ContentMigrationTest {
             "file",
             "proj/file",
             "1-file",
-            null,
             "local",
             false,
             YamlUtil.dumpJson(Map.of("content", "AAECAw==")));

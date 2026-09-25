@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FindingParser;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -227,10 +228,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return e -> TRIGGER_TYPES.contains(e.type()) && e.spec() != null && !e.spec().isBlank();
   }
 
+  /** Reacts to a stop as this box's machinery. */
   @Override
   public void onEvent(Event event) {
     try {
-      handleAgentStopped(event);
+      Actor.run(Actor.system(), () -> handleAgentStopped(event));
     } catch (Exception e) {
       System.err.println(
           "review-pipeline: failed to process "
@@ -322,7 +324,8 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     var reviewId = createReviewWithStages(config, specId, iteration);
     var future =
         CompletableFuture.runAsync(
-            () -> executePipeline(reviewId, config, event.project(), specId), pipelineExecutor);
+            Actor.carrying(() -> executePipeline(reviewId, config, event.project(), specId)),
+            pipelineExecutor);
     inFlight.put(reviewId, future);
     future.whenComplete((v, ex) -> inFlight.remove(reviewId));
   }

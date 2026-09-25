@@ -20,6 +20,9 @@ import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -94,8 +97,8 @@ class ApiRouterTest {
   void aConflictIsAddressedByTypeAndAStaleOrAmbiguousResolveIsRefused() throws Exception {
     try (var box = new SyncBox("node")) {
       var rooms = new RoomStore(box.db);
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
-      rooms.ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
+      Acting.system(() -> rooms.ensureFor("auth", "proj", "Auth", "uday", "mention"));
       park(box, "spec", box.specs.comparableSnapshot("auth"), "title", "remote");
       park(box, "room", rooms.comparableSnapshot("auth"), "wake", "off");
       var operations =
@@ -123,7 +126,8 @@ class ApiRouterTest {
         assertEquals("room", YamlUtil.parseMap(room.body()).get("entity_type"));
         assertEquals(404, get(server, "/v1/conflicts/auth?type=file", "token").statusCode());
 
-        box.specs.setContent("auth", "written after the conflict was recorded", "");
+        Acting.system(
+            () -> box.specs.setContent("auth", "written after the conflict was recorded", ""));
         var stale =
             post(
                 server, "/v1/conflicts/auth/resolve?type=spec", "token", "{\"strategy\":\"mine\"}");
@@ -165,7 +169,7 @@ class ApiRouterTest {
   @Test
   void aMergeSettlesOnlyTheVersionOfTheConflictItWasMadeFrom() throws Exception {
     try (var box = new SyncBox("node")) {
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       park(box, "spec", local, "title", "remote");
       var conflicts = new ConflictOperations(box.db);
@@ -240,7 +244,7 @@ class ApiRouterTest {
   @Test
   void fileListingsUseMetadataAndConditionalDownloadsNeverOpenTheBlob() throws Exception {
     var operations = new SeamOperations();
-    operations.files.put("data", new byte[] {1, 2, 3});
+    Acting.system(() -> operations.files.put("data", new byte[] {1, 2, 3}));
     try (var server = serverWith(operations, true)) {
       var listed = get(server, "/v1/projects/acme/files", "token");
       assertTrue(listed.body().contains("content_hash"));
@@ -329,7 +333,10 @@ class ApiRouterTest {
       var path = "dir/config";
       if (existingMode != null) {
         var original = "original\n".getBytes(StandardCharsets.UTF_8);
-        mainFiles.put(path, new ByteArrayInputStream(original), original.length, existingMode);
+        Acting.system(
+            () ->
+                mainFiles.put(
+                    path, new ByteArrayInputStream(original), original.length, existingMode));
         mainFiles.materialize();
         SyncBox.round(main.db, node.db, "file");
         nodeFiles.materialize();
@@ -353,7 +360,8 @@ class ApiRouterTest {
       var updatedHash = BlobStore.hash(updated.getBytes(StandardCharsets.UTF_8));
       for (var files : List.of(mainFiles, nodeFiles)) {
         var row = files.find(path).orElseThrow();
-        var materialized = files.projectsDir().resolve("acme/files").resolve(path);
+        var materialized =
+            Acting.system(() -> files.projectsDir().resolve("acme/files").resolve(path));
         assertAll(
             () -> assertEquals(expectedMode, row.mode()),
             () -> assertEquals(updatedHash, row.contentHash()),
@@ -486,7 +494,7 @@ class ApiRouterTest {
 
         public String put(String path, java.io.InputStream bytes, long size, int mode) {
           try {
-            files.put(path, bytes.readAllBytes());
+            Acting.system(() -> files.put(path, bytes.readAllBytes()));
           } catch (java.io.IOException e) {
             throw new java.io.UncheckedIOException(e);
           }
@@ -1593,7 +1601,10 @@ class ApiRouterTest {
               "{\"id\": \"fresh-room\", \"project\": \"acme\", \"title\": \"Fresh\"}");
       assertEquals(201, created.statusCode());
       assertEquals("fresh-room", ops.lastRoomCreate.id());
-      assertNotNull(ops.lastRoomCreate.createdBy(), "the router stamps the creator");
+      assertEquals(
+          new Actor(null, Role.ADMIN, Actor.Lane.API),
+          ops.lastRoomCreator,
+          "the router binds the caller: a machine token acts as no FDE, so it names no creator");
 
       var one = get(server, "/v1/rooms/design-room", "token");
       assertEquals(200, one.statusCode());
@@ -2046,6 +2057,7 @@ class ApiRouterTest {
     String lastRoomMessagesRoom;
     String lastRoomPost;
     RoomCreateRequest lastRoomCreate;
+    Actor lastRoomCreator;
     String lastRoomsProject = "unset";
     String lastRoomGet;
     String lastRoomDelete;
@@ -2053,22 +2065,23 @@ class ApiRouterTest {
     @Override
     public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
       lastRoomCreate = request;
+      lastRoomCreator = Actor.current();
       return Result.success(
           new RoomDetailResponse(
               new RoomView(
                   request.id(),
                   request.project(),
                   request.title(),
-                  request.createdBy(),
+                  actor.handle(),
                   request.wake(),
                   "on",
                   null,
                   List.of(),
                   List.of(),
-                  request.createdBy(),
+                  actor.handle(),
                   "t0",
                   "t0",
-                  request.createdBy()),
+                  actor.handle()),
               null,
               null));
     }
@@ -2362,10 +2375,10 @@ class ApiRouterTest {
                   List.of(),
                   null,
                   null,
-                  request.createdBy(),
+                  Actor.current().handle(),
                   "",
                   "",
-                  request.createdBy(),
+                  Actor.current().handle(),
                   null),
               specId,
               "r1",

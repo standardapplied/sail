@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -51,24 +52,27 @@ class OptimisticConcurrencyTest {
         new SailApiServer(
             "127.0.0.1", 0, operations, tokenStore, bus, persister, tempDir.resolve("api.sock"));
     server.start();
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "manatee",
-            "Auth flow",
-            SpecStatus.DRAFT,
-            null,
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "manatee",
+                    "Auth flow",
+                    SpecStatus.DRAFT,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   @AfterEach

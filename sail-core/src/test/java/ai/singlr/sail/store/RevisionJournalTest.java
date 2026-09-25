@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -26,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
  * stale otherwise), conflict resolution (take-remote vs keep-local), and {@code base_rev} recovery
  * from a tombstone after a local delete.
  */
+@ActingAs(Actor.Lane.MAIN)
 class RevisionJournalTest {
 
   @TempDir Path tempDir;
@@ -212,12 +215,6 @@ class RevisionJournalTest {
                 return m;
               },
               id)
-          .orElse(null);
-    }
-
-    @Override
-    public String author(String id) {
-      return db.queryOne("SELECT updated_by FROM widgets WHERE id = ?", row -> row.text(0), id)
           .orElse(null);
     }
 

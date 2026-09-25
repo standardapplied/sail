@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -87,26 +88,29 @@ class AgentLogCommandTest {
     try (var db = Sqlite.open(tempDir.resolve("log.db"))) {
       new SchemaManager(db).migrate();
       var specs = new SpecStore(db);
-      specs.create(
-          new SpecStore.SpecRow(
-              "auth",
-              "acme",
-              "Add auth",
-              ai.singlr.sail.config.SpecStatus.REVIEW,
-              null,
-              null,
-              null,
-              null,
-              null,
-              0,
-              null,
-              "",
-              "",
-              null,
-              java.util.List.of(),
-              java.util.List.of()));
+      Acting.as(
+          null,
+          () ->
+              specs.create(
+                  new SpecStore.SpecRow(
+                      "auth",
+                      "acme",
+                      "Add auth",
+                      ai.singlr.sail.config.SpecStatus.REVIEW,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      0,
+                      null,
+                      "",
+                      "",
+                      null,
+                      java.util.List.of(),
+                      java.util.List.of())));
       var reviews = new ReviewStore(db);
-      var reviewId = reviews.createReview("auth", 1);
+      var reviewId = Acting.system(() -> reviews.createReview("auth", 1));
 
       assertEquals(
           "/home/dev/.sail/runs/" + reviewId + "/review.log",

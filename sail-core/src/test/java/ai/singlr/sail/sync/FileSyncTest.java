@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -28,6 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
  * auto-converge, and two editing the <em>same</em> file conflict on its content with the local copy
  * left untouched — exactly the per-file granularity the design buys.
  */
+@ActingAs
 class FileSyncTest {
 
   @TempDir Path tempDir;

@@ -10,6 +10,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.ByteArrayInputStream;
@@ -25,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 
+@ActingAs
 class SyncContentFailureTest {
   @Test
   void aReadFailureInsideAChunkNamesTheHashAndStoresNothing() throws Exception {
@@ -39,7 +43,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(new SyncPrincipal("node", true)),
+                        main.server(Actor.sync("node", Role.MEMBER)),
                         node.db,
                         node.id,
                         SyncWire.MAX_FRAME,
@@ -92,7 +96,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(new SyncPrincipal("node", true)),
+                        main.server(Actor.sync("node", Role.MEMBER)),
                         node,
                         SyncWire.MAX_FRAME,
                         output -> corruptAnswer(output, fault))) {
@@ -176,7 +180,7 @@ class SyncContentFailureTest {
           () -> {
             try (var link =
                 SyncBox.connect(
-                    main.server(new SyncPrincipal("node", true)),
+                    main.server(Actor.sync("node", Role.MEMBER)),
                     node,
                     SyncWire.MAX_FRAME,
                     output -> output,
@@ -210,7 +214,7 @@ class SyncContentFailureTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(new SyncPrincipal("node", true)),
+                        main.server(Actor.sync("node", Role.MEMBER)),
                         node,
                         SyncWire.MAX_FRAME,
                         output -> corrupt(output, fault, other))) {

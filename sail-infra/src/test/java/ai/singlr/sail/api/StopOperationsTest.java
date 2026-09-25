@@ -16,6 +16,10 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -31,6 +35,7 @@ import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class StopOperationsTest {
 
   private static final String R1 = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -1274,60 +1279,69 @@ class StopOperationsTest {
   }
 
   private void seedSpec(String id, SpecStatus status, String assignee) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "Spec " + id,
-            status,
-            assignee,
-            "codex",
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "Spec " + id,
+                    status,
+                    assignee,
+                    "codex",
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of(),
+                    List.of())));
   }
 
   private void seedAdhocRun(Integer pid, String unit) {
-    runStore.reserveDispatch(
-        R1,
-        "acme",
-        "",
-        LOCAL_HANDLE,
-        LOCAL_HANDLE,
-        "adhoc",
-        List.of(),
-        "codex",
-        null,
-        "do it",
-        RUN_LOG,
-        unit);
-    if (pid != null) {
-      runStore.updateProcess(R1, pid, null, null);
-    }
+    Acting.system(
+        () -> {
+          runStore.reserveDispatch(
+              R1,
+              "acme",
+              "",
+              LOCAL_HANDLE,
+              LOCAL_HANDLE,
+              "adhoc",
+              List.of(),
+              "codex",
+              null,
+              "do it",
+              RUN_LOG,
+              unit);
+          if (pid != null) {
+            runStore.updateProcess(R1, pid, null, null);
+          }
+        });
   }
 
   private void seedRun(Integer pid, String unit) {
-    runStore.create(
-        R1,
-        "acme",
-        "auth",
-        LOCAL_HANDLE,
-        LOCAL_HANDLE,
-        "build",
-        "codex",
-        "feat/auth",
-        "do it",
-        pid,
-        null,
-        RUN_LOG,
-        unit);
+    Acting.system(
+        () -> {
+          runStore.create(
+              R1,
+              "acme",
+              "auth",
+              LOCAL_HANDLE,
+              LOCAL_HANDLE,
+              "build",
+              "codex",
+              "feat/auth",
+              "do it",
+              pid,
+              null,
+              RUN_LOG,
+              unit);
+        });
   }
 
   private void seedReviewRun() {
@@ -1434,25 +1448,28 @@ class StopOperationsTest {
   }
 
   private String seedRunWithCredential(Integer pid, String unit) {
-    var reservation =
-        (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                R1,
-                "acme",
-                "auth",
-                LOCAL_HANDLE,
-                LOCAL_HANDLE,
-                "build",
-                List.of(),
-                "codex",
-                "feat/auth",
-                "do it",
-                RUN_LOG,
-                unit);
-    if (pid != null) {
-      runStore.updateProcess(R1, pid, null, null);
-    }
-    return reservation.credential();
+    return Acting.system(
+        () -> {
+          var reservation =
+              (RunStore.Reservation.Reserved)
+                  runStore.reserveDispatch(
+                      R1,
+                      "acme",
+                      "auth",
+                      LOCAL_HANDLE,
+                      LOCAL_HANDLE,
+                      "build",
+                      List.of(),
+                      "codex",
+                      "feat/auth",
+                      "do it",
+                      RUN_LOG,
+                      unit);
+          if (pid != null) {
+            runStore.updateProcess(R1, pid, null, null);
+          }
+          return reservation.credential();
+        });
   }
 
   @Test

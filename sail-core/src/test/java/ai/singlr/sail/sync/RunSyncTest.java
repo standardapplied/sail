@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -32,6 +33,7 @@ import org.junit.jupiter.api.io.TempDir;
  * ran spec X. Runs are single-writer: only the executing node mutates its own runs, so a reader box
  * that pulled a run never pushes a change back and the round stays conflict-free.
  */
+@ActingAs
 class RunSyncTest {
 
   @TempDir Path tempDir;

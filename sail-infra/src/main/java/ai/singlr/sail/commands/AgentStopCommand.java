@@ -5,9 +5,9 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SailEventPublisher;
@@ -17,11 +17,13 @@ import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -87,18 +89,19 @@ public final class AgentStopCommand implements Runnable {
             hooks(shell, this::publishLifecycle, listener()),
             SessionYield.NONE)) {
       var outcome =
-          operations
-              .dispatching()
-              .stop(
-                  new StopOperations.ProjectTarget(name),
-                  Actor.cliOperator(handle),
-                  handle,
-                  dryRun);
+          CliOperator.actingUnlessPreview(
+              dryRun, operations.identity()::operator, () -> stop(operations, handle));
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
       }
     }
+  }
+
+  private StopOperations.Outcome stop(HostOperations operations, String handle) {
+    return operations
+        .dispatching()
+        .stop(new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
   }
 
   /**

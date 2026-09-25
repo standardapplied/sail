@@ -17,6 +17,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -38,6 +40,7 @@ import org.junit.jupiter.api.io.TempDir;
  * a prune or status probe that fails never fails the launch, and the run-store bookkeeping is a
  * silent no-op without a store.
  */
+@ActingAs
 class RunReservationTest {
 
   @TempDir Path tempDir;
@@ -179,11 +182,15 @@ class RunReservationTest {
   }
 
   private String completedRun(String specId, List<String> repos) {
-    var id = DateTimeUtils.newId().toString();
-    runStore.reserveDispatch(
-        id, "acme", specId, "node", "node", "build", repos, "codex", null, "task", "log", "unit");
-    runStore.transition(id, "running", "completed", 0);
-    return id;
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          runStore.reserveDispatch(
+              id, "acme", specId, "node", "node", "build", repos, "codex", null, "task", "log",
+              "unit");
+          runStore.transition(id, "running", "completed", 0);
+          return id;
+        });
   }
 
   private String reserveBuild(String specId, String role, List<String> repos) {

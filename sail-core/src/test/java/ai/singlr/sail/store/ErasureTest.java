@@ -12,6 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -20,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /** What a prune takes with it, declared once, and how main and a node apply it. */
+@ActingAs(value = Actor.Lane.CLI, handle = "uday")
 class ErasureTest {
 
   private Sqlite db;
@@ -123,8 +126,8 @@ class ErasureTest {
     room("lobby", "proj");
     var first = messages.append("lobby", "uday", "first", null);
     prune(spec("old"), "uday");
-    erasure.erase(List.of(new Erasure.Target("message", first.id())), "uday", "local");
-    erasure.erase(List.of(new Erasure.Target("project", "gone")), "uday", "local");
+    erasure.erase(List.of(new Erasure.Target("message", first.id())), "local");
+    erasure.erase(List.of(new Erasure.Target("project", "gone")), "local");
 
     var run = assertThrows(ChangeLog.Pruned.class, () -> run("proj", "old", null));
     assertTrue(
@@ -182,7 +185,7 @@ class ErasureTest {
     runs.acquireContainerLease("proj", "node", "snapshot");
 
     prune(spec("old"), "uday");
-    erasure.erase(List.of(new Erasure.Target("project", "proj")), "uday", "local");
+    erasure.erase(List.of(new Erasure.Target("project", "proj")), "local");
 
     assertEquals(0, count("SELECT count(*) FROM run_credentials"));
     assertEquals(0, count("SELECT count(*) FROM slack_threads"));
@@ -242,7 +245,6 @@ class ErasureTest {
                 new Erasure.Target("message", reply.id()),
                 new Erasure.Target("room", "old"),
                 spec("old")),
-            "uday",
             "local");
 
     assertEquals(4, result.entities().size());
@@ -261,7 +263,7 @@ class ErasureTest {
     prune(spec("old"), "uday");
     var first = new ChangeLog(db).erasure("spec", "old").orElseThrow();
 
-    var second = erasure.erase(erasure.closure(List.of(spec("old"))), "mady", "local");
+    var second = erasure.erase(erasure.closure(List.of(spec("old"))), "local");
 
     assertEquals(List.of(), second.entities());
     assertEquals(first, new ChangeLog(db).erasure("spec", "old").orElseThrow());
@@ -390,7 +392,8 @@ class ErasureTest {
   }
 
   private void prune(Erasure.Target root, String actor) {
-    erasure.erase(erasure.closure(List.of(root)), actor, "local");
+    Actor.run(
+        Actor.cliOperator(actor), () -> erasure.erase(erasure.closure(List.of(root)), "local"));
   }
 
   private Erasure.Target spec(String id) {

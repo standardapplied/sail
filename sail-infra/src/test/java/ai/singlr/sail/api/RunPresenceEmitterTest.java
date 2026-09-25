@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -49,25 +50,31 @@ class RunPresenceEmitterTest {
   }
 
   private String runningRunOn(String node) {
-    return runningRunOn(node, "build");
+    return Acting.system(
+        () -> {
+          return runningRunOn(node, "build");
+        });
   }
 
   private String runningRunOn(String node, String role) {
-    var id = DateTimeUtils.newId().toString();
-    return runStore.create(
-        id,
-        "backend",
-        "auth",
-        node,
-        node,
-        role,
-        "claude-code",
-        "feat/x",
-        "do it",
-        123,
-        null,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return runStore.create(
+              id,
+              "backend",
+              "auth",
+              node,
+              node,
+              role,
+              "claude-code",
+              "feat/x",
+              "do it",
+              123,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
   }
 
   private void stampAt(String id, Instant at) {
@@ -168,7 +175,7 @@ class RunPresenceEmitterTest {
     stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
     assertEquals(1, emitter.sweep());
 
-    runStore.complete(id, "completed", 0);
+    Acting.system(() -> runStore.complete(id, "completed", 0));
 
     assertEquals(0, emitter.sweep(), "terminal runs have no presence and no edges");
   }

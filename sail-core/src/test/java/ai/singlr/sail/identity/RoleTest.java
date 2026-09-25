@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.api;
+package ai.singlr.sail.identity;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;

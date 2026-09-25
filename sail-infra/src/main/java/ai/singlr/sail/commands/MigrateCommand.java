@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.Spinner;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
@@ -161,8 +162,8 @@ public final class MigrateCommand implements Runnable {
 
   /**
    * The steps of a migrate beyond the schema and data migrations: {@code imports} bring what lives
-   * on this box's disk into the database being migrated — the project catalog and shared files —
-   * and {@code host} converges the box around it.
+   * on this box's disk into the database being migrated — the project catalog and shared files — as
+   * this box's machinery, and {@code host} converges the box around it.
    */
   record Convergence(BiConsumer<Sqlite, Boolean> imports, BiConsumer<Sqlite, Boolean> host) {}
 
@@ -187,7 +188,7 @@ public final class MigrateCommand implements Runnable {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
       var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
-      convergence.imports().accept(db, jsonOutput);
+      Actor.run(Actor.system(), () -> convergence.imports().accept(db, jsonOutput));
       if (scope instanceof Scope.DatabaseOnly databaseOnly) {
         (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
         return runs;

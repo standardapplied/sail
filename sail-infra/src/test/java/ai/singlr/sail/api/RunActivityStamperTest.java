@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -44,21 +45,24 @@ class RunActivityStamperTest {
   }
 
   private String runningRun() {
-    var id = DateTimeUtils.newId().toString();
-    return runStore.create(
-        id,
-        "backend",
-        "auth",
-        "node-a",
-        "node-a",
-        "build",
-        "claude-code",
-        "feat/x",
-        "do it",
-        123,
-        null,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return runStore.create(
+              id,
+              "backend",
+              "auth",
+              "node-a",
+              "node-a",
+              "build",
+              "claude-code",
+              "feat/x",
+              "do it",
+              123,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
   }
 
   private static Event progress(String type, Map<String, Object> data) {
@@ -136,7 +140,7 @@ class RunActivityStamperTest {
   @Test
   void aTerminalRunIsNeverStamped() {
     var id = runningRun();
-    runStore.complete(id, "completed", 0);
+    Acting.system(() -> runStore.complete(id, "completed", 0));
     var revisions = journaledRevisions(id);
 
     stamper.onEvent(

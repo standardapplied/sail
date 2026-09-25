@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.identity.Actor;
 import java.util.Objects;
 
 /**

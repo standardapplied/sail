@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -25,6 +28,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+@ActingAs
 class SyncedEntitiesTest {
   @TempDir Path tempDir;
 
@@ -103,6 +107,9 @@ class SyncedEntitiesTest {
       assertEquals(remote, messages.comparableSnapshot(id));
       assertEquals(revision, messages.latestRev(id));
       assertEquals(revision, messages.baseRevOf(id), "rebased onto main's copy");
+      var head = new ChangeLog(box.db).head("message", id).orElseThrow();
+      assertEquals("node", head.actor(), "main's copy keeps its author, not the resolver's");
+      assertEquals(Actor.MAIN_HANDLE, head.peer());
       assertTrue(box.conflicts.pending().isEmpty());
     }
   }

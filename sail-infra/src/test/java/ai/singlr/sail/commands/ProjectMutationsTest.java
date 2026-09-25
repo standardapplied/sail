@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -52,7 +53,8 @@ class ProjectMutationsTest {
     var file = dir.resolve("custom.yaml");
     Files.writeString(file, "name: acme\n");
 
-    ProjectMutations.persist("acme", file, "name: acme\nimage: ubuntu/24.04\n", false, out, "x");
+    ProjectMutations.persist(
+        "acme", file, "name: acme\nimage: ubuntu/24.04\n", false, out, "x", null);
 
     assertEquals("name: acme\nimage: ubuntu/24.04\n", Files.readString(file));
   }
@@ -62,10 +64,16 @@ class ProjectMutationsTest {
     var file = dir.resolve("custom.yaml");
     Files.writeString(file, "original\n");
 
-    ProjectMutations.persist("acme", file, "changed\n", true, out, "record repo 'x'");
+    ProjectMutations.persist("acme", file, "changed\n", true, out, "record repo 'x'", null);
 
     assertEquals("original\n", Files.readString(file), "dry-run must not write");
     assertTrue(captured.toString(StandardCharsets.UTF_8).contains("[dry-run] record repo 'x'"));
+  }
+
+  @Test
+  void onlyACatalogWriteNeedsTheOperator() {
+    assertNull(ProjectMutations.catalogOperator(dir.resolve("custom.yaml"), false));
+    assertNull(ProjectMutations.catalogOperator(null, true));
   }
 
   @Test

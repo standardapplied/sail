@@ -101,7 +101,7 @@ public final class LegacyDataMigration implements DataMigration {
       changed++;
     }
     for (var id : unjournaled(db, "reviews", "id", "review")) {
-      db.transaction(() -> reviews.recordRevision(id, null, "migration", false, false));
+      db.transaction(() -> reviews.recordRevision(id, "migration"));
       changed++;
     }
     return changed;

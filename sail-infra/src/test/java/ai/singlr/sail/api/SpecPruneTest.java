@@ -13,6 +13,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -45,6 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
  * that asks main instead of erasing, the selectors a policy and retention use, and restore of a
  * deleted spec beside the refusal a pruned one gets.
  */
+@ActingAs
 class SpecPruneTest {
 
   private static final Actor ADMIN = new Actor("ops", Role.ADMIN, Actor.Lane.API);
@@ -84,10 +89,11 @@ class SpecPruneTest {
     archived("old", "uday");
     specs.create(row("kept", "uday", SpecStatus.PENDING));
 
-    var rehearsed = pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    var rehearsed =
+        Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY));
     assertTrue(specs.findById("old").isPresent(), "a dry run erases nothing");
     var published = bus.publishedCount();
-    var erased = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var erased = Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     assertTrue(rehearsed.dryRun());
     assertFalse(erased.dryRun());
@@ -113,21 +119,30 @@ class SpecPruneTest {
 
     assertRefused(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        () -> pruner.prune(PruneRequest.ids(List.of("theirs"), true), MADY));
+        () -> Acting.by(MADY, () -> pruner.prune(PruneRequest.ids(List.of("theirs"), true), MADY)));
     assertRefused(
         ErrorCode.READ_ONLY_CREDENTIAL,
         () ->
-            pruner.prune(
-                PruneRequest.ids(List.of("theirs"), true),
-                new Actor("uday", Role.VIEWER, Actor.Lane.API)));
+            Acting.by(
+                new Actor("uday", Role.VIEWER, Actor.Lane.API),
+                () ->
+                    pruner.prune(
+                        PruneRequest.ids(List.of("theirs"), true),
+                        new Actor("uday", Role.VIEWER, Actor.Lane.API))));
     assertRefused(
         ErrorCode.AGENT_LANE_FORBIDDEN,
         () ->
-            pruner.prune(
-                PruneRequest.ids(List.of("theirs"), false),
-                Actor.agentPrincipal("claude/r", "uday")));
+            Acting.by(
+                Actor.agentPrincipal("claude/r", "uday"),
+                () ->
+                    pruner.prune(
+                        PruneRequest.ids(List.of("theirs"), false),
+                        Actor.agentPrincipal("claude/r", "uday"))));
     assertTrue(specs.findById("theirs").isPresent());
-    assertEquals(1, pruner.prune(PruneRequest.ids(List.of("theirs"), true), ADMIN).specs());
+    assertEquals(
+        1,
+        Acting.by(ADMIN, () -> pruner.prune(PruneRequest.ids(List.of("theirs"), true), ADMIN))
+            .specs());
   }
 
   @Test
@@ -136,10 +151,12 @@ class SpecPruneTest {
 
     assertRefused(
         ErrorCode.FORBIDDEN_ADMIN_ONLY,
-        () -> pruner.prune(new PruneRequest(List.of(), policy, null, true), UDAY));
+        () ->
+            Acting.by(
+                UDAY, () -> pruner.prune(new PruneRequest(List.of(), policy, null, true), UDAY)));
     assertRefused(
         ErrorCode.FORBIDDEN_ADMIN_ONLY,
-        () -> pruner.prune(PruneRequest.project("acme", true), UDAY));
+        () -> Acting.by(UDAY, () -> pruner.prune(PruneRequest.project("acme", true), UDAY)));
   }
 
   @Test
@@ -157,22 +174,31 @@ class SpecPruneTest {
     db.execute("UPDATE specs SET cancelled_at = '2026-01-01T00:00:00Z'");
 
     var archivedOnly =
-        pruner.prune(
-            new PruneRequest(
-                List.of(),
-                new PruneRequest.Policy(List.of(SpecStatus.ARCHIVED), Duration.ofDays(90), "proj"),
-                null,
-                true),
-            ADMIN);
+        Acting.by(
+            ADMIN,
+            () ->
+                pruner.prune(
+                    new PruneRequest(
+                        List.of(),
+                        new PruneRequest.Policy(
+                            List.of(SpecStatus.ARCHIVED), Duration.ofDays(90), "proj"),
+                        null,
+                        true),
+                    ADMIN));
     var both =
-        pruner.prune(
-            new PruneRequest(
-                List.of(),
-                new PruneRequest.Policy(
-                    List.of(SpecStatus.ARCHIVED, SpecStatus.CANCELLED), Duration.ofDays(90), null),
-                null,
-                true),
-            ADMIN);
+        Acting.by(
+            ADMIN,
+            () ->
+                pruner.prune(
+                    new PruneRequest(
+                        List.of(),
+                        new PruneRequest.Policy(
+                            List.of(SpecStatus.ARCHIVED, SpecStatus.CANCELLED),
+                            Duration.ofDays(90),
+                            null),
+                        null,
+                        true),
+                    ADMIN));
 
     assertEquals(
         List.of("spec:ancient"),
@@ -186,9 +212,9 @@ class SpecPruneTest {
   void aWholeProjectGoesWithEverythingInIt() {
     archived("old", "uday");
     run(new RunStore(db), "running", null, "old");
-    new ProjectStore(db).upsert("proj", "name: proj\n", "uday");
+    new ProjectStore(db).upsert("proj", "name: proj\n");
 
-    var report = pruner.prune(PruneRequest.project("proj", false), ADMIN);
+    var report = Acting.by(ADMIN, () -> pruner.prune(PruneRequest.project("proj", false), ADMIN));
 
     assertEquals(1, report.projects());
     assertEquals(1, report.specs());
@@ -204,7 +230,11 @@ class SpecPruneTest {
     PruneReport report;
     try (var capture = new PrintStream(err, true, StandardCharsets.UTF_8)) {
       System.setErr(capture);
-      report = db.transaction(() -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
+      report =
+          db.transaction(
+              () ->
+                  Acting.by(
+                      UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY)));
     } finally {
       System.setErr(original);
     }
@@ -219,7 +249,7 @@ class SpecPruneTest {
 
   @Test
   void aProjectThisBoxHoldsNothingOfIsNeverSpent() {
-    var report = pruner.prune(PruneRequest.project("typo", false), ADMIN);
+    var report = Acting.by(ADMIN, () -> pruner.prune(PruneRequest.project("typo", false), ADMIN));
 
     assertEquals(List.of(), report.entries());
     assertEquals(0, count("SELECT count(*) FROM change_log"));
@@ -236,25 +266,38 @@ class SpecPruneTest {
 
     var live =
         assertThrows(
-            ApiException.class, () -> pruner.prune(PruneRequest.ids(List.of("live"), true), ADMIN));
+            ApiException.class,
+            () ->
+                Acting.by(
+                    ADMIN, () -> pruner.prune(PruneRequest.ids(List.of("live"), true), ADMIN)));
     assertEquals(ErrorCode.SPEC_NOT_PRUNABLE, live.failure().errorCode());
     assertTrue(live.getMessage().contains("is in_progress"), live.getMessage());
     var busy =
         assertThrows(
-            ApiException.class, () -> pruner.prune(PruneRequest.ids(List.of("busy"), false), UDAY));
+            ApiException.class,
+            () ->
+                Acting.by(
+                    UDAY, () -> pruner.prune(PruneRequest.ids(List.of("busy"), false), UDAY)));
     assertEquals(ErrorCode.SPEC_NOT_PRUNABLE, busy.failure().errorCode());
     assertTrue(busy.getMessage().contains(going), busy.getMessage());
     assertTrue(specs.findById("busy").isPresent());
 
     assertEquals(
-        2, pruner.prune(PruneRequest.ids(List.of("dropped", "deleted"), false), UDAY).specs());
+        2,
+        Acting.by(
+                UDAY,
+                () -> pruner.prune(PruneRequest.ids(List.of("dropped", "deleted"), false), UDAY))
+            .specs());
   }
 
   @Test
   void retentionTakesOldMessagesButNeverAParentAYoungReplyPointsAtAndOnlyFinishedRuns() {
-    rooms.create(
-        new RoomStore.RoomRow(
-            "lobby", "proj", "Lobby", null, null, null, "uday", null, null, "uday"));
+    Acting.as(
+        "uday",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "lobby", "proj", "Lobby", null, null, null, "uday", null, null, "uday")));
     var messages = new MessageStore(db);
     var oldAlone = messages.append("lobby", "uday", "old and alone", null);
     var oldParent = messages.append("lobby", "uday", "old, but answered lately", null);
@@ -288,10 +331,10 @@ class SpecPruneTest {
   @Test
   void aChildWrittenAfterTheDryRunGoesWithItsParentWhenTheApplyErases() {
     archived("old", "uday");
-    pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY));
     var late = run(new RunStore(db), "completed", "2026-09-22T00:00:00Z", "old");
 
-    var report = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var report = Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     assertTrue(report.entries().contains(new Erasure.Target(Erasure.RUN, late)));
     assertEquals(0, count("SELECT count(*) FROM runs WHERE spec_id = 'old'"));
@@ -301,12 +344,12 @@ class SpecPruneTest {
   @Test
   void theApplyChecksTheOwnerAgainNeverTrustingTheDryRun() {
     archived("old", "uday");
-    pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY);
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), true), UDAY));
     specs.update(row("old", "mady", SpecStatus.ARCHIVED));
 
     assertRefused(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
+        () -> Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY)));
     assertTrue(specs.findById("old").isPresent());
   }
 
@@ -323,7 +366,7 @@ class SpecPruneTest {
             null,
             false);
 
-    var report = pruner.prune(policy, ADMIN);
+    var report = Acting.by(ADMIN, () -> pruner.prune(policy, ADMIN));
 
     assertEquals(450, report.specs());
     assertEquals(0, count("SELECT count(*) FROM specs"));
@@ -332,12 +375,12 @@ class SpecPruneTest {
   @Test
   void anUnknownSpecIsNotFoundAndAPrunedOneIsNothingToDo() {
     archived("old", "uday");
-    pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     assertRefused(
         ErrorCode.SPEC_NOT_FOUND,
-        () -> pruner.prune(PruneRequest.ids(List.of("never"), true), UDAY));
-    var again = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+        () -> Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("never"), true), UDAY)));
+    var again = Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     assertEquals(List.of(), again.entries());
     assertFalse(again.dryRun());
@@ -350,7 +393,7 @@ class SpecPruneTest {
     archived("old", "uday");
     db.execute("UPDATE specs SET base_rev = rev WHERE id = 'old'");
 
-    var report = pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    var report = Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     assertTrue(report.requested());
     assertFalse(report.dryRun());
@@ -360,13 +403,17 @@ class SpecPruneTest {
     assertRefused(
         ErrorCode.INVALID_REQUEST,
         () ->
-            pruner.prune(
-                new PruneRequest(
-                    List.of(),
-                    new PruneRequest.Policy(List.of(SpecStatus.ARCHIVED), Duration.ofDays(1), null),
-                    null,
-                    false),
-                ADMIN));
+            Acting.by(
+                ADMIN,
+                () ->
+                    pruner.prune(
+                        new PruneRequest(
+                            List.of(),
+                            new PruneRequest.Policy(
+                                List.of(SpecStatus.ARCHIVED), Duration.ofDays(1), null),
+                            null,
+                            false),
+                        ADMIN)));
     assertThrows(
         IllegalStateException.class,
         () -> pruner.retain(new RetentionConfig(Duration.ofDays(1), null, null)));
@@ -378,7 +425,8 @@ class SpecPruneTest {
     archived("draft", "uday");
     var published = bus.publishedCount();
 
-    var report = pruner.prune(PruneRequest.ids(List.of("draft"), false), UDAY);
+    var report =
+        Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("draft"), false), UDAY));
 
     assertFalse(report.requested(), "nothing was asked of main");
     assertEquals(1, report.specs());
@@ -395,7 +443,7 @@ class SpecPruneTest {
     archived("synced", "uday");
     db.execute("UPDATE specs SET base_rev = rev WHERE id = 'synced'");
 
-    var report = pruner.prune(PruneRequest.project("proj", false), ADMIN);
+    var report = Acting.by(ADMIN, () -> pruner.prune(PruneRequest.project("proj", false), ADMIN));
 
     assertTrue(report.requested());
     assertTrue(specs.findById("synced").isPresent(), "main erases it; this box follows");
@@ -406,10 +454,10 @@ class SpecPruneTest {
   void aDeletedSpecIsRestoredWithTheIdentityRoomItMinted() {
     archived("old", "uday");
     var rev = specs.latestRev("old");
-    ops.delete("old", UDAY);
+    Acting.by(UDAY, () -> ops.delete("old", UDAY));
     assertTrue(rooms.findById("old").isEmpty());
 
-    var restored = ops.restore("old", new SpecRestoreRequest(rev), UDAY);
+    var restored = Acting.by(UDAY, () -> ops.restore("old", new SpecRestoreRequest(rev), UDAY));
 
     assertEquals("old", restored.spec().id());
     assertTrue(specs.findById("old").isPresent());
@@ -417,8 +465,8 @@ class SpecPruneTest {
     assertRefused(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
         () -> {
-          ops.delete("old", UDAY);
-          ops.restore("old", new SpecRestoreRequest(rev), MADY);
+          Acting.by(UDAY, () -> ops.delete("old", UDAY));
+          Acting.by(MADY, () -> ops.restore("old", new SpecRestoreRequest(rev), MADY));
         });
   }
 
@@ -427,14 +475,17 @@ class SpecPruneTest {
     archived("old", "uday");
     var rev = specs.latestRev("old");
     specs.create(row("kept", "uday", SpecStatus.PENDING));
-    pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY);
+    Acting.by(UDAY, () -> pruner.prune(PruneRequest.ids(List.of("old"), false), UDAY));
 
     var pruned =
         assertThrows(
-            ApiException.class, () -> ops.restore("old", new SpecRestoreRequest(rev), UDAY));
+            ApiException.class,
+            () -> Acting.by(UDAY, () -> ops.restore("old", new SpecRestoreRequest(rev), UDAY)));
     var missing =
         assertThrows(
-            ApiException.class, () -> ops.restore("kept", new SpecRestoreRequest("9-gone"), UDAY));
+            ApiException.class,
+            () ->
+                Acting.by(UDAY, () -> ops.restore("kept", new SpecRestoreRequest("9-gone"), UDAY)));
 
     assertEquals(ErrorCode.SPEC_PRUNED, pruned.failure().errorCode());
     assertEquals(410, ErrorCode.SPEC_PRUNED.httpCode());
@@ -442,7 +493,8 @@ class SpecPruneTest {
     assertEquals(ErrorCode.INVALID_REQUEST, missing.failure().errorCode());
     assertTrue(missing.getMessage().contains("not in its retained history"), missing.getMessage());
     assertRefused(
-        ErrorCode.SPEC_NOT_FOUND, () -> ops.restore("never", new SpecRestoreRequest(rev), UDAY));
+        ErrorCode.SPEC_NOT_FOUND,
+        () -> Acting.by(UDAY, () -> ops.restore("never", new SpecRestoreRequest(rev), UDAY)));
   }
 
   @Test
@@ -525,7 +577,8 @@ class SpecPruneTest {
 
   @Test
   void pruningNeedsARequestAndAnActor() {
-    assertThrows(NullPointerException.class, () -> pruner.prune(null, ADMIN));
+    assertThrows(
+        NullPointerException.class, () -> Acting.by(ADMIN, () -> pruner.prune(null, ADMIN)));
     assertThrows(
         NullPointerException.class, () -> pruner.prune(PruneRequest.ids(List.of("a"), true), null));
     assertThrows(
@@ -533,14 +586,21 @@ class SpecPruneTest {
   }
 
   private void archived(String id, String owner) {
-    specs.create(row(id, owner, SpecStatus.ARCHIVED));
-    specs.setContent(id, "a body only " + id + " holds", "");
-    rooms.create(
-        new RoomStore.RoomRow(id, "proj", id, owner, null, null, owner, null, null, owner));
-    var messages = new MessageStore(db);
-    var first = messages.append(id, owner, "first", null);
-    messages.append(id, owner, "reply", first.id());
-    run(new RunStore(db), "completed", "2026-09-01T00:00:00Z", id);
+    Acting.system(
+        () -> {
+          specs.create(row(id, owner, SpecStatus.ARCHIVED));
+          specs.setContent(id, "a body only " + id + " holds", "");
+          Acting.as(
+              owner,
+              () ->
+                  rooms.create(
+                      new RoomStore.RoomRow(
+                          id, "proj", id, owner, null, null, owner, null, null, owner)));
+          var messages = new MessageStore(db);
+          var first = messages.append(id, owner, "first", null);
+          messages.append(id, owner, "reply", first.id());
+          run(new RunStore(db), "completed", "2026-09-01T00:00:00Z", id);
+        });
   }
 
   private String run(RunStore runs, String status, String completedAt) {

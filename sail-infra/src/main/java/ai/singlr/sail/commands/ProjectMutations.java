@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ProjectDefinitions;
+import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -27,8 +29,19 @@ final class ProjectMutations {
   }
 
   /**
-   * Persists an edited definition through the catalog seam, or prints the intent under {@code
-   * --dry-run}. {@code dryRunLabel} describes the change for the dry-run line.
+   * This box's operator, resolved before a command changes anything, for the catalog write that
+   * ends it: a node that cannot name its operator refuses up front, never after cloning, starting
+   * or editing. Null for a dry run or an explicit {@code -f} file, neither of which touches the
+   * catalog.
+   */
+  static Actor catalogOperator(Path explicitFile, boolean dryRun) {
+    return dryRun || explicitFile != null ? null : CliOperator.current();
+  }
+
+  /**
+   * Persists an edited definition through the catalog seam as {@code operator} (see {@link
+   * #catalogOperator}), or prints the intent under {@code --dry-run}. {@code dryRunLabel} describes
+   * the change for the dry-run line.
    */
   static void persist(
       String name,
@@ -36,13 +49,14 @@ final class ProjectMutations {
       String definition,
       boolean dryRun,
       PrintStream out,
-      String dryRunLabel)
+      String dryRunLabel,
+      Actor operator)
       throws IOException {
     if (dryRun) {
       out.println("[dry-run] " + dryRunLabel);
       return;
     }
-    ProjectDefinitions.persist(name, explicitFile, definition, Actor.current());
+    ProjectDefinitions.persist(name, explicitFile, definition, operator);
   }
 
   static IllegalStateException notFound(String name) {

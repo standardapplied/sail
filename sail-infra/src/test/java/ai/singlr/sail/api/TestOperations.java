@@ -6,6 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -440,10 +442,10 @@ class TestOperations implements Operations {
                 List.of(),
                 null,
                 null,
-                request.createdBy(),
+                Actor.current().handle(),
                 "",
                 "",
-                request.createdBy(),
+                Actor.current().handle(),
                 null),
             specId,
             "r1",

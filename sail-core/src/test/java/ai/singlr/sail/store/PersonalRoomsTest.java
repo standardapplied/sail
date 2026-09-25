@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncEngine;
 import java.nio.file.Path;
@@ -162,24 +163,26 @@ class PersonalRoomsTest {
   @Test
   void aSpecOwningTheIdRefusesTheMint() {
     var specs = new SpecStore(db);
-    specs.create(
-        new SpecStore.SpecRow(
-            RAJESH_ACME,
-            "acme",
-            "Impostor",
-            SpecStatus.DRAFT,
-            null,
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.system(
+        () ->
+            specs.create(
+                new SpecStore.SpecRow(
+                    RAJESH_ACME,
+                    "acme",
+                    "Impostor",
+                    SpecStatus.DRAFT,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
     assertFalse(PersonalRooms.ensure(rooms, specs, rajesh("t0"), acme(DEFINITION)));
   }
 
@@ -187,7 +190,7 @@ class PersonalRoomsTest {
   void aDeletedPersonalRoomStaysDeleted() {
     var fde = rajesh("2026-08-01T00:00:00Z");
     PersonalRooms.ensure(rooms, null, fde, acme(DEFINITION));
-    assertTrue(rooms.delete(RAJESH_ACME));
+    assertTrue(Acting.system(() -> rooms.delete(RAJESH_ACME)));
 
     assertFalse(PersonalRooms.ensure(rooms, null, fde, acme(DEFINITION)));
     assertTrue(rooms.findById(RAJESH_ACME).isEmpty(), "the tombstone wins");

@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -23,6 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
  * StoreReplica} will delegate to — mirroring the revision/CAS/tombstone behaviour proven for {@link
  * FileStore}. The comparable snapshot is the {@code definition} alone.
  */
+@ActingAs(value = Actor.Lane.CLI, handle = "uday")
 class ProjectStoreSyncTest {
 
   @TempDir Path dir;
@@ -51,7 +54,7 @@ class ProjectStoreSyncTest {
 
   @Test
   void upsertJournalsAComparableRevision() {
-    store.upsert("acme", "name: acme\n", "uday");
+    store.upsert("acme", "name: acme\n");
 
     assertEquals(def("name: acme\n", "uday"), store.comparableSnapshot("acme"));
     assertNotEquals(null, store.latestRev("acme"));
@@ -60,10 +63,10 @@ class ProjectStoreSyncTest {
 
   @Test
   void editingMintsANewRevisionAndComparableSnapshotFollows() {
-    store.upsert("acme", "v1", "uday");
+    store.upsert("acme", "v1");
     var rev1 = store.latestRev("acme");
 
-    store.upsert("acme", "v2", "uday");
+    store.upsert("acme", "v2");
 
     assertNotEquals(rev1, store.latestRev("acme"));
     assertEquals(def("v2", "uday"), store.comparableSnapshot("acme"));
@@ -71,15 +74,18 @@ class ProjectStoreSyncTest {
   }
 
   @Test
+  @ActingAs(Actor.Lane.MAIN)
   void applyRevisionAdoptsMainsStateAtItsExactRevAsTheBase() {
-    store.applyRevision("acme", def("from-main"), "rev-xyz");
+    store.applyRevision("acme", def("from-main", "sumesh"), "rev-xyz");
 
-    assertEquals(def("from-main", "sync"), store.comparableSnapshot("acme"));
+    assertEquals(def("from-main", "sumesh"), store.comparableSnapshot("acme"));
+    assertEquals("sumesh", new ChangeLog(db).history("project", "acme").getLast().actor());
     assertEquals("rev-xyz", store.latestRev("acme"));
     assertEquals("rev-xyz", store.baseRevOf("acme"));
   }
 
   @Test
+  @ActingAs(value = Actor.Lane.SYNC, handle = "node")
   void commitAcceptsWhenExpectedRevMatchesAndMintsANewOne() {
     store.applyRevision("acme", def("base"), "rev-base");
 
@@ -88,10 +94,11 @@ class ProjectStoreSyncTest {
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals("rev-base", accepted.rev());
     assertEquals(accepted.rev(), store.latestRev("acme"));
-    assertEquals(def("pushed", "sync"), store.comparableSnapshot("acme"));
+    assertEquals(def("pushed", "node"), store.comparableSnapshot("acme"));
   }
 
   @Test
+  @ActingAs(value = Actor.Lane.SYNC, handle = "node")
   void commitRejectsAsStaleWhenMainMovedUnderUs() {
     store.applyRevision("acme", def("base"), "rev-base");
     store.commitRevision("acme", def("moved"), "rev-base");
@@ -99,7 +106,7 @@ class ProjectStoreSyncTest {
     var outcome = store.commitRevision("acme", def("racing"), "rev-base");
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
-    assertEquals(def("moved", "sync"), stale.currentSnapshot());
+    assertEquals(def("moved", "node"), stale.currentSnapshot());
   }
 
   @Test
@@ -115,7 +122,7 @@ class ProjectStoreSyncTest {
 
   @Test
   void applyRevisionNullAdoptsADeletionFromMain() {
-    store.upsert("acme", "local", "uday");
+    store.upsert("acme", "local");
 
     store.applyRevision("acme", null, "rev-del");
 
@@ -124,21 +131,29 @@ class ProjectStoreSyncTest {
   }
 
   @Test
-  void resolveConflictTakeTheirsAdoptsMainsDefinition() {
-    store.upsert("acme", "mine", "uday");
+  void resolveConflictTakeTheirsAdoptsMainsDefinitionUnderMainsAuthor() {
+    store.upsert("acme", "mine");
 
-    store.resolveConflict("acme", def("theirs"), def("theirs"));
+    store.resolveConflict("acme", def("theirs", "mady"), def("theirs", "mady"));
 
-    assertEquals(def("theirs", "sync"), store.comparableSnapshot("acme"));
+    assertEquals(def("theirs", "mady"), store.comparableSnapshot("acme"));
+    var head = new ChangeLog(db).head("project", "acme").orElseThrow();
+    assertEquals("mady", head.actor(), "main's revision keeps main's author, not the resolver");
+    assertEquals(Actor.MAIN_HANDLE, head.peer());
   }
 
   @Test
   void resolveConflictKeepMineWritesAForwardEditThatPushes() {
     store.applyRevision("acme", def("theirs"), "rev-theirs");
 
-    store.resolveConflict("acme", def("mine"), def("theirs"));
+    store.resolveConflict("acme", def("mine"), def("theirs", "mady"));
 
-    assertEquals(def("mine", "resolve"), store.comparableSnapshot("acme"));
+    assertEquals(def("mine", "uday"), store.comparableSnapshot("acme"));
+    var history = new ChangeLog(db).history("project", "acme");
+    assertEquals(
+        "mady",
+        history.get(history.size() - 2).actor(),
+        "the base adopted from main keeps main's author");
     assertNotEquals("rev-theirs", store.latestRev("acme"));
     assertNotEquals(
         store.baseRevOf("acme"), store.latestRev("acme"), "a forward local edit awaits push");

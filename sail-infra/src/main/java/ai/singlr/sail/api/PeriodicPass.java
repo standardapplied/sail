@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
 import java.time.Duration;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -39,13 +40,16 @@ final class PeriodicPass implements AutoCloseable {
         this::runIfIdle, interval.toMillis(), interval.toMillis(), TimeUnit.MILLISECONDS);
   }
 
-  /** Runs one pass unless another is still in flight. Returns whether the pass ran. */
+  /**
+   * Runs one pass, as this box's machinery, unless another is still in flight. Returns whether the
+   * pass ran.
+   */
   boolean runIfIdle() {
     if (!running.compareAndSet(false, true)) {
       return false;
     }
     try {
-      pass.run();
+      Actor.run(Actor.system(), pass);
     } catch (Throwable t) {
       System.err.println("  [" + name + "] pass failed: " + t);
       t.printStackTrace();

@@ -16,6 +16,7 @@ import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.SlackPoster;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
@@ -195,24 +196,27 @@ class SlackReactorTest {
 
   @Test
   void rootMessageUsesSpecTitleFromLookup() {
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "light",
-            "OAuth flow",
-            SpecStatus.PENDING,
-            null,
-            "claude-code",
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "light",
+                    "OAuth flow",
+                    SpecStatus.PENDING,
+                    null,
+                    "claude-code",
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
     var poster = new RecordingPoster();
     var reactor =
         new SlackReactor(

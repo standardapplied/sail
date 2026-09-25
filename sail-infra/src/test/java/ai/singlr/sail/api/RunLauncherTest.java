@@ -13,6 +13,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -33,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
  * happy path of, driven here directly: a queried status of {@code null}, a cancel that lost the
  * launch, a foreground completion, and a status query that fails.
  */
+@ActingAs
 class RunLauncherTest {
 
   @TempDir Path tempDir;
@@ -129,9 +132,12 @@ class RunLauncherTest {
   }
 
   private void seedRunningRun() {
-    runStore.create(
-        RUN_ID, "proj", "spec", "node", "node", "build", "codex", "b", "t", null, null, "log",
-        "unit");
+    Acting.system(
+        () -> {
+          runStore.create(
+              RUN_ID, "proj", "spec", "node", "node", "build", "codex", "b", "t", null, null, "log",
+              "unit");
+        });
   }
 
   @Test

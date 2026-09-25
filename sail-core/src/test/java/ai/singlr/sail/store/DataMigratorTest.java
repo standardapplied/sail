@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -68,6 +69,28 @@ class DataMigratorTest {
     }
     assertEquals(1, probeCount(db));
     assertEquals(List.of("racy"), appliedNames(db));
+  }
+
+  @Test
+  void aMigrationWritesAsThisBoxsMachinery() {
+    var migration =
+        new DataMigration() {
+          @Override
+          public String name() {
+            return "journaled";
+          }
+
+          @Override
+          public Report apply(Sqlite target, ProjectRegistry registry, Prompter prompter) {
+            new ProjectStore(target).upsert("acme", "name: acme\n");
+            return new Report(1, 0, 0, List.of());
+          }
+        };
+
+    new DataMigrator(db, List.of(migration)).run(projects, DataMigration.Prompter.NON_INTERACTIVE);
+
+    assertEquals(
+        Actor.SYSTEM_HANDLE, new ChangeLog(db).head("project", "acme").orElseThrow().actor());
   }
 
   private DataMigrator.Run racingRun(Sqlite connection, CountDownLatch start) {

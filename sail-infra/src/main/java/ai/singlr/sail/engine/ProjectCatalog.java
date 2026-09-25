@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
@@ -18,7 +19,8 @@ import java.nio.file.Path;
  * becomes the shared, replicated source of truth. Best-effort by design: the on-disk {@code
  * sail.yaml} and the container are the operations that must succeed, so a catalog write that fails
  * (DB momentarily unavailable) prints a hint and is recovered by the import migration on the next
- * {@code sail migrate} — it never aborts project creation.
+ * {@code sail migrate}. Only a node that cannot name its operator refuses, and its commands resolve
+ * the operator before they change anything.
  */
 public final class ProjectCatalog {
 
@@ -54,12 +56,19 @@ public final class ProjectCatalog {
   }
 
   /**
-   * Returns true if the definition was recorded; false (with a printed hint) on best-effort miss.
+   * Records the definition as {@code operator}, this box's operator ({@link CliOperator}), which
+   * the caller resolves before it writes anything, so a node that cannot name it refuses the edit
+   * rather than losing it. Returns true if the definition was recorded; false (with a printed hint)
+   * on best-effort miss.
    */
-  public static boolean record(String name, String definition, String actor) {
-    try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
+  public static boolean record(String name, String definition, Actor operator) {
+    return record(SailPaths.controlPlaneDb(), name, definition, operator);
+  }
+
+  static boolean record(Path catalog, String name, String definition, Actor operator) {
+    try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      new ProjectStore(db).upsert(name, definition, actor);
+      Actor.run(operator, () -> new ProjectStore(db).upsert(name, definition));
       return true;
     } catch (Exception e) {
       System.err.println(

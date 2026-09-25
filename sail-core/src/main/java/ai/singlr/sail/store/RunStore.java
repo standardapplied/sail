@@ -1556,11 +1556,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
 
     @Override
-    public String author(String id) {
-      return findById(id).map(RunRow::node).orElse(null);
-    }
-
-    @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var applied = new LinkedHashMap<>(snapshot);
       findById(id)

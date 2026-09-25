@@ -16,6 +16,10 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RoomStore;
@@ -25,7 +29,6 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
-import ai.singlr.sail.sync.SyncPrincipal;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -48,6 +51,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.MethodSource;
 
+@ActingAs
 class ConflictOperationsTest {
 
   @TempDir Path tempDir;
@@ -72,7 +76,12 @@ class ConflictOperationsTest {
   }
 
   private void round() throws IOException {
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+    try (var link =
+        SyncBox.connect(
+            Acting.by(
+                Actor.sync("node", Role.MEMBER),
+                () -> main.server(Actor.sync("node", Role.MEMBER))),
+            node)) {
       for (var type : List.of("spec", "room")) {
         link.reconcile(type, replicas.get(type));
       }
@@ -80,12 +89,15 @@ class ConflictOperationsTest {
   }
 
   private SyncConflicts.Conflict parkTitle() throws IOException {
-    main.specs.create(SyncBox.spec("auth", "base title", "pending"));
-    round();
-    main.specs.update(SyncBox.spec("auth", "main title", "pending"));
-    node.specs.update(SyncBox.spec("auth", "node title", "pending"));
-    round();
-    return node.conflicts.pendingFor("spec", "auth").orElseThrow();
+    return Acting.system(
+        () -> {
+          main.specs.create(SyncBox.spec("auth", "base title", "pending"));
+          round();
+          main.specs.update(SyncBox.spec("auth", "main title", "pending"));
+          node.specs.update(SyncBox.spec("auth", "node title", "pending"));
+          round();
+          return node.conflicts.pendingFor("spec", "auth").orElseThrow();
+        });
   }
 
   private Resolution resolution(Resolution.Strategy strategy) {
@@ -204,10 +216,10 @@ class ConflictOperationsTest {
   @Test
   void onlyAnOpenSpecConflictWithBothSidesPresentHasATemplate() throws IOException {
     main.specs.create(SyncBox.spec("auth", "base title", "pending"));
-    new RoomStore(main.db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+    new RoomStore(main.db).ensureFor("auth", "proj", "Auth", "uday", "mention");
     round();
-    new RoomStore(main.db).updateWake("auth", "on", "uday");
-    new RoomStore(node.db).updateWake("auth", "off", "uday");
+    new RoomStore(main.db).updateWake("auth", "on");
+    new RoomStore(node.db).updateWake("auth", "off");
     main.specs.delete("auth");
     node.specs.update(SyncBox.spec("auth", "node title", "pending"));
     round();
@@ -328,7 +340,12 @@ class ConflictOperationsTest {
 
     operations.resolve("spec", "auth", mergedTitle(operations.mergeTemplate("spec", "auth")));
     String wire;
-    try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+    try (var link =
+        SyncBox.connect(
+            Acting.by(
+                Actor.sync("node", Role.MEMBER),
+                () -> main.server(Actor.sync("node", Role.MEMBER))),
+            node)) {
       link.reconcile("spec", replicas.get("spec"));
       wire = link.log().toString();
     }
@@ -432,12 +449,12 @@ class ConflictOperationsTest {
   @Test
   void aSpecAndItsRoomParkedTogetherAreEachAddressedByType() throws IOException {
     main.specs.create(SyncBox.spec("auth", "base title", "pending"));
-    new RoomStore(main.db).ensureFor("auth", "proj", "Auth", "uday", "mention", "uday");
+    new RoomStore(main.db).ensureFor("auth", "proj", "Auth", "uday", "mention");
     round();
     main.specs.update(SyncBox.spec("auth", "main title", "pending"));
-    new RoomStore(main.db).updateWake("auth", "on", "uday");
+    new RoomStore(main.db).updateWake("auth", "on");
     node.specs.update(SyncBox.spec("auth", "node title", "pending"));
-    new RoomStore(node.db).updateWake("auth", "off", "uday");
+    new RoomStore(node.db).updateWake("auth", "off");
     round();
 
     var ambiguous = assertThrows(ApiException.class, () -> operations.find(null, "auth"));

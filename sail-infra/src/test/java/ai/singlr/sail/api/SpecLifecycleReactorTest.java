@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -42,24 +43,27 @@ class SpecLifecycleReactorTest {
   }
 
   private void seed(String id, String status) {
-    store.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            id,
-            SpecStatus.fromWire(status),
-            null,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    id,
+                    SpecStatus.fromWire(status),
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of(),
+                    List.of())));
   }
 
   private static Event stopped(String spec) {
@@ -145,6 +149,16 @@ class SpecLifecycleReactorTest {
     reactor.onEvent(stopped("auth"));
 
     assertEquals(SpecStatus.REVIEW, store.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void theReactorsTransitionIsAuthoredByThisBoxsMachinery() {
+    seed("auth", "in_progress");
+
+    reactor.onEvent(stopped("auth"));
+
+    assertEquals("sail", store.findById("auth").orElseThrow().updatedBy());
+    assertEquals("sail", store.history("auth").getLast().actor());
   }
 
   @Test

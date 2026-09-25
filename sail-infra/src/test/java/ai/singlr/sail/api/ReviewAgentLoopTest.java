@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -67,24 +68,27 @@ class ReviewAgentLoopTest {
   }
 
   private void createSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "T",
-            SpecStatus.IN_PROGRESS,
-            null,
-            "claude-code",
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "test-project",
+                    "T",
+                    SpecStatus.IN_PROGRESS,
+                    null,
+                    "claude-code",
+                    null,
+                    null,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   private ReviewPipelineConfig config(int maxIterations) {

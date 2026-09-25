@@ -13,6 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
@@ -135,7 +138,7 @@ class LocalApiRouterTest {
   @Test
   void aMergeSettlesOnlyTheVersionOfTheConflictItWasMadeFrom() {
     try (var box = new SyncBox("node")) {
-      box.specs.create(SyncBox.spec("auth", "local", "pending"));
+      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       parkTitle(box, local, "remote");
       var conflicts = new ConflictOperations(box.db);
@@ -389,7 +392,7 @@ class LocalApiRouterTest {
     assertEquals(List.of("a", "b", "c"), req.dependsOn());
     assertEquals(List.of("app", "web"), req.repos());
     assertEquals("# Goal", req.body());
-    assertEquals(TestOperations.PRINCIPAL, req.createdBy());
+    assertEquals(TestOperations.PRINCIPAL, ops.lastBound.handle());
   }
 
   @Test
@@ -407,7 +410,7 @@ class LocalApiRouterTest {
     assertEquals("draft", ops.lastCreate.status());
     assertEquals(
         TestOperations.PRINCIPAL,
-        ops.lastCreate.createdBy(),
+        ops.lastBound.handle(),
         "a client-sent actor field is ignored; authorship is the authenticated principal");
     assertEquals(0, ops.lastCreate.priority());
     assertEquals(List.of(), ops.lastCreate.dependsOn());
@@ -441,7 +444,7 @@ class LocalApiRouterTest {
     assertEquals(200, updated.status());
     assertEquals("archived", ops.lastUpdate.status());
     assertEquals(List.of("a"), ops.lastUpdate.dependsOn());
-    assertEquals(TestOperations.PRINCIPAL, ops.lastUpdate.updatedBy());
+    assertEquals(TestOperations.PRINCIPAL, ops.lastBound.handle());
     assertEquals(TestOperations.PRINCIPAL, ops.lastActor.handle());
     assertEquals(TestOperations.OWNER, ops.lastActor.owner());
     assertEquals(Role.MEMBER, ops.lastActor.role());
@@ -745,7 +748,7 @@ class LocalApiRouterTest {
                 boxAuth(),
                 "id=room&title=Room".getBytes(StandardCharsets.UTF_8)));
     assertEquals(201, created.status());
-    assertEquals(TestOperations.BOX_HANDLE, ops.lastCreate.createdBy());
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastBound.handle());
     assertEquals(
         TestOperations.BOX_HANDLE,
         ops.lastActor.handle(),
@@ -774,7 +777,7 @@ class LocalApiRouterTest {
                 boxAuth(),
                 "status=done".getBytes(StandardCharsets.UTF_8)));
     assertEquals(200, updated.status());
-    assertEquals(TestOperations.BOX_HANDLE, ops.lastUpdate.updatedBy());
+    assertEquals(TestOperations.BOX_HANDLE, ops.lastBound.handle());
   }
 
   @Test
@@ -840,6 +843,7 @@ class LocalApiRouterTest {
     private SpecUpdateRequest lastUpdate;
     private SpecContentRequest lastContent;
     private Actor lastActor;
+    private Actor lastBound;
     private String lastBoardProject;
     private String lastShownId;
     private String lastDeletedId;
@@ -872,6 +876,7 @@ class LocalApiRouterTest {
         SpecCreateRequest request, Actor actor) {
       lastCreate = request;
       lastActor = actor;
+      lastBound = Actor.current();
       return super.createGlobalSpec(request, actor);
     }
 
@@ -880,6 +885,7 @@ class LocalApiRouterTest {
         String specId, SpecUpdateRequest request, Actor actor) {
       lastUpdate = request;
       lastActor = actor;
+      lastBound = Actor.current();
       return super.updateGlobalSpec(specId, request, actor);
     }
 

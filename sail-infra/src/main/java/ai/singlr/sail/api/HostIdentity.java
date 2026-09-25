@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
@@ -15,6 +16,9 @@ import java.util.Optional;
 
 /** Tokens, FDEs, SSH keys and the gateway decision: who may reach this box. */
 public interface HostIdentity {
+  /** This box's CLI operator: who a command acts as when it writes without the API. */
+  Actor operator();
+
   List<TokenStore.TokenInfo> tokens();
 
   TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl);

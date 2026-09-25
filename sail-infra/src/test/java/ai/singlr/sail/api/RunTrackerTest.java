@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -62,39 +63,45 @@ class RunTrackerTest {
   }
 
   private String runningRun(String project, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    return runStore.create(
-        id,
-        project,
-        specId,
-        "node-a",
-        "node-a",
-        "build",
-        "claude-code",
-        "feat/x",
-        "do it",
-        123,
-        null,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return runStore.create(
+              id,
+              project,
+              specId,
+              "node-a",
+              "node-a",
+              "build",
+              "claude-code",
+              "feat/x",
+              "do it",
+              123,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
   }
 
   private String runningRunOn(String project, String specId, String node) {
-    var id = DateTimeUtils.newId().toString();
-    return runStore.create(
-        id,
-        project,
-        specId,
-        node,
-        node,
-        "build",
-        "claude-code",
-        "feat/x",
-        "do it",
-        123,
-        null,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return runStore.create(
+              id,
+              project,
+              specId,
+              node,
+              node,
+              "build",
+              "claude-code",
+              "feat/x",
+              "do it",
+              123,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
   }
 
   private static Event stopped(String project, Map<String, Object> data) {
@@ -197,7 +204,7 @@ class RunTrackerTest {
   @Test
   void aWatcherCompletionNeverOverwritesACommittedStopClaim() {
     var id = runningRun("backend", "auth");
-    runStore.transition(id, "running", "stopping");
+    Acting.system(() -> runStore.transition(id, "running", "stopping"));
 
     tracker.onEvent(
         Event.of(
@@ -219,7 +226,7 @@ class RunTrackerTest {
   @Test
   void aWatcherStopArrivingAfterAnOperatorCancelDoesNotReopenTheRun() {
     var id = runningRun("backend", "auth");
-    runStore.complete(id, "stopped", null);
+    Acting.system(() -> runStore.complete(id, "stopped", null));
 
     tracker.onEvent(
         stopped(
@@ -239,7 +246,7 @@ class RunTrackerTest {
   @Test
   void anAuthoritativeStopUpgradesTheExitCodeOfAnAlreadyFinishedRun() {
     var id = runningRun("backend", "auth");
-    runStore.complete(id, "stopped", null);
+    Acting.system(() -> runStore.complete(id, "stopped", null));
 
     tracker.onEvent(
         stopped(
@@ -257,7 +264,7 @@ class RunTrackerTest {
   @Test
   void stringExitCodeIsParsed() {
     var id = runningRun("backend", "auth");
-    runStore.complete(id, "stopped", null);
+    Acting.system(() -> runStore.complete(id, "stopped", null));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "9")));
 
@@ -267,7 +274,7 @@ class RunTrackerTest {
   @Test
   void anInvalidStringExitCodeIsIgnored() {
     var id = runningRun("backend", "auth");
-    runStore.complete(id, "stopped", null);
+    Acting.system(() -> runStore.complete(id, "stopped", null));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, "nope")));
 
@@ -284,7 +291,7 @@ class RunTrackerTest {
   @Test
   void aStopWithNoRunningRunAndAnAlreadyStampedLatestIsLeftAlone() {
     var id = runningRun("backend", "auth");
-    runStore.complete(id, "stopped", 0);
+    Acting.system(() -> runStore.complete(id, "stopped", 0));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 137)));
 
@@ -372,19 +379,21 @@ class RunTrackerTest {
     var id = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                id,
-                "backend",
-                "auth",
-                "node-a",
-                "node-a",
-                "build",
-                java.util.List.of(),
-                "claude-code",
-                "feat/x",
-                "do it",
-                "/home/dev/.sail/runs/" + id + "/agent.log",
-                "sail-agent-" + id);
+            Acting.system(
+                () ->
+                    runStore.reserveDispatch(
+                        id,
+                        "backend",
+                        "auth",
+                        "node-a",
+                        "node-a",
+                        "build",
+                        java.util.List.of(),
+                        "claude-code",
+                        "feat/x",
+                        "do it",
+                        "/home/dev/.sail/runs/" + id + "/agent.log",
+                        "sail-agent-" + id));
 
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 

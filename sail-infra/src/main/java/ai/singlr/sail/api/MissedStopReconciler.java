@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
@@ -146,9 +147,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Runs one reconciliation pass and returns how many stops were replayed. Errors are logged and
    * swallowed — per spec so one broken project cannot shadow the rest, and around the pass so
    * reconciliation can never block server startup; anything missed is retried on the next sweep and
-   * ultimately caught by the stranded-spec alarm.
+   * ultimately caught by the stranded-spec alarm. Runs as this box's machinery.
    */
   public int sweep() {
+    return Actor.call(Actor.system(), this::reconcileAll);
+  }
+
+  private int reconcileAll() {
     var replayed = 0;
     try {
       var handledThisSweep = new HashSet<String>();

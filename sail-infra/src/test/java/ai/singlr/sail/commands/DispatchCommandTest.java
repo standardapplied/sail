@@ -14,6 +14,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -362,8 +363,8 @@ class DispatchCommandTest {
     var db = Sqlite.open(dbDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
     var store = new SpecStore(db);
-    store.create(row("mine", "acme", SpecStatus.PENDING));
-    store.create(row("other", "zenith", SpecStatus.PENDING));
+    Acting.system(() -> store.create(row("mine", "acme", SpecStatus.PENDING)));
+    Acting.system(() -> store.create(row("other", "zenith", SpecStatus.PENDING)));
 
     var specs = store.projectSpecs("acme");
 

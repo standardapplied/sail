@@ -10,6 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -30,6 +34,7 @@ import org.junit.jupiter.api.io.TempDir;
  * request. Reconciles run on a same-thread executor with an injected clock, so every assertion is
  * deterministic.
  */
+@ActingAs
 class SailOperationsSyncTest {
 
   private static final String RUNNING_JSON =
@@ -60,7 +65,10 @@ class SailOperationsSyncTest {
   void aSpecMutationTriggersExactlyOneReconcile() throws Exception {
     var operations = operations(scheduler(), store -> {});
 
-    var result = operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"));
+    var result =
+        Acting.by(
+            Actor.cliOperator("uday"),
+            () -> operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -71,8 +79,11 @@ class SailOperationsSyncTest {
     var operations = operations(scheduler(), store -> {});
 
     var result =
-        operations.updateGlobalSpec(
-            "missing", update("pending"), new Actor("uday", Role.ADMIN, Actor.Lane.API));
+        Acting.by(
+            new Actor("uday", Role.ADMIN, Actor.Lane.API),
+            () ->
+                operations.updateGlobalSpec(
+                    "missing", update("pending"), new Actor("uday", Role.ADMIN, Actor.Lane.API)));
 
     assertInstanceOf(Result.Failure.class, result);
     assertEquals(0, rounds.get());
@@ -89,13 +100,18 @@ class SailOperationsSyncTest {
                 }),
             store -> {});
 
-    var result = operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"));
+    var result =
+        Acting.by(
+            Actor.cliOperator("uday"),
+            () -> operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
     assertInstanceOf(
         Result.Success.class,
-        operations.createGlobalSpec(create("billing"), Actor.cliOperator("uday")));
+        Acting.by(
+            Actor.cliOperator("uday"),
+            () -> operations.createGlobalSpec(create("billing"), Actor.cliOperator("uday"))));
     assertEquals(2, rounds.get());
   }
 
@@ -124,7 +140,10 @@ class SailOperationsSyncTest {
               operations.globalSpecs(new SpecStore.SpecFilter(null, null, null, null, null));
               assertInstanceOf(
                   Result.Success.class,
-                  operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
+                  Acting.by(
+                      Actor.cliOperator("uday"),
+                      () ->
+                          operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"))));
             });
 
     assertEquals(0, rounds.get());
@@ -223,24 +242,27 @@ class SailOperationsSyncTest {
   }
 
   private static void seedReady(SpecStore store) {
-    store.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            "uday",
-            null,
-            null,
-            null,
-            null,
-            0,
-            "uday",
-            "",
-            "",
-            "uday",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "uday",
+        () ->
+            store.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Add auth",
+                    SpecStatus.PENDING,
+                    "uday",
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "uday",
+                    "",
+                    "",
+                    "uday",
+                    List.of(),
+                    List.of())));
   }
 
   private static SpecCreateRequest create(String id) {
@@ -259,13 +281,12 @@ class SailOperationsSyncTest {
         List.of(),
         null,
         null,
-        "uday",
         null);
   }
 
   private static SpecUpdateRequest update(String status) {
     return new SpecUpdateRequest(
-        null, null, status, null, null, null, null, null, null, null, null, null, "uday", false);
+        null, null, status, null, null, null, null, null, null, null, null, null, false);
   }
 
   private static Event event(String type) {

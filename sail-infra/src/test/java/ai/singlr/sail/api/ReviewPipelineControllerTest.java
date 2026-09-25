@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -70,24 +71,27 @@ class ReviewPipelineControllerTest {
 
   private void createSpec(
       String id, String status, List<String> repos, String model, String reasoningEffort) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "test-project",
-            "Test spec",
-            SpecStatus.fromWire(status),
-            null,
-            null,
-            model,
-            reasoningEffort,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            repos));
+    Acting.as(
+        null,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "test-project",
+                    "Test spec",
+                    SpecStatus.fromWire(status),
+                    null,
+                    null,
+                    model,
+                    reasoningEffort,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    repos)));
   }
 
   private Event agentStoppedEvent(String specId) {
@@ -330,20 +334,22 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "review");
     var runStore = new ai.singlr.sail.store.RunStore(db);
     var runId = ai.singlr.sail.common.DateTimeUtils.newId().toString();
-    runStore.create(
-        runId,
-        "test-project",
-        "auth",
-        "node-a",
-        "node-a",
-        "room",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + runId);
+    Acting.system(
+        () ->
+            runStore.create(
+                runId,
+                "test-project",
+                "auth",
+                "node-a",
+                "node-a",
+                "room",
+                "claude-code",
+                null,
+                "t",
+                null,
+                null,
+                null,
+                "sail-agent-" + runId));
     var ctrl =
         new ReviewPipelineController(
             specStore,
@@ -378,7 +384,7 @@ class ReviewPipelineControllerTest {
   void aContainerLeaseHeldByARestoreErrorsTheReviewInsteadOfLaunchingIntoTheContainer() {
     createSpec("auth", "in_progress");
     var runStore = new RunStore(db);
-    runStore.acquireContainerLease("test-project", "node-a", "restore");
+    Acting.system(() -> runStore.acquireContainerLease("test-project", "node-a", "restore"));
     var launched = new java.util.concurrent.atomic.AtomicBoolean();
     var ctrl =
         new ReviewPipelineController(
@@ -406,7 +412,7 @@ class ReviewPipelineControllerTest {
     assertTrue(
         runStore.listForSpec("auth").isEmpty(), "a refused review must not insert a run row");
 
-    runStore.releaseContainerLease("test-project", "node-a");
+    Acting.system(() -> runStore.releaseContainerLease("test-project", "node-a"));
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertTrue(launched.get(), "the replayed stop must review normally once the lease is gone");
@@ -475,8 +481,8 @@ class ReviewPipelineControllerTest {
   @Test
   void aReviewAlreadyRunningIsNotRestartedWhenStatusIsReview() {
     createSpec("auth", "review");
-    var reviewId = reviewStore.createReview("auth", 1);
-    reviewStore.updateReviewStatus(reviewId, "running");
+    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
+    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -648,7 +654,7 @@ class ReviewPipelineControllerTest {
         controller(
             singleAgentStage("no_critical"),
             (p, a, pr, rid, cred) -> {
-              specStore.updateStatus("auth", SpecStatus.CANCELLED);
+              Acting.system(() -> specStore.updateStatus("auth", SpecStatus.CANCELLED));
               return CLEAN_REVIEW;
             });
 
@@ -772,7 +778,7 @@ class ReviewPipelineControllerTest {
     broken.onEvent(agentStoppedEvent("auth"));
     assertEquals(1, reviewStore.latestReviewForSpec("auth").orElseThrow().iteration());
 
-    specStore.updateStatus("auth", SpecStatus.IN_PROGRESS);
+    Acting.system(() -> specStore.updateStatus("auth", SpecStatus.IN_PROGRESS));
     var healthy =
         controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     healthy.onEvent(agentStoppedEvent("auth"));
@@ -809,9 +815,9 @@ class ReviewPipelineControllerTest {
   @Test
   void aSupersededHistoryStartsAFreshAttemptAtIterationOneInsteadOfEscalating() {
     createSpec("auth", "in_progress");
-    var exhausted = reviewStore.createReview("auth", 3);
-    reviewStore.updateReviewStatus(exhausted, "escalated");
-    reviewStore.supersedeForSpec("auth");
+    var exhausted = Acting.system(() -> reviewStore.createReview("auth", 3));
+    Acting.system(() -> reviewStore.updateReviewStatus(exhausted, "escalated"));
+    Acting.system(() -> reviewStore.supersedeForSpec("auth"));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -825,9 +831,9 @@ class ReviewPipelineControllerTest {
   @Test
   void aWedgedRunningReviewFromAPriorAttemptDoesNotBlockAFreshOne() {
     createSpec("auth", "in_progress");
-    var interrupted = reviewStore.createReview("auth", 1);
-    reviewStore.updateReviewStatus(interrupted, "running");
-    reviewStore.supersedeForSpec("auth");
+    var interrupted = Acting.system(() -> reviewStore.createReview("auth", 1));
+    Acting.system(() -> reviewStore.updateReviewStatus(interrupted, "running"));
+    Acting.system(() -> reviewStore.supersedeForSpec("auth"));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -1518,12 +1524,16 @@ class ReviewPipelineControllerTest {
     var messages = new MessageStore(db);
     var runStore = new RunStore(db);
     var oversized =
-        messages.append(
-            "auth",
-            "uday",
-            "x".repeat(ai.singlr.sail.engine.PromptConversation.MAX_CODE_POINTS + 1_000),
-            null);
-    var guidance = messages.append("auth", "uday", "the retry finding is intentional", null);
+        Acting.system(
+            () ->
+                messages.append(
+                    "auth",
+                    "uday",
+                    "x".repeat(ai.singlr.sail.engine.PromptConversation.MAX_CODE_POINTS + 1_000),
+                    null));
+    var guidance =
+        Acting.system(
+            () -> messages.append("auth", "uday", "the retry finding is intentional", null));
     var criticalOutput =
         """
         ```json
@@ -1675,10 +1685,10 @@ class ReviewPipelineControllerTest {
   @Test
   void executePipelinePublishesEventsWhenBusProvided() {
     createSpec("auth", "in_progress");
-    specStore.updateStatus("auth", SpecStatus.REVIEW);
-    var reviewId = reviewStore.createReview("auth", 1);
-    reviewStore.updateReviewStatus(reviewId, "running");
-    reviewStore.createStage(reviewId, "security", "agent");
+    Acting.system(() -> specStore.updateStatus("auth", SpecStatus.REVIEW));
+    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
+    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
+    Acting.system(() -> reviewStore.createStage(reviewId, "security", "agent"));
 
     try (var bus = new EventBus()) {
       var ctrl =
@@ -1688,7 +1698,10 @@ class ReviewPipelineControllerTest {
               (p, a, pr, rid, cred) -> CLEAN_REVIEW,
               bus);
 
-      ctrl.executePipeline(reviewId, singleAgentStage("no_critical"), "test-project", "auth");
+      Acting.system(
+          () ->
+              ctrl.executePipeline(
+                  reviewId, singleAgentStage("no_critical"), "test-project", "auth"));
 
       assertTrue(bus.publishedCount() > 0);
     }
@@ -1826,8 +1839,8 @@ class ReviewPipelineControllerTest {
   @Test
   void aRunningReviewIsNotRestartedByADuplicateEvent() {
     createSpec("auth", "in_progress");
-    var reviewId = reviewStore.createReview("auth", 1);
-    reviewStore.updateReviewStatus(reviewId, "running");
+    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
+    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -2011,7 +2024,7 @@ class ReviewPipelineControllerTest {
         (p, a, pr, rid, cred) -> {
           reviewIds.add(rid);
           var principal = runs.findByCredential(cred).orElseThrow().principal();
-          messages.append("auth", principal, "posted by " + principal, null);
+          Acting.system(() -> messages.append("auth", principal, "posted by " + principal, null));
           return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
         };
     var ctrl =
@@ -2156,24 +2169,27 @@ class ReviewPipelineControllerTest {
     var errDb = Sqlite.open(tempDir.resolve("err.db"));
     new SchemaManager(errDb).migrate();
     var errSpecStore = new SpecStore(errDb);
-    errSpecStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "test-project",
-            "Test spec",
-            SpecStatus.IN_PROGRESS,
-            null,
-            null,
-            null,
-            null,
-            "feat/test",
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        null,
+        () ->
+            errSpecStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "test-project",
+                    "Test spec",
+                    SpecStatus.IN_PROGRESS,
+                    null,
+                    null,
+                    null,
+                    null,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
     var ctrl =
         new ReviewPipelineController(
             errSpecStore,
@@ -2241,8 +2257,8 @@ class ReviewPipelineControllerTest {
   @Test
   void reentryAfterMaxIterationsEscalates() {
     createSpec("auth", "in_progress");
-    var reviewId = reviewStore.createReview("auth", 3);
-    reviewStore.updateReviewStatus(reviewId, "failed");
+    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 3));
+    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "failed"));
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
@@ -2593,7 +2609,7 @@ class ReviewPipelineControllerTest {
               List<String> repos,
               String model,
               String effort) {
-            messages.append("auth", "codex/fix", argument, null);
+            Acting.system(() -> messages.append("auth", "codex/fix", argument, null));
             return "fixed the race, disputed the cap";
           }
         };
@@ -2610,7 +2626,7 @@ class ReviewPipelineControllerTest {
       assertEquals("passed", reviews.get(1).status(), "the negotiation converges in one round");
       assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
 
-      var disputed = reviewStore.disputedFindings("auth");
+      var disputed = Acting.system(() -> reviewStore.disputedFindings("auth"));
       assertEquals(List.of("Worker cap ignored"), disputed.stream().map(Finding::title).toList());
       assertEquals(argument, disputed.getFirst().resolutionEvidence());
       assertTrue(

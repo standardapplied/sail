@@ -7,6 +7,8 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
@@ -56,7 +58,11 @@ class ParkedConflictFleetIT {
                 "mady-box", nodeRuns, new ChangeLog(nodeDb), conflicts, new SyncState(nodeDb));
         var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(runId));
         pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
-        mainReplica.commit(runId, pushedButNeverAcknowledged, mainReplica.currentRev(runId));
+        Actor.call(
+            Actor.sync("mady", Role.MEMBER),
+            () ->
+                mainReplica.commit(
+                    runId, pushedButNeverAcknowledged, mainReplica.currentRev(runId)));
         nodeRuns.stampActivity(runId, Duration.ZERO);
         nodeReplica.recordConflict(
             runId,

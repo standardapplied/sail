@@ -12,6 +12,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.SailEventHelper;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -80,19 +81,21 @@ class EventEmissionDeliveryIT {
     runId = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                runId,
-                "acme",
-                "auth",
-                "node-a",
-                "ada",
-                "build",
-                List.of(),
-                "claude-code",
-                "b",
-                "t",
-                "l",
-                "u");
+            Acting.system(
+                () ->
+                    runStore.reserveDispatch(
+                        runId,
+                        "acme",
+                        "auth",
+                        "node-a",
+                        "ada",
+                        "build",
+                        List.of(),
+                        "claude-code",
+                        "b",
+                        "t",
+                        "l",
+                        "u"));
     credential = reservation.credential();
     listener = new LocalApiSocket(bus, operations, root.resolve("api.sock"));
     listener.start();

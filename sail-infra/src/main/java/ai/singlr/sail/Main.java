@@ -5,6 +5,7 @@
 
 package ai.singlr.sail;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.RemoteCommandRunner;
@@ -28,17 +29,18 @@ public final class Main {
 
   /**
    * Prints an escaped command failure instead of swallowing it (the old handler returned 1 with no
-   * output). The message carries the "what happened AND what to do"; a message-less throwable falls
-   * back to its type so the user is never left with a silent non-zero exit.
+   * output). The message carries the "what happened AND what to do", and a refusal's fix follows
+   * it; a message-less throwable falls back to its type so the user is never left with a silent
+   * non-zero exit.
    */
   static int report(Exception ex, CommandLine commandLine) {
     var message = ex.getMessage();
-    commandLine
-        .getErr()
-        .println(
-            commandLine
-                .getColorScheme()
-                .errorText(Strings.isBlank(message) ? ex.toString() : message));
+    var err = commandLine.getErr();
+    err.println(
+        commandLine.getColorScheme().errorText(Strings.isBlank(message) ? ex.toString() : message));
+    if (ex instanceof ApiException refusal && Strings.isNotBlank(refusal.failure().action())) {
+      err.println(refusal.failure().action());
+    }
     return 1;
   }
 }

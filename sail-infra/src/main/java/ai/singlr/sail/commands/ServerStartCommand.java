@@ -44,6 +44,7 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DataMigration;
@@ -211,16 +212,15 @@ public final class ServerStartCommand implements Runnable {
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
-    var orphaned = reviewStore.failOrphanedRunning();
-    var orphanedRuns = runStore.failRunningReviewsOnNode(NodeIdentity.handle());
-    if (orphanedRuns > 0) {
+    var orphans = failOrphans(reviewStore, runStore, NodeIdentity.handle());
+    if (orphans.runs() > 0) {
       syncScheduler.afterWrite();
     }
-    if (orphaned > 0) {
+    if (orphans.reviews() > 0) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ Failed "
-                  + orphaned
+                  + orphans.reviews()
                   + " review(s) interrupted by a restart (they were blocking their specs)"));
     }
     var reviewController =
@@ -428,6 +428,16 @@ public final class ServerStartCommand implements Runnable {
         new AuthSessionStore(db),
         new PendingChallengeStore(db),
         webauthn.sessionTtl());
+  }
+
+  /** How many reviews, and review runs on this node, a restart left running. */
+  record Orphans(int reviews, int runs) {}
+
+  /** Fails what the restart orphaned, as this box's machinery. */
+  static Orphans failOrphans(ReviewStore reviews, RunStore runs, String node) {
+    return Actor.call(
+        Actor.system(),
+        () -> new Orphans(reviews.failOrphanedRunning(), runs.failRunningReviewsOnNode(node)));
   }
 
   /**

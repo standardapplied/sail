@@ -60,6 +60,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
+    var operator = ProjectMutations.catalogOperator(explicit, dryRun);
     var config =
         SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     if (config.services() == null || !config.services().containsKey(serviceName)) {
@@ -84,7 +85,8 @@ public final class ProjectRemoveServiceCommand implements Runnable {
         updatedText,
         dryRun,
         out,
-        "remove service '" + serviceName + "' from the catalog");
+        "remove service '" + serviceName + "' from the catalog",
+        operator);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

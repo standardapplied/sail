@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
@@ -22,6 +21,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -88,41 +89,47 @@ class DispatchCommandWiringTest {
   private String yaml;
 
   private SailOperations cliOperations(ShellExec shell, List<Event> events) throws Exception {
-    var yamlPath = tempDir.resolve("sail.yaml");
-    Files.writeString(yamlPath, YAML);
-    yaml = yamlPath.toString();
-    db = Sqlite.open(tempDir.resolve("control-plane.db"));
-    new SchemaManager(db).migrate();
-    var specStore = new SpecStore(db);
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
-    specStore.setContent("auth", "Do auth", "");
-    return DispatchCommand.operations(
-        db,
-        shell,
-        yaml,
-        events::add,
-        new WatcherSpawner(shell, (command, logPath) -> 4242L),
-        (project, config) -> "",
-        command -> 0,
-        DispatchOperations.Listener.NONE,
-        SessionYield.NONE);
+    return Acting.system(
+        () -> {
+          var yamlPath = tempDir.resolve("sail.yaml");
+          Files.writeString(yamlPath, YAML);
+          yaml = yamlPath.toString();
+          db = Sqlite.open(tempDir.resolve("control-plane.db"));
+          new SchemaManager(db).migrate();
+          var specStore = new SpecStore(db);
+          Acting.as(
+              "me",
+              () ->
+                  specStore.create(
+                      new SpecStore.SpecRow(
+                          "auth",
+                          "acme",
+                          "Add auth",
+                          SpecStatus.PENDING,
+                          HANDLE,
+                          null,
+                          null,
+                          null,
+                          null,
+                          0,
+                          "me",
+                          null,
+                          null,
+                          "me",
+                          List.of(),
+                          List.of())));
+          specStore.setContent("auth", "Do auth", "");
+          return DispatchCommand.operations(
+              db,
+              shell,
+              yaml,
+              events::add,
+              new WatcherSpawner(shell, (command, logPath) -> 4242L),
+              (project, config) -> "",
+              command -> 0,
+              DispatchOperations.Listener.NONE,
+              SessionYield.NONE);
+        });
   }
 
   private static StubShell shell() {
@@ -144,8 +151,7 @@ class DispatchCommandWiringTest {
     var operations = cliOperations(shell(), events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
 
-    var outcome =
-        operations.dispatching().dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE);
+    var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertEquals("sail/auth", dispatched.branch());
@@ -212,11 +218,11 @@ class DispatchCommandWiringTest {
             events);
     new FdeStore(db).add(HANDLE, null, null, "admin");
     var specStore = new SpecStore(db);
-    specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x");
+    Acting.system(
+        () -> specStore.updateReposAndStatus("auth", List.of("app"), SpecStatus.REVIEW, "x"));
     var request = new DispatchOperations.Request("auth", "background", false, null, true);
 
-    var outcome =
-        operations.dispatching().dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE);
+    var outcome = DispatchCommand.dispatchAsOperator(operations, "acme", request, HANDLE);
 
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     assertTrue(dispatched.restarted());

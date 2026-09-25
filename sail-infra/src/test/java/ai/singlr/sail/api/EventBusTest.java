@@ -12,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
@@ -249,5 +251,24 @@ class EventBusTest {
         sink.accept(event);
       }
     };
+  }
+
+  @Test
+  void aSubscriberReactsAsThisBoxsMachinery() throws Exception {
+    try (var bus = new EventBus()) {
+      var actor = new AtomicReference<Actor>();
+      var latch = new CountDownLatch(1);
+      bus.subscribe(
+          subscriber(
+              "machinery",
+              EventSubscriber.all(),
+              e -> {
+                actor.set(Actor.current());
+                latch.countDown();
+              }));
+      bus.publish(Event.of("p", null, "t", "a", "h"));
+      BusTesting.awaitDelivery(latch);
+      assertEquals(Actor.system(), actor.get());
+    }
   }
 }

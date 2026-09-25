@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
@@ -314,13 +315,16 @@ class AgentAttachCommandTest {
 
   private static RunStore.RunRow completedRun(RunStore runs, String id, List<String> repos) {
     reserve(runs, id, "build", repos);
-    runs.transition(id, "running", "completed", 0);
+    Acting.system(() -> runs.transition(id, "running", "completed", 0));
     return runs.findById(id).orElseThrow();
   }
 
   private static void reserve(RunStore runs, String id, String role, List<String> repos) {
-    runs.reserveDispatch(
-        id, "acme", "spec-" + id, "it", "it", role, repos, "codex", null, "t", "l", "u");
+    Acting.system(
+        () -> {
+          runs.reserveDispatch(
+              id, "acme", "spec-" + id, "it", "it", role, repos, "codex", null, "t", "l", "u");
+        });
   }
 
   private static RunStore.RunRow row(String id, String status) {
@@ -377,15 +381,28 @@ class AgentAttachCommandTest {
     try (var db = Sqlite.open(dir.resolve("t.db"))) {
       new SchemaManager(db).migrate();
       var rooms = new RoomStore(db);
-      rooms.create(
-          new RoomStore.RoomRow("spec-x", "acme", "X", "it", "on", null, "it", null, null, "it"));
+      Acting.as(
+          "it",
+          () ->
+              rooms.create(
+                  new RoomStore.RoomRow(
+                      "spec-x", "acme", "X", "it", "on", null, "it", null, null, "it")));
       var runs = new RunStore(db);
-      runs.create(
-          "r1", "acme", "spec-x", "it", "it", "build", "codex", null, "t", null, null, "l", "u");
-      runs.create(
-          "r2", "acme", "legacy", "it", "it", "build", "codex", null, "t", null, null, "l", "u");
-      runs.create(
-          "r3", "acme", null, "it", "it", "adhoc", "codex", null, "t", null, null, "l", "u");
+      Acting.system(
+          () ->
+              runs.create(
+                  "r1", "acme", "spec-x", "it", "it", "build", "codex", null, "t", null, null, "l",
+                  "u"));
+      Acting.system(
+          () ->
+              runs.create(
+                  "r2", "acme", "legacy", "it", "it", "build", "codex", null, "t", null, null, "l",
+                  "u"));
+      Acting.system(
+          () ->
+              runs.create(
+                  "r3", "acme", null, "it", "it", "adhoc", "codex", null, "t", null, null, "l",
+                  "u"));
       assertEquals(
           "spec-x", AgentAttachCommand.knownRoom(rooms, runs.findById("r1").orElseThrow()));
       assertEquals(

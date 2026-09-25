@@ -90,9 +90,7 @@ public final class OrphanErasure implements DataMigration {
                 () ->
                     stillOrphaned(db, type, id)
                         ? erasure.erase(
-                            erasure.closure(List.of(new Erasure.Target(type, id))),
-                            "sail",
-                            "migration")
+                            erasure.closure(List.of(new Erasure.Target(type, id))), "migration")
                         : new Erasure.Result(List.of(), 0));
         erased.addAll(result.entities());
       }

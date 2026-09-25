@@ -390,11 +390,6 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     }
 
     @Override
-    public String author(String id) {
-      return null;
-    }
-
-    @Override
     public void apply(String id, Map<String, Object> snapshot) {
       writeRow(rowFrom(id, snapshot));
     }

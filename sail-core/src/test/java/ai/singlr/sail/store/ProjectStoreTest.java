@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs(value = Actor.Lane.CLI, handle = "uday")
 class ProjectStoreTest {
 
   @TempDir Path tempDir;
@@ -39,7 +43,7 @@ class ProjectStoreTest {
 
   @Test
   void renameTombstonesTheOldIdentityAndCreatesTheNew() {
-    store.upsert("old", "name: old\nimage: ubuntu/24.04\n", "uday");
+    store.upsert("old", "name: old\nimage: ubuntu/24.04\n");
     var oldRev = store.latestRev("old");
 
     store.rename("old", "renamed", "name: renamed\nimage: ubuntu/24.04\n");
@@ -56,7 +60,7 @@ class ProjectStoreTest {
 
   @Test
   void renameIsIdempotentOnceTheOldNameIsGone() {
-    store.upsert("old", "name: old\n", "uday");
+    store.upsert("old", "name: old\n");
     store.rename("old", "renamed", "name: renamed\n");
 
     store.rename("old", "renamed", "name: renamed\n");
@@ -66,8 +70,8 @@ class ProjectStoreTest {
 
   @Test
   void renameOntoALiveNameIsRejectedAndLeavesBothIntact() {
-    store.upsert("old", "name: old\n", "uday");
-    store.upsert("taken", "name: taken\n", "uday");
+    store.upsert("old", "name: old\n");
+    store.upsert("taken", "name: taken\n");
 
     assertThrows(IllegalStateException.class, () -> store.rename("old", "taken", "name: taken\n"));
 
@@ -77,7 +81,7 @@ class ProjectStoreTest {
 
   @Test
   void plainDeleteDoesNotBlockResurrection() {
-    store.upsert("p", "name: p\n", "uday");
+    store.upsert("p", "name: p\n");
 
     store.delete("p");
 
@@ -89,7 +93,7 @@ class ProjectStoreTest {
 
   @Test
   void upsertInsertsAndRoundTripsTheDefinitionBlob() {
-    store.upsert("acme", "name: acme\nresources:\n  cpu: 2\n", "uday");
+    store.upsert("acme", "name: acme\nresources:\n  cpu: 2\n");
 
     var row = store.findByName("acme").orElseThrow();
     assertEquals("acme", row.name());
@@ -101,10 +105,10 @@ class ProjectStoreTest {
 
   @Test
   void upsertReplacesDefinitionPreservingCreationProvenance() {
-    store.upsert("acme", "v1", "uday");
+    store.upsert("acme", "v1");
     var created = store.findByName("acme").orElseThrow();
 
-    store.upsert("acme", "v2", "ada");
+    Actor.run(new Actor("ada", Role.MEMBER, Actor.Lane.API), () -> store.upsert("acme", "v2"));
 
     var updated = store.findByName("acme").orElseThrow();
     assertEquals("v2", updated.definition());
@@ -116,9 +120,9 @@ class ProjectStoreTest {
 
   @Test
   void listIsOrderedByName() {
-    store.upsert("zeta", "z", null);
-    store.upsert("alpha", "a", null);
-    store.upsert("mu", "m", null);
+    store.upsert("zeta", "z");
+    store.upsert("alpha", "a");
+    store.upsert("mu", "m");
 
     assertEquals(
         List.of("alpha", "mu", "zeta"),
@@ -132,7 +136,7 @@ class ProjectStoreTest {
 
   @Test
   void deleteRemovesAndReportsWhetherARowWentAway() {
-    store.upsert("acme", "x", null);
+    store.upsert("acme", "x");
 
     assertTrue(store.delete("acme"));
     assertTrue(store.findByName("acme").isEmpty());
@@ -140,10 +144,10 @@ class ProjectStoreTest {
   }
 
   @Test
-  void definitionMayBeNullActorButNotNullBlob() {
-    store.upsert("acme", "x", null);
+  void aMachineTokenLeavesNoAuthorButTheBlobIsRequired() {
+    Actor.run(new Actor(null, Role.MEMBER, Actor.Lane.API), () -> store.upsert("acme", "x"));
     assertNull(store.findByName("acme").orElseThrow().createdBy());
-    assertThrows(SqliteException.class, () -> store.upsert("broken", null, null));
+    assertThrows(SqliteException.class, () -> store.upsert("broken", null));
   }
 
   @Test
@@ -151,8 +155,7 @@ class ProjectStoreTest {
     store.upsert(
         "acme",
         "git:\n  name: Alex Morgan\n  email: uday@example.com\n"
-            + "ssh:\n  authorized_keys:\n    - ssh-ed25519 SECRETKEY main\n",
-        "uday");
+            + "ssh:\n  authorized_keys:\n    - ssh-ed25519 SECRETKEY main\n");
 
     var definition = store.findByName("acme").orElseThrow().definition();
     assertTrue(definition.contains("${GIT_NAME}"));
@@ -163,7 +166,7 @@ class ProjectStoreTest {
 
   @Test
   void theSyncedSnapshotCarriesPlaceholdersNotIdentity() {
-    store.upsert("acme", "git:\n  name: Uday\n  email: uday@example.com\n", "uday");
+    store.upsert("acme", "git:\n  name: Uday\n  email: uday@example.com\n");
 
     var snapshot = store.comparableSnapshot("acme");
     assertTrue(snapshot.get("definition").toString().contains("${GIT_NAME}"));
@@ -185,7 +188,7 @@ class ProjectStoreTest {
 
   @Test
   void canonicalizeIsANoOpForAlreadyRedactedRows() {
-    store.upsert("acme", "git:\n  name: Uday\n  email: uday@example.com\n", "uday");
+    store.upsert("acme", "git:\n  name: Uday\n  email: uday@example.com\n");
     assertEquals(0, store.canonicalizeDefinitions(), "upsert already redacted it");
   }
 }

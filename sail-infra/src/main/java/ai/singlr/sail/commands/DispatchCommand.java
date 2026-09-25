@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.commands;
 
-import ai.singlr.sail.api.Actor;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
@@ -17,7 +16,6 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
@@ -26,6 +24,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.List;
 import java.util.Objects;
@@ -139,7 +138,7 @@ public final class DispatchCommand implements Runnable {
                 renderer(sync),
                 StopOperations.Listener.NONE),
             new PtyHostYield())) {
-      render(dispatch(operations, request, handle));
+      render(dispatchAsOperator(operations, name, request, handle));
     }
   }
 
@@ -167,19 +166,25 @@ public final class DispatchCommand implements Runnable {
         sessionYield);
   }
 
-  private DispatchOperations.Outcome dispatch(
-      HostOperations operations, DispatchOperations.Request request, String handle) {
+  /**
+   * Dispatches {@code project}'s spec as this box's operator, rendering a refusal, the operator's
+   * own included, with its fix for the terminal.
+   */
+  static DispatchOperations.Outcome dispatchAsOperator(
+      HostOperations operations,
+      String project,
+      DispatchOperations.Request request,
+      String handle) {
     try {
-      return operations.dispatching().dispatch(name, request, Actor.cliOperator(handle), handle);
+      return Actor.call(
+          operations.identity().operator(),
+          () ->
+              operations
+                  .dispatching()
+                  .dispatch(project, request, Actor.cliOperator(handle), handle));
     } catch (ApiException e) {
-      throw new IllegalStateException(errorText(e), e);
+      throw new IllegalStateException(CliCommand.describe(e), e);
     }
-  }
-
-  /** A structured refusal rendered for the terminal: the reason and, when known, the fix. */
-  private static String errorText(ApiException e) {
-    var action = e.failure().action();
-    return Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action;
   }
 
   private void render(DispatchOperations.Outcome outcome) {

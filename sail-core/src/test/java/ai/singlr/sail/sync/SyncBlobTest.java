@@ -11,6 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
@@ -43,6 +47,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @Timeout(value = 3, unit = TimeUnit.MINUTES)
+@ActingAs
 class SyncBlobTest {
 
   @Test
@@ -73,7 +78,7 @@ class SyncBlobTest {
       var viewer =
           executor.submit(
               () -> {
-                main.server(new SyncPrincipal("viewer", false))
+                main.server(Actor.sync("viewer", Role.VIEWER))
                     .serve(input, OutputStream.nullOutputStream());
                 return null;
               });
@@ -84,11 +89,16 @@ class SyncBlobTest {
         assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
         var upload =
             executor.submit(
-                () -> {
-                  new FileStore(ingestDb)
-                      .put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
-                  return null;
-                });
+                Actor.carrying(
+                    () -> {
+                      new FileStore(ingestDb)
+                          .put(
+                              "project",
+                              "file",
+                              new ByteArrayInputStream(new byte[] {1, 2, 3}),
+                              0644);
+                      return null;
+                    }));
         upload.get(5, TimeUnit.SECONDS);
         var syncing = executor.submit(() -> SyncBox.round(ingestDb, node.db, "file"));
         assertEquals(1, syncing.get(5, TimeUnit.SECONDS).pulled());
@@ -140,11 +150,16 @@ class SyncBlobTest {
         assertThrows(TimeoutException.class, () -> collecting.get(100, TimeUnit.MILLISECONDS));
         var upload =
             executor.submit(
-                () -> {
-                  new FileStore(ingestDb)
-                      .put("project", "file", new ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
-                  return null;
-                });
+                Actor.carrying(
+                    () -> {
+                      new FileStore(ingestDb)
+                          .put(
+                              "project",
+                              "file",
+                              new ByteArrayInputStream(new byte[] {1, 2, 3}),
+                              0644);
+                      return null;
+                    }));
         upload.get(5, TimeUnit.SECONDS);
         var syncing = executor.submit(() -> SyncBox.round(ingestDb, node.db, "file"));
         assertEquals(1, syncing.get(5, TimeUnit.SECONDS).pulled());
@@ -179,7 +194,7 @@ class SyncBlobTest {
         SyncRpcServer.over(
                 db,
                 "main",
-                new SyncPrincipal("viewer", false),
+                Actor.sync("viewer", Role.VIEWER),
                 FdeRoster.EMPTY,
                 SyncTransitionSink.NONE,
                 SyncWire.UPGRADE_FLOOR)
@@ -235,13 +250,14 @@ class SyncBlobTest {
       }
       try (var link =
           SyncBox.connect(
-              main.server(new SyncPrincipal("node", true)),
+              main.server(Actor.sync("node", Role.MEMBER)),
               node,
               frame,
               output -> boundedLines(output, frame))) {
         var session = ((PagedSyncSession) link.session()).frame(frame);
         var report =
-            session.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
+            SyncBox.reconcile(
+                session, "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(14L * FastCdc.MIN, upload ? report.sentBytes() : report.fetchedBytes());
         assertTrue(link.count(upload ? "announce" : "fetch_chunks") >= 2);
         if (upload) assertEquals(link.count("push"), link.count("announce"));
@@ -287,7 +303,7 @@ class SyncBlobTest {
       files.put(
           new FileStore.FileRow(
               "two", "data.bin", first.contentHash(), first.size(), first.mode(), first.kind()));
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(Files.size(path), report.fetchedBytes());
@@ -300,7 +316,7 @@ class SyncBlobTest {
       try (var input = localFiles.open(localFiles.find("one", "data.bin").orElseThrow())) {
         assertEquals(first.contentHash(), BlobStore.hash(input));
       }
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         assertEquals(
             0,
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"))
@@ -318,7 +334,7 @@ class SyncBlobTest {
       var changed = new HashSet<>(files.blobs().manifest(next.contentHash()).chunkHashes());
       changed.removeAll(files.blobs().manifest(first.contentHash()).chunkHashes());
       assertEquals(1, changed.size());
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(files.blobs().chunk(changed.iterator().next()).length, report.fetchedBytes());
@@ -345,7 +361,7 @@ class SyncBlobTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(new SyncPrincipal("node", true)),
+                        main.server(Actor.sync("node", Role.MEMBER)),
                         node,
                         SyncWire.MAX_FRAME,
                         cut)) {
@@ -364,7 +380,7 @@ class SyncBlobTest {
       assertEquals(2, held.size());
       assertEquals(0, node.syncState.checkpoint("main", "file"));
       assertFalse(new BlobStore(node.db).has(hash));
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(all.size() - held.size(), requestedChunks(link));
       }
@@ -385,7 +401,7 @@ class SyncBlobTest {
       var replicas = SyncedEntities.replicas(node.db, "node", "node");
       try (var link =
           SyncBox.connect(
-              main.server(new SyncPrincipal("node", true)),
+              main.server(Actor.sync("node", Role.MEMBER)),
               node.db,
               "node-box",
               SyncWire.MAX_FRAME,
@@ -422,7 +438,7 @@ class SyncBlobTest {
       var server =
           new SyncRpcServer(
                   served,
-                  new SyncPrincipal("node", true),
+                  Actor.sync("node", Role.MEMBER),
                   FdeRoster.EMPTY,
                   SyncTransitionSink.NONE,
                   new ChangeLog(main.db)::headsAfter,
@@ -450,7 +466,7 @@ class SyncBlobTest {
       try (var input = Files.newInputStream(path)) {
         files.put("proj", "binary", input, 0750);
       }
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(Files.size(path), report.sentBytes());
@@ -462,7 +478,7 @@ class SyncBlobTest {
       files.put(
           new FileStore.FileRow(
               "other", "copy", file.contentHash(), file.size(), 0640, file.kind()));
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(0, report.sentBytes());
@@ -482,7 +498,7 @@ class SyncBlobTest {
       var changed = new HashSet<>(files.blobs().manifest(next.contentHash()).chunkHashes());
       changed.removeAll(files.blobs().manifest(file.contentHash()).chunkHashes());
       assertEquals(1, changed.size());
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(1, link.count("chunk"));
@@ -508,7 +524,7 @@ class SyncBlobTest {
               () -> {
                 try (var link =
                     SyncBox.connect(
-                        main.server(new SyncPrincipal("node", true)),
+                        main.server(Actor.sync("node", Role.MEMBER)),
                         node,
                         SyncWire.MAX_FRAME,
                         output -> output,
@@ -528,7 +544,7 @@ class SyncBlobTest {
       assertEquals(2, held.size());
       assertFalse(new BlobStore(main.db).has(hash));
       assertTrue(new FileStore(main.db).list("proj").isEmpty());
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         link.reconcile("file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
         assertEquals(chunks.size() - held.size(), link.count("chunk"));
       }
@@ -542,7 +558,7 @@ class SyncBlobTest {
         var node = new SyncBox(dir, "node")) {
       new FileStore(node.db)
           .put("proj", "binary", new java.io.ByteArrayInputStream(new byte[] {1, 2, 3}), 0644);
-      var link = SyncBox.connect(main.server(SyncPrincipal.readOnly()), node);
+      var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), node);
       var failure =
           assertThrows(
               SyncTransportException.class,
@@ -612,7 +628,7 @@ class SyncBlobTest {
           () -> {
             try (var link =
                 SyncBox.connect(
-                    main.server(new SyncPrincipal("node", true)),
+                    main.server(Actor.sync("node", Role.MEMBER)),
                     node,
                     SyncWire.MAX_FRAME,
                     record,
@@ -637,7 +653,7 @@ class SyncBlobTest {
       files.put("proj", "binary", new java.io.ByteArrayInputStream(new byte[1024]), 0644);
       var hash = files.find("proj", "binary").orElseThrow().contentHash();
       var server =
-          main.server(new SyncPrincipal("node", true))
+          main.server(Actor.sync("node", Role.MEMBER))
               .content(main.db, new ai.singlr.sail.config.FileLimits(512));
       var failure =
           assertThrows(
@@ -669,7 +685,7 @@ class SyncBlobTest {
       main.specs.setContent("a", "theirs from need", "");
       var remoteHash = main.specs.comparableSnapshot("a").get("body_hash").toString();
       node.syncState.advance("main", "spec", main.replica.maxSeq());
-      try (var link = SyncBox.connect(main.server(new SyncPrincipal("node", true)), node)) {
+      try (var link = SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node)) {
         var report =
             link.reconcile("spec", SyncedEntities.replicas(node.db, "node", "node").get("spec"));
         assertEquals(0, link.count("pull"));
@@ -698,13 +714,13 @@ class SyncBlobTest {
                 public void write(byte[] bytes, int offset, int length) throws IOException {
                   var line = new String(bytes, offset, length, StandardCharsets.UTF_8);
                   if (line.contains("\"op\": \"page\"") && changed.compareAndSet(false, true))
-                    main.specs.setContent("a", "body landed after page", "");
+                    Acting.system(() -> main.specs.setContent("a", "body landed after page", ""));
                   out.write(bytes, offset, length);
                 }
               };
       try (var link =
           SyncBox.connect(
-              main.server(new SyncPrincipal("node", true)), node, SyncWire.MAX_FRAME, race)) {
+              main.server(Actor.sync("node", Role.MEMBER)), node, SyncWire.MAX_FRAME, race)) {
         var report =
             link.reconcile("spec", SyncedEntities.replicas(node.db, "node", "node").get("spec"));
         assertEquals(2, link.count("push"));

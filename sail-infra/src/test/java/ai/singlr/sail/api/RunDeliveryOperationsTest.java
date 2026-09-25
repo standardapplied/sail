@@ -12,6 +12,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -31,6 +35,7 @@ import org.junit.jupiter.api.io.TempDir;
  * shown and what it said itself, tracked by exact message identity and scoped by the run's own spec
  * — so a message that synchronizes in late is still delivered, whatever its id.
  */
+@ActingAs
 class RunDeliveryOperationsTest {
 
   private static final Actor ADA = new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
@@ -86,21 +91,24 @@ class RunDeliveryOperationsTest {
   }
 
   private String newRun(String specId) {
-    var id = DateTimeUtils.newId().toString();
-    return runStore.create(
-        id,
-        "acme",
-        specId,
-        "node-a",
-        "ada",
-        "build",
-        "claude-code",
-        "b",
-        "t",
-        null,
-        null,
-        "l",
-        "u");
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return runStore.create(
+              id,
+              "acme",
+              specId,
+              "node-a",
+              "ada",
+              "build",
+              "claude-code",
+              "b",
+              "t",
+              null,
+              null,
+              "l",
+              "u");
+        });
   }
 
   @Test
@@ -343,7 +351,9 @@ class RunDeliveryOperationsTest {
 
   @Test
   void recordRoomConversationOmitsBlankOptionalsAndRefusesBadInput() {
-    var bare = operations.recordRoomConversation("room", " ", "abc", null, "", ADA).orThrow();
+    var bare =
+        Acting.by(ADA, () -> operations.recordRoomConversation("room", " ", "abc", null, "", ADA))
+            .orThrow();
     assertNull(bare.agent());
     assertFalse(bare.toMap().containsKey("agent"));
 

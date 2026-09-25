@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
  * boxes touching <em>different</em> projects auto-converge, and two editing the <em>same</em>
  * project's definition conflict with the local copy left untouched.
  */
+@ActingAs
 class ProjectSyncTest {
 
   @TempDir Path tempDir;
@@ -83,7 +85,7 @@ class ProjectSyncTest {
 
   @Test
   void aProjectCreatedOnMainLandsOnEveryNode() {
-    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n", "uday");
+    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n");
 
     sync(node);
     assertEquals("name: acme\nimage: ubuntu/24.04\n", definitionOn(node, "acme"));
@@ -94,7 +96,7 @@ class ProjectSyncTest {
 
   @Test
   void aProjectCreatedOnANodePushesToMainAndOtherNodes() {
-    node.projects.upsert("acme", "from-node", "mady");
+    node.projects.upsert("acme", "from-node");
 
     sync(node);
     assertEquals("from-node", definitionOn(main, "acme"));
@@ -105,12 +107,12 @@ class ProjectSyncTest {
 
   @Test
   void editsToDifferentProjectsAutoConvergeWithoutConflict() {
-    node.projects.upsert("acme", "A1", "uday");
+    node.projects.upsert("acme", "A1");
     sync(node);
     sync(other);
 
-    node.projects.upsert("acme", "A2", "uday");
-    other.projects.upsert("beta", "B1", "mady");
+    node.projects.upsert("acme", "A2");
+    other.projects.upsert("beta", "B1");
 
     sync(node);
     sync(other);
@@ -125,12 +127,12 @@ class ProjectSyncTest {
 
   @Test
   void editsToTheSameProjectConflictAndLeaveTheLocalCopyUntouched() {
-    node.projects.upsert("acme", "v1", "uday");
+    node.projects.upsert("acme", "v1");
     sync(node);
     sync(other);
 
-    node.projects.upsert("acme", "from-node", "uday");
-    other.projects.upsert("acme", "from-other", "mady");
+    node.projects.upsert("acme", "from-node");
+    other.projects.upsert("acme", "from-other");
 
     sync(node);
     var report = engine.reconcile(other.replica, main.replica);
@@ -144,7 +146,7 @@ class ProjectSyncTest {
 
   @Test
   void aDeleteOnOneBoxPropagates() {
-    node.projects.upsert("acme", "x", "uday");
+    node.projects.upsert("acme", "x");
     sync(node);
     sync(other);
 
@@ -168,8 +170,8 @@ class ProjectSyncTest {
 
   @Test
   void aRenameOnMainDeletesAStaleUnbasedNodeCopyInsteadOfResurrectingIt() {
-    main.projects.upsert("p", "name: p\n", "uday");
-    node.projects.upsert("p", "name: p\n", "mady");
+    main.projects.upsert("p", "name: p\n");
+    node.projects.upsert("p", "name: p\n");
 
     main.projects.rename("p", "q", "name: q\n");
     sync(node);
@@ -182,7 +184,7 @@ class ProjectSyncTest {
 
   @Test
   void aRenameOnMainRemovesASyncedProjectFromNodesWithoutConflict() {
-    main.projects.upsert("p", "name: p\n", "uday");
+    main.projects.upsert("p", "name: p\n");
     sync(node);
 
     main.projects.rename("p", "q", "name: q\n");
@@ -195,7 +197,7 @@ class ProjectSyncTest {
 
   @Test
   void aRenameOnANodePushesBothTheDeletionAndTheNewNameToMain() {
-    node.projects.upsert("p", "name: p\n", "mady");
+    node.projects.upsert("p", "name: p\n");
     node.projects.rename("p", "q", "name: q\n");
 
     sync(node);

@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -185,21 +186,27 @@ final class HostLanes {
 
     private PruneReport purge(String name, boolean dryRun) {
       schema.initialize();
-      return pruner.prune(PruneRequest.project(name, dryRun), operator.get());
+      var actor = operator.get();
+      return Actor.call(actor, () -> pruner.prune(PruneRequest.project(name, dryRun), actor));
     }
 
     @Override
     public Renamed rename(String from, String to) {
-      return ProjectCatalogRename.rename(db, from, to);
+      return Actor.call(operator.get(), () -> ProjectCatalogRename.rename(db, from, to));
     }
 
     @Override
     public void undoRename(Renamed renamed) {
-      ProjectCatalogRename.restore(db, renamed);
+      Actor.run(operator.get(), () -> ProjectCatalogRename.restore(db, renamed));
     }
   }
 
-  record Identity(Sqlite db, FdeStore fdes) implements HostIdentity {
+  record Identity(Sqlite db, FdeStore fdes, Supplier<Actor> cliOperator) implements HostIdentity {
+    @Override
+    public Actor operator() {
+      return cliOperator.get();
+    }
+
     @Override
     public List<TokenStore.TokenInfo> tokens() {
       return new TokenStore(db).list();

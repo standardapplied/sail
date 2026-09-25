@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
@@ -73,44 +74,50 @@ class ResourceAuthzTest {
   }
 
   private void seedSpec(String id, String assignee, String createdBy) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "Title",
-            SpecStatus.PENDING,
-            assignee,
-            null,
-            null,
-            null,
-            null,
-            0,
-            createdBy,
-            "",
-            "",
-            createdBy,
-            List.of(),
-            List.of()));
+    Acting.as(
+        createdBy,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "Title",
+                    SpecStatus.PENDING,
+                    assignee,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    createdBy,
+                    "",
+                    "",
+                    createdBy,
+                    List.of(),
+                    List.of())));
   }
 
   private String seedReviewAwaitingApproval(String specId) {
-    var reviewId = reviewStore.createReview(specId, 1);
-    var stageId = reviewStore.createStage(reviewId, "human", "human");
-    reviewStore.startStage(stageId, "someone");
-    reviewStore.addFinding(
-        stageId,
-        Finding.create(
-            Finding.Severity.HIGH,
-            Finding.Category.SECURITY,
-            "A.java",
-            1,
-            2,
-            "Issue",
-            "Desc",
-            "Ev",
-            new Finding.Suggestion("bad", "good", "why"),
-            0.9));
-    return reviewId;
+    return Acting.system(
+        () -> {
+          var reviewId = reviewStore.createReview(specId, 1);
+          var stageId = reviewStore.createStage(reviewId, "human", "human");
+          reviewStore.startStage(stageId, "someone");
+          reviewStore.addFinding(
+              stageId,
+              Finding.create(
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "A.java",
+                  1,
+                  2,
+                  "Issue",
+                  "Desc",
+                  "Ev",
+                  new Finding.Suggestion("bad", "good", "why"),
+                  0.9));
+          return reviewId;
+        });
   }
 
   private String memberToken(String handle) {

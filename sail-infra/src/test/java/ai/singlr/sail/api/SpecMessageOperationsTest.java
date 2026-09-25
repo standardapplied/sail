@@ -10,6 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -27,6 +31,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class SpecMessageOperationsTest {
 
   @TempDir Path tempDir;
@@ -283,9 +288,12 @@ class SpecMessageOperationsTest {
   @Test
   void specAddressedConversationLandsInTheSpecsHomeRoom() throws Exception {
     var rooms = new RoomStore(db);
-    rooms.create(
-        new RoomStore.RoomRow(
-            "study", "acme", "Study", "ada", null, null, "ada", null, null, "ada"));
+    Acting.as(
+        "ada",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "study", "acme", "Study", "ada", null, null, "ada", null, null, "ada")));
     db.execute(
         """
         INSERT INTO specs

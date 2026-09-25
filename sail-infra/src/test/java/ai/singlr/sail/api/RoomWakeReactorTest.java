@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -156,78 +157,90 @@ class RoomWakeReactorTest {
   }
 
   private void seed(String id, String status, String assignee, String wake) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            id,
-            SpecStatus.fromWire(status),
-            assignee,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "uday",
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
-    roomStore.ensureFor(id, "acme", id, assignee, wake, "uday");
+    Acting.system(
+        () -> {
+          Acting.as(
+              "uday",
+              () ->
+                  specStore.create(
+                      new SpecStore.SpecRow(
+                          id,
+                          "acme",
+                          id,
+                          SpecStatus.fromWire(status),
+                          assignee,
+                          null,
+                          null,
+                          null,
+                          null,
+                          0,
+                          "uday",
+                          "",
+                          "",
+                          null,
+                          List.of(),
+                          List.of())));
+          roomStore.ensureFor(id, "acme", id, assignee, wake);
+        });
   }
 
   private void engage(String id, String agent, String mode) {
     var spec = specStore.findById(id).orElseThrow();
     var member = ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString());
-    roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), null, "uday");
-    roomStore.updateRoster(id, ai.singlr.sail.config.Roster.solo(member).toJson(), "uday");
+    Acting.system(
+        () -> roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), null));
+    Acting.system(
+        () -> roomStore.updateRoster(id, ai.singlr.sail.config.Roster.solo(member).toJson()));
   }
 
   private String chatRun(String specId, String role, String status, Instant startedAt) {
     var id = DateTimeUtils.newId().toString();
-    runStore.create(
-        id,
-        "acme",
-        specId,
-        "uday",
-        "uday",
-        role,
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + id);
+    Acting.system(
+        () ->
+            runStore.create(
+                id,
+                "acme",
+                specId,
+                "uday",
+                "uday",
+                role,
+                "claude-code",
+                null,
+                "t",
+                null,
+                null,
+                null,
+                "sail-agent-" + id));
     db.execute("UPDATE runs SET started_at = ? WHERE id = ?", startedAt.toString(), id);
     if (!"running".equals(status)) {
-      runStore.complete(id, status, 0);
+      Acting.system(() -> runStore.complete(id, status, 0));
     }
     return id;
   }
 
   private String buildRun(String specId, String status) {
     var id = DateTimeUtils.newId().toString();
-    runStore.create(
-        id,
-        "acme",
-        specId,
-        "uday",
-        "uday",
-        "build",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + id);
+    Acting.system(
+        () ->
+            runStore.create(
+                id,
+                "acme",
+                specId,
+                "uday",
+                "uday",
+                "build",
+                "claude-code",
+                null,
+                "t",
+                null,
+                null,
+                null,
+                "sail-agent-" + id));
     if (!"running".equals(status)) {
       if ("stopping".equals(status)) {
-        runStore.transition(id, "running", "stopping");
+        Acting.system(() -> runStore.transition(id, "running", "stopping"));
       } else {
-        runStore.complete(id, status, 0);
+        Acting.system(() -> runStore.complete(id, status, 0));
       }
     }
     return id;
@@ -238,14 +251,17 @@ class RoomWakeReactorTest {
   }
 
   private Event message(String specId, String author, String body) {
-    var row = messageStore.append(specId, author, body, null);
-    return Event.of(
-        "acme",
-        specId,
-        Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
-        author,
-        "host",
-        Map.of("message_id", row.id(), "preview", body));
+    return Acting.system(
+        () -> {
+          var row = messageStore.append(specId, author, body, null);
+          return Event.of(
+              "acme",
+              specId,
+              Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+              author,
+              "host",
+              Map.of("message_id", row.id(), "preview", body));
+        });
   }
 
   private Event roomStop(String specId, String runId) {
@@ -426,11 +442,11 @@ class RoomWakeReactorTest {
     var reactor = reactor(executor);
 
     reactor.onEvent(message("auth", "uday", "hello"));
-    roomStore.updateWake("auth", "off", "uday");
+    Acting.system(() -> roomStore.updateWake("auth", "off"));
     executor.drain();
     assertTrue(launcher.woken.isEmpty(), "a mode flipped off mid-debounce wins");
 
-    roomStore.updateWake("auth", "on", "uday");
+    Acting.system(() -> roomStore.updateWake("auth", "on"));
     reactor.onEvent(message("auth", "uday", "hello again"));
     buildRun("auth", "running");
     executor.drain();
@@ -446,7 +462,7 @@ class RoomWakeReactorTest {
     var reactor = reactor(executor);
 
     reactor.onEvent(message("auth", "uday", "hello"));
-    specStore.delete("auth");
+    Acting.system(() -> specStore.delete("auth"));
     executor.drain();
 
     assertTrue(launcher.woken.isEmpty(), "a spec that vanished mid-debounce wakes nothing");
@@ -457,7 +473,7 @@ class RoomWakeReactorTest {
     seed("auth", "done", "uday", null);
     buildRun("auth", "completed");
     ageOutEveryFinish("auth");
-    var row = messageStore.append("auth", "uday", "from another box", null);
+    var row = Acting.system(() -> messageStore.append("auth", "uday", "from another box", null));
     var data = new LinkedHashMap<String, Object>();
     data.put("message_id", row.id());
     data.put("preview", "from another box");
@@ -632,7 +648,8 @@ class RoomWakeReactorTest {
     seed("chat", "draft", "uday", null);
     engage("chat", "claude-code", "full");
     var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
-    messageStore.append("chat", "uday", "landed after your last relay check", null);
+    Acting.system(
+        () -> messageStore.append("chat", "uday", "landed after your last relay check", null));
 
     reactor().onEvent(roomStop("chat", run));
 
@@ -644,7 +661,7 @@ class RoomWakeReactorTest {
   void aStopWithNothingOwedStaysQuiet() {
     seed("chat", "draft", "uday", null);
     engage("chat", "claude-code", "full");
-    messageStore.append("chat", "uday", "answered already", null);
+    Acting.system(() -> messageStore.append("chat", "uday", "answered already", null));
     var run = chatRun("chat", "room", "completed", DateTimeUtils.now().plusSeconds(60));
 
     reactor().onEvent(roomStop("chat", run));
@@ -656,7 +673,7 @@ class RoomWakeReactorTest {
   void aBuildStopFreesADeferredFullTurn() {
     seed("chat", "draft", "uday", null);
     engage("chat", "codex", "full");
-    messageStore.append("chat", "uday", "please add the diagram", null);
+    Acting.system(() -> messageStore.append("chat", "uday", "please add the diagram", null));
     var build = buildRun("chat", "completed");
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
@@ -681,7 +698,7 @@ class RoomWakeReactorTest {
   void aStopOnAnUnengagedSpecNeverRefires() {
     seed("plain", "in_progress", "uday", "on");
     var run = chatRun("plain", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
-    messageStore.append("plain", "uday", "owed but not engaged", null);
+    Acting.system(() -> messageStore.append("plain", "uday", "owed but not engaged", null));
 
     reactor().onEvent(roomStop("plain", run));
 
@@ -693,11 +710,11 @@ class RoomWakeReactorTest {
   void theSweepWakesOwedEngagedRoomsAndSkipsForeignOrQuietOnes() {
     seed("owed", "draft", "uday", null);
     engage("owed", "claude-code", "full");
-    messageStore.append("owed", "uday", "anyone there?", null);
+    Acting.system(() -> messageStore.append("owed", "uday", "anyone there?", null));
 
     seed("foreign", "draft", "someone-else", null);
     engage("foreign", "claude-code", "full");
-    messageStore.append("foreign", "uday", "not this box's job", null);
+    Acting.system(() -> messageStore.append("foreign", "uday", "not this box's job", null));
 
     seed("quiet", "draft", "uday", null);
     engage("quiet", "claude-code", "full");
@@ -711,10 +728,10 @@ class RoomWakeReactorTest {
   void aSweepFailureOnOneRoomNeverStopsTheOthers() {
     seed("first", "draft", "uday", null);
     engage("first", "claude-code", "full");
-    messageStore.append("first", "uday", "hello", null);
+    Acting.system(() -> messageStore.append("first", "uday", "hello", null));
     seed("second", "draft", "uday", null);
     engage("second", "claude-code", "full");
-    messageStore.append("second", "uday", "hello too", null);
+    Acting.system(() -> messageStore.append("second", "uday", "hello too", null));
     launcher.failWith = new RuntimeException("container offline");
 
     var reactor = reactor();
@@ -731,8 +748,8 @@ class RoomWakeReactorTest {
     seed("chat", "draft", "uday", null);
     engage("chat", "claude-code", "full");
     var run = chatRun("chat", "room", "completed", now.get().minus(Duration.ofMinutes(2)));
-    messageStore.append("chat", "uday", "first", null);
-    var second = messageStore.append("chat", "uday", "second", null);
+    Acting.system(() -> messageStore.append("chat", "uday", "first", null));
+    var second = Acting.system(() -> messageStore.append("chat", "uday", "second", null));
 
     reactor(new DirectExecutorService(), null).onEvent(roomStop("chat", run));
     assertTrue(launcher.woken.isEmpty(), "no message store, no owed check");
@@ -775,21 +792,23 @@ class RoomWakeReactorTest {
   void aRoomStopOnAnOwnedRunTriggersTheCommitGuard() {
     seed("auth", "done", "uday", null);
     var runId = DateTimeUtils.newId().toString();
-    runStore.create(
-        runId,
-        "acme",
-        "auth",
-        "uday",
-        "uday",
-        "room",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + runId);
-    runStore.complete(runId, "completed", 0);
+    Acting.system(
+        () ->
+            runStore.create(
+                runId,
+                "acme",
+                "auth",
+                "uday",
+                "uday",
+                "room",
+                "claude-code",
+                null,
+                "t",
+                null,
+                null,
+                null,
+                "sail-agent-" + runId));
+    Acting.system(() -> runStore.complete(runId, "completed", 0));
 
     reactor().onEvent(roomStop("auth", runId));
 
@@ -816,20 +835,22 @@ class RoomWakeReactorTest {
     reactor.onEvent(roomStop("auth", DateTimeUtils.newId().toString()));
 
     var foreignId = DateTimeUtils.newId().toString();
-    runStore.create(
-        foreignId,
-        "acme",
-        "auth",
-        "mady",
-        "mady",
-        "room",
-        "claude-code",
-        null,
-        "t",
-        null,
-        null,
-        null,
-        "sail-agent-" + foreignId);
+    Acting.system(
+        () ->
+            runStore.create(
+                foreignId,
+                "acme",
+                "auth",
+                "mady",
+                "mady",
+                "room",
+                "claude-code",
+                null,
+                "t",
+                null,
+                null,
+                null,
+                "sail-agent-" + foreignId));
     reactor.onEvent(roomStop("auth", foreignId));
 
     var blankRunId = new LinkedHashMap<String, Object>();
@@ -886,13 +907,17 @@ class RoomWakeReactorTest {
 
   @Test
   void aSpeclessRoomWithASeatedMemberWakesOnItsOwnersBox() {
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "chat-room", "acme", "Chat", "uday", null, null, "uday", null, null, "uday"));
-    roomStore.updateRoster(
-        "chat-room",
-        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
-        "uday");
+    Acting.as(
+        "uday",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "chat-room", "acme", "Chat", "uday", null, null, "uday", null, null, "uday")));
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "chat-room",
+                "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
 
     reactor().onEvent(message("chat-room", "uday", "hello"));
 
@@ -901,9 +926,21 @@ class RoomWakeReactorTest {
 
   @Test
   void aSpeclessRoomWithNoMemberStaysSilentRegardlessOfWakeMode() {
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "quiet-room", "acme", "Quiet", "uday", "on", null, "uday", null, null, "uday"));
+    Acting.as(
+        "uday",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "quiet-room",
+                    "acme",
+                    "Quiet",
+                    "uday",
+                    "on",
+                    null,
+                    "uday",
+                    null,
+                    null,
+                    "uday")));
 
     reactor().onEvent(message("quiet-room", "uday", "anyone?"));
 
@@ -912,13 +949,26 @@ class RoomWakeReactorTest {
 
   @Test
   void aSpeclessRoomIsSilentOnABoxThatDoesNotOwnIt() {
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "foreign-room", "acme", "Foreign", "ada", null, null, "ada", null, null, "ada"));
-    roomStore.updateRoster(
-        "foreign-room",
-        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
-        "ada");
+    Acting.as(
+        "ada",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "foreign-room",
+                    "acme",
+                    "Foreign",
+                    "ada",
+                    null,
+                    null,
+                    "ada",
+                    null,
+                    null,
+                    "ada")));
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "foreign-room",
+                "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
 
     reactor().onEvent(message("foreign-room", "uday", "hello"));
 
@@ -928,9 +978,11 @@ class RoomWakeReactorTest {
   @Test
   void aMemberRecordedOnlyOnTheRoomRowWakesTheAgent() {
     seed("auth", "in_progress", "uday", null);
-    roomStore.ensureFor("auth", "acme", "auth", "uday", null, "uday");
-    roomStore.updateRoster(
-        "auth", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]", "uday");
+    Acting.system(() -> roomStore.ensureFor("auth", "acme", "auth", "uday", null));
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "auth", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));
@@ -955,11 +1007,12 @@ class RoomWakeReactorTest {
   @Test
   void aSecondMemberTurnsAnUnsetWakeIntoMention() {
     seed("crowded", "in_progress", "uday", null);
-    roomStore.updateRoster(
-        "crowded",
-        "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"},"
-            + "{\"agent\":\"codex\",\"mode\":\"full\",\"engaged_at\":\"t1\"}]",
-        "uday");
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "crowded",
+                "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"},"
+                    + "{\"agent\":\"codex\",\"mode\":\"full\",\"engaged_at\":\"t1\"}]"));
 
     reactor().onEvent(message("crowded", "uday", "thoughts?"));
     assertTrue(launcher.woken.isEmpty(), "two members: a plain message wakes nobody");
@@ -970,19 +1023,22 @@ class RoomWakeReactorTest {
 
   @Test
   void aChatRoomMessageFiresAWakeOnItsOwnersBox() {
-    roomStore.create(
-        new RoomStore.RoomRow(
-            "lounge",
-            "acme",
-            "Lounge",
-            "uday",
-            "on",
-            "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
-            "uday",
-            "t0",
-            "t0",
-            "uday"));
-    messageStore.append("lounge", "uday", "anyone around?", null);
+    Acting.as(
+        "uday",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "lounge",
+                    "acme",
+                    "Lounge",
+                    "uday",
+                    "on",
+                    "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]",
+                    "uday",
+                    "t0",
+                    "t0",
+                    "uday")));
+    Acting.system(() -> messageStore.append("lounge", "uday", "anyone around?", null));
     var executor = new ManualExecutorService();
     var reactor = reactor(executor);
 
@@ -1000,8 +1056,8 @@ class RoomWakeReactorTest {
     var reactor = reactor(executor);
 
     reactor.onEvent(message("auth", "uday", "hello"));
-    specStore.delete("auth");
-    roomStore.delete("auth");
+    Acting.system(() -> specStore.delete("auth"));
+    Acting.system(() -> roomStore.delete("auth"));
     executor.drain();
 
     assertTrue(
@@ -1023,7 +1079,7 @@ class RoomWakeReactorTest {
   void aDismissalRecordedOnTheRoomLeavesNobodyToWake() {
     seed("auth", "in_progress", "uday", "off");
     engage("auth", "claude-code", "full");
-    roomStore.updateRoster("auth", null, "uday");
+    Acting.system(() -> roomStore.updateRoster("auth", null));
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));
@@ -1034,7 +1090,7 @@ class RoomWakeReactorTest {
   @Test
   void theWakeModeStoredOnTheRoomRowGovernsTheDecision() {
     seed("auth", "in_progress", "uday", "off");
-    roomStore.updateWake("auth", "on", "uday");
+    Acting.system(() -> roomStore.updateWake("auth", "on"));
 
     var reactor = reactor();
     reactor.onEvent(message("auth", "uday", "hello"));

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -153,7 +154,12 @@ public final class EventBus implements AutoCloseable {
       this.queue = new ArrayBlockingQueue<>(queueCapacity);
     }
 
+    /** Delivers this subscriber's events, as this box's machinery, until it is closed. */
     void drainLoop() {
+      Actor.run(Actor.system(), this::drain);
+    }
+
+    private void drain() {
       while (active) {
         Event event;
         try {

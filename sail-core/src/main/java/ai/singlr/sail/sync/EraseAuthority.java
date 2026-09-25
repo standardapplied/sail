@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
@@ -37,7 +38,7 @@ final class EraseAuthority {
   }
 
   /** Why {@code principal} may not erase {@code type} {@code id}; empty when it may. */
-  Optional<String> refusal(SyncPrincipal principal, String type, String id) {
+  Optional<String> refusal(Actor principal, String type, String id) {
     if (!principal.canWrite()) {
       return Optional.of("a read-only role cannot prune");
     }
@@ -48,7 +49,7 @@ final class EraseAuthority {
       return Optional.empty();
     }
     if (Erasure.PROJECT.equals(type)) {
-      if (!principal.admin()) {
+      if (!principal.isAdmin()) {
         return Optional.of("pruning a whole project is admin-only");
       }
       return erasure.holds(new Erasure.Target(type, id))
@@ -69,7 +70,7 @@ final class EraseAuthority {
               + " on main; archive or cancel it before pruning");
     }
     var owner = spec.get().owner();
-    if (principal.admin() || owner.equals(principal.handle())) {
+    if (principal.isAdmin() || owner.equals(principal.handle())) {
       return Optional.empty();
     }
     if (owner.isBlank()) {

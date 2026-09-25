@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -73,19 +74,21 @@ class RoomPrincipalAccessTest {
     runId = DateTimeUtils.newId().toString();
     principal = "claude/room-" + runId;
     var reservation =
-        runStore.reserveDispatch(
-            runId,
-            "acme",
-            "auth",
-            HANDLE,
-            HANDLE,
-            "room",
-            List.of(),
-            "claude-code",
-            null,
-            "answer the room",
-            "log",
-            "sail-agent-" + runId);
+        Acting.system(
+            () ->
+                runStore.reserveDispatch(
+                    runId,
+                    "acme",
+                    "auth",
+                    HANDLE,
+                    HANDLE,
+                    "room",
+                    List.of(),
+                    "claude-code",
+                    null,
+                    "answer the room",
+                    "log",
+                    "sail-agent-" + runId));
     credential = ((RunStore.Reservation.Reserved) reservation).credential();
     var operations =
         new SailOperations(
@@ -112,24 +115,27 @@ class RoomPrincipalAccessTest {
   }
 
   private void seedSpec(String id) {
-    specStore.create(
-        new SpecStore.SpecRow(
-            id,
-            "acme",
-            "OAuth flow",
-            SpecStatus.DONE,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            HANDLE,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of()));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    id,
+                    "acme",
+                    "OAuth flow",
+                    SpecStatus.DONE,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    HANDLE,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of())));
   }
 
   private ApiResponse call(String method, String path, String body) {

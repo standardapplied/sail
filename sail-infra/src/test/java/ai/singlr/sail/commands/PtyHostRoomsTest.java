@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RoomStore;
@@ -28,20 +29,32 @@ class PtyHostRoomsTest {
 
   @BeforeEach
   void seed() {
-    path = dir.resolve("cp.db");
-    try (var db = Sqlite.open(path)) {
-      new SchemaManager(db).migrate();
-      var fdes = new FdeStore(db);
-      fdes.add("ada", "Ada", null, "member");
-      fdes.add("mallory", "Mallory", null, "member");
-      fdes.add("root", "Root", null, "admin");
-      fdes.add("peek", "Peek", null, "viewer");
-      new RoomStore(db)
-          .create(
-              new RoomStore.RoomRow(
-                  "adas-room", "acme", "Ada's room", "ada", "on", null, "ada", null, null, "ada"));
-    }
-    rooms = new PtyHostRooms(path);
+    Acting.system(
+        () -> {
+          path = dir.resolve("cp.db");
+          try (var db = Sqlite.open(path)) {
+            new SchemaManager(db).migrate();
+            var fdes = new FdeStore(db);
+            fdes.add("ada", "Ada", null, "member");
+            fdes.add("mallory", "Mallory", null, "member");
+            fdes.add("root", "Root", null, "admin");
+            fdes.add("peek", "Peek", null, "viewer");
+            new RoomStore(db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "adas-room",
+                        "acme",
+                        "Ada's room",
+                        "ada",
+                        "on",
+                        null,
+                        "ada",
+                        null,
+                        null,
+                        "ada"));
+          }
+          rooms = new PtyHostRooms(path);
+        });
   }
 
   private String refusal(String room, String project, PtyIdentity who) {

@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.EventStore;
@@ -71,9 +72,12 @@ class AgentResumeSessionIT extends AbstractIncusIT {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       var rooms = new RoomStore(db);
-      rooms.create(
-          new RoomStore.RoomRow(
-              ROOM, CONTAINER, "Resume talk", "it", "on", null, "it", null, null, "it"));
+      Acting.as(
+          "it",
+          () ->
+              rooms.create(
+                  new RoomStore.RoomRow(
+                      ROOM, CONTAINER, "Resume talk", "it", "on", null, "it", null, null, "it")));
       new FdeStore(db).add("it", "IT", "it@example.dev", "admin");
       var runStore = new RunStore(db);
       var runId = completedRun(runStore, "sess-abc");
@@ -153,41 +157,46 @@ class AgentResumeSessionIT extends AbstractIncusIT {
 
   private static String completedRun(RunStore runStore, String sessionId) {
     var id = DateTimeUtils.newId().toString();
-    runStore.reserveDispatch(
-        id,
-        CONTAINER,
-        ROOM,
-        "it",
-        "it",
-        "build",
-        List.of(),
-        "claude-code",
-        null,
-        "task",
-        "log",
-        "u");
-    runStore.recordSession(id, sessionId, "hook", null);
-    runStore.transition(id, "running", "completed", 0);
+    Acting.system(
+        () ->
+            runStore.reserveDispatch(
+                id,
+                CONTAINER,
+                ROOM,
+                "it",
+                "it",
+                "build",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                "log",
+                "u"));
+    Acting.system(() -> runStore.recordSession(id, sessionId, "hook", null));
+    Acting.system(() -> runStore.transition(id, "running", "completed", 0));
     return id;
   }
 
   /** Reserves a whole-container build and completes it at once, so the next claim is free. */
   private static String reserve(RunReservation reservation, RunStore runStore) {
     var id = DateTimeUtils.newId().toString();
-    reservation.reserve(
-        id,
-        CONTAINER,
-        ROOM,
+    Acting.as(
         "it",
-        "it",
-        "build",
-        List.of(),
-        "claude-code",
-        null,
-        "task",
-        AgentUnit.forRun(id),
-        CONFIG);
-    runStore.transition(id, "running", "completed", 0);
+        () ->
+            reservation.reserve(
+                id,
+                CONTAINER,
+                ROOM,
+                "it",
+                "it",
+                "build",
+                List.of(),
+                "claude-code",
+                null,
+                "task",
+                AgentUnit.forRun(id),
+                CONFIG));
+    Acting.system(() -> runStore.transition(id, "running", "completed", 0));
     return id;
   }
 

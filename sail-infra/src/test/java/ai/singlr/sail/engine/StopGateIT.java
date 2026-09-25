@@ -15,6 +15,7 @@ import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -56,7 +57,7 @@ class StopGateIT extends AbstractIncusIT {
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
       var specStore = new SpecStore(db);
-      specStore.create(seededSpec());
+      Acting.system(() -> specStore.create(seededSpec()));
 
       var runStore = new RunStore(db);
       var bus = new EventBus();
@@ -148,7 +149,7 @@ class StopGateIT extends AbstractIncusIT {
             received.get(0).agent(),
             "event authorship is the run's minted principal, resolved from the credential");
 
-        assertTrue(runStore.transition("run-1", "running", "completed"));
+        assertTrue(Acting.system(() -> runStore.transition("run-1", "running", "completed")));
         var codexCredential = reserve(runStore, "run-2", "codex");
         var codexFirst = codexStopAttempt(codexCredential, false);
         assertTrue(codexFirst.ok(), "the first codex stop must exit 0: " + codexFirst.stderr());
@@ -189,9 +190,11 @@ class StopGateIT extends AbstractIncusIT {
   private static String reserve(RunStore runStore, String runId, String agent) {
     var reservation =
         (RunStore.Reservation.Reserved)
-            runStore.reserveDispatch(
-                runId, CONTAINER, SPEC_ID, "it", "it", "build", List.of(), agent, null, "probe",
-                null, "");
+            Acting.system(
+                () ->
+                    runStore.reserveDispatch(
+                        runId, CONTAINER, SPEC_ID, "it", "it", "build", List.of(), agent, null,
+                        "probe", null, ""));
     return reservation.credential();
   }
 

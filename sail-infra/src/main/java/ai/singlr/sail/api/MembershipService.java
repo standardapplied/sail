@@ -12,6 +12,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -202,7 +203,7 @@ public final class MembershipService {
     }
     projects.loadRunning(room.project());
     admission.requireInstalled(agentCli, room.project());
-    store.updateRoster(roomId, Roster.solo(member).toJson(), actor.handle());
+    store.updateRoster(roomId, Roster.solo(member).toJson());
     publishEngaged(room.project(), roomId, member, "");
     return new EngageLaunch(member.agent(), member.mode(), "", null);
   }
@@ -242,7 +243,7 @@ public final class MembershipService {
     if (standing == null) {
       return null;
     }
-    writeRoster(spec, Roster.EMPTY, actor);
+    writeRoster(spec, Roster.EMPTY);
     publish(
         spec.project(),
         specId,
@@ -267,7 +268,7 @@ public final class MembershipService {
     if (standing == null) {
       return null;
     }
-    store.updateRoster(roomId, null, actor.handle());
+    store.updateRoster(roomId, null);
     publish(
         room.project(),
         roomId,
@@ -285,17 +286,16 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND,
                         "Spec '" + specId + "' vanished while engaging."));
-    writeRoster(current, Roster.solo(member), actor);
+    writeRoster(current, Roster.solo(member));
   }
 
-  private void writeRoster(SpecStore.SpecRow spec, Roster roster, Actor actor) {
+  private void writeRoster(SpecStore.SpecRow spec, Roster roster) {
     var store = requireRooms();
-    var handle = actor == null ? spec.updatedBy() : actor.handle();
     specStore.atomically(
         () -> {
           store.ensureFor(
-              spec.roomIdOrIdentity(), spec.project(), spec.title(), spec.assignee(), null, handle);
-          store.updateRoster(spec.roomIdOrIdentity(), roster.toJson(), handle);
+              spec.roomIdOrIdentity(), spec.project(), spec.title(), spec.assignee(), null);
+          store.updateRoster(spec.roomIdOrIdentity(), roster.toJson());
           return null;
         });
   }

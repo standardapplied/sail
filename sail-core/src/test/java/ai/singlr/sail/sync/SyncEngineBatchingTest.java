@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -18,6 +19,7 @@ import org.junit.jupiter.api.Test;
  * The engine offers pending pushes as soon as they weigh the authority's budget, not only at the
  * end of the walk: a first upload of a large table holds one batch of snapshots at a time.
  */
+@ActingAs
 class SyncEngineBatchingTest {
 
   private static final long WEIGHT = 3;

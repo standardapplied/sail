@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
@@ -30,6 +31,7 @@ import org.junit.jupiter.params.provider.ValueSource;
  * Materialization is the data-safety boundary: it refreshes copies it wrote, never clobbers a file
  * a human edited locally, and refuses a synced path that escapes the project directory.
  */
+@ActingAs
 class FileMaterializerTest {
 
   @TempDir Path tempDir;
@@ -107,8 +109,7 @@ class FileMaterializerTest {
     ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
     var erasure = new Erasure(db);
-    erasure.erase(
-        erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "uday", "local");
+    erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "local");
 
     var report = materializer.materialize("acme");
 

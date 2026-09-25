@@ -56,7 +56,7 @@ public final class ProjectImporter {
           continue;
         }
         try {
-          store.upsert(name, Files.readString(descriptor), null);
+          store.upsert(name, Files.readString(descriptor));
           imported++;
         } catch (IOException e) {
           skipped++;

@@ -207,7 +207,10 @@ O(what it asks for), never O(history).
 
 A session opens with `hello` (protocol, build, fleet floor, box id) and is `welcome`d or
 `refuse`d once; floors compare as versions. The box id names the node in main's log; who the
-node is stays the authenticated SSH principal, which every commit is attributed to. The node
+node is stays the authenticated SSH principal, bound as the `SYNC` actor around
+every commit and erase: it is each revision's `peer`, and its author unless the revision
+offers its own `_actor`. The node binds `MAIN` around its round, so what it adopts records
+the author main recorded, with `main` as the peer. The node
 then asks `heads` for main's high-water per type and, for each
 type whose tip moved past its checkpoint, `pull`s main's change log since that checkpoint one
 bounded `page` at a time — a seed from any history size costs the same per page as an idle
@@ -628,9 +631,44 @@ these roles distinct is what lets the synced catalog stay identity-free.
 
 - **Roles and Authorizer.** The roles are `admin`, `member`, and `viewer`, enforced at the
   API boundary: GET maps to READ, mutating verbs to WRITE, and sensitive routes to ADMIN. An
-  unknown or blank role fails safe to viewer. Attribution (`created_by`, `updated_by`,
-  `decided_by`) is stamped server-side from the validated token's FDE, never from client
-  input.
+  unknown or blank role fails safe to viewer. Attribution (`created_by`, `updated_by`) is the
+  bound actor (below), never client input.
+- **Every write names who is acting.** One `Actor` (`ai.singlr.sail.identity`: handle,
+  `Role`, `Lane`, owner) is the identity of every write, whichever door it came through. Its
+  lane names the door:
+
+  | Lane | Who | Handle and role |
+  |---|---|---|
+  | `CLI` | the box's operator, root on this box | `CliOperator`: admin on main or a standalone box; on a node, the box FDE with the role the synced roster gives it; refused while the roster is unsynced |
+  | `API` | an HTTP token | its FDE, or a null handle for a machine token |
+  | `AGENT`, `ROOM` | a run's principal on the socket | the principal, owned by the FDE it acts for |
+  | `SYNC` | an FDE pushing through `_sync` to main | the role the gateway resolved |
+  | `MAIN` | a node adopting main's revisions | `main`; main has already decided them |
+  | `SYSTEM` | this box's own machinery | `sail` |
+
+  Each entry point binds the actor it acts as, at its edge and nowhere deeper, with
+  `Actor.run`/`Actor.call` (a `ScopedValue`): `ApiRouter` around routing, `LocalApiRouter`
+  per request, a command that writes without the API around its write, the `_sync` session
+  around each commit and erase, the node's round as `MAIN`, and each background entry that
+  writes (the event bus drain, the reactors, retention, the reconcilers, periodic passes, the
+  sync scheduler, the room-wake launch, migrations, `PersonalRooms.ensure`) as `SYSTEM`. A
+  `ScopedValue` does not cross into a plain executor, so work that continues a request is
+  submitted through `Actor.carrying(task)` and captures its requester. Resolving a conflict
+  adopts main's version as `MAIN`, so it keeps main's author, before the chosen state is
+  written as the resolver. `ChangeLog.append` and `erase` read
+  `Actor.current()` for every revision, tombstone and erasure: its handle is the author in
+  `change_log.actor`, the pushing FDE or `main` is the `peer`, and a write with nothing bound
+  throws and rolls its row back, as a pruned id does. A synced revision keeps the author it
+  offers in `_actor` (main committing a push, a node adopting main's), falling back to the
+  actor. A run, review or file has no author column, so the snapshot it offers carries its
+  journal head's author. Every store mutator stamps `updated_by` (and `created_by` on a create) from the same
+  actor, so the row and its history always agree. Deliberately unjournaled, and so naming no
+  one: `RunStore.stampActivity` (a latest-wins heartbeat), `Erasure.discard`,
+  `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and retention),
+  and the `ContentMigration`/`SchemaManager` rewrites. There is no default actor, in
+  production or in tests: a test binds only the writes it makes itself (`@ActingAs`,
+  `Acting`), and a binding an entry point makes is proven by a test that drives that entry
+  unbound wherever a test can drive it (the interactive files picker needs a console).
 - **Agent principals.** Every run — dispatch, ad-hoc, review — mints an agent principal
   inside its reservation transaction: a handle (`claude/a1b2c3`) plus the FDE it acts for,
   stamped on the run row (they replicate with the run), and an opaque run credential hashed
@@ -687,14 +725,11 @@ support GUI and direct-API clients:
    `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
-3. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
-   and projects, but shared files have no author column at all, which is a schema change for
-   low value, and the change-log's internal author column stays null for projects and files.
-4. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
+3. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
    them out everywhere, since the gateway refuses a disabled role, but the row lingers on
    nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
-5. **One platform per OS.** Mac arm64 and Linux amd64 only.
+4. **One platform per OS.** Mac arm64 and Linux amd64 only.
 
 ## The operations seam
 
@@ -755,6 +790,8 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 - The database is the replicated source of truth for specs, projects, and shared files, and
   on-disk descriptors are a materialized view. Reads are catalog-first, and writes go through
   the catalog, so an edit can never diverge or be lost on the next sync.
+- Every write names who is acting: one bound `Actor`, read by the journal, never a string a
+  caller threads through. A write with nothing bound fails.
 - Sync is CAS-safe, idempotent, order-independent, and conflict-parking, so local work is
   never lost. The `SyncEngine` is entity-agnostic, and a new synced entity adds a replica,
   not engine logic.

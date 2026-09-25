@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -124,18 +125,37 @@ public final class ChangeLog {
 
   /**
    * Appends a revision and moves the entity's head to it, as one transaction. {@code snapshot} is
-   * the entity's full state as JSON at this revision. Refused ({@link Pruned}) for an erased id,
-   * and for a revision whose state names an erased owner through a link {@link Erasure} declares:
-   * every writer — a local create, an import, main's commit of a push — meets the same rule here.
+   * the entity's full state as JSON at this revision, authored by the {@link Actor} bound to the
+   * operation. Refused ({@link Pruned}) for an erased id, and for a revision whose state names an
+   * erased owner through a link {@link Erasure} declares: every writer — a local create, an import,
+   * main's commit of a push — meets the same rule here. Refused too when nothing is bound, so a
+   * write that names no one never lands.
    */
   public void append(
       String entityType,
       String entityId,
       String rev,
-      String actor,
       String origin,
       boolean deleted,
       String snapshot) {
+    appendSynced(entityType, entityId, rev, null, origin, deleted, snapshot);
+  }
+
+  /**
+   * As {@link #append(String, String, String, String, boolean, String)} for a synced revision that
+   * offers {@code offeredAuthor} as its own author: recorded as its author on main committing a
+   * push and on a node adopting main's, and ignored on every other lane (see {@link
+   * Actor#authorOf}).
+   */
+  public void appendSynced(
+      String entityType,
+      String entityId,
+      String rev,
+      String offeredAuthor,
+      String origin,
+      boolean deleted,
+      String snapshot) {
+    var actor = Actor.current();
     db.transaction(
         () -> {
           if (isErased(entityType, entityId)) {
@@ -152,7 +172,8 @@ public final class ChangeLog {
               entityType,
               entityId,
               rev,
-              actor,
+              actor.authorOf(offeredAuthor),
+              actor.peer(),
               origin,
               deleted,
               snapshot,
@@ -161,23 +182,34 @@ public final class ChangeLog {
   }
 
   /**
-   * Erases an entity's history and records the erasure in its place, as one transaction: every
-   * entry of the entity except earlier erasure rows is deleted, one erasure row is appended with
-   * the empty snapshot and {@code rev}, and the head moves to it. The caller removes the live row
-   * in the same transaction.
+   * Erases an entity's history and records the erasure in its place, as one transaction, by the
+   * bound {@link Actor}: every entry of the entity except earlier erasure rows is deleted, one
+   * erasure row is appended with the empty snapshot and {@code rev}, and the head moves to it. The
+   * caller removes the live row in the same transaction.
    */
-  public void erase(String entityType, String entityId, String rev, String actor, String origin) {
+  public void erase(String entityType, String entityId, String rev, String origin) {
+    var actor = Actor.current();
     db.transaction(
         () -> {
           purge(entityType, entityId);
-          insert(entityType, entityId, rev, actor, origin, true, EMPTY_SNAPSHOT, Kind.ERASURE);
+          insert(
+              entityType,
+              entityId,
+              rev,
+              actor.handle(),
+              actor.peer(),
+              origin,
+              true,
+              EMPTY_SNAPSHOT,
+              Kind.ERASURE);
         });
   }
 
   /**
    * Deletes every entry of an entity except its erasure rows, and points its head at the newest
    * erasure left — or drops the head when none is. How an entity that belonged to an erased one
-   * leaves this box's history when its own erasure has not been recorded here.
+   * leaves this box's history when its own erasure has not been recorded here. Names no actor: it
+   * rewrites history under erasure rather than recording a write.
    */
   public void purge(String entityType, String entityId) {
     db.transaction(
@@ -280,7 +312,8 @@ public final class ChangeLog {
    * Drops the entries of each of {@code ids} that fall outside what history keeps — the newest
    * {@link #HISTORY_REVISIONS} of the entity, the revision {@code baseRevOf} names as its synced
    * base, and every tombstone and erasure — one entity per transaction. Returns how many entries
-   * were dropped. A head is always among the newest, so no head ever moves.
+   * were dropped. A head is always among the newest, so no head ever moves. Names no actor: it
+   * rewrites history under retention rather than recording a write.
    */
   public long compact(String entityType, Collection<String> ids, UnaryOperator<String> baseRevOf) {
     var dropped = 0L;
@@ -342,6 +375,7 @@ public final class ChangeLog {
       String entityId,
       String rev,
       String actor,
+      String peer,
       String origin,
       boolean deleted,
       String snapshot,
@@ -359,7 +393,7 @@ public final class ChangeLog {
               origin,
               deleted ? 1 : 0,
               snapshot,
-              SyncPeer.current(),
+              peer,
               kind.wire());
           db.execute(
               """

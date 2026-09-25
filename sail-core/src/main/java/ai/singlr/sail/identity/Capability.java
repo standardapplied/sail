@@ -3,11 +3,11 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.api;
+package ai.singlr.sail.identity;
 
 /**
  * A coarse permission required by an API route. Roles ({@link Role}) map to sets of capabilities,
- * and {@link Authorizer} checks the authenticated principal's role against the capability a route
+ * and {@code Authorizer} checks the authenticated principal's role against the capability a route
  * requires. Kept deliberately small; finer-grained, resource-scoped permissions can be layered on
  * later without changing this contract.
  */

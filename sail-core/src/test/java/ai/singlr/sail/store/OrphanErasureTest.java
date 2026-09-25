@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ActingAs;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.io.TempDir;
  * The one-time erasure of what an older release orphaned: counted, erased with an erasure row each,
  * on main only, one entity per transaction, resumable by a second process and idempotent.
  */
+@ActingAs
 class OrphanErasureTest {
 
   @TempDir Path dir;

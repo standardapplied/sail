@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerExec;
@@ -30,6 +31,8 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
@@ -87,7 +90,7 @@ public final class SailOperations implements HostOperations {
     this.catalog =
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
-    this.identity = new HostLanes.Identity(db, fdeStore);
+    this.identity = new HostLanes.Identity(db, fdeStore, this::cliOperator);
     this.pty = new HostLanes.Pty(db, eventStore);
     return this;
   }
@@ -107,24 +110,9 @@ public final class SailOperations implements HostOperations {
     return !syncOperations.configuration().isNode();
   }
 
-  /**
-   * The operator of this box's root CLI: the box's owner, an admin, on main or a standalone box; on
-   * a node, its FDE with the role main's roster gives it, so a node never promises what main then
-   * refuses. A node that has not synced the roster yet cannot tell, and says so.
-   */
+  /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    var handle = syncOperations.configuration().handle();
-    if (authoritative()) {
-      return Actor.cliOperator(handle);
-    }
-    var fde = Strings.isBlank(handle) ? Optional.<FdeStore.Fde>empty() : fdeStore.byHandle(handle);
-    if (fde.isEmpty()) {
-      throw new ApiException(
-          ErrorCode.CONFLICT,
-          "This node does not know its FDE's role yet, so it cannot tell what you may do.",
-          "Run 'sail sync' first, then try again.");
-    }
-    return new Actor(handle, Role.fromAttribute(fde.get().role()), Actor.Lane.CLI);
+    return CliOperator.of(syncOperations.configuration(), () -> fdeStore);
   }
 
   @Override
@@ -279,10 +267,11 @@ public final class SailOperations implements HostOperations {
     return new ConflictOperations(controlPlane).mergeTemplate(type, id);
   }
 
+  /** The CLI's conflict resolution: resolved as, and acting as, this box's operator. */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
-    return resolveConflict(
-        type, id, resolution, Actor.cliOperator(syncOperations.configuration().handle()));
+    var operator = cliOperator();
+    return Actor.call(operator, () -> resolveConflict(type, id, resolution, operator));
   }
 
   @Override
@@ -779,7 +768,7 @@ public final class SailOperations implements HostOperations {
                       actor,
                       localHandle);
               if (launch.completion() != null) {
-                launchExecutor.execute(launch.completion());
+                launchExecutor.execute(Actor.carrying(launch.completion()));
               }
               return new EngageResponse(launch.agent(), launch.mode(), launch.snapshot());
             });
@@ -918,13 +907,13 @@ public final class SailOperations implements HostOperations {
                             request.id(),
                             request.project(),
                             request.title(),
-                            request.createdBy(),
+                            actor.handle(),
                             request.wake(),
                             null,
-                            request.createdBy(),
                             null,
                             null,
-                            request.createdBy()));
+                            null,
+                            null));
                     return detailOf(store.findById(request.id()).orElseThrow());
                   });
             });

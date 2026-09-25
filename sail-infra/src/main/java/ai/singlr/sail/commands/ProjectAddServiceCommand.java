@@ -79,6 +79,7 @@ public final class ProjectAddServiceCommand implements Runnable {
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
+    var operator = ProjectMutations.catalogOperator(explicit, dryRun);
     var config =
         SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
     var shell = new ShellExecutor(dryRun);
@@ -116,7 +117,8 @@ public final class ProjectAddServiceCommand implements Runnable {
         updatedText,
         dryRun,
         out,
-        "record service '" + svcName + "' in the catalog");
+        "record service '" + svcName + "' in the catalog",
+        operator);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
@@ -111,22 +112,26 @@ class ApiSpecCommandsTest {
   }
 
   private void seedPassedReviewWithOpenFinding(String specId) {
-    var reviewId = reviewStore.createReview(specId, 1);
-    var stageId = reviewStore.createStage(reviewId, "security", "agent");
-    reviewStore.addFinding(
-        stageId,
-        Finding.create(
-            Finding.Severity.HIGH,
-            Finding.Category.SECURITY,
-            "Auth.java",
-            10,
-            12,
-            "Token leak",
-            "Token is logged.",
-            "log.info(token)",
-            new Finding.Suggestion("log.info(token)", "log.info(mask(token))", "Never log secrets"),
-            0.9));
-    reviewStore.updateReviewStatus(reviewId, "passed");
+    Acting.system(
+        () -> {
+          var reviewId = reviewStore.createReview(specId, 1);
+          var stageId = reviewStore.createStage(reviewId, "security", "agent");
+          reviewStore.addFinding(
+              stageId,
+              Finding.create(
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "Auth.java",
+                  10,
+                  12,
+                  "Token leak",
+                  "Token is logged.",
+                  "log.info(token)",
+                  new Finding.Suggestion(
+                      "log.info(token)", "log.info(mask(token))", "Never log secrets"),
+                  0.9));
+          reviewStore.updateReviewStatus(reviewId, "passed");
+        });
   }
 
   @Test

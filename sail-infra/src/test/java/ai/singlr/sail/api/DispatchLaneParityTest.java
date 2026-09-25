@@ -14,6 +14,9 @@ import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -39,6 +42,7 @@ import org.junit.jupiter.api.io.TempDir;
  * SailOperations} dispatching the same seeded spec must produce the same spec row, the same run
  * row, and the same event sequence — one executor, two thin callers.
  */
+@ActingAs
 class DispatchLaneParityTest {
 
   private static final String HANDLE = "me";
@@ -88,24 +92,27 @@ class DispatchLaneParityTest {
     var db = Sqlite.open(tempDir.resolve(name + ".db"));
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
-    specStore.create(
-        new SpecStore.SpecRow(
-            "auth",
-            "acme",
-            "Add auth",
-            SpecStatus.PENDING,
-            HANDLE,
-            null,
-            null,
-            null,
-            null,
-            0,
-            "me",
-            null,
-            null,
-            "me",
-            List.of(),
-            List.of()));
+    Acting.as(
+        "me",
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "auth",
+                    "acme",
+                    "Add auth",
+                    SpecStatus.PENDING,
+                    HANDLE,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    "me",
+                    null,
+                    null,
+                    "me",
+                    List.of(),
+                    List.of())));
     specStore.setContent("auth", "Do auth", "");
     new FdeStore(db).add(HANDLE, null, null, "admin");
     return new Lane(specStore, new RunStore(db), new CopyOnWriteArrayList<>(), db, yaml.toString());

@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -184,10 +185,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       int archived,
       String nextReadyId) {}
 
+  /**
+   * Creates {@code spec}, created and last updated by the bound {@link Actor} whatever the row
+   * names.
+   */
   public void create(SpecRow spec) {
     var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
+          var author = author();
           db.execute(
               """
               INSERT INTO specs (id, project, title, status, assignee, agent, model,
@@ -204,10 +210,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.reasoningEffort(),
               spec.branch(),
               spec.priority(),
-              spec.createdBy(),
+              author,
               now,
               now,
-              spec.updatedBy(),
+              author,
               spec.roomIdOrIdentity());
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
@@ -310,11 +316,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           var ids = db.query("SELECT id FROM specs WHERE project = ?", row -> row.text(0), old);
-          db.execute("UPDATE specs SET project = ? WHERE project = ?", renamed, old);
+          db.execute(
+              "UPDATE specs SET project = ?, updated_by = ? WHERE project = ?",
+              renamed,
+              author(),
+              old);
           ids.forEach(id -> recordRevision(id, "local", false));
         });
   }
 
+  /** Rewrites {@code spec}'s fields, as last updated by the bound {@link Actor}. */
   public void update(SpecRow spec) {
     var now = DateTimeUtils.now().toString();
     db.transaction(
@@ -335,7 +346,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.branch(),
               spec.priority(),
               now,
-              spec.updatedBy(),
+              author(),
               spec.id());
           db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", spec.id());
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", spec.id());
@@ -361,9 +372,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, updated_at = ? WHERE id = ?",
+              "UPDATE specs SET status = ?, updated_at = ?, updated_by = ? WHERE id = ?",
               status.wire(),
               DateTimeUtils.now().toString(),
+              author(),
               id);
           recordRevision(id, "local", false);
         });
@@ -381,9 +393,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, updated_at = ? WHERE id = ? AND status = ?",
+              """
+              UPDATE specs SET status = ?, updated_at = ?, updated_by = ?
+              WHERE id = ? AND status = ?""",
               status.wire(),
               DateTimeUtils.now().toString(),
+              author(),
               id,
               expected.wire());
           if (db.changes() == 0) {
@@ -407,10 +422,14 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = ? WHERE id = ?",
+              """
+              UPDATE specs SET status = ?, branch = COALESCE(?, branch), updated_at = ?,
+                  updated_by = ?
+              WHERE id = ?""",
               status.wire(),
               Strings.isBlank(branch) ? null : branch,
               DateTimeUtils.now().toString(),
+              author(),
               id);
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
           insertRepos(id, repos);
@@ -421,6 +440,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   public void delete(String id) {
     db.transaction(
         () -> {
+          stampAuthor(id);
           recordRevision(id, "local", true);
           db.execute("DELETE FROM specs WHERE id = ?", id);
         });
@@ -442,6 +462,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               plan,
               now);
           setHashes(specId, body, plan);
+          stampAuthor(specId);
           recordRevision(specId, "local", false);
         });
   }
@@ -468,12 +489,21 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           applySnapshot(id, snapshot);
+          stampAuthor(id);
           recordRevision(id, "restore", false);
         });
   }
 
   String recordRevision(String id, String origin, boolean deleted) {
     return journal.recordRevision(id, origin, deleted);
+  }
+
+  private void stampAuthor(String id) {
+    db.execute("UPDATE specs SET updated_by = ? WHERE id = ?", author(), id);
+  }
+
+  private static String author() {
+    return Actor.current().handle();
   }
 
   /** Why {@code rev} of spec {@code id} cannot be restored, naming what can be done instead. */
@@ -894,9 +924,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           db.execute(
               """
-              UPDATE specs SET project = ?
+              UPDATE specs SET project = ?, updated_by = ?
               WHERE id = ? AND (project IS NULL OR project = 'unassigned')""",
               project,
+              author(),
               id);
           if (db.changes() == 0) {
             return false;
@@ -973,11 +1004,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     @Override
     public Map<String, Object> snapshotMap(String id) {
       return findById(id).map(SpecStore.this::snapshotMap).orElse(null);
-    }
-
-    @Override
-    public String author(String id) {
-      return findById(id).map(SpecRow::updatedBy).orElse(null);
     }
 
     @Override
@@ -1131,15 +1157,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         deps,
         repos,
         spec.roomId());
-  }
-
-  /**
-   * Inserts dependency edges for an already-persisted spec. Used by bulk import, which inserts all
-   * spec rows before wiring dependencies so forward references within a batch don't violate the
-   * {@code depends_on} foreign key. Callers must ensure each target spec already exists.
-   */
-  public void addDependencies(String specId, List<String> deps) {
-    db.transaction(() -> insertDependencies(specId, deps));
   }
 
   private void insertDependencies(String specId, List<String> deps) {

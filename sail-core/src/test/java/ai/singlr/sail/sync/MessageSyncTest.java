@@ -9,13 +9,15 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
-import ai.singlr.sail.store.SyncPeer;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+@ActingAs
 class MessageSyncTest {
 
   @TempDir Path tempDir;
@@ -78,10 +81,12 @@ class MessageSyncTest {
     var fromOther = other.messages.append("room", "other", "other message", null);
     var engine = new SyncEngine();
 
-    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
-    SyncPeer.with("other", () -> engine.reconcile(other.replica, main.replica));
-    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
-    SyncPeer.with("other", () -> engine.reconcile(other.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(
+        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(
+        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
 
     assertEquals(2, main.messages.list("room", null, 10).size());
     assertTrue(node.messages.findById(fromOther.id()).isPresent());
@@ -98,14 +103,14 @@ class MessageSyncTest {
     var question = node.messages.append("room", principal, "Which flow?", null, true);
     var engine = new SyncEngine();
 
-    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
 
     var synced = main.messages.findById(question.id()).orElseThrow();
     assertTrue(synced.question(), "the flag is message data and rides the snapshot");
     assertEquals(Map.of("room", question.id()), main.messages.openQuestions());
 
     main.messages.append("room", "node", "answered", null);
-    SyncPeer.with("node", () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
     assertEquals(Map.of(), main.messages.openQuestions());
     assertEquals(Map.of(), node.messages.openQuestions());
   }
@@ -114,7 +119,9 @@ class MessageSyncTest {
   void syncedMessagesCannotBeChangedOrDeleted() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var row = node.messages.append("room", "node", "original", null);
-    SyncPeer.with("node", () -> new SyncEngine().reconcile(node.replica, main.replica));
+    Actor.call(
+        Actor.sync("node", Role.MEMBER),
+        () -> new SyncEngine().reconcile(node.replica, main.replica));
     var changed = new LinkedHashMap<>(main.messages.comparableSnapshot(row.id()));
     changed.put("body", "changed");
 
@@ -136,8 +143,8 @@ class MessageSyncTest {
     runs.rotateCredential(reviewId, "claude-code", "fix");
 
     var accepted =
-        SyncPeer.with(
-            "node",
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000ab",
@@ -158,8 +165,8 @@ class MessageSyncTest {
         VALUES ('orphan', 'acme', 'Orphan', 'pending', 'now', 'now', 'node', 'orphan')""");
 
     var accepted =
-        SyncPeer.with(
-            "node",
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
@@ -186,8 +193,8 @@ class MessageSyncTest {
         "unit");
 
     var accepted =
-        SyncPeer.with(
-            "node",
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
@@ -206,8 +213,8 @@ class MessageSyncTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SyncPeer.with(
-                    "node",
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
                     () ->
                         main.messages.commitRevision(
                             "019fee00-0000-7000-8000-0000000000bd",
@@ -225,8 +232,8 @@ class MessageSyncTest {
         assertThrows(
             IllegalArgumentException.class,
             () ->
-                SyncPeer.with(
-                    "node",
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
                     () ->
                         main.messages.commitRevision(messageId, snapshot("admin", "room"), null)));
 
@@ -241,8 +248,8 @@ class MessageSyncTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            SyncPeer.with(
-                "mallory",
+            Actor.call(
+                Actor.sync("mallory", Role.MEMBER),
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000002",
@@ -251,8 +258,8 @@ class MessageSyncTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            SyncPeer.with(
-                "mallory",
+            Actor.call(
+                Actor.sync("mallory", Role.MEMBER),
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000003",
@@ -275,8 +282,8 @@ class MessageSyncTest {
              'codex', 'agent/messages', 'task', 'running', 'now', 'codex/run-1', 'node')""");
     var acceptedId = "00000000-0000-7000-8000-000000000011";
 
-    SyncPeer.with(
-        "node",
+    Actor.call(
+        Actor.sync("node", Role.MEMBER),
         () -> main.messages.commitRevision(acceptedId, snapshot("codex/run-1", "room"), null));
 
     assertEquals("codex/run-1", main.messages.findById(acceptedId).orElseThrow().author());
@@ -288,8 +295,8 @@ class MessageSyncTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            SyncPeer.with(
-                "node",
+            Actor.call(
+                Actor.sync("node", Role.MEMBER),
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000012",

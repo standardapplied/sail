@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.FindingParser;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -129,24 +130,27 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       var specStore = new SpecStore(db);
       var reviewStore = new ReviewStore(db);
       var runStore = new RunStore(db);
-      specStore.create(
-          new SpecStore.SpecRow(
-              "auth",
-              CONTAINER,
-              "T",
-              SpecStatus.IN_PROGRESS,
-              null,
-              "codex",
-              null,
-              null,
-              "feat/test",
-              0,
-              null,
-              "",
-              "",
-              null,
-              List.of(),
-              List.of()));
+      Acting.as(
+          null,
+          () ->
+              specStore.create(
+                  new SpecStore.SpecRow(
+                      "auth",
+                      CONTAINER,
+                      "T",
+                      SpecStatus.IN_PROGRESS,
+                      null,
+                      "codex",
+                      null,
+                      null,
+                      "feat/test",
+                      0,
+                      null,
+                      "",
+                      "",
+                      null,
+                      List.of(),
+                      List.of())));
       var config =
           ReviewPipelineConfig.fromMap(
               Map.of(

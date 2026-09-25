@@ -141,10 +141,11 @@ public final class Erasure {
 
   /**
    * Erases {@code entities} as main: one transaction that removes each live row, its conflicts, its
-   * box-local rows and its history, and records one erasure row per entity attributed to {@code
-   * actor}. An entity already erased keeps the erasure it has and is not counted again.
+   * box-local rows and its history, and records one erasure row per entity attributed to the bound
+   * {@link ai.singlr.sail.identity.Actor}. An entity already erased keeps the erasure it has and is
+   * not counted again.
    */
-  public Result erase(List<Target> entities, String actor, String origin) {
+  public Result erase(List<Target> entities, String origin) {
     return db.transaction(
         () -> {
           deferReplyConstraint();
@@ -156,7 +157,7 @@ public final class Erasure {
               continue;
             }
             dropped += remove(target);
-            changeLog.erase(target.type(), target.id(), erasureRev(target), actor, origin);
+            changeLog.erase(target.type(), target.id(), erasureRev(target), origin);
             erased.add(target);
           }
           return new Result(erased, dropped);
@@ -183,7 +184,7 @@ public final class Erasure {
           for (var target : closure(List.of(root), true)) {
             remove(target);
             if (target.equals(root)) {
-              changeLog.erase(type, id, rev, null, "sync");
+              changeLog.erase(type, id, rev, "sync");
             } else {
               changeLog.purge(target.type(), target.id());
             }
@@ -195,7 +196,8 @@ public final class Erasure {
   /**
    * Removes {@code roots} and what belongs to them that main never acknowledged, leaving no erasure
    * row: how a node prunes what it alone ever held, so there is nothing to ask of main and the ids
-   * stay free. Returns what went.
+   * stay free. Returns what went. Journals nothing and names no actor: it rewrites history under
+   * erasure, and what it removes was never acknowledged by anyone else.
    */
   public Result discard(List<Target> roots) {
     return db.transaction(
