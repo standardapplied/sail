@@ -6,6 +6,7 @@
   - Lanes: `CLI` (the box's operator), `API` (an HTTP token), `AGENT` and `ROOM` (a run's principal on the socket), `SYNC` (an FDE pushing to main), `MAIN` (a node adopting main's revisions) and `SYSTEM` (this box's machinery, recorded as `sail`).
   - The author in `sail spec history` and in `updated_by` is always the one who made that revision. A status-only or content-only change, a delete, a restore and a project move used to keep the previous editor's name; a synced row with no author used to read `sync`, and retention's erasures `sail-retention` (they now say `sail`, with origin `retention`).
   - A write that names no one is refused and leaves nothing behind.
+  - A run, review or shared file keeps its author on every box. These have no author column, so a push used to record the pushing FDE on main and every box that pulled it recorded `main`.
   - On a node, the CLI acts as the box's FDE with the role main's roster gives it, everywhere it writes: conflict resolution no longer runs as a hard-coded admin. A node whose roster has not synced yet says so and asks for `sail sync`; a dry run needs no identity.
   - A spec or room created through a machine token (one with no FDE) records no author, and is no longer assigned to the token's name.
   - Resolving a finding when its follow-up spec reaches `done` is now a revision of the review, so it syncs.

@@ -658,7 +658,8 @@ these roles distinct is what lets the synced catalog stay identity-free.
   `change_log.actor`, the pushing FDE or `main` is the `peer`, and a write with nothing bound
   throws and rolls its row back, as a pruned id does. A synced revision keeps the author it
   offers in `_actor` (main committing a push, a node adopting main's), falling back to the
-  actor. Every store mutator stamps `updated_by` (and `created_by` on a create) from the same
+  actor. A run, review or file has no author column, so the snapshot it offers carries its
+  journal head's author. Every store mutator stamps `updated_by` (and `created_by` on a create) from the same
   actor, so the row and its history always agree. Deliberately unjournaled, and so naming no
   one: `RunStore.stampActivity` (a latest-wins heartbeat), `Erasure.discard`,
   `ChangeLog.purge` and `ChangeLog.compact` (history rewritten under erasure and retention),
@@ -721,14 +722,11 @@ support GUI and direct-API clients:
    `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
-3. **Attribution gaps in synced files.** Per-actor attribution rides via `_actor` for specs
-   and projects, but shared files have no author column at all, which is a schema change for
-   low value, and the change-log's internal author column stays null for projects and files.
-4. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
+3. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
    them out everywhere, since the gateway refuses a disabled role, but the row lingers on
    nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
-5. **One platform per OS.** Mac arm64 and Linux amd64 only.
+4. **One platform per OS.** Mac arm64 and Linux amd64 only.
 
 ## The operations seam
 

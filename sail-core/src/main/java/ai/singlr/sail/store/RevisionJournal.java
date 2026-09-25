@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
@@ -48,21 +49,41 @@ public final class RevisionJournal implements ConflictResolver {
             schema.entityType()));
   }
 
-  /** Comparable snapshot of the current state, or null if the entity is absent/deleted. */
+  /**
+   * Comparable snapshot of the current state, or null if the entity is absent/deleted. It carries
+   * the recorded author as {@code _actor} — the row's own when its schema has an author column,
+   * otherwise the journal head's — so every replica records the same author for the revision.
+   */
   public Map<String, Object> comparableSnapshot(String id) {
     var map = schema.snapshotMap(id);
-    return map == null ? null : schema.comparable(map);
+    if (map == null) {
+      return null;
+    }
+    var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor).orElse(null);
+    return authored(schema.comparable(map), author);
   }
 
-  /** Comparable snapshot recorded at a given revision (the merge base), or null if not recorded. */
+  /**
+   * Comparable snapshot recorded at a given revision (the merge base), or null if not recorded.
+   * Like {@link #comparableSnapshot} it carries that revision's author.
+   */
   public Map<String, Object> comparableAtRev(String id, String rev) {
     if (Strings.isBlank(rev)) {
       return null;
     }
     return changeLog
         .at(schema.entityType(), id, rev)
-        .map(e -> schema.comparable(YamlUtil.parseMap(e.snapshot())))
+        .map(e -> authored(schema.comparable(YamlUtil.parseMap(e.snapshot())), e.actor()))
         .orElse(null);
+  }
+
+  private static Map<String, Object> authored(Map<String, Object> comparable, String author) {
+    if (author == null || comparable.containsKey(Snapshots.ACTOR)) {
+      return comparable;
+    }
+    var snapshot = new LinkedHashMap<>(comparable);
+    snapshot.put(Snapshots.ACTOR, author);
+    return snapshot;
   }
 
   /** The current revision of a live row, or null if the row is absent. */
