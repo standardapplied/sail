@@ -308,6 +308,90 @@ class DeniedSyncTest {
   }
 
   @Test
+  void aSpecBornInARoomPostsThereThroughItsRuns() throws IOException {
+    for (var box : List.of(main, node)) {
+      box.db.execute(
+          """
+          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+          VALUES ('home', 'Home', 'acme', 'ada', 'now', 'now')""");
+    }
+    main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    round(ADA, "spec");
+    for (var box : List.of(main, node)) {
+      box.db.execute("UPDATE specs SET room_id = 'home' WHERE id = 'auth'");
+    }
+    var runs = new RunStore(node.db);
+    var id = DateTimeUtils.newId().toString();
+    runs.create(
+        id,
+        "acme",
+        "auth",
+        "ada",
+        "ada",
+        "build",
+        "claude-code",
+        "feat/auth",
+        "do it",
+        1,
+        null,
+        "/log",
+        "unit");
+    var messages = new MessageStore(node.db);
+    var agent =
+        messages.append("home", runs.findById(id).orElseThrow().principal(), "working", null);
+    var narrator = messages.append("home", "sail", "review passed", null);
+    var reply = messages.append("home", "ada", "thanks", agent.id());
+
+    assertEquals(0, round(ADA, "message").report().pushed(), "held until the spec's run lands");
+    round(ADA, "run");
+    var landed = round(ADA, "message");
+
+    assertEquals(3, landed.report().pushed());
+    assertEquals(List.of(), landed.denials());
+    var mains = new MessageStore(main.db);
+    for (var posted : List.of(agent, narrator, reply)) {
+      assertTrue(mains.findById(posted.id()).isPresent(), posted.body());
+    }
+    assertNextRoundIsClean(ADA, "message", replica("message"));
+  }
+
+  @Test
+  void aRunMainKeepsDenyingHoldsOnlyItsOwnPosts() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    var id = startRun(runs, null);
+    var messages = new MessageStore(node.db);
+    var stuck = messages.append("room", runs.findById(id).orElseThrow().principal(), "stuck", null);
+    var human = messages.append("room", "ada", "carry on", null);
+
+    assertEquals(
+        List.of(id), round(ADA, "run").denials().stream().map(SyncSession.Denial::id).toList());
+    var round = round(ADA, "message");
+
+    assertEquals(1, round.report().pushed(), "a human's post never waits on a run");
+    assertTrue(new MessageStore(main.db).findById(human.id()).isPresent());
+    assertTrue(messages.findById(stuck.id()).isPresent(), "the run's own post waits with it");
+  }
+
+  @Test
+  void aPostByARotatedPrincipalWaitsForTheRunsNewRevision() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    var id = startRun(runs, "ada");
+    round(ADA, "run");
+    runs.rotateCredential(id, "codex", "fix");
+    var posted =
+        new MessageStore(node.db)
+            .append("room", runs.findById(id).orElseThrow().principal(), "fixing", null);
+
+    assertEquals(0, round(ADA, "message").report().pushed());
+    round(ADA, "run");
+
+    assertEquals(1, round(ADA, "message").report().pushed());
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+  }
+
+  @Test
   void theMessagesOfARunMainDeniesAreDeniedAfterItNeverRefused() throws IOException {
     sharedRoom();
     var runs = new RunStore(node.db);

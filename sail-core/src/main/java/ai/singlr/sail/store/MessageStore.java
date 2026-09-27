@@ -27,6 +27,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
+
+  /**
+   * Whether run {@code r} belongs to the conversation named by {@code %1$s}: a run of the room
+   * itself, or of a spec whose room it is. A spec born in a room posts there while its runs name
+   * only the spec, so matching on the spec's id alone would miss them.
+   */
+  private static final String RUN_IN_CONVERSATION =
+      """
+      (r.room_id = %1$s OR r.spec_id = %1$s
+          OR r.spec_id IN (SELECT id FROM specs WHERE room_id = %1$s))""";
+
   private static final String COLUMNS =
       "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
 
@@ -285,22 +296,33 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers. A conversation's messages wait while a run this box made in it
-   * has not reached main: main decides an agent's or the pipeline's post by that run, so a post
-   * arriving first would be denied for good. The whole conversation waits, so no reply is offered
-   * before a message it answers; it is offered in the round after the run lands.
+   * after the message it answers. A post by a run this box made, or by the pipeline in a
+   * conversation with such a run, waits while that run has a change main has not taken, with the
+   * replies under it: main decides such a post by the run, so a post arriving first would be denied
+   * for good. Runs sync before messages, so it is normally offered later in the same round.
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
         db.query(
             """
-            SELECT m.id FROM room_messages m
-            WHERE (m.base_rev IS NULL OR m.base_rev = '' OR m.rev <> m.base_rev)
-              AND NOT EXISTS (SELECT 1 FROM runs r
-                  WHERE (r.spec_id = m.room_id OR r.room_id = m.room_id)
-                    AND coalesce(r.base_rev, '') = '')
-            ORDER BY m.rowid""",
-            row -> row.text(0)));
+            WITH RECURSIVE
+              pending AS (
+                SELECT id, room_id, author, reply_to, rowid AS seq FROM room_messages
+                WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev),
+              held(id) AS (
+                SELECT p.id FROM pending p
+                WHERE EXISTS (SELECT 1 FROM runs r
+                    WHERE (coalesce(r.base_rev, '') = '' OR r.rev <> r.base_rev)
+                      AND %s
+                      AND (p.author = ?1 OR r.principal = p.author
+                          OR EXISTS (SELECT 1 FROM run_principals rp
+                              WHERE rp.run_id = r.id AND rp.principal = p.author)))
+                UNION
+                SELECT p.id FROM pending p JOIN held h ON p.reply_to = h.id)
+            SELECT id FROM pending WHERE id NOT IN (SELECT id FROM held) ORDER BY seq"""
+                .formatted(RUN_IN_CONVERSATION.formatted("p.room_id")),
+            row -> row.text(0),
+            SAIL_AUTHOR));
   }
 
   public Set<String> syncEntityIds() {
@@ -417,14 +439,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         peer.equals(author)
             || (SAIL_AUTHOR.equals(author) && ranInConversation(peer, roomId))
             || db.queryOne(
-                    "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?)"
-                        + " AND (r.principal = ? OR EXISTS (SELECT 1 FROM run_principals rp"
-                        + " WHERE rp.run_id = r.id AND rp.principal = ?)) LIMIT 1",
+                    """
+                    SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s
+                        AND (r.principal = ?3 OR EXISTS (SELECT 1 FROM run_principals rp
+                            WHERE rp.run_id = r.id AND rp.principal = ?3)) LIMIT 1"""
+                        .formatted(RUN_IN_CONVERSATION.formatted("?2")),
                     row -> true,
                     peer,
                     roomId,
-                    roomId,
-                    author,
                     author)
                 .orElse(false);
     if (!ownsAuthor) {
@@ -463,10 +485,10 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   private boolean ranInConversation(String peer, String roomId) {
     return db.queryOne(
-            "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?) LIMIT 1",
+            "SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s LIMIT 1"
+                .formatted(RUN_IN_CONVERSATION.formatted("?2")),
             row -> true,
             peer,
-            roomId,
             roomId)
         .orElse(false);
   }
