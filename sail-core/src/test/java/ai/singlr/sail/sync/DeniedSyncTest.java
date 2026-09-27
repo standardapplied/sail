@@ -20,8 +20,12 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import java.io.FilterOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.IntStream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -162,6 +166,53 @@ class DeniedSyncTest {
     assertEquals(title, node.specs.findById("big").orElseThrow().title());
     assertEquals(main.specs.latestRev("big"), node.specs.latestRev("big"));
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+  }
+
+  @Test
+  void deniedEditsAreAnsweredWithinTheFrameTheirPushFit() throws IOException {
+    var ids = IntStream.range(10, 22).mapToObj(i -> "spec-" + i).toList();
+    ids.forEach(id -> main.specs.create(SyncBox.spec(id, "Shared " + id, "pending")));
+    round(ADA, "spec");
+    ids.forEach(id -> node.specs.update(SyncBox.spec(id, "Mine", "pending")));
+    var mains = SyncedEntities.replicas(main.db, "main", "main").get("spec");
+    var entry =
+        ids.stream()
+            .map(mains::state)
+            .mapToInt(
+                state ->
+                    SyncWire.encodedLength(
+                        new SyncWire.Entry(99, "spec-99", state.rev(), false, state.snapshot())))
+            .max()
+            .orElseThrow();
+    var frame = 256 + 4 * (entry + 2) + 40;
+    var longest = new AtomicInteger();
+
+    SyncSession.TypeReport report;
+    try (var link =
+        SyncBox.connect(main.server(ADA_VIEWING), node, frame, out -> measured(out, longest))) {
+      report =
+          SyncBox.reconcile(
+              ((PagedSyncSession) link.session()).frame(frame), "spec", replica("spec"));
+    }
+
+    assertNull(report.failure());
+    assertEquals(ids, report.denials().stream().map(SyncSession.Denial::id).toList());
+    assertTrue(longest.get() <= frame, "main's longest reply took " + longest.get() + " bytes");
+    ids.forEach(id -> assertEquals("Shared " + id, node.specs.findById(id).orElseThrow().title()));
+    assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+  }
+
+  private static OutputStream measured(OutputStream out, AtomicInteger longest) {
+    return new FilterOutputStream(out) {
+      private int line;
+
+      @Override
+      public void write(int value) throws IOException {
+        out.write(value);
+        line = value == '\n' ? 0 : line + 1;
+        longest.accumulateAndGet(line, Math::max);
+      }
+    };
   }
 
   @Test
