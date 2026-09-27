@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -114,7 +115,9 @@ class SyncCommandTest {
               "bytes_sent",
               0,
               "bytes_freed",
-              0),
+              0,
+              "denials",
+              List.of()),
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
 
@@ -179,8 +182,7 @@ class SyncCommandTest {
     } finally {
       System.setOut(original);
     }
-    return ai.singlr.sail.config.YamlUtil.parseMap(
-        output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    return YamlUtil.parseMap(output.toString(java.nio.charset.StandardCharsets.UTF_8));
   }
 
   private static Map<String, Object> nonNull(Map<String, Object> map) {
@@ -234,7 +236,7 @@ class SyncCommandTest {
                     new SyncSession.TypeReport(
                         "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null, 456, 123))),
             true);
-    var report = ai.singlr.sail.config.YamlUtil.parseMap(json);
+    var report = YamlUtil.parseMap(json);
     assertEquals(456, report.get("bytes_fetched"));
     assertEquals(123, report.get("bytes_sent"));
     assertEquals(3, report.get("merged"));
@@ -243,6 +245,53 @@ class SyncCommandTest {
     assertEquals("spec", type.get("type"));
     assertEquals(456, type.get("bytes_fetched"));
     assertEquals(123, type.get("bytes_sent"));
+  }
+
+  private static SyncReport deniedRound() {
+    return new SyncReport(
+        SyncEngine.Report.NONE,
+        null,
+        List.of(
+            new SyncSession.TypeReport(
+                "spec",
+                SyncEngine.Report.NONE,
+                0,
+                0,
+                false,
+                null,
+                0,
+                0,
+                0,
+                List.of(new SyncSession.Denial("spec", "auth", "your role is read-only"))),
+            new SyncSession.TypeReport(
+                "message",
+                SyncEngine.Report.NONE,
+                0,
+                0,
+                false,
+                null,
+                0,
+                0,
+                0,
+                List.of(
+                    new SyncSession.Denial("message", "m1", "'ada' may not post as 'grace'")))));
+  }
+
+  @Test
+  void aRoundWhoseOnlyNewsIsADenialIsNotReportedAsAlreadyInSync() {
+    var text = SyncCommand.render(deniedRound(), false);
+    assertFalse(text.contains("Already in sync"), text);
+    assertTrue(text.contains("Synced with main"), text);
+  }
+
+  @Test
+  void rendersDenialsInJsonByTypeIdAndReason() {
+    var report = YamlUtil.parseMap(SyncCommand.render(deniedRound(), true));
+    assertEquals(
+        List.of(
+            Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),
+            Map.of("type", "message", "id", "m1", "reason", "'ada' may not post as 'grace'")),
+        report.get("denials"));
   }
 
   @Test

@@ -43,8 +43,11 @@ import java.util.function.ToIntFunction;
  * <p>A page's view of main answers the engine from the page alone; a checkpoint only ever advances
  * to a seq whose entries this node has actually seen, never to main's high-water after its own
  * pushes, so a change another node lands between two exchanges can never be skipped. The view
- * weighs every offer as its bytes on the wire and budgets the engine one frame of them, so a first
- * upload of a large table holds one batch of snapshots at a time, never the whole table.
+ * weighs every offer as its bytes on the wire and the room main's answer to it may take, and
+ * budgets the engine one frame of them, so a first upload of a large table holds one batch of
+ * snapshots at a time, never the whole table, and main's results fit the frame the push did. Each
+ * offer main denies is announced through the session's notice as it settles, so a round that fails
+ * afterwards still says what main decided.
  *
  * <p>Erasures never reach the engine. The prunes this node asked for go to main first, as erase
  * offers, and each one main answers is applied here at main's rev; an erasure entry in a page, a
@@ -74,6 +77,8 @@ public final class PagedSyncSession implements SyncSession {
   private boolean sawTombstone;
   private int adopted;
   private Set<String> touched = Set.of();
+  private List<SyncSession.Denial> denials = new ArrayList<>();
+  private Consumer<String> notice = ignored -> {};
   private String broken;
 
   PagedSyncSession content(Sqlite db) {
@@ -103,6 +108,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.eraseRequests = eraseRequests;
     copy.asked = asked;
     copy.contentFields = contentFields;
+    copy.notice = notice;
     return copy;
   }
 
@@ -137,7 +143,9 @@ public final class PagedSyncSession implements SyncSession {
               + welcome.version()
               + "; upgrade main first, then nodes.");
     }
-    return new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
+    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
+    session.notice = notice;
+    return session;
   }
 
   @Override
@@ -204,6 +212,7 @@ public final class PagedSyncSession implements SyncSession {
     var sentBefore = sentBytes;
     sawTombstone = false;
     touched = Set.of();
+    denials = new ArrayList<>();
     var ask = askedFor(type);
     adopted = ask.adopted();
     var tip = tips().get(type);
@@ -255,7 +264,9 @@ public final class PagedSyncSession implements SyncSession {
         pages == 0 && dirty.isEmpty() && ask.count() + late.count() == 0,
         null,
         fetchedBytes - fetchedBefore,
-        sentBytes - sentBefore);
+        sentBytes - sentBefore,
+        0,
+        denials);
   }
 
   /** What asking main to erase one type's pending prunes came to. */
@@ -682,7 +693,7 @@ public final class PagedSyncSession implements SyncSession {
               contentFields.getOrDefault(type, Set.of()));
       var inventory = 0L;
       for (var hash : hashes) inventory += SyncWire.inventoryWeight(blobs.manifest(hash)) + 2L;
-      return Math.max(SyncWire.encodedLength(offer), inventory);
+      return Math.max(SyncWire.resultBound(offer), inventory);
     }
 
     @Override
@@ -755,7 +766,8 @@ public final class PagedSyncSession implements SyncSession {
               type + ": main answered " + result.id() + " for " + batch.get(i).id(),
               null);
         }
-        if (result instanceof SyncWire.Stale) {
+        if (result instanceof SyncWire.Stale
+            || result instanceof SyncWire.Denied denied && !denied.carried()) {
           stale.add(result.id());
         }
       }
@@ -768,8 +780,9 @@ public final class PagedSyncSession implements SyncSession {
     }
 
     /**
-     * Replaces the view's entries for the ids main called stale with main's present rows, fetched
-     * through the frame-bounded need path; an id main no longer knows leaves the view.
+     * Replaces the view's entries for the ids main called stale, or denied without their version,
+     * with main's present rows, fetched through the frame-bounded need path; an id main no longer
+     * knows leaves the view.
      */
     private void refresh(List<String> ids) {
       if (ids.isEmpty()) {
@@ -786,6 +799,22 @@ public final class PagedSyncSession implements SyncSession {
           });
     }
 
+    /**
+     * Makes main's version in a denial this view's entry — the content it names fetched first, so
+     * the node can adopt it — or drops the entry when main holds none.
+     */
+    private void holdMainsVersion(SyncWire.Denied denied) {
+      if (denied.rev() == null) {
+        entries.remove(denied.id());
+        return;
+      }
+      var entry =
+          new SyncWire.Entry(
+              0, denied.id(), denied.rev(), denied.snapshot() == null, denied.snapshot());
+      fetchContent(type, List.of(entry));
+      entries.put(denied.id(), entry);
+    }
+
     private CommitOutcome settle(Offer offer, SyncWire.Result result) {
       return switch (result) {
         case SyncWire.Accepted accepted -> {
@@ -797,6 +826,16 @@ public final class PagedSyncSession implements SyncSession {
         }
         case SyncWire.Stale _ ->
             new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));
+        case SyncWire.Denied denied -> {
+          if (denied.carried()) {
+            holdMainsVersion(denied);
+          }
+          var denial = new SyncSession.Denial(type, denied.id(), denied.reason());
+          denials.add(denial);
+          notice.accept(denial.describe());
+          yield new CommitOutcome.Denied(
+              denied.reason(), currentRev(offer.id()), current(offer.id()));
+        }
         case SyncWire.Refused refused ->
             throw new SyncTransportException(
                 "refused", type + " " + offer.id() + ": " + refused.reason(), null);

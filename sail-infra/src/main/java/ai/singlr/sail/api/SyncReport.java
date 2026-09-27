@@ -25,6 +25,11 @@ public record SyncReport(
     return types.stream().mapToLong(SyncSession.TypeReport::freedBytes).sum();
   }
 
+  /** Every offer main denied this round, type by type. */
+  public List<SyncSession.Denial> denials() {
+    return types.stream().flatMap(type -> type.denials().stream()).toList();
+  }
+
   public SyncReport(SyncEngine.Report report, String message) {
     this(report, message, List.of());
   }

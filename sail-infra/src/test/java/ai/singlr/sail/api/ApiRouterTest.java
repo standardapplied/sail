@@ -33,6 +33,7 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.net.URI;
@@ -61,11 +62,18 @@ class ApiRouterTest {
       var status = get(server, "/v1/sync", "token");
       assertEquals(200, status.statusCode());
       assertTrue(status.body().contains("main@host"));
+      assertEquals(
+          List.of(Map.of("type", "spec", "id", "auth", "reason", "your role is read-only")),
+          YamlUtil.parseMap(status.body()).get("denials"),
+          "GET /v1/sync lists the last round's denials");
       assertEquals(422, post(server, "/v1/sync", "token", "{\"main\":3}").statusCode());
       var round = post(server, "/v1/sync", "token", "{\"main\":\"alternate\"}");
       assertEquals(200, round.statusCode());
       assertEquals("alternate", operations.request.main());
       assertTrue(round.body().contains("\"pushed\": 2"));
+      assertEquals(
+          List.of(Map.of("type", "spec", "id", "auth", "reason", "your role is read-only")),
+          YamlUtil.parseMap(round.body()).get("denials"));
       var conflicts = get(server, "/v1/conflicts", "token");
       assertEquals(200, conflicts.statusCode());
       assertTrue(conflicts.body().contains("acme/config"));
@@ -424,6 +432,9 @@ class ApiRouterTest {
     }
   }
 
+  private static final SyncSession.Denial DENIAL =
+      new SyncSession.Denial("spec", "auth", "your role is read-only");
+
   private static final class SeamOperations extends TestOperations {
     private int openedFiles;
     private int capConsulted;
@@ -436,13 +447,32 @@ class ApiRouterTest {
 
     @Override
     public SyncStatus syncStatus() {
-      return SyncStatus.unattempted("node", "main@host");
+      return new SyncStatus(
+          "node",
+          "main@host",
+          SyncEngine.Report.NONE,
+          "in_sync",
+          null,
+          null,
+          0,
+          null,
+          null,
+          null,
+          0,
+          0,
+          0,
+          List.of(DENIAL));
     }
 
     @Override
     public SyncReport sync(SyncRequest request) {
       this.request = request;
-      return new SyncReport(new SyncEngine.Report(1, 2, 3, 4), null);
+      return new SyncReport(
+          new SyncEngine.Report(1, 2, 3, 4),
+          null,
+          List.of(
+              new SyncSession.TypeReport(
+                  "spec", SyncEngine.Report.NONE, 0, 0, false, null, 0, 0, 0, List.of(DENIAL))));
     }
 
     @Override

@@ -39,6 +39,11 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   }
 
   @Override
+  public boolean live(String id) {
+    return inner.live(id);
+  }
+
+  @Override
   public Set<String> latestWinsFields() {
     return inner.latestWinsFields();
   }

@@ -77,7 +77,9 @@ public interface MainReplica {
    * Compare-and-set push of an authoritative state ({@code null} = delete). Accepts and mints a new
    * rev only if {@code expectedRev} still matches main's current rev for the entity (a brand-new
    * entity expects {@code null}); otherwise rejects with main's present state so the engine can
-   * reconcile against the concurrent change rather than clobber it.
+   * reconcile against the concurrent change rather than clobber it. A change the acting principal
+   * may not make is {@linkplain CommitOutcome.Denied denied} with main's version, decided in the
+   * same transaction.
    */
   CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev);
 

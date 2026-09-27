@@ -24,14 +24,19 @@ public final class SyncViews {
     return map;
   }
 
-  static Map<String, Object> round(SyncReport round) {
+  public static Map<String, Object> round(SyncReport round) {
     var map = new LinkedHashMap<>(report(round.report()));
     map.put("message", round.message());
     map.put("bytes_fetched", round.fetchedBytes());
     map.put("bytes_sent", round.sentBytes());
     map.put("bytes_freed", round.freedBytes());
     map.put("types", round.types().stream().map(SyncViews::type).toList());
+    map.put("denials", denials(round.denials()));
     return map;
+  }
+
+  public static List<Map<String, Object>> denials(List<SyncSession.Denial> denials) {
+    return denials.stream().map(SyncSession.Denial::toMap).toList();
   }
 
   public static Map<String, Object> type(SyncSession.TypeReport type) {
@@ -63,6 +68,7 @@ public final class SyncViews {
     map.put("bytes_sent", status.sentBytes());
     map.put("bytes_freed", status.freedBytes());
     map.put("last_report", status.lastReport() == null ? null : report(status.lastReport()));
+    map.put("denials", denials(status.denials()));
     return map;
   }
 

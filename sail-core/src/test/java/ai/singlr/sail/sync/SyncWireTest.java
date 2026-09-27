@@ -61,13 +61,31 @@ class SyncWireTest {
               List.of(
                   new SyncWire.Accepted("auth", "7-feed"),
                   new SyncWire.Stale("b"),
-                  new SyncWire.Refused("d", "read-only")),
+                  new SyncWire.Refused("d", "blob not held"),
+                  new SyncWire.Denied("e", "read-only", "5-main", snapshot()),
+                  new SyncWire.Denied("f", "read-only", "6-tomb", null),
+                  new SyncWire.Denied("g", "read-only", null, null),
+                  new SyncWire.Denied("h", "read-only", null, null, false)),
               99),
           new SyncWire.Fdes(
               List.of(
                   Map.of("handle", "ada", "role", "admin", "status", "active"),
                   Map.of("handle", "uday", "role", "member", "status", "disabled"))),
           new SyncWire.Failed("disk full", "store"));
+
+  @Test
+  void aDenialReadWithoutItsMarkerIsTheRefusalAnOlderNodeKnowsWithTheSameReason() {
+    var denied = new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot());
+    var line = SyncWire.encode(new SyncWire.Results(List.of(denied), 9));
+    var marker = "\"denied\": true";
+    assertTrue(line.contains(marker), line);
+
+    var unmarked = SyncWire.decodeResponse(line.replace(marker + ", ", ""));
+
+    assertEquals(
+        new SyncWire.Results(List.of(new SyncWire.Refused("auth", "your role is read-only")), 9),
+        unmarked);
+  }
 
   @Test
   void aChunkCannotBeAnnouncedUntilItsBytesMatchItsHash() {

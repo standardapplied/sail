@@ -6,7 +6,9 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -37,7 +39,8 @@ public final class SyncHealth {
       Instant staleSince,
       long fetchedBytes,
       long sentBytes,
-      long freedBytes) {}
+      long freedBytes,
+      List<SyncSession.Denial> denials) {}
 
   public Optional<Health> find(String peer) {
     return db.queryOne(
@@ -45,20 +48,24 @@ public final class SyncHealth {
         SELECT peer, last_attempt_at, last_success_at, consecutive_failures,
                last_error_kind, last_error, last_report, state, stale_since
         FROM sync_health WHERE peer = ?""",
-        row ->
-            new Health(
-                row.text(0),
-                instant(row.text(1)),
-                instant(row.text(2)),
-                Math.toIntExact(row.integer(3)),
-                row.text(4),
-                row.text(5),
-                report(row.text(6)),
-                row.text(7),
-                instant(row.text(8)),
-                bytes(row.text(6), "bytes_fetched"),
-                bytes(row.text(6), "bytes_sent"),
-                bytes(row.text(6), "bytes_freed")),
+        row -> {
+          var last =
+              row.text(6) == null ? Map.<String, Object>of() : YamlUtil.parseMap(row.text(6));
+          return new Health(
+              row.text(0),
+              instant(row.text(1)),
+              instant(row.text(2)),
+              Math.toIntExact(row.integer(3)),
+              row.text(4),
+              row.text(5),
+              row.text(6) == null ? null : report(last),
+              row.text(7),
+              instant(row.text(8)),
+              bytes(last, "bytes_fetched"),
+              bytes(last, "bytes_sent"),
+              bytes(last, "bytes_freed"),
+              denials(last));
+        },
         peer);
   }
 
@@ -77,16 +84,18 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return succeeded(peer, at, report, 0, 0, 0);
+    return succeeded(peer, at, report, 0, 0, 0, List.of());
   }
 
+  /** A completed round, with the offers main denied in it. */
   public boolean succeeded(
       String peer,
       Instant at,
       SyncEngine.Report report,
       long fetchedBytes,
       long sentBytes,
-      long freedBytes) {
+      long freedBytes,
+      List<SyncSession.Denial> denials) {
     return db.transaction(
         () -> {
           var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
@@ -113,7 +122,9 @@ public final class SyncHealth {
                       "bytes_sent",
                       sentBytes,
                       "bytes_freed",
-                      freedBytes)),
+                      freedBytes,
+                      "denials",
+                      denials.stream().map(SyncSession.Denial::toMap).toList())),
               peer);
           return recovered;
         });
@@ -140,18 +151,27 @@ public final class SyncHealth {
     return value == null ? null : Instant.parse(value);
   }
 
-  private static SyncEngine.Report report(String value) {
-    if (value == null) return null;
-    var map = YamlUtil.parseMap(value);
+  private static SyncEngine.Report report(Map<String, Object> last) {
     return new SyncEngine.Report(
-        ((Number) map.get("pulled")).intValue(),
-        ((Number) map.get("pushed")).intValue(),
-        ((Number) map.get("merged")).intValue(),
-        ((Number) map.get("conflicts")).intValue());
+        count(last, "pulled"),
+        count(last, "pushed"),
+        count(last, "merged"),
+        count(last, "conflicts"));
   }
 
-  private static long bytes(String json, String field) {
-    var value = YamlUtil.parseMap(json).get(field);
-    return value instanceof Number number ? number.longValue() : 0;
+  private static int count(Map<String, Object> last, String field) {
+    return last.get(field) instanceof Number number ? number.intValue() : 0;
+  }
+
+  /** The denials a round recorded; a report written before denials existed has none. */
+  private static List<SyncSession.Denial> denials(Map<String, Object> last) {
+    if (!(last.get("denials") instanceof List<?> denials)) {
+      return List.of();
+    }
+    return denials.stream().map(SyncSession.Denial::fromMap).flatMap(Optional::stream).toList();
+  }
+
+  private static long bytes(Map<String, Object> last, String field) {
+    return last.get(field) instanceof Number number ? number.longValue() : 0;
   }
 }

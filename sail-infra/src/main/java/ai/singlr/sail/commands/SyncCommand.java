@@ -23,7 +23,6 @@ import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -256,20 +255,11 @@ public final class SyncCommand implements Callable<Integer> {
   static String render(SyncReport round, boolean json) {
     var report = round.report();
     if (json) {
-      var map = new LinkedHashMap<String, Object>();
-      map.put("pulled", report.pulled());
-      map.put("pushed", report.pushed());
-      map.put("merged", report.merged());
-      map.put("conflicts", report.conflicts());
-      map.put("bytes_fetched", round.fetchedBytes());
-      map.put("bytes_sent", round.sentBytes());
-      map.put("bytes_freed", round.freedBytes());
-      map.put("types", round.types().stream().map(SyncViews::type).toList());
-      return YamlUtil.dumpJson(map);
+      return YamlUtil.dumpJson(SyncViews.round(round));
     }
     var detail =
         round.types().stream().filter(SyncCommand::worthALine).map(SyncCommand::line).toList();
-    if (report.total() == 0 && detail.isEmpty()) {
+    if (report.total() == 0 && detail.isEmpty() && round.denials().isEmpty()) {
       return Ansi.AUTO.string("  @|green ✓|@ Already in sync with main.");
     }
     var lines = new ArrayList<String>();

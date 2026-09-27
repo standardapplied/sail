@@ -10,8 +10,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncSession;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,6 +56,42 @@ class SyncHealthTest {
 
     assertTrue(health.succeeded("main", t0.plusSeconds(4), new SyncEngine.Report(0, 0, 0, 0)));
     assertEquals(0, health.find("main").orElseThrow().consecutiveFailures());
+  }
+
+  @Test
+  void theLastRoundsDenialsAreKeptUntilTheNextRoundReplacesThem() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    health.begin("main", t0);
+    assertEquals(List.of(), health.find("main").orElseThrow().denials());
+    var denial = new SyncSession.Denial("spec", "auth", "your role is read-only");
+
+    health.succeeded("main", t0, SyncEngine.Report.NONE, 0, 0, 0, List.of(denial));
+
+    assertEquals(List.of(denial), health.find("main").orElseThrow().denials());
+    health.succeeded("main", t0.plusSeconds(1), SyncEngine.Report.NONE);
+    assertEquals(List.of(), health.find("main").orElseThrow().denials());
+  }
+
+  @Test
+  void aReportFromBeforeDenialsOrWithAMalformedOneReadsWhatItCan() {
+    health.begin("main", Instant.parse("2026-09-17T00:00:00Z"));
+    db.execute(
+        "UPDATE sync_health SET last_report = ? WHERE peer = 'main'",
+        """
+        {"pulled": 1, "pushed": 2, "merged": 0, "conflicts": 0, "bytes_sent": 7}""");
+
+    var legacy = health.find("main").orElseThrow();
+
+    assertEquals(new SyncEngine.Report(1, 2, 0, 0), legacy.lastReport());
+    assertEquals(7, legacy.sentBytes());
+    assertEquals(List.of(), legacy.denials());
+    db.execute(
+        "UPDATE sync_health SET last_report = ? WHERE peer = 'main'",
+        """
+        {"denials": ["junk", {"type": "spec"}, {"type": "spec", "id": "auth", "reason": null}]}""");
+    var malformed = health.find("main").orElseThrow();
+    assertEquals(SyncEngine.Report.NONE, malformed.lastReport());
+    assertEquals(List.of(new SyncSession.Denial("spec", "auth", "")), malformed.denials());
   }
 
   @Test

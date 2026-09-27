@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -32,7 +31,6 @@ import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
-import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedInputStream;
 import java.io.IOException;
@@ -170,7 +168,7 @@ class SyncServerCommandTest {
   }
 
   @Test
-  void aViewerTokenMayPullButNotPush() throws Exception {
+  void aViewerTokenMayPullAndItsPushIsDenied() throws Exception {
     Acting.system(() -> mainSpecs.create(spec("board", "Shared")));
     var token = tokenFor("viewer");
 
@@ -179,15 +177,17 @@ class SyncServerCommandTest {
     assertEquals("Shared", nodeSpecs.findById("board").orElseThrow().title());
 
     Acting.system(() -> nodeSpecs.create(spec("mine", "Local only")));
-    assertThrows(SyncTransportException.class, () -> syncWithToken(token));
+    syncWithToken(token);
     assertTrue(mainSpecs.findById("mine").isEmpty());
+    assertTrue(nodeSpecs.findById("mine").isEmpty(), "the node holds main's version: none");
   }
 
   @Test
   void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
-    assertThrows(SyncTransportException.class, () -> syncWithToken(null));
+    syncWithToken(null);
     assertTrue(mainSpecs.findById("auth").isEmpty());
+    assertTrue(nodeSpecs.findById("auth").isEmpty());
   }
 
   private StoreReplica nodeRunReplica() {

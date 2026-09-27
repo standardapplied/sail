@@ -22,6 +22,18 @@ import java.util.Set;
  */
 public interface SyncedStore {
 
+  /**
+   * A pushed change main cannot decide yet, because it names something main does not hold, such as
+   * the run that posted a message. Refused rather than denied, so the node keeps the change and
+   * offers it again once what it names has arrived. Thrown inside the commit's transaction, so
+   * nothing of the change lands.
+   */
+  final class Unheld extends IllegalStateException {
+    public Unheld(String message) {
+      super(message);
+    }
+  }
+
   /** The {@code change_log.entity_type} discriminator, e.g. {@code "spec"}. */
   String entityType();
 
@@ -94,5 +106,14 @@ public interface SyncedStore {
    */
   default void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
     applyRevision(id, snapshot, rev);
+  }
+
+  /**
+   * Whether {@code id} is work still under way on this box, which main's denial never rewrites or
+   * removes: its next change is offered again, and once the work has finished a denial settles it
+   * like any other. None by default.
+   */
+  default boolean live(String id) {
+    return false;
   }
 }

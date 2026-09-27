@@ -27,6 +27,26 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
+
+  /**
+   * Whether run {@code %1$s} belongs to the conversation named by {@code %2$s}: a run of the room
+   * itself, or of a spec whose room it is. A spec born in a room posts there while its runs name
+   * only the spec, so matching on the spec's id alone would miss them.
+   */
+  private static final String RUN_IN_CONVERSATION =
+      """
+      (%1$s.room_id = %2$s OR %1$s.spec_id = %2$s
+          OR %1$s.spec_id IN (SELECT id FROM specs WHERE room_id = %2$s))""";
+
+  /**
+   * Whether run {@code %1$s}, on a node, is one main holds, with the spec it belongs to: main
+   * places a run in a spec's conversation through its own copy of that spec.
+   */
+  private static final String RUN_ON_MAIN =
+      """
+      (coalesce(%1$s.base_rev, '') <> '' AND NOT EXISTS (SELECT 1 FROM specs s
+          WHERE s.id = %1$s.spec_id AND coalesce(s.base_rev, '') = ''))""";
+
   private static final String COLUMNS =
       "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
 
@@ -285,16 +305,40 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers.
+   * after the message it answers. Main decides an agent's post by its run, and the pipeline's by a
+   * run of the same owner in the conversation, so such a post waits, with the replies under it,
+   * until main holds what decides it: a run it names has a change main has not taken, or the
+   * pipeline's conversation has a run of that owner only this box holds. A post arriving first
+   * would be denied for good. Runs sync before messages, so it normally goes later in the round.
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
         db.query(
             """
-            SELECT id FROM room_messages
-            WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev
-            ORDER BY rowid""",
-            row -> row.text(0)));
+            WITH RECURSIVE
+              pending AS (
+                SELECT id, room_id, author, reply_to, rowid AS seq FROM room_messages
+                WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev),
+              held(id) AS (
+                SELECT p.id FROM pending p
+                WHERE EXISTS (SELECT 1 FROM runs r
+                    WHERE %1$s AND (NOT %2$s OR r.rev <> r.base_rev)
+                      AND (r.principal = p.author OR EXISTS (SELECT 1 FROM run_principals rp
+                          WHERE rp.run_id = r.id AND rp.principal = p.author)))
+                  OR (p.author = ?1 AND EXISTS (SELECT 1 FROM runs r
+                    WHERE %1$s AND NOT %2$s
+                      AND NOT EXISTS (SELECT 1 FROM runs a
+                          WHERE %3$s AND %4$s AND a.owner = r.owner)))
+                UNION
+                SELECT p.id FROM pending p JOIN held h ON p.reply_to = h.id)
+            SELECT id FROM pending WHERE id NOT IN (SELECT id FROM held) ORDER BY seq"""
+                .formatted(
+                    RUN_IN_CONVERSATION.formatted("r", "p.room_id"),
+                    RUN_ON_MAIN.formatted("r"),
+                    RUN_IN_CONVERSATION.formatted("a", "p.room_id"),
+                    RUN_ON_MAIN.formatted("a")),
+            row -> row.text(0),
+            SAIL_AUTHOR));
   }
 
   public Set<String> syncEntityIds() {
@@ -306,7 +350,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             ENTITY));
   }
 
+  /**
+   * Adopts main's copy of a message. Main holding none ({@code snapshot} and {@code rev} both null)
+   * is how a message main denied leaves this box: it goes with the replies this box posted under
+   * it, which main cannot hold either, and every revision stays in the change log.
+   */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
+    if (snapshot == null && rev == null) {
+      withdraw(id);
+      return;
+    }
     if (snapshot == null) {
       throw new IllegalArgumentException("messages are immutable and cannot be deleted");
     }
@@ -332,8 +385,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  private void withdraw(String id) {
+    db.execute(
+        """
+        WITH RECURSIVE thread(id) AS (
+            SELECT ?1
+            UNION
+            SELECT m.id FROM room_messages m JOIN thread t ON m.reply_to = t.id)
+        DELETE FROM room_messages WHERE id IN (SELECT id FROM thread)""",
+        id);
+  }
+
   /**
-   * The one way a message leaves this box: erased with its room or by retention, never edited or
+   * How a message main holds leaves this box: erased with its room or by retention, never edited or
    * deleted on its own. A reply erased with it may go first; {@link Erasure} defers the reply
    * constraint to its commit.
    */
@@ -360,10 +424,13 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var row = fromSnapshot(id, snapshot);
           var peer = Actor.current().peer();
           if (!mayPostAs(peer, row.author(), row.roomId())) {
-            throw new IllegalArgumentException(
-                "sync principal '" + peer + "' may not post as '" + row.author() + "'");
+            requireDecidable(row);
+            return new PushOutcome.Denied(
+                "'" + peer + "' may not post as '" + row.author() + "' in this room", null, null);
           }
-          requireReplyTarget(row);
+          if (!holdsReplyTarget(row)) {
+            return new PushOutcome.Denied("it replies to a message main does not hold", null, null);
+          }
           write(row, rev, null);
           changeLog.appendSynced(ENTITY, id, rev, row.author(), "sync", false, json);
           return new PushOutcome.Accepted(rev);
@@ -388,14 +455,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         peer.equals(author)
             || (SAIL_AUTHOR.equals(author) && ranInConversation(peer, roomId))
             || db.queryOne(
-                    "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?)"
-                        + " AND (r.principal = ? OR EXISTS (SELECT 1 FROM run_principals rp"
-                        + " WHERE rp.run_id = r.id AND rp.principal = ?)) LIMIT 1",
+                    """
+                    SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s
+                        AND (r.principal = ?3 OR EXISTS (SELECT 1 FROM run_principals rp
+                            WHERE rp.run_id = r.id AND rp.principal = ?3)) LIMIT 1"""
+                        .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
                     row -> true,
                     peer,
                     roomId,
-                    roomId,
-                    author,
                     author)
                 .orElse(false);
     if (!ownsAuthor) {
@@ -405,12 +472,39 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         || postAuthority(peer, "FROM specs s", "s.room_id = ?", roomId);
   }
 
+  /**
+   * Refuses to decide a post in a conversation main has never held ({@link SyncedStore.Unheld}):
+   * its room or spec syncs before its messages, so the next round decides it, where a denial now
+   * would remove a message whose room had simply not arrived. A conversation main held and lost is
+   * decided like any other.
+   */
+  private void requireDecidable(MessageRow row) {
+    if (!knowsConversation(row.roomId())) {
+      throw new Unheld(
+          "main does not hold room '"
+              + row.roomId()
+              + "' yet; rooms sync before their messages, so the next round settles this");
+    }
+  }
+
+  private boolean knowsConversation(String roomId) {
+    return db.queryOne(
+            """
+            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
+                OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
+            row -> true,
+            roomId)
+        .orElse(false);
+  }
+
   private boolean ranInConversation(String peer, String roomId) {
     return db.queryOne(
-            "SELECT 1 FROM runs r WHERE r.owner = ? AND (r.spec_id = ? OR r.room_id = ?) LIMIT 1",
+            "SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s LIMIT 1"
+                .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
             row -> true,
             peer,
-            roomId,
             roomId)
         .orElse(false);
   }
@@ -513,13 +607,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   private void requireReplyTarget(MessageRow row) {
-    if (row.replyTo() != null
-        && findById(row.replyTo())
-            .filter(parent -> parent.roomId().equals(row.roomId()))
-            .isEmpty()) {
+    if (!holdsReplyTarget(row)) {
       throw new IllegalArgumentException(
           "reply_to must reference a message in room '" + row.roomId() + "'");
     }
+  }
+
+  private boolean holdsReplyTarget(MessageRow row) {
+    return row.replyTo() == null
+        || findById(row.replyTo())
+            .filter(parent -> parent.roomId().equals(row.roomId()))
+            .isPresent();
   }
 
   private static MessageRow fromSnapshot(String id, Map<String, Object> snapshot) {

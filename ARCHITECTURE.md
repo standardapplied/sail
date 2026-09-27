@@ -231,8 +231,9 @@ batch the node `announce`s the blob hashes the batch references and main answers
 node sends those manifests, main validates every one against its own `limits.file_max` and
 answers `lack` again with the chunks it does not hold; the node sends exactly those and main
 assembles. `lack` has one meaning in both replies — of what you just named, I hold none of these
-— and a commit naming a hash main does not hold is refused. A read-only principal is refused at
-`announce`, before main stores a byte. Every protocol-4 message names an `op` and no earlier
+— and a commit naming a hash main does not hold is refused. A read-only principal's `announce`
+is answered lacking nothing, so main never stores a byte of its content, and each offer it
+then pushes is denied. Every protocol-4 message names an `op` and no earlier
 protocol did, so a main that answers `hello` with a message naming none is on an older protocol
 and the node fails naming the remedy: upgrade main. Anything on the channel that is not a
 message at all is reported as that, never blamed on main's version.
@@ -273,6 +274,38 @@ file's content and a project's definition are single opaque blobs, so they take 
 theirs only. Resolving rebases the row onto main's version and writes the choice, so a
 follow-up sync converges and the conflict cannot re-raise. Every version stays in the change
 log, so no choice loses work.
+
+Main answers each offer on its own: `accepted` with the rev it minted, `stale` when it moved
+since the node fetched, `refused` on integrity grounds (content it does not hold, a pruned id, a
+run pushed with no node handle), or `denied` when this principal may not make this change. A
+denial is decided inside the commit's transaction, never thrown, and never fails the offers
+beside it. Main denies a read-only principal's offers (erase requests keep their own path), a
+message whose author the pusher may not post as, a reply to a message main does not hold, and a
+run whose execution provenance is not the pusher's. A message in a room main has never held is
+refused instead, because its room has simply not arrived; rooms sync before messages, so the next
+round decides it. Main decides an agent's post by its run, and the review pipeline's by a run
+of the same owner, placing a run in a conversation through its room or its spec's room. So the
+node holds such a post, with the replies under it, until main holds what decides it: while the
+agent's run, or that run's spec, has a change main has not taken, or while the pipeline's owner
+has no run there that main holds. Runs sync before messages, so the post normally goes later in
+the same round; one that arrived first would be denied for good. The
+answer carries main's current version of the entity: a revision, a tombstone, or nothing. The
+node budgets every offer for its answer as well as its bytes, and a version that would take the
+answer past that room is withheld; the node fetches it with `need`, as it does for a stale offer.
+A push from a node of this release therefore never gets results larger than the frame it fit.
+
+The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
+main's rev, or removes its row when main holds none. A denied message leaves the room with the
+replies this box posted under it. Work still under way here is the exception: a run that has not
+finished keeps its row, credential and room guard, is offered again, and settles once it has
+finished. The node's own revision stays in its change log, no conflict is parked, and the round
+carries on, so the next round has nothing to offer again. Each denial is announced as main
+answers it, naming where the node's version is kept, so `sail sync` and a node's running server
+print it even when the round then fails; `sail sync --json` and `GET /v1/sync` list them (type,
+id, reason). On the wire a denial is a `refused` result marked `denied: true`, so
+a 0.46 node reads a refusal and fails that type's round naming the reason: as before for a
+read-only push and a forged author, while a run main may not take from it, which a 0.46 main
+answered as stale, now fails its run type until the node upgrades.
 
 A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
 a resolve is refused (`409` over the API) when the live row no longer matches the conflict's
@@ -340,8 +373,8 @@ process's stdio as a newline-framed JSON RPC pipe. Auth is pure SSH keys, with
 join` generated, so a missing key fails fast. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
-admits the `_sync` session. The write gate lives next to the write: the `_sync` server
-refuses pushes from read-only viewer roles while still letting them pull.
+admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
+session is denied to a read-only viewer role, which may still pull.
 
 ### Identity isolation in synced projects
 
