@@ -281,24 +281,25 @@ run pushed with no node handle), or `denied` when this principal may not make th
 denial is decided inside the commit's transaction, never thrown, and never fails the offers
 beside it. Main denies a read-only principal's offers (erase requests keep their own path), a
 message whose author the pusher may not post as, a reply to a message main does not hold, and a
-run whose execution provenance is not the pusher's. Main denies only on what it holds: a message
-in a room main has never held, or by an author it can place as neither the pusher, an FDE, nor a
-run's principal, is refused instead, because its room or run has simply not arrived; rooms and
-runs sync before messages, so the next round decides it. The answer carries main's current
-version of the entity: a revision, a tombstone, or nothing. The node budgets every offer for its
-answer as well as its bytes, and a version that would take the answer past that room is
-withheld; the node fetches it with `need`, as it does for a stale offer. Results therefore never
-outgrow the frame the push fit in.
+run whose execution provenance is not the pusher's. A message in a room main has never held is
+refused instead, because its room has simply not arrived; rooms sync before messages, so the next
+round decides it. A message an agent or the review pipeline posts rests on a run, so the node
+holds a conversation's messages back while a run it made there has not reached main, and offers
+them in the round after the run lands; a post that arrived first would be denied for good. The
+answer carries main's current version of the entity: a revision, a tombstone, or nothing. The
+node budgets every offer for its answer as well as its bytes, and a version that would take the
+answer past that room is withheld; the node fetches it with `need`, as it does for a stale offer.
+A push from a node of this release therefore never gets results larger than the frame it fit.
 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
 main's rev, or removes its row when main holds none. A denied message leaves the room with the
 replies this box posted under it. Work still under way here is the exception: a run that has not
 finished keeps its row, credential and room guard, is offered again, and settles once it has
 finished. The node's own revision stays in its change log, no conflict is parked, and the round
-carries on, so the next round has nothing to offer again. `sail sync` prints each denial and where
-the node's version is kept, `sail sync --json` and `GET /v1/sync` list them (type, id, reason),
-and a node's running server logs them; a round that fails for another type prints the denials it
-settled before the failure. On the wire a denial is a `refused` result marked `denied: true`, so
+carries on, so the next round has nothing to offer again. Each denial is announced as it
+settles, naming where the node's version is kept, so `sail sync` and a node's running server
+print it even when the round later fails; `sail sync --json` and `GET /v1/sync` list them (type,
+id, reason). On the wire a denial is a `refused` result marked `denied: true`, so
 a 0.46 node reads a refusal and fails that type's round naming the reason: as before for a
 read-only push and a forged author, while a run main may not take from it, which a 0.46 main
 answered as stale, now fails its run type until the node upgrades.

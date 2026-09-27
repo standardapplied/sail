@@ -259,8 +259,7 @@ public final class SyncCommand implements Callable<Integer> {
     }
     var detail =
         round.types().stream().filter(SyncCommand::worthALine).map(SyncCommand::line).toList();
-    var denials = round.denials().stream().map(SyncCommand::denialLine).toList();
-    if (report.total() == 0 && detail.isEmpty() && denials.isEmpty()) {
+    if (report.total() == 0 && detail.isEmpty() && round.denials().isEmpty()) {
       return Ansi.AUTO.string("  @|green ✓|@ Already in sync with main.");
     }
     var lines = new ArrayList<String>();
@@ -274,7 +273,6 @@ public final class SyncCommand implements Callable<Integer> {
                 + report.merged()
                 + "|@ merged."));
     lines.addAll(detail);
-    lines.addAll(denials);
     if (report.conflicts() > 0) {
       lines.add(
           Banner.errorLine(
@@ -283,11 +281,6 @@ public final class SyncCommand implements Callable<Integer> {
               Ansi.AUTO));
     }
     return String.join("\n", lines);
-  }
-
-  /** One denied offer, as {@link SyncSession.Denial#describe} tells it. */
-  static String denialLine(SyncSession.Denial denial) {
-    return Banner.warnLine(denial.describe(), Ansi.AUTO);
   }
 
   private static boolean worthALine(SyncSession.TypeReport type) {

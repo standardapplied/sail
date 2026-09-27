@@ -278,19 +278,10 @@ class SyncCommandTest {
   }
 
   @Test
-  void rendersEachDenialNamingWhyAndWhereTheNodesVersionIs() {
+  void aRoundWhoseOnlyNewsIsADenialIsNotReportedAsAlreadyInSync() {
     var text = SyncCommand.render(deniedRound(), false);
     assertFalse(text.contains("Already in sync"), text);
-    assertTrue(
-        text.contains(
-            "spec auth: main denied this change — your role is read-only. Yours is in its"
-                + " history: sail spec history auth."),
-        text);
-    assertTrue(
-        text.contains(
-            "message m1: main denied this change — 'ada' may not post as 'grace'. Yours stays in"
-                + " this box's change log."),
-        text);
+    assertTrue(text.contains("Synced with main"), text);
   }
 
   @Test

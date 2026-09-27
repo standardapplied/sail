@@ -259,8 +259,8 @@ class MessageSyncTest {
   }
 
   @Test
-  void aPostMainCannotDecideYetIsRefusedNeverDenied() {
-    var missingRoom =
+  void aPostInAConversationMainNeverHeldIsRefusedNeverDenied() {
+    var refused =
         assertThrows(
             SyncedStore.Unheld.class,
             () ->
@@ -271,23 +271,25 @@ class MessageSyncTest {
                             "00000000-0000-7000-8000-000000000003",
                             snapshot("node", "missing"),
                             null)));
-    var unplacedAuthor =
-        assertThrows(
-            SyncedStore.Unheld.class,
-            () ->
-                Actor.call(
-                    Actor.sync("node", Role.MEMBER),
-                    () ->
-                        main.messages.commitRevision(
-                            "00000000-0000-7000-8000-000000000004",
-                            snapshot("codex/unsynced", "room"),
-                            null)));
 
-    assertTrue(missingRoom.getMessage().contains("room 'missing'"), missingRoom.getMessage());
-    assertTrue(
-        unplacedAuthor.getMessage().contains("posts as 'codex/unsynced'"),
-        unplacedAuthor.getMessage());
-    assertTrue(main.messages.list("room", null, 10).isEmpty());
+    assertTrue(refused.getMessage().contains("room 'missing'"), refused.getMessage());
+    assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000003").isEmpty());
+  }
+
+  @Test
+  void anAuthorMainCannotPlaceIsDenied() {
+    var denied =
+        assertInstanceOf(
+            PushOutcome.Denied.class,
+            Actor.call(
+                Actor.sync("node", Role.MEMBER),
+                () ->
+                    main.messages.commitRevision(
+                        "00000000-0000-7000-8000-000000000004",
+                        snapshot("codex/unknown-run", "room"),
+                        null)));
+
+    assertTrue(denied.reason().contains("may not post as 'codex/unknown-run'"), denied.reason());
   }
 
   @Test

@@ -285,15 +285,21 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers.
+   * after the message it answers. A conversation's messages wait while a run this box made in it
+   * has not reached main: main decides an agent's or the pipeline's post by that run, so a post
+   * arriving first would be denied for good. The whole conversation waits, so no reply is offered
+   * before a message it answers; it is offered in the round after the run lands.
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
         db.query(
             """
-            SELECT id FROM room_messages
-            WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev
-            ORDER BY rowid""",
+            SELECT m.id FROM room_messages m
+            WHERE (m.base_rev IS NULL OR m.base_rev = '' OR m.rev <> m.base_rev)
+              AND NOT EXISTS (SELECT 1 FROM runs r
+                  WHERE (r.spec_id = m.room_id OR r.room_id = m.room_id)
+                    AND coalesce(r.base_rev, '') = '')
+            ORDER BY m.rowid""",
             row -> row.text(0)));
   }
 
@@ -380,7 +386,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var row = fromSnapshot(id, snapshot);
           var peer = Actor.current().peer();
           if (!mayPostAs(peer, row.author(), row.roomId())) {
-            requireDecidable(row, peer);
+            requireDecidable(row);
             return new PushOutcome.Denied(
                 "'" + peer + "' may not post as '" + row.author() + "' in this room", null, null);
           }
@@ -429,23 +435,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Refuses to decide a post on facts main does not hold yet ({@link SyncedStore.Unheld}): a
-   * conversation main has never held, or an author main can place as neither the pusher, an FDE,
-   * nor a run's principal. Rooms, specs and runs sync before messages, so the next round decides
-   * the post; a denial now would remove a message its run or room had simply not delivered yet.
+   * Refuses to decide a post in a conversation main has never held ({@link SyncedStore.Unheld}):
+   * its room or spec syncs before its messages, so the next round decides it, where a denial now
+   * would remove a message whose room had simply not arrived. A conversation main held and lost is
+   * decided like any other.
    */
-  private void requireDecidable(MessageRow row, String peer) {
+  private void requireDecidable(MessageRow row) {
     if (!knowsConversation(row.roomId())) {
       throw new Unheld(
           "main does not hold room '"
               + row.roomId()
               + "' yet; rooms sync before their messages, so the next round settles this");
-    }
-    if (!knowsAuthor(row.author(), peer)) {
-      throw new Unheld(
-          "main holds no FDE or run that posts as '"
-              + row.author()
-              + "' yet; runs sync before their messages, so the next round settles this");
     }
   }
 
@@ -459,19 +459,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             row -> true,
             roomId)
         .orElse(false);
-  }
-
-  private boolean knowsAuthor(String author, String peer) {
-    return Objects.equals(author, peer)
-        || SAIL_AUTHOR.equals(author)
-        || db.queryOne(
-                """
-                SELECT 1 WHERE EXISTS (SELECT 1 FROM fdes WHERE handle = ?1)
-                    OR EXISTS (SELECT 1 FROM runs WHERE principal = ?1)
-                    OR EXISTS (SELECT 1 FROM run_principals WHERE principal = ?1)""",
-                row -> true,
-                author)
-            .orElse(false);
   }
 
   private boolean ranInConversation(String peer, String roomId) {

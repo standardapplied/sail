@@ -45,7 +45,9 @@ import java.util.function.ToIntFunction;
  * pushes, so a change another node lands between two exchanges can never be skipped. The view
  * weighs every offer as its bytes on the wire and the room main's answer to it may take, and
  * budgets the engine one frame of them, so a first upload of a large table holds one batch of
- * snapshots at a time, never the whole table, and main's results fit the frame the push did.
+ * snapshots at a time, never the whole table, and main's results fit the frame the push did. Each
+ * offer main denies is announced through the session's notice as it settles, so a round that fails
+ * afterwards still says what main decided.
  *
  * <p>Erasures never reach the engine. The prunes this node asked for go to main first, as erase
  * offers, and each one main answers is applied here at main's rev; an erasure entry in a page, a
@@ -76,6 +78,7 @@ public final class PagedSyncSession implements SyncSession {
   private int adopted;
   private Set<String> touched = Set.of();
   private List<SyncSession.Denial> denials = new ArrayList<>();
+  private Consumer<String> notice = ignored -> {};
   private String broken;
 
   PagedSyncSession content(Sqlite db) {
@@ -105,6 +108,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.eraseRequests = eraseRequests;
     copy.asked = asked;
     copy.contentFields = contentFields;
+    copy.notice = notice;
     return copy;
   }
 
@@ -139,7 +143,9 @@ public final class PagedSyncSession implements SyncSession {
               + welcome.version()
               + "; upgrade main first, then nodes.");
     }
-    return new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
+    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
+    session.notice = notice;
+    return session;
   }
 
   @Override
@@ -824,7 +830,9 @@ public final class PagedSyncSession implements SyncSession {
           if (denied.carried()) {
             holdMainsVersion(denied);
           }
-          denials.add(new SyncSession.Denial(type, denied.id(), denied.reason()));
+          var denial = new SyncSession.Denial(type, denied.id(), denied.reason());
+          denials.add(denial);
+          notice.accept(denial.describe());
           yield new CommitOutcome.Denied(
               denied.reason(), currentRev(offer.id()), current(offer.id()));
         }

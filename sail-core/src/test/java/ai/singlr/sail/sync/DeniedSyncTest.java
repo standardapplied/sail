@@ -91,13 +91,13 @@ class DeniedSyncTest {
     }
   }
 
-  private static String startRun(RunStore runs) {
+  private static String startRun(RunStore runs, String node) {
     var id = DateTimeUtils.newId().toString();
     runs.create(
         id,
         "acme",
         "room",
-        "ada",
+        node,
         "ada",
         "build",
         "claude-code",
@@ -128,7 +128,17 @@ class DeniedSyncTest {
     round(ADA, "spec");
     node.specs.update(SyncBox.spec("auth", "Viewer edit", "pending"));
 
-    var report = round(ADA_VIEWING, "spec");
+    SyncSession.TypeReport report;
+    try (var link = SyncBox.connect(main.server(ADA_VIEWING), node)) {
+      report = link.reconcile("spec", replica("spec"));
+      assertEquals(
+          List.of(
+              "spec auth: main denied this change — "
+                  + StoreReplica.READ_ONLY
+                  + ". Yours is in its history: sail spec history auth."),
+          link.notices(),
+          "each denial is announced as it settles");
+    }
 
     assertNull(report.failure(), "a denial settles; it never fails the round");
     assertEquals(1, report.denials().size());
@@ -261,23 +271,61 @@ class DeniedSyncTest {
   }
 
   @Test
-  void aRunsMessageThatReachesMainBeforeItsRunIsRefusedAndLandsAfterIt() throws IOException {
+  void aRunsMessageWaitsForItsRunAndLandsAfterIt() throws IOException {
     sharedRoom();
     var runs = new RunStore(node.db);
-    var id = startRun(runs);
+    var id = startRun(runs, "ada");
     var messages = new MessageStore(node.db);
     var posted =
         messages.append("room", runs.findById(id).orElseThrow().principal(), "from the run", null);
+    var reply = messages.append("room", "ada", "answering the run", posted.id());
 
-    var refused = assertThrows(SyncTransportException.class, () -> round(ADA, "message"));
+    var waiting = round(ADA, "message");
 
-    assertTrue(refused.getMessage().contains("no FDE or run that posts as"), refused.getMessage());
-    assertTrue(messages.findById(posted.id()).isPresent(), "a post main cannot decide is kept");
+    assertNull(waiting.failure());
+    assertEquals(0, waiting.report().pushed(), "the conversation waits for the run it rests on");
+    assertTrue(messages.findById(posted.id()).isPresent());
     round(ADA, "run");
     var landed = round(ADA, "message");
-    assertEquals(1, landed.report().pushed());
+    assertEquals(2, landed.report().pushed());
     assertEquals(List.of(), landed.denials());
+    assertTrue(new MessageStore(main.db).findById(reply.id()).isPresent());
+    assertNextRoundIsClean(ADA, "message", replica("message"));
+  }
+
+  @Test
+  void thePipelinesMessageWaitsForTheRunItNarrates() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    startRun(runs, "ada");
+    var posted = new MessageStore(node.db).append("room", "sail", "review passed", null);
+
+    assertEquals(0, round(ADA, "message").report().pushed());
+    round(ADA, "run");
+
+    assertEquals(1, round(ADA, "message").report().pushed());
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+  }
+
+  @Test
+  void theMessagesOfARunMainDeniesAreDeniedAfterItNeverRefused() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    var id = startRun(runs, null);
+    var messages = new MessageStore(node.db);
+    var posted =
+        messages.append("room", runs.findById(id).orElseThrow().principal(), "unstamped", null);
+    runs.complete(id, "completed", 0);
+
+    var run = round(ADA, "run");
+
+    assertEquals(List.of(id), run.denials().stream().map(SyncSession.Denial::id).toList());
+    assertTrue(runs.findById(id).isEmpty(), "a run with no node stamp is never main's to take");
+    var message = round(ADA, "message");
+    assertNull(message.failure());
+    assertEquals(
+        List.of(posted.id()), message.denials().stream().map(SyncSession.Denial::id).toList());
+    assertTrue(messages.findById(posted.id()).isEmpty());
     assertNextRoundIsClean(ADA, "message", replica("message"));
   }
 
@@ -326,7 +374,7 @@ class DeniedSyncTest {
   @Test
   void aLiveRunMainDeniesIsKeptWithItsCredentialUntilItFinishes() throws IOException {
     var runs = new RunStore(node.db);
-    var id = startRun(runs);
+    var id = startRun(runs, "ada");
 
     var live = round(ADA_VIEWING, "run");
 
