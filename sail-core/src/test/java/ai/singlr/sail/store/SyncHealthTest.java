@@ -73,6 +73,28 @@ class SyncHealthTest {
   }
 
   @Test
+  void aReportFromBeforeDenialsOrWithAMalformedOneReadsWhatItCan() {
+    health.begin("main", Instant.parse("2026-09-17T00:00:00Z"));
+    db.execute(
+        "UPDATE sync_health SET last_report = ? WHERE peer = 'main'",
+        """
+        {"pulled": 1, "pushed": 2, "merged": 0, "conflicts": 0, "bytes_sent": 7}""");
+
+    var legacy = health.find("main").orElseThrow();
+
+    assertEquals(new SyncEngine.Report(1, 2, 0, 0), legacy.lastReport());
+    assertEquals(7, legacy.sentBytes());
+    assertEquals(List.of(), legacy.denials());
+    db.execute(
+        "UPDATE sync_health SET last_report = ? WHERE peer = 'main'",
+        """
+        {"denials": ["junk", {"type": "spec"}, {"type": "spec", "id": "auth", "reason": null}]}""");
+    var malformed = health.find("main").orElseThrow();
+    assertEquals(SyncEngine.Report.NONE, malformed.lastReport());
+    assertEquals(List.of(new SyncSession.Denial("spec", "auth", "")), malformed.denials());
+  }
+
+  @Test
   void recordingASuccessHoldsTheWriteLockBeforeItReads() {
     // A deferred transaction reads under a shared lock; a commit from another connection in
     // between leaves it unable to upgrade, and the round is recorded as still syncing. Taking

@@ -1314,6 +1314,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         .orElse(true);
   }
 
+  /**
+   * A run that has not finished is live here: its row, credential and room guard are what the agent
+   * and its watcher act through, so main's denial never rewrites or removes them.
+   */
+  @Override
+  public boolean live(String id) {
+    return findById(id).map(run -> !RunStatus.isTerminal(run.status())).orElse(false);
+  }
+
   public Map<String, Object> comparableSnapshot(String id) {
     return journal.comparableSnapshot(id);
   }

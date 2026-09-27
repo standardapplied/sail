@@ -636,7 +636,7 @@ class SyncTransportTest {
       bigSpec(nodeA, id);
     }
     try (var link = connect(nodeA)) {
-      var paged = ((PagedSyncSession) link.session()).frame(SMALL_FRAME);
+      var paged = ((PagedSyncSession) link.session()).frame(1_800);
       var round = SyncBox.reconcile(paged, "spec", nodeA.replica);
       assertEquals(4, round.report().pushed());
       assertEquals(4, link.count("push"));

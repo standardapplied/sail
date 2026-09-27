@@ -13,6 +13,7 @@ import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncedStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -105,6 +106,11 @@ public final class SyncRpcServer {
       String version) {
     this.replicas = Collections.unmodifiableMap(new LinkedHashMap<>(replicas));
     this.principal = Objects.requireNonNull(principal, "principal");
+    if (principal.lane() != Actor.Lane.SYNC) {
+      throw new IllegalArgumentException(
+          "A sync session acts on the SYNC lane, where main decides what the FDE may push; got "
+              + principal.lane());
+    }
     this.fdeRoster = Objects.requireNonNull(fdeRoster, "fdeRoster");
     this.transitionSink = Objects.requireNonNull(transitionSink, "transitionSink");
     this.heads = Objects.requireNonNull(heads, "heads");
@@ -317,7 +323,7 @@ public final class SyncRpcServer {
             case SyncWire.Heads ignored -> welcomed ? tips() : helloRequired();
             case SyncWire.Pull pull -> welcomed ? page(pull, frame) : helloRequired();
             case SyncWire.Need need -> welcomed ? current(need, frame) : helloRequired();
-            case SyncWire.Push push -> welcomed ? results(push, frame) : helloRequired();
+            case SyncWire.Push push -> welcomed ? results(push) : helloRequired();
             case SyncWire.FetchFdes ignored ->
                 welcomed ? new SyncWire.Fdes(fdeRoster.entries()) : helloRequired();
             case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session");
@@ -493,24 +499,22 @@ public final class SyncRpcServer {
    * Main's verdicts on one push, one per offer: a decision on one offer never fails the offers
    * beside it. An erase request is decided by {@link EraseAuthority}; every other offer goes to the
    * type's authority, which denies what the principal may not change — a read-only role's offers
-   * among them — inside the commit's own transaction. A denial carries main's version only while
-   * the results still fit the frame; past it, the node fetches the version itself.
+   * among them — inside the commit's own transaction. A denial carries main's version only within
+   * its offer's {@link SyncWire#resultBound}; past it, the node fetches the version itself.
    */
-  private SyncWire.Response results(SyncWire.Push push, int frame) {
+  private SyncWire.Response results(SyncWire.Push push) {
     var main = replicas.get(push.type());
     if (main == null) {
       return new SyncWire.Failed("Unknown entity type: " + push.type());
     }
-    var budget = new SyncWire.Frame(frame);
     var results = new ArrayList<SyncWire.Result>();
     for (var offer : push.offers()) {
       var result = offer.erase() ? erased(push.type(), offer) : result(push.type(), main, offer);
-      if (result instanceof SyncWire.Denied denied
-          && !budget.admits(SyncWire.encodedLength(denied))) {
-        result = denied.withheld();
-      }
-      budget.add(SyncWire.encodedLength(result));
-      results.add(result);
+      results.add(
+          result instanceof SyncWire.Denied denied
+                  && SyncWire.encodedLength(denied) > SyncWire.resultBound(offer)
+              ? denied.withheld()
+              : result);
     }
     return new SyncWire.Results(results, main.maxSeq());
   }
@@ -566,7 +570,7 @@ public final class SyncRpcServer {
       outcome =
           Actor.call(
               principal, () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
-    } catch (BlobStore.NotHeld | ChangeLog.Pruned e) {
+    } catch (BlobStore.NotHeld | ChangeLog.Pruned | SyncedStore.Unheld e) {
       return new SyncWire.Refused(offer.id(), e.getMessage());
     }
     return switch (outcome) {

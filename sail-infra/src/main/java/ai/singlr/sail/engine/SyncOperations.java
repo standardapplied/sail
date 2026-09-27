@@ -48,7 +48,9 @@ import picocli.CommandLine.Help.Ansi;
  * registry in its order — the dependency order, a spec before its runs, a room before its messages
  * — and one type's failure is recorded against that type while the rest of the round, post-steps
  * included, still runs; the first failure is thrown afterwards with the others suppressed, so a
- * broken type never silences the materialization of the ones that succeeded.
+ * broken type never silences the materialization of the ones that succeeded. The denials the other
+ * types settled are printed before it is thrown: they already changed this box, and the round
+ * report that would list them is lost with the failure.
  */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
@@ -171,6 +173,9 @@ public final class SyncOperations {
       var round = new Round(summed, List.copyOf(types), pulledMessages);
       notify(round);
       if (!failures.isEmpty()) {
+        types.stream()
+            .flatMap(type -> type.denials().stream())
+            .forEach(denial -> notice(denial.describe()));
         var first = failures.getFirst();
         failures.stream().skip(1).forEach(first::addSuppressed);
         throw first;

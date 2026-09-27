@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
@@ -18,6 +19,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -508,6 +510,8 @@ class SyncRpcServerTest {
       main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
       var server = main.server(Actor.sync(null, Role.VIEWER));
       var mainsRev = main.specs.latestRev("auth");
+      var edited = new LinkedHashMap<>(main.replica.current("auth"));
+      edited.put("title", "Viewer edit");
       var replies =
           serve(
               server,
@@ -515,7 +519,7 @@ class SyncRpcServerTest {
               new SyncWire.Pull("spec", 0, 10),
               push(
                   "spec",
-                  new MainReplica.Offer("auth", Map.of("title", "Viewer edit"), mainsRev),
+                  new MainReplica.Offer("auth", edited, mainsRev),
                   new MainReplica.Offer("born", Map.of("title", "Viewer spec"), null)),
               push("run", new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
       assertInstanceOf(SyncWire.Page.class, replies.get(1));
@@ -564,29 +568,37 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aDenialWhoseVersionWouldOverflowTheFrameIsAnsweredWithoutIt() throws Exception {
+  void aDenialCarriesMainsVersionOnlyWithinTheRoomItsOfferLeftForIt() throws Exception {
+    var small = Map.<String, Object>of("body", "x".repeat(100));
     var large = Map.<String, Object>of("body", "x".repeat(700));
     var deciding =
         new FakeMain() {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
-            return new CommitOutcome.Denied("not yours", "2-m", large);
+            return new CommitOutcome.Denied("not yours", "2-m", "a".equals(id) ? small : large);
           }
         };
+    var fits = new MainReplica.Offer("a", Map.of(), null);
+    var outgrows = new MainReplica.Offer("b", Map.of(), null);
     var replies =
         serveLines(
             server(deciding, "spec", Actor.sync("ada", Role.MEMBER)),
-            1200,
-            List.of(
-                SyncWire.encode(HELLO),
-                SyncWire.encode(
-                    push(
-                        "spec",
-                        new MainReplica.Offer("a", Map.of(), null),
-                        new MainReplica.Offer("b", Map.of(), null)))));
+            SyncWire.MAX_FRAME,
+            List.of(SyncWire.encode(HELLO), SyncWire.encode(push("spec", fits, outgrows))));
     var results = assertInstanceOf(SyncWire.Results.class, replies.get(1)).results();
-    assertEquals(new SyncWire.Denied("a", "not yours", "2-m", large), results.get(0));
+    assertEquals(new SyncWire.Denied("a", "not yours", "2-m", small), results.get(0));
+    assertTrue(SyncWire.encodedLength(results.get(0)) <= SyncWire.resultBound(fits));
     assertEquals(new SyncWire.Denied("b", "not yours", null, null, false), results.get(1));
+    assertTrue(SyncWire.encodedLength(results.get(1)) <= SyncWire.resultBound(outgrows));
+  }
+
+  @Test
+  void aSyncSessionActsOnlyOnTheSyncLane() {
+    var failure =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> new SyncRpcServer(Map.of(), Actor.system(), FdeRoster.EMPTY));
+    assertTrue(failure.getMessage().contains("SYNC lane"), failure.getMessage());
   }
 
   @Test

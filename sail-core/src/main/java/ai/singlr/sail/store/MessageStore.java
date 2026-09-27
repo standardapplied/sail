@@ -380,6 +380,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var row = fromSnapshot(id, snapshot);
           var peer = Actor.current().peer();
           if (!mayPostAs(peer, row.author(), row.roomId())) {
+            requireDecidable(row, peer);
             return new PushOutcome.Denied(
                 "'" + peer + "' may not post as '" + row.author() + "' in this room", null, null);
           }
@@ -425,6 +426,52 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     }
     return postAuthority(peer, "FROM rooms s", "s.id = ?", roomId)
         || postAuthority(peer, "FROM specs s", "s.room_id = ?", roomId);
+  }
+
+  /**
+   * Refuses to decide a post on facts main does not hold yet ({@link SyncedStore.Unheld}): a
+   * conversation main has never held, or an author main can place as neither the pusher, an FDE,
+   * nor a run's principal. Rooms, specs and runs sync before messages, so the next round decides
+   * the post; a denial now would remove a message its run or room had simply not delivered yet.
+   */
+  private void requireDecidable(MessageRow row, String peer) {
+    if (!knowsConversation(row.roomId())) {
+      throw new Unheld(
+          "main does not hold room '"
+              + row.roomId()
+              + "' yet; rooms sync before their messages, so the next round settles this");
+    }
+    if (!knowsAuthor(row.author(), peer)) {
+      throw new Unheld(
+          "main holds no FDE or run that posts as '"
+              + row.author()
+              + "' yet; runs sync before their messages, so the next round settles this");
+    }
+  }
+
+  private boolean knowsConversation(String roomId) {
+    return db.queryOne(
+            """
+            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
+                OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
+            row -> true,
+            roomId)
+        .orElse(false);
+  }
+
+  private boolean knowsAuthor(String author, String peer) {
+    return Objects.equals(author, peer)
+        || SAIL_AUTHOR.equals(author)
+        || db.queryOne(
+                """
+                SELECT 1 WHERE EXISTS (SELECT 1 FROM fdes WHERE handle = ?1)
+                    OR EXISTS (SELECT 1 FROM runs WHERE principal = ?1)
+                    OR EXISTS (SELECT 1 FROM run_principals WHERE principal = ?1)""",
+                row -> true,
+                author)
+            .orElse(false);
   }
 
   private boolean ranInConversation(String peer, String roomId) {

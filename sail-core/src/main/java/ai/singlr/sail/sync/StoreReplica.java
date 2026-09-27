@@ -92,6 +92,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public boolean live(String entityId) {
+    return store.live(entityId);
+  }
+
+  @Override
   public Set<String> latestWinsFields() {
     return store.latestWinsFields();
   }

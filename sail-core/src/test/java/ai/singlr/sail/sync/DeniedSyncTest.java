@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -17,6 +18,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.util.List;
@@ -76,6 +78,41 @@ class DeniedSyncTest {
     }
   }
 
+  private void sharedRoom() {
+    for (var box : List.of(main, node)) {
+      box.db.execute(
+          """
+          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+          VALUES ('room', 'Room', 'acme', 'ada', 'now', 'now')""");
+    }
+  }
+
+  private static String startRun(RunStore runs) {
+    var id = DateTimeUtils.newId().toString();
+    runs.create(
+        id,
+        "acme",
+        "room",
+        "ada",
+        "ada",
+        "build",
+        "claude-code",
+        "feat/auth",
+        "do it",
+        1,
+        null,
+        "/log",
+        "unit");
+    return id;
+  }
+
+  private long credentials(String runId) {
+    return node.db
+        .queryOne(
+            "SELECT count(*) FROM run_credentials WHERE run_id = ?", row -> row.integer(0), runId)
+        .orElseThrow();
+  }
+
   private List<String> history(String type, String id) {
     return new ChangeLog(node.db)
         .history(type, id).stream().map(ChangeLog.Entry::snapshot).toList();
@@ -106,44 +143,24 @@ class DeniedSyncTest {
   }
 
   @Test
-  void aDenialWhoseVersionOverflowsTheResultsFrameIsFetchedAndSettledTheSame() throws IOException {
-    var first = "First ".repeat(80);
-    var second = "Second ".repeat(80);
-    main.specs.create(SyncBox.spec("one", first, "pending"));
-    main.specs.create(SyncBox.spec("two", second, "pending"));
+  void aDeniedDeleteWhoseVersionOutgrowsItsAnswerIsFetchedAndRestored() throws IOException {
+    var title = "Large ".repeat(400);
+    main.specs.create(SyncBox.spec("big", title, "pending"));
     round(ADA, "spec");
-    node.specs.update(SyncBox.spec("one", "Viewer edit", "pending"));
-    node.specs.update(SyncBox.spec("two", "Viewer edit", "pending"));
-
-    var mains = SyncedEntities.replicas(main.db, "main", "main").get("spec");
-    var entries = 0;
-    var denials = 0;
-    for (var id : List.of("one", "two")) {
-      var state = mains.state(id);
-      entries +=
-          SyncWire.encodedLength(new SyncWire.Entry(0, id, state.rev(), false, state.snapshot()))
-              + 2;
-      denials +=
-          SyncWire.encodedLength(
-                  new SyncWire.Denied(id, StoreReplica.READ_ONLY, state.rev(), state.snapshot()))
-              + 2;
-    }
-    var frame = 256 + entries;
-    assertTrue(256 + denials > frame, "both versions must not fit one batch of results");
+    node.specs.delete("big");
 
     SyncSession.TypeReport report;
-    try (var link = SyncBox.connect(main.server(ADA_VIEWING), node, frame, out -> out)) {
+    try (var link = SyncBox.connect(main.server(ADA_VIEWING), node)) {
       report = link.reconcile("spec", replica("spec"));
-      assertEquals(1, link.count("push"), "both offers are decided in one push");
-      assertEquals(2, link.count("need"), "the withheld version is fetched after the push");
+      assertEquals(1, link.count("push"));
+      assertEquals(2, link.count("need"), "main withholds a version larger than its answer's room");
     }
 
     assertNull(report.failure());
-    assertEquals(
-        List.of("one", "two"), report.denials().stream().map(SyncSession.Denial::id).toList());
-    assertEquals(first, node.specs.findById("one").orElseThrow().title());
-    assertEquals(second, node.specs.findById("two").orElseThrow().title());
-    assertEquals(main.specs.latestRev("two"), node.specs.latestRev("two"));
+    assertEquals(List.of("big"), report.denials().stream().map(SyncSession.Denial::id).toList());
+    assertEquals(1, report.report().pulled(), "adopting main's version is a pull");
+    assertEquals(title, node.specs.findById("big").orElseThrow().title());
+    assertEquals(main.specs.latestRev("big"), node.specs.latestRev("big"));
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
   }
 
@@ -166,12 +183,7 @@ class DeniedSyncTest {
   @Test
   void aMessagePostedAsAnotherFdeIsDeniedAndLeavesTheRoomWhileItsNeighboursLand()
       throws IOException {
-    for (var box : List.of(main, node)) {
-      box.db.execute(
-          """
-          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
-          VALUES ('room', 'Room', 'acme', 'ada', 'now', 'now')""");
-    }
+    sharedRoom();
     new FdeStore(main.db).add("grace", null, null, "member");
     var messages = new MessageStore(node.db);
     var own = messages.append("room", "ada", "mine", null);
@@ -195,6 +207,94 @@ class DeniedSyncTest {
     assertTrue(messages.findById(reply.id()).isEmpty(), "and takes this box's reply with it");
     assertFalse(history("message", forged.id()).isEmpty(), "its revision stays in the change log");
     assertNextRoundIsClean(ADA, "message", replica("message"));
+  }
+
+  @Test
+  void aRunsMessageThatReachesMainBeforeItsRunIsRefusedAndLandsAfterIt() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    var id = startRun(runs);
+    var messages = new MessageStore(node.db);
+    var posted =
+        messages.append("room", runs.findById(id).orElseThrow().principal(), "from the run", null);
+
+    var refused = assertThrows(SyncTransportException.class, () -> round(ADA, "message"));
+
+    assertTrue(refused.getMessage().contains("no FDE or run that posts as"), refused.getMessage());
+    assertTrue(messages.findById(posted.id()).isPresent(), "a post main cannot decide is kept");
+    round(ADA, "run");
+    var landed = round(ADA, "message");
+    assertEquals(1, landed.report().pushed());
+    assertEquals(List.of(), landed.denials());
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertNextRoundIsClean(ADA, "message", replica("message"));
+  }
+
+  @Test
+  void aMessageInARoomMainDoesNotHoldYetIsRefusedAndLandsAfterTheRoom() throws IOException {
+    new RoomStore(node.db)
+        .create(
+            new RoomStore.RoomRow(
+                "fresh", "acme", "Fresh", "ada", null, null, null, null, null, null));
+    var messages = new MessageStore(node.db);
+    var posted = messages.append("fresh", "ada", "first words", null);
+
+    var refused = assertThrows(SyncTransportException.class, () -> round(ADA, "message"));
+
+    assertTrue(
+        refused.getMessage().contains("does not hold room 'fresh' yet"), refused.getMessage());
+    assertTrue(messages.findById(posted.id()).isPresent());
+    round(ADA, "room");
+    assertEquals(1, round(ADA, "message").report().pushed());
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+  }
+
+  @Test
+  void aMessageInARoomMainHasDeletedIsDeniedAndLeavesTheRoom() throws IOException {
+    sharedRoom();
+    main.db.execute(
+        """
+        INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+        VALUES ('gone', 'Gone', 'acme', 'ada', 'now', 'now')""");
+    new RoomStore(main.db).delete("gone");
+    node.db.execute(
+        """
+        INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+        VALUES ('gone', 'Gone', 'acme', 'ada', 'now', 'now')""");
+    var messages = new MessageStore(node.db);
+    var posted = messages.append("gone", "ada", "into the void", null);
+
+    var report = round(ADA, "message");
+
+    assertEquals(
+        List.of(posted.id()), report.denials().stream().map(SyncSession.Denial::id).toList());
+    assertTrue(messages.findById(posted.id()).isEmpty(), "main held the room, so it decides");
+    assertNextRoundIsClean(ADA, "message", replica("message"));
+  }
+
+  @Test
+  void aLiveRunMainDeniesIsKeptWithItsCredentialUntilItFinishes() throws IOException {
+    var runs = new RunStore(node.db);
+    var id = startRun(runs);
+
+    var live = round(ADA_VIEWING, "run");
+
+    assertNull(live.failure());
+    assertEquals(List.of(id), live.denials().stream().map(SyncSession.Denial::id).toList());
+    assertEquals(0, live.report().pulled(), "work still under way here is never rewritten");
+    assertEquals("running", runs.findById(id).orElseThrow().status());
+    assertEquals(1, credentials(id), "the agent can still act as its run");
+    assertEquals(
+        List.of(id),
+        round(ADA_VIEWING, "run").denials().stream().map(SyncSession.Denial::id).toList());
+    runs.complete(id, "completed", 0);
+
+    var finished = round(ADA_VIEWING, "run");
+
+    assertEquals(1, finished.report().pulled());
+    assertTrue(runs.findById(id).isEmpty(), "once finished, main holding none removes it");
+    assertFalse(history("run", id).isEmpty());
+    assertNextRoundIsClean(ADA_VIEWING, "run", replica("run"));
   }
 
   @Test

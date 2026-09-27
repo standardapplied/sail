@@ -58,6 +58,12 @@ public final class SyncWire {
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
 
+  /**
+   * Room for main's answer to an offer beyond the offer itself: a reason and the markers a result
+   * carries. Every reason main gives names at most the offer's own strings besides a short text.
+   */
+  private static final int RESULT_ALLOWANCE = 256;
+
   private static final String OP = "op";
   private static final String TYPE = "type";
   private static final String ID = "id";
@@ -401,9 +407,9 @@ public final class SyncWire {
    * version of the entity: a revision, a tombstone ({@code rev} with a null {@code snapshot}), or
    * nothing when main holds none. The node adopts it and keeps its own in history. It travels as a
    * {@code refused} result marked {@code denied}, so a node that predates it reads the {@link
-   * Refused} it knows, naming the same reason. A version that would push the results past the frame
-   * is not {@code carried}: the node fetches it through the bounded {@link Need} path, as it does
-   * for a {@link Stale} offer.
+   * Refused} it knows, naming the same reason. A version that would take the answer past its
+   * offer's {@link #resultBound} is not {@code carried}: the node fetches it through the bounded
+   * {@link Need} path, as it does for a {@link Stale} offer.
    */
   public record Denied(
       String id, String reason, String rev, Map<String, Object> snapshot, boolean carried)
@@ -493,6 +499,14 @@ public final class SyncWire {
   /** The bytes {@code offer} takes inside a push. */
   public static int encodedLength(MainReplica.Offer offer) {
     return YamlUtil.dumpJson(offerMap(offer)).getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  /**
+   * The most main's answer to {@code offer} may take. The node budgets each offer at no less, so
+   * the results for a push never outgrow the frame the push fit in.
+   */
+  public static int resultBound(MainReplica.Offer offer) {
+    return encodedLength(offer) + RESULT_ALLOWANCE;
   }
 
   public static String context(Request request) {

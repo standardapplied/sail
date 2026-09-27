@@ -43,6 +43,14 @@ public interface LocalReplica {
     return true;
   }
 
+  /**
+   * Whether {@code id} is work still under way on this box, which main's denial never rewrites or
+   * removes. None by default; see {@link ai.singlr.sail.store.SyncedStore#live}.
+   */
+  default boolean live(String id) {
+    return false;
+  }
+
   /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#latestWinsFields}. */
   default Set<String> latestWinsFields() {
     return Set.of();

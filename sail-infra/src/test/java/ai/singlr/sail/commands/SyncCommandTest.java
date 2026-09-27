@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SyncReport;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -181,8 +182,7 @@ class SyncCommandTest {
     } finally {
       System.setOut(original);
     }
-    return ai.singlr.sail.config.YamlUtil.parseMap(
-        output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    return YamlUtil.parseMap(output.toString(java.nio.charset.StandardCharsets.UTF_8));
   }
 
   private static Map<String, Object> nonNull(Map<String, Object> map) {
@@ -236,7 +236,7 @@ class SyncCommandTest {
                     new SyncSession.TypeReport(
                         "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null, 456, 123))),
             true);
-    var report = ai.singlr.sail.config.YamlUtil.parseMap(json);
+    var report = YamlUtil.parseMap(json);
     assertEquals(456, report.get("bytes_fetched"));
     assertEquals(123, report.get("bytes_sent"));
     assertEquals(3, report.get("merged"));
@@ -278,24 +278,24 @@ class SyncCommandTest {
   }
 
   @Test
-  void rendersEachDenialNamingWhatMainKeptAndWhereTheNodesVersionIs() {
+  void rendersEachDenialNamingWhyAndWhereTheNodesVersionIs() {
     var text = SyncCommand.render(deniedRound(), false);
     assertFalse(text.contains("Already in sync"), text);
     assertTrue(
         text.contains(
-            "spec auth: main kept its version — your role is read-only. Yours is in its history:"
-                + " sail spec history auth."),
+            "spec auth: main denied this change — your role is read-only. Yours is in its"
+                + " history: sail spec history auth."),
         text);
     assertTrue(
         text.contains(
-            "message m1: main kept its version — 'ada' may not post as 'grace'. Yours is in this"
-                + " box's history."),
+            "message m1: main denied this change — 'ada' may not post as 'grace'. Yours stays in"
+                + " this box's change log."),
         text);
   }
 
   @Test
   void rendersDenialsInJsonByTypeIdAndReason() {
-    var report = ai.singlr.sail.config.YamlUtil.parseMap(SyncCommand.render(deniedRound(), true));
+    var report = YamlUtil.parseMap(SyncCommand.render(deniedRound(), true));
     assertEquals(
         List.of(
             Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),

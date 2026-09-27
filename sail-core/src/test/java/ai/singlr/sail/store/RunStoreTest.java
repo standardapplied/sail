@@ -21,6 +21,8 @@ import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -766,10 +768,10 @@ class RunStoreTest {
     Actor.call(Actor.sync("node-a", Role.MEMBER), () -> store.commitRevision(id, base(), null));
     var rev = store.latestRev(id);
     var other = Actor.sync("node-b", Role.MEMBER);
-    var restamped = new java.util.HashMap<>(moved());
+    var restamped = new HashMap<>(moved());
     restamped.put("node", "node-b");
 
-    for (var offered : java.util.Arrays.asList(restamped, moved(), null)) {
+    for (var offered : Arrays.asList(restamped, moved(), null)) {
       var denied =
           assertInstanceOf(
               PushOutcome.Denied.class,
@@ -784,7 +786,7 @@ class RunStoreTest {
   @Test
   void aSyncSessionIsDeniedAForgedOrUnstampedRunAndATombstonedRunsReturn() {
     var own = Actor.sync("node-a", Role.MEMBER);
-    var unstamped = new java.util.HashMap<>(base());
+    var unstamped = new HashMap<>(base());
     unstamped.remove("node");
     assertInstanceOf(
         PushOutcome.Denied.class,

@@ -43,8 +43,9 @@ import java.util.function.ToIntFunction;
  * <p>A page's view of main answers the engine from the page alone; a checkpoint only ever advances
  * to a seq whose entries this node has actually seen, never to main's high-water after its own
  * pushes, so a change another node lands between two exchanges can never be skipped. The view
- * weighs every offer as its bytes on the wire and budgets the engine one frame of them, so a first
- * upload of a large table holds one batch of snapshots at a time, never the whole table.
+ * weighs every offer as its bytes on the wire and the room main's answer to it may take, and
+ * budgets the engine one frame of them, so a first upload of a large table holds one batch of
+ * snapshots at a time, never the whole table, and main's results fit the frame the push did.
  *
  * <p>Erasures never reach the engine. The prunes this node asked for go to main first, as erase
  * offers, and each one main answers is applied here at main's rev; an erasure entry in a page, a
@@ -686,7 +687,7 @@ public final class PagedSyncSession implements SyncSession {
               contentFields.getOrDefault(type, Set.of()));
       var inventory = 0L;
       for (var hash : hashes) inventory += SyncWire.inventoryWeight(blobs.manifest(hash)) + 2L;
-      return Math.max(SyncWire.encodedLength(offer), inventory);
+      return Math.max(SyncWire.resultBound(offer), inventory);
     }
 
     @Override

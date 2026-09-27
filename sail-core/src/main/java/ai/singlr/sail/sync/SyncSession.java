@@ -8,8 +8,11 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.store.Sqlite;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Consumer;
 
 /**
@@ -20,8 +23,44 @@ import java.util.function.Consumer;
  */
 public sealed interface SyncSession extends AutoCloseable permits PagedSyncSession {
 
-  /** An offer main denied: the node now holds main's version, and its own is in its history. */
-  record Denial(String type, String id, String reason) {}
+  /**
+   * An offer main denied, naming why: the node settled it to main's version, unless it is work
+   * still live here, and its own version stays in its history.
+   */
+  record Denial(String type, String id, String reason) {
+    public Denial {
+      Objects.requireNonNull(type, "type");
+      Objects.requireNonNull(id, "id");
+      reason = Objects.requireNonNullElse(reason, "");
+    }
+
+    /** The denial read back from {@link #toMap}, or empty for anything that is not one. */
+    public static Optional<Denial> fromMap(Object value) {
+      if (!(value instanceof Map<?, ?> map)
+          || !(map.get("type") instanceof String type)
+          || !(map.get("id") instanceof String id)) {
+        return Optional.empty();
+      }
+      return Optional.of(new Denial(type, id, Objects.toString(map.get("reason"), "")));
+    }
+
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("type", type);
+      map.put("id", id);
+      map.put("reason", reason);
+      return map;
+    }
+
+    /** The denial as the FDE reads it: what main refused, why, and where their version is kept. */
+    public String describe() {
+      var kept =
+          "spec".equals(type)
+              ? "Yours is in its history: sail spec history " + id + "."
+              : "Yours stays in this box's change log.";
+      return type + " " + id + ": main denied this change — " + reason + ". " + kept;
+    }
+  }
 
   /**
    * How one entity type fared in a round: the engine's counts, how many pages and entries main

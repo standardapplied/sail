@@ -22,6 +22,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import ai.singlr.sail.store.SyncedStore;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -226,6 +227,7 @@ class MessageSyncTest {
 
   @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
+    new FdeStore(main.db).add("admin", null, null, "admin");
     var messageId = "00000000-0000-7000-8000-000000000001";
 
     var denied =
@@ -242,7 +244,7 @@ class MessageSyncTest {
   }
 
   @Test
-  void authenticatedPeerCannotPostToForeignOrMissingSpec() {
+  void authenticatedPeerCannotPostToAForeignRoom() {
     main.db.execute("UPDATE rooms SET assignee = 'ada', created_by = 'ada' WHERE id = 'room'");
 
     assertInstanceOf(
@@ -252,14 +254,39 @@ class MessageSyncTest {
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000002", snapshot("mallory", "room"), null)));
-    assertInstanceOf(
-        PushOutcome.Denied.class,
-        Actor.call(
-            Actor.sync("mallory", Role.MEMBER),
-            () ->
-                main.messages.commitRevision(
-                    "00000000-0000-7000-8000-000000000003", snapshot("mallory", "missing"), null)));
 
+    assertTrue(main.messages.list("room", null, 10).isEmpty());
+  }
+
+  @Test
+  void aPostMainCannotDecideYetIsRefusedNeverDenied() {
+    var missingRoom =
+        assertThrows(
+            SyncedStore.Unheld.class,
+            () ->
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
+                    () ->
+                        main.messages.commitRevision(
+                            "00000000-0000-7000-8000-000000000003",
+                            snapshot("node", "missing"),
+                            null)));
+    var unplacedAuthor =
+        assertThrows(
+            SyncedStore.Unheld.class,
+            () ->
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
+                    () ->
+                        main.messages.commitRevision(
+                            "00000000-0000-7000-8000-000000000004",
+                            snapshot("codex/unsynced", "room"),
+                            null)));
+
+    assertTrue(missingRoom.getMessage().contains("room 'missing'"), missingRoom.getMessage());
+    assertTrue(
+        unplacedAuthor.getMessage().contains("posts as 'codex/unsynced'"),
+        unplacedAuthor.getMessage());
     assertTrue(main.messages.list("room", null, 10).isEmpty());
   }
 

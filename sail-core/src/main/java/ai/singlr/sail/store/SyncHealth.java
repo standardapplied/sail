@@ -48,21 +48,24 @@ public final class SyncHealth {
         SELECT peer, last_attempt_at, last_success_at, consecutive_failures,
                last_error_kind, last_error, last_report, state, stale_since
         FROM sync_health WHERE peer = ?""",
-        row ->
-            new Health(
-                row.text(0),
-                instant(row.text(1)),
-                instant(row.text(2)),
-                Math.toIntExact(row.integer(3)),
-                row.text(4),
-                row.text(5),
-                report(row.text(6)),
-                row.text(7),
-                instant(row.text(8)),
-                bytes(row.text(6), "bytes_fetched"),
-                bytes(row.text(6), "bytes_sent"),
-                bytes(row.text(6), "bytes_freed"),
-                denials(row.text(6))),
+        row -> {
+          var last =
+              row.text(6) == null ? Map.<String, Object>of() : YamlUtil.parseMap(row.text(6));
+          return new Health(
+              row.text(0),
+              instant(row.text(1)),
+              instant(row.text(2)),
+              Math.toIntExact(row.integer(3)),
+              row.text(4),
+              row.text(5),
+              row.text(6) == null ? null : report(last),
+              row.text(7),
+              instant(row.text(8)),
+              bytes(last, "bytes_fetched"),
+              bytes(last, "bytes_sent"),
+              bytes(last, "bytes_freed"),
+              denials(last));
+        },
         peer);
   }
 
@@ -81,17 +84,7 @@ public final class SyncHealth {
    * finished round would be recorded as still syncing.
    */
   public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
-    return succeeded(peer, at, report, 0, 0, 0);
-  }
-
-  public boolean succeeded(
-      String peer,
-      Instant at,
-      SyncEngine.Report report,
-      long fetchedBytes,
-      long sentBytes,
-      long freedBytes) {
-    return succeeded(peer, at, report, fetchedBytes, sentBytes, freedBytes, List.of());
+    return succeeded(peer, at, report, 0, 0, 0, List.of());
   }
 
   /** A completed round, with the offers main denied in it. */
@@ -131,7 +124,7 @@ public final class SyncHealth {
                       "bytes_freed",
                       freedBytes,
                       "denials",
-                      denials.stream().map(SyncHealth::denial).toList())),
+                      denials.stream().map(SyncSession.Denial::toMap).toList())),
               peer);
           return recovered;
         });
@@ -158,37 +151,27 @@ public final class SyncHealth {
     return value == null ? null : Instant.parse(value);
   }
 
-  private static SyncEngine.Report report(String value) {
-    if (value == null) return null;
-    var map = YamlUtil.parseMap(value);
+  private static SyncEngine.Report report(Map<String, Object> last) {
     return new SyncEngine.Report(
-        ((Number) map.get("pulled")).intValue(),
-        ((Number) map.get("pushed")).intValue(),
-        ((Number) map.get("merged")).intValue(),
-        ((Number) map.get("conflicts")).intValue());
+        count(last, "pulled"),
+        count(last, "pushed"),
+        count(last, "merged"),
+        count(last, "conflicts"));
   }
 
-  private static Map<String, Object> denial(SyncSession.Denial denial) {
-    return Map.of("type", denial.type(), "id", denial.id(), "reason", denial.reason());
+  private static int count(Map<String, Object> last, String field) {
+    return last.get(field) instanceof Number number ? number.intValue() : 0;
   }
 
-  private static List<SyncSession.Denial> denials(String json) {
-    if (json == null || !(YamlUtil.parseMap(json).get("denials") instanceof List<?> denials)) {
+  /** The denials a round recorded; a report written before denials existed has none. */
+  private static List<SyncSession.Denial> denials(Map<String, Object> last) {
+    if (!(last.get("denials") instanceof List<?> denials)) {
       return List.of();
     }
-    return denials.stream()
-        .map(Map.class::cast)
-        .map(
-            denial ->
-                new SyncSession.Denial(
-                    String.valueOf(denial.get("type")),
-                    String.valueOf(denial.get("id")),
-                    String.valueOf(denial.get("reason"))))
-        .toList();
+    return denials.stream().map(SyncSession.Denial::fromMap).flatMap(Optional::stream).toList();
   }
 
-  private static long bytes(String json, String field) {
-    var value = YamlUtil.parseMap(json).get(field);
-    return value instanceof Number number ? number.longValue() : 0;
+  private static long bytes(Map<String, Object> last, String field) {
+    return last.get(field) instanceof Number number ? number.longValue() : 0;
   }
 }

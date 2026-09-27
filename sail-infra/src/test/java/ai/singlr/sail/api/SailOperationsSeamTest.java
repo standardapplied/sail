@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
@@ -48,11 +49,13 @@ import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -974,6 +977,54 @@ class SailOperationsSeamTest {
       events.clear();
       assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
       assertEquals(List.of(), posted.get(), "the next round never announces it again");
+    }
+  }
+
+  @Test
+  void aFailedRoundStillReportsTheDenialsItsOtherTypesSettled() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      Acting.system(() -> main.specs.create(SyncBox.spec("auth", "Auth", "pending")));
+      var replicas =
+          new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", "node"));
+      replicas.remove("file");
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main", "node", "node-box"),
+              target ->
+                  channel(
+                      new SyncRpcServer(
+                              replicas,
+                              Actor.sync("node", Role.VIEWER),
+                              List::of,
+                              SyncTransitionSink.NONE,
+                              new ChangeLog(main.db)::headsAfter,
+                              SyncWire.UPGRADE_FLOOR)
+                          .content(main.db, FileLimits.defaults()))));
+      operations.schema().prepareSync();
+      assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+      Acting.system(() -> node.specs.update(SyncBox.spec("auth", "Viewer edit", "pending")));
+      var err = new ByteArrayOutputStream();
+      var original = System.err;
+      System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+      try {
+        var failure = assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
+        assertTrue(failure.getMessage().contains("file"), failure.getMessage());
+      } finally {
+        System.setErr(original);
+      }
+
+      assertTrue(
+          err.toString(StandardCharsets.UTF_8)
+              .contains("spec auth: main denied this change — your role is read-only"),
+          err.toString(StandardCharsets.UTF_8));
+      assertEquals("Auth", node.specs.findById("auth").orElseThrow().title());
     }
   }
 

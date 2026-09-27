@@ -24,7 +24,7 @@ public final class SyncViews {
     return map;
   }
 
-  static Map<String, Object> round(SyncReport round) {
+  public static Map<String, Object> round(SyncReport round) {
     var map = new LinkedHashMap<>(report(round.report()));
     map.put("message", round.message());
     map.put("bytes_fetched", round.fetchedBytes());
@@ -36,15 +36,7 @@ public final class SyncViews {
   }
 
   public static List<Map<String, Object>> denials(List<SyncSession.Denial> denials) {
-    return denials.stream().map(SyncViews::denial).toList();
-  }
-
-  private static Map<String, Object> denial(SyncSession.Denial denial) {
-    var map = new LinkedHashMap<String, Object>();
-    map.put("type", denial.type());
-    map.put("id", denial.id());
-    map.put("reason", denial.reason());
-    return map;
+    return denials.stream().map(SyncSession.Denial::toMap).toList();
   }
 
   public static Map<String, Object> type(SyncSession.TypeReport type) {
