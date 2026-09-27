@@ -283,10 +283,12 @@ beside it. Main denies a read-only principal's offers (erase requests keep their
 message whose author the pusher may not post as, a reply to a message main does not hold, and a
 run whose execution provenance is not the pusher's. A message in a room main has never held is
 refused instead, because its room has simply not arrived; rooms sync before messages, so the next
-round decides it. A message an agent or the review pipeline posts rests on a run of its
-conversation (the room's, or its spec's), so the node holds such a post, with the replies under
-it, while a run it made there has a change main has not taken; runs sync before messages, so it
-normally goes later in the same round. A post that arrived first would be denied for good. The
+round decides it. Main decides an agent's post by its run, and the review pipeline's by a run
+of the same owner, placing a run in a conversation through its room or its spec's room. So the
+node holds such a post, with the replies under it, until main holds what decides it: while the
+agent's run, or that run's spec, has a change main has not taken, or while the pipeline's owner
+has no run there that main holds. Runs sync before messages, so the post normally goes later in
+the same round; one that arrived first would be denied for good. The
 answer carries main's current version of the entity: a revision, a tombstone, or nothing. The
 node budgets every offer for its answer as well as its bytes, and a version that would take the
 answer past that room is withheld; the node fetches it with `need`, as it does for a stale offer.

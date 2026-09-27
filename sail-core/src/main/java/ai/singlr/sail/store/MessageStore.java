@@ -29,14 +29,23 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   private static final String ENTITY = "message";
 
   /**
-   * Whether run {@code r} belongs to the conversation named by {@code %1$s}: a run of the room
+   * Whether run {@code %1$s} belongs to the conversation named by {@code %2$s}: a run of the room
    * itself, or of a spec whose room it is. A spec born in a room posts there while its runs name
    * only the spec, so matching on the spec's id alone would miss them.
    */
   private static final String RUN_IN_CONVERSATION =
       """
-      (r.room_id = %1$s OR r.spec_id = %1$s
-          OR r.spec_id IN (SELECT id FROM specs WHERE room_id = %1$s))""";
+      (%1$s.room_id = %2$s OR %1$s.spec_id = %2$s
+          OR %1$s.spec_id IN (SELECT id FROM specs WHERE room_id = %2$s))""";
+
+  /**
+   * Whether run {@code %1$s}, on a node, is one main holds, with the spec it belongs to: main
+   * places a run in a spec's conversation through its own copy of that spec.
+   */
+  private static final String RUN_ON_MAIN =
+      """
+      (coalesce(%1$s.base_rev, '') <> '' AND NOT EXISTS (SELECT 1 FROM specs s
+          WHERE s.id = %1$s.spec_id AND coalesce(s.base_rev, '') = ''))""";
 
   private static final String COLUMNS =
       "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
@@ -296,10 +305,11 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers. A post by a run this box made, or by the pipeline in a
-   * conversation with such a run, waits while that run has a change main has not taken, with the
-   * replies under it: main decides such a post by the run, so a post arriving first would be denied
-   * for good. Runs sync before messages, so it is normally offered later in the same round.
+   * after the message it answers. Main decides an agent's post by its run, and the pipeline's by a
+   * run of the same owner in the conversation, so such a post waits, with the replies under it,
+   * until main holds what decides it: a run it names has a change main has not taken, or the
+   * pipeline's conversation has a run of that owner only this box holds. A post arriving first
+   * would be denied for good. Runs sync before messages, so it normally goes later in the round.
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
@@ -312,15 +322,21 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
               held(id) AS (
                 SELECT p.id FROM pending p
                 WHERE EXISTS (SELECT 1 FROM runs r
-                    WHERE (coalesce(r.base_rev, '') = '' OR r.rev <> r.base_rev)
-                      AND %s
-                      AND (p.author = ?1 OR r.principal = p.author
-                          OR EXISTS (SELECT 1 FROM run_principals rp
-                              WHERE rp.run_id = r.id AND rp.principal = p.author)))
+                    WHERE %1$s AND (NOT %2$s OR r.rev <> r.base_rev)
+                      AND (r.principal = p.author OR EXISTS (SELECT 1 FROM run_principals rp
+                          WHERE rp.run_id = r.id AND rp.principal = p.author)))
+                  OR (p.author = ?1 AND EXISTS (SELECT 1 FROM runs r
+                    WHERE %1$s AND NOT %2$s
+                      AND NOT EXISTS (SELECT 1 FROM runs a
+                          WHERE %3$s AND %4$s AND a.owner = r.owner)))
                 UNION
                 SELECT p.id FROM pending p JOIN held h ON p.reply_to = h.id)
             SELECT id FROM pending WHERE id NOT IN (SELECT id FROM held) ORDER BY seq"""
-                .formatted(RUN_IN_CONVERSATION.formatted("p.room_id")),
+                .formatted(
+                    RUN_IN_CONVERSATION.formatted("r", "p.room_id"),
+                    RUN_ON_MAIN.formatted("r"),
+                    RUN_IN_CONVERSATION.formatted("a", "p.room_id"),
+                    RUN_ON_MAIN.formatted("a")),
             row -> row.text(0),
             SAIL_AUTHOR));
   }
@@ -443,7 +459,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                     SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s
                         AND (r.principal = ?3 OR EXISTS (SELECT 1 FROM run_principals rp
                             WHERE rp.run_id = r.id AND rp.principal = ?3)) LIMIT 1"""
-                        .formatted(RUN_IN_CONVERSATION.formatted("?2")),
+                        .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
                     row -> true,
                     peer,
                     roomId,
@@ -486,7 +502,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   private boolean ranInConversation(String peer, String roomId) {
     return db.queryOne(
             "SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s LIMIT 1"
-                .formatted(RUN_IN_CONVERSATION.formatted("?2")),
+                .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
             row -> true,
             peer,
             roomId)

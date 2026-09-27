@@ -356,6 +356,58 @@ class DeniedSyncTest {
   }
 
   @Test
+  void anAgentsPostWaitsForItsSpecAsWellAsItsRun() throws IOException {
+    for (var box : List.of(main, node)) {
+      box.db.execute(
+          """
+          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+          VALUES ('home', 'Home', 'acme', 'ada', 'now', 'now')""");
+    }
+    node.specs.create(SyncBox.spec("auth", "Auth", "pending").withRoomId("home"));
+    var runs = new RunStore(node.db);
+    var id = DateTimeUtils.newId().toString();
+    runs.create(
+        id,
+        "acme",
+        "auth",
+        "ada",
+        "ada",
+        "build",
+        "claude-code",
+        "feat/auth",
+        "do it",
+        1,
+        null,
+        "/log",
+        "unit");
+    var posted =
+        new MessageStore(node.db)
+            .append("home", runs.findById(id).orElseThrow().principal(), "working", null);
+    round(ADA, "run");
+
+    assertEquals(0, round(ADA, "message").report().pushed(), "main places the run by its spec");
+    round(ADA, "spec");
+
+    assertEquals(1, round(ADA, "message").report().pushed());
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+  }
+
+  @Test
+  void thePipelinesPostGoesOnceMainHoldsARunOfItsOwnerThere() throws IOException {
+    sharedRoom();
+    var runs = new RunStore(node.db);
+    startRun(runs, "ada");
+    round(ADA, "run");
+    startRun(runs, null);
+    round(ADA, "run");
+    var posted = new MessageStore(node.db).append("room", "sail", "review passed", null);
+
+    assertEquals(
+        1, round(ADA, "message").report().pushed(), "main already holds a run to decide by");
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+  }
+
+  @Test
   void aRunMainKeepsDenyingHoldsOnlyItsOwnPosts() throws IOException {
     sharedRoom();
     var runs = new RunStore(node.db);
