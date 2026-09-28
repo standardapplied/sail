@@ -1027,7 +1027,7 @@ public final class SailOperations implements HostOperations {
 
   private boolean mintPersonalRooms(RoomStore store, String project) {
     var actor = Actor.current();
-    if (fdeStore == null || projectStore == null || actor == null || actor.handle() == null) {
+    if (fdeStore == null || projectStore == null || actor.handle() == null) {
       return false;
     }
     var fde = fdeStore.byHandle(actor.handle()).orElse(null);
