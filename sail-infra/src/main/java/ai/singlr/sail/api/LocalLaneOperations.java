@@ -47,12 +47,9 @@ public interface LocalLaneOperations {
   /**
    * The actor {@code run}'s credential acts as: its principal, for the FDE the run acts for, on the
    * agent lane or, for a read-only lane, the room lane — with the role the role rule gives that
-   * FDE, capped by the lane's. Empty when that FDE is disabled or unknown, or on boxes that keep no
-   * role rule.
+   * FDE, capped by the lane's. Empty when that FDE is disabled or unknown.
    */
-  default Optional<Actor> runActor(RunStore.RunRow run) {
-    return Optional.empty();
-  }
+  Optional<Actor> runActor(RunStore.RunRow run);
 
   /**
    * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the

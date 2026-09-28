@@ -107,7 +107,7 @@ class HostCliIdentityTest {
     assertEquals(0, create(savedToken(), "auth"));
     assertEquals("uday", specs.findById("auth").orElseThrow().createdBy());
     assertEquals("uday", specs.findById("auth").orElseThrow().updatedBy());
-    assertTrue(HostToken.describe(MAIN).contains("'uday'"));
+    assertTrue(HostToken.describe(operations.identity().box()).contains("'uday'"));
   }
 
   @Test
@@ -127,7 +127,7 @@ class HostCliIdentityTest {
 
     assertEquals(0, create(savedToken(), "auth"));
     assertNull(specs.findById("auth").orElseThrow().createdBy());
-    assertTrue(HostToken.describe(SyncConfig.unset()).contains("no sync handle"));
+    assertTrue(HostToken.describe(operations.identity().box()).contains("no sync handle"));
   }
 
   @Test
