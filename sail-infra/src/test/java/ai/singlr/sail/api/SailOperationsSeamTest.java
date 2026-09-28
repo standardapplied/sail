@@ -18,6 +18,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -26,7 +27,9 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -40,6 +43,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.MainReplica;
@@ -47,8 +51,10 @@ import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
+import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -68,9 +74,16 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -115,7 +128,7 @@ class SailOperationsSeamTest {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");
         var operations = operations(node.db)) {
-      var offline = new java.util.concurrent.atomic.AtomicBoolean(true);
+      var offline = new AtomicBoolean(true);
       var clock = new BackoffTest.TestClock();
       operations.useSyncClock(clock);
       var sync =
@@ -175,17 +188,17 @@ class SailOperationsSeamTest {
                 SessionYield.NONE);
         var server = server(operations, node.db)) {
       var clock = new BackoffTest.TestClock();
-      var nanos = new java.util.concurrent.atomic.AtomicLong();
-      var attempts = new java.util.concurrent.atomic.AtomicInteger();
-      var offline = new java.util.concurrent.atomic.AtomicBoolean(true);
-      var events = new java.util.concurrent.LinkedBlockingQueue<Event>();
+      var nanos = new AtomicLong();
+      var attempts = new AtomicInteger();
+      var offline = new AtomicBoolean(true);
+      var events = new LinkedBlockingQueue<Event>();
       bus.subscribe(
           new EventSubscriber() {
             public String name() {
               return "health-test";
             }
 
-            public java.util.function.Predicate<Event> filter() {
+            public Predicate<Event> filter() {
               return e -> e.type().startsWith("sync_");
             }
 
@@ -208,7 +221,7 @@ class SailOperationsSeamTest {
                     if (offline.get()) throw new IOException("main port blocked");
                     return channel(main);
                   }));
-      java.util.function.Consumer<Duration> advance =
+      Consumer<Duration> advance =
           duration -> {
             clock.advance(duration);
             nanos.addAndGet(duration.toNanos());
@@ -223,6 +236,7 @@ class SailOperationsSeamTest {
               advance::accept,
               clock::instant);
       operations.useSyncScheduler(scheduler);
+      knownToMain(main, "owner", "member");
       var token = credential(node.db, "owner", "member", "token");
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -230,7 +244,7 @@ class SailOperationsSeamTest {
       assertEquals("stale", YamlUtil.parseMap(stale.body()).get("state"));
       assertTrue(stale.body().contains("main port blocked"));
       assertEquals(
-          java.util.Set.of(
+          Set.of(
               "schema_version",
               "role",
               "main",
@@ -266,12 +280,8 @@ class SailOperationsSeamTest {
           "in_sync",
           YamlUtil.parseMap(send(server, "GET", "/v1/sync", token, "").body()).get("state"));
       scheduler.syncNow();
-      assertEquals(
-          Event.WellKnownTypes.SYNC_DEGRADED,
-          events.poll(5, java.util.concurrent.TimeUnit.SECONDS).type());
-      assertEquals(
-          Event.WellKnownTypes.SYNC_RECOVERED,
-          events.poll(5, java.util.concurrent.TimeUnit.SECONDS).type());
+      assertEquals(Event.WellKnownTypes.SYNC_DEGRADED, events.poll(5, TimeUnit.SECONDS).type());
+      assertEquals(Event.WellKnownTypes.SYNC_RECOVERED, events.poll(5, TimeUnit.SECONDS).type());
       assertTrue(events.isEmpty());
     }
   }
@@ -403,12 +413,9 @@ class SailOperationsSeamTest {
               tempDir,
               () -> new SyncConfig("node", "main", "node", "node-box"),
               target -> {
-                throw new ai.singlr.sail.sync.SyncTransportException(
-                    kind, "message m1: failure cause", null);
+                throw new SyncTransportException(kind, "message m1: failure cause", null);
               }));
-      assertThrows(
-          ai.singlr.sail.sync.SyncTransportException.class,
-          () -> operations.sync(new SyncRequest(null)));
+      assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
       assertEquals(kind, operations.syncStatus().lastErrorKind());
       assertEquals("message m1: failure cause", operations.syncStatus().lastError());
     }
@@ -433,11 +440,7 @@ class SailOperationsSeamTest {
                       new RoomStore.RoomRow(
                           "room", "proj", "Room", "node", "on", "[]", "node", null, null, "node")));
       var message =
-          Acting.system(
-              () ->
-                  new ai.singlr.sail.store.MessageStore(box.db)
-                      .append("room", "node", "local", null)
-                      .id());
+          Acting.system(() -> new MessageStore(box.db).append("room", "node", "local", null).id());
       for (var entry : Map.of("run", run, "review", review, "message", message).entrySet()) {
         var store = SyncedEntities.require(entry.getKey()).store(box.db);
         var local = store.comparableSnapshot(entry.getValue());
@@ -452,8 +455,13 @@ class SailOperationsSeamTest {
             YamlUtil.dumpJson(local),
             YamlUtil.dumpJson(remote),
             List.of(field));
-        operations.resolveConflict(
-            entry.getKey(), entry.getValue(), new Resolution(Resolution.Strategy.THEIRS, null));
+        TestAuth.asOperator(
+            operations,
+            () ->
+                operations.resolveConflict(
+                    entry.getKey(),
+                    entry.getValue(),
+                    new Resolution(Resolution.Strategy.THEIRS, null)));
         assertEquals(value, store.comparableSnapshot(entry.getValue()).get(field));
       }
       assertTrue(operations.conflicts().isEmpty());
@@ -478,7 +486,7 @@ class SailOperationsSeamTest {
                 throw new IOException("unused");
               }));
       new FdeStore(box.db).add(handle, null, null, role);
-      var token = new ai.singlr.sail.store.BoxCredentialStore(box.db).replace(handle);
+      var token = new BoxCredentialStore(box.db).replace(handle);
       Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
       box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
@@ -520,9 +528,9 @@ class SailOperationsSeamTest {
       var lane =
           new TestOperations() {
             @Override
-            public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(
-                String type, String id, Resolution resolution, Actor actor) {
-              return operations.resolveConflict(type, id, resolution, actor);
+            public SyncConflicts.Conflict resolveConflict(
+                String type, String id, Resolution resolution) {
+              return operations.resolveConflict(type, id, resolution);
             }
           };
       var response =
@@ -602,6 +610,8 @@ class SailOperationsSeamTest {
                 targets.add(target);
                 return channel(main);
               }));
+      knownToMain(main, "member", "member");
+      knownToMain(main, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
       var denied = send(server, "POST", "/v1/sync", member, "{\"main\":\"untrusted-peer\"}");
       assertEquals(403, denied.statusCode(), denied.body());
@@ -705,7 +715,7 @@ class SailOperationsSeamTest {
         var server = server(operations, box.db)) {
       var files = new FileStore(box.db);
       for (var path : List.of("dir/ /config", "dir/config")) {
-        ai.singlr.sail.store.ContentFixtures.put(files, "proj", path, "local");
+        ContentFixtures.put(files, "proj", path, "local");
         var id = "proj/" + path;
         var local = files.comparableSnapshot(id);
         var remote = new LinkedHashMap<>(local);
@@ -737,17 +747,21 @@ class SailOperationsSeamTest {
   }
 
   private static SailApiServer server(SailOperations operations, Sqlite db) throws IOException {
-    var auth =
-        new SessionAwareAuth(
-            new AuthSessionStore(db), new FdeStore(db), new TokenAuth(new TokenStore(db)));
+    var auth = TestAuth.sessions(db);
     var server =
         new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
     return server;
   }
 
+  /** A node's roster mirrors main's, so an FDE a node acts as must be on main's roster too. */
+  private static void knownToMain(SyncBox main, String handle, String role) {
+    new FdeStore(main.db).add(handle, null, null, role);
+  }
+
   private static String credential(Sqlite db, String handle, String role, String lane) {
-    var fde = new FdeStore(db).add(handle, null, null, role);
+    var fdes = new FdeStore(db);
+    var fde = fdes.byHandle(handle).orElseGet(() -> fdes.add(handle, null, null, role));
     return lane.equals("session")
         ? new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(30)).token()
         : new TokenStore(db).create(handle, role, fde.id(), null).token();
@@ -775,8 +789,7 @@ class SailOperationsSeamTest {
       assertTrue(files.list().isEmpty());
       assertTrue(files.get("missing").isEmpty());
       var bytes = new byte[] {0, 1, 2, -1};
-      assertEquals(
-          "dir/config", ai.singlr.sail.engine.ProjectFileFixtures.put(files, "dir/config", bytes));
+      assertEquals("dir/config", ProjectFileFixtures.put(files, "dir/config", bytes));
       assertArrayEquals(bytes, files.get("dir/config").orElseThrow().readAllBytes());
       assertEquals(List.of("acme"), operations.catalog().projectsWithFiles());
       assertEquals("dir/config", files.list().getFirst().path());
@@ -785,7 +798,7 @@ class SailOperationsSeamTest {
       assertArrayEquals(bytes, Files.readAllBytes(local));
       assertEquals(0, files.materialize().written());
       Files.writeString(local, "local edit");
-      ai.singlr.sail.engine.ProjectFileFixtures.put(files, "dir/config", new byte[] {5});
+      ProjectFileFixtures.put(files, "dir/config", new byte[] {5});
       assertEquals(List.of("dir/config"), files.materialize().skipped());
       Files.delete(local);
       assertEquals(1, files.materialize().written());
@@ -794,26 +807,16 @@ class SailOperationsSeamTest {
       assertFalse(Acting.system(() -> files.remove("dir/config")));
       assertTrue(files.list().isEmpty());
       assertThrows(
-          IllegalArgumentException.class,
-          () -> ai.singlr.sail.engine.ProjectFileFixtures.put(files, "../escape", bytes));
+          IllegalArgumentException.class, () -> ProjectFileFixtures.put(files, "../escape", bytes));
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              files.put(
-                  "large",
-                  java.io.InputStream.nullInputStream(),
-                  ai.singlr.sail.config.FileLimits.DEFAULT_MAX + 1,
-                  0644));
+              files.put("large", InputStream.nullInputStream(), FileLimits.DEFAULT_MAX + 1, 0644));
       assertThrows(IllegalArgumentException.class, () -> operations.projectFiles("../escape"));
       assertEquals(
           "cap",
           Acting.system(
-              () ->
-                  files.put(
-                      "cap",
-                      java.io.InputStream.nullInputStream(),
-                      ai.singlr.sail.config.FileLimits.DEFAULT_MAX,
-                      0644)));
+              () -> files.put("cap", InputStream.nullInputStream(), FileLimits.DEFAULT_MAX, 0644)));
     }
   }
 
@@ -838,8 +841,11 @@ class SailOperationsSeamTest {
       assertEquals("auth", operations.conflict(null, "auth").entityId());
       assertNull(operations.conflict(null, "missing"));
       var resolved =
-          operations.resolveConflict(
-              null, "auth", new Resolution(Resolution.Strategy.THEIRS, null));
+          TestAuth.asOperator(
+              operations,
+              () ->
+                  operations.resolveConflict(
+                      null, "auth", new Resolution(Resolution.Strategy.THEIRS, null)));
       assertEquals("resolved", resolved.status());
       assertNotNull(resolved.resolvedRev());
       assertEquals("remote", box.specs.findById("auth").orElseThrow().title());
@@ -848,8 +854,11 @@ class SailOperationsSeamTest {
           assertThrows(
               ApiException.class,
               () ->
-                  operations.resolveConflict(
-                      "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+                  TestAuth.asOperator(
+                      operations,
+                      () ->
+                          operations.resolveConflict(
+                              "spec", "auth", new Resolution(Resolution.Strategy.MINE, null))));
       assertEquals(404, settled.status());
       Acting.system(() -> box.specs.update(SyncBox.spec("auth", "local", "pending")));
       box.conflicts.record(
@@ -859,7 +868,11 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
-      operations.resolveConflict("spec", "auth", new Resolution(Resolution.Strategy.MINE, null));
+      TestAuth.asOperator(
+          operations,
+          () ->
+              operations.resolveConflict(
+                  "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
       assertEquals("local", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record(
           "spec",
@@ -872,15 +885,25 @@ class SailOperationsSeamTest {
           new LinkedHashMap<>(
               ConflictMerge.parseTemplate(operations.conflictMergeTemplate("spec", "auth")));
       merged.put("title", "merged");
-      operations.resolveConflict(
-          "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
+      TestAuth.asOperator(
+          operations,
+          () ->
+              operations.resolveConflict(
+                  "spec",
+                  "auth",
+                  new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged))));
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record("file", "auth", null, null, null, List.of("content"));
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              operations.resolveConflict(
-                  "file", "auth", new Resolution(Resolution.Strategy.MERGE, "title: edited")));
+              TestAuth.asOperator(
+                  operations,
+                  () ->
+                      operations.resolveConflict(
+                          "file",
+                          "auth",
+                          new Resolution(Resolution.Strategy.MERGE, "title: edited"))));
       box.conflicts.record("spec", "auth", null, null, null, List.of("title"));
       var ambiguous = assertThrows(ApiException.class, () -> operations.conflict(null, "auth"));
       assertEquals(
@@ -900,7 +923,7 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               new FileStore(main.db)
-                  .put("proj", "config", new java.io.ByteArrayInputStream(content), 0644));
+                  .put("proj", "config", new ByteArrayInputStream(content), 0644));
       var targets = new ArrayList<String>();
       operations.useControlPlane(
           node.db,
@@ -925,6 +948,43 @@ class SailOperationsSeamTest {
       assertEquals("main spec", node.specs.findById("auth").orElseThrow().title());
       assertEquals(0, operations.sync(new SyncRequest("override")).report().total());
       assertEquals(List.of("main-target", "override"), targets);
+    }
+  }
+
+  @Test
+  void aRoundDisablesAnFdeMainsRosterNoLongerLists() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var fdes = new FdeStore(node.db);
+      fdes.add("node", null, null, "member");
+      fdes.add("gone", null, null, "admin");
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main-target", "node", "node-box"),
+              target ->
+                  channel(
+                      SyncRpcServer.over(
+                          main.db,
+                          "main",
+                          Actor.sync("node", Role.MEMBER),
+                          () ->
+                              List.of(
+                                  Map.of("handle", "node", "role", "viewer", "status", "active")),
+                          SyncTransitionSink.NONE,
+                          SyncWire.UPGRADE_FLOOR))));
+      operations.schema().prepareSync();
+
+      operations.sync(new SyncRequest(null));
+
+      assertFalse(fdes.byHandle("gone").orElseThrow().active(), "main removed it");
+      assertTrue(fdes.byHandle("node").orElseThrow().active());
+      assertEquals("viewer", fdes.byHandle("node").orElseThrow().role());
     }
   }
 
@@ -956,10 +1016,10 @@ class SailOperationsSeamTest {
                               SyncTransitionSink.NONE,
                               new ChangeLog(main.db)::headsAfter,
                               SyncWire.UPGRADE_FLOOR)
-                          .content(main.db, ai.singlr.sail.config.FileLimits.defaults())),
+                          .content(main.db, FileLimits.defaults())),
               events::add));
       operations.schema().prepareSync();
-      java.util.function.Supplier<List<String>> posted =
+      Supplier<List<String>> posted =
           () ->
               events.stream()
                   .map(Event::type)
@@ -1067,11 +1127,9 @@ class SailOperationsSeamTest {
       var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
 
       var rehearsed =
-          Acting.by(
-              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin));
+          Acting.by(admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), true)));
       var erased =
-          Acting.by(
-              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), false), admin));
+          Acting.by(admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), false)));
 
       assertEquals(1, ((Result.Success<PruneReport>) rehearsed).value().specs());
       assertEquals(1, ((Result.Success<PruneReport>) erased).value().specs());
@@ -1143,7 +1201,7 @@ class SailOperationsSeamTest {
             assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
 
         assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
-        assertTrue(refused.getMessage().contains("does not know its FDE's role yet"));
+        assertTrue(refused.getMessage().contains("does not know its FDE's role"));
       }
     }
   }
@@ -1185,8 +1243,7 @@ class SailOperationsSeamTest {
       var projects = new ProjectStore(db);
       var definition = "name: old\n";
       Acting.system(() -> projects.upsert("old", definition));
-      ai.singlr.sail.engine.ProjectFileFixtures.put(
-          operations.projectFiles("old"), "config", new byte[] {1});
+      ProjectFileFixtures.put(operations.projectFiles("old"), "config", new byte[] {1});
       assertFalse(operations.catalog().destroy("old", false).purged());
       var renamed = operations.catalog().rename("old", "new");
       assertTrue(operations.catalog().project("old").isEmpty());
@@ -1309,13 +1366,12 @@ class SailOperationsSeamTest {
       assertThrows(
           ApiException.class,
           () ->
-              operations
-                  .dispatching()
-                  .stop(
-                      new StopOperations.RunTarget("missing"),
-                      Actor.cliOperator("node"),
-                      "node",
-                      false));
+              Actor.call(
+                  Actor.cliOperator("node"),
+                  () ->
+                      operations
+                          .dispatching()
+                          .stop(new StopOperations.RunTarget("missing"), "node", false)));
     }
   }
 
@@ -1325,9 +1381,20 @@ class SailOperationsSeamTest {
             main.db,
             "main",
             Actor.sync("node", Role.MEMBER),
-            List::of,
+            () -> rosterOf(main),
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR));
+  }
+
+  /** Main's roster as its sync server serves it to a node. */
+  private static List<Map<String, Object>> rosterOf(SyncBox main) {
+    return new FdeStore(main.db)
+        .list().stream()
+            .map(
+                fde ->
+                    Map.<String, Object>of(
+                        "handle", fde.handle(), "role", fde.role(), "status", fde.status()))
+            .toList();
   }
 
   private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {

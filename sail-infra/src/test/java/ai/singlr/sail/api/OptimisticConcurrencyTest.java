@@ -50,7 +50,13 @@ class OptimisticConcurrencyTest {
         new SailOperations(new ShellExecutor(false), "sail.yaml", bus, persister, specStore);
     server =
         new SailApiServer(
-            "127.0.0.1", 0, operations, tokenStore, bus, persister, tempDir.resolve("api.sock"));
+            "127.0.0.1",
+            0,
+            operations,
+            TestAuth.tokens(db),
+            bus,
+            persister,
+            tempDir.resolve("api.sock"));
     server.start();
     Acting.as(
         null,

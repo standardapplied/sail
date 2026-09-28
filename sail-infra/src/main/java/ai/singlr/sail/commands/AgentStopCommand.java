@@ -23,7 +23,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -88,9 +87,7 @@ public final class AgentStopCommand implements Runnable {
             SailPaths.PROJECT_DESCRIPTOR,
             hooks(shell, this::publishLifecycle, listener()),
             SessionYield.NONE)) {
-      var outcome =
-          CliOperator.actingUnlessPreview(
-              dryRun, operations.identity()::operator, () -> stop(operations, handle));
+      var outcome = stopAsOperator(operations, name, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
@@ -98,10 +95,19 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  private StopOperations.Outcome stop(HostOperations operations, String handle) {
-    return operations
-        .dispatching()
-        .stop(new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
+  /**
+   * Stops {@code project}'s run as this box's operator — acting as no one for a preview, which
+   * writes and signals nothing.
+   */
+  static StopOperations.Outcome stopAsOperator(
+      HostOperations operations, String project, String handle, boolean dryRun) {
+    return CliOperator.actingUnlessPreview(
+        dryRun,
+        operations.identity()::operator,
+        () ->
+            operations
+                .dispatching()
+                .stop(new StopOperations.ProjectTarget(project), handle, dryRun));
   }
 
   /**

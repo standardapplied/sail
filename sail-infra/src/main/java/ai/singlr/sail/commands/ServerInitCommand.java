@@ -5,11 +5,12 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostIdentity;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.ServerConnectionConfig;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.store.TokenStore;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -50,28 +51,23 @@ public final class ServerInitCommand implements Runnable {
       }
 
       var configPath = SailPaths.clientConfigPath();
-      var existing = operations.identity().tokens();
-      var existingAdmin = existing.stream().anyMatch(t -> "admin".equals(t.name()));
+      var identity = operations.identity();
+      var existing = identity.tokens();
+      var existingAdmin = existing.stream().anyMatch(t -> HostToken.NAME.equals(t.name()));
       var configMissing = !Files.exists(configPath);
       if (existing.isEmpty()) {
-        var created =
-            operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
-        ServerConnectionConfig.saveLocalToken(created.token(), configPath);
-        System.out.println(
-            Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
+        identity.mintHostToken(configPath);
+        announce(identity, configPath);
       } else if (configMissing) {
         if (existingAdmin) {
-          operations.identity().revokeToken("admin");
+          identity.revokeToken(HostToken.NAME);
           System.out.println(
               Ansi.AUTO.string(
                   "  @|yellow ↻|@ Config missing — rotating admin token (old plaintext is"
                       + " unrecoverable)."));
         }
-        var created =
-            operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
-        ServerConnectionConfig.saveLocalToken(created.token(), configPath);
-        System.out.println(
-            Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
+        identity.mintHostToken(configPath);
+        announce(identity, configPath);
       } else {
         System.out.println(
             Ansi.AUTO.string(
@@ -81,5 +77,14 @@ public final class ServerInitCommand implements Runnable {
                     + configPath));
       }
     }
+  }
+
+  private static void announce(HostIdentity identity, Path configPath) {
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|green ✓|@ API token created and saved to "
+                + configPath
+                + "; "
+                + HostToken.describe(identity.box())));
   }
 }

@@ -42,7 +42,8 @@ class DispatchPolicyTest {
 
   private static DispatchDecision.Refused refuse(Actor actor, Spec spec, String localHandle) {
     return assertInstanceOf(
-        DispatchDecision.Refused.class, DispatchPolicy.check(actor, spec, localHandle));
+        DispatchDecision.Refused.class,
+        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle)));
   }
 
   @Test
@@ -97,13 +98,16 @@ class DispatchPolicyTest {
   @Test
   void memberDispatchingOwnLocalSpecIsAllowed() {
     assertInstanceOf(
-        DispatchDecision.Allowed.class, DispatchPolicy.check(member(NODE), spec(NODE), NODE));
+        DispatchDecision.Allowed.class,
+        Actor.call(member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test
   void adminMayDispatchAnyLocalSpecEvenWithoutMatchingHandle() {
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
-    assertInstanceOf(DispatchDecision.Allowed.class, DispatchPolicy.check(admin, spec(NODE), NODE));
+    assertInstanceOf(
+        DispatchDecision.Allowed.class,
+        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test
@@ -116,7 +120,7 @@ class DispatchPolicyTest {
   void cliOperatorDispatchingOwnSpecIsAllowed() {
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        DispatchPolicy.check(Actor.cliOperator(NODE), spec(NODE), NODE));
+        Actor.call(Actor.cliOperator(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
   }
 
   @Test

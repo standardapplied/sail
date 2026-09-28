@@ -18,6 +18,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -30,6 +31,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
@@ -41,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -314,11 +317,12 @@ public final class Fleet implements AutoCloseable {
                   reviews,
                   runs,
                   projects,
-                  ai.singlr.sail.engine.ConnectEnvironment::detect,
+                  ConnectEnvironment::detect,
                   SyncScheduler.disabled(),
                   fdes,
                   SessionYield.NONE)
-              .useMessages(messages);
+              .useMessages(messages)
+              .useRooms(new RoomStore(db));
       slack = new CapturingPoster();
       var syncConfig =
           main
@@ -336,7 +340,7 @@ public final class Fleet implements AutoCloseable {
               "127.0.0.1",
               freePort(),
               operations,
-              new SessionAwareAuth(new AuthSessionStore(db), fdes, new TokenAuth(tokens)),
+              TestAuth.sessions(db),
               bus,
               null,
               home.resolve(".sail/sail-api.sock"),
@@ -367,11 +371,14 @@ public final class Fleet implements AutoCloseable {
           Acting.as(
               handle,
               () ->
-                  dispatcher.dispatch(
-                      PROJECT,
-                      new DispatchOperations.Request(specId, "background", false, null, false),
+                  Actor.call(
                       Actor.cliOperator(handle),
-                      handle));
+                      () ->
+                          dispatcher.dispatch(
+                              PROJECT,
+                              new DispatchOperations.Request(
+                                  specId, "background", false, null, false),
+                              handle)));
       return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     }
 
@@ -392,11 +399,9 @@ public final class Fleet implements AutoCloseable {
       return Acting.as(
           handle,
           () ->
-              stopper.stop(
-                  new StopOperations.ProjectTarget(PROJECT),
+              Actor.call(
                   Actor.cliOperator(handle),
-                  handle,
-                  false));
+                  () -> stopper.stop(new StopOperations.ProjectTarget(PROJECT), handle, false)));
     }
 
     /**
@@ -414,7 +419,7 @@ public final class Fleet implements AutoCloseable {
               bus,
               (project, runId, unit) -> false,
               () -> handle,
-              () -> java.time.Instant.now().plus(Duration.ofHours(1)));
+              () -> Instant.now().plus(Duration.ofHours(1)));
       return reconciler.sweep();
     }
 
@@ -441,11 +446,11 @@ public final class Fleet implements AutoCloseable {
       return Acting.as(
               handle,
               () ->
-                  operations.postRoomMessage(
-                      specId,
-                      new SpecMessageRequest(body, null, false),
+                  Actor.call(
                       Actor.cliOperator(handle),
-                      handle))
+                      () ->
+                          operations.postRoomMessage(
+                              specId, new SpecMessageRequest(body, null, false), handle)))
           .orThrow()
           .message();
     }
@@ -471,7 +476,7 @@ public final class Fleet implements AutoCloseable {
     }
 
     public Result<RunLogResponse> runLog(String runId) {
-      return operations.runLog(runId, 100, handle, Actor.cliOperator(handle));
+      return Actor.call(Actor.cliOperator(handle), () -> operations.runLog(runId, 100, handle));
     }
 
     public String latestPeer(String specId) {

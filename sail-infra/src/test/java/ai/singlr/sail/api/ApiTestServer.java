@@ -56,7 +56,7 @@ public final class ApiTestServer implements AutoCloseable {
     var socketPath = tempDir.resolve("api.sock");
     var server =
         new SailApiServer(
-            "127.0.0.1", 0, operations, tokenStore, eventBus, auditSubscriber, socketPath);
+            "127.0.0.1", 0, operations, TestAuth.tokens(db), eventBus, auditSubscriber, socketPath);
     server.start();
     return new ApiTestServer(db, server, tokenStore, token);
   }

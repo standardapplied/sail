@@ -5,9 +5,7 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.TokenStore;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -31,75 +29,11 @@ public final class SailApiServer implements AutoCloseable {
   private final LocalApiSocket socketListener;
 
   /**
-   * Construct with database-backed token auth. Used by the control plane server ({@code sail server
-   * start}). When {@code eventBus} is non-null, the persister is registered as a subscriber, the
-   * SSE handler is mounted, and a Unix-socket events listener is started at {@link
-   * SailPaths#apiSocketPath()} so project containers can publish events without going over TCP.
+   * Construct with {@code auth}. When {@code eventBus} is non-null, the persister is registered as
+   * a subscriber, the SSE handler is mounted, and a Unix-socket events listener is started at
+   * {@code socketPath} (none when null) so project containers can publish events without going over
+   * TCP.
    */
-  public SailApiServer(
-      String host,
-      int port,
-      Operations operations,
-      TokenStore tokenStore,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber)
-      throws IOException {
-    this(
-        host,
-        port,
-        operations,
-        new TokenAuth(tokenStore),
-        eventBus,
-        auditSubscriber,
-        SailPaths.apiSocketPath(),
-        null);
-  }
-
-  /**
-   * Control-plane constructor that also mounts the passkey ceremony endpoints at {@code /v1/auth}.
-   * Pass {@code null} for {@code passkeyHandler} to leave passkey login unmounted.
-   */
-  public SailApiServer(
-      String host,
-      int port,
-      Operations operations,
-      TokenStore tokenStore,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      HttpHandler passkeyHandler)
-      throws IOException {
-    this(
-        host,
-        port,
-        operations,
-        new TokenAuth(tokenStore),
-        eventBus,
-        auditSubscriber,
-        SailPaths.apiSocketPath(),
-        passkeyHandler);
-  }
-
-  /** Test / advanced constructor that lets the caller pick the UDS path. */
-  public SailApiServer(
-      String host,
-      int port,
-      Operations operations,
-      TokenStore tokenStore,
-      EventBus eventBus,
-      EventSubscriber auditSubscriber,
-      Path socketPath)
-      throws IOException {
-    this(
-        host,
-        port,
-        operations,
-        new TokenAuth(tokenStore),
-        eventBus,
-        auditSubscriber,
-        socketPath,
-        null);
-  }
-
   SailApiServer(
       String host,
       int port,

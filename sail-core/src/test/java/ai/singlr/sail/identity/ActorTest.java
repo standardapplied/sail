@@ -84,6 +84,16 @@ class ActorTest {
   void machineTokenActsForNoOne() {
     var machine = new Actor(null, Role.MEMBER, Actor.Lane.API);
     assertFalse(machine.actsFor("uday"));
+    assertFalse(new Actor("", Role.MEMBER, Actor.Lane.API).actsFor(""), "blank is no one");
+  }
+
+  @Test
+  void theActingFdeIsTheHandleOrTheFdeARunActsFor() {
+    assertEquals("uday", Actor.cliOperator("uday").actingFde());
+    assertEquals("uday", Actor.agentPrincipal("claude/a1b2c3", "uday").actingFde());
+    assertEquals("uday", Actor.roomPrincipal("claude/room-a1b2c3", "uday").actingFde());
+    assertEquals("carol", Actor.sync("carol", Role.MEMBER).actingFde());
+    assertNull(new Actor(null, Role.ADMIN, Actor.Lane.API).actingFde());
   }
 
   @Test

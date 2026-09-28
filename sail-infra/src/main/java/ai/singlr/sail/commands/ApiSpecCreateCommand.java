@@ -49,7 +49,10 @@ public final class ApiSpecCreateCommand implements Runnable {
   @Option(names = "--status", description = "Initial status.", defaultValue = "draft")
   private String status;
 
-  @Option(names = "--assignee", description = "Assignee.")
+  @Option(
+      names = "--assignee",
+      description =
+          "FDE handle to assign; leave blank for anyone to claim. The agent type goes in --agent.")
   private String assignee;
 
   @Option(names = "--agent", description = "Agent override.")

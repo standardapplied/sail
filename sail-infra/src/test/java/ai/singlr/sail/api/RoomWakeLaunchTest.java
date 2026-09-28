@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
@@ -37,6 +39,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -202,11 +205,11 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aSpeclessFullWakeClaimsTheRepoSetAndOwnerFallsToTheWaker() throws Exception {
+  void aSpeclessFullWakeClaimsTheRepoSetAndActsForTheRoomsOwner() throws Exception {
     var ops = operations(liveAgentShell());
     var rooms = new RoomStore(db);
     Acting.as(
-        null,
+        HANDLE,
         () ->
             rooms.create(
                 new RoomStore.RoomRow(
@@ -223,7 +226,7 @@ class RoomWakeLaunchTest {
     var run = runStore.findById(runId).orElseThrow();
     assertEquals("room-full", run.role());
     assertTrue(run.task().contains("Collaborator Turn (full access)"));
-    assertEquals(HANDLE, run.owner(), "a room with no owner falls to the waking box");
+    assertEquals(HANDLE, run.owner(), "an unassigned room's run acts for its creator");
   }
 
   @Test
@@ -394,6 +397,37 @@ class RoomWakeLaunchTest {
   }
 
   @Test
+  void anUnassignedSpecsRoomRunActsForItsCreator() throws Exception {
+    var ops = operations(liveAgentShell());
+    Acting.as(
+        "mady",
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "draft",
+                    "acme",
+                    "Draft",
+                    SpecStatus.PENDING,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of("app"))));
+    Acting.system(() -> specStore.setContent("draft", "Draft it.", ""));
+
+    var run = runStore.findById(ops.startRoomRun("acme", "draft", HANDLE)).orElseThrow();
+
+    assertEquals("mady", run.owner(), "the run acts for the spec's owner, never the waker");
+  }
+
+  @Test
   void aWakeMintsARoomRunAndSeedsTheLedgerWithTheRenderedMessages() throws Exception {
     var ops = operations(liveAgentShell());
     seedSpec("auth");
@@ -414,7 +448,7 @@ class RoomWakeLaunchTest {
     assertEquals("sail-agent-" + runId, run.unit());
     assertEquals(123, run.pid());
     assertEquals(
-        java.util.Set.of(question.id(), verdict.id()),
+        Set.of(question.id(), verdict.id()),
         runStore.deliveredMessageIds(runId),
         "the prompt is the run's first delivery, seeded by identity");
     assertTrue(run.task().contains("Room Duty"));
@@ -667,10 +701,7 @@ class RoomWakeLaunchTest {
           rooms.ensureFor(specId, spec.project(), spec.title(), spec.assignee(), null);
           rooms.updateRoster(
               specId,
-              ai.singlr.sail.config.Roster.solo(
-                      ai.singlr.sail.config.Engagement.of(
-                          agent, mode, null, "2026-08-18T00:00:00Z"))
-                  .toJson());
+              Roster.solo(Engagement.of(agent, mode, null, "2026-08-18T00:00:00Z")).toJson());
         });
   }
 

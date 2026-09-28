@@ -33,32 +33,41 @@ class ReviewPolicyTest {
 
   @Test
   void adminMayDecideAnyReview() {
-    assertAllowed(ReviewPolicy.decide(actor("ops", Role.ADMIN), REVIEW, SPEC, "raj"));
+    assertAllowed(
+        Actor.call(actor("ops", Role.ADMIN), () -> ReviewPolicy.decide(REVIEW, SPEC, "raj")));
   }
 
   @Test
   void assigneeMayApproveTheirOwnReview() {
-    assertAllowed(ReviewPolicy.decide(actor("uday", Role.MEMBER), REVIEW, SPEC, "uday"));
+    assertAllowed(
+        Actor.call(actor("uday", Role.MEMBER), () -> ReviewPolicy.decide(REVIEW, SPEC, "uday")));
   }
 
   @Test
   void nonAssigneeMemberIsRefusedNamingTheAssignee() {
-    var r = refused(ReviewPolicy.decide(actor("uday", Role.MEMBER), REVIEW, SPEC, "raj"));
+    var r =
+        refused(
+            Actor.call(actor("uday", Role.MEMBER), () -> ReviewPolicy.decide(REVIEW, SPEC, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("raj"), r.message());
     assertTrue(r.fix().contains("approve or dismiss"), r.fix());
   }
 
   @Test
-  void unassignedSpecAllowsOnlyAdmin() {
-    var r = refused(ReviewPolicy.decide(actor("uday", Role.MEMBER), REVIEW, SPEC, ""));
+  void aSpecWithNoOwnerAllowsOnlyAdmin() {
+    var r =
+        refused(
+            Actor.call(actor("uday", Role.MEMBER), () -> ReviewPolicy.decide(REVIEW, SPEC, "")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
-    assertAllowed(ReviewPolicy.decide(actor("ops", Role.ADMIN), REVIEW, SPEC, ""));
+    assertAllowed(
+        Actor.call(actor("ops", Role.ADMIN), () -> ReviewPolicy.decide(REVIEW, SPEC, "")));
   }
 
   @Test
   void machineTokenWithoutHandleNeverMatchesAssignee() {
-    var r = refused(ReviewPolicy.decide(actor(null, Role.MEMBER), REVIEW, SPEC, "raj"));
+    var r =
+        refused(
+            Actor.call(actor(null, Role.MEMBER), () -> ReviewPolicy.decide(REVIEW, SPEC, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
 }

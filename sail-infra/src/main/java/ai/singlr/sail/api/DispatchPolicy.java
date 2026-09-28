@@ -30,11 +30,12 @@ public final class DispatchPolicy {
   private DispatchPolicy() {}
 
   /**
-   * Decides whether {@code actor} may dispatch {@code spec} on the node identified by {@code
+   * Decides whether the bound actor may dispatch {@code spec} on the node identified by {@code
    * localHandle}. Rules are checked in order — node identity, execution locality, caller
    * capability, then ownership — so the most fundamental precondition names the refusal.
    */
-  public static DispatchDecision check(Actor actor, Spec spec, String localHandle) {
+  public static DispatchDecision check(Spec spec, String localHandle) {
+    var actor = Actor.current();
     if (actor.agentLane()) {
       return agentLaneForbidden("dispatch specs");
     }
@@ -92,7 +93,7 @@ public final class DispatchPolicy {
       return new DispatchDecision.Refused(
           ErrorCode.RUNS_ON_OTHER_NODE,
           "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
-          "Assign it first: sail spec update " + spec.id() + " --assignee " + localHandle);
+          "Claim it first: sail spec update " + spec.id() + " --assignee " + localHandle);
     }
     return new DispatchDecision.Refused(
         ErrorCode.RUNS_ON_OTHER_NODE,

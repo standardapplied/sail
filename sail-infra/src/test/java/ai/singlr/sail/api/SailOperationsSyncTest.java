@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -66,9 +67,7 @@ class SailOperationsSyncTest {
     var operations = operations(scheduler(), store -> {});
 
     var result =
-        Acting.by(
-            Actor.cliOperator("uday"),
-            () -> operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
+        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("auth")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -81,9 +80,7 @@ class SailOperationsSyncTest {
     var result =
         Acting.by(
             new Actor("uday", Role.ADMIN, Actor.Lane.API),
-            () ->
-                operations.updateGlobalSpec(
-                    "missing", update("pending"), new Actor("uday", Role.ADMIN, Actor.Lane.API)));
+            () -> operations.updateGlobalSpec("missing", update("pending")));
 
     assertInstanceOf(Result.Failure.class, result);
     assertEquals(0, rounds.get());
@@ -101,17 +98,13 @@ class SailOperationsSyncTest {
             store -> {});
 
     var result =
-        Acting.by(
-            Actor.cliOperator("uday"),
-            () -> operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday")));
+        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("auth")));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
     assertInstanceOf(
         Result.Success.class,
-        Acting.by(
-            Actor.cliOperator("uday"),
-            () -> operations.createGlobalSpec(create("billing"), Actor.cliOperator("uday"))));
+        Acting.by(Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("billing"))));
     assertEquals(2, rounds.get());
   }
 
@@ -142,8 +135,7 @@ class SailOperationsSyncTest {
                   Result.Success.class,
                   Acting.by(
                       Actor.cliOperator("uday"),
-                      () ->
-                          operations.createGlobalSpec(create("auth"), Actor.cliOperator("uday"))));
+                      () -> operations.createGlobalSpec(create("auth"))));
             });
 
     assertEquals(0, rounds.get());
@@ -166,11 +158,11 @@ class SailOperationsSyncTest {
         operations(scheduler(), null, dispatchShell(), SailOperationsSyncTest::seedReady);
 
     var result =
-        operations.dispatch(
-            "acme",
-            new DispatchRequest("auth", "background", true),
+        Actor.call(
             new Actor("uday", Role.ADMIN, Actor.Lane.API),
-            "uday");
+            () ->
+                operations.dispatch(
+                    "acme", new DispatchRequest("auth", "background", true), "uday"));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(2, rounds.get());
@@ -181,11 +173,10 @@ class SailOperationsSyncTest {
     var operations = operations(scheduler(), null, dispatchShell(), store -> {});
 
     var result =
-        operations.dispatch(
-            "acme",
-            new DispatchRequest(null, "background", true),
+        Actor.call(
             new Actor("uday", Role.ADMIN, Actor.Lane.API),
-            "uday");
+            () ->
+                operations.dispatch("acme", new DispatchRequest(null, "background", true), "uday"));
 
     assertInstanceOf(Result.Success.class, result);
     assertEquals(1, rounds.get());
@@ -237,7 +228,7 @@ class SailOperationsSyncTest {
         null,
         null,
         null,
-        () -> new ai.singlr.sail.engine.ConnectEnvironment("203.0.113.7", "uday", true),
+        () -> new ConnectEnvironment("203.0.113.7", "uday", true),
         scheduler);
   }
 

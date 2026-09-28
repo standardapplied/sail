@@ -18,8 +18,10 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -30,6 +32,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -146,6 +149,40 @@ class DispatchCommandWiringTest {
   }
 
   @Test
+  void aViewerNodesCliDispatchAndStopAreRefusedWithTheSyncedRole() throws Exception {
+    var operations = cliOperations(shell(), new ArrayList<>());
+    var fdes = new FdeStore(db);
+    fdes.add(HANDLE, null, null, "member");
+    operations.useControlPlane(
+        db,
+        tempDir,
+        new SyncOperations(
+            db,
+            "box",
+            tempDir,
+            () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
+            target -> {
+              throw new IOException("main unavailable");
+            }));
+    assertInstanceOf(
+        DispatchOperations.Dispatched.class,
+        DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
+
+    fdes.update(HANDLE, null, null, "viewer");
+
+    var stop =
+        assertThrows(
+            ApiException.class,
+            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, false));
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
+    var dispatch =
+        assertThrows(
+            IllegalStateException.class,
+            () -> DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
+    assertTrue(dispatch.getMessage().contains("read-only"), dispatch.getMessage());
+  }
+
+  @Test
   void cliConstructionPathRecordsTheRunStampsTheBranchAndAnswersRuns() throws Exception {
     var events = new ArrayList<Event>();
     var operations = cliOperations(shell(), events);
@@ -199,9 +236,9 @@ class DispatchCommandWiringTest {
         assertThrows(
             ApiException.class,
             () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> operations.dispatching().dispatch("acme", request, HANDLE)));
 
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("spec id"));
@@ -242,9 +279,9 @@ class DispatchCommandWiringTest {
         assertThrows(
             ApiException.class,
             () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> operations.dispatching().dispatch("acme", request(), HANDLE)));
 
     assertTrue(ex.getMessage().contains("roster"));
     assertEquals(

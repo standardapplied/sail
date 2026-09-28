@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -35,7 +36,8 @@ class AuthorizationTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     tokenStore = new TokenStore(db);
-    server = new SailApiServer("127.0.0.1", 0, ops, tokenStore, new EventBus(), null);
+    server =
+        new SailApiServer("127.0.0.1", 0, ops, TestAuth.tokens(db), new EventBus(), null, null);
     server.start();
   }
 
@@ -101,7 +103,7 @@ class AuthorizationTest {
 
   @Test
   void fdeOwnedTokenCanWrite() throws Exception {
-    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var fde = new FdeStore(db).add("uday", null, null);
     var token = tokenStore.create("uday-laptop", "admin", fde.id(), null).token();
     assertNotEquals(403, send("POST", "/v1/specs", token, "{}").statusCode());
   }
@@ -121,7 +123,7 @@ class AuthorizationTest {
 
   @Test
   void assigneeMeResolvesToFdeHandle() throws Exception {
-    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var fde = new FdeStore(db).add("uday", null, null);
     var token = tokenStore.create("uday-laptop", "member", fde.id(), null).token();
     send("GET", "/v1/specs?assignee=me", token, null);
     assertEquals("uday", ops.lastAssignee);

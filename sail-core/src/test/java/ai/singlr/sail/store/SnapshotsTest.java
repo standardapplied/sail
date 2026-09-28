@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -84,5 +85,33 @@ class SnapshotsTest {
   @ActingAs(value = Actor.Lane.CLI, handle = "uday")
   void aLocalWriteIsAuthoredByTheActorWhateverTheSnapshotSays() {
     assertEquals("uday", Snapshots.actor(Map.of("_actor", "someone-else")));
+  }
+
+  @Test
+  @ActingAs(value = Actor.Lane.MAIN, handle = "main")
+  void aNodeAdoptsTheCreatorMainHoldsNoneIncludedAndKeepsItsOwnWhenMainNamesNone() {
+    var none = new HashMap<String, Object>();
+    none.put(Snapshots.CREATOR, null);
+
+    assertEquals("carol", Snapshots.adoptedCreator(Map.of("_created_by", "carol"), "alice"));
+    assertNull(Snapshots.adoptedCreator(none, "alice"), "main holds none");
+    assertEquals("alice", Snapshots.adoptedCreator(Map.of("title", "t"), "alice"), "older main");
+  }
+
+  @Test
+  @ActingAs(value = Actor.Lane.SYNC, handle = "node")
+  void mainKeepsTheCreatorItHoldsWhateverAnOfferNames() {
+    assertEquals("carol", Snapshots.adoptedCreator(Map.of("_created_by", "mallory"), "carol"));
+  }
+
+  @Test
+  void anAcceptedOfferNamesTheCreatorMainHoldsOnlyWhenMainSaysSo() {
+    var offer = Map.<String, Object>of("title", "t", "_created_by", "alice");
+
+    assertEquals(offer, Snapshots.withCreator(offer, null));
+    assertNull(Snapshots.withCreator(offer, new Snapshots.Creator(null)).get("_created_by"));
+    assertEquals(
+        "carol", Snapshots.withCreator(offer, new Snapshots.Creator("carol")).get("_created_by"));
+    assertNull(Snapshots.withCreator(null, new Snapshots.Creator("carol")));
   }
 }

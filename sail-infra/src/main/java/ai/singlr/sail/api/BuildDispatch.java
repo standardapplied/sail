@@ -19,7 +19,6 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -107,7 +106,7 @@ public final class BuildDispatch {
    * configured, launch, and arm the guardrail watcher. Every refusal fires before any mutation.
    */
   public DispatchOperations.Outcome dispatch(
-      String project, DispatchOperations.Request request, Actor actor, String localHandle) {
+      String project, DispatchOperations.Request request, String localHandle) {
     var loaded = projects.loadRunning(project);
     if (!request.mode().equals("background") && !request.mode().equals("foreground")) {
       throw new ApiException(
@@ -123,7 +122,7 @@ public final class BuildDispatch {
     }
 
     var specs = specStore.projectSpecs(project);
-    var resolution = resolveSpec(specs, request.specId(), request.restart(), actor, localHandle);
+    var resolution = resolveSpec(specs, request.specId(), request.restart(), localHandle);
     if (resolution.spec() == null) {
       return new DispatchOperations.NoSpecs();
     }
@@ -241,7 +240,7 @@ public final class BuildDispatch {
    * refusal fires before any mutation, so a refused caller can never reset a status.
    */
   static SpecResolution resolveSpec(
-      List<Spec> specs, String specId, boolean restart, Actor actor, String localHandle) {
+      List<Spec> specs, String specId, boolean restart, String localHandle) {
     var spec = Strings.isBlank(specId) ? null : SpecCatalog.findById(specs, specId);
     if (spec == null) {
       if (RestartResolution.decide(specId, null, restart)
@@ -252,10 +251,10 @@ public final class BuildDispatch {
       if (next == null) {
         return SpecResolution.none();
       }
-      LaunchAdmission.requireAllowed(actor, next, localHandle);
+      LaunchAdmission.requireAllowed(next, localHandle);
       return SpecResolution.of(next);
     }
-    LaunchAdmission.requireAllowed(actor, spec, localHandle);
+    LaunchAdmission.requireAllowed(spec, localHandle);
     return switch (RestartResolution.decide(specId, spec, restart)) {
       case RestartResolution.Refused refused -> throw refusal(refused);
       case RestartResolution.NotRestarted ignored -> {

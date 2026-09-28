@@ -253,10 +253,7 @@ public final class JoinCommand implements Runnable {
   private static List<String> nodeFdeHandles() {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
       return new FdeStore(db)
-          .list().stream()
-              .filter(fde -> "active".equals(fde.status()))
-              .map(FdeStore.Fde::handle)
-              .toList();
+          .list().stream().filter(FdeStore.Fde::active).map(FdeStore.Fde::handle).toList();
     } catch (Exception ignored) {
       return List.of();
     }

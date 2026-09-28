@@ -83,7 +83,9 @@ public final class HostSyncCommand implements Runnable {
   static HostYaml configure(HostYaml host, boolean asMain, String mainTarget, String hostname) {
     var identified = withBoxId(host, hostname);
     if (asMain) {
-      return HostConfigSetCommand.applyChange(identified, "sync-role", SyncConfig.ROLE_MAIN);
+      var sync = identified.sync();
+      return identified.withSync(
+          new SyncConfig(SyncConfig.ROLE_MAIN, null, sync.handle(), sync.boxId()));
     }
     HostConfigSetCommand.validate("sync-main", mainTarget);
     var asNode = HostConfigSetCommand.applyChange(identified, "sync-role", SyncConfig.ROLE_NODE);

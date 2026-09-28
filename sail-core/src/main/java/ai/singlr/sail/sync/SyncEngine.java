@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.Snapshots;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
@@ -158,7 +160,8 @@ public final class SyncEngine {
           if (localSnap == null && Objects.equals(localRev, remoteRev)) {
             return Outcome.CONVERGED;
           }
-          return adoptOrRedetect(id, localRev, null, remoteRev, Outcome.PULLED, redetectsLeft);
+          return adoptOrRedetect(
+              id, localRev, null, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
         }
         remoteSnap = null;
       }
@@ -176,19 +179,44 @@ public final class SyncEngine {
             remoteRev == null || Objects.equals(localRev, remoteRev)
                 ? Outcome.CONVERGED
                 : adoptOrRedetect(
-                    id, localRev, remoteSnap, remoteRev, Outcome.CONVERGED, redetectsLeft);
+                    id,
+                    localRev,
+                    remoteSnap,
+                    remoteRev,
+                    main.author(id),
+                    Outcome.CONVERGED,
+                    redetectsLeft);
         case ConflictDetector.TakeRemote ignored ->
-            adoptOrRedetect(id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+            adoptOrRedetect(
+                id,
+                localRev,
+                remoteSnap,
+                remoteRev,
+                main.author(id),
+                Outcome.PULLED,
+                redetectsLeft);
         case ConflictDetector.KeepLocal ignored ->
             local.mayPush(id)
                 ? offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
                 : adoptOrRedetect(
-                    id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+                    id,
+                    localRev,
+                    remoteSnap,
+                    remoteRev,
+                    main.author(id),
+                    Outcome.PULLED,
+                    redetectsLeft);
         case ConflictDetector.Merged m ->
             local.mayPush(id)
                 ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
                 : adoptOrRedetect(
-                    id, localRev, remoteSnap, remoteRev, Outcome.PULLED, redetectsLeft);
+                    id,
+                    localRev,
+                    remoteSnap,
+                    remoteRev,
+                    main.author(id),
+                    Outcome.PULLED,
+                    redetectsLeft);
         case ConflictDetector.Conflict c -> {
           local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
           yield Outcome.CONFLICT;
@@ -210,14 +238,30 @@ public final class SyncEngine {
         String expectedLocalRev,
         Map<String, Object> snapshot,
         String rev,
+        String author,
         Outcome onAdopted,
         int redetectsLeft) {
-      if (local.adoptIfCurrent(id, expectedLocalRev, snapshot, rev)) {
+      if (adopt(id, expectedLocalRev, snapshot, rev, author)) {
         return onAdopted;
       }
       return redetectsLeft <= 0
           ? recordStaleConflict(id, main.current(id))
           : reconcileEntity(id, main.current(id), main.currentRev(id), redetectsLeft - 1);
+    }
+
+    /**
+     * Adopts main's version at {@code rev} if the local row still sits at {@code expectedLocalRev},
+     * as main recording {@code author} — so a tombstone, which has no snapshot to name its author
+     * in, records the same author on this box as on main.
+     */
+    private boolean adopt(
+        String id,
+        String expectedLocalRev,
+        Map<String, Object> snapshot,
+        String rev,
+        String author) {
+      return Actor.call(
+          Actor.main(author), () -> local.adoptIfCurrent(id, expectedLocalRev, snapshot, rev));
     }
 
     /** Queues the snapshot for main's next batch; its verdict is settled when the batch answers. */
@@ -247,8 +291,9 @@ public final class SyncEngine {
             adoptOrRedetect(
                 offer.id(),
                 offer.offeredLocalRev(),
-                offer.snapshot(),
+                Snapshots.withCreator(offer.snapshot(), a.creator()),
                 a.rev(),
+                a.author(),
                 offer.onAccepted(),
                 offer.redetectsLeft());
         case CommitOutcome.Rejected r ->
@@ -258,8 +303,7 @@ public final class SyncEngine {
                     offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
         case CommitOutcome.Denied d ->
             !local.live(offer.id())
-                    && local.adoptIfCurrent(
-                        offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev())
+                    && adopt(offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev(), d.author())
                 ? Outcome.PULLED
                 : Outcome.DENIED;
       };

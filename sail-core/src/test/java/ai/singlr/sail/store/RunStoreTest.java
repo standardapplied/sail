@@ -21,11 +21,17 @@ import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -841,8 +847,8 @@ class RunStoreTest {
     return new RunStore(freshDb);
   }
 
-  private static java.util.Map<String, Object> base() {
-    return java.util.Map.of(
+  private static Map<String, Object> base() {
+    return Map.of(
         "project",
         "backend",
         "spec_id",
@@ -857,8 +863,8 @@ class RunStoreTest {
         "running");
   }
 
-  private static java.util.Map<String, Object> moved() {
-    return java.util.Map.of(
+  private static Map<String, Object> moved() {
+    return Map.of(
         "project",
         "backend",
         "spec_id",
@@ -873,12 +879,12 @@ class RunStoreTest {
         "completed");
   }
 
-  private static java.util.Map<String, Object> theirs() {
+  private static Map<String, Object> theirs() {
     return moved();
   }
 
-  private java.util.Optional<DispatchGate.Conflict> reserve(
-      RunStore target, String id, String specId, String node, java.util.List<String> repos) {
+  private Optional<DispatchGate.Conflict> reserve(
+      RunStore target, String id, String specId, String node, List<String> repos) {
     return conflictOf(
         target.reserveDispatch(
             id,
@@ -895,14 +901,13 @@ class RunStoreTest {
             "sail-agent-" + id));
   }
 
-  private static java.util.Optional<DispatchGate.Conflict> conflictOf(
-      RunStore.Reservation reservation) {
+  private static Optional<DispatchGate.Conflict> conflictOf(RunStore.Reservation reservation) {
     return reservation instanceof RunStore.Reservation.Conflicted conflicted
-        ? java.util.Optional.of(conflicted.conflict())
-        : java.util.Optional.empty();
+        ? Optional.of(conflicted.conflict())
+        : Optional.empty();
   }
 
-  private java.util.Optional<DispatchGate.Conflict> reserveAdhoc(String id, String node) {
+  private Optional<DispatchGate.Conflict> reserveAdhoc(String id, String node) {
     return conflictOf(
         store.reserveDispatch(
             id,
@@ -911,7 +916,7 @@ class RunStoreTest {
             node,
             node,
             "adhoc",
-            java.util.List.of(),
+            List.of(),
             "claude-code",
             null,
             "do it",
@@ -929,7 +934,7 @@ class RunStoreTest {
     var run = store.findById(id).orElseThrow();
     assertEquals("adhoc", run.role());
     assertEquals("", run.specId());
-    assertEquals(java.util.List.of(), run.repos());
+    assertEquals(List.of(), run.repos());
     assertEquals("running", run.status());
     assertEquals("sail-agent-" + id, run.unit());
   }
@@ -939,15 +944,14 @@ class RunStoreTest {
     reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     assertTrue(conflict.isPresent(), "an ad-hoc session reserves the whole container");
   }
 
   @Test
   void aRunningDispatchBlocksAnAdhocReservation() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     var conflict = reserveAdhoc(DateTimeUtils.newId().toString(), "node-a");
 
@@ -972,8 +976,7 @@ class RunStoreTest {
     assertTrue(reserveAdhoc(DateTimeUtils.newId().toString(), "node-a").isEmpty());
   }
 
-  private java.util.Optional<DispatchGate.Conflict> reserveRoom(
-      String id, String specId, String node) {
+  private Optional<DispatchGate.Conflict> reserveRoom(String id, String specId, String node) {
     return conflictOf(
         store.reserveDispatch(
             id,
@@ -982,7 +985,7 @@ class RunStoreTest {
             node,
             node,
             "room",
-            java.util.List.of(),
+            List.of(),
             "claude-code",
             null,
             "answer in the room",
@@ -1002,7 +1005,19 @@ class RunStoreTest {
     assertEquals("claude/room-" + id, run.principal());
     assertTrue(run.roomRole());
     assertTrue(run.sessionRole(), "room runs join the stop/status/reaper lanes");
-    assertEquals(java.util.List.of("claude/room-" + id), store.principals(id));
+    assertEquals(List.of("claude/room-" + id), store.principals(id));
+  }
+
+  @Test
+  void aRunsCredentialStandsForItsPrincipalOnItsLaneForItsFde() {
+    var room = DateTimeUtils.newId().toString();
+    reserveRoom(room, "auth", "node-a");
+    var build = store.findById(newRun("backend", "other")).orElseThrow();
+
+    var roomRow = store.findById(room).orElseThrow();
+
+    assertEquals(Actor.roomPrincipal(roomRow.principal(), "node-a"), roomRow.principalActor());
+    assertEquals(Actor.agentPrincipal(build.principal(), build.owner()), build.principalActor());
   }
 
   @Test
@@ -1048,12 +1063,7 @@ class RunStoreTest {
     reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
 
     assertTrue(
-        reserve(
-                store,
-                DateTimeUtils.newId().toString(),
-                "other",
-                "node-a",
-                java.util.List.of("app"))
+        reserve(store, DateTimeUtils.newId().toString(), "other", "node-a", List.of("app"))
             .isEmpty(),
         "a chat never blocks another spec's build");
 
@@ -1065,7 +1075,7 @@ class RunStoreTest {
     reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a");
 
     assertTrue(
-        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))
             .isEmpty(),
         "a dispatch proceeds during a read-only chat turn");
     assertTrue(
@@ -1075,7 +1085,7 @@ class RunStoreTest {
 
   @Test
   void aLiveBuildRunsAlongsideItsOwnSpecsRoomReservation() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     assertTrue(
         reserveRoom(DateTimeUtils.newId().toString(), "auth", "node-a").isEmpty(),
@@ -1113,10 +1123,9 @@ class RunStoreTest {
 
     assertEquals(id, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(id, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
-    assertEquals(java.util.List.of(id), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(id), store.running().stream().map(RunStore.RunRow::id).toList());
     assertTrue(store.transition(id, "running", "stopping"));
-    assertEquals(
-        java.util.List.of(id), store.stopping().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(id), store.stopping().stream().map(RunStore.RunRow::id).toList());
   }
 
   @Test
@@ -1177,11 +1186,11 @@ class RunStoreTest {
   void reserveDispatchPersistsTheReservedReposOnTheRunningRun() {
     var id = DateTimeUtils.newId().toString();
 
-    var conflict = reserve(store, id, "auth", "node-a", java.util.List.of("app", "web"));
+    var conflict = reserve(store, id, "auth", "node-a", List.of("app", "web"));
 
     assertTrue(conflict.isEmpty());
     var run = store.findById(id).orElseThrow();
-    assertEquals(java.util.List.of("app", "web"), run.repos());
+    assertEquals(List.of("app", "web"), run.repos());
     assertEquals("running", run.status());
     assertEquals("build", run.role());
     assertEquals("sail-agent-" + id, run.unit());
@@ -1190,36 +1199,36 @@ class RunStoreTest {
   @Test
   void reservedReposSurviveReplication() {
     var id = DateTimeUtils.newId().toString();
-    reserve(store, id, "auth", "node-a", java.util.List.of("app"));
+    reserve(store, id, "auth", "node-a", List.of("app"));
 
     var snapshot = store.comparableSnapshot(id);
-    assertEquals(java.util.List.of("app"), snapshot.get("repos"));
+    assertEquals(List.of("app"), snapshot.get("repos"));
     var adopted = DateTimeUtils.newId().toString();
     store.applyRevision(adopted, snapshot, "1-remote");
-    assertEquals(java.util.List.of("app"), store.findById(adopted).orElseThrow().repos());
+    assertEquals(List.of("app"), store.findById(adopted).orElseThrow().repos());
   }
 
   @Test
   void reserveDispatchRefusesAnOverlapAndInsertsNothing() {
     var first = DateTimeUtils.newId().toString();
-    reserve(store, first, "auth", "node-a", java.util.List.of("app", "web"));
+    reserve(store, first, "auth", "node-a", List.of("app", "web"));
 
     var second = DateTimeUtils.newId().toString();
-    var conflict = reserve(store, second, "billing", "node-a", java.util.List.of("web", "docs"));
+    var conflict = reserve(store, second, "billing", "node-a", List.of("web", "docs"));
 
     var blocked = conflict.orElseThrow();
     assertEquals(first, blocked.run().runId());
     assertEquals("auth", blocked.run().specId());
-    assertEquals(java.util.List.of("web"), blocked.overlap());
+    assertEquals(List.of("web"), blocked.overlap());
     assertTrue(store.findById(second).isEmpty(), "a refused reservation must not insert a row");
   }
 
   @Test
   void reserveDispatchAdmitsDisjointRepos() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"));
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"));
 
     var second = DateTimeUtils.newId().toString();
-    var conflict = reserve(store, second, "web-work", "node-a", java.util.List.of("web"));
+    var conflict = reserve(store, second, "web-work", "node-a", List.of("web"));
 
     assertTrue(conflict.isEmpty());
     assertEquals("running", store.findById(second).orElseThrow().status());
@@ -1244,7 +1253,7 @@ class RunStoreTest {
             "node-a",
             "node-a",
             "build",
-            java.util.List.of("app"),
+            List.of("app"),
             "claude-code",
             "feat/x",
             "do it",
@@ -1257,7 +1266,7 @@ class RunStoreTest {
 
     store.releaseContainerLease("backend", "node-a");
     assertTrue(
-        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))
             .isEmpty());
   }
 
@@ -1334,7 +1343,7 @@ class RunStoreTest {
         "node-a",
         "node-a",
         "invite",
-        java.util.List.of(),
+        List.of(),
         "claude-code",
         null,
         "consult",
@@ -1378,20 +1387,19 @@ class RunStoreTest {
         DateTimeUtils.now().minus(RunStore.LEASE_TTL).minus(Duration.ofMinutes(1)).toString());
 
     assertTrue(
-        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("app"))
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("app"))
             .isEmpty());
   }
 
   @Test
   void anEmptyRepoSetReservesTheWholeContainer() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of());
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of());
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("web"));
+        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("web"));
 
     assertTrue(conflict.isPresent());
-    assertEquals(java.util.List.of(), conflict.orElseThrow().overlap());
+    assertEquals(List.of(), conflict.orElseThrow().overlap());
   }
 
   @Test
@@ -1399,8 +1407,7 @@ class RunStoreTest {
     newRun("backend", "auth");
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("web"));
+        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("web"));
 
     assertTrue(conflict.isPresent(), "a row the gate cannot scope reads as whole-container");
   }
@@ -1408,11 +1415,10 @@ class RunStoreTest {
   @Test
   void aLiveRunOfTheSameSpecBlocksItsOwnReReservationEvenOnDisjointRepos() {
     var first = DateTimeUtils.newId().toString();
-    reserve(store, first, "auth", "node-a", java.util.List.of("app"));
+    reserve(store, first, "auth", "node-a", List.of("app"));
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "auth", "node-a", java.util.List.of("web"));
+        reserve(store, DateTimeUtils.newId().toString(), "auth", "node-a", List.of("web"));
 
     assertEquals(first, conflict.orElseThrow().run().runId());
   }
@@ -1420,23 +1426,21 @@ class RunStoreTest {
   @Test
   void aFinishedRunNeverBlocksAReservation() {
     var first = DateTimeUtils.newId().toString();
-    reserve(store, first, "auth", "node-a", java.util.List.of("app"));
+    reserve(store, first, "auth", "node-a", List.of("app"));
     store.complete(first, "stopped", 0);
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("app"));
+        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"));
 
     assertTrue(conflict.isEmpty());
   }
 
   @Test
   void aForeignNodesRunNeverBlocksAReservation() {
-    reserve(store, DateTimeUtils.newId().toString(), "auth", "raj", java.util.List.of("app"));
+    reserve(store, DateTimeUtils.newId().toString(), "auth", "raj", List.of("app"));
 
     var conflict =
-        reserve(
-            store, DateTimeUtils.newId().toString(), "billing", "node-a", java.util.List.of("app"));
+        reserve(store, DateTimeUtils.newId().toString(), "billing", "node-a", List.of("app"));
 
     assertTrue(conflict.isEmpty());
   }
@@ -1445,9 +1449,9 @@ class RunStoreTest {
   void concurrentReservationsAcrossConnectionsAdmitExactlyOne() throws Exception {
     var path = tempDir.resolve("test.db");
     var contenders = 4;
-    var start = new java.util.concurrent.CountDownLatch(1);
-    var admitted = new java.util.concurrent.atomic.AtomicInteger();
-    var threads = new java.util.ArrayList<Thread>();
+    var start = new CountDownLatch(1);
+    var admitted = new AtomicInteger();
+    var threads = new ArrayList<Thread>();
     for (var i = 0; i < contenders; i++) {
       var spec = "spec-" + i;
       threads.add(
@@ -1459,8 +1463,7 @@ class RunStoreTest {
                           var contender = new RunStore(connection);
                           start.await();
                           var id = DateTimeUtils.newId().toString();
-                          if (reserve(contender, id, spec, "node-a", java.util.List.of("app"))
-                              .isEmpty()) {
+                          if (reserve(contender, id, spec, "node-a", List.of("app")).isEmpty()) {
                             admitted.incrementAndGet();
                           }
                         } catch (InterruptedException e) {
@@ -1479,7 +1482,7 @@ class RunStoreTest {
         "the BEGIN IMMEDIATE reservation must serialize dispatches across connections");
   }
 
-  private String reservedCredential(String id, String specId, java.util.List<String> repos) {
+  private String reservedCredential(String id, String specId, List<String> repos) {
     var reservation =
         store.reserveDispatch(
             id,
@@ -1504,10 +1507,21 @@ class RunStoreTest {
   }
 
   @Test
+  void everyMintedPrincipalHasThePrincipalShapeAndNoHandleDoes() {
+    var id = DateTimeUtils.newId().toString();
+    reservedCredential(id, "auth", List.of("app"));
+
+    assertTrue(RunStore.isPrincipalHandle(store.findById(id).orElseThrow().principal()));
+    assertTrue(RunStore.isPrincipalHandle("/" + id), "a run with no agent family still mints one");
+    assertFalse(RunStore.isPrincipalHandle("uday"));
+    assertFalse(RunStore.isPrincipalHandle(null));
+  }
+
+  @Test
   void reserveDispatchMintsThePrincipalAndCredentialWithTheRow() {
     var id = DateTimeUtils.newId().toString();
 
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     var run = store.findById(id).orElseThrow();
     assertEquals("claude/" + id, run.principal());
@@ -1527,10 +1541,10 @@ class RunStoreTest {
 
   @Test
   void aRefusedReservationMintsNothing() {
-    reservedCredential(DateTimeUtils.newId().toString(), "auth", java.util.List.of("app"));
+    reservedCredential(DateTimeUtils.newId().toString(), "auth", List.of("app"));
     var second = DateTimeUtils.newId().toString();
 
-    var conflict = reserve(store, second, "billing", "node-a", java.util.List.of("app"));
+    var conflict = reserve(store, second, "billing", "node-a", List.of("app"));
 
     assertTrue(conflict.isPresent());
     assertEquals(0, credentialRows(second));
@@ -1654,7 +1668,7 @@ class RunStoreTest {
   @Test
   void findByCredentialRejectsBlankUnknownAndRevoked() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     assertTrue(store.findByCredential(null).isEmpty());
     assertTrue(store.findByCredential("").isEmpty());
@@ -1668,7 +1682,7 @@ class RunStoreTest {
   @Test
   void aCredentialWithoutAConfiguredHardStopNeverExpires() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     var nullExpiryRows =
         db.queryOne(
@@ -1694,7 +1708,7 @@ class RunStoreTest {
             "node-a",
             "uday",
             "build",
-            java.util.List.of("app"),
+            List.of("app"),
             "claude-code",
             "feat/x",
             "do it",
@@ -1720,7 +1734,7 @@ class RunStoreTest {
   @Test
   void anExpiredCredentialIsRejectedAndPrunedOnLookup() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
     db.execute(
         "UPDATE run_credentials SET expires_at = ? WHERE run_id = ?", "2000-01-01T00:00:00Z", id);
 
@@ -1730,9 +1744,9 @@ class RunStoreTest {
 
   @Test
   void everyTerminalTransitionRevokesTheCredential() {
-    for (var terminal : java.util.List.of("completed", "stopped", "failed")) {
+    for (var terminal : List.of("completed", "stopped", "failed")) {
       var id = DateTimeUtils.newId().toString();
-      var credential = reservedCredential(id, "spec-" + terminal, java.util.List.of(terminal));
+      var credential = reservedCredential(id, "spec-" + terminal, List.of(terminal));
 
       assertTrue(store.transition(id, "running", terminal));
 
@@ -1744,7 +1758,7 @@ class RunStoreTest {
   @Test
   void aStopClaimKeepsTheCredentialUntilTheVerifiedFinish() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     assertTrue(store.transition(id, "running", "stopping"));
     assertTrue(
@@ -1758,7 +1772,7 @@ class RunStoreTest {
   @Test
   void aLostTransitionRevokesNothing() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     assertFalse(store.transition(id, "stopping", "stopped"));
 
@@ -1768,7 +1782,7 @@ class RunStoreTest {
   @Test
   void completeRevokesTheCredential() {
     var id = DateTimeUtils.newId().toString();
-    var credential = reservedCredential(id, "auth", java.util.List.of("app"));
+    var credential = reservedCredential(id, "auth", List.of("app"));
 
     store.complete(id, "failed", 1);
 
@@ -1778,7 +1792,7 @@ class RunStoreTest {
   @Test
   void principalAndOwnerReplicateInTheComparableSnapshot() {
     var id = DateTimeUtils.newId().toString();
-    reservedCredential(id, "auth", java.util.List.of("app"));
+    reservedCredential(id, "auth", List.of("app"));
 
     var snapshot = store.comparableSnapshot(id);
 
@@ -1800,7 +1814,7 @@ class RunStoreTest {
     store.markDelivered(id, List.of(first));
 
     assertEquals(
-        java.util.Set.of(first, second),
+        Set.of(first, second),
         store.deliveredMessageIds(id),
         "a replayed acknowledgement is a no-op, never an error");
     assertEquals(revBefore, store.latestRev(id), "delivery bookkeeping never journals a revision");
@@ -1855,7 +1869,7 @@ class RunStoreTest {
   @Test
   void adoptingAnOldShapeSnapshotDerivesTheHistoryFromItsPrincipal() {
     var id = newRun("backend", "auth");
-    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot(id));
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(id));
     var principal = (String) snapshot.get("principal");
     snapshot.remove("principals");
 
@@ -1910,7 +1924,7 @@ class RunStoreTest {
   @Test
   void adoptingAnOldShapeSnapshotDerivesNullSessionFields() {
     var id = newRun("backend", "auth");
-    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot(id));
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(id));
     snapshot.remove("session_id");
     snapshot.remove("session_source");
     snapshot.remove("transcript_path");
@@ -1960,11 +1974,11 @@ class RunStoreTest {
     store.markDelivered(id, List.of(rendered.id()));
     messages.applyRevision(
         lateId,
-        java.util.Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
+        Map.of("spec_id", "auth", "author", "ada", "body", "late", "created_at", "now"),
         "1-abc");
 
     assertEquals(
-        java.util.Set.of(rendered.id()),
+        Set.of(rendered.id()),
         store.deliveredMessageIds(id),
         "the seed is the exact ids the prompt rendered — a message syncing in later is never"
             + " swept, even though its id sorts before the rendered one");
@@ -1987,8 +2001,7 @@ class RunStoreTest {
   }
 
   @Test
-  void aRoomKeyedRunSyncsItsRoomAcrossTheFleet(
-      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+  void aRoomKeyedRunSyncsItsRoomAcrossTheFleet(@TempDir Path dir) {
     try (var ownerDb = Sqlite.open(dir.resolve("owner.db"));
         var peerDb = Sqlite.open(dir.resolve("peer.db"))) {
       new SchemaManager(ownerDb).migrate();
@@ -2003,7 +2016,7 @@ class RunStoreTest {
           "uday",
           "uday",
           "room",
-          java.util.List.of(),
+          List.of(),
           "claude-code",
           null,
           "t",
@@ -2011,21 +2024,19 @@ class RunStoreTest {
           "u",
           null);
       var snapshot = owner.comparableSnapshot("0195a2f0-0000-7000-8000-0000000000c1");
-      org.junit.jupiter.api.Assertions.assertEquals(
-          "chat-room", snapshot.get("room_id"), "the room key rides the run snapshot");
+      assertEquals("chat-room", snapshot.get("room_id"), "the room key rides the run snapshot");
 
       peer.applyRevision("0195a2f0-0000-7000-8000-0000000000c1", snapshot, "1-remote");
 
       var replicated = peer.findById("0195a2f0-0000-7000-8000-0000000000c1").orElseThrow();
-      org.junit.jupiter.api.Assertions.assertEquals("chat-room", replicated.conversationId());
-      org.junit.jupiter.api.Assertions.assertEquals(
+      assertEquals("chat-room", replicated.conversationId());
+      assertEquals(
           1, peer.listForRoom("chat-room").size(), "a peer box can key the turn by its room");
     }
   }
 
   @Test
-  void aRoomKeyedReservationTracksAndSerializesByRoom(
-      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+  void aRoomKeyedReservationTracksAndSerializesByRoom(@TempDir Path dir) {
     try (var roomDb = Sqlite.open(dir.resolve("room-runs.db"))) {
       new SchemaManager(roomDb).migrate();
       var runs = new RunStore(roomDb);
@@ -2039,19 +2050,17 @@ class RunStoreTest {
               "uday",
               "uday",
               "room",
-              java.util.List.of(),
+              List.of(),
               "claude-code",
               null,
               "t",
               "l",
               "u",
               null);
-      org.junit.jupiter.api.Assertions.assertInstanceOf(RunStore.Reservation.Reserved.class, first);
-      org.junit.jupiter.api.Assertions.assertNull(
-          runs.findById("run-1").orElseThrow().specId(), "no work-item on a chat turn");
-      org.junit.jupiter.api.Assertions.assertEquals(
-          1, runs.listForRoom("chat-room").size(), "the turn is tracked by its room");
-      org.junit.jupiter.api.Assertions.assertTrue(runs.listForRoom("other-room").isEmpty());
+      assertInstanceOf(RunStore.Reservation.Reserved.class, first);
+      assertNull(runs.findById("run-1").orElseThrow().specId(), "no work-item on a chat turn");
+      assertEquals(1, runs.listForRoom("chat-room").size(), "the turn is tracked by its room");
+      assertTrue(runs.listForRoom("other-room").isEmpty());
 
       var second =
           runs.reserveDispatch(
@@ -2062,14 +2071,14 @@ class RunStoreTest {
               "uday",
               "uday",
               "room",
-              java.util.List.of(),
+              List.of(),
               "claude-code",
               null,
               "t",
               "l",
               "u",
               null);
-      org.junit.jupiter.api.Assertions.assertInstanceOf(
+      assertInstanceOf(
           RunStore.Reservation.Conflicted.class,
           second,
           "two live turns of one spec-less room must conflict — the room is the gate scope");

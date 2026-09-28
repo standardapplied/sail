@@ -15,7 +15,9 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,8 +71,8 @@ class SpecStoreTest {
   void adoptionRequiresHeldContentAndFillsTheTextColumnsAtomically() {
     var blobs = new BlobStore(db);
     store.create(spec("template", "Template", "pending"));
-    var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot("template"));
-    var hash = BlobStore.hash("remote body".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot("template"));
+    var hash = BlobStore.hash("remote body".getBytes(StandardCharsets.UTF_8));
     snapshot.put("body_hash", hash);
     var failure =
         assertThrows(
@@ -82,35 +84,40 @@ class SpecStoreTest {
     store.adoptForSync("incoming", snapshot, "1-main");
     assertEquals("remote body", store.getContent("incoming").orElseThrow().body());
     assertFalse(
-        ai.singlr.sail.config.YamlUtil.parseMap(store.history("incoming").getFirst().snapshot())
-            .containsKey("body"));
+        YamlUtil.parseMap(store.history("incoming").getFirst().snapshot()).containsKey("body"));
   }
 
   @Test
-  void assignedToMatchesOnlyANonBlankHandleEqualToTheAssignee() {
-    var mine =
-        new SpecStore.SpecRow(
-            "s",
-            "test-project",
-            "T",
-            SpecStatus.fromWire("pending"),
-            "uday",
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of());
-    assertTrue(mine.assignedTo("uday"));
-    assertFalse(mine.assignedTo("mady"));
-    assertFalse(mine.assignedTo(null), "a blank handle is assigned no spec");
-    assertFalse(
-        spec("s", "T", "pending").assignedTo("uday"), "an unassigned spec is owned by nobody");
+  void ownedByIsTheAssigneeOrTheCreatorWhileUnassigned() {
+    var assigned = row("uday", "mady");
+    var unassigned = row(" ", "mady");
+
+    assertTrue(assigned.ownedBy("uday"));
+    assertFalse(assigned.ownedBy("mady"), "an assigned spec is not its creator's");
+    assertTrue(unassigned.ownedBy("mady"), "an unassigned spec is its creator's");
+    assertFalse(unassigned.ownedBy("uday"));
+    assertFalse(assigned.ownedBy(null), "a blank handle owns no spec");
+    assertFalse(row(null, null).ownedBy(""), "a spec with no owner is nobody's");
+  }
+
+  private static SpecStore.SpecRow row(String assignee, String createdBy) {
+    return new SpecStore.SpecRow(
+        "s",
+        "test-project",
+        "T",
+        SpecStatus.PENDING,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        createdBy,
+        "",
+        "",
+        null,
+        List.of(),
+        List.of());
   }
 
   @Test
@@ -128,7 +135,7 @@ class SpecStoreTest {
   void aLegacySnapshotCarryingRetiredKeysAppliesCleanly() {
     store.create(spec("auth", "OAuth", "pending"));
     var snapshot = store.comparableSnapshot("auth");
-    var legacy = new java.util.LinkedHashMap<String, Object>(snapshot);
+    var legacy = new LinkedHashMap<String, Object>(snapshot);
     legacy.put("wake", "on");
     legacy.put("engagement", "{\"agent\":\"claude-code\",\"engaged_at\":\"t0\"}");
 
@@ -582,7 +589,7 @@ class SpecStoreTest {
 
   @Test
   void applyRevisionRejectsAnUnknownStatusAsCorruption() {
-    var snapshot = new java.util.LinkedHashMap<String, Object>();
+    var snapshot = new LinkedHashMap<String, Object>();
     snapshot.put("title", "From the future");
     snapshot.put("status", "warp_speed");
     snapshot.put("project", "test-project");
@@ -725,7 +732,7 @@ class SpecStoreTest {
     var snapshot = store.comparableSnapshot("auth");
     assertEquals("design-room", snapshot.get("room_id"), "the room link syncs");
 
-    var legacy = new java.util.LinkedHashMap<String, Object>(snapshot);
+    var legacy = new LinkedHashMap<String, Object>(snapshot);
     legacy.remove("room_id");
     store.applyRevision("auth", legacy, "9-legacy");
     assertEquals(

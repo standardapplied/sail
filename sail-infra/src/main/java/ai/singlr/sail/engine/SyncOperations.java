@@ -223,16 +223,21 @@ public final class SyncOperations {
 
   public record MainTarget(String target, String message) {}
 
+  /**
+   * The main this box syncs with: {@code flag}, else its configured main. The main box itself syncs
+   * with nothing, whatever it is asked: a round adopts the other side's versions and roster, which
+   * would overwrite the fleet's source of truth.
+   */
   public static MainTarget resolveMain(String flag, SyncConfig sync) {
+    if (sync.isMain()) {
+      return new MainTarget(
+          null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
+    }
     if (Strings.isNotBlank(flag)) {
       return new MainTarget(flag, null);
     }
     if (Strings.isNotBlank(sync.main())) {
       return new MainTarget(sync.main(), null);
-    }
-    if (sync.isMain()) {
-      return new MainTarget(
-          null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
     }
     return new MainTarget(
         null,
@@ -353,9 +358,11 @@ public final class SyncOperations {
 
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
-   * for a malformed role or status — dropped, never written with a bad authorization.
+   * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
+   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}).
    */
   public static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
+    fdes.disableUnlisted(roster.stream().map(entry -> str(entry, "handle")).toList());
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {

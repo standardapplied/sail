@@ -40,6 +40,17 @@ class HostSyncCommandTest {
   }
 
   @Test
+  void aNodeTakingTheMainRoleDropsTheMainItPointedAt() {
+    var node = HostSyncCommand.configure(BASE, false, "sail@maindevbox", "devbox");
+
+    var promoted = HostSyncCommand.configure(node, true, null, "devbox");
+
+    assertTrue(promoted.sync().isMain());
+    assertNull(promoted.sync().main());
+    assertEquals(node.sync().boxId(), promoted.sync().boxId());
+  }
+
+  @Test
   void mainTargetMakesItANodePointedAtMainInOneStep() {
     var updated = HostSyncCommand.configure(BASE, false, "sail@maindevbox", "devbox");
 

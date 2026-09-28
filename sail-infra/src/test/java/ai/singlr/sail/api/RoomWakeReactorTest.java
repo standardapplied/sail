@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
@@ -28,6 +30,10 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -75,8 +81,7 @@ class RoomWakeReactorTest {
     }
   }
 
-  private static final class ManualExecutorService
-      extends java.util.concurrent.AbstractExecutorService {
+  private static final class ManualExecutorService extends AbstractExecutorService {
     final Deque<Runnable> queued = new ArrayDeque<>();
 
     @Override
@@ -109,7 +114,7 @@ class RoomWakeReactorTest {
     }
 
     @Override
-    public boolean awaitTermination(long timeout, java.util.concurrent.TimeUnit unit) {
+    public boolean awaitTermination(long timeout, TimeUnit unit) {
       return true;
     }
   }
@@ -134,12 +139,11 @@ class RoomWakeReactorTest {
     return reactor(new DirectExecutorService(), messageStore);
   }
 
-  private RoomWakeReactor reactor(java.util.concurrent.ExecutorService executor) {
+  private RoomWakeReactor reactor(ExecutorService executor) {
     return reactor(executor, messageStore);
   }
 
-  private RoomWakeReactor reactor(
-      java.util.concurrent.ExecutorService executor, MessageStore messages) {
+  private RoomWakeReactor reactor(ExecutorService executor, MessageStore messages) {
     return new RoomWakeReactor(
         specStore,
         roomStore,
@@ -186,11 +190,10 @@ class RoomWakeReactorTest {
 
   private void engage(String id, String agent, String mode) {
     var spec = specStore.findById(id).orElseThrow();
-    var member = ai.singlr.sail.config.Engagement.of(agent, mode, null, now.get().toString());
+    var member = Engagement.of(agent, mode, null, now.get().toString());
     Acting.system(
         () -> roomStore.ensureFor(id, spec.project(), spec.title(), spec.assignee(), null));
-    Acting.system(
-        () -> roomStore.updateRoster(id, ai.singlr.sail.config.Roster.solo(member).toJson()));
+    Acting.system(() -> roomStore.updateRoster(id, Roster.solo(member).toJson()));
   }
 
   private String chatRun(String specId, String role, String status, Instant startedAt) {
@@ -356,6 +359,42 @@ class RoomWakeReactorTest {
     handle.set("");
     reactor.onEvent(message("auth", "uday", "hello again"));
     assertTrue(launcher.woken.isEmpty(), "a box with no handle wakes nothing");
+  }
+
+  @Test
+  void anUnassignedSpecsRoomWakesOnItsCreatorsBoxOnly() {
+    seed("draft", "pending", null, "on");
+
+    handle.set("mady");
+    reactor().onEvent(message("draft", "mady", "anyone?"));
+    assertTrue(launcher.woken.isEmpty(), "an unassigned spec is its creator's, not this box's");
+
+    handle.set("uday");
+    reactor().onEvent(message("draft", "mady", "anyone at all?"));
+    assertEquals(List.of("acme/draft"), launcher.woken, "uday created it, so uday's box wakes");
+  }
+
+  @Test
+  void anUnassignedSpeclessRoomWakesOnItsCreatorsBox() {
+    Acting.as(
+        "uday",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "open-room", "acme", "Open", null, null, null, null, null, null, null)));
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "open-room",
+                "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
+
+    handle.set("mady");
+    reactor().onEvent(message("open-room", "mady", "hello"));
+    assertTrue(launcher.woken.isEmpty());
+
+    handle.set("uday");
+    reactor().onEvent(message("open-room", "mady", "hello again"));
+    assertEquals(List.of("acme/open-room"), launcher.woken);
   }
 
   @Test
@@ -870,7 +909,7 @@ class RoomWakeReactorTest {
   @Test
   void theBusDeliversAPostedMessageToTheReactorEndToEnd() throws Exception {
     seed("auth", "done", "uday", "on");
-    var latch = new java.util.concurrent.CountDownLatch(1);
+    var latch = new CountDownLatch(1);
     var reactor = reactor();
     try (var bus = new EventBus()) {
       bus.subscribe(BusTesting.latching(reactor, latch));

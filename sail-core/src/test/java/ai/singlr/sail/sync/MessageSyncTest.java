@@ -11,20 +11,26 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PushOutcome;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -79,18 +85,16 @@ class MessageSyncTest {
 
   @Test
   void messagesFromDifferentBoxesConvergeWithoutConflict() {
-    new FdeStore(main.db).add("node", null, null, "admin");
-    new FdeStore(main.db).add("other", null, null, "admin");
     var fromNode = node.messages.append("room", "node", "node message", null);
     var fromOther = other.messages.append("room", "other", "other message", null);
     var engine = new SyncEngine();
 
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
+        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
 
     assertEquals(2, main.messages.list("room", null, 10).size());
     assertTrue(node.messages.findById(fromOther.id()).isPresent());
@@ -101,7 +105,7 @@ class MessageSyncTest {
   void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(runId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var principal = runs.findById(runId).orElseThrow().principal();
     var question = node.messages.append("room", principal, "Which flow?", null, true);
@@ -141,7 +145,7 @@ class MessageSyncTest {
   void aMessageAuthoredBeforePrincipalRotationStillSyncs() {
     var reviewId = "019fee00-0000-7000-8000-0000000000aa";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(reviewId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
     runs.rotateCredential(reviewId, "claude-code", "fix");
@@ -156,7 +160,7 @@ class MessageSyncTest {
                     null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "a reviewer-authored message that synchronizes after the fix lane rotated the run's"
             + " principal authenticates against the replicated history, never wedging sync");
   }
@@ -176,14 +180,14 @@ class MessageSyncTest {
                     "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "a spec's ownership fields are authoritative for policy before its room row exists");
   }
 
   @Test
   void thePipelineNarratorSyncsFromTheBoxThatRanTheReview() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(
         "019fee00-0000-7000-8000-0000000000bb",
         "acme",
@@ -204,7 +208,7 @@ class MessageSyncTest {
                     "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "the review pipeline narrates verdicts as 'sail' on the box that ran the review;"
             + " refusing those rows wedges that box's sync forever");
   }
@@ -241,6 +245,53 @@ class MessageSyncTest {
     assertNull(denied.currentRev(), "main holds no version of a message it never took");
     assertNull(denied.currentSnapshot());
     assertTrue(main.messages.findById(messageId).isEmpty());
+  }
+
+  @Test
+  void mainDecidesAPostByTheConversationsOwnerForEveryBlankAndSetAssigneeAndCreator() {
+    new SpecStore(main.db)
+        .create(
+            new SpecStore.SpecRow(
+                "spec-room",
+                "acme",
+                "Spec",
+                SpecStatus.PENDING,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                "",
+                "",
+                null,
+                List.of(),
+                List.of()));
+    var values = Arrays.asList(null, "", " \t", "mady", "uday");
+    var seq = 0;
+    for (var table : List.of("rooms", "specs")) {
+      var conversation = "rooms".equals(table) ? "room" : "spec-room";
+      for (var assignee : values) {
+        for (var creator : values) {
+          main.db.execute(
+              "UPDATE " + table + " SET assignee = ?, created_by = ? WHERE id = ?",
+              assignee,
+              creator,
+              conversation);
+          var id = "019fee00-0000-7000-8000-%012d".formatted(++seq);
+          var outcome =
+              Actor.call(
+                  Actor.sync("mady", Role.MEMBER),
+                  () -> main.messages.commitRevision(id, snapshot("mady", conversation), null));
+
+          assertEquals(
+              Ownership.owns("mady", assignee, creator),
+              outcome instanceof PushOutcome.Accepted,
+              table + " assignee=" + assignee + " creator=" + creator + ": " + outcome);
+        }
+      }
+    }
   }
 
   @Test

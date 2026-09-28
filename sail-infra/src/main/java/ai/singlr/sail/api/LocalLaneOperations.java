@@ -33,8 +33,7 @@ public interface LocalLaneOperations {
    */
   String conflictMergeTemplate(String type, String id);
 
-  SyncConflicts.Conflict resolveConflict(
-      String type, String id, Resolution resolution, Actor actor);
+  SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution);
 
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local
@@ -44,6 +43,13 @@ public interface LocalLaneOperations {
   default Optional<RunStore.RunRow> runForCredential(String credential) {
     return Optional.empty();
   }
+
+  /**
+   * The actor {@code run}'s credential acts as: its principal, for the FDE the run acts for, on the
+   * agent lane or, for a read-only lane, the room lane — with the role the role rule gives that
+   * FDE, capped by the lane's. Empty when that FDE is disabled or unknown.
+   */
+  Optional<Actor> runActor(RunStore.RunRow run);
 
   /**
    * Resolves the box's ambient credential to the FDE actor it stands for, or empty when the
@@ -59,26 +65,24 @@ public interface LocalLaneOperations {
   Result<GlobalSpecDetailResponse> globalSpec(String specId);
 
   /**
-   * Creates a spec as {@code actor}. A spec born into an existing room — named explicitly or
+   * Creates a spec as the bound actor. A spec born into an existing room — named explicitly or
    * sitting on the spec's own id — binds under that room's post right, so a member cannot land work
    * in somebody else's room.
    */
-  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request, Actor actor);
+  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
 
-  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request, Actor actor);
+  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(String specId, SpecUpdateRequest request);
 
-  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor);
+  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId);
 
   Result<GlobalSpecContentResponse> globalSpecContent(String specId);
 
-  Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request, Actor actor);
+  Result<GlobalSpecContentResponse> setGlobalSpecContent(String specId, SpecContentRequest request);
 
   Result<GlobalBoardResponse> globalBoard(String project);
 
   Result<SpecMessageResponse> postRoomMessage(
-      String roomId, SpecMessageRequest request, Actor actor, String author);
+      String roomId, SpecMessageRequest request, String author);
 
   /**
    * A page of a room's conversation: {@code before} pages backward from the newest (the default),
@@ -118,7 +122,7 @@ public interface LocalLaneOperations {
   /**
    * Records the hook-reported identity of an interactive, room-bound agent conversation — one
    * started in a terminal session that exported {@code SAIL_ROOM_ID}, which has no run row. The
-   * room must exist and {@code actor} must hold its post right — the same gate a room message
+   * room must exist and the bound actor must hold its post right — the same gate a room message
    * passes, so a box credential cannot forge conversations into rooms it does not own. The fact
    * lands as a record-class {@code agent_conversation_started} event in that room, authored by the
    * actor's handle, carrying the CLI ({@code agent}), the conversation's session id, and the
@@ -126,10 +130,5 @@ public interface LocalLaneOperations {
    * resume-through-either-door builds on.
    */
   Result<RoomConversationResponse> recordRoomConversation(
-      String roomId,
-      String agent,
-      String sessionId,
-      String source,
-      String transcriptPath,
-      Actor actor);
+      String roomId, String agent, String sessionId, String source, String transcriptPath);
 }

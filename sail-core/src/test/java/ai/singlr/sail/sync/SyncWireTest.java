@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -12,7 +13,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FastCdc;
+import ai.singlr.sail.store.Snapshots;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -52,20 +61,29 @@ class SyncWireTest {
           new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
           new SyncWire.Page(
               List.of(
-                  new SyncWire.Entry(5, "auth", "3-abc", false, snapshot()),
-                  new SyncWire.Entry(9, "gone", "4-def", true, null)),
+                  new SyncWire.Entry(
+                      5, "auth", "3-abc", false, snapshot(), ChangeLog.Kind.REVISION, null),
+                  new SyncWire.Entry(
+                      9, "gone", "4-def", true, null, ChangeLog.Kind.TOMBSTONE, null),
+                  SyncWire.Entry.version("left", "5-ghi", null, "ada"),
+                  new SyncWire.Entry(
+                      11, "pruned", "6-jkl", true, null, ChangeLog.Kind.ERASURE, "ada")),
               9,
               false,
               12),
           new SyncWire.Results(
               List.of(
-                  new SyncWire.Accepted("auth", "7-feed"),
+                  new SyncWire.Accepted("auth", "7-feed", null, null),
+                  new SyncWire.Accepted("mine", "8-feed", "ada", null),
+                  new SyncWire.Accepted("born", "9-feed", "ada", new Snapshots.Creator("carol")),
+                  new SyncWire.Accepted("none", "10-feed", "ada", new Snapshots.Creator(null)),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
-                  new SyncWire.Denied("e", "read-only", "5-main", snapshot()),
-                  new SyncWire.Denied("f", "read-only", "6-tomb", null),
-                  new SyncWire.Denied("g", "read-only", null, null),
-                  new SyncWire.Denied("h", "read-only", null, null, false)),
+                  new SyncWire.Denied("e", "read-only", "5-main", snapshot(), true, null),
+                  new SyncWire.Denied("f", "read-only", "6-tomb", null, true, null),
+                  new SyncWire.Denied("i", "read-only", "7-tomb", null, true, "ada"),
+                  new SyncWire.Denied("g", "read-only", null, null, true, null),
+                  new SyncWire.Denied("h", "read-only", null, null, false, null)),
               99),
           new SyncWire.Fdes(
               List.of(
@@ -75,7 +93,8 @@ class SyncWireTest {
 
   @Test
   void aDenialReadWithoutItsMarkerIsTheRefusalAnOlderNodeKnowsWithTheSameReason() {
-    var denied = new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot());
+    var denied =
+        new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot(), true, null);
     var line = SyncWire.encode(new SyncWire.Results(List.of(denied), 9));
     var marker = "\"denied\": true";
     assertTrue(line.contains(marker), line);
@@ -89,8 +108,8 @@ class SyncWireTest {
 
   @Test
   void aChunkCannotBeAnnouncedUntilItsBytesMatchItsHash() {
-    var output = new java.io.ByteArrayOutputStream();
-    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    var output = new ByteArrayOutputStream();
+    var hash = BlobStore.hash(new byte[] {1});
     assertThrows(
         IllegalArgumentException.class, () -> SyncWire.writeChunk(output, hash, new byte[] {2}));
     assertEquals(0, output.size());
@@ -98,7 +117,7 @@ class SyncWireTest {
 
   @Test
   void contentLengthsMustBeIntegersAndEntriesMustBeObjects() {
-    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    var hash = BlobStore.hash(new byte[] {1});
     for (var size : List.of("\"1\"", "1.5", "null")) {
       var line = "{\"op\":\"chunk\",\"hash\":\"" + hash + "\",\"size\":" + size + "}";
       assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeRequest(line));
@@ -128,10 +147,10 @@ class SyncWireTest {
                 () -> Rpc.receive(new ByteStreams.Input(""), "manifest"))
             .kind());
     var broken =
-        new java.io.InputStream() {
+        new InputStream() {
           @Override
-          public int read() throws java.io.IOException {
-            throw new java.io.IOException("connection reset");
+          public int read() throws IOException {
+            throw new IOException("connection reset");
           }
         };
     var failure = assertThrows(SyncTransportException.class, () -> Rpc.receive(broken, "chunk"));
@@ -193,9 +212,63 @@ class SyncWireTest {
   }
 
   @Test
+  void entriesAcceptancesAndDenialsDecodeWithoutTheAuthorAnOlderMainNeverSends() {
+    var page =
+        (SyncWire.Page)
+            SyncWire.decodeResponse(
+                "{\"op\": \"page\", \"entries\": [{\"seq\": 1, \"id\": \"gone\","
+                    + " \"rev\": \"2-x\", \"deleted\": true, \"kind\": \"tombstone\"},"
+                    + " {\"seq\": 2, \"id\": \"pruned\", \"rev\": \"3-x\", \"deleted\": true,"
+                    + " \"kind\": \"erasure\"}], \"next\": 2, \"done\": true, \"maxSeq\": 2}");
+    var results =
+        (SyncWire.Results)
+            SyncWire.decodeResponse(
+                "{\"op\": \"results\", \"results\": [{\"id\": \"a\", \"accepted\":"
+                    + " {\"rev\": \"1-a\"}}, {\"id\": \"b\", \"refused\": {\"reason\": \"no\","
+                    + " \"denied\": true, \"rev\": \"2-b\", \"snapshot\": null}}],"
+                    + " \"maxSeq\": 2}");
+
+    assertEquals(
+        List.of(
+            new SyncWire.Entry(1, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE, null),
+            new SyncWire.Entry(2, "pruned", "3-x", true, null, ChangeLog.Kind.ERASURE, null)),
+        page.entries());
+    assertEquals(
+        List.of(
+            new SyncWire.Accepted("a", "1-a", null, null),
+            new SyncWire.Denied("b", "no", "2-b", null, true, null)),
+        results.results());
+  }
+
+  @Test
+  void anAuthorTravelsOnlyWhereNoSnapshotCanNameIt() {
+    var revision =
+        SyncWire.encode(
+            new SyncWire.Page(
+                List.of(
+                    new SyncWire.Entry(
+                        1, "a", "1-a", false, snapshot(), ChangeLog.Kind.REVISION, "ada")),
+                1,
+                true,
+                1));
+    var deniedRevision =
+        SyncWire.encode(
+            new SyncWire.Results(
+                List.of(new SyncWire.Denied("a", "no", "1-a", snapshot(), true, "ada")), 1));
+
+    assertFalse(revision.contains("\"author\""), revision);
+    assertFalse(deniedRevision.contains("\"author\""), deniedRevision);
+  }
+
+  @Test
   void aTombstoneEntryCarriesNoSnapshotAndDecodesAsDeleted() {
     var page =
-        new SyncWire.Page(List.of(new SyncWire.Entry(3, "gone", "2-x", true, null)), 3, true, 3);
+        new SyncWire.Page(
+            List.of(
+                new SyncWire.Entry(3, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE, null)),
+            3,
+            true,
+            3);
     var line = SyncWire.encode(page);
     assertFalse(line.contains("snapshot"));
     var decoded = (SyncWire.Page) SyncWire.decodeResponse(line);
@@ -207,9 +280,10 @@ class SyncWireTest {
   void everyEntryNamesItsKindSoAnErasureIsNeverReadAsARevision() {
     var entries =
         List.of(
-            new SyncWire.Entry(1, "live", "1-a", false, Map.of("title", "t")),
-            new SyncWire.Entry(2, "gone", "2-b", true, null),
-            new SyncWire.Entry(3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE));
+            new SyncWire.Entry(
+                1, "live", "1-a", false, Map.of("title", "t"), ChangeLog.Kind.REVISION, null),
+            new SyncWire.Entry(2, "gone", "2-b", true, null, ChangeLog.Kind.TOMBSTONE, null),
+            new SyncWire.Entry(3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE, null));
     var line = SyncWire.encode(new SyncWire.Page(entries, 3, true, 3));
 
     var decoded = ((SyncWire.Page) SyncWire.decodeResponse(line)).entries();
@@ -233,12 +307,13 @@ class SyncWireTest {
                     + " \"deleted\": true}], \"next\": 1, \"done\": true, \"maxSeq\": 1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SyncWire.Entry(1, "a", "1-a", false, null, ChangeLog.Kind.ERASURE));
+        () -> new SyncWire.Entry(1, "a", "1-a", false, null, ChangeLog.Kind.ERASURE, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SyncWire.Entry(1, "a", "1-a", true, null, ChangeLog.Kind.REVISION));
+        () -> new SyncWire.Entry(1, "a", "1-a", true, null, ChangeLog.Kind.REVISION, null));
     assertThrows(
-        IllegalArgumentException.class, () -> new SyncWire.Entry(1, "a", "1-a", true, null, null));
+        IllegalArgumentException.class,
+        () -> new SyncWire.Entry(1, "a", "1-a", true, null, null, null));
   }
 
   @Test
@@ -292,7 +367,15 @@ class SyncWireTest {
     assertEquals(push, SyncWire.decodeRequest(SyncWire.encode(push)));
     var page =
         new SyncWire.Page(
-            List.of(new SyncWire.Entry(1, "m1", "1-main", false, Map.of("body", content))),
+            List.of(
+                new SyncWire.Entry(
+                    1,
+                    "m1",
+                    "1-main",
+                    false,
+                    Map.of("body", content),
+                    ChangeLog.Kind.REVISION,
+                    null)),
             1,
             true,
             1);
@@ -317,7 +400,8 @@ class SyncWireTest {
 
   @Test
   void anEntrysEncodedLengthIsExactlyWhatThePageCarriesForIt() {
-    var entry = new SyncWire.Entry(5, "auth", "3-abc", false, snapshot());
+    var entry =
+        new SyncWire.Entry(5, "auth", "3-abc", false, snapshot(), ChangeLog.Kind.REVISION, null);
     var lone = SyncWire.encode(new SyncWire.Page(List.of(entry), 5, true, 5));
     var pair = SyncWire.encode(new SyncWire.Page(List.of(entry, entry), 5, true, 5));
     assertEquals(SyncWire.encodedLength(entry) + 2, pair.length() - lone.length());
@@ -329,7 +413,7 @@ class SyncWireTest {
 
   @Test
   void readFramedReadsOneLinePerCallWithoutTheTerminator() throws Exception {
-    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\nsecond\n");
+    var in = new ByteStreams.Input("first\nsecond\n");
     assertEquals("first", SyncWire.readFramed(in));
     assertEquals("second", SyncWire.readFramed(in));
     assertNull(SyncWire.readFramed(in));
@@ -337,7 +421,7 @@ class SyncWireTest {
 
   @Test
   void readFramedNamesAChannelThatClosedMidMessageInsteadOfReturningTheFragment() {
-    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\n{\"op\": \"page\", \"entr");
+    var in = new ByteStreams.Input("first\n{\"op\": \"page\", \"entr");
 
     var thrown =
         assertThrows(
@@ -353,11 +437,9 @@ class SyncWireTest {
 
   @Test
   void readFramedAcceptsAMessageExactlyAtTheBoundAndRejectsOneOver() throws Exception {
-    assertEquals(
-        "abcd", SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcd\n"), 4));
+    assertEquals("abcd", SyncWire.readFramed(new ByteStreams.Input("abcd\n"), 4));
     assertThrows(
-        SyncTransportException.class,
-        () -> SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcde"), 4));
+        SyncTransportException.class, () -> SyncWire.readFramed(new ByteStreams.Input("abcde"), 4));
   }
 
   @Test
@@ -374,15 +456,14 @@ class SyncWireTest {
   @Test
   void binaryChunksPreserveEveryByteAndReturnToLineMode() throws Exception {
     var payload = new byte[] {0, -1, -2, 10, 13, 65};
-    var output = new java.io.ByteArrayOutputStream();
-    SyncWire.writeChunk(output, ai.singlr.sail.store.BlobStore.hash(payload), payload);
-    output.write("{\"op\":\"done\"}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-    var input = new java.io.ByteArrayInputStream(output.toByteArray());
+    var output = new ByteArrayOutputStream();
+    SyncWire.writeChunk(output, BlobStore.hash(payload), payload);
+    output.write("{\"op\":\"done\"}\n".getBytes(StandardCharsets.UTF_8));
+    var input = new ByteArrayInputStream(output.toByteArray());
     var chunk = (SyncWire.Chunk) SyncWire.decodeResponse(SyncWire.readLine(input));
-    org.junit.jupiter.api.Assertions.assertArrayEquals(
-        payload, SyncWire.readBytes(input, chunk.size()));
+    assertArrayEquals(payload, SyncWire.readBytes(input, chunk.size()));
     assertEquals(new SyncWire.Done(), SyncWire.decodeResponse(SyncWire.readLine(input)));
-    org.junit.jupiter.api.Assertions.assertNull(SyncWire.readLine(input));
+    assertNull(SyncWire.readLine(input));
   }
 
   @Test
@@ -390,17 +471,15 @@ class SyncWireTest {
     var malformed =
         assertThrows(
             SyncTransportException.class,
-            () -> SyncWire.readLine(new java.io.ByteArrayInputStream(new byte[] {-1, 10})));
+            () -> SyncWire.readLine(new ByteArrayInputStream(new byte[] {-1, 10})));
     assertEquals("protocol", malformed.kind());
     var cut =
         assertThrows(
             SyncTransportException.class,
-            () -> SyncWire.readBytes(new java.io.ByteArrayInputStream(new byte[] {1}), 2));
+            () -> SyncWire.readBytes(new ByteArrayInputStream(new byte[] {1}), 2));
     assertEquals("unreachable", cut.kind());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            SyncWire.readBytes(
-                java.io.InputStream.nullInputStream(), ai.singlr.sail.store.FastCdc.MAX + 1));
+        () -> SyncWire.readBytes(InputStream.nullInputStream(), FastCdc.MAX + 1));
   }
 }

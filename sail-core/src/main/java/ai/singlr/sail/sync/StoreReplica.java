@@ -9,6 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
@@ -131,8 +132,25 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     return snapshot(
         () ->
             erasure(entityId)
-                .map(erased -> new MainReplica.State(null, erased.rev(), ChangeLog.Kind.ERASURE))
-                .orElseGet(() -> new MainReplica.State(current(entityId), currentRev(entityId))));
+                .map(
+                    erased ->
+                        new MainReplica.State(
+                            null, erased.rev(), ChangeLog.Kind.ERASURE, erased.actor()))
+                .orElseGet(
+                    () ->
+                        new MainReplica.State(
+                            current(entityId), currentRev(entityId), recordedAuthor(entityId))));
+  }
+
+  private Snapshots.Creator recordedCreator(String entityId) {
+    var committed = current(entityId);
+    return committed == null || !committed.containsKey(Snapshots.CREATOR)
+        ? null
+        : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
+  }
+
+  private String recordedAuthor(String entityId) {
+    return changeLog.head(store.entityType(), entityId).map(ChangeLog.Entry::actor).orElse(null);
   }
 
   @Override
@@ -164,14 +182,17 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           }
           if (!Actor.current().canWrite()) {
             return new CommitOutcome.Denied(
-                READ_ONLY, store.latestRev(entityId), current(entityId));
+                READ_ONLY, store.latestRev(entityId), current(entityId), recordedAuthor(entityId));
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
-            case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
+            case PushOutcome.Accepted a ->
+                new CommitOutcome.Accepted(
+                    a.rev(), recordedAuthor(entityId), recordedCreator(entityId));
             case PushOutcome.Stale s ->
                 new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
             case PushOutcome.Denied d ->
-                new CommitOutcome.Denied(d.reason(), d.currentRev(), d.currentSnapshot());
+                new CommitOutcome.Denied(
+                    d.reason(), d.currentRev(), d.currentSnapshot(), recordedAuthor(entityId));
           };
         });
   }

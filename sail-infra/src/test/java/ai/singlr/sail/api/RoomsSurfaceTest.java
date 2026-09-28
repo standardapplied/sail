@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -84,9 +85,12 @@ class RoomsSurfaceTest {
     return Acting.system(
         () -> {
           var result =
-              ops.createRoom(
-                  RoomCreateRequest.fromMap(Map.of("id", id, "project", "acme", "title", title)),
-                  admin());
+              Actor.call(
+                  admin(),
+                  () ->
+                      ops.createRoom(
+                          RoomCreateRequest.fromMap(
+                              Map.of("id", id, "project", "acme", "title", title))));
           assertTrue(result instanceof Result.Success<RoomDetailResponse>, result.toString());
           return ((Result.Success<RoomDetailResponse>) result).value();
         });
@@ -100,11 +104,13 @@ class RoomsSurfaceTest {
     assertTrue(specStore.findById("design-room").isEmpty(), "the board never sees it");
 
     var posted =
-        ops.postRoomMessage(
-            "design-room",
-            new SpecMessageRequest("hello chat-only world", null, false),
+        Actor.call(
             admin(),
-            HANDLE);
+            () ->
+                ops.postRoomMessage(
+                    "design-room",
+                    new SpecMessageRequest("hello chat-only world", null, false),
+                    HANDLE));
     assertTrue(posted instanceof Result.Success<SpecMessageResponse>, posted.toString());
 
     var messages = ops.roomMessages("design-room", null, null, 10);
@@ -118,7 +124,7 @@ class RoomsSurfaceTest {
         ((Result.Success<RoomMembersResponse>) members).value().members().isEmpty(),
         "a fresh chat room seats nobody");
 
-    var listed = ops.rooms("acme", admin());
+    var listed = Actor.call(admin(), () -> ops.rooms("acme"));
     var view = ((Result.Success<RoomsListResponse>) listed).value();
     assertEquals(1, view.rooms().size());
     assertNotNull(view.latestByRoom().get("design-room"), "the message decorates the rooms list");
@@ -143,9 +149,12 @@ class RoomsSurfaceTest {
     create("dup-room", "First");
 
     var second =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "dup-room", "project", "acme", "title", "Two")),
-            admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createRoom(
+                    RoomCreateRequest.fromMap(
+                        Map.of("id", "dup-room", "project", "acme", "title", "Two"))));
 
     assertTrue(second instanceof Result.Failure<RoomDetailResponse>);
     assertEquals(ErrorCode.CONFLICT, ((Result.Failure<RoomDetailResponse>) second).errorCode());
@@ -162,7 +171,7 @@ class RoomsSurfaceTest {
                     "auth",
                     "acme",
                     "Auth",
-                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    SpecStatus.DRAFT,
                     HANDLE,
                     null,
                     null,
@@ -178,9 +187,12 @@ class RoomsSurfaceTest {
                     "adas-room")));
 
     var shadowed =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "auth", "project", "acme", "title", "Namesake")),
-            admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createRoom(
+                    RoomCreateRequest.fromMap(
+                        Map.of("id", "auth", "project", "acme", "title", "Namesake"))));
 
     assertTrue(shadowed instanceof Result.Failure<RoomDetailResponse>, shadowed.toString());
     var failure = (Result.Failure<RoomDetailResponse>) shadowed;
@@ -192,40 +204,63 @@ class RoomsSurfaceTest {
   @Test
   void deleteTombstonesAChatRoomButRefusesARoomHoldingSpecs() {
     create("empty-room", "Empty");
-    var deleted = ops.deleteRoom("empty-room", admin());
+    var deleted = Actor.call(admin(), () -> ops.deleteRoom("empty-room"));
     assertTrue(deleted instanceof Result.Success<RoomDeletedResponse>);
     assertTrue(roomStore.findById("empty-room").isEmpty());
     assertNotNull(roomStore.latestRev("empty-room"), "the deletion tombstones for sync");
 
     create("busy-room", "Busy");
     var spec =
-        ops.createGlobalSpec(
-            SpecCreateRequest.fromMap(
-                Map.of("id", "work", "title", "Work", "project", "acme", "room_id", "busy-room")),
-            admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createGlobalSpec(
+                    SpecCreateRequest.fromMap(
+                        Map.of(
+                            "id",
+                            "work",
+                            "title",
+                            "Work",
+                            "project",
+                            "acme",
+                            "room_id",
+                            "busy-room"))));
     assertTrue(spec instanceof Result.Success<GlobalSpecCreatedResponse>, spec.toString());
 
-    var refused = ops.deleteRoom("busy-room", admin());
+    var refused = Actor.call(admin(), () -> ops.deleteRoom("busy-room"));
     assertTrue(refused instanceof Result.Failure<RoomDeletedResponse>);
     assertEquals(ErrorCode.CONFLICT, ((Result.Failure<RoomDeletedResponse>) refused).errorCode());
 
     var detail = ((Result.Success<RoomDetailResponse>) ops.room("busy-room")).value();
-    assertEquals(java.util.List.of("work"), detail.room().specIds());
+    assertEquals(List.of("work"), detail.room().specIds());
   }
 
   @Test
   void invalidCreatesAndMissingRoomsFailLoudly() {
     var noTitle =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme")), admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createRoom(
+                    RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme"))));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) noTitle).errorCode());
 
     var badWake =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(
-                Map.of("id", "y-room", "project", "acme", "title", "Y", "wake", "sometimes")),
-            admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createRoom(
+                    RoomCreateRequest.fromMap(
+                        Map.of(
+                            "id",
+                            "y-room",
+                            "project",
+                            "acme",
+                            "title",
+                            "Y",
+                            "wake",
+                            "sometimes"))));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) badWake).errorCode());
 
@@ -234,8 +269,11 @@ class RoomsSurfaceTest {
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<RoomDetailResponse>) missing).errorCode());
 
     var missingPost =
-        ops.postRoomMessage(
-            "ghost-room", new SpecMessageRequest("hi", null, false), admin(), HANDLE);
+        Actor.call(
+            admin(),
+            () ->
+                ops.postRoomMessage(
+                    "ghost-room", new SpecMessageRequest("hi", null, false), HANDLE));
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<SpecMessageResponse>) missingPost).errorCode());
   }
@@ -243,13 +281,23 @@ class RoomsSurfaceTest {
   @Test
   void aValidWakeModeIsAcceptedAndListsAcrossAllProjects() {
     var created =
-        ops.createRoom(
-            RoomCreateRequest.fromMap(
-                Map.of("id", "wakey-room", "project", "acme", "title", "Wakey", "wake", "mention")),
-            admin());
+        Actor.call(
+            admin(),
+            () ->
+                ops.createRoom(
+                    RoomCreateRequest.fromMap(
+                        Map.of(
+                            "id",
+                            "wakey-room",
+                            "project",
+                            "acme",
+                            "title",
+                            "Wakey",
+                            "wake",
+                            "mention"))));
     assertEquals("mention", ((Result.Success<RoomDetailResponse>) created).value().room().wake());
 
-    var all = ops.rooms(null, admin());
+    var all = Actor.call(admin(), () -> ops.rooms(null));
     assertEquals(1, ((Result.Success<RoomsListResponse>) all).value().rooms().size());
   }
 
@@ -272,20 +320,24 @@ class RoomsSurfaceTest {
     assertEquals(
         ErrorCode.COMMAND_FAILED,
         ((Result.Failure<RoomDetailResponse>)
-                unwired.createRoom(
-                    RoomCreateRequest.fromMap(
-                        Map.of("id", "z-room", "project", "acme", "title", "Z")),
-                    admin()))
+                Actor.call(
+                    admin(),
+                    () ->
+                        unwired.createRoom(
+                            RoomCreateRequest.fromMap(
+                                Map.of("id", "z-room", "project", "acme", "title", "Z")))))
             .errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
-        ((Result.Failure<RoomsListResponse>) unwired.rooms(null, admin())).errorCode());
+        ((Result.Failure<RoomsListResponse>) Actor.call(admin(), () -> unwired.rooms(null)))
+            .errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
         ((Result.Failure<RoomDetailResponse>) unwired.room("any")).errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
-        ((Result.Failure<RoomDeletedResponse>) unwired.deleteRoom("any", admin())).errorCode());
+        ((Result.Failure<RoomDeletedResponse>) Actor.call(admin(), () -> unwired.deleteRoom("any")))
+            .errorCode());
   }
 
   @Test
@@ -305,7 +357,9 @@ class RoomsSurfaceTest {
             .useRooms(roomStore);
     create("quiet-room", "Quiet");
 
-    var listed = ((Result.Success<RoomsListResponse>) quiet.rooms("acme", admin())).value();
+    var listed =
+        ((Result.Success<RoomsListResponse>) Actor.call(admin(), () -> quiet.rooms("acme")))
+            .value();
     assertTrue(listed.latestByRoom().isEmpty(), "no message store, no decoration");
     var detail = ((Result.Success<RoomDetailResponse>) quiet.room("quiet-room")).value();
     assertEquals("quiet-room", detail.room().id());
@@ -322,18 +376,20 @@ class RoomsSurfaceTest {
     assertEquals(
         ErrorCode.BAD_REQUEST, ((Result.Failure<SpecMessagesResponse>) badCursor).errorCode());
 
-    var ghostDelete = ops.deleteRoom("ghost-room", admin());
+    var ghostDelete = Actor.call(admin(), () -> ops.deleteRoom("ghost-room"));
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<RoomDeletedResponse>) ghostDelete).errorCode());
   }
 
   @Test
   void blankIdentityFieldsOnCreateAreEachRefused() {
-    var blankId = ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null), admin());
+    var blankId =
+        Actor.call(admin(), () -> ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null)));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankId).errorCode());
 
-    var blankProject = ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null), admin());
+    var blankProject =
+        Actor.call(admin(), () -> ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null)));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankProject).errorCode());
   }
@@ -353,8 +409,11 @@ class RoomsSurfaceTest {
             new ReviewStore(db),
             new RunStore(db));
     var posted =
-        bare.postRoomMessage(
-            "anywhere", new SpecMessageRequest("hi", null, false), admin(), HANDLE);
+        Actor.call(
+            admin(),
+            () ->
+                bare.postRoomMessage(
+                    "anywhere", new SpecMessageRequest("hi", null, false), HANDLE));
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND, ((Result.Failure<SpecMessageResponse>) posted).errorCode());
 
@@ -370,7 +429,9 @@ class RoomsSurfaceTest {
                 new RunStore(db))
             .useRooms(roomStore);
     create("no-spec-store", "NoSpecs");
-    var listed = ((Result.Success<RoomsListResponse>) specless.rooms(null, admin())).value();
+    var listed =
+        ((Result.Success<RoomsListResponse>) Actor.call(admin(), () -> specless.rooms(null)))
+            .value();
     assertTrue(
         listed.rooms().stream().allMatch(view -> view.specIds().isEmpty()),
         "a box without a spec store lists rooms with empty attachments");
@@ -386,7 +447,7 @@ class RoomsSurfaceTest {
                     "legacy",
                     "acme",
                     "Legacy spec",
-                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    SpecStatus.DRAFT,
                     HANDLE,
                     null,
                     null,
@@ -397,12 +458,15 @@ class RoomsSurfaceTest {
                     "",
                     "",
                     HANDLE,
-                    java.util.List.of(),
-                    java.util.List.of())));
+                    List.of(),
+                    List.of())));
 
     var posted =
-        ops.postRoomMessage(
-            "legacy", new SpecMessageRequest("via room door", null, false), admin(), HANDLE);
+        Actor.call(
+            admin(),
+            () ->
+                ops.postRoomMessage(
+                    "legacy", new SpecMessageRequest("via room door", null, false), HANDLE));
 
     assertTrue(
         posted instanceof Result.Success<SpecMessageResponse>,
@@ -421,19 +485,21 @@ class RoomsSurfaceTest {
               .start(
                   () -> {
                     align(barrier);
-                    ops.deleteRoom(roomId, admin());
+                    Actor.call(admin(), () -> ops.deleteRoom(roomId));
                   });
       var binder =
           Thread.ofVirtual()
               .start(
                   () -> {
                     align(barrier);
-                    ops.createGlobalSpec(
-                        SpecCreateRequest.fromMap(
-                            Map.of(
-                                "id", specId, "title", "Race", "project", "acme", "room_id",
-                                roomId)),
-                        admin());
+                    Actor.call(
+                        admin(),
+                        () ->
+                            ops.createGlobalSpec(
+                                SpecCreateRequest.fromMap(
+                                    Map.of(
+                                        "id", specId, "title", "Race", "project", "acme", "room_id",
+                                        roomId))));
                   });
       deleter.join();
       binder.join();

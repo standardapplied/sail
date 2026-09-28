@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -33,12 +34,15 @@ import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -183,6 +187,66 @@ class SyncServerCommandTest {
   }
 
   @Test
+  void aDisabledFdesSessionIsRefusedBeforeAnythingIsServed() throws Exception {
+    var token = tokenFor("member");
+    mainDb.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
+    var out = new ByteArrayOutputStream();
+
+    var exit =
+        SyncServerCommand.serve(
+            mainReplicaDb,
+            "main",
+            token,
+            new ByteArrayInputStream(new byte[0]),
+            out,
+            SyncTransitionSink.NONE,
+            SyncConfig::unset);
+
+    assertEquals(1, exit);
+    assertEquals(0, out.size(), "nothing is served");
+  }
+
+  @Test
+  void mainsOperatorSyncsAsAnAdminWhateverItsRosterRole() throws Exception {
+    var token = tokenFor("viewer");
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    var toServer = new PipedOutputStream();
+    var serverIn = new BufferedInputStream(new PipedInputStream(toServer));
+    var toClient = new PipedOutputStream();
+    var clientIn = new BufferedInputStream(new PipedInputStream(toClient));
+    var serverThread =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    SyncServerCommand.serve(
+                        mainReplicaDb,
+                        "main",
+                        token,
+                        serverIn,
+                        toClient,
+                        SyncTransitionSink.NONE,
+                        () -> new SyncConfig("main", null, "uday", "main"));
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                });
+    try (var session =
+        SyncSession.open(
+            clientIn,
+            toServer,
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            n -> {},
+            nodeDb)) {
+      assertEquals(
+          1,
+          Actor.call(Actor.main(), () -> session.reconcile("spec", nodeReplica)).report().pushed());
+    } finally {
+      serverThread.join();
+    }
+  }
+
+  @Test
   void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     syncWithToken(null);
@@ -250,7 +314,7 @@ class SyncServerCommandTest {
   void aCommittedPushHandsItsTransitionsToTheSink() throws Exception {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     Acting.system(() -> nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress")));
-    var seen = new java.util.ArrayList<SyncTransition>();
+    var seen = new ArrayList<SyncTransition>();
 
     syncWithToken(tokenFor("member"), "spec", nodeReplica, seen::add);
 
@@ -265,7 +329,7 @@ class SyncServerCommandTest {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");
     syncWithToken(token);
-    var seen = new java.util.ArrayList<SyncTransition>();
+    var seen = new ArrayList<SyncTransition>();
 
     syncWithToken(token, "spec", nodeReplica, seen::add);
 
@@ -274,7 +338,7 @@ class SyncServerCommandTest {
 
   @Test
   void rosterExposesMainsFdesAsMaps() {
-    new ai.singlr.sail.store.FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
+    new FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
 
     var roster = SyncServerCommand.roster(mainDb);
 

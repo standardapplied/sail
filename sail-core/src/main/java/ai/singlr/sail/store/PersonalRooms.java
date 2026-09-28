@@ -59,7 +59,7 @@ public final class PersonalRooms {
    * identifies it — and rendered on the wire so Mast pins the reader's room without re-deriving the
    * id. Never throws: a creator that is no FDE handle (an agent principal) simply derives no match.
    */
-  public static String ownerOf(RoomStore.RoomRow row) {
+  public static String personalRoomOf(RoomStore.RoomRow row) {
     if (row.createdBy() == null || !row.id().startsWith(PREFIX)) {
       return null;
     }

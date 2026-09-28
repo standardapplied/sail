@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
@@ -763,7 +764,7 @@ record RoomView(
     String wake,
     String effectiveWake,
     String personalOf,
-    List<ai.singlr.sail.config.Engagement> members,
+    List<Engagement> members,
     List<String> specIds,
     String createdBy,
     String createdAt,
@@ -772,7 +773,7 @@ record RoomView(
     implements Mappable {
 
   static RoomView from(RoomStore.RoomRow row, List<String> specIds) {
-    var members = ai.singlr.sail.config.Roster.fromJson(row.roster()).members();
+    var members = Roster.fromJson(row.roster()).members();
     return new RoomView(
         row.id(),
         row.project(),
@@ -780,7 +781,7 @@ record RoomView(
         row.assignee(),
         row.wake(),
         RoomWakePolicy.effectiveMode(row.wake(), members.size()),
-        PersonalRooms.ownerOf(row),
+        PersonalRooms.personalRoomOf(row),
         members,
         specIds,
         row.createdBy(),
@@ -877,7 +878,7 @@ record RoomDeletedResponse(String id) implements Mappable {
 }
 
 /** Response of {@code GET /v1/rooms/{id}/members}: the room's roster, room-first. */
-record RoomMembersResponse(List<ai.singlr.sail.config.Engagement> members) implements Mappable {
+record RoomMembersResponse(List<Engagement> members) implements Mappable {
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -1253,7 +1254,7 @@ record GlobalSpecView(
         spec.roomId());
   }
 
-  private static Map<String, Object> engagementMap(ai.singlr.sail.config.Engagement engagement) {
+  private static Map<String, Object> engagementMap(Engagement engagement) {
     if (engagement == null) {
       return null;
     }

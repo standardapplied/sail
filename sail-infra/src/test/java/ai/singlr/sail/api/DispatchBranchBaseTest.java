@@ -159,11 +159,13 @@ class DispatchBranchBaseTest {
             SessionYield.NONE);
 
     var outcome =
-        ops.dispatch(
-            "acme",
-            new DispatchOperations.Request("auth", "background", false, null, false),
+        Actor.call(
             ADMIN,
-            HANDLE);
+            () ->
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    HANDLE));
     assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
   }
 

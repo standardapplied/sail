@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -273,5 +274,54 @@ class RoomStoreTest {
 
     assertEquals(1, acme.size());
     assertEquals("auth", acme.getFirst().id());
+  }
+
+  @Test
+  void aSpecsOwnRoomBelongsToItsSpecNeverToItsStaleRoomRow() {
+    insertRoom("auth", null, "uday");
+    insertSpec("auth", "auth", "mady", "uday");
+
+    assertEquals(List.of("mady"), rooms.owners("auth"));
+  }
+
+  @Test
+  void aStandaloneRoomBelongsToItsOwnerAndToTheOwnerOfEachSpecBornInIt() {
+    insertRoom("home", null, "ada");
+    insertSpec("auth", "home", null, "raj");
+    insertSpec("docs", "home", "ada", "ada");
+
+    assertEquals(List.of("raj", "ada"), rooms.owners("home"));
+    assertEquals(List.of(), rooms.owners("auth"), "a spec born in a room has no room of its own");
+  }
+
+  @Test
+  void aConversationNoOneOwnsHasNoOwners() {
+    insertRoom("empty", null, null);
+
+    assertEquals(List.of(), rooms.owners("empty"));
+    assertEquals(List.of(), rooms.owners("nowhere"));
+  }
+
+  private void insertRoom(String id, String assignee, String createdBy) {
+    db.execute(
+        """
+        INSERT INTO rooms (id, title, project, assignee, created_by, created_at, updated_at)
+        VALUES (?, ?, 'acme', ?, ?, 'now', 'now')""",
+        id,
+        id,
+        assignee,
+        createdBy);
+  }
+
+  private void insertSpec(String id, String roomId, String assignee, String createdBy) {
+    db.execute(
+        """
+        INSERT INTO specs (id, title, project, room_id, assignee, created_by, created_at, updated_at)
+        VALUES (?, ?, 'acme', ?, ?, ?, 'now', 'now')""",
+        id,
+        id,
+        roomId,
+        assignee,
+        createdBy);
   }
 }

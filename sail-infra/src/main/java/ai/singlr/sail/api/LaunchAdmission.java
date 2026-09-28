@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.FdeStore;
 import java.util.List;
 
@@ -19,8 +20,8 @@ import java.util.List;
  * snapshot: is the actor allowed to act on this spec from this box, is the box's FDE in the synced
  * roster, is the chosen agent a known name actually installed in the container, and is the model a
  * shell-safe token. Each refusal is an {@link ApiException} thrown before any side effect, so a
- * rejected launch never leaves a half-provisioned run. Shared by the dispatch, ad-hoc, room, and
- * membership lanes so admission is decided in exactly one place.
+ * rejected launch never leaves a half-provisioned run. Shared by the lanes an operator starts —
+ * dispatch, build and membership — so admission is decided in exactly one place.
  */
 public final class LaunchAdmission {
 
@@ -33,16 +34,12 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when the actor may not act on {@code spec} from the box identified by {@code
-   * localHandle}.
-   */
-  /**
    * Refuses when the actor may not act on a spec-less room from this box: same four rules as the
    * spec path — no agent lane, node handle set, this box owns the room (assignee, else creator),
    * write credential, admin-or-owner — with room wording, since no work-item is involved.
    */
-  public static void requireAllowedForRoom(
-      Actor actor, String roomId, String owner, String localHandle) {
+  public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
+    var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
           ErrorCode.FORBIDDEN,
@@ -55,7 +52,7 @@ public final class LaunchAdmission {
           "This box has no FDE handle, so room ownership cannot be established.",
           "Set it with: sail host config set sync-handle <handle>");
     }
-    if (!localHandle.equals(owner)) {
+    if (!Ownership.owns(localHandle, owner)) {
       throw new ApiException(
           ErrorCode.NOT_YOUR_SPEC,
           "Room '" + roomId + "' belongs to '" + owner + "', whose box serves its agents.",
@@ -67,7 +64,7 @@ public final class LaunchAdmission {
           "Your credential is read-only and cannot change room membership.",
           "Ask an admin for a member or admin credential.");
     }
-    if (!actor.isAdmin() && !owner.equals(actor.handle())) {
+    if (!actor.isAdmin() && !Ownership.owns(actor.handle(), owner)) {
       throw new ApiException(
           ErrorCode.NOT_YOUR_SPEC,
           "Room '" + roomId + "' belongs to '" + owner + "', not you.",
@@ -75,28 +72,34 @@ public final class LaunchAdmission {
     }
   }
 
-  public static void requireAllowed(Actor actor, Spec spec, String localHandle) {
-    if (DispatchPolicy.check(actor, spec, localHandle)
-        instanceof DispatchDecision.Refused refused) {
+  /**
+   * Refuses when the actor may not act on {@code spec} from the box identified by {@code
+   * localHandle}.
+   */
+  public static void requireAllowed(Spec spec, String localHandle) {
+    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }
   }
 
   /**
-   * Refuses dispatch when this box's FDE handle is missing from the synced roster: an unauthorized
-   * handle means the specs assigned to it cannot be trusted. A box that keeps no roster ({@code
-   * fdeStore == null}) skips the check.
+   * Refuses dispatch when this box's FDE is missing from the synced roster or disabled there: an
+   * unauthorized handle means the specs assigned to it cannot be trusted, and a run launched for a
+   * disabled FDE would be refused at its every call. A box that keeps no roster ({@code fdeStore ==
+   * null}) skips the check.
    */
   public void requireTrustedRoster(String localHandle) {
-    if (fdeStore == null || fdeStore.byHandle(localHandle).isPresent()) {
+    if (fdeStore == null
+        || fdeStore.byHandle(localHandle).filter(FdeStore.Fde::active).isPresent()) {
       return;
     }
     throw new ApiException(
         ErrorCode.FDE_NOT_IN_ROSTER,
         "FDE '"
             + localHandle
-            + "' is not in this box's roster, so its assigned specs cannot be trusted.",
-        "Run 'sail sync' to pull the roster from main, or get authorized there first.");
+            + "' is not an active member of this box's roster, so its assigned specs cannot be"
+            + " trusted.",
+        "Run 'sudo sail sync' to pull the roster from main, or get authorized there first.");
   }
 
   /**

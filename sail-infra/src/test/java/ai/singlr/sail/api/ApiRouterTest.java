@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
@@ -34,8 +35,13 @@ import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -262,17 +268,16 @@ class ApiRouterTest {
       var download = get(server, "/v1/projects/acme/files/data", "token");
       assertEquals("3", download.headers().firstValue("content-length").orElseThrow());
       var etag = download.headers().firstValue("etag").orElseThrow();
-      assertEquals("\"" + ai.singlr.sail.store.BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
+      assertEquals("\"" + BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
       var request =
-          java.net.http.HttpRequest.newBuilder(
-                  java.net.URI.create(
-                      "http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
+          HttpRequest.newBuilder(
+                  URI.create("http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
               .header("Authorization", "Bearer token")
               .header("If-None-Match", etag)
               .GET()
               .build();
-      try (var client = java.net.http.HttpClient.newHttpClient()) {
-        var cached = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+      try (var client = HttpClient.newHttpClient()) {
+        var cached = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(304, cached.statusCode());
         assertEquals("", cached.body());
       }
@@ -331,13 +336,13 @@ class ApiRouterTest {
               new FileStore(main.db),
               directory.resolve("main-projects"),
               "acme",
-              ai.singlr.sail.config.FileLimits.defaults());
+              FileLimits.defaults());
       var nodeFiles =
           new SharedProjectFiles(
               new FileStore(node.db),
               directory.resolve("node-projects"),
               "acme",
-              ai.singlr.sail.config.FileLimits.defaults());
+              FileLimits.defaults());
       var path = "dir/config";
       if (existingMode != null) {
         var original = "original\n".getBytes(StandardCharsets.UTF_8);
@@ -389,12 +394,12 @@ class ApiRouterTest {
               .header("Authorization", "Bearer token")
               .PUT(
                   HttpRequest.BodyPublishers.ofInputStream(
-                      () -> new java.io.ByteArrayInputStream(new byte[] {1})))
+                      () -> new ByteArrayInputStream(new byte[] {1})))
               .build();
       var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("Content-Length is required"));
-      try (var socket = new java.net.Socket("127.0.0.1", server.port())) {
+      try (var socket = new Socket("127.0.0.1", server.port())) {
         socket.setSoTimeout(5000);
         socket
             .getOutputStream()
@@ -403,9 +408,8 @@ class ApiRouterTest {
                     .getBytes(StandardCharsets.US_ASCII));
         socket.getOutputStream().flush();
         var line =
-            new java.io.BufferedReader(
-                    new java.io.InputStreamReader(
-                        socket.getInputStream(), StandardCharsets.US_ASCII))
+            new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
                 .readLine();
         assertTrue(line.contains("413"), line);
       }
@@ -501,32 +505,32 @@ class ApiRouterTest {
                       new FileStore.FileRow(
                           project,
                           entry.getKey(),
-                          ai.singlr.sail.store.BlobStore.hash(entry.getValue()),
+                          BlobStore.hash(entry.getValue()),
                           entry.getValue().length,
                           0644,
                           "binary"))
               .toList();
         }
 
-        public ai.singlr.sail.config.FileLimits limits() {
+        public FileLimits limits() {
           capConsulted++;
-          return new ai.singlr.sail.config.FileLimits(1024);
+          return new FileLimits(1024);
         }
 
         public Optional<FileStore.FileRow> find(String path) {
           return list().stream().filter(row -> row.path().equals(path)).findFirst();
         }
 
-        public java.io.InputStream open(FileStore.FileRow row) {
+        public InputStream open(FileStore.FileRow row) {
           openedFiles++;
-          return new java.io.ByteArrayInputStream(files.get(row.path()));
+          return new ByteArrayInputStream(files.get(row.path()));
         }
 
-        public String put(String path, java.io.InputStream bytes, long size, int mode) {
+        public String put(String path, InputStream bytes, long size, int mode) {
           try {
             Acting.system(() -> files.put(path, bytes.readAllBytes()));
-          } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
           }
           return path;
         }
@@ -1089,7 +1093,7 @@ class ApiRouterTest {
         ApiJson.withSchema(new ApiError("code", "message", "")).toString().contains("action"));
     assertTrue(
         ApiJson.withSchema(new ApiError("code", "message", "fix")).toString().contains("action"));
-    assertThrows(NullPointerException.class, () -> new TokenAuth(null));
+    assertThrows(NullPointerException.class, () -> new TokenAuth(null, null));
   }
 
   @Test
@@ -1922,12 +1926,14 @@ class ApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postRoomMessage(
-        String specId, SpecMessageRequest request, Actor actor, String author) {
+        String specId, SpecMessageRequest request, String author) {
+
+      var actor = Actor.current();
       this.actor = actor;
       this.author = author;
       this.body = request.body();
       this.question = request.question();
-      return super.postRoomMessage(specId, request, actor, author);
+      return Actor.call(actor, () -> super.postRoomMessage(specId, request, author));
     }
   }
 
@@ -2070,7 +2076,7 @@ class ApiRouterTest {
 
     @Override
     public Result<EngageResponse> addRoomMember(
-        String roomId, EngageRequest request, Actor actor, String localHandle) {
+        String roomId, EngageRequest request, String localHandle) {
       lastAddMember = new Engage(roomId, request, localHandle);
       return Result.success(
           new EngageResponse(
@@ -2078,8 +2084,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<DisengageResponse> removeRoomMember(
-        String roomId, Actor actor, String localHandle) {
+    public Result<DisengageResponse> removeRoomMember(String roomId, String localHandle) {
       lastRemoveMember = roomId;
       return Result.success(new DisengageResponse("claude-code"));
     }
@@ -2093,7 +2098,9 @@ class ApiRouterTest {
     String lastRoomDelete;
 
     @Override
-    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+
+      var actor = Actor.current();
       lastRoomCreate = request;
       lastRoomCreator = Actor.current();
       return Result.success(
@@ -2117,7 +2124,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RoomsListResponse> rooms(String project, Actor actor) {
+    public Result<RoomsListResponse> rooms(String project) {
       lastRoomsProject = project;
       return Result.success(
           new RoomsListResponse(
@@ -2164,7 +2171,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+    public Result<RoomDeletedResponse> deleteRoom(String roomId) {
       lastRoomDelete = roomId;
       return Result.success(new RoomDeletedResponse(roomId));
     }
@@ -2178,7 +2185,7 @@ class ApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postRoomMessage(
-        String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+        String roomId, SpecMessageRequest request, String authorHandle) {
       lastRoomPost = roomId + ":" + request.body();
       return Result.success(
           new SpecMessageResponse(
@@ -2228,7 +2235,7 @@ class ApiRouterTest {
 
     @Override
     public Result<DispatchResponse> dispatch(
-        String project, DispatchRequest request, Actor actor, String localHandle) {
+        String project, DispatchRequest request, String localHandle) {
       return Result.success(
           new DispatchResponse(
               project,
@@ -2300,12 +2307,12 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
+    public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
       return Result.success(new RunLogResponse(runId, List.of("tail=" + tail), null));
     }
 
     @Override
-    public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
+    public Result<StopRunResponse> stopRun(String runId, String localHandle) {
       return Result.success(new StopRunResponse(runId, false, null, null, false));
     }
 
@@ -2416,8 +2423,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecCreatedResponse> createGlobalSpec(
-        SpecCreateRequest request, Actor actor) {
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
       return Result.success(
           new GlobalSpecCreatedResponse(
               new GlobalSpecView(
@@ -2444,7 +2450,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-        String specId, SpecUpdateRequest request, Actor actor) {
+        String specId, SpecUpdateRequest request) {
       return Result.success(
           new GlobalSpecUpdatedResponse(
               new GlobalSpecView(
@@ -2470,7 +2476,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
+    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
       return Result.success(new GlobalSpecDeletedResponse(specId));
     }
 
@@ -2481,7 +2487,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-        String specId, SpecContentRequest request, Actor actor) {
+        String specId, SpecContentRequest request) {
       return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
     }
 
@@ -2503,14 +2509,9 @@ class ApiRouterTest {
 
     @Override
     public Result<RoomConversationResponse> recordRoomConversation(
-        String roomId,
-        String agent,
-        String sessionId,
-        String source,
-        String transcriptPath,
-        Actor actor) {
+        String roomId, String agent, String sessionId, String source, String transcriptPath) {
       return new TestOperations()
-          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, actor);
+          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath);
     }
 
     @Override
@@ -2525,7 +2526,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-        String specId, SpecRestoreRequest request, Actor actor) {
+        String specId, SpecRestoreRequest request) {
       return Result.success(
           new GlobalSpecRestoredResponse(
               GlobalSpecView.from(
@@ -2575,13 +2576,12 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
+    public Result<ReviewApproveResponse> approveReview(String reviewId) {
       return Result.success(new ReviewApproveResponse(reviewId, true));
     }
 
     @Override
-    public Result<FindingDismissResponse> dismissFinding(
-        String reviewId, String findingId, Actor actor) {
+    public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
       return Result.success(new FindingDismissResponse(findingId, true));
     }
   }

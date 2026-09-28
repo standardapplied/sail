@@ -124,7 +124,7 @@ class ReviewOperationsTest {
     var stageId = reviewStore.createStage(reviewId, "human", "human");
     reviewStore.startStage(stageId, "uday");
 
-    var response = Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId, UDAY_ADMIN));
+    var response = Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId));
 
     assertTrue(response.approved());
     var review = reviewStore.findReview(reviewId).orElseThrow();
@@ -142,16 +142,13 @@ class ReviewOperationsTest {
     reviewStore.createStage(reviewId, "security", "agent");
 
     var ex =
-        assertThrows(
-            ApiException.class,
-            () -> Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId, UDAY_ADMIN)));
+        assertThrows(ApiException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId)));
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
   }
 
   @Test
   void approveMissingThrowsNotFound() {
-    assertThrows(
-        ApiException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.approve("nope", UDAY_ADMIN)));
+    assertThrows(ApiException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.approve("nope")));
   }
 
   @Test
@@ -159,7 +156,7 @@ class ReviewOperationsTest {
     var reviewId = seedReviewWithFinding();
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
 
-    var response = Acting.by(UDAY_ADMIN, () -> ops.dismissFinding(reviewId, findingId, UDAY_ADMIN));
+    var response = Acting.by(UDAY_ADMIN, () -> ops.dismissFinding(reviewId, findingId));
 
     assertTrue(response.dismissed());
     assertEquals(
@@ -170,8 +167,7 @@ class ReviewOperationsTest {
   @Test
   void dismissFindingMissingReviewThrowsNotFound() {
     assertThrows(
-        ApiException.class,
-        () -> Acting.by(UDAY_ADMIN, () -> ops.dismissFinding("nope", "f1", UDAY_ADMIN)));
+        ApiException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.dismissFinding("nope", "f1")));
   }
 
   @Test
@@ -184,9 +180,7 @@ class ReviewOperationsTest {
     var ex =
         assertThrows(
             ApiException.class,
-            () ->
-                Acting.by(
-                    UDAY_ADMIN, () -> ops.dismissFinding(otherReview, victimFinding, UDAY_ADMIN)));
+            () -> Acting.by(UDAY_ADMIN, () -> ops.dismissFinding(otherReview, victimFinding)));
 
     assertEquals(ErrorCode.NOT_FOUND, ex.failure().errorCode());
     assertEquals(
@@ -344,14 +338,17 @@ class ReviewOperationsTest {
     reviewStore.startStage(humanStage, "uday");
     var sourceReview = reviewStore.reviewsForSpec("auth").getFirst().id();
 
-    Acting.by(UDAY_ADMIN, () -> ops.approve(followupReview, UDAY_ADMIN));
+    Acting.by(UDAY_ADMIN, () -> ops.approve(followupReview));
 
     var afterApprove =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();
     assertEquals(List.of(Finding.Resolution.OPEN, Finding.Resolution.OPEN), afterApprove);
 
-    new GlobalSpecOperations(specStore, reviewStore)
-        .update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done")), UDAY_ADMIN);
+    Actor.call(
+        UDAY_ADMIN,
+        () ->
+            new GlobalSpecOperations(specStore, reviewStore)
+                .update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done"))));
 
     var afterDone =
         reviewStore.findingsForReview(sourceReview).stream().map(Finding::resolution).toList();

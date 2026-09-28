@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -29,8 +30,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -140,7 +143,6 @@ class AgentPrincipalLifecycleTest {
                 dispatchOps.dispatch(
                     "acme",
                     new DispatchOperations.Request("auth", "background", false, null, false),
-                    ADMIN,
                     HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     var runId = dispatched.runId();
@@ -160,9 +162,14 @@ class AgentPrincipalLifecycleTest {
             null,
             specStore,
             new ReviewStore(db),
-            runStore);
+            runStore,
+            null,
+            ConnectEnvironment::detect,
+            SyncScheduler.disabled(),
+            new FdeStore(db),
+            SessionYield.NONE);
     var router = new LocalApiRouter(bus, operations);
-    var delivered = new java.util.concurrent.CountDownLatch(1);
+    var delivered = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
             BusTesting.latching(
@@ -173,7 +180,7 @@ class AgentPrincipalLifecycleTest {
                   }
 
                   @Override
-                  public java.util.function.Predicate<Event> filter() {
+                  public Predicate<Event> filter() {
                     return e -> Event.WellKnownTypes.AGENT_TOOL_FINISHED.equals(e.type());
                   }
 
@@ -227,8 +234,7 @@ class AgentPrincipalLifecycleTest {
             (project, unit) -> agentAlive.set(false),
             StopOperations.Listener.NONE);
     var stopped =
-        Acting.by(
-            ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), ADMIN, HANDLE, false));
+        Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
     var refused = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
@@ -302,7 +308,6 @@ class AgentPrincipalLifecycleTest {
                 dispatchOps.dispatch(
                     "acme",
                     new DispatchOperations.Request("auth", "background", false, null, false),
-                    Actor.cliOperator("alice"),
                     HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
 
@@ -321,7 +326,12 @@ class AgentPrincipalLifecycleTest {
             null,
             specStore,
             new ReviewStore(db),
-            runStore);
+            runStore,
+            null,
+            ConnectEnvironment::detect,
+            SyncScheduler.disabled(),
+            new FdeStore(db),
+            SessionYield.NONE);
     var router = new LocalApiRouter(bus, operations);
     var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
     assertEquals(

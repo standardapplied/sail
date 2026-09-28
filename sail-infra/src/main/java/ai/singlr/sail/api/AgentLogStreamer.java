@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -56,26 +57,22 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
-  private final Function<String, Optional<String>> specAssignee;
+  private final Function<String, Optional<String>> specOwner;
   private final Supplier<String> localHandle;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
-    this(
-        auth,
-        AgentLogStreamer::lookupFromDb,
-        AgentLogStreamer::assigneeFromDb,
-        NodeIdentity::handle);
+    this(auth, AgentLogStreamer::lookupFromDb, AgentLogStreamer::ownerFromDb, NodeIdentity::handle);
   }
 
   AgentLogStreamer(
       ApiAuth auth,
       Function<String, Optional<RunStore.RunRow>> runLookup,
-      Function<String, Optional<String>> specAssignee,
+      Function<String, Optional<String>> specOwner,
       Supplier<String> localHandle) {
     this.auth = auth;
     this.runLookup = runLookup;
-    this.specAssignee = specAssignee;
+    this.specOwner = specOwner;
     this.localHandle = localHandle;
   }
 
@@ -87,9 +84,9 @@ public final class AgentLogStreamer implements HttpHandler {
     }
   }
 
-  private static Optional<String> assigneeFromDb(String specId) {
+  private static Optional<String> ownerFromDb(String specId) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::assignee);
+      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::owner);
     } catch (RuntimeException e) {
       return Optional.empty();
     }
@@ -123,13 +120,11 @@ public final class AgentLogStreamer implements HttpHandler {
         sendForeign(exchange, run);
         return;
       }
-      if (RunPolicy.access(
+      if (Actor.call(
               ApiRouter.actorOf(exchange),
-              run.id(),
-              StopOperations.specIdOf(run),
-              Strings.isBlank(run.specId())
-                  ? run.node()
-                  : specAssignee.apply(run.specId()).orElse(null))
+              () ->
+                  RunPolicy.access(
+                      run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, specOwner)))
           instanceof AccessDecision.Refused refused) {
         var fix =
             Strings.isBlank(refused.fix())

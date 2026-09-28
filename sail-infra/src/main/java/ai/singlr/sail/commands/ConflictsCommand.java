@@ -11,6 +11,7 @@ import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
 import java.io.IOException;
@@ -302,7 +303,9 @@ public final class ConflictsCommand implements Callable<Integer> {
 
     private void resolve(
         HostOperations operations, String type, Resolution.Strategy strategy, String merged) {
-      operations.resolveConflict(type, address.entity, new Resolution(strategy, merged));
+      Actor.run(
+          operations.identity().operator(),
+          () -> operations.resolveConflict(type, address.entity, new Resolution(strategy, merged)));
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ Resolved @|yellow "

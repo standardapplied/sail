@@ -178,10 +178,7 @@ public final class DispatchCommand implements Runnable {
     try {
       return Actor.call(
           operations.identity().operator(),
-          () ->
-              operations
-                  .dispatching()
-                  .dispatch(project, request, Actor.cliOperator(handle), handle));
+          () -> operations.dispatching().dispatch(project, request, handle));
     } catch (ApiException e) {
       throw new IllegalStateException(CliCommand.describe(e), e);
     }

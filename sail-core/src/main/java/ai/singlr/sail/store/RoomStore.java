@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -60,8 +61,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       String updatedBy) {}
 
   /**
-   * Creates a room as a local edit, stamping creation and update times, created and last updated by
-   * the bound {@link Actor} whatever the row names.
+   * Creates a room as a local edit, stamping creation and update times, created by the FDE the
+   * bound {@link Actor} acts as ({@link Actor#actingFde}) and last updated by the actor, whatever
+   * the row names.
    */
   public void create(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
@@ -81,7 +83,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               room.assignee(),
               room.wake(),
               room.roster(),
-              author,
+              Actor.current().actingFde(),
               now,
               now,
               author);
@@ -237,6 +239,31 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
             updated_at, updated_by
         FROM rooms WHERE roster IS NOT NULL""",
         RoomStore::mapRoom);
+  }
+
+  /**
+   * Who owns conversation {@code roomId}: the one rule every door that admits a post, a terminal
+   * pin or a birth into a room decides by, and main's check of a synced post too. A room belongs to
+   * the owner of each spec that lives in it (the spec's own room, or the room it was born in) and,
+   * when it is not a spec's own room, to the owner its own row names. A spec's own room row is
+   * never consulted: the spec decides, so a claim moves the room with it at every door at once.
+   * Each owner is named once; empty when no one is known.
+   */
+  public List<String> owners(String roomId) {
+    return db
+        .query(
+            """
+            SELECT assignee, created_by FROM specs
+            WHERE room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1)
+            UNION ALL
+            SELECT assignee, created_by FROM rooms
+            WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM specs WHERE id = ?1)""",
+            row -> Ownership.ownerOf(row.text(0), row.text(1)),
+            roomId)
+        .stream()
+        .filter(Strings::isNotBlank)
+        .distinct()
+        .toList();
   }
 
   public Optional<RoomRow> findById(String id) {

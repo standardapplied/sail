@@ -17,6 +17,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -100,9 +101,9 @@ final class GlobalSpecOperations {
     return runStore.listForSpec(specId).stream().findFirst().map(RunSummary::from).orElse(null);
   }
 
-  GlobalSpecCreatedResponse create(SpecCreateRequest request, Actor actor) {
+  GlobalSpecCreatedResponse create(SpecCreateRequest request) {
+    var actor = Actor.current();
     requireStore();
-    Objects.requireNonNull(actor, "spec creation needs the authenticated actor");
     if (request.id() == null || request.id().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
     }
@@ -116,14 +117,13 @@ final class GlobalSpecOperations {
           "spec project is required.",
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
-    var assignee = Strings.isBlank(request.assignee()) ? actor.handle() : request.assignee();
     var row =
         new SpecStore.SpecRow(
             request.id(),
             request.project(),
             request.title(),
             parseStatus(request.status(), SpecStatus.PENDING),
-            assignee,
+            validAssignee(request.assignee()),
             request.agent(),
             validModel(request.model()),
             validReasoning(request.reasoningEffort()),
@@ -135,7 +135,7 @@ final class GlobalSpecOperations {
             null,
             request.dependsOn(),
             request.repos());
-    var created = specStore.atomically(() -> birth(row, request, actor));
+    var created = specStore.atomically(() -> birth(row, request));
     publishBoardUpdated(created.project(), created.id(), principal(actor.handle()));
     return new GlobalSpecCreatedResponse(viewOf(created));
   }
@@ -146,11 +146,11 @@ final class GlobalSpecOperations {
    * all. That is what keeps {@code room_id == id} an exact record of "this spec minted this room" —
    * a room landing on the id mid-birth cannot slip between the check and the mint.
    */
-  private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request, Actor actor) {
+  private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request) {
     reserveIdentityRoom(request.id());
     var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
     if (home != null) {
-      admitIntoRoom(home, request.project(), actor);
+      admitIntoRoom(home, row);
     }
     specStore.create(row.withRoomId(home != null ? home.id() : request.id()));
     if (request.body() != null || request.plan() != null) {
@@ -206,11 +206,13 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * Binding a spec to an existing room hands the spec's owner every membership write that room
-   * takes — engage rewrites its roster — so it needs the room's own post right: the room's assignee
-   * (or creator when unassigned) or an admin, in the room's project.
+   * Binding a spec to an existing room hands the spec's owner a voice there and every membership
+   * write the room takes — engage rewrites its roster — so it needs the room's post right ({@link
+   * RoomStore#owners}), in the room's project, and naming its assignee is a claim or a reassignment
+   * into that room ({@link #authorizeReassign}).
    */
-  private static void admitIntoRoom(RoomStore.RoomRow room, String project, Actor actor) {
+  private void admitIntoRoom(RoomStore.RoomRow room, SpecStore.SpecRow spec) {
+    var project = spec.project();
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
@@ -223,13 +225,18 @@ final class GlobalSpecOperations {
               + "'.",
           "A spec is born only into a room of its own project.");
     }
-    SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
+    SpecPolicy.post(room.id(), rooms.get().owners(room.id())).enforce();
+    if (Strings.isNotBlank(spec.assignee())) {
+      authorizeReassign(spec.id(), null, room.id(), spec.assignee());
+    }
   }
 
-  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {
+  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
+    var actor = Actor.current();
     requireStore();
+    var assignee = request.assignee() == null ? null : validAssignee(request.assignee());
     var existing = findOrThrow(specId);
-    authorizeUpdate(actor, existing, request);
+    authorizeUpdate(existing, request);
     guardReassignment(specId, existing, request);
     var updated =
         new SpecStore.SpecRow(
@@ -237,7 +244,7 @@ final class GlobalSpecOperations {
             request.project() != null ? request.project() : existing.project(),
             request.title() != null ? request.title() : existing.title(),
             parseStatus(request.status(), existing.status()),
-            request.assignee() != null ? request.assignee() : existing.assignee(),
+            request.assignee() != null ? assignee : existing.assignee(),
             request.agent() != null ? request.agent() : existing.agent(),
             request.model() != null ? validModel(request.model()) : existing.model(),
             request.reasoningEffort() != null
@@ -270,12 +277,6 @@ final class GlobalSpecOperations {
     return new GlobalSpecUpdatedResponse(viewOf(result));
   }
 
-  /**
-   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
-   * (admin-only, or a member self-claiming an unassigned spec); any other edit is governed by the
-   * general mutate policy (assignee or admin, creator or admin when unassigned). Runs before the
-   * status-based claim lock so identity is validated first.
-   */
   /** The row as a wire view, wake and roster decorated from its room — the fields' only home. */
   private GlobalSpecView viewOf(SpecStore.SpecRow row) {
     var store = rooms.get();
@@ -329,14 +330,32 @@ final class GlobalSpecOperations {
     }
   }
 
-  private static void authorizeUpdate(
-      Actor actor, SpecStore.SpecRow existing, SpecUpdateRequest request) {
+  /**
+   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
+   * ({@link #authorizeReassign}); any other edit is governed by the general mutate policy (assignee
+   * or admin, creator or admin when unassigned). Runs before the status-based claim lock so
+   * identity is validated first.
+   */
+  private void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
     if (reassigning) {
-      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), request.assignee()).enforce();
+      authorizeReassign(
+          existing.id(), existing.assignee(), existing.roomIdOrIdentity(), request.assignee());
     } else {
-      SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+      SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     }
+  }
+
+  /**
+   * Enforces {@link SpecPolicy#reassign} for giving spec {@code specId}, held by {@code
+   * currentAssignee} in conversation {@code room}, to {@code assignee}.
+   */
+  private void authorizeReassign(
+      String specId, String currentAssignee, String room, String assignee) {
+    var bornIn = specId.equals(room) ? null : room;
+    var store = rooms.get();
+    var bornInOwners = bornIn == null || store == null ? List.<String>of() : store.owners(bornIn);
+    SpecPolicy.reassign(specId, currentAssignee, assignee, bornIn, bornInOwners).enforce();
   }
 
   private static void guardReassignment(
@@ -359,10 +378,10 @@ final class GlobalSpecOperations {
     }
   }
 
-  GlobalSpecDeletedResponse delete(String specId, Actor actor) {
+  GlobalSpecDeletedResponse delete(String specId) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     var store = rooms.get();
     var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
@@ -384,10 +403,10 @@ final class GlobalSpecOperations {
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
-  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request, Actor actor) {
+  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     specStore.setContent(
         specId,
         Objects.requireNonNullElse(request.body(), ""),
@@ -433,16 +452,16 @@ final class GlobalSpecOperations {
    * otherwise an assignee could route around the admin-only reassign rule by restoring a revision
    * owned by someone else.
    */
-  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
+  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request) {
     requireStore();
     var existing = restorable(specId);
-    SpecPolicy.mutate(actor, specId, existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(specId, existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
-    var targetAssignee = revisionAssignee(specId, request.rev());
+    var targetAssignee = validAssignee(revisionAssignee(specId, request.rev()));
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      SpecPolicy.reassign(actor, specId, existing.assignee(), targetAssignee).enforce();
+      authorizeReassign(specId, existing.assignee(), existing.roomIdOrIdentity(), targetAssignee);
     }
     var store = rooms.get();
     specStore.atomically(
@@ -534,6 +553,22 @@ final class GlobalSpecOperations {
           ErrorCode.INTERNAL,
           "Spec store not available. Start the server with 'sail server start'.");
     }
+  }
+
+  /**
+   * An assignee is an FDE handle, or blank for anyone to claim — never a run's principal, whose
+   * shape ({@link RunStore#isPrincipalHandle}) no FDE handle has. A handle this box's roster does
+   * not know yet is accepted: a node may not have synced a new FDE.
+   */
+  private static String validAssignee(String assignee) {
+    if (RunStore.isPrincipalHandle(assignee)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "Assignee '" + assignee + "' names a run, not an FDE.",
+          "Give an FDE handle, or leave it blank for anyone to claim; the agent type goes in"
+              + " --agent.");
+    }
+    return Strings.isBlank(assignee) ? null : assignee;
   }
 
   private static String validModel(String model) {

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
@@ -14,6 +15,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -128,7 +130,7 @@ public final class RoomWakeLauncher {
             project,
             specId,
             localHandle,
-            Strings.isBlank(spec.assignee()) ? localHandle : spec.assignee(),
+            spec.owner(),
             role,
             repoPaths,
             agentType,
@@ -188,7 +190,7 @@ public final class RoomWakeLauncher {
     if (room == null) {
       throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
     }
-    var member = ai.singlr.sail.config.Roster.fromJson(room.roster()).standing();
+    var member = Roster.fromJson(room.roster()).standing();
     if (member == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
@@ -215,10 +217,7 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<SailYaml.Repo>of();
     var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
-    var owner =
-        room.assignee() == null || room.assignee().isBlank()
-            ? Objects.toString(room.createdBy(), localHandle)
-            : room.assignee();
+    var owner = Ownership.ownerOf(room.assignee(), room.createdBy());
     var credential =
         runReservation.reserve(
             runId,

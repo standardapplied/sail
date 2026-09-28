@@ -185,6 +185,10 @@ class ErasureSyncTest {
       assertFalse(new BlobStore(box.db).has(body), box.id + " still holds the pruned body");
     }
     assertEquals(onMain.rev(), erasure(node.db, onMain.target()).rev());
+    assertEquals(
+        "node",
+        erasure(node.db, onMain.target()).actor(),
+        "the node records the author main's answer names");
     assertTrue(reports.getFirst().freedBytes() > 0, "the node reports what the collection freed");
   }
 
@@ -274,6 +278,27 @@ class ErasureSyncTest {
     assertTrue(main.specs.findById("theirs").isPresent());
     assertTrue(node.specs.findById("theirs").isPresent());
     assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
+  }
+
+  @Test
+  void theCreatorOfAnUnassignedSpecMayPruneItAndAnotherMemberMayNot() throws IOException {
+    Acting.as("node", () -> main.specs.create(owned("draft", "Draft", "archived", null)));
+    Acting.as("uday", () -> main.specs.create(owned("theirs", "Theirs", "archived", null)));
+    round(NODE);
+    new EraseRequests(node.db).request(Erasure.SPEC, "draft", "node");
+
+    round(NODE);
+
+    assertTrue(main.specs.findById("draft").isEmpty(), "its creator owns an unassigned spec");
+    assertTrue(node.specs.findById("draft").isEmpty());
+    new EraseRequests(node.db).request(Erasure.SPEC, "theirs", "node");
+    try (var link = SyncBox.connect(main.server(NODE), node)) {
+      var refused =
+          assertThrows(
+              SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
+      assertTrue(refused.getMessage().contains("belongs to 'uday'"), refused.getMessage());
+    }
+    assertTrue(main.specs.findById("theirs").isPresent());
   }
 
   @Test

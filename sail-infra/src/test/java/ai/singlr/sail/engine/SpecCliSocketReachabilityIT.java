@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -91,7 +92,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   fdeStore,
                   SessionYield.NONE)
               .useMessages(new MessageStore(db))
-              .useBoxCredentials(boxStore);
+              .useBoxCredentials(boxStore)
+              .useRooms(new RoomStore(db));
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();
 

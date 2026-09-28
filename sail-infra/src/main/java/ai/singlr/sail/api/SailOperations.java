@@ -12,6 +12,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
@@ -33,6 +34,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
@@ -90,9 +92,22 @@ public final class SailOperations implements HostOperations {
     this.catalog =
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
-    this.identity = new HostLanes.Identity(db, fdeStore, this::cliOperator);
-    this.pty = new HostLanes.Pty(db, eventStore);
+    this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
+    this.pty = new HostLanes.Pty(db, roles(), eventStore);
     return this;
+  }
+
+  /** The role rule over this box's roster and its sync configuration ({@link #box}). */
+  private RoleRule roles() {
+    return new RoleRule(this::box, fdeStore);
+  }
+
+  /**
+   * This box's sync configuration, read afresh each time; a box with no control plane wired has
+   * none.
+   */
+  private SyncConfig box() {
+    return syncOperations == null ? SyncConfig.unset() : syncOperations.configuration();
   }
 
   /**
@@ -112,7 +127,7 @@ public final class SailOperations implements HostOperations {
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    return CliOperator.of(syncOperations.configuration(), () -> fdeStore);
+    return CliOperator.of(syncOperations.configuration(), fdeStore);
   }
 
   @Override
@@ -269,16 +284,9 @@ public final class SailOperations implements HostOperations {
     return new ConflictOperations(controlPlane).mergeTemplate(type, id);
   }
 
-  /** The CLI's conflict resolution: resolved as, and acting as, this box's operator. */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
-    var operator = cliOperator();
-    return Actor.call(operator, () -> resolveConflict(type, id, resolution, operator));
-  }
-
-  @Override
-  public SyncConflicts.Conflict resolveConflict(
-      String type, String id, Resolution resolution, Actor actor) {
+    var actor = Actor.current();
     var owner = syncOperations.configuration().handle();
     if (!actor.isAdmin()
         && !(actor.canWrite() && Strings.isNotBlank(owner) && actor.actsFor(owner))) {
@@ -471,19 +479,22 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The FDE actor the box credential stands for: resolved through the roster so the role is the
-   * FDE's real one and a handle that has left the roster refuses. Empty when the box store is not
-   * wired (a lane that never authenticates is a lane that fails closed).
+   * The FDE actor the box credential stands for, with the role {@link RoleRule} gives that FDE: a
+   * disabled FDE, or one the roster does not know, refuses. Empty when the box store is not wired
+   * (a lane that never authenticates is a lane that fails closed).
    */
   @Override
   public Optional<Actor> boxActorForCredential(String credential) {
-    if (boxCredentialStore == null || fdeStore == null) {
+    if (boxCredentialStore == null) {
       return Optional.empty();
     }
     return boxCredentialStore
         .resolve(credential)
-        .flatMap(fdeStore::byHandle)
-        .map(fde -> new Actor(fde.handle(), Role.fromAttribute(fde.role()), Actor.Lane.CLI));
+        .flatMap(
+            handle ->
+                roles()
+                    .roleOf(handle, Role.ADMIN)
+                    .map(role -> new Actor(handle, role, Actor.Lane.CLI)));
   }
 
   SailOperations(
@@ -755,7 +766,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<EngageResponse> addRoomMember(
-      String specId, EngageRequest request, Actor actor, String localHandle) {
+      String specId, EngageRequest request, String localHandle) {
     freshenForRead();
     var result =
         safe(
@@ -767,7 +778,6 @@ public final class SailOperations implements HostOperations {
                       request.mode(),
                       request.model(),
                       request.snapshot(),
-                      actor,
                       localHandle);
               if (launch.completion() != null) {
                 launchExecutor.execute(Actor.carrying(launch.completion()));
@@ -807,11 +817,11 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<SpecMessageResponse> postRoomMessage(
-      String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+      String roomId, SpecMessageRequest request, String authorHandle) {
     return safeWrite(
         () -> {
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(principal, room.id(), room.assignee(), room.createdBy()).enforce();
+          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
           return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
@@ -845,9 +855,9 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The conversation behind {@code roomId}, resolved spec-first: a spec's identity keeps its
-   * ownership fields authoritative for policy, and a genuinely spec-less room answers from its own
-   * row. {@code ROOM_NOT_FOUND} otherwise.
+   * The conversation behind {@code roomId}, resolved spec-first: a spec answers as its room, its
+   * identity room or the room it was born in, even before that room's row has arrived; a genuinely
+   * spec-less room answers from its own row. {@code ROOM_NOT_FOUND} otherwise.
    */
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
     var spec = specStore == null ? null : specStore.findById(roomId).orElse(null);
@@ -858,7 +868,7 @@ public final class SailOperations implements HostOperations {
         return room;
       }
       return new RoomStore.RoomRow(
-          spec.id(),
+          spec.roomIdOrIdentity(),
           spec.project(),
           spec.title(),
           spec.assignee(),
@@ -879,7 +889,8 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+    var actor = Actor.current();
     freshenForRead();
     var result =
         safe(
@@ -949,11 +960,11 @@ public final class SailOperations implements HostOperations {
    * next sync; a box that already holds it (minted there, or synced) mints nothing.
    */
   @Override
-  public Result<RoomsListResponse> rooms(String project, Actor actor) {
+  public Result<RoomsListResponse> rooms(String project) {
     return safeRead(
         () -> {
           var store = requireRoomStore();
-          if (mintPersonalRooms(store, project, actor)) {
+          if (mintPersonalRooms(store, project)) {
             triggerSyncAfterWrite();
           }
           var rows = project == null || project.isBlank() ? store.listAll() : store.list(project);
@@ -983,7 +994,7 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+  public Result<RoomDeletedResponse> deleteRoom(String roomId) {
     freshenForRead();
     var result =
         safe(
@@ -999,7 +1010,7 @@ public final class SailOperations implements HostOperations {
                                     new ApiException(
                                         ErrorCode.ROOM_NOT_FOUND,
                                         "Room '" + roomId + "' was not found."));
-                    SpecPolicy.mutate(actor, row.id(), row.assignee(), row.createdBy()).enforce();
+                    SpecPolicy.mutate(row.id(), row.assignee(), row.createdBy()).enforce();
                     var attached = specIdsOf(roomId);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
@@ -1017,8 +1028,9 @@ public final class SailOperations implements HostOperations {
     return result;
   }
 
-  private boolean mintPersonalRooms(RoomStore store, String project, Actor actor) {
-    if (fdeStore == null || projectStore == null || actor == null || actor.handle() == null) {
+  private boolean mintPersonalRooms(RoomStore store, String project) {
+    var actor = Actor.current();
+    if (fdeStore == null || projectStore == null || actor.handle() == null) {
       return false;
     }
     var fde = fdeStore.byHandle(actor.handle()).orElse(null);
@@ -1078,11 +1090,9 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<DisengageResponse> removeRoomMember(
-      String specId, Actor actor, String localHandle) {
+  public Result<DisengageResponse> removeRoomMember(String specId, String localHandle) {
     freshenForRead();
-    var result =
-        safe(() -> new DisengageResponse(dispatchOps.disengage(specId, actor, localHandle)));
+    var result = safe(() -> new DisengageResponse(dispatchOps.disengage(specId, localHandle)));
     if (result instanceof Result.Success<DisengageResponse>) {
       triggerSyncAfterWrite();
     }
@@ -1111,9 +1121,9 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<DispatchResponse> dispatch(
-      String project, DispatchRequest request, Actor actor, String localHandle) {
+      String project, DispatchRequest request, String localHandle) {
     freshenForRead();
-    var result = safe(() -> dispatchValue(project, request, actor, localHandle));
+    var result = safe(() -> dispatchValue(project, request, localHandle));
     if (result instanceof Result.Success<DispatchResponse> success
         && success.value().dispatched()) {
       triggerSyncAfterWrite();
@@ -1147,6 +1157,20 @@ public final class SailOperations implements HostOperations {
     return safe(() -> agentReportValue(project, localHandle));
   }
 
+  /**
+   * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
+   * box launched it.
+   */
+  @Override
+  public Optional<Actor> runActor(RunStore.RunRow run) {
+    var lane = run.principalActor();
+    var role =
+        Strings.isBlank(run.owner())
+            ? roles().roleOfUnbound(lane.role())
+            : roles().roleOf(run.owner(), lane.role());
+    return role.map(granted -> new Actor(lane.handle(), granted, lane.lane(), lane.owner()));
+  }
+
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {
     return runStore == null ? Optional.empty() : runStore.findByCredential(credential);
@@ -1173,8 +1197,8 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
-    return onLocalRun(runId, localHandle, actor, run -> safe(() -> runLogValue(run, tail)));
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
+    return onLocalRun(runId, localHandle, run -> safe(() -> runLogValue(run, tail)));
   }
 
   /**
@@ -1183,14 +1207,13 @@ public final class SailOperations implements HostOperations {
    * run) schedules sync-on-write so the terminal state reaches every peer promptly.
    */
   @Override
-  public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
+  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
     if (stopOps == null) {
       return Result.failure(
           ErrorCode.INTERNAL,
           "Run store not available. Start the server with 'sail server start'.");
     }
-    var outcome =
-        safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), actor, localHandle, false));
+    var outcome = safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), localHandle, false));
     if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
       return outcome.asFailure();
     }
@@ -1222,7 +1245,7 @@ public final class SailOperations implements HostOperations {
    * stop.
    */
   private <T> Result<T> onLocalRun(
-      String runId, String localHandle, Actor actor, Function<RunStore.RunRow, Result<T>> served) {
+      String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
     if (runStore == null) {
       return Result.failure(
           ErrorCode.INTERNAL,
@@ -1235,27 +1258,19 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    if (RunPolicy.access(actor, run.id(), StopOperations.specIdOf(run), runOwner(run))
+    if (RunPolicy.access(
+            run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, this::specOwner))
         instanceof AccessDecision.Refused refused) {
       return Result.failure(refused.code(), refused.message(), refused.fix());
     }
     return served.apply(run);
   }
 
-  /** The identity that owns a run: its spec's assignee, or the launching node for ad-hoc runs. */
-  private String runOwner(RunStore.RunRow run) {
-    return Strings.isBlank(run.specId()) ? run.node() : specAssignee(run.specId());
-  }
-
-  /**
-   * The current assignee of {@code specId}, or null when the spec is absent or the store is not
-   * wired.
-   */
-  private String specAssignee(String specId) {
-    if (specStore == null || Strings.isBlank(specId)) {
-      return null;
-    }
-    return specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(null);
+  /** The current owner of {@code specId}, empty when the spec is absent or the store not wired. */
+  private Optional<String> specOwner(String specId) {
+    return specStore == null
+        ? Optional.empty()
+        : specStore.findById(specId).map(SpecStore.SpecRow::owner);
   }
 
   private RunStore requireRunStore() {
@@ -1386,7 +1401,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private DispatchResponse dispatchValue(
-      String project, DispatchRequest request, Actor actor, String localHandle) {
+      String project, DispatchRequest request, String localHandle) {
     var outcome =
         dispatchOps.dispatch(
             project,
@@ -1396,7 +1411,6 @@ public final class SailOperations implements HostOperations {
                 request.dryRun(),
                 request.repos(),
                 request.restart()),
-            actor,
             localHandle);
     return switch (outcome) {
       case DispatchOperations.NoSpecs ignored ->
@@ -1740,9 +1754,8 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
-      SpecCreateRequest request, Actor actor) {
-    return safeWrite(() -> globalSpecOps.create(request, actor));
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+    return safeWrite(() -> globalSpecOps.create(request));
   }
 
   @Override
@@ -1753,13 +1766,13 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request, Actor actor) {
-    return safeWrite(() -> globalSpecOps.update(specId, request, actor));
+      String specId, SpecUpdateRequest request) {
+    return safeWrite(() -> globalSpecOps.update(specId, request));
   }
 
   @Override
-  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
-    return safeWrite(() -> globalSpecOps.delete(specId, actor));
+  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+    return safeWrite(() -> globalSpecOps.delete(specId));
   }
 
   @Override
@@ -1769,8 +1782,8 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request, Actor actor) {
-    return safeWrite(() -> globalSpecOps.setContent(specId, request, actor));
+      String specId, SpecContentRequest request) {
+    return safeWrite(() -> globalSpecOps.setContent(specId, request));
   }
 
   @Override
@@ -1851,19 +1864,15 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public Result<RoomConversationResponse> recordRoomConversation(
-      String roomId,
-      String agent,
-      String sessionId,
-      String source,
-      String transcriptPath,
-      Actor actor) {
+      String roomId, String agent, String sessionId, String source, String transcriptPath) {
+    var actor = Actor.current();
     return safe(
         () -> {
           if (Strings.isBlank(sessionId)) {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
+          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());
@@ -1925,7 +1934,7 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
+  public Result<PruneReport> pruneSpecs(PruneRequest request) {
     return safeWrite(
         () -> {
           if (pruner == null) {
@@ -1934,14 +1943,14 @@ public final class SailOperations implements HostOperations {
                 "This box keeps no erasure log, so nothing can be pruned here.",
                 "Start the server with 'sail server start'.");
           }
-          return pruner.prune(request, actor);
+          return pruner.prune(request);
         });
   }
 
   @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-      String specId, SpecRestoreRequest request, Actor actor) {
-    return safeWrite(() -> globalSpecOps.restore(specId, request, actor));
+      String specId, SpecRestoreRequest request) {
+    return safeWrite(() -> globalSpecOps.restore(specId, request));
   }
 
   @Override
@@ -1972,13 +1981,12 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
-    return safeWrite(() -> reviewOps.approve(reviewId, actor));
+  public Result<ReviewApproveResponse> approveReview(String reviewId) {
+    return safeWrite(() -> reviewOps.approve(reviewId));
   }
 
   @Override
-  public Result<FindingDismissResponse> dismissFinding(
-      String reviewId, String findingId, Actor actor) {
-    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId, actor));
+  public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
+    return safeWrite(() -> reviewOps.dismissFinding(reviewId, findingId));
   }
 }

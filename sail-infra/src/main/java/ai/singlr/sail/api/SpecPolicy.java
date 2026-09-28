@@ -7,7 +7,8 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.identity.Ownership;
+import java.util.List;
 
 /**
  * Resource-scoped authorization for the spec aggregate, shared by every lane (the HTTP API a member
@@ -27,72 +28,115 @@ public final class SpecPolicy {
   private SpecPolicy() {}
 
   /**
-   * Decides whether {@code actor} may mutate spec {@code specId}. Ownership is the assignee, or the
-   * creator when the spec is unassigned; an admin always passes. Order — write capability, then
+   * Decides whether the bound actor may mutate spec {@code specId}. Ownership is the assignee, or
+   * the creator when the spec is unassigned; an admin always passes. Order — write capability, then
    * admin, then ownership — so the most fundamental precondition names the refusal.
    */
-  public static AccessDecision mutate(
-      Actor actor, String specId, String assignee, String createdBy) {
+  public static AccessDecision mutate(String specId, String assignee, String createdBy) {
+    var actor = Actor.current();
     if (!actor.canWrite()) {
       return readOnly();
     }
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    var owner = SpecStore.ownerOf(assignee, createdBy);
-    if (Strings.isNotBlank(owner) && actor.actsFor(owner)) {
+    if (actor.actsFor(Ownership.ownerOf(assignee, createdBy))) {
       return AccessDecision.allowed();
     }
     return notAssignee(specId, assignee, createdBy);
   }
 
   /**
-   * Decides whether {@code actor} may post a message to spec {@code specId}'s room. Every lane but
-   * the room lane posts under the plain mutation gate. A room principal is read-only everywhere
-   * else — {@link #mutate} refuses it on capability before ownership is even consulted — so the
-   * lane's one write carries its own rule: it may post exactly when it acts for the spec's
-   * assignee, the FDE whose box woke it. Fails closed on an unassigned spec; a wake never fires for
-   * one.
+   * Decides whether the actor may post in conversation {@code conversationId}, whose owners are
+   * {@code owners} (as {@code RoomStore.owners} decides them). Every lane but the room lane posts
+   * under the mutation gate: a writer who is an admin or acts for an owner. A room principal is
+   * read-only everywhere else, so the lane's one write carries its own rule: it may post exactly
+   * when it acts for an owner, the FDE whose box woke it.
    */
-  public static AccessDecision post(Actor actor, String specId, String assignee, String createdBy) {
+  public static AccessDecision post(String conversationId, List<String> owners) {
+    var actor = Actor.current();
     if (!actor.roomLane()) {
-      return mutate(actor, specId, assignee, createdBy);
+      if (!actor.canWrite()) {
+        return readOnly();
+      }
+      if (actor.isAdmin()) {
+        return AccessDecision.allowed();
+      }
     }
-    if (Strings.isNotBlank(assignee) && actor.actsFor(assignee)) {
+    if (owners.stream().anyMatch(actor::actsFor)) {
       return AccessDecision.allowed();
     }
-    return notAssignee(specId, assignee, createdBy);
+    if (owners.isEmpty()) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+          "No one owns '" + conversationId + "' yet, so only an admin may post there.",
+          "Claim its spec first with --assignee <you>, or have an admin post.");
+    }
+    var named = String.join(" or ", owners);
+    return AccessDecision.refused(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        "'"
+            + conversationId
+            + "' belongs to "
+            + named
+            + ": only "
+            + named
+            + " or an admin may post there, not you.",
+        "Ask " + named + " to post it, or have an admin do it.");
   }
 
   /**
-   * Decides whether {@code actor} may set spec {@code specId}'s assignee to {@code
+   * Decides whether the bound actor may set spec {@code specId}'s assignee to {@code
    * requestedAssignee}. Reassignment is an admin act; the one member-allowed case is claiming a
    * spec that is currently unassigned for oneself. An agent principal claims for the FDE it acts
    * for, never for its ephemeral run-scoped handle — dispatch locality matches the assignee against
    * the node's FDE handle, so a run-principal assignee would leave the spec undispatchable.
+   *
+   * <p>A spec's owner owns its conversation, so a claim gives the claimant a voice there. A spec
+   * born in another conversation, {@code bornIn} (null for a spec whose conversation is its own),
+   * whose owners are {@code bornInOwners}, is claimed only by one who may already post there
+   * ({@link #post}): a claim never opens someone else's room.
    */
   public static AccessDecision reassign(
-      Actor actor, String specId, String currentAssignee, String requestedAssignee) {
+      String specId,
+      String currentAssignee,
+      String requestedAssignee,
+      String bornIn,
+      List<String> bornInOwners) {
+    var actor = Actor.current();
     if (!actor.canWrite()) {
       return readOnly();
     }
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    var claimant = actor.agentLane() ? actor.owner() : actor.handle();
-    if (Strings.isBlank(currentAssignee)
-        && Strings.isNotBlank(claimant)
-        && claimant.equals(requestedAssignee)) {
-      return AccessDecision.allowed();
+    var claimant = actor.actingFde();
+    if (Strings.isNotBlank(currentAssignee)
+        || Strings.isBlank(claimant)
+        || !claimant.equals(requestedAssignee)) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_ADMIN_ONLY,
+          "Reassigning spec '"
+              + specId
+              + "' moves work between FDEs and is an admin-only action"
+              + (Strings.isNotBlank(currentAssignee)
+                  ? " (currently '" + currentAssignee + "')"
+                  : "")
+              + ".",
+          "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
     }
-    return AccessDecision.refused(
-        ErrorCode.FORBIDDEN_ADMIN_ONLY,
-        "Reassigning spec '"
-            + specId
-            + "' moves work between FDEs and is an admin-only action"
-            + (Strings.isNotBlank(currentAssignee) ? " (currently '" + currentAssignee + "')" : "")
-            + ".",
-        "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
+    if (Strings.isNotBlank(bornIn)
+        && post(bornIn, bornInOwners) instanceof AccessDecision.Refused) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_ADMIN_ONLY,
+          "Spec '"
+              + specId
+              + "' lives in '"
+              + bornIn
+              + "', where you may not post, and claiming it would give you a voice there.",
+          "Ask an admin to assign it to you.");
+    }
+    return AccessDecision.allowed();
   }
 
   private static AccessDecision readOnly() {

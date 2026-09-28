@@ -57,7 +57,8 @@ class SpecMessageOperationsTest {
                 null,
                 new SpecStore(db),
                 new ReviewStore(db))
-            .useMessages(new MessageStore(db));
+            .useMessages(new MessageStore(db))
+            .useRooms(new RoomStore(db));
   }
 
   @AfterEach
@@ -91,12 +92,11 @@ class SpecMessageOperationsTest {
             delivered));
 
     var posted =
-        operations
-            .postRoomMessage(
-                "room",
-                new SpecMessageRequest("Progress\n  update", null, false),
+        Actor.call(
                 member("ada"),
-                "ada")
+                () ->
+                    operations.postRoomMessage(
+                        "room", new SpecMessageRequest("Progress\n  update", null, false), "ada"))
             .orThrow();
 
     assertEquals("ada", posted.message().author());
@@ -116,15 +116,20 @@ class SpecMessageOperationsTest {
   void validatesUnknownSpecsBodiesCursorsAndLongPreviews() {
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND,
-        operations
-            .postRoomMessage(
-                "missing", new SpecMessageRequest("body", null, false), member("ada"), "ada")
+        Actor.call(
+                member("ada"),
+                () ->
+                    operations.postRoomMessage(
+                        "missing", new SpecMessageRequest("body", null, false), "ada"))
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations
-            .postRoomMessage("room", new SpecMessageRequest(" ", null, false), member("ada"), "ada")
+        Actor.call(
+                member("ada"),
+                () ->
+                    operations.postRoomMessage(
+                        "room", new SpecMessageRequest(" ", null, false), "ada"))
             .asFailure()
             .errorCode());
     assertEquals(
@@ -135,9 +140,11 @@ class SpecMessageOperationsTest {
         operations.roomMessages("missing", null, null, 50).asFailure().errorCode());
 
     var longMessage = "x".repeat(200);
-    operations
-        .postRoomMessage(
-            "room", new SpecMessageRequest(longMessage, null, false), member("ada"), "ada")
+    Actor.call(
+            member("ada"),
+            () ->
+                operations.postRoomMessage(
+                    "room", new SpecMessageRequest(longMessage, null, false), "ada"))
         .orThrow();
     assertEquals(1, operations.roomMessages("room", null, null, 50).orThrow().messages().size());
   }
@@ -145,12 +152,13 @@ class SpecMessageOperationsTest {
   @Test
   void onlyTheSpecOwnerOrAnAdminCanPost() {
     var refused =
-        operations
-            .postRoomMessage(
-                "room",
-                new SpecMessageRequest("foreign instruction", null, false),
+        Actor.call(
                 member("mallory"),
-                "mallory")
+                () ->
+                    operations.postRoomMessage(
+                        "room",
+                        new SpecMessageRequest("foreign instruction", null, false),
+                        "mallory"))
             .asFailure();
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.errorCode());
@@ -158,9 +166,13 @@ class SpecMessageOperationsTest {
 
     var agent = Actor.agentPrincipal("codex/run-1", "ada");
     var posted =
-        operations
-            .postRoomMessage(
-                "room", new SpecMessageRequest("owner update", null, false), agent, agent.handle())
+        Actor.call(
+                agent,
+                () ->
+                    operations.postRoomMessage(
+                        "room",
+                        new SpecMessageRequest("owner update", null, false),
+                        agent.handle()))
             .orThrow();
     assertEquals(agent.handle(), posted.message().author());
   }
@@ -174,9 +186,11 @@ class SpecMessageOperationsTest {
             '2026-07-02T00:00:00Z')""");
     db.execute("UPDATE specs SET updated_at = '2026-07-01T00:00:00Z' WHERE id = 'room'");
     var posted =
-        operations
-            .postRoomMessage(
-                "room", new SpecMessageRequest("activity", null, false), member("ada"), "ada")
+        Actor.call(
+                member("ada"),
+                () ->
+                    operations.postRoomMessage(
+                        "room", new SpecMessageRequest("activity", null, false), "ada"))
             .orThrow();
 
     var listed = operations.globalSpecs(new SpecStore.SpecFilter(null, null, null, null, null));
@@ -243,9 +257,11 @@ class SpecMessageOperationsTest {
             delivered));
     var agent = Actor.agentPrincipal("claude/run-1", "ada");
     var posted =
-        operations
-            .postRoomMessage(
-                "room", new SpecMessageRequest("Which flow?", null, true), agent, agent.handle())
+        Actor.call(
+                agent,
+                () ->
+                    operations.postRoomMessage(
+                        "room", new SpecMessageRequest("Which flow?", null, true), agent.handle()))
             .orThrow();
 
     assertTrue(posted.message().question());
@@ -264,9 +280,11 @@ class SpecMessageOperationsTest {
     assertEquals(posted.message().id(), shown.get("question_message_id"));
     assertEquals(1, operations.globalBoard("acme").orThrow().toMap().get("needs_reply"));
 
-    operations
-        .postRoomMessage(
-            "room", new SpecMessageRequest("use PKCE", null, false), member("ada"), "ada")
+    Actor.call(
+            member("ada"),
+            () ->
+                operations.postRoomMessage(
+                    "room", new SpecMessageRequest("use PKCE", null, false), "ada"))
         .orThrow();
 
     var answeredList =
@@ -333,12 +351,11 @@ class SpecMessageOperationsTest {
             delivered));
 
     var posted =
-        withRooms
-            .postRoomMessage(
-                "born",
-                new SpecMessageRequest("home sweet home", null, false),
+        Actor.call(
                 member("ada"),
-                "ada")
+                () ->
+                    withRooms.postRoomMessage(
+                        "born", new SpecMessageRequest("home sweet home", null, false), "ada"))
             .orThrow();
 
     BusTesting.awaitDelivery(delivered);

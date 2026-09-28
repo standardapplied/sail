@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
@@ -17,7 +18,7 @@ import java.util.Optional;
 /**
  * Main's decision on a node's request to erase, made against main's own copy — never the node's. A
  * spec is erased once it is archived, cancelled or deleted, by an admin or by its owner ({@link
- * SpecStore#ownerOf}), and never while a run of it is unfinished. One main has already erased has
+ * Ownership#ownerOf}), and never while a run of it is unfinished. One main has already erased has
  * nothing left to protect, so asking again only answers the erasure it has; one main holds nothing
  * of has no owner main can establish. A whole project is erased only by an admin, and only one main
  * holds something of; nothing else is erased on request: messages and runs go with what they belong
@@ -37,8 +38,9 @@ final class EraseAuthority {
     this.erasure = new Erasure(db);
   }
 
-  /** Why {@code principal} may not erase {@code type} {@code id}; empty when it may. */
-  Optional<String> refusal(Actor principal, String type, String id) {
+  /** Why the bound actor may not erase {@code type} {@code id}; empty when it may. */
+  Optional<String> refusal(String type, String id) {
+    var principal = Actor.current();
     if (!principal.canWrite()) {
       return Optional.of("a read-only role cannot prune");
     }
@@ -70,7 +72,7 @@ final class EraseAuthority {
               + " on main; archive or cancel it before pruning");
     }
     var owner = spec.get().owner();
-    if (principal.isAdmin() || owner.equals(principal.handle())) {
+    if (principal.isAdmin() || Ownership.owns(principal.handle(), owner)) {
       return Optional.empty();
     }
     if (owner.isBlank()) {

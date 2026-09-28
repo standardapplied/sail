@@ -66,7 +66,7 @@ class ConcurrentReconcileTest {
 
     @Override
     public State state(String id) {
-      return new State(current(id), currentRev(id));
+      return new State(current(id), currentRev(id), null);
     }
 
     @Override
@@ -81,7 +81,10 @@ class ConcurrentReconcileTest {
         onFirstCommit = null;
         hook.run();
       }
-      var outcome = script.isEmpty() ? new CommitOutcome.Accepted("m-" + minted++) : script.poll();
+      var outcome =
+          script.isEmpty()
+              ? new CommitOutcome.Accepted("m-" + minted++, null, null)
+              : script.poll();
       if (outcome instanceof CommitOutcome.Accepted accepted) {
         snapshots.put(id, snapshot);
         revs.put(id, accepted.rev());

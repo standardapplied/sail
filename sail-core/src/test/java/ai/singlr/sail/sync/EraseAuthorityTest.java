@@ -48,13 +48,17 @@ class EraseAuthorityTest {
     db.close();
   }
 
+  private Optional<String> refusal(Actor as, String type, String id) {
+    return Actor.call(as, () -> authority.refusal(type, id));
+  }
+
   @Test
   void theAssigneeOrTheCreatorOfAnUnassignedSpecMayPruneIt() {
     create(spec("assigned", "mady", "uday"));
     create(spec("unassigned", null, "mady"));
 
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "assigned"));
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "unassigned"));
+    assertEquals(Optional.empty(), refusal(MADY, "spec", "assigned"));
+    assertEquals(Optional.empty(), refusal(MADY, "spec", "unassigned"));
   }
 
   @Test
@@ -63,9 +67,8 @@ class EraseAuthorityTest {
 
     assertEquals(
         Optional.of("spec 'theirs' belongs to 'uday'; ask them or an admin"),
-        authority.refusal(MADY, "spec", "theirs"));
-    assertEquals(
-        Optional.empty(), authority.refusal(Actor.sync("mady", Role.ADMIN), "spec", "theirs"));
+        refusal(MADY, "spec", "theirs"));
+    assertEquals(Optional.empty(), refusal(Actor.sync("mady", Role.ADMIN), "spec", "theirs"));
   }
 
   @Test
@@ -73,7 +76,7 @@ class EraseAuthorityTest {
     create(spec("gone", "uday", "uday"));
     specs.delete("gone");
 
-    assertTrue(authority.refusal(MADY, "spec", "gone").orElseThrow().contains("'uday'"));
+    assertTrue(refusal(MADY, "spec", "gone").orElseThrow().contains("'uday'"));
   }
 
   @Test
@@ -84,12 +87,12 @@ class EraseAuthorityTest {
             "main holds no spec 'never-here', so it cannot tell whose it is; sync it before"
                 + " pruning");
 
-    assertEquals(never, authority.refusal(MADY, "spec", "never-here"));
-    assertEquals(never, authority.refusal(ADMIN, "spec", "never-here"));
+    assertEquals(never, refusal(MADY, "spec", "never-here"));
+    assertEquals(never, refusal(ADMIN, "spec", "never-here"));
     assertEquals(
         Optional.of("spec 'ownerless' has no owner; only an admin can prune it"),
-        authority.refusal(MADY, "spec", "ownerless"));
-    assertEquals(Optional.empty(), authority.refusal(ADMIN, "spec", "ownerless"));
+        refusal(MADY, "spec", "ownerless"));
+    assertEquals(Optional.empty(), refusal(ADMIN, "spec", "ownerless"));
   }
 
   @Test
@@ -101,9 +104,9 @@ class EraseAuthorityTest {
 
     assertEquals(
         Optional.of("spec 'live' is in_progress on main; archive or cancel it before pruning"),
-        authority.refusal(ADMIN, "spec", "live"));
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "dropped"));
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "deleted"));
+        refusal(ADMIN, "spec", "live"));
+    assertEquals(Optional.empty(), refusal(MADY, "spec", "dropped"));
+    assertEquals(Optional.empty(), refusal(MADY, "spec", "deleted"));
   }
 
   @Test
@@ -131,27 +134,25 @@ class EraseAuthorityTest {
     var erasure = new Erasure(db);
     erasure.erase(erasure.closure(List.of(new Erasure.Target("spec", "theirs"))), "local");
 
-    assertEquals(Optional.empty(), authority.refusal(MADY, "spec", "theirs"));
+    assertEquals(Optional.empty(), refusal(MADY, "spec", "theirs"));
     assertEquals(
         Optional.of("a read-only role cannot prune"),
-        authority.refusal(Actor.sync("mady", Role.VIEWER), "spec", "theirs"));
+        refusal(Actor.sync("mady", Role.VIEWER), "spec", "theirs"));
   }
 
   @Test
   void aViewerAWholeProjectAndAnythingButSpecsAndProjectsAreRefused() {
     assertEquals(
         Optional.of("a read-only role cannot prune"),
-        authority.refusal(Actor.sync("mady", Role.VIEWER), "spec", "any"));
+        refusal(Actor.sync("mady", Role.VIEWER), "spec", "any"));
     assertEquals(
-        Optional.of("pruning a whole project is admin-only"),
-        authority.refusal(MADY, "project", "acme"));
-    assertEquals(
-        Optional.of("main holds no project 'acme'"), authority.refusal(ADMIN, "project", "acme"));
+        Optional.of("pruning a whole project is admin-only"), refusal(MADY, "project", "acme"));
+    assertEquals(Optional.of("main holds no project 'acme'"), refusal(ADMIN, "project", "acme"));
     create(spec("in-acme", "mady", "mady", SpecStatus.DONE, "acme"));
-    assertEquals(Optional.empty(), authority.refusal(ADMIN, "project", "acme"));
+    assertEquals(Optional.empty(), refusal(ADMIN, "project", "acme"));
     assertEquals(
         Optional.of("only specs and projects are pruned on request, not a message"),
-        authority.refusal(Actor.sync("uday", Role.ADMIN), "message", "m"));
+        refusal(Actor.sync("uday", Role.ADMIN), "message", "m"));
   }
 
   private void create(SpecStore.SpecRow row) {

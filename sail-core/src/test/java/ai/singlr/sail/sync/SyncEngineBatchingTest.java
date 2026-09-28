@@ -96,13 +96,13 @@ class SyncEngineBatchingTest {
 
     @Override
     public State state(String id) {
-      return new State(null, null);
+      return new State(null, null, null);
     }
 
     @Override
     public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
       accepted.add(id);
-      return new CommitOutcome.Accepted("rev-" + accepted.size());
+      return new CommitOutcome.Accepted("rev-" + accepted.size(), null, null);
     }
 
     @Override

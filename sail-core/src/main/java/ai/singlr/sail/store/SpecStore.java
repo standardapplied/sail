@@ -11,6 +11,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -20,9 +21,9 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Spec CRUD on SQLite. Every method maps to a small number of SQL statements. No caching, no lazy
@@ -105,6 +106,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           null);
     }
 
+    /** Its owner ({@link Ownership#ownerOf}); blank when neither assignee nor creator is known. */
+    public String owner() {
+      return Ownership.ownerOf(assignee, createdBy);
+    }
+
     /** This row with {@code roomId} replaced — the create-time attachment to its room. */
     public SpecRow withRoomId(String roomId) {
       return new SpecRow(
@@ -133,15 +139,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * Whether this spec is assigned to the box whose handle is {@code localHandle}. Unlike run
-     * ownership, a blank handle owns nothing: an FDE-bound box serves only its assignee's specs,
-     * and an unbound box drives no spec's room lane at all.
+     * Whether the FDE {@code identity} owns this spec ({@link Ownership#ownerOf}): its assignee, or
+     * its creator while it is unassigned. A blank identity owns nothing.
      */
-    public boolean assignedTo(String localHandle) {
-      return Strings.isNotBlank(localHandle) && localHandle.equals(assignee);
+    public boolean ownedBy(String identity) {
+      return Ownership.owns(identity, assignee, createdBy);
     }
 
-    /** Projects this stored row onto the storage-agnostic {@link Spec} value type. */
     /** The row as the canonical aggregate — every persisted field, nothing dropped. */
     public Spec toSpec() {
       return new Spec(
@@ -186,14 +190,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       String nextReadyId) {}
 
   /**
-   * Creates {@code spec}, created and last updated by the bound {@link Actor} whatever the row
-   * names.
+   * Creates {@code spec}, created by the FDE the bound {@link Actor} acts as ({@link
+   * Actor#actingFde}) and last updated by the actor, whatever the row names.
    */
   public void create(SpecRow spec) {
     var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
           var author = author();
+          var creator = Actor.current().actingFde();
           db.execute(
               """
               INSERT INTO specs (id, project, title, status, assignee, agent, model,
@@ -210,7 +215,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.reasoningEffort(),
               spec.branch(),
               spec.priority(),
-              author,
+              creator,
               now,
               now,
               author,
@@ -364,7 +369,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * every composed scope is a check-then-write: under WAL a deferred begin would let another
    * process commit between the check and the write.
    */
-  public <T> T atomically(java.util.function.Supplier<T> work) {
+  public <T> T atomically(Supplier<T> work) {
     return db.transaction(work);
   }
 
@@ -552,9 +557,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       String roomId,
       boolean live) {
 
-    /** Its owner: the assignee, or the creator while unassigned; blank when neither is known. */
+    /** Its owner ({@link Ownership#ownerOf}); blank when neither assignee nor creator is known. */
     public String owner() {
-      return ownerOf(assignee, createdBy);
+      return Ownership.ownerOf(assignee, createdBy);
     }
 
     public String roomIdOrIdentity() {
@@ -573,11 +578,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /** A tombstone of a spec this box never held as a row keeps no state, so no status. */
   private static SpecStatus statusOf(String wire) {
     return wire == null ? null : SpecStatus.fromWire(wire);
-  }
-
-  /** The one rule for who owns a spec: its assignee, or its creator while it is unassigned. */
-  public static String ownerOf(String assignee, String createdBy) {
-    return Strings.isNotBlank(assignee) ? assignee : Objects.toString(createdBy, "");
   }
 
   /** Spec {@code id} as this box last knew it, live or deleted; empty when it holds neither. */
@@ -731,12 +731,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var plan = blobs.text(planHash);
     var spec = specFromSnapshot(snapshot);
     var now = DateTimeUtils.now().toString();
-    if (findById(id).isPresent()) {
+    var held = findById(id);
+    if (held.isPresent()) {
       db.execute(
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
               reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
-              room_id = ?
+              room_id = ?, created_by = ?
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -750,6 +751,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           now,
           spec.updatedBy(),
           spec.roomIdOrIdentity(),
+          Snapshots.adoptedCreator(snapshot, held.get().createdBy()),
           id);
       db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", id);
       db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
@@ -839,8 +841,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   /**
    * The subset of a snapshot that carries an FDE's actual work — everything except the surrogate
-   * key and the timestamp/attribution metadata that every replica writes locally. Conflict
-   * detection compares only these, so two boxes never falsely conflict on {@code updated_at}.
+   * key and the timestamp/attribution metadata that every replica writes locally — plus its author
+   * and creator as the reserved {@link Snapshots#ACTOR} and {@link Snapshots#CREATOR} keys, which
+   * conflict detection ignores. Conflict detection compares only the work, so two boxes never
+   * falsely conflict on {@code updated_at}.
    */
   private static Map<String, Object> comparable(Map<String, Object> full) {
     if (full == null) {
@@ -856,6 +860,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     if (author != null) {
       m.put(Snapshots.ACTOR, author);
     }
+    m.put(Snapshots.CREATOR, full.get("created_by"));
     return m;
   }
 
@@ -980,6 +985,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var full = new LinkedHashMap<>(snapshot);
     full.put("id", id);
     full.put("updated_by", Snapshots.actor(snapshot));
+    full.put("created_by", Snapshots.creator(snapshot));
     return full;
   }
 

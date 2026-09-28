@@ -16,15 +16,21 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -77,9 +83,10 @@ class RunDeliveryOperationsTest {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null,
+                new FdeStore(db),
                 SessionYield.NONE)
-            .useMessages(messages);
+            .useMessages(messages)
+            .useRooms(new RoomStore(db));
     runId = newRun("room");
     principal = runStore.findById(runId).orElseThrow().principal();
   }
@@ -164,7 +171,7 @@ class RunDeliveryOperationsTest {
 
     messages.applyRevision(
         oldId,
-        java.util.Map.of(
+        Map.of(
             "spec_id", "room",
             "author", "ada",
             "body", "minted before, synced after",
@@ -300,8 +307,8 @@ class RunDeliveryOperationsTest {
 
   @Test
   void recordRoomConversationLandsARecordClassEventInTheRoom() throws Exception {
-    var seen = new java.util.concurrent.atomic.AtomicReference<Event>();
-    var latch = new java.util.concurrent.CountDownLatch(1);
+    var seen = new AtomicReference<Event>();
+    var latch = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
             BusTesting.latching(
@@ -312,7 +319,7 @@ class RunDeliveryOperationsTest {
                   }
 
                   @Override
-                  public java.util.function.Predicate<Event> filter() {
+                  public Predicate<Event> filter() {
                     return e -> true;
                   }
 
@@ -324,9 +331,11 @@ class RunDeliveryOperationsTest {
                 latch));
 
     var recorded =
-        operations
-            .recordRoomConversation(
-                "room", " claude-code ", " abc-123 ", "startup", "/t/abc.jsonl", ADA)
+        Actor.call(
+                ADA,
+                () ->
+                    operations.recordRoomConversation(
+                        "room", " claude-code ", " abc-123 ", "startup", "/t/abc.jsonl"))
             .orThrow();
 
     assertEquals("room", recorded.roomId());
@@ -352,21 +361,24 @@ class RunDeliveryOperationsTest {
   @Test
   void recordRoomConversationOmitsBlankOptionalsAndRefusesBadInput() {
     var bare =
-        Acting.by(ADA, () -> operations.recordRoomConversation("room", " ", "abc", null, "", ADA))
+        Acting.by(ADA, () -> operations.recordRoomConversation("room", " ", "abc", null, ""))
             .orThrow();
     assertNull(bare.agent());
     assertFalse(bare.toMap().containsKey("agent"));
 
     assertEquals(
         ErrorCode.BAD_REQUEST,
-        operations
-            .recordRoomConversation("room", "claude-code", " ", null, null, ADA)
+        Actor.call(
+                ADA,
+                () -> operations.recordRoomConversation("room", "claude-code", " ", null, null))
             .asFailure()
             .errorCode());
     assertEquals(
         ErrorCode.ROOM_NOT_FOUND,
-        operations
-            .recordRoomConversation("nowhere", "claude-code", "abc", null, null, ADA)
+        Actor.call(
+                ADA,
+                () ->
+                    operations.recordRoomConversation("nowhere", "claude-code", "abc", null, null))
             .asFailure()
             .errorCode());
   }
@@ -376,24 +388,27 @@ class RunDeliveryOperationsTest {
     var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.CLI);
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        operations
-            .recordRoomConversation("room", "claude-code", "abc", null, null, mallory)
+        Actor.call(
+                mallory,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .asFailure()
             .errorCode(),
         "a member who does not own the room cannot author a conversation into it");
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.CLI);
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        operations
-            .recordRoomConversation("room", "claude-code", "abc", null, null, viewer)
+        Actor.call(
+                viewer,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .asFailure()
             .errorCode(),
         "a read-only credential writes nothing, even into its own room");
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.CLI);
     assertEquals(
         "room",
-        operations
-            .recordRoomConversation("room", "claude-code", "abc", null, null, admin)
+        Actor.call(
+                admin,
+                () -> operations.recordRoomConversation("room", "claude-code", "abc", null, null))
             .orThrow()
             .roomId(),
         "an admin passes the same gate a room message takes");

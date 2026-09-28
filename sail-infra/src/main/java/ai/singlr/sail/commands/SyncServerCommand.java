@@ -10,11 +10,13 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -33,7 +35,9 @@ import java.io.OutputStream;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 
 /**
@@ -90,14 +94,32 @@ public final class SyncServerCommand implements Callable<Integer> {
       OutputStream out,
       SyncTransitionSink transitionSink)
       throws IOException {
+    return serve(converged, mainId, token, in, out, transitionSink, BoxIdentity::config);
+  }
+
+  /**
+   * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
+   * this main ({@code box}). A session with no token is a read-only one that owns nothing; a token
+   * whose FDE is disabled is refused before anything is served.
+   */
+  static int serve(
+      SyncDatabase converged,
+      String mainId,
+      String token,
+      InputStream in,
+      OutputStream out,
+      SyncTransitionSink transitionSink,
+      Supplier<SyncConfig> box)
+      throws IOException {
     var db = converged.db();
+    var principal = principal(db, token, new RoleRule(box, new FdeStore(db)));
+    if (principal.isEmpty()) {
+      System.err.println(
+          "sail _sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
+      return 1;
+    }
     SyncRpcServer.over(
-            db,
-            mainId,
-            principal(db, token),
-            () -> roster(db),
-            transitionSink,
-            SailVersion.version())
+            db, mainId, principal.get(), () -> roster(db), transitionSink, SailVersion.version())
         .serve(in, out);
     return 0;
   }
@@ -162,18 +184,17 @@ public final class SyncServerCommand implements Callable<Integer> {
     return map;
   }
 
-  private static Actor principal(Sqlite db, String token) {
-    if (Strings.isBlank(token)) {
-      return Actor.sync(null, Role.VIEWER);
+  private static Optional<Actor> principal(Sqlite db, String token, RoleRule roles) {
+    var fde =
+        Strings.isBlank(token)
+            ? Optional.<FdeStore.Fde>empty()
+            : new AuthSessionStore(db)
+                .validate(token)
+                .flatMap(session -> new FdeStore(db).byId(session.fdeId()));
+    if (fde.isEmpty()) {
+      return Optional.of(Actor.sync(null, Role.VIEWER));
     }
-    return new AuthSessionStore(db)
-        .validate(token)
-        .flatMap(session -> new FdeStore(db).byId(session.fdeId()))
-        .map(SyncServerCommand::principalOf)
-        .orElse(Actor.sync(null, Role.VIEWER));
-  }
-
-  private static Actor principalOf(FdeStore.Fde fde) {
-    return Actor.sync(fde.handle(), Role.fromAttribute(fde.role()));
+    var handle = fde.get().handle();
+    return roles.roleOf(handle, Role.ADMIN).map(role -> Actor.sync(handle, role));
   }
 }

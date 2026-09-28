@@ -5,7 +5,10 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,6 +23,9 @@ public final class Snapshots {
 
   /** Reserved metadata key carrying the author of a revision through the sync protocol. */
   public static final String ACTOR = "_actor";
+
+  /** Reserved metadata key carrying the creator of an entity through the sync protocol. */
+  public static final String CREATOR = "_created_by";
 
   private Snapshots() {}
 
@@ -53,5 +59,57 @@ public final class Snapshots {
    */
   public static String actor(Map<String, Object> snapshot) {
     return Actor.current().authorOf(snapshot == null ? null : text(snapshot, ACTOR));
+  }
+
+  /**
+   * The creator a row born from {@code snapshot} records: the {@link #CREATOR} it offers, or else
+   * the FDE the bound {@link Actor} acts as ({@link Actor#actingFde}) — the pusher, when main
+   * commits a node's create that names none. A node adopting main's revision records only the
+   * creator main names.
+   */
+  public static String creator(Map<String, Object> snapshot) {
+    var offered = text(snapshot, CREATOR);
+    var actor = Actor.current();
+    return offered != null || actor.lane() == Actor.Lane.MAIN ? offered : actor.actingFde();
+  }
+
+  /**
+   * The creator a row that holds {@code held} records when written from {@code snapshot}. A creator
+   * is written once: main keeps the one it holds whatever a later offer names, and a node adopting
+   * main's revision takes the creator main holds, none included. A snapshot without the {@link
+   * #CREATOR} key, from a main that predates it, keeps {@code held}. One exception fills a gap an
+   * older main left: a creator main never recorded is taken from a push by that creator, naming
+   * itself — a push never names anyone else as a creator.
+   */
+  public static String adoptedCreator(Map<String, Object> snapshot, String held) {
+    var actor = Actor.current();
+    if (actor.lane() == Actor.Lane.MAIN) {
+      return snapshot.containsKey(CREATOR) ? text(snapshot, CREATOR) : held;
+    }
+    return actor.lane() == Actor.Lane.SYNC
+            && Strings.isBlank(held)
+            && Ownership.owns(actor.handle(), text(snapshot, CREATOR))
+        ? actor.handle()
+        : held;
+  }
+
+  /**
+   * The creator main holds for an entity; {@code handle} is null when it holds none. A null {@code
+   * Creator} is a main that did not say.
+   */
+  public record Creator(String handle) {}
+
+  /**
+   * {@code snapshot} naming {@code creator} as its {@link #CREATOR}: an offer main accepted, as
+   * main committed it, since main keeps the creator it holds whatever the offer named. The snapshot
+   * itself when main did not say.
+   */
+  public static Map<String, Object> withCreator(Map<String, Object> snapshot, Creator creator) {
+    if (snapshot == null || creator == null) {
+      return snapshot;
+    }
+    var committed = new LinkedHashMap<>(snapshot);
+    committed.put(CREATOR, creator.handle());
+    return committed;
   }
 }

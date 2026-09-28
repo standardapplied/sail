@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.SailRoomRelay;
 import ai.singlr.sail.engine.SailStopGate;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -27,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -58,6 +60,7 @@ class RoomRelayDeliveryIT {
     Files.createDirectories(home);
     db = Sqlite.open(root.resolve("delivery.db"));
     new SchemaManager(db).migrate();
+    new FdeStore(db).add("ada", null, null, "member");
     db.execute(
         """
         INSERT INTO specs
@@ -77,7 +80,7 @@ class RoomRelayDeliveryIT {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null,
+                new FdeStore(db),
                 SessionYield.NONE)
             .useMessages(messages);
     runId = DateTimeUtils.newId().toString();
@@ -92,7 +95,7 @@ class RoomRelayDeliveryIT {
                         "node-a",
                         "ada",
                         "build",
-                        java.util.List.of(),
+                        List.of(),
                         "claude-code",
                         "b",
                         "t",

@@ -11,37 +11,54 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
+import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
  * The operator of this box's root CLI, resolved in one place for every command that acts as it: the
- * box's owner, an admin, on main or a standalone box; on a node, its FDE with the role main's
- * roster gives it, so a node never promises what main then refuses. A node that has not synced the
- * roster yet cannot tell, and says so.
+ * box's FDE, with the role {@link RoleRule} gives it — admin on main or a standalone box, whose
+ * root they hold, and on a node the role main's roster gives it, so a node never promises what main
+ * then refuses. Main or a standalone box with no sync handle has no FDE to be, and its root acts as
+ * an admin with none. A node that cannot name its FDE's role — its roster has not synced, the FDE
+ * is disabled, or it names no FDE — says so ({@link #unplaced}).
  */
 public final class CliOperator {
 
   private CliOperator() {}
 
-  /** The operator this box's configuration and synced roster name. */
-  public static Actor of(SyncConfig config, Supplier<FdeStore> roster) {
-    var handle = config.handle();
-    if (!config.isNode()) {
-      return Actor.cliOperator(handle);
+  /** The operator this box's configuration and roster name; a null roster is none kept yet. */
+  public static Actor of(SyncConfig config, FdeStore roster) {
+    var roles = new RoleRule(() -> config, roster);
+    var handle = roles.boxFde().orElse(null);
+    return roles
+        .roleOfUnbound(Role.ADMIN)
+        .map(role -> new Actor(handle, role, Actor.Lane.CLI))
+        .orElseThrow(() -> unplaced(handle));
+  }
+
+  /**
+   * The refusal for whatever acts for this box's FDE, {@code handle}, when the box cannot place it:
+   * a node whose roster does not know that FDE yet or has disabled it, or a node that names none.
+   */
+  public static ApiException unplaced(String handle) {
+    if (Strings.isBlank(handle)) {
+      return new ApiException(
+          ErrorCode.CONFLICT,
+          "This box syncs with main but names no FDE of its own, so it cannot tell what you may do.",
+          "Name it with 'sudo sail host config set sync-handle <you>', then run 'sudo sail sync'.");
     }
-    var fde =
-        Strings.isBlank(handle) ? Optional.<FdeStore.Fde>empty() : roster.get().byHandle(handle);
-    return fde.map(found -> new Actor(handle, Role.fromAttribute(found.role()), Actor.Lane.CLI))
-        .orElseThrow(
-            () ->
-                new ApiException(
-                    ErrorCode.CONFLICT,
-                    "This node does not know its FDE's role yet, so it cannot tell what you may do.",
-                    "Run 'sail sync' first, then try again."));
+    return new ApiException(
+        ErrorCode.CONFLICT,
+        "This box does not know its FDE's role ('"
+            + handle
+            + "'), so it cannot tell what you may do.",
+        "Run 'sudo sail sync' first. If it still refuses, ask an admin whether '"
+            + handle
+            + "' is disabled.");
   }
 
   /**
@@ -59,11 +76,11 @@ public final class CliOperator {
   }
 
   static Actor current(SyncConfig config, Path controlPlane) {
-    if (!config.isNode()) {
-      return of(config, () -> null);
+    if (!Files.exists(controlPlane)) {
+      return of(config, null);
     }
     try (var db = Sqlite.open(controlPlane)) {
-      return of(config, () -> new FdeStore(db));
+      return of(config, new FdeStore(db));
     }
   }
 }

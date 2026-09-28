@@ -9,6 +9,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -42,7 +44,12 @@ class SshGatewayTest {
   }
 
   private SshGateway.Decision authorize(String command, String handle) {
-    return SshGateway.authorize(command, handle, fdes, sessions);
+    return SshGateway.authorize(
+        command,
+        handle,
+        fdes,
+        new RoleRule(() -> new SyncConfig("main", null, "main-op", "box"), fdes),
+        sessions);
   }
 
   @Test
@@ -65,6 +72,13 @@ class SshGatewayTest {
     var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde list", "uday"));
     assertTrue(rejected.reason().contains("admin role"));
     assertTrue(sessions.validate("sess_anything").isEmpty());
+  }
+
+  @Test
+  void mainsOperatorActsAsAnAdminWhateverItsRosterRole() {
+    fdes.add("main-op", null, null, "member");
+
+    assertInstanceOf(SshGateway.Authorized.class, authorize("sail fde list", "main-op"));
   }
 
   @Test

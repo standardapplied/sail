@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.ssh.SshPublicKey;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -38,7 +39,13 @@ public final class FdeStore {
       String email,
       String role,
       String status,
-      String createdAt) {}
+      String createdAt) {
+
+    /** Whether this FDE may act at all: a {@code disabled} one is refused through every door. */
+    public boolean active() {
+      return "active".equals(status);
+    }
+  }
 
   /** Creates an FDE with the default {@code member} role. */
   public Fde add(String handle, String displayName, String email) {
@@ -162,6 +169,25 @@ public final class FdeStore {
     return db.query(SELECT + " ORDER BY handle", FdeStore::map);
   }
 
+  /**
+   * Disables every active FDE this box holds that main's roster, naming {@code listed}, no longer
+   * does: main removed it, so it is refused here as it is on main, never left acting with its last
+   * role. Its local row, and what references it, stays. Returns the handles it disabled.
+   */
+  public List<String> disableUnlisted(Collection<String> listed) {
+    return db.transaction(
+        () -> {
+          var unlisted =
+              list().stream()
+                  .filter(fde -> fde.active() && !listed.contains(fde.handle()))
+                  .map(Fde::handle)
+                  .toList();
+          unlisted.forEach(
+              handle -> db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = ?", handle));
+          return unlisted;
+        });
+  }
+
   /** Returns the number of FDEs that are active admins — the principals who can administer. */
   public long activeAdminCount() {
     return db.queryOne(
@@ -199,9 +225,7 @@ public final class FdeStore {
           var fde =
               byId(fdeId)
                   .orElseThrow(() -> new IllegalArgumentException("No FDE with id " + fdeId + "."));
-          if ("admin".equals(fde.role())
-              && "active".equals(fde.status())
-              && activeAdminCount() <= 1) {
+          if ("admin".equals(fde.role()) && fde.active() && activeAdminCount() <= 1) {
             throw new IllegalStateException(
                 "'"
                     + fde.handle()

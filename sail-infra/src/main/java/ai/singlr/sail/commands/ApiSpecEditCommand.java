@@ -39,7 +39,11 @@ public final class ApiSpecEditCommand implements Runnable {
   @Option(names = "--status", description = "New status.")
   private String status;
 
-  @Option(names = "--assignee", description = "New assignee.")
+  @Option(
+      names = "--assignee",
+      description =
+          "New assignee: an FDE handle; claim an unassigned spec with your own. The agent type"
+              + " goes in --agent.")
   private String assignee;
 
   @Option(names = "--agent", description = "Agent override.")

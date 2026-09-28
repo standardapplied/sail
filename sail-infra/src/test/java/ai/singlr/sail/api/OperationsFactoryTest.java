@@ -104,9 +104,12 @@ class OperationsFactoryTest {
           Actor.call(
               actor,
               () ->
-                  operations
-                      .dispatching()
-                      .stop(new StopOperations.RunTarget(runId), actor, "node", false));
+                  Actor.call(
+                      actor,
+                      () ->
+                          operations
+                              .dispatching()
+                              .stop(new StopOperations.RunTarget(runId), "node", false)));
 
       assertTrue(assertInstanceOf(StopOperations.NotRunning.class, outcome).runReleased());
       assertEquals("stopped", runs.findById(runId).orElseThrow().status());

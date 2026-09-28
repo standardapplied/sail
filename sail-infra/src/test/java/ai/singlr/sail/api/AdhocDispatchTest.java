@@ -361,11 +361,14 @@ class AdhocDispatchTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.dispatch(
-                    "acme",
-                    new DispatchOperations.Request("auth", "background", false, null, false),
+                Actor.call(
                     ADMIN,
-                    HANDLE));
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, false),
+                            HANDLE)));
 
     assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refusal.failure().errorCode());
     assertTrue(refusal.getMessage().contains("Ad-hoc agent run"), refusal.getMessage());
