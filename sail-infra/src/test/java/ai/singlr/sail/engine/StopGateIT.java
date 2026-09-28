@@ -16,6 +16,7 @@ import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -60,6 +61,8 @@ class StopGateIT extends AbstractIncusIT {
       Acting.system(() -> specStore.create(seededSpec()));
 
       var runStore = new RunStore(db);
+      var roster = new FdeStore(db);
+      roster.add("it", "IT", "it@example.dev", "member");
       var bus = new EventBus();
       var received = new CopyOnWriteArrayList<Event>();
       bus.subscribe(recorder(received));
@@ -74,7 +77,7 @@ class StopGateIT extends AbstractIncusIT {
               runStore,
               null,
               ai.singlr.sail.api.SyncScheduler.disabled(),
-              null,
+              roster,
               SessionYield.NONE);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {
         server.start();

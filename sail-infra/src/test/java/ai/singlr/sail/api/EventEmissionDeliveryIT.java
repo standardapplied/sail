@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.SailEventHelper;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -57,6 +58,7 @@ class EventEmissionDeliveryIT {
     Files.createDirectories(home);
     db = Sqlite.open(root.resolve("session.db"));
     new SchemaManager(db).migrate();
+    new FdeStore(db).add("ada", null, null, "member");
     db.execute(
         """
         INSERT INTO specs
@@ -75,7 +77,7 @@ class EventEmissionDeliveryIT {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null,
+                new FdeStore(db),
                 SessionYield.NONE)
             .useMessages(new MessageStore(db));
     runId = DateTimeUtils.newId().toString();

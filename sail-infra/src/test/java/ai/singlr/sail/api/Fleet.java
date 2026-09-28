@@ -31,6 +31,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
@@ -319,7 +320,8 @@ public final class Fleet implements AutoCloseable {
                   SyncScheduler.disabled(),
                   fdes,
                   SessionYield.NONE)
-              .useMessages(messages);
+              .useMessages(messages)
+              .useRooms(new RoomStore(db));
       slack = new CapturingPoster();
       var syncConfig =
           main
