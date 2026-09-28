@@ -11,7 +11,6 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -48,7 +47,6 @@ class ReplyChainSyncTest {
           INSERT INTO rooms (id, title, project, created_at, updated_at)
           VALUES ('room', 'Room', 'acme', 'now', 'now')""");
     }
-    new FdeStore(main.db).add("node", null, null, "admin");
     mainMessages = new MessageStore(main.db);
     nodeMessages = new MessageStore(node.db);
     nodeReplica =
@@ -67,7 +65,7 @@ class ReplyChainSyncTest {
   }
 
   private SyncBox.Link connect() throws IOException {
-    return SyncBox.connect(main.server(Actor.sync("node", Role.MEMBER)), node);
+    return SyncBox.connect(main.server(Actor.sync("node", Role.ADMIN)), node);
   }
 
   private static void chain(MessageStore messages) {

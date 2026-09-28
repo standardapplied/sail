@@ -55,13 +55,30 @@ public interface MainReplica {
   String currentRev(String id);
 
   /**
-   * One entity's current state and its revision, read together, and the kind of the entry they come
-   * from: an erased entity has no snapshot and its erasure's rev.
+   * One entity's current state and its revision, read together, the kind of the entry they come
+   * from — an erased entity has no snapshot and its erasure's rev — and the author main recorded
+   * for that entry, null when unknown.
    */
-  record State(Map<String, Object> snapshot, String rev, ChangeLog.Kind kind) {
-    public State(Map<String, Object> snapshot, String rev) {
-      this(snapshot, rev, snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION);
+  record State(Map<String, Object> snapshot, String rev, ChangeLog.Kind kind, String author) {
+    public State(Map<String, Object> snapshot, String rev, String author) {
+      this(
+          snapshot,
+          rev,
+          snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION,
+          author);
     }
+
+    public State(Map<String, Object> snapshot, String rev) {
+      this(snapshot, rev, null);
+    }
+  }
+
+  /**
+   * The author main recorded for its current version of {@code id}, which a node records when it
+   * adopts that version; null when main names none.
+   */
+  default String author(String id) {
+    return state(id).author();
   }
 
   /**

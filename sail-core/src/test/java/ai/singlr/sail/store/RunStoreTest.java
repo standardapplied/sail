@@ -1504,6 +1504,17 @@ class RunStoreTest {
   }
 
   @Test
+  void everyMintedPrincipalHasThePrincipalShapeAndNoHandleDoes() {
+    var id = DateTimeUtils.newId().toString();
+    reservedCredential(id, "auth", java.util.List.of("app"));
+
+    assertTrue(RunStore.isPrincipalHandle(store.findById(id).orElseThrow().principal()));
+    assertTrue(RunStore.isPrincipalHandle("/" + id), "a run with no agent family still mints one");
+    assertFalse(RunStore.isPrincipalHandle("uday"));
+    assertFalse(RunStore.isPrincipalHandle(null));
+  }
+
+  @Test
   void reserveDispatchMintsThePrincipalAndCredentialWithTheRow() {
     var id = DateTimeUtils.newId().toString();
 

@@ -964,6 +964,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     recordPrincipal(id, Snapshots.text(snapshot, "principal"));
   }
 
+  /**
+   * Whether {@code handle} has the shape {@link #principalHandle} mints for a run's principal —
+   * {@code <family>/<id>} — which no FDE handle has. How an assignee that names a run rather than
+   * an FDE is told apart.
+   */
+  public static boolean isPrincipalHandle(String handle) {
+    return handle != null && handle.contains("/");
+  }
+
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');

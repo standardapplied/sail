@@ -59,8 +59,9 @@ public final class SyncWire {
   public static final int MAX_FRAME = 16 * 1024 * 1024;
 
   /**
-   * Room for main's answer to an offer beyond the offer itself: a reason and the markers a result
-   * carries. Every reason main gives names at most the offer's own strings besides a short text.
+   * Room for main's answer to an offer beyond the offer itself: a reason, the author main recorded
+   * and the markers a result carries. Every reason main gives names at most the offer's own strings
+   * besides a short text, and an author is one handle.
    */
   private static final int RESULT_ALLOWANCE = 256;
 
@@ -96,6 +97,7 @@ public final class SyncWire {
   private static final String MESSAGE = "message";
   private static final String KIND = "kind";
   private static final String ERASE = "erase";
+  private static final String AUTHOR = "author";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -337,7 +339,10 @@ public final class SyncWire {
 
   /**
    * One change of one entity at its head. A tombstone and an erasure carry {@code deleted} and no
-   * snapshot; {@code kind} says which, so no reader infers one from the other.
+   * snapshot; {@code kind} says which, so no reader infers one from the other. Having no snapshot
+   * to name its author in, a tombstone or an erasure carries the {@code author} main recorded, so
+   * the node records the same one; an older main sends none. A revision's author rides in its
+   * snapshot.
    */
   public record Entry(
       long seq,
@@ -345,7 +350,8 @@ public final class SyncWire {
       String rev,
       boolean deleted,
       Map<String, Object> snapshot,
-      ChangeLog.Kind kind) {
+      ChangeLog.Kind kind,
+      String author) {
     public Entry {
       if (kind == null) {
         throw new IllegalArgumentException("Entry " + id + " names no kind");
@@ -356,7 +362,18 @@ public final class SyncWire {
       }
     }
 
-    /** A revision, or a tombstone when {@code deleted}. */
+    /** A change of {@code kind} that names no author. */
+    public Entry(
+        long seq,
+        String id,
+        String rev,
+        boolean deleted,
+        Map<String, Object> snapshot,
+        ChangeLog.Kind kind) {
+      this(seq, id, rev, deleted, snapshot, kind, null);
+    }
+
+    /** A revision, or a tombstone when {@code deleted}, that names no author. */
     public Entry(long seq, String id, String rev, boolean deleted, Map<String, Object> snapshot) {
       this(
           seq,
@@ -365,6 +382,22 @@ public final class SyncWire {
           deleted,
           snapshot,
           deleted ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION);
+    }
+
+    /**
+     * Main's version of {@code id} outside any page, as a verdict hands it over: a revision, or a
+     * tombstone when {@code snapshot} is null, made by {@code author}.
+     */
+    public static Entry version(
+        String id, String rev, Map<String, Object> snapshot, String author) {
+      return new Entry(
+          0,
+          id,
+          rev,
+          snapshot == null,
+          snapshot,
+          snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION,
+          author);
     }
 
     public boolean erased() {
@@ -385,14 +418,22 @@ public final class SyncWire {
     String id();
   }
 
-  /** Main minted {@code rev} for the offer. */
-  public record Accepted(String id, String rev) implements Result {}
+  /**
+   * Main minted {@code rev} for the offer, recording {@code author} as who made it: the author the
+   * offer named, or the pusher when it named none. The node records the same one when it settles
+   * its offer; an older main sends none.
+   */
+  public record Accepted(String id, String rev, String author) implements Result {
+    public Accepted(String id, String rev) {
+      this(id, rev, null);
+    }
+  }
 
   /**
-   * Main moved since the node fetched, or the offer is not the node's to make; the offer was left
-   * untouched. Main's present state is deliberately not carried here: a batch of results must fit
-   * one frame no matter how large the concurrent versions are, so the node fetches them through the
-   * bounded {@link Need} path instead.
+   * Main moved since the node fetched; the offer was left untouched. An offer that is not the
+   * node's to make is answered {@link Denied}, never stale. Main's present state is deliberately
+   * not carried here: a batch of results must fit one frame no matter how large the concurrent
+   * versions are, so the node fetches them through the bounded {@link Need} path instead.
    */
   public record Stale(String id) implements Result {}
 
@@ -404,16 +445,26 @@ public final class SyncWire {
 
   /**
    * Main decided this principal may not make this change, naming why, and answers with its current
-   * version of the entity: a revision, a tombstone ({@code rev} with a null {@code snapshot}), or
-   * nothing when main holds none. The node adopts it and keeps its own in history. It travels as a
-   * {@code refused} result marked {@code denied}, so a node that predates it reads the {@link
-   * Refused} it knows, naming the same reason. A version that would take the answer past its
-   * offer's {@link #resultBound} is not {@code carried}: the node fetches it through the bounded
-   * {@link Need} path, as it does for a {@link Stale} offer.
+   * version of the entity: a revision, a tombstone ({@code rev} with a null {@code snapshot}, and
+   * the {@code author} main recorded for it), or nothing when main holds none. The node adopts it
+   * and keeps its own in history. It travels as a {@code refused} result marked {@code denied}, so
+   * a node that predates it reads the {@link Refused} it knows, naming the same reason. A version
+   * that would take the answer past its offer's {@link #resultBound} is not {@code carried}: the
+   * node fetches it through the bounded {@link Need} path, as it does for a {@link Stale} offer.
    */
   public record Denied(
-      String id, String reason, String rev, Map<String, Object> snapshot, boolean carried)
+      String id,
+      String reason,
+      String rev,
+      Map<String, Object> snapshot,
+      boolean carried,
+      String author)
       implements Result {
+    public Denied(
+        String id, String reason, String rev, Map<String, Object> snapshot, boolean carried) {
+      this(id, reason, rev, snapshot, carried, null);
+    }
+
     public Denied(String id, String reason, String rev, Map<String, Object> snapshot) {
       this(id, reason, rev, snapshot, true);
     }
@@ -673,6 +724,8 @@ public final class SyncWire {
     map.put(KIND, entry.kind().wire());
     if (!entry.deleted()) {
       map.put(SNAPSHOT, entry.snapshot());
+    } else if (entry.author() != null) {
+      map.put(AUTHOR, entry.author());
     }
     return map;
   }
@@ -684,7 +737,8 @@ public final class SyncWire {
         string(map, REV),
         bool(map, DELETED),
         snapshot(map, SNAPSHOT),
-        ChangeLog.Kind.of(string(map, KIND)));
+        ChangeLog.Kind.of(string(map, KIND)),
+        string(map, AUTHOR));
   }
 
   private static Map<String, Object> offerMap(MainReplica.Offer offer) {
@@ -707,7 +761,14 @@ public final class SyncWire {
     var map = new LinkedHashMap<String, Object>();
     map.put(ID, result.id());
     switch (result) {
-      case Accepted accepted -> map.put(ACCEPTED, Map.of(REV, accepted.rev()));
+      case Accepted accepted -> {
+        var verdict = new LinkedHashMap<String, Object>();
+        verdict.put(REV, accepted.rev());
+        if (accepted.author() != null) {
+          verdict.put(AUTHOR, accepted.author());
+        }
+        map.put(ACCEPTED, verdict);
+      }
       case Stale _ -> map.put(STALE, true);
       case Refused refused -> map.put(REFUSED, Map.of(REASON, refused.reason()));
       case Denied denied -> {
@@ -717,6 +778,9 @@ public final class SyncWire {
         if (denied.carried()) {
           refused.put(REV, denied.rev());
           refused.put(SNAPSHOT, denied.snapshot());
+          if (denied.snapshot() == null && denied.author() != null) {
+            refused.put(AUTHOR, denied.author());
+          }
         }
         map.put(REFUSED, refused);
       }
@@ -728,7 +792,7 @@ public final class SyncWire {
     var id = string(map, ID);
     var accepted = snapshot(map, ACCEPTED);
     if (accepted != null) {
-      return new Accepted(id, string(accepted, REV));
+      return new Accepted(id, string(accepted, REV), string(accepted, AUTHOR));
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);
@@ -740,7 +804,8 @@ public final class SyncWire {
           string(refused, REASON),
           string(refused, REV),
           snapshot(refused, SNAPSHOT),
-          refused.containsKey(SNAPSHOT));
+          refused.containsKey(SNAPSHOT),
+          string(refused, AUTHOR));
     }
     if (refused != null) {
       return new Refused(id, string(refused, REASON));

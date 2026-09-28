@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -25,10 +26,10 @@ import java.util.function.Supplier;
 /**
  * The standing-member reactor: a human message posted to a spec's room while no run is live wakes
  * the agent as a new, fully-guarded {@code room}-role run that answers in the room. Subscribed to
- * {@code spec_message_posted} on every box, but it fires only on the dispatch-owning one — the box
- * whose handle equals the spec's assignee — so the fleet has exactly one waker per spec, and a
- * sync-arrived message (a Mast reply landing on main and syncing over) counts the same as a
- * locally-posted one.
+ * {@code spec_message_posted} on every box, but it fires only on the owning one — the box whose
+ * handle is the spec's owner ({@link Ownership#ownerOf}: its assignee, or its creator while it is
+ * unassigned) — so the fleet has exactly one waker per spec, and a sync-arrived message (a Mast
+ * reply landing on main and syncing over) counts the same as a locally-posted one.
  *
  * <p>Timing is deliberately dumb — no content heuristics. A {@link #DEBOUNCE} window batches the
  * triggering message with any that follow (they all ride the wake prompt, which reads the room at
@@ -213,7 +214,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       return new Target(
           id,
           spec.project(),
-          spec.assignedTo(localHandle.get()),
+          spec.ownedBy(localHandle.get()),
           MembershipService.stateOf(roomStore, spec),
           dispatchedAtLeastOnce(id),
           true,
@@ -223,12 +224,10 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (room == null) {
       return null;
     }
-    var owner =
-        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
     return new Target(
         id,
         room.project(),
-        owner != null && owner.equals(localHandle.get()),
+        Ownership.owns(localHandle.get(), room.assignee(), room.createdBy()),
         MembershipService.RoomState.of(room),
         false,
         false,

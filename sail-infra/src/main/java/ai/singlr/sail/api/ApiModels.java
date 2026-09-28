@@ -780,7 +780,7 @@ record RoomView(
         row.assignee(),
         row.wake(),
         RoomWakePolicy.effectiveMode(row.wake(), members.size()),
-        PersonalRooms.ownerOf(row),
+        PersonalRooms.personalRoomOf(row),
         members,
         specIds,
         row.createdBy(),

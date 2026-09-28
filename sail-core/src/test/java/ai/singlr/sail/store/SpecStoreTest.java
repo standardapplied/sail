@@ -87,30 +87,36 @@ class SpecStoreTest {
   }
 
   @Test
-  void assignedToMatchesOnlyANonBlankHandleEqualToTheAssignee() {
-    var mine =
-        new SpecStore.SpecRow(
-            "s",
-            "test-project",
-            "T",
-            SpecStatus.fromWire("pending"),
-            "uday",
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            List.of());
-    assertTrue(mine.assignedTo("uday"));
-    assertFalse(mine.assignedTo("mady"));
-    assertFalse(mine.assignedTo(null), "a blank handle is assigned no spec");
-    assertFalse(
-        spec("s", "T", "pending").assignedTo("uday"), "an unassigned spec is owned by nobody");
+  void ownedByIsTheAssigneeOrTheCreatorWhileUnassigned() {
+    var assigned = row("uday", "mady");
+    var unassigned = row(" ", "mady");
+
+    assertTrue(assigned.ownedBy("uday"));
+    assertFalse(assigned.ownedBy("mady"), "an assigned spec is not its creator's");
+    assertTrue(unassigned.ownedBy("mady"), "an unassigned spec is its creator's");
+    assertFalse(unassigned.ownedBy("uday"));
+    assertFalse(assigned.ownedBy(null), "a blank handle owns no spec");
+    assertFalse(row(null, null).ownedBy(""), "a spec with no owner is nobody's");
+  }
+
+  private static SpecStore.SpecRow row(String assignee, String createdBy) {
+    return new SpecStore.SpecRow(
+        "s",
+        "test-project",
+        "T",
+        SpecStatus.PENDING,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        createdBy,
+        "",
+        "",
+        null,
+        List.of(),
+        List.of());
   }
 
   @Test

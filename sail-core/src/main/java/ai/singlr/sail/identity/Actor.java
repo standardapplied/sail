@@ -5,16 +5,19 @@
 
 package ai.singlr.sail.identity;
 
+import ai.singlr.sail.common.Strings;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
  * Who is acting: the one identity every write names, whichever door it came through. {@code handle}
  * is the acting FDE's handle (the {@code assignee} a spec is matched against), a run's principal on
- * the in-container lanes, or a fixed name for main and this box's machinery; it is null for a
- * machine credential that owns no FDE. {@code role} carries the capabilities. {@code lane} names
- * the way the write is made. {@code owner} is set only on the {@link Lane#AGENT} and {@link
- * Lane#ROOM} lanes: the FDE the run's principal acts for, used for attribution and policy tiering,
- * never as a separate authorization system.
+ * the in-container lanes, or a fixed name for main and this box's machinery — on the {@link
+ * Lane#MAIN} lane, the author main recorded for the version a node adopts, when main names one; it
+ * is null for a machine credential that owns no FDE. {@code role} carries the capabilities. {@code
+ * lane} names the way the write is made. {@code owner} is set only on the {@link Lane#AGENT} and
+ * {@link Lane#ROOM} lanes: the FDE the run's principal acts for, used for attribution and policy
+ * tiering, never as a separate authorization system.
  *
  * <p>Every entry point binds the actor it acts as with {@link #run} or {@link #call}, at its edge,
  * and the {@code ChangeLog} reads it back through {@link #current()} for every revision it records.
@@ -91,7 +94,16 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
 
   /** Main, as a node adopts what it decided. */
   public static Actor main() {
-    return new Actor(MAIN_HANDLE, Role.ADMIN, Lane.MAIN);
+    return main(null);
+  }
+
+  /**
+   * Main, as a node adopts a version main recorded as made by {@code author}: the node records the
+   * same author, even for a tombstone or an erasure, which carries no snapshot to name one. A null
+   * author is plain {@link #main()}.
+   */
+  public static Actor main(String author) {
+    return new Actor(Objects.requireNonNullElse(author, MAIN_HANDLE), Role.ADMIN, Lane.MAIN);
   }
 
   /** This box's own machinery: reactors, sweepers, reconcilers, migrations. */
@@ -165,12 +177,21 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
   }
 
   /**
+   * The FDE this actor acts as: its own handle, or on the {@link Lane#AGENT} and {@link Lane#ROOM}
+   * lanes the FDE its run acts for, never the run's principal. What a spec or room records as its
+   * creator, and whom a claim assigns it to.
+   */
+  public String actingFde() {
+    return agentLane() ? owner : handle;
+  }
+
+  /**
    * Whether this actor is {@code identity} or acts on its behalf: an agent principal carries its
    * owning FDE, so a spec assigned to that FDE is the agent's to work exactly as if the FDE edited
-   * it directly.
+   * it directly. A blank identity is no one's.
    */
   public boolean actsFor(String identity) {
-    return identity != null && (identity.equals(handle) || identity.equals(owner));
+    return Strings.isNotBlank(identity) && (identity.equals(handle) || identity.equals(owner));
   }
 
   /**
@@ -178,7 +199,11 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
    * its revisions, and null for a write this box made itself.
    */
   public String peer() {
-    return carriesSync() ? handle : null;
+    return switch (lane) {
+      case SYNC -> handle;
+      case MAIN -> MAIN_HANDLE;
+      default -> null;
+    };
   }
 
   /**

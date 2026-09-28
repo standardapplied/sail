@@ -79,18 +79,16 @@ class MessageSyncTest {
 
   @Test
   void messagesFromDifferentBoxesConvergeWithoutConflict() {
-    new FdeStore(main.db).add("node", null, null, "admin");
-    new FdeStore(main.db).add("other", null, null, "admin");
     var fromNode = node.messages.append("room", "node", "node message", null);
     var fromOther = other.messages.append("room", "other", "other message", null);
     var engine = new SyncEngine();
 
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
-    Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
+        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
+    Actor.call(Actor.sync("node", Role.ADMIN), () -> engine.reconcile(node.replica, main.replica));
     Actor.call(
-        Actor.sync("other", Role.MEMBER), () -> engine.reconcile(other.replica, main.replica));
+        Actor.sync("other", Role.ADMIN), () -> engine.reconcile(other.replica, main.replica));
 
     assertEquals(2, main.messages.list("room", null, 10).size());
     assertTrue(node.messages.findById(fromOther.id()).isPresent());
@@ -241,6 +239,53 @@ class MessageSyncTest {
     assertNull(denied.currentRev(), "main holds no version of a message it never took");
     assertNull(denied.currentSnapshot());
     assertTrue(main.messages.findById(messageId).isEmpty());
+  }
+
+  @Test
+  void mainDecidesAPostByTheConversationsOwnerForEveryBlankAndSetAssigneeAndCreator() {
+    new ai.singlr.sail.store.SpecStore(main.db)
+        .create(
+            new ai.singlr.sail.store.SpecStore.SpecRow(
+                "spec-room",
+                "acme",
+                "Spec",
+                ai.singlr.sail.config.SpecStatus.PENDING,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0,
+                null,
+                "",
+                "",
+                null,
+                java.util.List.of(),
+                java.util.List.of()));
+    var values = java.util.Arrays.asList(null, "", " \t", "mady", "uday");
+    var seq = 0;
+    for (var table : java.util.List.of("rooms", "specs")) {
+      var conversation = "rooms".equals(table) ? "room" : "spec-room";
+      for (var assignee : values) {
+        for (var creator : values) {
+          main.db.execute(
+              "UPDATE " + table + " SET assignee = ?, created_by = ? WHERE id = ?",
+              assignee,
+              creator,
+              conversation);
+          var id = "019fee00-0000-7000-8000-%012d".formatted(++seq);
+          var outcome =
+              Actor.call(
+                  Actor.sync("mady", Role.MEMBER),
+                  () -> main.messages.commitRevision(id, snapshot("mady", conversation), null));
+
+          assertEquals(
+              ai.singlr.sail.identity.Ownership.owns("mady", assignee, creator),
+              outcome instanceof PushOutcome.Accepted,
+              table + " assignee=" + assignee + " creator=" + creator + ": " + outcome);
+        }
+      }
+    }
   }
 
   @Test

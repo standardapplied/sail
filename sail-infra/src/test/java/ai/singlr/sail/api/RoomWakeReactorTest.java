@@ -359,6 +359,42 @@ class RoomWakeReactorTest {
   }
 
   @Test
+  void anUnassignedSpecsRoomWakesOnItsCreatorsBoxOnly() {
+    seed("draft", "pending", null, "on");
+
+    handle.set("mady");
+    reactor().onEvent(message("draft", "mady", "anyone?"));
+    assertTrue(launcher.woken.isEmpty(), "an unassigned spec is its creator's, not this box's");
+
+    handle.set("uday");
+    reactor().onEvent(message("draft", "mady", "anyone at all?"));
+    assertEquals(List.of("acme/draft"), launcher.woken, "uday created it, so uday's box wakes");
+  }
+
+  @Test
+  void anUnassignedSpeclessRoomWakesOnItsCreatorsBox() {
+    Acting.as(
+        "uday",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "open-room", "acme", "Open", null, null, null, null, null, null, null)));
+    Acting.system(
+        () ->
+            roomStore.updateRoster(
+                "open-room",
+                "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
+
+    handle.set("mady");
+    reactor().onEvent(message("open-room", "mady", "hello"));
+    assertTrue(launcher.woken.isEmpty());
+
+    handle.set("uday");
+    reactor().onEvent(message("open-room", "mady", "hello again"));
+    assertEquals(List.of("acme/open-room"), launcher.woken);
+  }
+
+  @Test
   void aLiveRunSuppressesTheWakeWhateverItsRole() {
     seed("auth", "in_progress", "uday", "on");
     buildRun("auth", "running");

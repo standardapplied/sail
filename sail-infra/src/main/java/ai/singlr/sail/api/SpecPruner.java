@@ -42,8 +42,8 @@ import java.util.function.Supplier;
  * main decides on its own copy, and discards on the spot what it alone ever held.
  *
  * <p>Authority: write capability, never an agent; for a spec named by id, its owner ({@link
- * SpecStore#ownerOf}) or an admin, and only once it is archived, cancelled or deleted with no run
- * of it still going; a policy, a project or retention, an admin only.
+ * ai.singlr.sail.identity.Ownership#ownerOf}) or an admin, and only once it is archived, cancelled
+ * or deleted with no run of it still going; a policy, a project or retention, an admin only.
  */
 final class SpecPruner {
 

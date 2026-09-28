@@ -60,8 +60,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       String updatedBy) {}
 
   /**
-   * Creates a room as a local edit, stamping creation and update times, created and last updated by
-   * the bound {@link Actor} whatever the row names.
+   * Creates a room as a local edit, stamping creation and update times, created by the FDE the
+   * bound {@link Actor} acts as ({@link Actor#actingFde}) and last updated by the actor, whatever
+   * the row names.
    */
   public void create(RoomRow room) {
     Strings.requireNonBlank(room.id(), "A room needs an id");
@@ -81,7 +82,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               room.assignee(),
               room.wake(),
               room.roster(),
-              author,
+              Actor.current().actingFde(),
               now,
               now,
               author);

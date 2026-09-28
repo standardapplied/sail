@@ -53,17 +53,22 @@ class SyncWireTest {
           new SyncWire.Page(
               List.of(
                   new SyncWire.Entry(5, "auth", "3-abc", false, snapshot()),
-                  new SyncWire.Entry(9, "gone", "4-def", true, null)),
+                  new SyncWire.Entry(9, "gone", "4-def", true, null),
+                  SyncWire.Entry.version("left", "5-ghi", null, "ada"),
+                  new SyncWire.Entry(
+                      11, "pruned", "6-jkl", true, null, ChangeLog.Kind.ERASURE, "ada")),
               9,
               false,
               12),
           new SyncWire.Results(
               List.of(
                   new SyncWire.Accepted("auth", "7-feed"),
+                  new SyncWire.Accepted("mine", "8-feed", "ada"),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
                   new SyncWire.Denied("e", "read-only", "5-main", snapshot()),
                   new SyncWire.Denied("f", "read-only", "6-tomb", null),
+                  new SyncWire.Denied("i", "read-only", "7-tomb", null, true, "ada"),
                   new SyncWire.Denied("g", "read-only", null, null),
                   new SyncWire.Denied("h", "read-only", null, null, false)),
               99),
@@ -190,6 +195,53 @@ class SyncWireTest {
     assertEquals(
         Map.of("op", "refuse", "reason", "upgrade to 0.44.0: sail upgrade"),
         YamlUtil.parseMap(line));
+  }
+
+  @Test
+  void entriesAcceptancesAndDenialsDecodeWithoutTheAuthorAnOlderMainNeverSends() {
+    var page =
+        (SyncWire.Page)
+            SyncWire.decodeResponse(
+                "{\"op\": \"page\", \"entries\": [{\"seq\": 1, \"id\": \"gone\","
+                    + " \"rev\": \"2-x\", \"deleted\": true, \"kind\": \"tombstone\"},"
+                    + " {\"seq\": 2, \"id\": \"pruned\", \"rev\": \"3-x\", \"deleted\": true,"
+                    + " \"kind\": \"erasure\"}], \"next\": 2, \"done\": true, \"maxSeq\": 2}");
+    var results =
+        (SyncWire.Results)
+            SyncWire.decodeResponse(
+                "{\"op\": \"results\", \"results\": [{\"id\": \"a\", \"accepted\":"
+                    + " {\"rev\": \"1-a\"}}, {\"id\": \"b\", \"refused\": {\"reason\": \"no\","
+                    + " \"denied\": true, \"rev\": \"2-b\", \"snapshot\": null}}],"
+                    + " \"maxSeq\": 2}");
+
+    assertEquals(
+        List.of(
+            new SyncWire.Entry(1, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE),
+            new SyncWire.Entry(2, "pruned", "3-x", true, null, ChangeLog.Kind.ERASURE)),
+        page.entries());
+    assertEquals(
+        List.of(new SyncWire.Accepted("a", "1-a"), new SyncWire.Denied("b", "no", "2-b", null)),
+        results.results());
+  }
+
+  @Test
+  void anAuthorTravelsOnlyWhereNoSnapshotCanNameIt() {
+    var revision =
+        SyncWire.encode(
+            new SyncWire.Page(
+                List.of(
+                    new SyncWire.Entry(
+                        1, "a", "1-a", false, snapshot(), ChangeLog.Kind.REVISION, "ada")),
+                1,
+                true,
+                1));
+    var deniedRevision =
+        SyncWire.encode(
+            new SyncWire.Results(
+                List.of(new SyncWire.Denied("a", "no", "1-a", snapshot(), true, "ada")), 1));
+
+    assertFalse(revision.contains("\"author\""), revision);
+    assertFalse(deniedRevision.contains("\"author\""), deniedRevision);
   }
 
   @Test

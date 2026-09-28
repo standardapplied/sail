@@ -21,8 +21,12 @@ import java.util.Map;
 public sealed interface CommitOutcome
     permits CommitOutcome.Accepted, CommitOutcome.Rejected, CommitOutcome.Denied {
 
-  /** Main accepted the push and minted {@code rev}. */
-  record Accepted(String rev) implements CommitOutcome {}
+  /** Main accepted the push and minted {@code rev}, recording {@code author} as who made it. */
+  record Accepted(String rev, String author) implements CommitOutcome {
+    public Accepted(String rev) {
+      this(rev, null);
+    }
+  }
 
   /** Main moved since the node fetched; {@code current*} is its present state, left untouched. */
   record Rejected(String currentRev, Map<String, Object> currentSnapshot)
@@ -31,7 +35,12 @@ public sealed interface CommitOutcome
   /**
    * Main decided this principal may not make this change, naming why. {@code rev} and {@code
    * snapshot} are main's version: a revision, a tombstone (a rev with no snapshot), or nothing when
-   * main holds none.
+   * main holds none; {@code author} is who main recorded as making it.
    */
-  record Denied(String reason, String rev, Map<String, Object> snapshot) implements CommitOutcome {}
+  record Denied(String reason, String rev, Map<String, Object> snapshot, String author)
+      implements CommitOutcome {
+    public Denied(String reason, String rev, Map<String, Object> snapshot) {
+      this(reason, rev, snapshot, null);
+    }
+  }
 }

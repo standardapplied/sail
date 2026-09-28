@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -31,9 +32,9 @@ import java.util.function.Supplier;
  * snapshot a full membership may pay for.
  *
  * <p>The roster seats many members by schema; this surface currently seats one standing agent per
- * room, so adding a member replaces the previous one exactly as engagement always did. Waker-box
- * election stays on the <em>spec's</em> assignee — work-item ownership — until rooms can exist
- * without a spec.
+ * room, so adding a member replaces the previous one exactly as engagement always did. A spec-less
+ * room is managed from its owner's box ({@link Ownership#ownerOf}), a spec's room under the spec's
+ * dispatch tier.
  */
 public final class MembershipService {
 
@@ -179,9 +180,8 @@ public final class MembershipService {
                 () ->
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    var owner =
-        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
-    LaunchAdmission.requireAllowedForRoom(actor, roomId, owner, localHandle);
+    LaunchAdmission.requireAllowedForRoom(
+        actor, roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
     admission.requireTrustedRoster(localHandle);
     var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -261,9 +261,8 @@ public final class MembershipService {
                 () ->
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    var owner =
-        room.assignee() == null || room.assignee().isBlank() ? room.createdBy() : room.assignee();
-    LaunchAdmission.requireAllowedForRoom(actor, roomId, owner, localHandle);
+    LaunchAdmission.requireAllowedForRoom(
+        actor, roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {
       return null;

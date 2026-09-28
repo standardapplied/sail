@@ -185,6 +185,10 @@ class ErasureSyncTest {
       assertFalse(new BlobStore(box.db).has(body), box.id + " still holds the pruned body");
     }
     assertEquals(onMain.rev(), erasure(node.db, onMain.target()).rev());
+    assertEquals(
+        "node",
+        erasure(node.db, onMain.target()).actor(),
+        "the node records the author main's answer names");
     assertTrue(reports.getFirst().freedBytes() > 0, "the node reports what the collection freed");
   }
 

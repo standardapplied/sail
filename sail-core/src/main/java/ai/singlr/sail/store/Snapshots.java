@@ -21,6 +21,9 @@ public final class Snapshots {
   /** Reserved metadata key carrying the author of a revision through the sync protocol. */
   public static final String ACTOR = "_actor";
 
+  /** Reserved metadata key carrying the creator of an entity through the sync protocol. */
+  public static final String CREATOR = "_created_by";
+
   private Snapshots() {}
 
   /** The string form of a present value, or null when the key is absent. */
@@ -53,5 +56,26 @@ public final class Snapshots {
    */
   public static String actor(Map<String, Object> snapshot) {
     return Actor.current().authorOf(snapshot == null ? null : text(snapshot, ACTOR));
+  }
+
+  /**
+   * The creator a row born from {@code snapshot} records: the {@link #CREATOR} it offers, or else
+   * the FDE the bound {@link Actor} acts as ({@link Actor#actingFde}) — the pusher, when main
+   * commits a node's create that names none. A node adopting main's revision records only the
+   * creator main names.
+   */
+  public static String creator(Map<String, Object> snapshot) {
+    var offered = text(snapshot, CREATOR);
+    var actor = Actor.current();
+    return offered != null || actor.lane() == Actor.Lane.MAIN ? offered : actor.actingFde();
+  }
+
+  /**
+   * The creator {@code snapshot} writes over the one a row already holds, or null to keep the row's
+   * own. A creator is written once, at create: main keeps the one it holds whatever a later offer
+   * names, and only a node adopting main's revision takes the creator main holds.
+   */
+  public static String adoptedCreator(Map<String, Object> snapshot) {
+    return Actor.current().lane() == Actor.Lane.MAIN ? text(snapshot, CREATOR) : null;
   }
 }

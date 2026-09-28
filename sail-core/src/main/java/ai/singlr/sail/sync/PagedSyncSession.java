@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.engine.SemVer;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -342,7 +343,7 @@ public final class PagedSyncSession implements SyncSession {
         var id = batch.get(i);
         switch (results.results().get(i)) {
           case SyncWire.Accepted accepted when accepted.id().equals(id) -> {
-            if (erasure.adopt(type, id, accepted.rev())) applied++;
+            if (adoptErasure(type, id, accepted.rev(), accepted.author())) applied++;
             eraseRequests.drop(type, id);
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
@@ -380,13 +381,18 @@ public final class PagedSyncSession implements SyncSession {
             type + " " + entry.id() + ": an erasure arrived on a session with no store",
             null);
       }
-      if (erasure.adopt(type, entry.id(), entry.rev())) {
+      if (adoptErasure(type, entry.id(), entry.rev(), entry.author())) {
         adopted++;
       } else {
         remaining.add(entry);
       }
     }
     return remaining;
+  }
+
+  /** Applies main's erasure of {@code id} at {@code rev}, recording the author main recorded. */
+  private boolean adoptErasure(String type, String id, String rev, String author) {
+    return Actor.call(Actor.main(author), () -> erasure.adopt(type, id, rev));
   }
 
   /**
@@ -677,7 +683,9 @@ public final class PagedSyncSession implements SyncSession {
 
     @Override
     public State state(String entityId) {
-      return new State(current(entityId), currentRev(entityId));
+      var entry = entries.get(entityId);
+      return new State(
+          current(entityId), currentRev(entityId), entry == null ? null : entry.author());
     }
 
     @Override
@@ -809,8 +817,7 @@ public final class PagedSyncSession implements SyncSession {
         return;
       }
       var entry =
-          new SyncWire.Entry(
-              0, denied.id(), denied.rev(), denied.snapshot() == null, denied.snapshot());
+          SyncWire.Entry.version(denied.id(), denied.rev(), denied.snapshot(), denied.author());
       fetchContent(type, List.of(entry));
       entries.put(denied.id(), entry);
     }
@@ -820,9 +827,9 @@ public final class PagedSyncSession implements SyncSession {
         case SyncWire.Accepted accepted -> {
           entries.put(
               offer.id(),
-              new SyncWire.Entry(
-                  0, offer.id(), accepted.rev(), offer.snapshot() == null, offer.snapshot()));
-          yield new CommitOutcome.Accepted(accepted.rev());
+              SyncWire.Entry.version(
+                  offer.id(), accepted.rev(), offer.snapshot(), accepted.author()));
+          yield new CommitOutcome.Accepted(accepted.rev(), accepted.author());
         }
         case SyncWire.Stale _ ->
             new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));
@@ -834,7 +841,7 @@ public final class PagedSyncSession implements SyncSession {
           denials.add(denial);
           notice.accept(denial.describe());
           yield new CommitOutcome.Denied(
-              denied.reason(), currentRev(offer.id()), current(offer.id()));
+              denied.reason(), currentRev(offer.id()), current(offer.id()), author(offer.id()));
         }
         case SyncWire.Refused refused ->
             throw new SyncTransportException(

@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.identity.Ownership;
 
 /**
  * Resource-scoped authorization for the spec aggregate, shared by every lane (the HTTP API a member
@@ -39,8 +39,7 @@ public final class SpecPolicy {
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    var owner = SpecStore.ownerOf(assignee, createdBy);
-    if (Strings.isNotBlank(owner) && actor.actsFor(owner)) {
+    if (actor.actsFor(Ownership.ownerOf(assignee, createdBy))) {
       return AccessDecision.allowed();
     }
     return notAssignee(specId, assignee, createdBy);
@@ -50,15 +49,14 @@ public final class SpecPolicy {
    * Decides whether {@code actor} may post a message to spec {@code specId}'s room. Every lane but
    * the room lane posts under the plain mutation gate. A room principal is read-only everywhere
    * else — {@link #mutate} refuses it on capability before ownership is even consulted — so the
-   * lane's one write carries its own rule: it may post exactly when it acts for the spec's
-   * assignee, the FDE whose box woke it. Fails closed on an unassigned spec; a wake never fires for
-   * one.
+   * lane's one write carries its own rule: it may post exactly when it acts for the room's owner
+   * ({@link Ownership#ownerOf}), the FDE whose box woke it — the creator of an unassigned one.
    */
   public static AccessDecision post(Actor actor, String specId, String assignee, String createdBy) {
     if (!actor.roomLane()) {
       return mutate(actor, specId, assignee, createdBy);
     }
-    if (Strings.isNotBlank(assignee) && actor.actsFor(assignee)) {
+    if (actor.actsFor(Ownership.ownerOf(assignee, createdBy))) {
       return AccessDecision.allowed();
     }
     return notAssignee(specId, assignee, createdBy);
@@ -79,7 +77,7 @@ public final class SpecPolicy {
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    var claimant = actor.agentLane() ? actor.owner() : actor.handle();
+    var claimant = actor.actingFde();
     if (Strings.isBlank(currentAssignee)
         && Strings.isNotBlank(claimant)
         && claimant.equals(requestedAssignee)) {

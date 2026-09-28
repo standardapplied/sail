@@ -633,6 +633,37 @@ class EngagementLifecycleTest {
   }
 
   @Test
+  void anUnassignedSpeclessRoomIsManagedFromItsCreatorsBoxOnly() throws Exception {
+    var ops = operations(shell());
+    new FdeStore(db).add("ada", null, null, "member");
+    Acting.as(
+        "ada",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "open-room", "acme", "Open", null, null, null, null, null, null, null)));
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ops.engage(
+                    "open-room",
+                    "claude-code",
+                    null,
+                    null,
+                    false,
+                    Actor.cliOperator(HANDLE),
+                    HANDLE));
+    assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("belongs to 'ada'"), ex.getMessage());
+
+    ops.engage("open-room", "claude-code", null, null, false, Actor.cliOperator("ada"), "ada");
+    assertNotNull(roomMember("open-room"), "its creator's box seats the member");
+    assertEquals("claude-code", ops.disengage("open-room", Actor.cliOperator("ada"), "ada"));
+  }
+
+  @Test
   void aSpeclessRoomRefusesMembershipFromANonOwner() throws Exception {
     var ops = operations(shell());
     Acting.as(

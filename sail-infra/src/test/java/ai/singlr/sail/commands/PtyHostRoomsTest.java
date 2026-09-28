@@ -52,6 +52,22 @@ class PtyHostRoomsTest {
                         null,
                         null,
                         "ada"));
+            Acting.as(
+                "ada",
+                () ->
+                    new RoomStore(db)
+                        .create(
+                            new RoomStore.RoomRow(
+                                "open-room",
+                                "acme",
+                                "Unassigned",
+                                null,
+                                "on",
+                                null,
+                                null,
+                                null,
+                                null,
+                                null)));
           }
           rooms = new PtyHostRooms(path);
         });
@@ -79,6 +95,13 @@ class PtyHostRoomsTest {
     assertTrue(
         refusal("adas-room", "acme", new PtyIdentity("mallory", true)).contains("not you"),
         "the roster's role decides, never an admin bit riding the identity");
+  }
+
+  @Test
+  void anUnassignedRoomIsItsCreatorsToPin() {
+    assertDoesNotThrow(() -> rooms.admit("open-room", "acme", new PtyIdentity("ada", false)));
+    var refused = refusal("open-room", "acme", new PtyIdentity("mallory", false));
+    assertTrue(refused.contains("only ada or an admin"), refused);
   }
 
   @Test

@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -445,7 +446,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * owns its own handle, the agent principals of runs its box executed (current or historical), and
    * the platform narrator {@link #SAIL_AUTHOR} — but the narrator only for conversations the peer's
    * box ran something in: the review pipeline narrates where it executed, and runs sync before
-   * messages, so the run row is the evidence. Posting authority over the room is required on top.
+   * messages, so the run row is the evidence. Posting authority over the room is required on top:
+   * the session's role is admin, or the peer owns the conversation.
    */
   private boolean mayPostAs(String peer, String author, String roomId) {
     if (peer == null) {
@@ -468,8 +470,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (!ownsAuthor) {
       return false;
     }
-    return postAuthority(peer, "FROM rooms s", "s.id = ?", roomId)
-        || postAuthority(peer, "FROM specs s", "s.room_id = ?", roomId);
+    return Actor.current().isAdmin() || ownsConversation(peer, roomId);
   }
 
   /**
@@ -510,25 +511,20 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Whether {@code peer}'s box holds posting authority over the conversation: an admin FDE, the
-   * assignee, or the creator of an unassigned surface. Resolved against the room row and against
-   * any spec attached to the room — a spec's ownership fields stay authoritative for policy even
-   * when its room row has not been minted or has not arrived yet (a synced-in or imported spec).
+   * Whether {@code peer} owns the conversation ({@link Ownership#owns}), judged on the room row and
+   * on every spec attached to the room: a spec's ownership fields stay authoritative for policy
+   * even when its room row has not been minted or has not arrived yet (a synced-in or imported
+   * spec).
    */
-  private boolean postAuthority(String peer, String from, String where, String roomId) {
-    return db.queryOne(
-            "SELECT 1 "
-                + from
-                + " LEFT JOIN fdes f ON f.handle = ? WHERE "
-                + where
-                + " AND (lower(coalesce(f.role, '')) = 'admin' OR s.assignee = ?"
-                + " OR (trim(coalesce(s.assignee, '')) = '' AND s.created_by = ?)) LIMIT 1",
-            row -> true,
-            peer,
-            roomId,
-            peer,
-            peer)
-        .orElse(false);
+  private boolean ownsConversation(String peer, String roomId) {
+    return db.query(
+            """
+            SELECT assignee, created_by FROM rooms WHERE id = ?1
+            UNION ALL
+            SELECT assignee, created_by FROM specs WHERE room_id = ?1""",
+            row -> Ownership.owns(peer, row.text(0), row.text(1)),
+            roomId)
+        .contains(true);
   }
 
   /**

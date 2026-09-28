@@ -201,12 +201,15 @@ class SpecPolicyTest {
   }
 
   @Test
-  void roomPrincipalFailsClosedOnAnUnassignedSpec() {
+  void roomPrincipalMayPostToTheRoomOfAnUnassignedSpecItsFdeCreated() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    var r = refused(SpecPolicy.post(room, SPEC, "", "raj"));
-
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+    assertAllowed(SpecPolicy.post(room, SPEC, "", "raj"));
+    assertEquals(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        refused(SpecPolicy.post(room, SPEC, "", "sumesh")).code());
+    assertEquals(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused(SpecPolicy.post(room, SPEC, null, null)).code());
   }
 
   @Test

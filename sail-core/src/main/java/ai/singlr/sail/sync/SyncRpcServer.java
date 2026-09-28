@@ -486,7 +486,13 @@ public final class SyncRpcServer {
   private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
     var state = main.state(id);
     return new SyncWire.Entry(
-        seq, id, state.rev(), state.snapshot() == null, state.snapshot(), state.kind());
+        seq,
+        id,
+        state.rev(),
+        state.snapshot() == null,
+        state.snapshot(),
+        state.kind(),
+        state.author());
   }
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {
@@ -550,8 +556,8 @@ public final class SyncRpcServer {
                     erasure.erase(plan, "sync");
                     erasedInSession = true;
                   }
-                  return new SyncWire.Accepted(
-                      offer.id(), changeLog.erasure(type, offer.id()).orElseThrow().rev());
+                  var erased = changeLog.erasure(type, offer.id()).orElseThrow();
+                  return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor());
                 }));
   }
 
@@ -576,11 +582,12 @@ public final class SyncRpcServer {
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
         emitTransitions(type, offer.id(), before, main);
-        yield new SyncWire.Accepted(offer.id(), accepted.rev());
+        yield new SyncWire.Accepted(offer.id(), accepted.rev(), accepted.author());
       }
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
       case CommitOutcome.Denied denied ->
-          new SyncWire.Denied(offer.id(), denied.reason(), denied.rev(), denied.snapshot());
+          new SyncWire.Denied(
+              offer.id(), denied.reason(), denied.rev(), denied.snapshot(), true, denied.author());
     };
   }
 

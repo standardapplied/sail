@@ -131,8 +131,18 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     return snapshot(
         () ->
             erasure(entityId)
-                .map(erased -> new MainReplica.State(null, erased.rev(), ChangeLog.Kind.ERASURE))
-                .orElseGet(() -> new MainReplica.State(current(entityId), currentRev(entityId))));
+                .map(
+                    erased ->
+                        new MainReplica.State(
+                            null, erased.rev(), ChangeLog.Kind.ERASURE, erased.actor()))
+                .orElseGet(
+                    () ->
+                        new MainReplica.State(
+                            current(entityId), currentRev(entityId), recordedAuthor(entityId))));
+  }
+
+  private String recordedAuthor(String entityId) {
+    return changeLog.head(store.entityType(), entityId).map(ChangeLog.Entry::actor).orElse(null);
   }
 
   @Override
@@ -164,14 +174,16 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           }
           if (!Actor.current().canWrite()) {
             return new CommitOutcome.Denied(
-                READ_ONLY, store.latestRev(entityId), current(entityId));
+                READ_ONLY, store.latestRev(entityId), current(entityId), recordedAuthor(entityId));
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
-            case PushOutcome.Accepted a -> new CommitOutcome.Accepted(a.rev());
+            case PushOutcome.Accepted a ->
+                new CommitOutcome.Accepted(a.rev(), recordedAuthor(entityId));
             case PushOutcome.Stale s ->
                 new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
             case PushOutcome.Denied d ->
-                new CommitOutcome.Denied(d.reason(), d.currentRev(), d.currentSnapshot());
+                new CommitOutcome.Denied(
+                    d.reason(), d.currentRev(), d.currentSnapshot(), recordedAuthor(entityId));
           };
         });
   }

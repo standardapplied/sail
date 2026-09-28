@@ -97,7 +97,7 @@ class PersonalRoomsTest {
   }
 
   @Test
-  void ownerOfIsTheCreatorOnlyForTheCreatorsOwnPersonalRoom() {
+  void personalRoomOfIsTheCreatorOnlyForTheCreatorsOwnPersonalRoom() {
     assertTrue(PersonalRooms.ensure(rooms, null, rajesh("t0"), acme(DEFINITION)));
     var personal = rooms.findById(RAJESH_ACME).orElseThrow();
     var other =
@@ -122,11 +122,11 @@ class PersonalRoomsTest {
             "t0",
             "codex/run-1");
 
-    assertEquals("rajesh", PersonalRooms.ownerOf(personal));
-    assertNull(PersonalRooms.ownerOf(other));
-    assertNull(PersonalRooms.ownerOf(forged), "another creator's room is not this handle's");
-    assertNull(PersonalRooms.ownerOf(anonymous));
-    assertNull(PersonalRooms.ownerOf(agentMade), "a non-handle creator never throws");
+    assertEquals("rajesh", PersonalRooms.personalRoomOf(personal));
+    assertNull(PersonalRooms.personalRoomOf(other));
+    assertNull(PersonalRooms.personalRoomOf(forged), "another creator's room is not this handle's");
+    assertNull(PersonalRooms.personalRoomOf(anonymous));
+    assertNull(PersonalRooms.personalRoomOf(agentMade), "a non-handle creator never throws");
   }
 
   @Test
