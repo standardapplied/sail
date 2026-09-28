@@ -202,11 +202,11 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aSpeclessFullWakeClaimsTheRepoSetAndOwnerFallsToTheWaker() throws Exception {
+  void aSpeclessFullWakeClaimsTheRepoSetAndActsForTheRoomsOwner() throws Exception {
     var ops = operations(liveAgentShell());
     var rooms = new RoomStore(db);
     Acting.as(
-        null,
+        HANDLE,
         () ->
             rooms.create(
                 new RoomStore.RoomRow(
@@ -223,7 +223,7 @@ class RoomWakeLaunchTest {
     var run = runStore.findById(runId).orElseThrow();
     assertEquals("room-full", run.role());
     assertTrue(run.task().contains("Collaborator Turn (full access)"));
-    assertEquals(HANDLE, run.owner(), "a room with no owner falls to the waking box");
+    assertEquals(HANDLE, run.owner(), "an unassigned room's run acts for its creator");
   }
 
   @Test
@@ -391,6 +391,37 @@ class RoomWakeLaunchTest {
                           List.of("app"))));
           specStore.setContent(id, "Build the OAuth flow.", "");
         });
+  }
+
+  @Test
+  void anUnassignedSpecsRoomRunActsForItsCreator() throws Exception {
+    var ops = operations(liveAgentShell());
+    Acting.as(
+        "mady",
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                    "draft",
+                    "acme",
+                    "Draft",
+                    SpecStatus.PENDING,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    List.of("app"))));
+    Acting.system(() -> specStore.setContent("draft", "Draft it.", ""));
+
+    var run = runStore.findById(ops.startRoomRun("acme", "draft", HANDLE)).orElseThrow();
+
+    assertEquals("mady", run.owner(), "the run acts for the spec's owner, never the waker");
   }
 
   @Test

@@ -210,7 +210,12 @@ A session opens with `hello` (protocol, build, fleet floor, box id) and is `welc
 node is stays the authenticated SSH principal, bound as the `SYNC` actor around
 every commit and erase: it is each revision's `peer`, and its author unless the revision
 offers its own `_actor`. The node binds `MAIN` around its round, so what it adopts records
-the author main recorded, with `main` as the peer. The node
+the author main recorded, with `main` as the peer. Wherever main hands the node a revision
+that carries no snapshot to name its author in, main says who made it: an `accepted` result
+names the author main recorded for the node's own offer (the pusher, when the offer named
+none), and a tombstone or erasure `entry` and a `denied` tombstone name theirs. The engine
+adopts each under `Actor.main(author)`, so every replica records the same author for the same
+revision. Each field is optional on the wire, and an older peer ignores it. The node
 then asks `heads` for main's high-water per type and, for each
 type whose tip moved past its checkpoint, `pull`s main's change log since that checkpoint one
 bounded `page` at a time — a seed from any history size costs the same per page as an idle
@@ -666,20 +671,47 @@ these roles distinct is what lets the synced catalog stay identity-free.
   API boundary: GET maps to READ, mutating verbs to WRITE, and sensitive routes to ADMIN. An
   unknown or blank role fails safe to viewer. Attribution (`created_by`, `updated_by`) is the
   bound actor (below), never client input.
+- **One identity per FDE, whichever door.** One rule, `RoleRule` (`ai.singlr.sail.identity`),
+  decides the role a credential that names an FDE acts with: this box's operator on main or a
+  standalone box, the FDE its sync handle names, is admin, because they hold root on it; every
+  other FDE acts with the role main's roster gives it; the credential's own role caps both; and
+  an FDE the roster marks `disabled`, or one it does not know, is refused. An API token, a
+  passkey session, the box credential on the socket, the host CLI (`CliOperator`), a sync
+  session, the SSH gateway and the terminal all decide through it, so demoting or disabling an
+  FDE on main takes effect at every door on every box once the roster syncs. The host CLI is
+  the box's FDE: when the box has a sync handle, its API token is bound to that FDE — minted
+  bound by `sail server init`, `sail server start` and `sail upgrade`'s token repair
+  (`HostToken`), and an FDE-less one bound by `sail migrate` — so a host CLI write names that
+  FDE and, on a node, acts with its synced role. A box with no sync handle has no FDE to be, and
+  its token names none: a machine token acts with its minted role.
+- **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
+  a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
+  (mutation, reassignment and the posting rule, room lane included), `EraseAuthority`, the room
+  wake (whose box wakes a conversation), membership, the terminal door and main's check of who
+  may post a synced message all read it. A spec left without an assignee stays unassigned, and
+  so does its identity room; any member may claim it by assigning it to themselves, an agent
+  for the FDE it acts for, and dispatch refuses it until then. An assignee is an FDE handle,
+  never an agent type or a run's principal (`RunStore.isPrincipalHandle`). `created_by` is the
+  acting FDE (`Actor.actingFde`: the handle, or the FDE a run acts for), written once at
+  create; a spec's creator travels as `_created_by` beside `_actor`, main keeps the one it holds
+  (recording the pusher when a node-born create names none), and a node adopts main's.
 - **Every write names who is acting.** One `Actor` (`ai.singlr.sail.identity`: handle,
   `Role`, `Lane`, owner) is the identity of every write, whichever door it came through. Its
   lane names the door:
 
   | Lane | Who | Handle and role |
   |---|---|---|
-  | `CLI` | the box's operator, root on this box | `CliOperator`: admin on main or a standalone box; on a node, the box FDE with the role the synced roster gives it; refused while the roster is unsynced |
-  | `API` | an HTTP token | its FDE, or a null handle for a machine token |
+  | `CLI` | the box's operator, root on this box | `CliOperator`: the box FDE with the role `RoleRule` gives it — admin on main or a standalone box, the synced roster role on a node; refused while the roster is unsynced or the FDE is disabled |
+  | `API` | an HTTP token or passkey session | its FDE with the role `RoleRule` gives it, or a null handle and the minted role for a machine token |
   | `AGENT`, `ROOM` | a run's principal on the socket | the principal, owned by the FDE it acts for |
-  | `SYNC` | an FDE pushing through `_sync` to main | the role the gateway resolved |
-  | `MAIN` | a node adopting main's revisions | `main`; main has already decided them |
+  | `SYNC` | an FDE pushing through `_sync` to main | the role `RoleRule` gives the session's FDE |
+  | `MAIN` | a node adopting main's revisions | `main`, or the author main recorded for what it adopts; main has already decided them |
   | `SYSTEM` | this box's own machinery | `sail` |
 
-  Each entry point binds the actor it acts as, at its edge and nowhere deeper, with
+  Each entry point binds the actor it acts as, at its edge and nowhere deeper, and that binding
+  is the one channel for who is acting: no operation takes an `Actor` argument
+  (`OperationsTakeNoActorTest`), and every policy and admission — `SpecPolicy`, `ReviewPolicy`,
+  `DispatchPolicy`, `RunPolicy`, `LaunchAdmission` — reads `Actor.current()`. It binds with
   `Actor.run`/`Actor.call` (a `ScopedValue`): `ApiRouter` around routing, `LocalApiRouter`
   per request, a command that writes without the API around its write, the `_sync` session
   around each commit and erase, the node's round as `MAIN`, and each background entry that
@@ -759,7 +791,7 @@ support GUI and direct-API clients:
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
 3. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
-   them out everywhere, since the gateway refuses a disabled role, but the row lingers on
+   them out everywhere, since every door refuses a disabled FDE, but the row lingers on
    nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
 4. **One platform per OS.** Mac arm64 and Linux amd64 only.
@@ -823,8 +855,10 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 - The database is the replicated source of truth for specs, projects, and shared files, and
   on-disk descriptors are a materialized view. Reads are catalog-first, and writes go through
   the catalog, so an edit can never diverge or be lost on the next sync.
-- Every write names who is acting: one bound `Actor`, read by the journal, never a string a
-  caller threads through. A write with nothing bound fails.
+- Every write names who is acting: one bound `Actor`, read by the journal and by every policy,
+  never a string or an argument a caller threads through. A write with nothing bound fails.
+- One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once
+  and read by every door: a second derivation of either is a bug.
 - Sync is CAS-safe, idempotent, order-independent, and conflict-parking, so local work is
   never lost. The `SyncEngine` is entity-agnostic, and a new synced entity adds a replica,
   not engine logic.
