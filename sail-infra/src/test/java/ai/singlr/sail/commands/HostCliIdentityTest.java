@@ -169,6 +169,7 @@ class HostCliIdentityTest {
       assertTrue(refused.getMessage().contains("HTTP 409"), refused.getMessage());
       assertTrue(refused.getMessage().contains("sync-handle"), refused.getMessage());
     }
+    assertTrue(HostToken.describe(operations.identity().box()).contains("refused"));
   }
 
   @Test

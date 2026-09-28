@@ -150,7 +150,7 @@ final class GlobalSpecOperations {
     reserveIdentityRoom(request.id());
     var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
     if (home != null) {
-      admitIntoRoom(home, request.project());
+      admitIntoRoom(home, row);
     }
     specStore.create(row.withRoomId(home != null ? home.id() : request.id()));
     if (request.body() != null || request.plan() != null) {
@@ -206,11 +206,13 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * Binding a spec to an existing room hands the spec's owner every membership write that room
-   * takes — engage rewrites its roster — so it needs the room's post right ({@link
-   * RoomStore#owners}), in the room's project.
+   * Binding a spec to an existing room hands the spec's owner a voice there and every membership
+   * write the room takes — engage rewrites its roster — so it needs the room's post right ({@link
+   * RoomStore#owners}), in the room's project, and naming its assignee is a claim or a reassignment
+   * into that room ({@link #authorizeReassign}).
    */
-  private void admitIntoRoom(RoomStore.RoomRow room, String project) {
+  private void admitIntoRoom(RoomStore.RoomRow room, SpecStore.SpecRow spec) {
+    var project = spec.project();
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
@@ -224,6 +226,9 @@ final class GlobalSpecOperations {
           "A spec is born only into a room of its own project.");
     }
     SpecPolicy.post(room.id(), rooms.get().owners(room.id())).enforce();
+    if (Strings.isNotBlank(spec.assignee())) {
+      authorizeReassign(spec.id(), null, room.id(), spec.assignee());
+    }
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
@@ -272,12 +277,6 @@ final class GlobalSpecOperations {
     return new GlobalSpecUpdatedResponse(viewOf(result));
   }
 
-  /**
-   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
-   * (admin-only, or a member self-claiming an unassigned spec); any other edit is governed by the
-   * general mutate policy (assignee or admin, creator or admin when unassigned). Runs before the
-   * status-based claim lock so identity is validated first.
-   */
   /** The row as a wire view, wake and roster decorated from its room — the fields' only home. */
   private GlobalSpecView viewOf(SpecStore.SpecRow row) {
     var store = rooms.get();
@@ -331,6 +330,12 @@ final class GlobalSpecOperations {
     }
   }
 
+  /**
+   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
+   * ({@link #authorizeReassign}); any other edit is governed by the general mutate policy (assignee
+   * or admin, creator or admin when unassigned). Runs before the status-based claim lock so
+   * identity is validated first.
+   */
   private void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
     if (reassigning) {

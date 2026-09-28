@@ -717,8 +717,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
   A spec left without an assignee stays unassigned, and so does its identity room; any member
   may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
   refuses it until then. Owning a spec gives a voice in its conversation, so a spec born in a
-  room is claimed only by one who may already post there (`SpecPolicy.reassign`): a claim never
-  opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
+  room is claimed, or created with an assignee, only by one who may already post there and only
+  for themselves (`SpecPolicy.reassign`); giving it to anyone else is an admin's act. A claim
+  never opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
   (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
   handle, or the FDE a run acts for), written once at create. A spec's creator travels as
   `_created_by` beside `_actor`: main keeps the one it holds, records the pusher when a

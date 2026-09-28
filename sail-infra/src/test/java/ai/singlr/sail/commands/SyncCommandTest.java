@@ -45,6 +45,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 class SyncCommandTest {
 
@@ -132,7 +133,7 @@ class SyncCommandTest {
               0,
               "denials",
               List.of()),
-          nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
+          nonNull(capture(() -> new CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
 
       var health = new SyncHealth(db);
@@ -142,7 +143,7 @@ class SyncCommandTest {
           Instant.parse("2026-09-14T00:00:00Z"),
           "protocol",
           "message: page exceeded 4 MiB");
-      var stale = nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
+      var stale = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals("stale", stale.get("state"));
       assertEquals("protocol", stale.get("last_error_kind"));
       assertEquals(1, stale.get("consecutive_failures"));
@@ -151,8 +152,7 @@ class SyncCommandTest {
           SyncCommand.renderStatus(stale));
 
       new SyncConflicts(db).record("spec", "auth", "base", "mine", "theirs", List.of("title"));
-      var conflicted =
-          nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
+      var conflicted = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals(1, conflicted.get("pending_conflicts"));
     }
     assertEquals(

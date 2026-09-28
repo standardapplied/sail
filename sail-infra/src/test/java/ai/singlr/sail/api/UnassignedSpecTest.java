@@ -165,7 +165,7 @@ class UnassignedSpecTest {
     var claim = send("PUT", "/v1/specs/auth", carol, "{\"assignee\": \"carol\"}");
 
     assertEquals(403, claim.statusCode(), claim.body());
-    assertTrue(claim.body().contains("Ask uday"), claim.body());
+    assertTrue(claim.body().contains("Ask an admin"), claim.body());
     assertEquals(
         403, send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode());
     var given = send("PUT", "/v1/specs/auth", uday, "{\"assignee\": \"carol\"}");
@@ -175,6 +175,36 @@ class UnassignedSpecTest {
         200, send("PUT", "/v1/specs/auth", admin, "{\"assignee\": \"carol\"}").statusCode());
     var delegated = send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"on it\"}");
     assertEquals(201, delegated.statusCode(), delegated.body());
+  }
+
+  @Test
+  void aSpecIsBornInARoomForSomeoneElseOnlyByAnAdmin() throws Exception {
+    var uday = token("uday", "member");
+    var room = "{\"id\": \"design\", \"project\": \"acme\", \"title\": \"D\"}";
+    assertEquals(201, send("POST", "/v1/rooms", uday, room).statusCode());
+
+    var forCarol =
+        send(
+            "POST",
+            "/v1/specs",
+            uday,
+            "{\"id\": \"auth\", \"project\": \"acme\", \"title\": \"A\", \"room_id\":"
+                + " \"design\", \"assignee\": \"carol\"}");
+    var forHimself =
+        send(
+            "POST",
+            "/v1/specs",
+            uday,
+            "{\"id\": \"login\", \"project\": \"acme\", \"title\": \"L\", \"room_id\":"
+                + " \"design\", \"assignee\": \"uday\"}");
+
+    assertEquals(403, forCarol.statusCode(), forCarol.body());
+    assertTrue(specs.findById("auth").isEmpty(), "a refused birth leaves nothing behind");
+    assertEquals(201, forHimself.statusCode(), forHimself.body());
+    assertEquals(
+        403,
+        send("POST", "/v1/rooms/design/messages", token("carol", "member"), "{\"body\": \"x\"}")
+            .statusCode());
   }
 
   @Test

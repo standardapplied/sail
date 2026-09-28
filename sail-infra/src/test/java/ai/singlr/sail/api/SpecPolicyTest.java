@@ -157,7 +157,7 @@ class SpecPolicyTest {
 
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
     assertTrue(r.message().contains("'design'"), r.message());
-    assertTrue(r.fix().contains("Ask uday"), r.fix());
+    assertTrue(r.fix().contains("Ask an admin"), r.fix());
   }
 
   @Test

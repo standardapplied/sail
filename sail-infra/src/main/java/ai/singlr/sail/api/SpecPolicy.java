@@ -94,8 +94,8 @@ public final class SpecPolicy {
    *
    * <p>A spec's owner owns its conversation, so a claim gives the claimant a voice there. A spec
    * born in another conversation, {@code bornIn} (null for a spec whose conversation is its own),
-   * whose owners are {@code bornInOwners}, is claimed only by one who may already post there: a
-   * claim never opens someone else's room.
+   * whose owners are {@code bornInOwners}, is claimed only by one who may already post there
+   * ({@link #post}): a claim never opens someone else's room.
    */
   public static AccessDecision reassign(
       String specId,
@@ -125,7 +125,8 @@ public final class SpecPolicy {
               + ".",
           "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
     }
-    if (Strings.isNotBlank(bornIn) && !bornInOwners.contains(claimant)) {
+    if (Strings.isNotBlank(bornIn)
+        && post(bornIn, bornInOwners) instanceof AccessDecision.Refused) {
       return AccessDecision.refused(
           ErrorCode.FORBIDDEN_ADMIN_ONLY,
           "Spec '"
@@ -133,8 +134,7 @@ public final class SpecPolicy {
               + "' lives in '"
               + bornIn
               + "', where you may not post, and claiming it would give you a voice there.",
-          (bornInOwners.isEmpty() ? "Ask an admin" : "Ask " + String.join(" or ", bornInOwners))
-              + " to assign it to you.");
+          "Ask an admin to assign it to you.");
     }
     return AccessDecision.allowed();
   }

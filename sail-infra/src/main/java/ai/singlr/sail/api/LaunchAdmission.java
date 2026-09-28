@@ -20,8 +20,8 @@ import java.util.List;
  * snapshot: is the actor allowed to act on this spec from this box, is the box's FDE in the synced
  * roster, is the chosen agent a known name actually installed in the container, and is the model a
  * shell-safe token. Each refusal is an {@link ApiException} thrown before any side effect, so a
- * rejected launch never leaves a half-provisioned run. Shared by the dispatch, ad-hoc, room, and
- * membership lanes so admission is decided in exactly one place.
+ * rejected launch never leaves a half-provisioned run. Shared by the lanes an operator starts —
+ * dispatch, build and membership — so admission is decided in exactly one place.
  */
 public final class LaunchAdmission {
 
@@ -33,10 +33,6 @@ public final class LaunchAdmission {
     this.fdeStore = fdeStore;
   }
 
-  /**
-   * Refuses when the actor may not act on {@code spec} from the box identified by {@code
-   * localHandle}.
-   */
   /**
    * Refuses when the actor may not act on a spec-less room from this box: same four rules as the
    * spec path — no agent lane, node handle set, this box owns the room (assignee, else creator),
@@ -76,6 +72,10 @@ public final class LaunchAdmission {
     }
   }
 
+  /**
+   * Refuses when the actor may not act on {@code spec} from the box identified by {@code
+   * localHandle}.
+   */
   public static void requireAllowed(Spec spec, String localHandle) {
     if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());

@@ -112,8 +112,10 @@ final class LocalApiRouter implements LocalApiHandler {
                               ? "this box's FDE"
                               : "FDE '" + run.owner() + "'")
                           + ", whom this box cannot place: its roster has disabled that FDE or"
-                          + " does not know it yet. Ask an admin to re-enable the FDE, or run"
-                          + " 'sudo sail sync' on a node that has not pulled main's roster."));
+                          + " does not know it yet, or this box names no FDE of its own. Ask an"
+                          + " admin to re-enable the FDE, run 'sudo sail sync' on a node that has"
+                          + " not pulled main's roster, or name this box's FDE with 'sudo sail host"
+                          + " config set sync-handle <you>'."));
     }
     return operations
         .boxActorForCredential(request.bearer())

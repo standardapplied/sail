@@ -37,8 +37,11 @@ public final class HostToken {
 
   /** Who the host token acts as on a box configured as {@code box}. */
   public static String describe(SyncConfig box) {
-    return Strings.isBlank(box.handle())
-        ? "this box has no sync handle, so it acts as no FDE"
-        : "it acts as this box's FDE '" + box.handle() + "'";
+    if (Strings.isNotBlank(box.handle())) {
+      return "it acts as this box's FDE '" + box.handle() + "'";
+    }
+    return box.isNode()
+        ? "this node names no FDE, so it is refused until you set its sync handle"
+        : "this box has no sync handle, so it acts as no FDE";
   }
 }

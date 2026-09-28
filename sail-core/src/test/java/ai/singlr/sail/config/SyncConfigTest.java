@@ -39,6 +39,15 @@ class SyncConfigTest {
   }
 
   @Test
+  void aBoxDeclaredMainIsNeverANodeEvenWithAStaleTarget() {
+    var promoted = new SyncConfig(SyncConfig.ROLE_MAIN, "sail@oldmain", "uday");
+
+    assertTrue(promoted.isMain());
+    assertFalse(promoted.isNode());
+    assertTrue(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "uday").isNode());
+  }
+
+  @Test
   void roundTripsThroughAMapIncludingTheHandle() {
     var sync = new SyncConfig(SyncConfig.ROLE_NODE, "sail@maindevbox", "mady");
     var restored = SyncConfig.fromMap(sync.toMap());

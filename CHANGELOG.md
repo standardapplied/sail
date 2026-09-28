@@ -7,7 +7,7 @@
   - Its creator, the FDE who created it (a run records the FDE it acts for), may edit it while it is unassigned. Any member claims it with `sail spec update <id> --assignee <you>`; an agent claims it for the FDE it acts for. Dispatch refuses it until then, naming that claim.
   - Its room wakes on its creator's box, and a room-role run woken there may answer in it. Main accepts its creator's posts in its room through sync. Its creator may read the logs of, and stop, a run working it.
   - Once it is claimed, its room is the new owner's at every door: HTTP, the socket, the terminal and main's check of synced posts all decide who owns a conversation by one rule.
-  - Owning a spec gives a voice in its conversation, so a spec born in a room is claimed only by one who may already post in that room; anyone else asks the room's owner or an admin to assign it. A claim never opens someone else's room.
+  - Owning a spec gives a voice in its conversation, so a spec born in a room is claimed, or created with an assignee, only by one who may already post in that room, and only for themselves; anyone else asks an admin to assign it. A claim never opens someone else's room.
   - A post about a spec born in a room whose row has not synced yet lands in that room.
   - A run's own FDE may still read the logs of, and stop, its run after the spec is reassigned.
   - A spec's creator now travels with it: main records a node-born spec's creator (the pushing FDE, when an older node names none) and keeps it, whatever a later push says, and every other box adopts it, the pushing node included. A spec main holds with no creator, such as one pushed before this release, gains one only from a push by that creator naming themselves.
