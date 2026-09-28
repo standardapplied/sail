@@ -83,20 +83,23 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses dispatch when this box's FDE handle is missing from the synced roster: an unauthorized
-   * handle means the specs assigned to it cannot be trusted. A box that keeps no roster ({@code
-   * fdeStore == null}) skips the check.
+   * Refuses dispatch when this box's FDE is missing from the synced roster or disabled there: an
+   * unauthorized handle means the specs assigned to it cannot be trusted, and a run launched for a
+   * disabled FDE would be refused at its every call. A box that keeps no roster ({@code fdeStore ==
+   * null}) skips the check.
    */
   public void requireTrustedRoster(String localHandle) {
-    if (fdeStore == null || fdeStore.byHandle(localHandle).isPresent()) {
+    if (fdeStore == null
+        || fdeStore.byHandle(localHandle).filter(FdeStore.Fde::active).isPresent()) {
       return;
     }
     throw new ApiException(
         ErrorCode.FDE_NOT_IN_ROSTER,
         "FDE '"
             + localHandle
-            + "' is not in this box's roster, so its assigned specs cannot be trusted.",
-        "Run 'sail sync' to pull the roster from main, or get authorized there first.");
+            + "' is not an active member of this box's roster, so its assigned specs cannot be"
+            + " trusted.",
+        "Run 'sudo sail sync' to pull the roster from main, or get authorized there first.");
   }
 
   /**

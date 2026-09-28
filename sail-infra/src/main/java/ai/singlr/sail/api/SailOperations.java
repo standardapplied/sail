@@ -127,7 +127,7 @@ public final class SailOperations implements HostOperations {
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    return CliOperator.of(syncOperations.configuration(), () -> fdeStore);
+    return CliOperator.of(syncOperations.configuration(), fdeStore);
   }
 
   @Override
@@ -855,9 +855,9 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The conversation behind {@code roomId}, resolved spec-first: a spec's identity keeps its
-   * ownership fields authoritative for policy, and a genuinely spec-less room answers from its own
-   * row. {@code ROOM_NOT_FOUND} otherwise.
+   * The conversation behind {@code roomId}, resolved spec-first: a spec answers as its room, its
+   * identity room or the room it was born in, even before that room's row has arrived; a genuinely
+   * spec-less room answers from its own row. {@code ROOM_NOT_FOUND} otherwise.
    */
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
     var spec = specStore == null ? null : specStore.findById(roomId).orElse(null);
@@ -868,7 +868,7 @@ public final class SailOperations implements HostOperations {
         return room;
       }
       return new RoomStore.RoomRow(
-          spec.id(),
+          spec.roomIdOrIdentity(),
           spec.project(),
           spec.title(),
           spec.assignee(),
@@ -1163,10 +1163,7 @@ public final class SailOperations implements HostOperations {
    */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    var lane =
-        run.readOnlyLane()
-            ? Actor.roomPrincipal(run.principal(), run.owner())
-            : Actor.agentPrincipal(run.principal(), run.owner());
+    var lane = run.principalActor();
     var role =
         Strings.isBlank(run.owner())
             ? roles().roleOfUnbound(lane.role())

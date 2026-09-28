@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -16,6 +17,10 @@ import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.Snapshots;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -103,7 +108,7 @@ class SyncWireTest {
 
   @Test
   void aChunkCannotBeAnnouncedUntilItsBytesMatchItsHash() {
-    var output = new java.io.ByteArrayOutputStream();
+    var output = new ByteArrayOutputStream();
     var hash = BlobStore.hash(new byte[] {1});
     assertThrows(
         IllegalArgumentException.class, () -> SyncWire.writeChunk(output, hash, new byte[] {2}));
@@ -142,10 +147,10 @@ class SyncWireTest {
                 () -> Rpc.receive(new ByteStreams.Input(""), "manifest"))
             .kind());
     var broken =
-        new java.io.InputStream() {
+        new InputStream() {
           @Override
-          public int read() throws java.io.IOException {
-            throw new java.io.IOException("connection reset");
+          public int read() throws IOException {
+            throw new IOException("connection reset");
           }
         };
     var failure = assertThrows(SyncTransportException.class, () -> Rpc.receive(broken, "chunk"));
@@ -451,15 +456,14 @@ class SyncWireTest {
   @Test
   void binaryChunksPreserveEveryByteAndReturnToLineMode() throws Exception {
     var payload = new byte[] {0, -1, -2, 10, 13, 65};
-    var output = new java.io.ByteArrayOutputStream();
+    var output = new ByteArrayOutputStream();
     SyncWire.writeChunk(output, BlobStore.hash(payload), payload);
     output.write("{\"op\":\"done\"}\n".getBytes(StandardCharsets.UTF_8));
-    var input = new java.io.ByteArrayInputStream(output.toByteArray());
+    var input = new ByteArrayInputStream(output.toByteArray());
     var chunk = (SyncWire.Chunk) SyncWire.decodeResponse(SyncWire.readLine(input));
-    org.junit.jupiter.api.Assertions.assertArrayEquals(
-        payload, SyncWire.readBytes(input, chunk.size()));
+    assertArrayEquals(payload, SyncWire.readBytes(input, chunk.size()));
     assertEquals(new SyncWire.Done(), SyncWire.decodeResponse(SyncWire.readLine(input)));
-    org.junit.jupiter.api.Assertions.assertNull(SyncWire.readLine(input));
+    assertNull(SyncWire.readLine(input));
   }
 
   @Test
@@ -467,15 +471,15 @@ class SyncWireTest {
     var malformed =
         assertThrows(
             SyncTransportException.class,
-            () -> SyncWire.readLine(new java.io.ByteArrayInputStream(new byte[] {-1, 10})));
+            () -> SyncWire.readLine(new ByteArrayInputStream(new byte[] {-1, 10})));
     assertEquals("protocol", malformed.kind());
     var cut =
         assertThrows(
             SyncTransportException.class,
-            () -> SyncWire.readBytes(new java.io.ByteArrayInputStream(new byte[] {1}), 2));
+            () -> SyncWire.readBytes(new ByteArrayInputStream(new byte[] {1}), 2));
     assertEquals("unreachable", cut.kind());
     assertThrows(
         IllegalArgumentException.class,
-        () -> SyncWire.readBytes(java.io.InputStream.nullInputStream(), FastCdc.MAX + 1));
+        () -> SyncWire.readBytes(InputStream.nullInputStream(), FastCdc.MAX + 1));
   }
 }

@@ -39,6 +39,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -447,7 +448,7 @@ class RoomWakeLaunchTest {
     assertEquals("sail-agent-" + runId, run.unit());
     assertEquals(123, run.pid());
     assertEquals(
-        java.util.Set.of(question.id(), verdict.id()),
+        Set.of(question.id(), verdict.id()),
         runStore.deliveredMessageIds(runId),
         "the prompt is the run's first delivery, seeded by identity");
     assertTrue(run.task().contains("Room Duty"));

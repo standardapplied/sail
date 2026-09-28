@@ -32,6 +32,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -161,7 +162,7 @@ class DispatchCommandWiringTest {
             tempDir,
             () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
             target -> {
-              throw new java.io.IOException("main unavailable");
+              throw new IOException("main unavailable");
             }));
     assertInstanceOf(
         DispatchOperations.Dispatched.class,

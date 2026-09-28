@@ -223,16 +223,21 @@ public final class SyncOperations {
 
   public record MainTarget(String target, String message) {}
 
+  /**
+   * The main this box syncs with: {@code flag}, else its configured main. The main box itself syncs
+   * with nothing, whatever it is asked: a round adopts the other side's versions and roster, which
+   * would overwrite the fleet's source of truth.
+   */
   public static MainTarget resolveMain(String flag, SyncConfig sync) {
+    if (sync.isMain()) {
+      return new MainTarget(
+          null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
+    }
     if (Strings.isNotBlank(flag)) {
       return new MainTarget(flag, null);
     }
     if (Strings.isNotBlank(sync.main())) {
       return new MainTarget(sync.main(), null);
-    }
-    if (sync.isMain()) {
-      return new MainTarget(
-          null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
     }
     return new MainTarget(
         null,

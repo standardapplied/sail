@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -149,6 +150,47 @@ class UnassignedSpecTest {
             () -> terminal.admit("auth", "acme", new PtyIdentity("uday", false)));
     assertTrue(refused.getMessage().contains("only mady"), refused.getMessage());
     assertEquals(List.of("mady"), new RoomStore(db).owners("auth"), "and main decides the same");
+  }
+
+  @Test
+  void aSpecBornInSomeoneElsesRoomIsClaimedOnlyByOneWhoMayPostThere() throws Exception {
+    var uday = token("uday", "member");
+    var carol = token("carol", "member");
+    var room = "{\"id\": \"design\", \"project\": \"acme\", \"title\": \"D\"}";
+    assertEquals(201, send("POST", "/v1/rooms", uday, room).statusCode());
+    var born =
+        "{\"id\": \"auth\", \"project\": \"acme\", \"title\": \"A\", \"room_id\": \"design\"}";
+    assertEquals(201, send("POST", "/v1/specs", uday, born).statusCode());
+
+    var claim = send("PUT", "/v1/specs/auth", carol, "{\"assignee\": \"carol\"}");
+
+    assertEquals(403, claim.statusCode(), claim.body());
+    assertTrue(claim.body().contains("Ask uday"), claim.body());
+    assertEquals(
+        403, send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"hi\"}").statusCode());
+    var given = send("PUT", "/v1/specs/auth", uday, "{\"assignee\": \"carol\"}");
+    assertEquals(403, given.statusCode(), "handing it on is an admin's act");
+    var admin = token("ops", "admin");
+    assertEquals(
+        200, send("PUT", "/v1/specs/auth", admin, "{\"assignee\": \"carol\"}").statusCode());
+    var delegated = send("POST", "/v1/rooms/design/messages", carol, "{\"body\": \"on it\"}");
+    assertEquals(201, delegated.statusCode(), delegated.body());
+  }
+
+  @Test
+  void aPostAboutABornInSpecWhoseRoomHasNotArrivedLandsInThatRoom() throws Exception {
+    db.execute(
+        """
+        INSERT INTO specs
+            (id, title, project, assignee, created_by, created_at, updated_at, room_id)
+        VALUES ('auth', 'A', 'acme', 'uday', 'uday', 'now', 'now', 'design')""");
+
+    var posted =
+        send("POST", "/v1/rooms/auth/messages", token("uday", "member"), "{\"body\": \"hi\"}");
+
+    assertEquals(201, posted.statusCode(), posted.body());
+    assertEquals(1, new MessageStore(db).list("design", null, 10).size());
+    assertTrue(new MessageStore(db).list("auth", null, 10).isEmpty());
   }
 
   @Test

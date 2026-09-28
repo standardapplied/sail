@@ -70,10 +70,7 @@ class TestOperations implements Operations {
   /** Every run here acts for an active member FDE, so its lane decides its role. */
   @Override
   public Optional<Actor> runActor(RunStore.RunRow run) {
-    return Optional.of(
-        run.readOnlyLane()
-            ? Actor.roomPrincipal(run.principal(), run.owner())
-            : Actor.agentPrincipal(run.principal(), run.owner()));
+    return Optional.of(run.principalActor());
   }
 
   @Override

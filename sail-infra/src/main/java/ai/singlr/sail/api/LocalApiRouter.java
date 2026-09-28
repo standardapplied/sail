@@ -107,11 +107,13 @@ final class LocalApiRouter implements LocalApiHandler {
               () ->
                   problem(
                       403,
-                      "This run acts for FDE '"
-                          + run.owner()
-                          + "', whom this box's roster has disabled or does not know. Ask an"
-                          + " admin to re-enable the FDE, or run 'sudo sail sync' on a node that"
-                          + " has not pulled main's roster."));
+                      "This run acts for "
+                          + (Strings.isBlank(run.owner())
+                              ? "this box's FDE"
+                              : "FDE '" + run.owner() + "'")
+                          + ", whom this box cannot place: its roster has disabled that FDE or"
+                          + " does not know it yet. Ask an admin to re-enable the FDE, or run"
+                          + " 'sudo sail sync' on a node that has not pulled main's roster."));
     }
     return operations
         .boxActorForCredential(request.bearer())

@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.FileStore;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -194,7 +195,7 @@ class SyncRpcServerTest {
     var hash = BlobStore.hash(bytes);
     for (var truncated : List.of(false, true)) {
       try (var main = new SyncBox("main")) {
-        var request = new java.io.ByteArrayOutputStream();
+        var request = new ByteArrayOutputStream();
         for (var content :
             List.of(
                 SyncWire.encode(HELLO),
@@ -207,7 +208,7 @@ class SyncRpcServerTest {
         request.writeBytes(truncated ? new byte[] {1, 2} : new byte[] {3, 2, 1});
         var output = new ByteStreams.Output();
         main.server(Actor.sync("node", Role.MEMBER))
-            .serve(new java.io.ByteArrayInputStream(request.toByteArray()), output);
+            .serve(new ByteArrayInputStream(request.toByteArray()), output);
         var failed =
             assertInstanceOf(
                 SyncWire.Failed.class,

@@ -98,12 +98,16 @@ class SpecPolicyTest {
 
   @Test
   void adminMayReassignAnyAssignedSpec() {
-    assertAllowed(Actor.call(admin("ops"), () -> SpecPolicy.reassign(SPEC, "raj", "uday")));
+    assertAllowed(
+        Actor.call(admin("ops"), () -> SpecPolicy.reassign(SPEC, "raj", "uday", null, List.of())));
   }
 
   @Test
   void memberCannotReassignSomeoneElsesSpec() {
-    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "raj", "uday")));
+    var r =
+        refused(
+            Actor.call(
+                member("uday"), () -> SpecPolicy.reassign(SPEC, "raj", "uday", null, List.of())));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
     assertTrue(r.message().contains("admin-only"), r.message());
     assertTrue(r.message().contains("raj"), r.message());
@@ -111,31 +115,80 @@ class SpecPolicyTest {
 
   @Test
   void memberCannotReassignEvenTheirOwnSpecToAnother() {
-    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "uday", "raj")));
+    var r =
+        refused(
+            Actor.call(
+                member("uday"), () -> SpecPolicy.reassign(SPEC, "uday", "raj", null, List.of())));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
   @Test
   void memberMayClaimAnUnassignedSpecForThemselves() {
-    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday")));
-    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "", "uday")));
+    assertAllowed(
+        Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday", null, List.of())));
+    assertAllowed(
+        Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "", "uday", null, List.of())));
   }
 
   @Test
   void memberCannotClaimAnUnassignedSpecForSomeoneElse() {
-    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, null, "raj")));
+    var r =
+        refused(
+            Actor.call(
+                member("uday"), () -> SpecPolicy.reassign(SPEC, null, "raj", null, List.of())));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
   @Test
+  void aSpecBornInAConversationIsClaimedOnlyByOneWhoMayAlreadyPostThere() {
+    assertAllowed(
+        Actor.call(
+            member("raj"),
+            () -> SpecPolicy.reassign(SPEC, null, "raj", "design", List.of("uday", "raj"))));
+    assertAllowed(
+        Actor.call(
+            admin("ops"), () -> SpecPolicy.reassign(SPEC, null, "ops", "design", List.of("uday"))));
+
+    var r =
+        refused(
+            Actor.call(
+                member("carol"),
+                () -> SpecPolicy.reassign(SPEC, null, "carol", "design", List.of("uday"))));
+
+    assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
+    assertTrue(r.message().contains("'design'"), r.message());
+    assertTrue(r.fix().contains("Ask uday"), r.fix());
+  }
+
+  @Test
+  void anAgentClaimsABornInSpecOnlyWhereItsFdeMayPost() {
+    var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
+
+    assertAllowed(
+        Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "raj", "design", List.of("raj"))));
+    assertEquals(
+        ErrorCode.FORBIDDEN_ADMIN_ONLY,
+        refused(
+                Actor.call(
+                    agent, () -> SpecPolicy.reassign(SPEC, null, "raj", "design", List.of())))
+            .code());
+  }
+
+  @Test
   void viewerCannotReassign() {
-    var r = refused(Actor.call(viewer("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday")));
+    var r =
+        refused(
+            Actor.call(
+                viewer("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday", null, List.of())));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, r.code());
   }
 
   @Test
   void machineMemberTokenCannotClaimUnassigned() {
-    var r = refused(Actor.call(member(null), () -> SpecPolicy.reassign(SPEC, null, "raj")));
+    var r =
+        refused(
+            Actor.call(
+                member(null), () -> SpecPolicy.reassign(SPEC, null, "raj", null, List.of())));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
@@ -160,15 +213,18 @@ class SpecPolicyTest {
   void agentPrincipalClaimsAnUnassignedSpecForItsOwningFde() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "raj")));
-    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, "", "raj")));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "raj", null, List.of())));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, "", "raj", null, List.of())));
   }
 
   @Test
   void agentPrincipalCannotClaimForItsEphemeralRunHandle() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    var r = refused(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "claude/a1b2c3")));
+    var r =
+        refused(
+            Actor.call(
+                agent, () -> SpecPolicy.reassign(SPEC, null, "claude/a1b2c3", null, List.of())));
 
     assertEquals(
         ErrorCode.FORBIDDEN_ADMIN_ONLY,
@@ -180,7 +236,9 @@ class SpecPolicyTest {
   void agentPrincipalCannotClaimForAThirdFde() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    var r = refused(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "sumesh")));
+    var r =
+        refused(
+            Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "sumesh", null, List.of())));
 
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
@@ -223,7 +281,8 @@ class SpecPolicyTest {
         refused(Actor.call(room, () -> SpecPolicy.mutate(SPEC, "raj", "raj"))).code());
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        refused(Actor.call(room, () -> SpecPolicy.reassign(SPEC, null, "raj"))).code());
+        refused(Actor.call(room, () -> SpecPolicy.reassign(SPEC, null, "raj", null, List.of())))
+            .code());
   }
 
   @Test

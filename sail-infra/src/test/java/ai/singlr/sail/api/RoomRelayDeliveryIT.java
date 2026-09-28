@@ -28,6 +28,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -94,7 +95,7 @@ class RoomRelayDeliveryIT {
                         "node-a",
                         "ada",
                         "build",
-                        java.util.List.of(),
+                        List.of(),
                         "claude-code",
                         "b",
                         "t",

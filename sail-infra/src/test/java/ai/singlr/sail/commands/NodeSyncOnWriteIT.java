@@ -49,7 +49,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class NodeSyncOnWriteIT {
 
-  private static final String MAIN_CLASS = "ai.singlr.sail.Main";
+  private static final String MAIN_CLASS = "Main";
   private static final String SPEC_ID = "sync-e2e";
   private static final Duration PROPAGATION_DEADLINE = Duration.ofSeconds(60);
 

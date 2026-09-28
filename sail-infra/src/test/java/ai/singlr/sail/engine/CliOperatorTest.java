@@ -33,8 +33,8 @@ class CliOperatorTest {
     var main = new SyncConfig("main", null, "uday", "uday-box");
     var standalone = new SyncConfig(null, null, "raj", null);
 
-    assertEquals(Actor.cliOperator("uday"), CliOperator.of(main, () -> null));
-    assertEquals(Actor.cliOperator("raj"), CliOperator.of(standalone, () -> null));
+    assertEquals(Actor.cliOperator("uday"), CliOperator.of(main, null));
+    assertEquals(Actor.cliOperator("raj"), CliOperator.of(standalone, null));
   }
 
   @Test
@@ -42,7 +42,7 @@ class CliOperatorTest {
     try (var db = roster()) {
       new FdeStore(db).add("mady", null, null, "member");
 
-      var operator = CliOperator.of(NODE, () -> new FdeStore(db));
+      var operator = CliOperator.of(NODE, new FdeStore(db));
 
       assertEquals(new Actor("mady", Role.MEMBER, Actor.Lane.CLI), operator);
     }
@@ -51,8 +51,7 @@ class CliOperatorTest {
   @Test
   void aNodeWhoseRosterHasNotSyncedRefusesToGuessARole() {
     try (var db = roster()) {
-      var refused =
-          assertThrows(ApiException.class, () -> CliOperator.of(NODE, () -> new FdeStore(db)));
+      var refused = assertThrows(ApiException.class, () -> CliOperator.of(NODE, new FdeStore(db)));
 
       assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
       assertTrue(refused.getMessage().contains("does not know its FDE's role"));
@@ -61,17 +60,17 @@ class CliOperatorTest {
   }
 
   @Test
-  void aNodeWithNoHandleIsRefusedWithoutReadingTheRoster() {
-    var anonymous = new SyncConfig("node", "sail@main", null, "box");
+  void aNodeThatNamesNoFdeIsRefusedWithTheCommandThatNamesOne() {
+    try (var db = roster()) {
+      new FdeStore(db).add("mady", null, null, "admin");
+      var anonymous = new SyncConfig("node", "sail@main", null, "box");
 
-    assertThrows(
-        ApiException.class,
-        () ->
-            CliOperator.of(
-                anonymous,
-                () -> {
-                  throw new AssertionError("the roster is never read without a handle");
-                }));
+      var refused =
+          assertThrows(ApiException.class, () -> CliOperator.of(anonymous, new FdeStore(db)));
+
+      assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
+      assertTrue(refused.failure().action().contains("sync-handle"), refused.failure().action());
+    }
   }
 
   @Test
@@ -91,7 +90,7 @@ class CliOperatorTest {
   @Test
   void aPreviewActsAsNoOneSoAnUnsyncedNodeCanStillDescribeIt() {
     try (var db = roster()) {
-      Supplier<Actor> operator = () -> CliOperator.of(NODE, () -> new FdeStore(db));
+      Supplier<Actor> operator = () -> CliOperator.of(NODE, new FdeStore(db));
 
       assertEquals("described", CliOperator.actingUnlessPreview(true, operator, () -> "described"));
       var refused =

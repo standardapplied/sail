@@ -680,7 +680,8 @@ these roles distinct is what lets the synced catalog stay identity-free.
   (`CliOperator`), a sync session, the SSH gateway and the terminal all decide through it, so
   demoting or disabling an FDE on main takes effect at every door on every box once the roster
   syncs. A node mirrors main's roster each round: an FDE main no longer lists is disabled there
-  too (`FdeStore.disableUnlisted`).
+  too (`FdeStore.disableUnlisted`). Main itself never syncs against another box, whatever it is
+  asked (`SyncOperations.resolveMain`): a round adopts the other side's versions and roster.
   - **The host CLI is the box's FDE.** Its API token (`HostToken`, named `admin`) names no FDE
     of its own: when it is used, `TokenAuth` resolves it to the FDE the box's sync handle names
     at that moment, so a host CLI write names that FDE and acts with the role `RoleRule` gives
@@ -688,20 +689,21 @@ these roles distinct is what lets the synced catalog stay identity-free.
     needs migrating.
   - **A machine token** (any other token that names no FDE) acts as no FDE, so it records no
     author, with the role of the box's FDE capped by its minted role (`RoleRule.roleOfUnbound`):
-    on a node it never acts beyond the FDE whose box it lives on. On a box with no sync handle there is no
-    FDE to be, and a machine token acts with its minted role.
-  - **Before the roster arrives.** On a node whose roster does not know its own FDE yet, a token
-    that acts for that FDE is answered `409` with the fix `sudo sail sync`, and the host CLI,
-    the box credential and the terminal are refused: nothing acts as an FDE the box cannot
-    place.
+    on a node it never acts beyond the FDE whose box it lives on. On main or a standalone box
+    with no sync handle there is no FDE to be, and a machine token acts with its minted role.
+  - **Before the roster arrives.** On a node whose roster does not know its own FDE yet, or
+    that names no FDE, a token that acts for the box's FDE is answered `409` naming the fix
+    (`sudo sail sync`, or setting the sync handle), and the host CLI, the box credential and
+    the terminal are refused: nothing acts as an FDE the box cannot place
+    (`CliOperator.unplaced`).
   - **A run's credential** acts as the run's principal, with the role `RoleRule` gives the FDE
     the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
     A run whose FDE is disabled is refused at the socket.
 - **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
   a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
-  (mutation and reassignment), `EraseAuthority`, the room wake (whose box wakes a
-  conversation), membership and review approval read it; `Ownership.owns` is the one identity
-  comparison beside it. Two rules derive from it and are each implemented once:
+  (mutation and reassignment), `EraseAuthority`, the room wake and membership (whose box serves
+  a room's agents: the room's own owner, one box) and review approval read it. Two rules derive
+  from it and are each implemented once:
   - **Who owns a conversation** (`RoomStore.owners`): a spec's conversation is its identity
     room, or the room it was born in, and the spec's owner owns it; a standalone room is owned
     by its own owner and by the owner of every spec born in it. The posting rule
@@ -714,7 +716,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
 
   A spec left without an assignee stays unassigned, and so does its identity room; any member
   may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
-  refuses it until then. An assignee is an FDE handle, never an agent type or a run's principal
+  refuses it until then. Owning a spec gives a voice in its conversation, so a spec born in a
+  room is claimed only by one who may already post there (`SpecPolicy.reassign`): a claim never
+  opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
   (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
   handle, or the FDE a run acts for), written once at create. A spec's creator travels as
   `_created_by` beside `_actor`: main keeps the one it holds, records the pusher when a

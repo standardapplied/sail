@@ -260,6 +260,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
 
     /**
+     * The actor this run's credential stands for before the role rule weighs it: its principal, for
+     * the FDE the run acts for, on the room lane for a read-only lane and the agent lane otherwise.
+     */
+    public Actor principalActor() {
+      return readOnlyLane()
+          ? Actor.roomPrincipal(principal, owner)
+          : Actor.agentPrincipal(principal, owner);
+    }
+
+    /**
      * Whether this row is a review execution — the reviewer or its fix agent, which share the one
      * review row. Their own stop must never re-enter the pipeline, so lane-aware reactors consult
      * this as the fallback when a stop signal lost its role marker.

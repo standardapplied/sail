@@ -35,8 +35,13 @@ import ai.singlr.sail.sync.ConflictMerge;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import java.io.BufferedReader;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.UncheckedIOException;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -266,8 +271,7 @@ class ApiRouterTest {
       assertEquals("\"" + BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
       var request =
           HttpRequest.newBuilder(
-                  java.net.URI.create(
-                      "http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
+                  URI.create("http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
               .header("Authorization", "Bearer token")
               .header("If-None-Match", etag)
               .GET()
@@ -390,12 +394,12 @@ class ApiRouterTest {
               .header("Authorization", "Bearer token")
               .PUT(
                   HttpRequest.BodyPublishers.ofInputStream(
-                      () -> new java.io.ByteArrayInputStream(new byte[] {1})))
+                      () -> new ByteArrayInputStream(new byte[] {1})))
               .build();
       var response = HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofString());
       assertEquals(422, response.statusCode());
       assertTrue(response.body().contains("Content-Length is required"));
-      try (var socket = new java.net.Socket("127.0.0.1", server.port())) {
+      try (var socket = new Socket("127.0.0.1", server.port())) {
         socket.setSoTimeout(5000);
         socket
             .getOutputStream()
@@ -404,9 +408,8 @@ class ApiRouterTest {
                     .getBytes(StandardCharsets.US_ASCII));
         socket.getOutputStream().flush();
         var line =
-            new java.io.BufferedReader(
-                    new java.io.InputStreamReader(
-                        socket.getInputStream(), StandardCharsets.US_ASCII))
+            new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
                 .readLine();
         assertTrue(line.contains("413"), line);
       }
@@ -518,16 +521,16 @@ class ApiRouterTest {
           return list().stream().filter(row -> row.path().equals(path)).findFirst();
         }
 
-        public java.io.InputStream open(FileStore.FileRow row) {
+        public InputStream open(FileStore.FileRow row) {
           openedFiles++;
-          return new java.io.ByteArrayInputStream(files.get(row.path()));
+          return new ByteArrayInputStream(files.get(row.path()));
         }
 
-        public String put(String path, java.io.InputStream bytes, long size, int mode) {
+        public String put(String path, InputStream bytes, long size, int mode) {
           try {
             Acting.system(() -> files.put(path, bytes.readAllBytes()));
-          } catch (java.io.IOException e) {
-            throw new java.io.UncheckedIOException(e);
+          } catch (IOException e) {
+            throw new UncheckedIOException(e);
           }
           return path;
         }

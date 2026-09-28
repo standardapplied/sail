@@ -32,8 +32,11 @@ import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.AfterEach;
@@ -159,7 +162,7 @@ class EngagementLifecycleTest {
   }
 
   private static final class StubShell implements ShellExec {
-    private final java.util.Map<String, ShellExec.Result> scripts = new java.util.LinkedHashMap<>();
+    private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
     private final List<String> order;
 
     StubShell(List<String> order) {
@@ -193,7 +196,7 @@ class EngagementLifecycleTest {
     }
 
     @Override
-    public ShellExec.Result exec(List<String> command, Path workDir, java.time.Duration timeout) {
+    public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout) {
       return exec(command);
     }
 

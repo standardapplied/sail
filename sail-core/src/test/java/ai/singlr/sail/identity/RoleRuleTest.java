@@ -126,6 +126,13 @@ class RoleRuleTest {
   }
 
   @Test
+  void aCredentialNamingNoFdeOnANodeThatNamesNoFdeIsRefused() {
+    var anonymous = new SyncConfig("node", "sail@main", null, "node-box");
+
+    assertEquals(Optional.empty(), new RoleRule(() -> anonymous, roster).roleOfUnbound(Role.ADMIN));
+  }
+
+  @Test
   void aRoleIsCappedByTheLesserOfTheTwo() {
     assertEquals(Role.MEMBER, Role.ADMIN.cappedBy(Role.MEMBER));
     assertEquals(Role.VIEWER, Role.VIEWER.cappedBy(Role.ADMIN));

@@ -14,6 +14,7 @@ import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.LocalApiSocket;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
@@ -76,7 +77,7 @@ class StopGateIT extends AbstractIncusIT {
               null,
               runStore,
               null,
-              ai.singlr.sail.api.SyncScheduler.disabled(),
+              SyncScheduler.disabled(),
               roster,
               SessionYield.NONE);
       try (var server = new LocalApiSocket(bus, operations, socketDir.resolve("api.sock"))) {

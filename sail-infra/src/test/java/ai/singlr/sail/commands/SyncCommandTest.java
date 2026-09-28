@@ -11,23 +11,38 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncReport;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -35,32 +50,32 @@ class SyncCommandTest {
 
   @Test
   void gcUsesTheHostLaneAndReportsFreedContent() throws Exception {
-    try (var db = ai.singlr.sail.store.Sqlite.openMemory()) {
-      new ai.singlr.sail.store.SchemaManager(db).migrate();
-      var hash = new ai.singlr.sail.store.BlobStore(db).putText("orphan");
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var hash = new BlobStore(db).putText("orphan");
       var operations =
-          ai.singlr.sail.api.OperationsFactory.create(
+          OperationsFactory.create(
                   db,
-                  new ai.singlr.sail.engine.ShellExecutor(true),
+                  new ShellExecutor(true),
                   "sail.yaml",
                   null,
                   null,
-                  ai.singlr.sail.api.SyncScheduler.disabled(),
-                  ai.singlr.sail.api.SessionYield.NONE)
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE)
               .useControlPlane(
                   db,
-                  java.nio.file.Path.of(System.getProperty("java.io.tmpdir")),
-                  new ai.singlr.sail.engine.SyncOperations(
+                  Path.of(System.getProperty("java.io.tmpdir")),
+                  new SyncOperations(
                       db,
                       "box",
-                      java.nio.file.Path.of(System.getProperty("java.io.tmpdir")),
-                      ai.singlr.sail.config.SyncConfig::unset,
+                      Path.of(System.getProperty("java.io.tmpdir")),
+                      SyncConfig::unset,
                       target -> {
-                        throw new java.io.IOException("offline");
+                        throw new IOException("offline");
                       }));
-      var output = new java.io.ByteArrayOutputStream();
+      var output = new ByteArrayOutputStream();
       var previous = System.out;
-      try (var stream = new java.io.PrintStream(output)) {
+      try (var stream = new PrintStream(output)) {
         System.setOut(stream);
         assertEquals(0, new SyncCommand.Gc(() -> operations).call());
       } finally {
@@ -69,37 +84,36 @@ class SyncCommandTest {
       assertTrue(
           output.toString().contains("Compacted 0 history entries; freed 6 bytes"),
           output.toString());
-      assertFalse(new ai.singlr.sail.store.BlobStore(db).has(hash));
+      assertFalse(new BlobStore(db).has(hash));
     }
   }
 
   @Test
   void syncStatusReadsThisBoxesStoredHealthInProcess(@TempDir Path home) throws Exception {
-    try (var db = ai.singlr.sail.store.Sqlite.open(home.resolve("sail.db"))) {
-      new ai.singlr.sail.store.SchemaManager(db).migrate();
-      var config = new ai.singlr.sail.config.SyncConfig("node", "sail@main", "node");
+    try (var db = Sqlite.open(home.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var config = new SyncConfig("node", "sail@main", "node");
       var operations =
-          ai.singlr.sail.api.OperationsFactory.create(
+          OperationsFactory.create(
                   db,
-                  new ai.singlr.sail.engine.ShellExecutor(true),
+                  new ShellExecutor(true),
                   "sail.yaml",
                   null,
                   null,
-                  ai.singlr.sail.api.SyncScheduler.disabled(),
-                  ai.singlr.sail.api.SessionYield.NONE)
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE)
               .useControlPlane(
                   db,
                   home,
-                  new ai.singlr.sail.engine.SyncOperations(
+                  new SyncOperations(
                       db,
                       "node",
                       home,
                       () -> config,
                       target -> {
-                        throw new java.io.IOException("main unavailable");
+                        throw new IOException("main unavailable");
                       }));
-      java.util.function.Supplier<SyncCommand.Status> status =
-          () -> new SyncCommand.Status(() -> operations);
+      Supplier<SyncCommand.Status> status = () -> new SyncCommand.Status(() -> operations);
       assertEquals(
           Map.of(
               "role",
@@ -121,11 +135,11 @@ class SyncCommandTest {
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json"))),
           "nothing attempted yet: no state, no timestamps");
 
-      var health = new ai.singlr.sail.store.SyncHealth(db);
-      health.begin("sail@main", java.time.Instant.parse("2026-09-14T00:00:00Z"));
+      var health = new SyncHealth(db);
+      health.begin("sail@main", Instant.parse("2026-09-14T00:00:00Z"));
       health.failed(
           "sail@main",
-          java.time.Instant.parse("2026-09-14T00:00:00Z"),
+          Instant.parse("2026-09-14T00:00:00Z"),
           "protocol",
           "message: page exceeded 4 MiB");
       var stale = nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
@@ -136,8 +150,7 @@ class SyncCommandTest {
           "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale));
 
-      new ai.singlr.sail.store.SyncConflicts(db)
-          .record("spec", "auth", "base", "mine", "theirs", java.util.List.of("title"));
+      new SyncConflicts(db).record("spec", "auth", "base", "mine", "theirs", List.of("title"));
       var conflicted =
           nonNull(capture(() -> new picocli.CommandLine(status.get()).execute("--json")));
       assertEquals(1, conflicted.get("pending_conflicts"));
@@ -173,20 +186,19 @@ class SyncCommandTest {
   }
 
   private static Map<String, Object> capture(Runnable command) {
-    var output = new java.io.ByteArrayOutputStream();
+    var output = new ByteArrayOutputStream();
     var original = System.out;
-    try (var stream =
-        new java.io.PrintStream(output, true, java.nio.charset.StandardCharsets.UTF_8)) {
+    try (var stream = new PrintStream(output, true, StandardCharsets.UTF_8)) {
       System.setOut(stream);
       command.run();
     } finally {
       System.setOut(original);
     }
-    return YamlUtil.parseMap(output.toString(java.nio.charset.StandardCharsets.UTF_8));
+    return YamlUtil.parseMap(output.toString(StandardCharsets.UTF_8));
   }
 
   private static Map<String, Object> nonNull(Map<String, Object> map) {
-    var kept = new java.util.LinkedHashMap<String, Object>();
+    var kept = new LinkedHashMap<String, Object>();
     map.forEach(
         (k, v) -> {
           if (v != null) kept.put(k, v);
@@ -213,6 +225,15 @@ class SyncCommandTest {
   @Test
   void resolveMainHasNoTargetWhenThisBoxIsMain() {
     var resolved = SyncCommand.resolveMain(null, new SyncConfig(SyncConfig.ROLE_MAIN, null, null));
+    assertNull(resolved.target());
+    assertTrue(resolved.message().contains("main devbox"));
+  }
+
+  @Test
+  void theMainBoxNeverSyncsAgainstAnotherBoxEvenWhenAsked() {
+    var resolved =
+        SyncCommand.resolveMain("sail@other", new SyncConfig(SyncConfig.ROLE_MAIN, null, null));
+
     assertNull(resolved.target());
     assertTrue(resolved.message().contains("main devbox"));
   }

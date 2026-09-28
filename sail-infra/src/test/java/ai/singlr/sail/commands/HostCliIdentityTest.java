@@ -158,6 +158,20 @@ class HostCliIdentityTest {
   }
 
   @Test
+  void aNodeThatNamesNoFdeRefusesEveryTokenThatNamesNone() throws Exception {
+    fdes.add("uday", null, null, "admin");
+    var machine = new TokenStore(db).create("ci", "admin").token();
+    serve(new SyncConfig("node", "sail@main", null, "node-box"));
+    operations.identity().mintHostToken(configPath);
+
+    for (var token : List.of(savedToken(), machine)) {
+      var refused = assertThrows(IOException.class, () -> whoami(token));
+      assertTrue(refused.getMessage().contains("HTTP 409"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("sync-handle"), refused.getMessage());
+    }
+  }
+
+  @Test
   void theHostTokenFollowsTheBoxsSyncHandle() throws Exception {
     fdes.add("uday", null, null, "member");
     fdes.add("raj", null, null, "member");

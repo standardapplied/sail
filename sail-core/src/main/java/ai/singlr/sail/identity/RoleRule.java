@@ -20,8 +20,8 @@ import java.util.function.Supplier;
  * roster gives it. Either way the credential's own role caps it, so no credential acts beyond what
  * it was minted with. An FDE the roster marks disabled is refused, and so is one it does not know,
  * unless it is the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE
- * but its operator. A credential that names no FDE acts with the role of the box's FDE when the box
- * has a sync handle, so no credential on a box acts beyond the FDE whose box it is.
+ * but its operator. A credential that names no FDE acts with the role of the box's FDE ({@link
+ * #roleOfUnbound}), so no credential on a box acts beyond the FDE whose box it is.
  */
 public final class RoleRule {
 
@@ -53,11 +53,16 @@ public final class RoleRule {
 
   /**
    * The role a credential that names no FDE, minted with {@code cap}, acts with: the role of the
-   * box's FDE ({@link #boxFde}), so on a node it is refused until the roster knows that FDE; on a
-   * box with no sync handle, {@code cap}. Empty when the credential is refused.
+   * box's FDE ({@link #boxFde}), so on a node it is refused until the roster knows that FDE. Main
+   * or a standalone box with no sync handle has no FDE to be, and the credential acts with {@code
+   * cap}; a node with none syncs as no one, and is refused. Empty when the credential is refused.
    */
   public Optional<Role> roleOfUnbound(Role cap) {
-    return boxFde().map(handle -> roleOf(handle, cap)).orElse(Optional.of(cap));
+    var fde = boxFde();
+    if (fde.isPresent()) {
+      return roleOf(fde.get(), cap);
+    }
+    return box.get().isNode() ? Optional.empty() : Optional.of(cap);
   }
 
   /** The FDE this box is, named by its sync handle; empty on a box with no sync handle. */

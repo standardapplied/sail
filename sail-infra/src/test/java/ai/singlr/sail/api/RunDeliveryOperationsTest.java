@@ -27,6 +27,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
@@ -170,7 +171,7 @@ class RunDeliveryOperationsTest {
 
     messages.applyRevision(
         oldId,
-        java.util.Map.of(
+        Map.of(
             "spec_id", "room",
             "author", "ada",
             "body", "minted before, synced after",

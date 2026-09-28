@@ -2051,7 +2051,7 @@ class SailOperationsTest {
         unit,
         "t0",
         null,
-        java.util.List.of(),
+        List.of(),
         null,
         null,
         null);

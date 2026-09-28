@@ -30,11 +30,9 @@ public final class HostToken {
    * Mints the host token — non-expiring when {@code ttl} is null — and saves it to {@code
    * configPath}.
    */
-  public static TokenStore.CreatedToken mint(TokenStore tokens, Duration ttl, Path configPath)
-      throws IOException {
-    var created = tokens.create(NAME, "admin", null, ttl);
-    ServerConnectionConfig.saveLocalToken(created.token(), configPath);
-    return created;
+  public static void mint(TokenStore tokens, Duration ttl, Path configPath) throws IOException {
+    ServerConnectionConfig.saveLocalToken(
+        tokens.create(NAME, "admin", null, ttl).token(), configPath);
   }
 
   /** Who the host token acts as on a box configured as {@code box}. */

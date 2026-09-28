@@ -79,7 +79,7 @@ public final class Snapshots {
    * main's revision takes the creator main holds, none included. A snapshot without the {@link
    * #CREATOR} key, from a main that predates it, keeps {@code held}. One exception fills a gap an
    * older main left: a creator main never recorded is taken from a push by that creator, naming
-   * itself, which grants nothing a claim would not.
+   * itself — a push never names anyone else as a creator.
    */
   public static String adoptedCreator(Map<String, Object> snapshot, String held) {
     var actor = Actor.current();

@@ -34,12 +34,15 @@ import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -187,14 +190,14 @@ class SyncServerCommandTest {
   void aDisabledFdesSessionIsRefusedBeforeAnythingIsServed() throws Exception {
     var token = tokenFor("member");
     mainDb.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
-    var out = new java.io.ByteArrayOutputStream();
+    var out = new ByteArrayOutputStream();
 
     var exit =
         SyncServerCommand.serve(
             mainReplicaDb,
             "main",
             token,
-            new java.io.ByteArrayInputStream(new byte[0]),
+            new ByteArrayInputStream(new byte[0]),
             out,
             SyncTransitionSink.NONE,
             SyncConfig::unset);
@@ -311,7 +314,7 @@ class SyncServerCommandTest {
   void aCommittedPushHandsItsTransitionsToTheSink() throws Exception {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     Acting.system(() -> nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress")));
-    var seen = new java.util.ArrayList<SyncTransition>();
+    var seen = new ArrayList<SyncTransition>();
 
     syncWithToken(tokenFor("member"), "spec", nodeReplica, seen::add);
 
@@ -326,7 +329,7 @@ class SyncServerCommandTest {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");
     syncWithToken(token);
-    var seen = new java.util.ArrayList<SyncTransition>();
+    var seen = new ArrayList<SyncTransition>();
 
     syncWithToken(token, "spec", nodeReplica, seen::add);
 

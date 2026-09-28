@@ -43,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -418,7 +419,7 @@ public final class Fleet implements AutoCloseable {
               bus,
               (project, runId, unit) -> false,
               () -> handle,
-              () -> java.time.Instant.now().plus(Duration.ofHours(1)));
+              () -> Instant.now().plus(Duration.ofHours(1)));
       return reconciler.sweep();
     }
 

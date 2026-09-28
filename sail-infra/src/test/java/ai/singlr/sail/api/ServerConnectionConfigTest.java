@@ -9,9 +9,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ClientConfig;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -62,11 +65,11 @@ class ServerConnectionConfigTest {
   @Test
   void savePreservesClientConfigKeys() throws IOException {
     var configPath = tempDir.resolve("config.yaml");
-    java.nio.file.Files.writeString(configPath, "host: devbox\nuser: sail\n");
+    Files.writeString(configPath, "host: devbox\nuser: sail\n");
 
     ServerConnectionConfig.saveSessionToken("sess_new", configPath);
 
-    var client = ai.singlr.sail.config.ClientConfig.load(configPath);
+    var client = ClientConfig.load(configPath);
     assertEquals("devbox", client.host());
     assertEquals("sail", client.user());
     assertEquals("sess_new", ServerConnectionConfig.resolve(null, null, configPath).token());
@@ -154,9 +157,7 @@ class ServerConnectionConfigTest {
 
     var perms = Files.getPosixFilePermissions(configFile);
     assertEquals(
-        java.util.Set.of(
-            java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-            java.nio.file.attribute.PosixFilePermission.OWNER_WRITE),
+        Set.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
         perms,
         "token file must not be group/world readable");
   }

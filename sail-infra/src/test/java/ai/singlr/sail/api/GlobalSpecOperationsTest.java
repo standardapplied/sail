@@ -24,6 +24,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
@@ -66,8 +67,7 @@ class GlobalSpecOperationsTest {
 
   private SpecCreateRequest createReq(Map<String, Object> overrides) {
     var base =
-        new java.util.HashMap<String, Object>(
-            Map.of("id", "auth", "project", "manatee", "title", "Auth"));
+        new HashMap<String, Object>(Map.of("id", "auth", "project", "manatee", "title", "Auth"));
     base.putAll(overrides);
     return SpecCreateRequest.fromMap(base);
   }
@@ -833,7 +833,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of("id", "roomy", "title", "Roomy spec", "project", "acme"))));
+                    Map.of("id", "roomy", "title", "Roomy spec", "project", "acme"))));
 
     var room = rooms.findById("roomy").orElseThrow();
     assertEquals("Roomy spec", room.title());
@@ -850,7 +850,7 @@ class GlobalSpecOperationsTest {
         () ->
             ops.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of(
+                    Map.of(
                         "id",
                         "plain",
                         "title",
@@ -872,7 +872,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of("id", "reused", "title", "First life", "project", "acme"))));
+                    Map.of("id", "reused", "title", "First life", "project", "acme"))));
     rooms.updateRoster(
         "reused", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]");
 
@@ -884,7 +884,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of("id", "reused", "title", "Second life", "project", "acme"))));
+                    Map.of("id", "reused", "title", "Second life", "project", "acme"))));
     var reborn = rooms.findById("reused").orElseThrow();
     assertEquals("Second life", reborn.title(), "a reused id mints a fresh room");
     assertNull(reborn.roster(), "no ghost member resurrects from the first life");
@@ -899,7 +899,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of("id", "kept", "title", "Kept", "project", "acme"))));
+                    Map.of("id", "kept", "title", "Kept", "project", "acme"))));
     rooms.updateRoster(
         "kept", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]");
 
@@ -908,8 +908,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.update(
                 "kept",
-                SpecUpdateRequest.fromMap(
-                    java.util.Map.of("title", "Kept v2", "updated_by", "uday"))));
+                SpecUpdateRequest.fromMap(Map.of("title", "Kept v2", "updated_by", "uday"))));
 
     var after = specStore.findById("kept").orElseThrow();
     assertEquals("Kept v2", after.title());
@@ -944,7 +943,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of(
+                    Map.of(
                         "id",
                         "attached",
                         "title",
@@ -988,8 +987,7 @@ class GlobalSpecOperationsTest {
             ApiException.class,
             () ->
                 Acting.by(
-                    ADMIN,
-                    () -> withRooms.create(createReq(java.util.Map.of("room_id", "ghost-room")))));
+                    ADMIN, () -> withRooms.create(createReq(Map.of("room_id", "ghost-room")))));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
     assertTrue(specStore.findById("auth").isEmpty(), "a refused birth creates no spec");
     assertTrue(rooms.findById("ghost-room").isEmpty(), "and mints no room under the wrong id");
@@ -999,8 +997,7 @@ class GlobalSpecOperationsTest {
             ApiException.class,
             () ->
                 Acting.by(
-                    ADMIN,
-                    () -> withRooms.create(createReq(java.util.Map.of("room_id", "other-room")))));
+                    ADMIN, () -> withRooms.create(createReq(Map.of("room_id", "other-room")))));
     assertEquals(ErrorCode.INVALID_REQUEST, foreign.failure().errorCode());
     assertTrue(foreign.getMessage().contains("beta"), foreign.getMessage());
     assertTrue(specStore.findById("auth").isEmpty());
@@ -1014,8 +1011,7 @@ class GlobalSpecOperationsTest {
             ApiException.class,
             () ->
                 Acting.by(
-                    ADMIN,
-                    () -> noRooms.create(createReq(java.util.Map.of("room_id", "design-room")))));
+                    ADMIN, () -> noRooms.create(createReq(Map.of("room_id", "design-room")))));
     assertEquals(ErrorCode.INTERNAL, refused.failure().errorCode());
     assertTrue(refused.getMessage().contains("design-room"), refused.getMessage());
   }
@@ -1028,9 +1024,7 @@ class GlobalSpecOperationsTest {
     var missing =
         assertThrows(
             ApiException.class,
-            () ->
-                Acting.by(
-                    ADMIN, () -> withRooms.create(createReq(java.util.Map.of("room_id", "auth")))));
+            () -> Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("room_id", "auth")))));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, missing.failure().errorCode());
     assertTrue(specStore.findById("auth").isEmpty(), "a refused birth creates no spec");
 
@@ -1049,8 +1043,7 @@ class GlobalSpecOperationsTest {
                     null,
                     null,
                     "uday")));
-    for (var request :
-        List.of(createReq(java.util.Map.of()), createReq(java.util.Map.of("room_id", "auth")))) {
+    for (var request : List.of(createReq(Map.of()), createReq(Map.of("room_id", "auth")))) {
       var taken =
           assertThrows(ApiException.class, () -> Acting.by(ADMIN, () -> withRooms.create(request)));
       assertEquals(
@@ -1120,9 +1113,7 @@ class GlobalSpecOperationsTest {
                     "ada")));
     Acting.by(
         ADMIN,
-        () ->
-            withRooms.create(
-                createReq(java.util.Map.of("room_id", "adas-room", "assignee", "mallory"))));
+        () -> withRooms.create(createReq(Map.of("room_id", "adas-room", "assignee", "mallory"))));
     Acting.as(
         "ada",
         () ->
@@ -1158,7 +1149,7 @@ class GlobalSpecOperationsTest {
                     null,
                     null,
                     "uday")));
-    Acting.by(ADMIN, () -> withRooms.create(createReq(java.util.Map.of("room_id", "design-room"))));
+    Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("room_id", "design-room"))));
 
     var updated =
         Acting.by(
@@ -1166,8 +1157,7 @@ class GlobalSpecOperationsTest {
             () ->
                 withRooms.update(
                     "auth",
-                    SpecUpdateRequest.fromMap(
-                        java.util.Map.of("wake", "mention", "updated_by", "uday"))));
+                    SpecUpdateRequest.fromMap(Map.of("wake", "mention", "updated_by", "uday"))));
 
     assertEquals("mention", rooms.findById("design-room").orElseThrow().wake());
     assertEquals("mention", updated.spec().wake(), "the view reads the same room it wrote");
@@ -1203,8 +1193,7 @@ class GlobalSpecOperationsTest {
                     mallory,
                     () ->
                         withRooms.create(
-                            createReq(
-                                java.util.Map.of("room_id", "adas-room", "assignee", "mallory")))));
+                            createReq(Map.of("room_id", "adas-room", "assignee", "mallory")))));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, explicit.failure().errorCode());
     assertTrue(specStore.findById("auth").isEmpty(), "a refused binding creates no spec");
 
@@ -1216,8 +1205,7 @@ class GlobalSpecOperationsTest {
                     mallory,
                     () ->
                         withRooms.create(
-                            createReq(
-                                java.util.Map.of("id", "adas-room", "assignee", "mallory")))));
+                            createReq(Map.of("id", "adas-room", "assignee", "mallory")))));
     assertEquals(
         ErrorCode.CONFLICT,
         byId.failure().errorCode(),
@@ -1230,15 +1218,12 @@ class GlobalSpecOperationsTest {
             ApiException.class,
             () ->
                 Acting.by(
-                    viewer,
-                    () -> withRooms.create(createReq(java.util.Map.of("room_id", "adas-room")))));
+                    viewer, () -> withRooms.create(createReq(Map.of("room_id", "adas-room")))));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
 
     Acting.by(
         ADMIN,
-        () ->
-            withRooms.create(
-                createReq(java.util.Map.of("room_id", "adas-room", "assignee", "mallory"))));
+        () -> withRooms.create(createReq(Map.of("room_id", "adas-room", "assignee", "mallory"))));
     assertEquals(
         "adas-room",
         specStore.findById("auth").orElseThrow().roomIdOrIdentity(),
@@ -1268,7 +1253,7 @@ class GlobalSpecOperationsTest {
     var foreign =
         assertThrows(
             ApiException.class,
-            () -> Acting.by(ADMIN, () -> withRooms.create(createReq(java.util.Map.of()))));
+            () -> Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of()))));
     assertEquals(ErrorCode.CONFLICT, foreign.failure().errorCode());
     assertTrue(specStore.findById("auth").isEmpty(), "no spec lands across the project line");
   }
@@ -1282,7 +1267,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of(
+                    Map.of(
                         "id",
                         "wakey",
                         "title",
@@ -1297,8 +1282,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.update(
                 "wakey",
-                SpecUpdateRequest.fromMap(
-                    java.util.Map.of("wake", "mention", "updated_by", "uday"))));
+                SpecUpdateRequest.fromMap(Map.of("wake", "mention", "updated_by", "uday"))));
 
     assertEquals(
         "mention",
@@ -1315,7 +1299,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.create(
                 SpecCreateRequest.fromMap(
-                    java.util.Map.of(
+                    Map.of(
                         "id",
                         "still",
                         "title",
@@ -1331,8 +1315,7 @@ class GlobalSpecOperationsTest {
         () ->
             withRooms.update(
                 "still",
-                SpecUpdateRequest.fromMap(
-                    java.util.Map.of("title", "Renamed", "updated_by", "uday"))));
+                SpecUpdateRequest.fromMap(Map.of("title", "Renamed", "updated_by", "uday"))));
 
     assertEquals(before, rooms.latestRev("still"), "no wake edit, no room write");
   }

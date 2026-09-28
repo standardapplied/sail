@@ -214,8 +214,7 @@ class StopOperationsTest {
 
   @Test
   void anUnreadableFingerprintOnALivePidRefusesWithoutSignalling() throws Exception {
-    var shell =
-        liveAgentShell().throwOn("cat /proc/123/stat", new java.io.IOException("exec timed out"));
+    var shell = liveAgentShell().throwOn("cat /proc/123/stat", new IOException("exec timed out"));
     var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
@@ -647,8 +646,8 @@ class StopOperationsTest {
             liveAgentShell(),
             (project, unit) -> halts.add(unit.unitName()),
             StopOperations.Listener.NONE,
-            java.time.Duration.ofMillis(20),
-            java.time.Duration.ZERO);
+            Duration.ofMillis(20),
+            Duration.ZERO);
     seedAdhocRun(123, UNIT);
 
     var refusal =
@@ -874,8 +873,8 @@ class StopOperationsTest {
             liveAgentShell(),
             (project, unit) -> {},
             StopOperations.Listener.NONE,
-            java.time.Duration.ofMillis(20),
-            java.time.Duration.ZERO);
+            Duration.ofMillis(20),
+            Duration.ZERO);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
@@ -904,8 +903,8 @@ class StopOperationsTest {
               shell.on("kill -0 123", new ShellExec.Result(1, "", ""));
             },
             StopOperations.Listener.NONE,
-            java.time.Duration.ofMillis(20),
-            java.time.Duration.ZERO);
+            Duration.ofMillis(20),
+            Duration.ZERO);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
@@ -1266,8 +1265,8 @@ class StopOperationsTest {
             shell,
             (project, unit) -> {},
             StopOperations.Listener.NONE,
-            java.time.Duration.ofSeconds(5),
-            java.time.Duration.ZERO);
+            Duration.ofSeconds(5),
+            Duration.ZERO);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     seedRun(123, UNIT);
 
@@ -1372,8 +1371,8 @@ class StopOperationsTest {
       FakeShell shell,
       StopOperations.AgentHalter halter,
       StopOperations.Listener listener,
-      java.time.Duration verifyDeadline,
-      java.time.Duration verifyPace)
+      Duration verifyDeadline,
+      Duration verifyPace)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(

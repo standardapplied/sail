@@ -28,7 +28,9 @@ import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -264,11 +266,11 @@ class MessageSyncTest {
                 "",
                 "",
                 null,
-                java.util.List.of(),
-                java.util.List.of()));
-    var values = java.util.Arrays.asList(null, "", " \t", "mady", "uday");
+                List.of(),
+                List.of()));
+    var values = Arrays.asList(null, "", " \t", "mady", "uday");
     var seq = 0;
-    for (var table : java.util.List.of("rooms", "specs")) {
+    for (var table : List.of("rooms", "specs")) {
       var conversation = "rooms".equals(table) ? "room" : "spec-room";
       for (var assignee : values) {
         for (var creator : values) {

@@ -91,9 +91,18 @@ public final class SpecPolicy {
    * spec that is currently unassigned for oneself. An agent principal claims for the FDE it acts
    * for, never for its ephemeral run-scoped handle — dispatch locality matches the assignee against
    * the node's FDE handle, so a run-principal assignee would leave the spec undispatchable.
+   *
+   * <p>A spec's owner owns its conversation, so a claim gives the claimant a voice there. A spec
+   * born in another conversation, {@code bornIn} (null for a spec whose conversation is its own),
+   * whose owners are {@code bornInOwners}, is claimed only by one who may already post there: a
+   * claim never opens someone else's room.
    */
   public static AccessDecision reassign(
-      String specId, String currentAssignee, String requestedAssignee) {
+      String specId,
+      String currentAssignee,
+      String requestedAssignee,
+      String bornIn,
+      List<String> bornInOwners) {
     var actor = Actor.current();
     if (!actor.canWrite()) {
       return readOnly();
@@ -102,19 +111,32 @@ public final class SpecPolicy {
       return AccessDecision.allowed();
     }
     var claimant = actor.actingFde();
-    if (Strings.isBlank(currentAssignee)
-        && Strings.isNotBlank(claimant)
-        && claimant.equals(requestedAssignee)) {
-      return AccessDecision.allowed();
+    if (Strings.isNotBlank(currentAssignee)
+        || Strings.isBlank(claimant)
+        || !claimant.equals(requestedAssignee)) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_ADMIN_ONLY,
+          "Reassigning spec '"
+              + specId
+              + "' moves work between FDEs and is an admin-only action"
+              + (Strings.isNotBlank(currentAssignee)
+                  ? " (currently '" + currentAssignee + "')"
+                  : "")
+              + ".",
+          "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
     }
-    return AccessDecision.refused(
-        ErrorCode.FORBIDDEN_ADMIN_ONLY,
-        "Reassigning spec '"
-            + specId
-            + "' moves work between FDEs and is an admin-only action"
-            + (Strings.isNotBlank(currentAssignee) ? " (currently '" + currentAssignee + "')" : "")
-            + ".",
-        "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
+    if (Strings.isNotBlank(bornIn) && !bornInOwners.contains(claimant)) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_ADMIN_ONLY,
+          "Spec '"
+              + specId
+              + "' lives in '"
+              + bornIn
+              + "', where you may not post, and claiming it would give you a voice there.",
+          (bornInOwners.isEmpty() ? "Ask an admin" : "Ask " + String.join(" or ", bornInOwners))
+              + " to assign it to you.");
+    }
+    return AccessDecision.allowed();
   }
 
   private static AccessDecision readOnly() {

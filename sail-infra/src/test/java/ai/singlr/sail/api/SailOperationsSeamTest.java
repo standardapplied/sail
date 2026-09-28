@@ -54,6 +54,7 @@ import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -73,6 +74,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -242,7 +244,7 @@ class SailOperationsSeamTest {
       assertEquals("stale", YamlUtil.parseMap(stale.body()).get("state"));
       assertTrue(stale.body().contains("main port blocked"));
       assertEquals(
-          java.util.Set.of(
+          Set.of(
               "schema_version",
               "role",
               "main",
@@ -809,18 +811,12 @@ class SailOperationsSeamTest {
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              files.put(
-                  "large",
-                  java.io.InputStream.nullInputStream(),
-                  FileLimits.DEFAULT_MAX + 1,
-                  0644));
+              files.put("large", InputStream.nullInputStream(), FileLimits.DEFAULT_MAX + 1, 0644));
       assertThrows(IllegalArgumentException.class, () -> operations.projectFiles("../escape"));
       assertEquals(
           "cap",
           Acting.system(
-              () ->
-                  files.put(
-                      "cap", java.io.InputStream.nullInputStream(), FileLimits.DEFAULT_MAX, 0644)));
+              () -> files.put("cap", InputStream.nullInputStream(), FileLimits.DEFAULT_MAX, 0644)));
     }
   }
 
@@ -927,7 +923,7 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               new FileStore(main.db)
-                  .put("proj", "config", new java.io.ByteArrayInputStream(content), 0644));
+                  .put("proj", "config", new ByteArrayInputStream(content), 0644));
       var targets = new ArrayList<String>();
       operations.useControlPlane(
           node.db,

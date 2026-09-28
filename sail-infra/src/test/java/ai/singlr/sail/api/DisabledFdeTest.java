@@ -124,7 +124,7 @@ class DisabledFdeTest {
     assertEquals(200, get(session).statusCode());
     assertEquals(200, socket().status());
     assertEquals(200, socket(runCredential).status());
-    assertEquals("mady", CliOperator.of(MAIN, () -> new FdeStore(db)).handle());
+    assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db)).handle());
     assertInstanceOf(SshGateway.Authorized.class, gateway());
     assertEquals(
         "mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null).fde());
@@ -140,7 +140,7 @@ class DisabledFdeTest {
     var run = socket(runCredential);
     assertEquals(403, run.status(), "a run acting for the FDE");
     assertTrue(run.body().toString().contains("'mady'"), run.body().toString());
-    var cli = assertThrows(ApiException.class, () -> CliOperator.of(MAIN, () -> new FdeStore(db)));
+    var cli = assertThrows(ApiException.class, () -> CliOperator.of(MAIN, new FdeStore(db)));
     assertEquals(ErrorCode.CONFLICT, cli.failure().errorCode(), "the host CLI");
     assertInstanceOf(SshGateway.Rejected.class, gateway(), "the SSH gateway");
     var terminal =

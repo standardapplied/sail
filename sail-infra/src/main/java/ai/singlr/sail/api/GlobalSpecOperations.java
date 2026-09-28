@@ -17,6 +17,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -330,13 +331,26 @@ final class GlobalSpecOperations {
     }
   }
 
-  private static void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
+  private void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
     if (reassigning) {
-      SpecPolicy.reassign(existing.id(), existing.assignee(), request.assignee()).enforce();
+      authorizeReassign(
+          existing.id(), existing.assignee(), existing.roomIdOrIdentity(), request.assignee());
     } else {
       SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     }
+  }
+
+  /**
+   * Enforces {@link SpecPolicy#reassign} for giving spec {@code specId}, held by {@code
+   * currentAssignee} in conversation {@code room}, to {@code assignee}.
+   */
+  private void authorizeReassign(
+      String specId, String currentAssignee, String room, String assignee) {
+    var bornIn = specId.equals(room) ? null : room;
+    var store = rooms.get();
+    var bornInOwners = bornIn == null || store == null ? List.<String>of() : store.owners(bornIn);
+    SpecPolicy.reassign(specId, currentAssignee, assignee, bornIn, bornInOwners).enforce();
   }
 
   private static void guardReassignment(
@@ -442,7 +456,7 @@ final class GlobalSpecOperations {
     }
     var targetAssignee = validAssignee(revisionAssignee(specId, request.rev()));
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      SpecPolicy.reassign(specId, existing.assignee(), targetAssignee).enforce();
+      authorizeReassign(specId, existing.assignee(), existing.roomIdOrIdentity(), targetAssignee);
     }
     var store = rooms.get();
     specStore.atomically(

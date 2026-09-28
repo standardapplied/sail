@@ -232,7 +232,7 @@ class RoomsSurfaceTest {
     assertEquals(ErrorCode.CONFLICT, ((Result.Failure<RoomDeletedResponse>) refused).errorCode());
 
     var detail = ((Result.Success<RoomDetailResponse>) ops.room("busy-room")).value();
-    assertEquals(java.util.List.of("work"), detail.room().specIds());
+    assertEquals(List.of("work"), detail.room().specIds());
   }
 
   @Test
@@ -458,8 +458,8 @@ class RoomsSurfaceTest {
                     "",
                     "",
                     HANDLE,
-                    java.util.List.of(),
-                    java.util.List.of())));
+                    List.of(),
+                    List.of())));
 
     var posted =
         Actor.call(
