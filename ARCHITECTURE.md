@@ -681,20 +681,24 @@ these roles distinct is what lets the synced catalog stay identity-free.
   FDE on main takes effect at every door on every box once the roster syncs. The host CLI is
   the box's FDE: when the box has a sync handle, its API token is bound to that FDE — minted
   bound by `sail server init`, `sail server start` and `sail upgrade`'s token repair
-  (`HostToken`), and an FDE-less one bound by `sail migrate` — so a host CLI write names that
-  FDE and, on a node, acts with its synced role. A box with no sync handle has no FDE to be, and
-  its token names none: a machine token acts with its minted role.
+  (`HostToken`), and an FDE-less one bound by `sail migrate` and by every sync round once the
+  roster knows the FDE — so a host CLI write names that FDE and, on a node, acts with its synced
+  role. A node whose roster does not know its FDE mints no host token: an FDE-less one would act
+  with its minted admin role. A box with no sync handle has no FDE to be, and its token names
+  none: a machine token acts with its minted role.
 - **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
   a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
   (mutation, reassignment and the posting rule, room lane included), `EraseAuthority`, the room
-  wake (whose box wakes a conversation), membership, the terminal door and main's check of who
-  may post a synced message all read it. A spec left without an assignee stays unassigned, and
+  wake (whose box wakes a conversation), membership, the terminal door, who may read or stop a
+  spec's run and approve its review, and main's check of who may post a synced message all read
+  it. A spec left without an assignee stays unassigned, and
   so does its identity room; any member may claim it by assigning it to themselves, an agent
   for the FDE it acts for, and dispatch refuses it until then. An assignee is an FDE handle,
   never an agent type or a run's principal (`RunStore.isPrincipalHandle`). `created_by` is the
   acting FDE (`Actor.actingFde`: the handle, or the FDE a run acts for), written once at
   create; a spec's creator travels as `_created_by` beside `_actor`, main keeps the one it holds
-  (recording the pusher when a node-born create names none), and a node adopts main's.
+  (recording the pusher when a node-born create names none), and a node adopts main's — the
+  pushing node from the creator main names when it accepts the push.
 - **Every write names who is acting.** One `Actor` (`ai.singlr.sail.identity`: handle,
   `Role`, `Lane`, owner) is the identity of every write, whichever door it came through. Its
   lane names the door:

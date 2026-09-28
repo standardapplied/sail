@@ -70,6 +70,7 @@ import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RelyingParty;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -177,15 +178,7 @@ public final class ServerStartCommand implements Runnable {
     var tokenStore = new TokenStore(db);
     var configPath = SailPaths.clientConfigPath();
     if (tokenStore.list().isEmpty()) {
-      var box = BoxIdentity.config();
-      var minted = HostToken.mint(tokenStore, new FdeStore(db), box, null, configPath);
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ API token created and saved to "
-                  + configPath
-                  + "; "
-                  + HostToken.describe(minted, box)));
-      System.out.println();
+      mintHostToken(tokenStore, new FdeStore(db), configPath);
     }
     var specStore = new SpecStore(db);
     var roomStore = new RoomStore(db);
@@ -388,6 +381,28 @@ public final class ServerStartCommand implements Runnable {
    * sail-launched session. Skipped with a loud note when the box has no sync handle — the socket
    * then keeps refusing interactive callers, which is fail-closed, not broken.
    */
+  /**
+   * Mints the host CLI's API token on a box that holds none. A node whose roster does not know its
+   * FDE yet gets none, loudly: an FDE-less token there would act as admin whatever the roster says,
+   * and the server still starts, so a sync can pull the roster.
+   */
+  private static void mintHostToken(TokenStore tokens, FdeStore roster, Path configPath)
+      throws IOException {
+    var box = BoxIdentity.config();
+    try {
+      var minted = HostToken.mint(tokens, roster, box, null, configPath);
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|green ✓|@ API token created and saved to "
+                  + configPath
+                  + "; "
+                  + HostToken.describe(minted, box)));
+    } catch (IllegalStateException e) {
+      System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + e.getMessage()));
+    }
+    System.out.println();
+  }
+
   private static void provisionBoxCredential(BoxCredentialStore store) {
     var handle = NodeIdentity.handle();
     if (Strings.isBlank(handle)) {

@@ -7,26 +7,39 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RunStore;
+import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * Resource-scoped authorization for the run aggregate: reading a run's log (buffered tail or SSE
  * stream) and stopping it. Pure and I/O-free so REST and SSE evaluate the identical verdict for the
- * identical caller from one place. A run's owner is its spec's assignee — an FDE must not read the
- * logs of a spec that is not assigned to them — or, for an ad-hoc session that works no spec, the
- * handle of the box that launched it; the admin retains override either way.
+ * identical caller from one place. A run's owner is its spec's owner — its assignee, or its creator
+ * while it is unassigned; an FDE must not read the logs of a spec that is not theirs — or, for an
+ * ad-hoc session that works no spec, the handle of the box that launched it; the admin retains
+ * override either way.
  *
- * <p>Fails closed: no owner (an unassigned or deleted spec, an ad-hoc run from a handle-less box)
- * means only an admin may reach it; a machine token's null handle matches no owner.
+ * <p>Fails closed: no owner (a spec with no known assignee or creator, a deleted spec, an ad-hoc
+ * run from a handle-less box) means only an admin may reach it; a machine token's null handle
+ * matches no owner.
  */
 public final class RunPolicy {
 
   private RunPolicy() {}
 
   /**
+   * Who owns {@code run}: the owner of the spec it works, as {@code specOwner} finds it, null when
+   * the spec is gone; or, for an ad-hoc session, the box that launched it.
+   */
+  public static String ownerOf(RunStore.RunRow run, Function<String, Optional<String>> specOwner) {
+    return Strings.isBlank(run.specId()) ? run.node() : specOwner.apply(run.specId()).orElse(null);
+  }
+
+  /**
    * Decides whether {@code actor} may access run {@code runId}: {@code specId} names its spec (null
-   * for an ad-hoc session) and {@code owner} the identity that owns it — the spec's assignee or the
-   * ad-hoc session's launching handle. The provenance guard (does this run belong to this box) is a
-   * separate, earlier check; this governs identity.
+   * for an ad-hoc session) and {@code owner} the identity that owns it — {@link #ownerOf}. The
+   * provenance guard (does this run belong to this box) is a separate, earlier check; this governs
+   * identity.
    */
   public static AccessDecision access(String runId, String specId, String owner) {
     var actor = Actor.current();
@@ -57,7 +70,7 @@ public final class RunPolicy {
         + specId
         + "'"
         + (Strings.isNotBlank(owner)
-            ? ", assigned to '" + owner + "', not you."
-            : ", which is unassigned.");
+            ? ", owned by '" + owner + "', not you."
+            : ", which has no owner.");
   }
 }

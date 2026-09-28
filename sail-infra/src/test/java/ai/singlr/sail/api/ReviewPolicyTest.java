@@ -54,7 +54,7 @@ class ReviewPolicyTest {
   }
 
   @Test
-  void unassignedSpecAllowsOnlyAdmin() {
+  void aSpecWithNoOwnerAllowsOnlyAdmin() {
     var r =
         refused(
             Actor.call(actor("uday", Role.MEMBER), () -> ReviewPolicy.decide(REVIEW, SPEC, "")));

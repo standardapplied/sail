@@ -21,10 +21,17 @@ import java.util.Map;
 public sealed interface CommitOutcome
     permits CommitOutcome.Accepted, CommitOutcome.Rejected, CommitOutcome.Denied {
 
-  /** Main accepted the push and minted {@code rev}, recording {@code author} as who made it. */
-  record Accepted(String rev, String author) implements CommitOutcome {
+  /**
+   * Main accepted the push and minted {@code rev}, recording {@code author} as who made it and
+   * {@code creator} as the creator it holds, null when the entity carries none.
+   */
+  record Accepted(String rev, String author, String creator) implements CommitOutcome {
     public Accepted(String rev) {
-      this(rev, null);
+      this(rev, null, null);
+    }
+
+    public Accepted(String rev, String author) {
+      this(rev, author, null);
     }
   }
 

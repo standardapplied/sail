@@ -105,6 +105,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           null);
     }
 
+    /** Its owner ({@link Ownership#ownerOf}); blank when neither assignee nor creator is known. */
+    public String owner() {
+      return Ownership.ownerOf(assignee, createdBy);
+    }
+
     /** This row with {@code roomId} replaced — the create-time attachment to its room. */
     public SpecRow withRoomId(String roomId) {
       return new SpecRow(

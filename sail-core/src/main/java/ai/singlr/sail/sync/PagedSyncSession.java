@@ -10,6 +10,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.io.InputStream;
@@ -828,8 +829,11 @@ public final class PagedSyncSession implements SyncSession {
           entries.put(
               offer.id(),
               SyncWire.Entry.version(
-                  offer.id(), accepted.rev(), offer.snapshot(), accepted.author()));
-          yield new CommitOutcome.Accepted(accepted.rev(), accepted.author());
+                  offer.id(),
+                  accepted.rev(),
+                  Snapshots.withCreator(offer.snapshot(), accepted.creator()),
+                  accepted.author()));
+          yield new CommitOutcome.Accepted(accepted.rev(), accepted.author(), accepted.creator());
         }
         case SyncWire.Stale _ ->
             new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));

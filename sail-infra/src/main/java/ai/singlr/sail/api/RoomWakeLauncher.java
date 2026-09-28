@@ -129,7 +129,7 @@ public final class RoomWakeLauncher {
             project,
             specId,
             localHandle,
-            Ownership.ownerOf(spec.assignee(), spec.createdBy()),
+            spec.owner(),
             role,
             repoPaths,
             agentType,

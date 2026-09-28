@@ -64,6 +64,7 @@ class SyncWireTest {
               List.of(
                   new SyncWire.Accepted("auth", "7-feed"),
                   new SyncWire.Accepted("mine", "8-feed", "ada"),
+                  new SyncWire.Accepted("born", "9-feed", "ada", "carol"),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
                   new SyncWire.Denied("e", "read-only", "5-main", snapshot()),

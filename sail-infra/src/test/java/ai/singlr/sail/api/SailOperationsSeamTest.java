@@ -18,6 +18,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -932,6 +933,42 @@ class SailOperationsSeamTest {
       assertEquals("main spec", node.specs.findById("auth").orElseThrow().title());
       assertEquals(0, operations.sync(new SyncRequest("override")).report().total());
       assertEquals(List.of("main-target", "override"), targets);
+    }
+  }
+
+  @Test
+  void aRoundBindsTheHostTokenOnceMainsRosterKnowsTheBoxsFde() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var tokens = new TokenStore(node.db);
+      tokens.create(HostToken.NAME, "admin");
+      operations.useControlPlane(
+          node.db,
+          tempDir,
+          new SyncOperations(
+              node.db,
+              "node",
+              tempDir,
+              () -> new SyncConfig("node", "main-target", "node", "node-box"),
+              target ->
+                  channel(
+                      SyncRpcServer.over(
+                          main.db,
+                          "main",
+                          Actor.sync("node", Role.MEMBER),
+                          () ->
+                              List.of(
+                                  Map.of("handle", "node", "role", "viewer", "status", "active")),
+                          SyncTransitionSink.NONE,
+                          SyncWire.UPGRADE_FLOOR))));
+      operations.schema().prepareSync();
+      assertNull(tokens.list().getFirst().fdeHandle());
+
+      operations.sync(new SyncRequest(null));
+
+      var host = tokens.list().getFirst();
+      assertEquals("node", host.fdeHandle(), "the host token now acts as the box's FDE");
     }
   }
 

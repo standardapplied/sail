@@ -9,6 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
@@ -141,6 +142,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
                             current(entityId), currentRev(entityId), recordedAuthor(entityId))));
   }
 
+  private String recordedCreator(String entityId) {
+    var committed = current(entityId);
+    return committed == null ? null : Snapshots.text(committed, Snapshots.CREATOR);
+  }
+
   private String recordedAuthor(String entityId) {
     return changeLog.head(store.entityType(), entityId).map(ChangeLog.Entry::actor).orElse(null);
   }
@@ -178,7 +184,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
             case PushOutcome.Accepted a ->
-                new CommitOutcome.Accepted(a.rev(), recordedAuthor(entityId));
+                new CommitOutcome.Accepted(
+                    a.rev(), recordedAuthor(entityId), recordedCreator(entityId));
             case PushOutcome.Stale s ->
                 new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
             case PushOutcome.Denied d ->

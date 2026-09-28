@@ -20,6 +20,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -157,7 +158,9 @@ public final class SyncOperations {
       }
       var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
       try {
-        reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+        var roster = new FdeStore(db);
+        reportRejectedFdes(applyFdes(roster, session.fetchFdes()));
+        HostToken.bind(new TokenStore(db), roster, configuration.get());
       } catch (RuntimeException e) {
         failures.add(transportFailure("fde", e));
       }

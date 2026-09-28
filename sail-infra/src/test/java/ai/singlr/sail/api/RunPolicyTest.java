@@ -59,11 +59,11 @@ class RunPolicyTest {
   }
 
   @Test
-  void unassignedSpecAllowsOnlyAdmin() {
+  void aSpecWithNoOwnerAllowsOnlyAdmin() {
     var r =
         refused(Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, SPEC, null)));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
-    assertTrue(r.message().contains("unassigned"), r.message());
+    assertTrue(r.message().contains("no owner"), r.message());
     assertAllowed(Actor.call(actor("ops", Role.ADMIN), () -> RunPolicy.access(RUN, SPEC, null)));
   }
 

@@ -582,7 +582,8 @@ public final class SyncRpcServer {
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
         emitTransitions(type, offer.id(), before, main);
-        yield new SyncWire.Accepted(offer.id(), accepted.rev(), accepted.author());
+        yield new SyncWire.Accepted(
+            offer.id(), accepted.rev(), accepted.author(), accepted.creator());
       }
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
       case CommitOutcome.Denied denied ->

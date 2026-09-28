@@ -494,6 +494,30 @@ class StopOperationsTest {
   }
 
   @Test
+  void theCreatorOfAnUnassignedSpecMayStopItsRunAndAnotherMemberMayNot() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, null);
+    seedRun(123, UNIT);
+
+    var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    other, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.failure().errorCode());
+    assertTrue(refusal.getMessage().contains("owned by 'me'"), refusal.getMessage());
+
+    var creator = new Actor("me", Role.MEMBER, Actor.Lane.API);
+    var outcome =
+        Actor.call(creator, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+  }
+
+  @Test
   void aRunWithoutASpecStillStopsButCancelsNothing() throws Exception {
     var shell = liveAgentShell();
     var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);

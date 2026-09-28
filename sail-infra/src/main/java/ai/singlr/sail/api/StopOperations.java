@@ -647,9 +647,7 @@ public final class StopOperations {
           "Ask an admin for a member or admin credential.");
     }
     var owner =
-        Strings.isBlank(run.specId())
-            ? run.node()
-            : specStore.findById(run.specId()).map(SpecStore.SpecRow::assignee).orElse(null);
+        RunPolicy.ownerOf(run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
     if (RunPolicy.access(run.id(), specIdOf(run), owner)
         instanceof AccessDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());

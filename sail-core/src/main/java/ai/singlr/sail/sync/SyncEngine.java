@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.Snapshots;
 import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.LinkedHashSet;
@@ -290,7 +291,7 @@ public final class SyncEngine {
             adoptOrRedetect(
                 offer.id(),
                 offer.offeredLocalRev(),
-                offer.snapshot(),
+                Snapshots.withCreator(offer.snapshot(), a.creator()),
                 a.rev(),
                 a.author(),
                 offer.onAccepted(),

@@ -61,7 +61,7 @@ final class ReviewOperations {
   ReviewApproveResponse approve(String reviewId) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
-    ReviewPolicy.decide(reviewId, review.specId(), specAssignee(review.specId())).enforce();
+    ReviewPolicy.decide(reviewId, review.specId(), specOwner(review.specId())).enforce();
     var humanStage =
         reviewStore.stagesForReview(reviewId).stream()
             .filter(s -> "human".equals(s.stageType()) && "running".equals(s.status()))
@@ -163,7 +163,7 @@ final class ReviewOperations {
   FindingDismissResponse dismissFinding(String reviewId, String findingId) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
-    ReviewPolicy.decide(reviewId, review.specId(), specAssignee(review.specId())).enforce();
+    ReviewPolicy.decide(reviewId, review.specId(), specOwner(review.specId())).enforce();
     var finding =
         reviewStore.findingsForReview(reviewId).stream()
             .filter(candidate -> candidate.id().equals(findingId))
@@ -177,9 +177,9 @@ final class ReviewOperations {
     return new FindingDismissResponse(finding.id(), true);
   }
 
-  /** The current assignee of the review's spec, or null when the spec is absent — fail closed. */
-  private String specAssignee(String specId) {
-    return specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(null);
+  /** The current owner of the review's spec, or null when the spec is absent — fail closed. */
+  private String specOwner(String specId) {
+    return specStore.findById(specId).map(SpecStore.SpecRow::owner).orElse(null);
   }
 
   /** Attribution for an approval: the acting FDE's handle, or {@code sail} for a machine token. */

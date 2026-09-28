@@ -213,7 +213,7 @@ public final class MigrateCommand implements Runnable {
   private static void convergeHost(Sqlite db, boolean jsonOutput) {
     relocateHostConfig(jsonOutput);
     assignBoxId(jsonOutput);
-    bindHostToken(db, BoxIdentity.config(), SailPaths.clientConfigPath(), jsonOutput);
+    bindHostToken(db, BoxIdentity.config(), jsonOutput);
     syncAuthorizedKeys(db, jsonOutput);
     ensureSshdKeepalive(jsonOutput);
     convergeContainers(jsonOutput);
@@ -549,35 +549,25 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
+   * Binds the FDE-less host token to the box's FDE, so the host CLI acts as that FDE: a token
+   * minted before the box had a sync handle, or before the roster knew its FDE. A no-op for a token
+   * already bound, and for a box with no FDE to be.
+   */
+  static void bindHostToken(Sqlite db, SyncConfig box, boolean jsonOutput) {
+    var fde = HostToken.bind(new TokenStore(db), new FdeStore(db), box);
+    if (fde != null && !jsonOutput) {
+      System.out.println(
+          Ansi.AUTO.string("  @|green ✓|@ The host CLI's API token now acts as FDE '" + fde + "'"));
+    }
+  }
+
+  /**
    * Converges the {@code sail} user's {@code authorized_keys} with the SSH-key registry on
    * provisioned hosts. Living here (not in {@code upgrade}) is load-bearing: an upgrade is executed
    * by the OLD binary, which re-execs the NEW binary's {@code migrate} — so this is the one step
    * guaranteed to run new-binary code on every upgrade path. Quiet when there is nothing to do
    * (unprovisioned host, non-root) and never fatal.
    */
-  /**
-   * Binds the FDE-less API token in this box's client config to the box's FDE, so the host CLI acts
-   * as that FDE: a token minted before the box had a sync handle, or before the roster knew its
-   * FDE. A no-op for a token already bound, and for a box with no FDE to be.
-   */
-  static void bindHostToken(Sqlite db, SyncConfig box, Path configPath, boolean jsonOutput) {
-    try {
-      var fde = HostToken.bind(new TokenStore(db), new FdeStore(db), box, configPath);
-      if (fde != null && !jsonOutput) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green ✓|@ The host CLI's API token now acts as FDE '" + fde + "'"));
-      }
-    } catch (IOException e) {
-      System.err.println(
-          "  Could not bind the host CLI's API token to this box's FDE: "
-              + e.getMessage()
-              + ". Rerun 'sudo sail migrate' once "
-              + configPath
-              + " is readable.");
-    }
-  }
-
   private static void syncAuthorizedKeys(Sqlite db, boolean jsonOutput) {
     try {
       if (new AuthorizedKeysSync().sync(db) instanceof AuthorizedKeysSync.Synced synced

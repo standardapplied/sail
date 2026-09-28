@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.identity.Actor;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -77,5 +78,19 @@ public final class Snapshots {
    */
   public static String adoptedCreator(Map<String, Object> snapshot) {
     return Actor.current().lane() == Actor.Lane.MAIN ? text(snapshot, CREATOR) : null;
+  }
+
+  /**
+   * {@code snapshot} naming {@code creator} as its {@link #CREATOR}: an offer main accepted, as
+   * main committed it, since main keeps the creator it holds whatever the offer named. The snapshot
+   * itself when main names none.
+   */
+  public static Map<String, Object> withCreator(Map<String, Object> snapshot, String creator) {
+    if (snapshot == null || creator == null) {
+      return snapshot;
+    }
+    var committed = new LinkedHashMap<>(snapshot);
+    committed.put(CREATOR, creator);
+    return committed;
   }
 }

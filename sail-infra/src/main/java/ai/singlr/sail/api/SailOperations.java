@@ -1248,20 +1248,15 @@ public final class SailOperations implements HostOperations {
     return served.apply(run);
   }
 
-  /** The identity that owns a run: its spec's assignee, or the launching node for ad-hoc runs. */
   private String runOwner(RunStore.RunRow run) {
-    return Strings.isBlank(run.specId()) ? run.node() : specAssignee(run.specId());
+    return RunPolicy.ownerOf(run, this::specOwner);
   }
 
-  /**
-   * The current assignee of {@code specId}, or null when the spec is absent or the store is not
-   * wired.
-   */
-  private String specAssignee(String specId) {
-    if (specStore == null || Strings.isBlank(specId)) {
-      return null;
-    }
-    return specStore.findById(specId).map(SpecStore.SpecRow::assignee).orElse(null);
+  /** The current owner of {@code specId}, empty when the spec is absent or the store not wired. */
+  private Optional<String> specOwner(String specId) {
+    return specStore == null
+        ? Optional.empty()
+        : specStore.findById(specId).map(SpecStore.SpecRow::owner);
   }
 
   private RunStore requireRunStore() {

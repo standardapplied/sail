@@ -1044,6 +1044,64 @@ class SailOperationsTest {
   }
 
   @Test
+  void runLogAllowsTheCreatorOfAnUnassignedRunSpecAndRefusesAnotherMember() throws Exception {
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell()
+                .on("incus list ^acme$", RUNNING_JSON)
+                .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"),
+            null,
+            specs ->
+                Acting.as(
+                    "me",
+                    () ->
+                        specs.create(
+                            new SpecStore.SpecRow(
+                                "auth",
+                                "acme",
+                                "Add auth",
+                                SpecStatus.PENDING,
+                                null,
+                                null,
+                                null,
+                                null,
+                                null,
+                                0,
+                                "me",
+                                null,
+                                null,
+                                "me",
+                                List.of(),
+                                List.of()))),
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "me",
+                    "build",
+                    "claude-code",
+                    "feat/auth",
+                    "do it",
+                    123,
+                    null,
+                    RUN_LOG,
+                    "sail-agent-" + R1));
+
+    var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
+    assertError(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        Acting.by(other, () -> operations.runLog(R1, 2, "node-a")));
+
+    var creator = new Actor("me", Role.MEMBER, Actor.Lane.API);
+    var result = Acting.by(creator, () -> operations.runLog(R1, 2, "node-a"));
+
+    assertEquals(List.of("one", "two"), get(result, "lines"));
+  }
+
+  @Test
   void runLogRefusesAMemberWhoIsNotTheRunSpecAssignee() throws Exception {
     var operations = opsWithLocalRunAndSpec(shell().on("incus list ^acme$", RUNNING_JSON));
 

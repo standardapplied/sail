@@ -98,6 +98,7 @@ public final class SyncWire {
   private static final String KIND = "kind";
   private static final String ERASE = "erase";
   private static final String AUTHOR = "author";
+  private static final String CREATOR = "creator";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -420,12 +421,17 @@ public final class SyncWire {
 
   /**
    * Main minted {@code rev} for the offer, recording {@code author} as who made it: the author the
-   * offer named, or the pusher when it named none. The node records the same one when it settles
-   * its offer; an older main sends none.
+   * offer named, or the pusher when it named none; and {@code creator} as the creator main holds,
+   * which may not be the one the offer named. The node records the same ones when it settles its
+   * offer; an older main sends neither.
    */
-  public record Accepted(String id, String rev, String author) implements Result {
+  public record Accepted(String id, String rev, String author, String creator) implements Result {
     public Accepted(String id, String rev) {
-      this(id, rev, null);
+      this(id, rev, null, null);
+    }
+
+    public Accepted(String id, String rev, String author) {
+      this(id, rev, author, null);
     }
   }
 
@@ -767,6 +773,9 @@ public final class SyncWire {
         if (accepted.author() != null) {
           verdict.put(AUTHOR, accepted.author());
         }
+        if (accepted.creator() != null) {
+          verdict.put(CREATOR, accepted.creator());
+        }
         map.put(ACCEPTED, verdict);
       }
       case Stale _ -> map.put(STALE, true);
@@ -792,7 +801,8 @@ public final class SyncWire {
     var id = string(map, ID);
     var accepted = snapshot(map, ACCEPTED);
     if (accepted != null) {
-      return new Accepted(id, string(accepted, REV), string(accepted, AUTHOR));
+      return new Accepted(
+          id, string(accepted, REV), string(accepted, AUTHOR), string(accepted, CREATOR));
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);

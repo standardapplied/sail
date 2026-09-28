@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
@@ -20,6 +21,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
@@ -112,13 +114,11 @@ class HostCliIdentityTest {
     assertEquals(0, create(token, "before"));
     assertNull(specs.findById("before").orElseThrow().createdBy(), "an FDE-less token is no one");
 
-    MigrateCommand.bindHostToken(db, MAIN, configPath, true);
+    MigrateCommand.bindHostToken(db, MAIN, true);
 
     assertEquals(0, create(token, "after"));
     assertEquals("uday", specs.findById("after").orElseThrow().createdBy());
-    assertNull(
-        ai.singlr.sail.engine.HostToken.bind(new TokenStore(db), fdes, MAIN, configPath),
-        "a bound token is bound once");
+    assertNull(HostToken.bind(new TokenStore(db), fdes, MAIN), "a bound token is bound once");
   }
 
   @Test
@@ -128,9 +128,7 @@ class HostCliIdentityTest {
     var minted = operations.identity().mintHostToken(configPath);
 
     assertNull(minted.fde());
-    assertTrue(
-        ai.singlr.sail.engine.HostToken.describe(minted, SyncConfig.unset())
-            .contains("no sync handle"));
+    assertTrue(HostToken.describe(minted, SyncConfig.unset()).contains("no sync handle"));
   }
 
   @Test
@@ -145,6 +143,19 @@ class HostCliIdentityTest {
 
     fdes.update("uday", null, null, "member");
     assertEquals(0, create(token, "allowed"));
+  }
+
+  @Test
+  void aNodeWhoseRosterLacksItsFdeMintsNoHostToken() throws Exception {
+    serve(NODE);
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class, () -> operations.identity().mintHostToken(configPath));
+
+    assertTrue(refused.getMessage().contains("'uday' is not in this node's roster"));
+    assertTrue(operations.identity().tokens().isEmpty(), "no FDE-less admin token on a node");
+    assertNull(ServerConnectionConfig.savedToken(configPath));
   }
 
   @Test

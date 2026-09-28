@@ -10,12 +10,12 @@ import ai.singlr.sail.identity.Actor;
 
 /**
  * Resource-scoped authorization for the review aggregate: approving a review and dismissing a
- * finding. Pure and I/O-free. The FDE who owns the work — the assignee of the review's spec — may
- * accept their own review gate; an admin retains override. Reads are open to any READ credential
- * and do not travel this policy.
+ * finding. Pure and I/O-free. The FDE who owns the work — the owner of the review's spec, its
+ * assignee or, while it is unassigned, its creator — may accept their own review gate; an admin
+ * retains override. Reads are open to any READ credential and do not travel this policy.
  *
- * <p>Fails closed: a review whose spec has no assignee (or was deleted) yields no owner, so only an
- * admin may act; a machine token's null handle matches no assignee.
+ * <p>Fails closed: a review whose spec has no owner (or was deleted) may be acted on only by an
+ * admin; a machine token's null handle matches no owner.
  */
 public final class ReviewPolicy {
 
@@ -23,14 +23,14 @@ public final class ReviewPolicy {
 
   /**
    * Decides whether {@code actor} may approve review {@code reviewId} or dismiss one of its
-   * findings, given its spec {@code specId} is assigned to {@code specAssignee}.
+   * findings, given its spec {@code specId} is owned by {@code specOwner}.
    */
-  public static AccessDecision decide(String reviewId, String specId, String specAssignee) {
+  public static AccessDecision decide(String reviewId, String specId, String specOwner) {
     var actor = Actor.current();
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    if (Strings.isNotBlank(specAssignee) && specAssignee.equals(actor.handle())) {
+    if (Strings.isNotBlank(specOwner) && specOwner.equals(actor.handle())) {
       return AccessDecision.allowed();
     }
     return AccessDecision.refused(
@@ -40,11 +40,11 @@ public final class ReviewPolicy {
             + " is for spec '"
             + specId
             + "'"
-            + (Strings.isNotBlank(specAssignee)
-                ? ", assigned to '" + specAssignee + "', not you."
-                : ", which is unassigned."),
+            + (Strings.isNotBlank(specOwner)
+                ? ", owned by '" + specOwner + "', not you."
+                : ", which has no owner."),
         "Only "
-            + (Strings.isNotBlank(specAssignee) ? specAssignee : "the spec's assignee")
+            + (Strings.isNotBlank(specOwner) ? specOwner : "the spec's owner")
             + " or an admin may approve or dismiss it.");
   }
 }

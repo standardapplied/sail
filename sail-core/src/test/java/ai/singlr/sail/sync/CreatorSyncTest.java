@@ -11,6 +11,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
@@ -65,6 +66,7 @@ class CreatorSyncTest {
     round(bob);
 
     assertEquals("alice", creatorOf(main, "legacy"));
+    assertEquals("alice", creatorOf(alice, "legacy"), "the pusher adopts the creator main records");
     assertEquals("alice", creatorOf(bob, "legacy"));
   }
 
@@ -80,6 +82,7 @@ class CreatorSyncTest {
 
     assertEquals("Retitled", main.specs.findById("draft").orElseThrow().title());
     assertEquals("carol", creatorOf(main, "draft"));
+    assertEquals("carol", creatorOf(alice, "draft"), "the pusher adopts main's creator");
     assertEquals("carol", creatorOf(bob, "draft"));
   }
 
@@ -95,6 +98,7 @@ class CreatorSyncTest {
 
     assertEquals("Retitled", bob.specs.findById("draft").orElseThrow().title());
     assertEquals("carol", creatorOf(main, "draft"));
+    assertEquals("carol", creatorOf(alice, "draft"), "the pusher adopts main's creator");
     assertEquals("carol", creatorOf(bob, "draft"));
   }
 
@@ -142,7 +146,7 @@ class CreatorSyncTest {
         "carol",
         () ->
             box.specs.update(
-                new ai.singlr.sail.store.SpecStore.SpecRow(
+                new SpecStore.SpecRow(
                     row.id(),
                     row.project(),
                     title,
@@ -162,7 +166,7 @@ class CreatorSyncTest {
                     row.roomId())));
   }
 
-  private static ai.singlr.sail.store.SpecStore.SpecRow unassigned(String id) {
+  private static SpecStore.SpecRow unassigned(String id) {
     return SyncBox.spec(id, "Draft", "pending");
   }
 
