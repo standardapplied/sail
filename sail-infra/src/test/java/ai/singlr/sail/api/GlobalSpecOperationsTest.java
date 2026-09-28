@@ -78,12 +78,11 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
-  void createAutoAssignsToTheCreatorWhenUnassigned() {
-    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of()), UDAY_ADMIN));
-    assertEquals(
-        "uday",
-        ops.get("auth").spec().assignee(),
-        "a new room lands on the caller so their box wakes it — no orphan on nobody's board");
+  void createLeavesABlankAssigneeUnassignedAndRecordsTheCreator() {
+    Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of("assignee", " ")), UDAY_ADMIN));
+    var spec = ops.get("auth").spec();
+    assertNull(spec.assignee(), "anyone may claim it; its creator's box wakes its room");
+    assertEquals("uday", spec.createdBy());
   }
 
   @Test
@@ -906,7 +905,8 @@ class GlobalSpecOperationsTest {
     var room = rooms.findById("roomy").orElseThrow();
     assertEquals("Roomy spec", room.title());
     assertEquals("acme", room.project());
-    assertEquals("uday", room.assignee(), "an unassigned create defaults assignee to its creator");
+    assertNull(room.assignee(), "an unassigned spec's identity room is unassigned too");
+    assertEquals("uday", room.createdBy());
     assertNull(room.roster(), "a fresh room seats nobody");
   }
 

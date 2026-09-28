@@ -197,7 +197,9 @@ public final class SpecSkillGenerator {
         - **id** (required): stable identifier, lowercase with hyphens
         - **title** (required): short human-readable description
         - **status**: one of pending, in_progress, review, awaiting_merge, done
-        - **assignee**: agent type or engineer name
+        - **assignee**: an FDE handle, or blank for anyone to claim (never an agent type or a
+          run's principal); the agent type goes in `--agent`. An agent claims an unassigned spec
+          for the FDE it acts for
         - **depends-on**: spec ids that must be done first
         - **repos**: target repository paths from `sail.yaml` `repos[].path`
         - **agent**: agent CLI for this spec (`claude-code` or `codex`)

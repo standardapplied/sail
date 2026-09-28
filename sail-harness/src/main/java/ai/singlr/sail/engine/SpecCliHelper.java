@@ -102,12 +102,14 @@ public final class SpecCliHelper {
         spec board                         show the kanban summary
         spec list [--status S] [--assignee me] [--search Q]
         spec show <id>
-        spec create --id <id> --title <title> [--body-file F] [--status pending]
+        spec create --id <id> --title <title> [--body-file F] [--status pending] [--assignee H]
                     [--depends-on a,b] [--repos a,b] [--agent A] [--model M]
                     [--reasoning-effort none|low|medium|high|xhigh] [--priority N] [--plan-file F]
                     [--room R]  (default: $SAIL_ROOM_ID when this terminal is pinned to a room)
         spec update <id> [--status S] [--title T] [--assignee H] [--wake on|mention|off]
                     [--force] [...]  (alias: edit)
+                    --assignee takes an FDE handle; leave it blank for anyone to claim, and
+                    claim an unassigned spec for your FDE. The agent type goes in --agent.
         spec content <id> --body-file F [--plan-file F]   revise the body
         spec comment <id> --body <text>|- [--reply-to <message-id>] [--question]
                     (--question flags a blocking question so the board pages the engineer)

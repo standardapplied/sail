@@ -92,7 +92,7 @@ public final class DispatchPolicy {
       return new DispatchDecision.Refused(
           ErrorCode.RUNS_ON_OTHER_NODE,
           "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
-          "Assign it first: sail spec update " + spec.id() + " --assignee " + localHandle);
+          "Claim it first: sail spec update " + spec.id() + " --assignee " + localHandle);
     }
     return new DispatchDecision.Refused(
         ErrorCode.RUNS_ON_OTHER_NODE,

@@ -116,14 +116,13 @@ final class GlobalSpecOperations {
           "spec project is required.",
           "Pass --project <name> or run from a directory containing sail.yaml.");
     }
-    var assignee = Strings.isBlank(request.assignee()) ? actor.handle() : request.assignee();
     var row =
         new SpecStore.SpecRow(
             request.id(),
             request.project(),
             request.title(),
             parseStatus(request.status(), SpecStatus.PENDING),
-            assignee,
+            validAssignee(request.assignee()),
             request.agent(),
             validModel(request.model()),
             validReasoning(request.reasoningEffort()),
@@ -228,6 +227,7 @@ final class GlobalSpecOperations {
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {
     requireStore();
+    validAssignee(request.assignee());
     var existing = findOrThrow(specId);
     authorizeUpdate(actor, existing, request);
     guardReassignment(specId, existing, request);
@@ -534,6 +534,22 @@ final class GlobalSpecOperations {
           ErrorCode.INTERNAL,
           "Spec store not available. Start the server with 'sail server start'.");
     }
+  }
+
+  /**
+   * An assignee is an FDE handle, or blank for anyone to claim — never a run's principal, whose
+   * shape ({@link RunStore#isPrincipalHandle}) no FDE handle has. A handle this box's roster does
+   * not know yet is accepted: a node may not have synced a new FDE.
+   */
+  private static String validAssignee(String assignee) {
+    if (RunStore.isPrincipalHandle(assignee)) {
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST,
+          "Assignee '" + assignee + "' names a run, not an FDE.",
+          "Give an FDE handle, or leave it blank for anyone to claim; the agent type goes in"
+              + " --agent.");
+    }
+    return Strings.isBlank(assignee) ? null : assignee;
   }
 
   private static String validModel(String model) {

@@ -816,6 +816,19 @@ class SailOperationsTest {
   }
 
   @Test
+  void anUnassignedSpecIsRefusedUntilClaimedAndTheRefusalNamesTheClaim() throws Exception {
+    var operations =
+        operationsWithStore(
+            baseYaml(), idleShell(), store -> seedAssigned(store, "draft", "pending", null));
+
+    var refused = operations.dispatch("acme", request("draft"), ADMIN, LOCAL_HANDLE);
+
+    assertError(ErrorCode.RUNS_ON_OTHER_NODE, refused);
+    assertEquals(
+        "Claim it first: sail spec update draft --assignee " + LOCAL_HANDLE, refused.action());
+  }
+
+  @Test
   void specAssignedToAnotherNodeIsRefusedRunsOnOtherNode() throws Exception {
     var operations =
         operationsWithStore(
