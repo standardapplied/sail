@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.Snapshots;
 import java.util.Map;
 
 /**
@@ -23,9 +24,9 @@ public sealed interface CommitOutcome
 
   /**
    * Main accepted the push and minted {@code rev}, recording {@code author} as who made it and
-   * {@code creator} as the creator it holds, null when the entity carries none.
+   * holding {@code creator}, null when the entity carries no creator or main did not say.
    */
-  record Accepted(String rev, String author, String creator) implements CommitOutcome {
+  record Accepted(String rev, String author, Snapshots.Creator creator) implements CommitOutcome {
     public Accepted(String rev) {
       this(rev, null, null);
     }

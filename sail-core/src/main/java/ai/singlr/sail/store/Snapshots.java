@@ -72,25 +72,34 @@ public final class Snapshots {
   }
 
   /**
-   * The creator {@code snapshot} writes over the one a row already holds, or null to keep the row's
-   * own. A creator is written once, at create: main keeps the one it holds whatever a later offer
-   * names, and only a node adopting main's revision takes the creator main holds.
+   * The creator a row that holds {@code held} records when written from {@code snapshot}. A creator
+   * is written once, at create: main keeps the one it holds whatever a later offer names, and only
+   * a node adopting main's revision takes the creator main holds, none included. A snapshot without
+   * the {@link #CREATOR} key, from a main that predates it, keeps {@code held}.
    */
-  public static String adoptedCreator(Map<String, Object> snapshot) {
-    return Actor.current().lane() == Actor.Lane.MAIN ? text(snapshot, CREATOR) : null;
+  public static String adoptedCreator(Map<String, Object> snapshot, String held) {
+    return Actor.current().lane() == Actor.Lane.MAIN && snapshot.containsKey(CREATOR)
+        ? text(snapshot, CREATOR)
+        : held;
   }
+
+  /**
+   * The creator main holds for an entity; {@code handle} is null when it holds none. A null {@code
+   * Creator} is a main that did not say.
+   */
+  public record Creator(String handle) {}
 
   /**
    * {@code snapshot} naming {@code creator} as its {@link #CREATOR}: an offer main accepted, as
    * main committed it, since main keeps the creator it holds whatever the offer named. The snapshot
-   * itself when main names none.
+   * itself when main did not say.
    */
-  public static Map<String, Object> withCreator(Map<String, Object> snapshot, String creator) {
+  public static Map<String, Object> withCreator(Map<String, Object> snapshot, Creator creator) {
     if (snapshot == null || creator == null) {
       return snapshot;
     }
     var committed = new LinkedHashMap<>(snapshot);
-    committed.put(CREATOR, creator);
+    committed.put(CREATOR, creator.handle());
     return committed;
   }
 }

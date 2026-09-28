@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -113,6 +114,25 @@ class CreatorSyncTest {
     round(bob);
 
     assertEquals("carol", creatorOf(bob, "draft"));
+  }
+
+  @Test
+  void aNodeAdoptsTheNoCreatorMainHoldsOverItsOwn() throws IOException {
+    Acting.as(null, () -> main.specs.create(unassigned("twin")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("twin")));
+
+    round(alice);
+    assertNull(creatorOf(alice, "twin"), "adopting main's version adopts its creator, none");
+
+    alice.db.execute("UPDATE specs SET created_by = 'alice' WHERE id = 'twin'");
+    retitle(alice, "twin", "Retitled");
+    round(alice);
+    round(alice);
+
+    assertEquals("Retitled", main.specs.findById("twin").orElseThrow().title());
+    assertNull(creatorOf(main, "twin"));
+    assertNull(creatorOf(alice, "twin"), "the pusher adopts the none main holds");
+    assertEquals(main.replica.currentRev("twin"), alice.replica.currentRev("twin"));
   }
 
   @Test

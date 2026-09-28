@@ -142,9 +142,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
                             current(entityId), currentRev(entityId), recordedAuthor(entityId))));
   }
 
-  private String recordedCreator(String entityId) {
+  private Snapshots.Creator recordedCreator(String entityId) {
     var committed = current(entityId);
-    return committed == null ? null : Snapshots.text(committed, Snapshots.CREATOR);
+    return committed == null || !committed.containsKey(Snapshots.CREATOR)
+        ? null
+        : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
   }
 
   private String recordedAuthor(String entityId) {

@@ -15,10 +15,11 @@ import java.util.Objects;
  * Validates bearer tokens against the SQLite-backed {@link TokenStore} and stamps the token's
  * identity and role on the exchange. A token bound to an FDE acts with the role {@link RoleRule}
  * gives that FDE, capped by the token's minted role, and is refused when the FDE is disabled; a
- * machine token that names no FDE acts with its minted role. Authentication only — {@link
- * Authorizer} is the authorization tier and enforces {@code token.role} per route (it runs
- * immediately after this in {@code ApiRouter}). The loopback bind is an additional network
- * boundary, not a substitute for the role check.
+ * machine token that names no FDE acts as the box's FDE when the box has a sync handle, and with
+ * its minted role when it has none. Authentication only — {@link Authorizer} is the authorization
+ * tier and enforces {@code token.role} per route (it runs immediately after this in {@code
+ * ApiRouter}). The loopback bind is an additional network boundary, not a substitute for the role
+ * check.
  */
 public final class TokenAuth implements ApiAuth {
 
@@ -57,16 +58,25 @@ public final class TokenAuth implements ApiAuth {
 
   private Role roleOf(TokenStore.TokenInfo token) {
     var minted = Role.fromAttribute(token.role());
-    if (token.fdeHandle() == null) {
-      return minted;
+    var handle = token.fdeHandle();
+    if (handle == null) {
+      return roles
+          .roleOfUnbound(minted)
+          .orElseThrow(
+              () ->
+                  new ApiException(
+                      ErrorCode.INVALID_BEARER_TOKEN,
+                      "Bearer token names no FDE, so it acts as this box's FDE, which this box's"
+                          + " roster does not know or has disabled.",
+                      "Run 'sudo sail sync' to pull main's roster."));
     }
     return roles
-        .roleOf(token.fdeHandle(), minted)
+        .roleOf(handle, minted)
         .orElseThrow(
             () ->
                 new ApiException(
                     ErrorCode.INVALID_BEARER_TOKEN,
-                    "Bearer token's FDE '" + token.fdeHandle() + "' is disabled.",
-                    "Ask an admin to re-enable '" + token.fdeHandle() + "'."));
+                    "Bearer token's FDE '" + handle + "' is disabled.",
+                    "Ask an admin to re-enable '" + handle + "'."));
   }
 }

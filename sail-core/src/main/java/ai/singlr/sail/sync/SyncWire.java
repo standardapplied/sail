@@ -9,6 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
+import ai.singlr.sail.store.Snapshots;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -422,10 +423,11 @@ public final class SyncWire {
   /**
    * Main minted {@code rev} for the offer, recording {@code author} as who made it: the author the
    * offer named, or the pusher when it named none; and {@code creator} as the creator main holds,
-   * which may not be the one the offer named. The node records the same ones when it settles its
-   * offer; an older main sends neither.
+   * which may not be the one the offer named, and may be none. The node records the same ones when
+   * it settles its offer; an older main sends neither.
    */
-  public record Accepted(String id, String rev, String author, String creator) implements Result {
+  public record Accepted(String id, String rev, String author, Snapshots.Creator creator)
+      implements Result {
     public Accepted(String id, String rev) {
       this(id, rev, null, null);
     }
@@ -774,7 +776,7 @@ public final class SyncWire {
           verdict.put(AUTHOR, accepted.author());
         }
         if (accepted.creator() != null) {
-          verdict.put(CREATOR, accepted.creator());
+          verdict.put(CREATOR, accepted.creator().handle());
         }
         map.put(ACCEPTED, verdict);
       }
@@ -801,8 +803,9 @@ public final class SyncWire {
     var id = string(map, ID);
     var accepted = snapshot(map, ACCEPTED);
     if (accepted != null) {
-      return new Accepted(
-          id, string(accepted, REV), string(accepted, AUTHOR), string(accepted, CREATOR));
+      var creator =
+          accepted.containsKey(CREATOR) ? new Snapshots.Creator(string(accepted, CREATOR)) : null;
+      return new Accepted(id, string(accepted, REV), string(accepted, AUTHOR), creator);
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);

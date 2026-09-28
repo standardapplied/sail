@@ -103,6 +103,29 @@ class RoleRuleTest {
   }
 
   @Test
+  void aCredentialNamingNoFdeActsAsTheBoxsFdeWhenTheBoxHasASyncHandle() {
+    assertEquals(
+        Optional.of(Role.ADMIN), new RoleRule(() -> MAIN, roster).roleOfUnbound(Role.ADMIN));
+    assertEquals(
+        Optional.of(Role.MEMBER), new RoleRule(() -> NODE, roster).roleOfUnbound(Role.ADMIN));
+    assertEquals(
+        Optional.of(Role.MEMBER),
+        new RoleRule(() -> STANDALONE, roster).roleOfUnbound(Role.MEMBER));
+    assertEquals(
+        Optional.of(Role.ADMIN),
+        new RoleRule(SyncConfig::unset, roster).roleOfUnbound(Role.ADMIN),
+        "a box with no sync handle has no FDE to cap it");
+  }
+
+  @Test
+  void aCredentialNamingNoFdeOnANodeWhoseRosterLacksItsFdeIsRefused() {
+    var stranger = new SyncConfig("node", "sail@main", "stranger", "node-box");
+
+    assertEquals(Optional.empty(), new RoleRule(() -> stranger, roster).roleOfUnbound(Role.ADMIN));
+    assertEquals(Optional.empty(), new RoleRule(() -> NODE, null).roleOfUnbound(Role.ADMIN));
+  }
+
+  @Test
   void aRoleIsCappedByTheLesserOfTheTwo() {
     assertEquals(Role.MEMBER, Role.ADMIN.cappedBy(Role.MEMBER));
     assertEquals(Role.VIEWER, Role.VIEWER.cappedBy(Role.ADMIN));

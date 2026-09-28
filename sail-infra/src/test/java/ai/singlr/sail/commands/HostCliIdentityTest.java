@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
@@ -146,16 +145,33 @@ class HostCliIdentityTest {
   }
 
   @Test
-  void aNodeWhoseRosterLacksItsFdeMintsNoHostToken() throws Exception {
+  void anFdeLessHostTokenOnANodeActsAsTheBoxsFdeAndIsRefusedUntilTheRosterKnowsIt()
+      throws Exception {
+    var token = new TokenStore(db).create(HostToken.NAME, "admin").token();
     serve(NODE);
 
-    var refused =
-        assertThrows(
-            IllegalStateException.class, () -> operations.identity().mintHostToken(configPath));
+    assertNotEquals(0, create(token, "unknown"), "a node's roster does not know its FDE yet");
+    fdes.add("uday", null, null, "viewer");
+    assertNotEquals(0, create(token, "viewer"), "an FDE-less token acts as the box's viewer FDE");
+    fdes.update("uday", null, null, "member");
+    assertEquals(0, create(token, "member"));
 
-    assertTrue(refused.getMessage().contains("'uday' is not in this node's roster"));
-    assertTrue(operations.identity().tokens().isEmpty(), "no FDE-less admin token on a node");
-    assertNull(ServerConnectionConfig.savedToken(configPath));
+    assertTrue(specs.findById("unknown").isEmpty());
+    assertTrue(specs.findById("viewer").isEmpty());
+  }
+
+  @Test
+  void aNodeWhoseRosterLacksItsFdeMintsAHostTokenTheNextBindNames() throws Exception {
+    serve(NODE);
+
+    var minted = operations.identity().mintHostToken(configPath);
+
+    assertNull(minted.fde());
+    assertTrue(HostToken.describe(minted, NODE).contains("acts with that FDE's role"));
+    fdes.add("uday", null, null, "member");
+    assertEquals("uday", HostToken.bind(new TokenStore(db), fdes, NODE));
+    assertEquals(0, create(ServerConnectionConfig.savedToken(configPath), "bound"));
+    assertEquals("uday", specs.findById("bound").orElseThrow().createdBy());
   }
 
   @Test

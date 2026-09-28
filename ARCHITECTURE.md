@@ -683,9 +683,10 @@ these roles distinct is what lets the synced catalog stay identity-free.
   bound by `sail server init`, `sail server start` and `sail upgrade`'s token repair
   (`HostToken`), and an FDE-less one bound by `sail migrate` and by every sync round once the
   roster knows the FDE — so a host CLI write names that FDE and, on a node, acts with its synced
-  role. A node whose roster does not know its FDE mints no host token: an FDE-less one would act
-  with its minted admin role. A box with no sync handle has no FDE to be, and its token names
-  none: a machine token acts with its minted role.
+  role. A token that names no FDE, the host token before it is bound included, acts as the box's
+  FDE when the box has a sync handle (`RoleRule.roleOfUnbound`), so on a node it is refused until
+  the roster knows that FDE and never acts beyond it. A box with no sync handle has no FDE to be,
+  and its token names none: a machine token acts with its minted role.
 - **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
   a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
   (mutation, reassignment and the posting rule, room lane included), `EraseAuthority`, the room

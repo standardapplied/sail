@@ -730,12 +730,13 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     var plan = blobs.text(planHash);
     var spec = specFromSnapshot(snapshot);
     var now = DateTimeUtils.now().toString();
-    if (findById(id).isPresent()) {
+    var held = findById(id);
+    if (held.isPresent()) {
       db.execute(
           """
           UPDATE specs SET project = ?, title = ?, status = ?, assignee = ?, agent = ?, model = ?,
               reasoning_effort = ?, branch = ?, priority = ?, updated_at = ?, updated_by = ?,
-              room_id = ?, created_by = COALESCE(?, created_by)
+              room_id = ?, created_by = ?
           WHERE id = ?""",
           spec.project(),
           spec.title(),
@@ -749,7 +750,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           now,
           spec.updatedBy(),
           spec.roomIdOrIdentity(),
-          Snapshots.adoptedCreator(snapshot),
+          Snapshots.adoptedCreator(snapshot, held.get().createdBy()),
           id);
       db.execute("DELETE FROM spec_dependencies WHERE spec_id = ?", id);
       db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
@@ -858,10 +859,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     if (author != null) {
       m.put(Snapshots.ACTOR, author);
     }
-    var creator = full.get("created_by");
-    if (creator != null) {
-      m.put(Snapshots.CREATOR, creator);
-    }
+    m.put(Snapshots.CREATOR, full.get("created_by"));
     return m;
   }
 

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Snapshots;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,7 +65,8 @@ class SyncWireTest {
               List.of(
                   new SyncWire.Accepted("auth", "7-feed"),
                   new SyncWire.Accepted("mine", "8-feed", "ada"),
-                  new SyncWire.Accepted("born", "9-feed", "ada", "carol"),
+                  new SyncWire.Accepted("born", "9-feed", "ada", new Snapshots.Creator("carol")),
+                  new SyncWire.Accepted("none", "10-feed", "ada", new Snapshots.Creator(null)),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
                   new SyncWire.Denied("e", "read-only", "5-main", snapshot()),

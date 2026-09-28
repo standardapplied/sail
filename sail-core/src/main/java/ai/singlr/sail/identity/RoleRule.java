@@ -20,7 +20,8 @@ import java.util.function.Supplier;
  * Either way the credential's own role caps it, so no credential acts beyond what it was minted
  * with. An FDE the roster marks disabled is refused, and so is one it does not know, unless it is
  * the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE but its
- * operator.
+ * operator. A credential that names no FDE acts as the box's FDE when the box has a sync handle, so
+ * no credential on a box acts beyond the FDE whose box it is.
  */
 public record RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
 
@@ -44,6 +45,16 @@ public record RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
       return Optional.of(Role.ADMIN.cappedBy(cap));
     }
     return fde.map(found -> Role.fromAttribute(found.role()).cappedBy(cap));
+  }
+
+  /**
+   * The role a credential that names no FDE, minted with {@code cap}, acts with: the role of the
+   * FDE this box's sync handle names, so on a node it is refused until the roster knows that FDE;
+   * on a box with no sync handle, {@code cap}. Empty when the credential is refused.
+   */
+  public Optional<Role> roleOfUnbound(Role cap) {
+    var handle = box.get().handle();
+    return Strings.isBlank(handle) ? Optional.of(cap) : roleOf(handle, cap);
   }
 
   private boolean isOperator(String handle) {
