@@ -67,6 +67,15 @@ class TestOperations implements Operations {
     return Optional.of(new Actor(BOX_HANDLE, Role.MEMBER, Actor.Lane.CLI));
   }
 
+  /** Every run here acts for an active member FDE, so its lane decides its role. */
+  @Override
+  public Optional<Actor> runActor(RunStore.RunRow run) {
+    return Optional.of(
+        run.readOnlyLane()
+            ? Actor.roomPrincipal(run.principal(), run.owner())
+            : Actor.agentPrincipal(run.principal(), run.owner()));
+  }
+
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {
     if (ROOM_RUN_CREDENTIAL.equals(credential)) {

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -159,7 +160,12 @@ class AgentPrincipalLifecycleTest {
             null,
             specStore,
             new ReviewStore(db),
-            runStore);
+            runStore,
+            null,
+            ConnectEnvironment::detect,
+            SyncScheduler.disabled(),
+            new FdeStore(db),
+            SessionYield.NONE);
     var router = new LocalApiRouter(bus, operations);
     var delivered = new java.util.concurrent.CountDownLatch(1);
     var subscription =
@@ -318,7 +324,12 @@ class AgentPrincipalLifecycleTest {
             null,
             specStore,
             new ReviewStore(db),
-            runStore);
+            runStore,
+            null,
+            ConnectEnvironment::detect,
+            SyncScheduler.disabled(),
+            new FdeStore(db),
+            SessionYield.NONE);
     var router = new LocalApiRouter(bus, operations);
     var updated = router.handle(request("PUT", "/v1/specs/auth", credential.get(), "priority=7"));
     assertEquals(

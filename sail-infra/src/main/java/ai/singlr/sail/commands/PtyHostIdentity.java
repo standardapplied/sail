@@ -8,7 +8,6 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
-import ai.singlr.sail.store.FdeStore;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.function.Supplier;
@@ -38,9 +37,5 @@ final class PtyHostIdentity implements PtyIdentity.Resolver {
     try (var operations = OperationsFactory.open(dbPath)) {
       return operations.pty().identity(token, boxHandle.get());
     }
-  }
-
-  private static boolean isAdmin(FdeStore fdes, String handle) {
-    return fdes.byHandle(handle).map(fde -> "admin".equals(fde.role())).orElse(false);
   }
 }

@@ -607,14 +607,14 @@ public final class UpgradeCommand implements Runnable {
         }
         if (operations.identity().tokens().isEmpty()) {
           var configPath = SailPaths.clientConfigPath();
-          var minted = operations.identity().mintHostToken(configPath);
+          operations.identity().mintHostToken(configPath);
           if (!json) {
             System.out.println(
                 Ansi.AUTO.string(
                     "    @|green ✓|@ API token created and saved to "
                         + configPath
                         + "; "
-                        + HostToken.describe(minted, operations.identity().box())));
+                        + HostToken.describe(operations.identity().box())));
           }
         }
       }

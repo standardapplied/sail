@@ -542,7 +542,7 @@ public final class SyncRpcServer {
         () ->
             db.<SyncWire.Result>transaction(
                 () -> {
-                  var refusal = authority.refusal(principal, type, offer.id());
+                  var refusal = authority.refusal(type, offer.id());
                   if (refusal.isPresent()) {
                     return new SyncWire.Refused(offer.id(), refusal.get());
                   }
@@ -557,7 +557,7 @@ public final class SyncRpcServer {
                     erasedInSession = true;
                   }
                   var erased = changeLog.erasure(type, offer.id()).orElseThrow();
-                  return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor());
+                  return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor(), null);
                 }));
   }
 

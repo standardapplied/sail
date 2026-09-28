@@ -14,19 +14,23 @@ import java.util.function.Supplier;
 
 /**
  * The role a credential that names an FDE acts with: one rule for every door — an API token, a
- * passkey session, the box credential, the host CLI, a sync session, the SSH gateway and the
- * terminal. This box's operator on main or a standalone box, the FDE its sync handle names, is
- * admin, because they hold root on it. Every other FDE acts with the role main's roster gives it.
- * Either way the credential's own role caps it, so no credential acts beyond what it was minted
- * with. An FDE the roster marks disabled is refused, and so is one it does not know, unless it is
- * the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE but its
- * operator. A credential that names no FDE acts as the box's FDE when the box has a sync handle, so
- * no credential on a box acts beyond the FDE whose box it is.
+ * passkey session, the box credential, the host CLI, a run credential, a sync session, the SSH
+ * gateway and the terminal. This box's operator on main or a standalone box, the FDE its sync
+ * handle names, is admin, because they hold root on it. Every other FDE acts with the role main's
+ * roster gives it. Either way the credential's own role caps it, so no credential acts beyond what
+ * it was minted with. An FDE the roster marks disabled is refused, and so is one it does not know,
+ * unless it is the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE
+ * but its operator. A credential that names no FDE acts with the role of the box's FDE when the box
+ * has a sync handle, so no credential on a box acts beyond the FDE whose box it is.
  */
-public record RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
+public final class RoleRule {
 
-  public RoleRule {
-    Objects.requireNonNull(box, "box");
+  private final Supplier<SyncConfig> box;
+  private final FdeStore roster;
+
+  public RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
+    this.box = Objects.requireNonNull(box, "box");
+    this.roster = roster;
   }
 
   /**
@@ -49,12 +53,17 @@ public record RoleRule(Supplier<SyncConfig> box, FdeStore roster) {
 
   /**
    * The role a credential that names no FDE, minted with {@code cap}, acts with: the role of the
-   * FDE this box's sync handle names, so on a node it is refused until the roster knows that FDE;
-   * on a box with no sync handle, {@code cap}. Empty when the credential is refused.
+   * box's FDE ({@link #boxFde}), so on a node it is refused until the roster knows that FDE; on a
+   * box with no sync handle, {@code cap}. Empty when the credential is refused.
    */
   public Optional<Role> roleOfUnbound(Role cap) {
+    return boxFde().map(handle -> roleOf(handle, cap)).orElse(Optional.of(cap));
+  }
+
+  /** The FDE this box is, named by its sync handle; empty on a box with no sync handle. */
+  public Optional<String> boxFde() {
     var handle = box.get().handle();
-    return Strings.isBlank(handle) ? Optional.of(cap) : roleOf(handle, cap);
+    return Strings.isBlank(handle) ? Optional.empty() : Optional.of(handle);
   }
 
   private boolean isOperator(String handle) {

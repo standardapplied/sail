@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
@@ -37,8 +38,9 @@ final class EraseAuthority {
     this.erasure = new Erasure(db);
   }
 
-  /** Why {@code principal} may not erase {@code type} {@code id}; empty when it may. */
-  Optional<String> refusal(Actor principal, String type, String id) {
+  /** Why the bound actor may not erase {@code type} {@code id}; empty when it may. */
+  Optional<String> refusal(String type, String id) {
+    var principal = Actor.current();
     if (!principal.canWrite()) {
       return Optional.of("a read-only role cannot prune");
     }
@@ -70,7 +72,7 @@ final class EraseAuthority {
               + " on main; archive or cancel it before pruning");
     }
     var owner = spec.get().owner();
-    if (principal.isAdmin() || owner.equals(principal.handle())) {
+    if (principal.isAdmin() || Ownership.owns(principal.handle(), owner)) {
       return Optional.empty();
     }
     if (owner.isBlank()) {

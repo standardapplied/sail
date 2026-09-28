@@ -26,6 +26,7 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -1709,7 +1710,8 @@ class SailOperationsTest {
                 SyncScheduler.disabled(),
                 new FdeStore(db),
                 SessionYield.NONE)
-            .useMessages(new MessageStore(db));
+            .useMessages(new MessageStore(db))
+            .useRooms(new RoomStore(db));
 
     var result =
         Actor.call(

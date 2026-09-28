@@ -147,6 +147,7 @@ class UnassignedSpecTest {
 
   @Test
   void aRunCreatesItForTheFdeItActsForAndClaimsItForThatFde() {
+    new FdeStore(db).add("uday", null, null, "member");
     var credential = runCredential("uday");
     var router = new LocalApiRouter(new EventBus(), operations);
 

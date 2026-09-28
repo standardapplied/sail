@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 
 /**
  * Resource-scoped authorization for the review aggregate: approving a review and dismissing a
@@ -30,7 +31,7 @@ public final class ReviewPolicy {
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }
-    if (Strings.isNotBlank(specOwner) && specOwner.equals(actor.handle())) {
+    if (Ownership.owns(actor.handle(), specOwner)) {
       return AccessDecision.allowed();
     }
     return AccessDecision.refused(

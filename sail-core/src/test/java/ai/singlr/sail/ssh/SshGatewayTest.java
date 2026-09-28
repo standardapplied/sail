@@ -47,6 +47,7 @@ class SshGatewayTest {
     return SshGateway.authorize(
         command,
         handle,
+        fdes,
         new RoleRule(() -> new SyncConfig("main", null, "main-op", "box"), fdes),
         sessions);
   }

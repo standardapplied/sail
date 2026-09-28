@@ -28,10 +28,10 @@ public interface HostIdentity {
   TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl);
 
   /**
-   * Mints this box's host CLI token, bound to the box's FDE when it has one, and saves it to the
-   * client config at {@code configPath}.
+   * Mints this box's host CLI token, which acts as the box's FDE ({@link HostToken}), and saves it
+   * to the client config at {@code configPath}.
    */
-  HostToken.Minted mintHostToken(Path configPath) throws IOException;
+  void mintHostToken(Path configPath) throws IOException;
 
   /** The box's sync configuration, which names the FDE its host CLI acts as. */
   SyncConfig box();

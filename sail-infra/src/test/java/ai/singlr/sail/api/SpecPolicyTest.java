@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /** Table tests for the pure spec access policy: every {role × ownership × verb} shape. */
@@ -188,14 +189,14 @@ class SpecPolicyTest {
   void roomPrincipalMayPostToItsOwnersSpecRoom() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, "raj", "raj")));
+    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, List.of("raj"))));
   }
 
   @Test
   void roomPrincipalMayNotPostToAnotherFdesSpecRoom() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    var r = refused(Actor.call(room, () -> SpecPolicy.post(SPEC, "sumesh", "sumesh")));
+    var r = refused(Actor.call(room, () -> SpecPolicy.post(SPEC, List.of("sumesh"))));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
@@ -204,13 +205,13 @@ class SpecPolicyTest {
   void roomPrincipalMayPostToTheRoomOfAnUnassignedSpecItsFdeCreated() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, "", "raj")));
+    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, List.of("raj"))));
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, "", "sumesh"))).code());
+        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, List.of("sumesh")))).code());
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, null, null))).code());
+        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, List.of()))).code());
   }
 
   @Test
@@ -227,13 +228,46 @@ class SpecPolicyTest {
 
   @Test
   void nonRoomLanesPostUnderThePlainMutationGate() {
-    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, "uday", "raj")));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, List.of("uday"))));
     assertAllowed(
         Actor.call(
             Actor.agentPrincipal("claude/a1b2c3", "raj"),
-            () -> SpecPolicy.post(SPEC, "raj", "raj")));
+            () -> SpecPolicy.post(SPEC, List.of("raj"))));
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        refused(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, "raj", "raj"))).code());
+        refused(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, List.of("raj")))).code());
+  }
+
+  @Test
+  void anyOwnerOfAConversationMayPostInIt() {
+    var owners = List.of("raj", "sumesh");
+
+    assertAllowed(Actor.call(member("sumesh"), () -> SpecPolicy.post(SPEC, owners)));
+    assertAllowed(
+        Actor.call(
+            Actor.roomPrincipal("claude/room-a1b2c3", "raj"), () -> SpecPolicy.post(SPEC, owners)));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, owners)));
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
+    assertTrue(r.message().contains("raj or sumesh"), r.message());
+  }
+
+  @Test
+  void aConversationNoOneOwnsTakesOnlyAnAdminsPost() {
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, List.of())));
+
+    assertTrue(r.message().contains("No one owns"), r.message());
+    assertTrue(r.fix().contains("--assignee"), r.fix());
+    assertAllowed(
+        Actor.call(
+            new Actor("ops", Role.ADMIN, Actor.Lane.API), () -> SpecPolicy.post(SPEC, List.of())));
+  }
+
+  @Test
+  void aViewerMayNotPostOffTheRoomLaneEvenAsTheOwner() {
+    var viewer = new Actor("raj", Role.VIEWER, Actor.Lane.API);
+
+    assertEquals(
+        ErrorCode.READ_ONLY_CREDENTIAL,
+        refused(Actor.call(viewer, () -> SpecPolicy.post(SPEC, List.of("raj")))).code());
   }
 }

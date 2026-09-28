@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.FdeStore;
 import com.sun.net.httpserver.HttpExchange;
 import java.util.Objects;
 
@@ -27,11 +28,14 @@ public final class SessionAwareAuth implements ApiAuth {
   private static final String SESSION_PREFIX = "sess_";
 
   private final AuthSessionStore sessions;
+  private final FdeStore roster;
   private final RoleRule roles;
   private final ApiAuth tokenAuth;
 
-  public SessionAwareAuth(AuthSessionStore sessions, RoleRule roles, ApiAuth tokenAuth) {
+  public SessionAwareAuth(
+      AuthSessionStore sessions, FdeStore roster, RoleRule roles, ApiAuth tokenAuth) {
     this.sessions = Objects.requireNonNull(sessions, "sessions");
+    this.roster = Objects.requireNonNull(roster, "roster");
     this.roles = Objects.requireNonNull(roles, "roles");
     this.tokenAuth = Objects.requireNonNull(tokenAuth, "tokenAuth");
   }
@@ -53,7 +57,7 @@ public final class SessionAwareAuth implements ApiAuth {
     var fde =
         sessions
             .validate(token)
-            .flatMap(session -> roles.roster().byId(session.fdeId()))
+            .flatMap(session -> roster.byId(session.fdeId()))
             .orElseThrow(SessionAwareAuth::invalid);
     var role = roles.roleOf(fde.handle(), Role.ADMIN).orElseThrow(SessionAwareAuth::invalid);
     exchange.setAttribute("token.name", fde.handle());

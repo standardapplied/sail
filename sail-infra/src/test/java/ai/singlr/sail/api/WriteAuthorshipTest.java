@@ -111,6 +111,7 @@ class WriteAuthorshipTest {
 
   @Test
   void aSocketWriteIsAuthoredByTheRunsPrincipal() {
+    new FdeStore(db).add("uday", null, null, "member");
     try (var operations = operations(() -> SyncConfig.unset());
         var bus = new EventBus()) {
       Acting.as("uday", () -> specs.create(spec("auth", "uday")));

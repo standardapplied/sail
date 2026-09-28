@@ -90,15 +90,6 @@ public record ServerConnectionConfig(String serverUrl, String token) {
     return Strings.isBlank(value) ? null : Path.of(value);
   }
 
-  /** The token saved in the client config at {@code configPath}, or null when it holds none. */
-  public static String savedToken(Path configPath) throws IOException {
-    if (!Files.exists(configPath)) {
-      return null;
-    }
-    var token = YamlUtil.parseFile(configPath).get("token");
-    return token == null || Strings.isBlank(token.toString()) ? null : token.toString();
-  }
-
   public static void saveLocalToken(String token, Path configPath) throws IOException {
     saveLocalConfig(DEFAULT_URL, token, configPath);
   }

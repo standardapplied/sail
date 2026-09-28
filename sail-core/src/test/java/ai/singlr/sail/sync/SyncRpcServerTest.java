@@ -55,12 +55,12 @@ class SyncRpcServerTest {
 
     @Override
     public State state(String entityId) {
-      return new State(current(entityId), currentRev(entityId));
+      return new State(current(entityId), currentRev(entityId), null);
     }
 
     @Override
     public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-      return new CommitOutcome.Accepted("1-x");
+      return new CommitOutcome.Accepted("1-x", null, null);
     }
 
     @Override
@@ -547,8 +547,8 @@ class SyncRpcServerTest {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
             return "forged".equals(id)
-                ? new CommitOutcome.Denied("not yours", "3-m", Map.of("title", "main's"))
-                : new CommitOutcome.Accepted("1-x");
+                ? new CommitOutcome.Denied("not yours", "3-m", Map.of("title", "main's"), null)
+                : new CommitOutcome.Accepted("1-x", null, null);
           }
         };
     var results =
@@ -562,7 +562,7 @@ class SyncRpcServerTest {
                         new MainReplica.Offer("honest", Map.of(), null))))
             .results();
     assertEquals(
-        new SyncWire.Denied("forged", "not yours", "3-m", Map.of("title", "main's")),
+        new SyncWire.Denied("forged", "not yours", "3-m", Map.of("title", "main's"), true, null),
         results.get(0));
     assertInstanceOf(SyncWire.Accepted.class, results.get(1));
   }
@@ -575,7 +575,8 @@ class SyncRpcServerTest {
         new FakeMain() {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
-            return new CommitOutcome.Denied("not yours", "2-m", "a".equals(id) ? small : large);
+            return new CommitOutcome.Denied(
+                "not yours", "2-m", "a".equals(id) ? small : large, null);
           }
         };
     var fits = new MainReplica.Offer("a", Map.of(), null);
@@ -586,9 +587,9 @@ class SyncRpcServerTest {
             SyncWire.MAX_FRAME,
             List.of(SyncWire.encode(HELLO), SyncWire.encode(push("spec", fits, outgrows))));
     var results = assertInstanceOf(SyncWire.Results.class, replies.get(1)).results();
-    assertEquals(new SyncWire.Denied("a", "not yours", "2-m", small), results.get(0));
+    assertEquals(new SyncWire.Denied("a", "not yours", "2-m", small, true, null), results.get(0));
     assertTrue(SyncWire.encodedLength(results.get(0)) <= SyncWire.resultBound(fits));
-    assertEquals(new SyncWire.Denied("b", "not yours", null, null, false), results.get(1));
+    assertEquals(new SyncWire.Denied("b", "not yours", null, null, false, null), results.get(1));
     assertTrue(SyncWire.encodedLength(results.get(1)) <= SyncWire.resultBound(outgrows));
   }
 
@@ -726,7 +727,7 @@ class SyncRpcServerTest {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
             seenPeer.set(Actor.current().peer());
-            return new CommitOutcome.Accepted("1-x");
+            return new CommitOutcome.Accepted("1-x", null, null);
           }
         };
     after(
@@ -765,7 +766,7 @@ class SyncRpcServerTest {
 
           @Override
           public State state(String entityId) {
-            return new State(Map.of("status", "pending"), "1-x");
+            return new State(Map.of("status", "pending"), "1-x", null);
           }
         };
     var page =
@@ -839,7 +840,7 @@ class SyncRpcServerTest {
       public CommitOutcome commit(
           String entityId, Map<String, Object> snapshot, String expectedRev) {
         committed = snapshot;
-        return new CommitOutcome.Accepted("1-x");
+        return new CommitOutcome.Accepted("1-x", null, null);
       }
     };
   }

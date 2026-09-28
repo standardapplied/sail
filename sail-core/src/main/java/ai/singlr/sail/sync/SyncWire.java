@@ -364,28 +364,6 @@ public final class SyncWire {
       }
     }
 
-    /** A change of {@code kind} that names no author. */
-    public Entry(
-        long seq,
-        String id,
-        String rev,
-        boolean deleted,
-        Map<String, Object> snapshot,
-        ChangeLog.Kind kind) {
-      this(seq, id, rev, deleted, snapshot, kind, null);
-    }
-
-    /** A revision, or a tombstone when {@code deleted}, that names no author. */
-    public Entry(long seq, String id, String rev, boolean deleted, Map<String, Object> snapshot) {
-      this(
-          seq,
-          id,
-          rev,
-          deleted,
-          snapshot,
-          deleted ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION);
-    }
-
     /**
      * Main's version of {@code id} outside any page, as a verdict hands it over: a revision, or a
      * tombstone when {@code snapshot} is null, made by {@code author}.
@@ -427,15 +405,7 @@ public final class SyncWire {
    * it settles its offer; an older main sends neither.
    */
   public record Accepted(String id, String rev, String author, Snapshots.Creator creator)
-      implements Result {
-    public Accepted(String id, String rev) {
-      this(id, rev, null, null);
-    }
-
-    public Accepted(String id, String rev, String author) {
-      this(id, rev, author, null);
-    }
-  }
+      implements Result {}
 
   /**
    * Main moved since the node fetched; the offer was left untouched. An offer that is not the
@@ -471,10 +441,6 @@ public final class SyncWire {
     public Denied(
         String id, String reason, String rev, Map<String, Object> snapshot, boolean carried) {
       this(id, reason, rev, snapshot, carried, null);
-    }
-
-    public Denied(String id, String reason, String rev, Map<String, Object> snapshot) {
-      this(id, reason, rev, snapshot, true);
     }
 
     /** This denial without main's version, which the node then fetches. */

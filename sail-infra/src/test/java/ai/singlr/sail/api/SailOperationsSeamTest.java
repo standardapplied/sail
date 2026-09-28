@@ -18,7 +18,6 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -224,6 +223,7 @@ class SailOperationsSeamTest {
               advance::accept,
               clock::instant);
       operations.useSyncScheduler(scheduler);
+      knownToMain(main, "owner", "member");
       var token = credential(node.db, "owner", "member", "token");
       scheduler.freshenRead();
       assertEquals(1, attempts.get());
@@ -606,6 +606,8 @@ class SailOperationsSeamTest {
                 targets.add(target);
                 return channel(main);
               }));
+      knownToMain(main, "member", "member");
+      knownToMain(main, "admin", "admin");
       var member = credential(node.db, "member", "member", lane);
       var denied = send(server, "POST", "/v1/sync", member, "{\"main\":\"untrusted-peer\"}");
       assertEquals(403, denied.statusCode(), denied.body());
@@ -748,8 +750,14 @@ class SailOperationsSeamTest {
     return server;
   }
 
+  /** A node's roster mirrors main's, so an FDE a node acts as must be on main's roster too. */
+  private static void knownToMain(SyncBox main, String handle, String role) {
+    new FdeStore(main.db).add(handle, null, null, role);
+  }
+
   private static String credential(Sqlite db, String handle, String role, String lane) {
-    var fde = new FdeStore(db).add(handle, null, null, role);
+    var fdes = new FdeStore(db);
+    var fde = fdes.byHandle(handle).orElseGet(() -> fdes.add(handle, null, null, role));
     return lane.equals("session")
         ? new AuthSessionStore(db).create(fde.id(), Duration.ofMinutes(30)).token()
         : new TokenStore(db).create(handle, role, fde.id(), null).token();
@@ -937,12 +945,13 @@ class SailOperationsSeamTest {
   }
 
   @Test
-  void aRoundBindsTheHostTokenOnceMainsRosterKnowsTheBoxsFde() throws Exception {
+  void aRoundDisablesAnFdeMainsRosterNoLongerLists() throws Exception {
     try (var main = new SyncBox("main");
         var node = new SyncBox("node");
         var operations = operations(node.db)) {
-      var tokens = new TokenStore(node.db);
-      tokens.create(HostToken.NAME, "admin");
+      var fdes = new FdeStore(node.db);
+      fdes.add("node", null, null, "member");
+      fdes.add("gone", null, null, "admin");
       operations.useControlPlane(
           node.db,
           tempDir,
@@ -963,12 +972,12 @@ class SailOperationsSeamTest {
                           SyncTransitionSink.NONE,
                           SyncWire.UPGRADE_FLOOR))));
       operations.schema().prepareSync();
-      assertNull(tokens.list().getFirst().fdeHandle());
 
       operations.sync(new SyncRequest(null));
 
-      var host = tokens.list().getFirst();
-      assertEquals("node", host.fdeHandle(), "the host token now acts as the box's FDE");
+      assertFalse(fdes.byHandle("gone").orElseThrow().active(), "main removed it");
+      assertTrue(fdes.byHandle("node").orElseThrow().active());
+      assertEquals("viewer", fdes.byHandle("node").orElseThrow().role());
     }
   }
 
@@ -1366,9 +1375,20 @@ class SailOperationsSeamTest {
             main.db,
             "main",
             Actor.sync("node", Role.MEMBER),
-            List::of,
+            () -> rosterOf(main),
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR));
+  }
+
+  /** Main's roster as its sync server serves it to a node. */
+  private static List<Map<String, Object>> rosterOf(SyncBox main) {
+    return new FdeStore(main.db)
+        .list().stream()
+            .map(
+                fde ->
+                    Map.<String, Object>of(
+                        "handle", fde.handle(), "role", fde.role(), "status", fde.status()))
+            .toList();
   }
 
   private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {

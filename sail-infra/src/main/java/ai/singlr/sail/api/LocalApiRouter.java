@@ -80,22 +80,14 @@ final class LocalApiRouter implements LocalApiHandler {
   private sealed interface Caller {
     Actor actor();
 
-    record Run(RunStore.RunRow run) implements Caller {
-
-      /**
-       * A read-only lane run's credential — a {@code room} wake, or a read-only invite launched
-       * before that lane was retired — resolves to the read-and-converse room principal, never the
-       * write-capable agent principal: the lane's authority is decided here, at the boundary, by
-       * the run row the server minted — not by anything the session says. A full turn carries the
-       * member-tier agent principal a dispatched agent holds, nothing more.
-       */
-      @Override
-      public Actor actor() {
-        return run.readOnlyLane()
-            ? Actor.roomPrincipal(run.principal(), run.owner())
-            : Actor.agentPrincipal(run.principal(), run.owner());
-      }
-    }
+    /**
+     * A run's credential, acting as {@code actor} ({@link LocalLaneOperations#runActor}): a
+     * read-only lane run — a {@code room} wake — is the read-and-converse room principal, never the
+     * write-capable agent principal, decided at this boundary by the run row the server minted, not
+     * by anything the session says. A full turn carries the agent principal a dispatched agent
+     * holds, nothing more.
+     */
+    record Run(RunStore.RunRow run, Actor actor) implements Caller {}
 
     record Box(Actor fde) implements Caller {
       @Override
@@ -106,14 +98,34 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   private ApiResponse route(LocalApiRequest request) {
-    var caller = resolve(request.bearer());
-    if (caller == null) {
-      return problem(
-          401,
-          "Missing or unknown credential. Requests on this socket must present the"
-              + " SAIL_RUN_CREDENTIAL of a live run (a finished run's credential is revoked) or"
-              + " this box's ambient box.credential as a bearer token.");
+    var run = operations.runForCredential(request.bearer()).orElse(null);
+    if (run != null) {
+      return operations
+          .runActor(run)
+          .map(actor -> actingAs(request, new Caller.Run(run, actor)))
+          .orElseGet(
+              () ->
+                  problem(
+                      403,
+                      "This run acts for FDE '"
+                          + run.owner()
+                          + "', whom this box's roster has disabled or does not know. Ask an"
+                          + " admin to re-enable the FDE, or run 'sudo sail sync' on a node that"
+                          + " has not pulled main's roster."));
     }
+    return operations
+        .boxActorForCredential(request.bearer())
+        .map(actor -> actingAs(request, new Caller.Box(actor)))
+        .orElseGet(
+            () ->
+                problem(
+                    401,
+                    "Missing or unknown credential. Requests on this socket must present the"
+                        + " SAIL_RUN_CREDENTIAL of a live run (a finished run's credential is"
+                        + " revoked) or this box's ambient box.credential as a bearer token."));
+  }
+
+  private ApiResponse actingAs(LocalApiRequest request, Caller caller) {
     return Actor.call(caller.actor(), () -> route(request, caller));
   }
 
@@ -183,14 +195,6 @@ final class LocalApiRouter implements LocalApiHandler {
     return problem(404, "No route for " + path);
   }
 
-  private Caller resolve(String bearer) {
-    var run = operations.runForCredential(bearer).orElse(null);
-    if (run != null) {
-      return new Caller.Run(run);
-    }
-    return operations.boxActorForCredential(bearer).<Caller>map(Caller.Box::new).orElse(null);
-  }
-
   /**
    * Reflects the authenticated identity: a run's minted principal with the FDE it acts for, or the
    * box FDE covered by the ambient credential.
@@ -201,8 +205,7 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     var body = new LinkedHashMap<String, Object>();
     switch (caller) {
-      case Caller.Run(var run) -> {
-        var actor = caller.actor();
+      case Caller.Run(var run, var actor) -> {
         body.put("handle", run.principal());
         body.put("owner", run.owner());
         body.put("role", actor.role().name().toLowerCase());
@@ -236,7 +239,7 @@ final class LocalApiRouter implements LocalApiHandler {
     if (!"POST".equals(request.method())) {
       return problem(405, "events accepts POST");
     }
-    if (!(caller instanceof Caller.Run(var run))) {
+    if (!(caller instanceof Caller.Run(var run, _))) {
       return problem(
           403,
           "Events narrate a run's lifecycle and require a run credential; the box credential"
@@ -326,7 +329,7 @@ final class LocalApiRouter implements LocalApiHandler {
         yield ApiResponse.from(result);
       }
       case "POST" -> {
-        if (caller instanceof Caller.Run(var run)
+        if (caller instanceof Caller.Run(var run, _)
             && run.readOnlyLane()
             && !id.equals(run.conversationId())) {
           yield problem(403, "A room session posts only to its own room.");
@@ -353,7 +356,7 @@ final class LocalApiRouter implements LocalApiHandler {
    */
   private void markDeliveredOnSelfRead(
       Caller caller, String specId, Result<SpecMessagesResponse> result) {
-    if (!(caller instanceof Caller.Run(var run))
+    if (!(caller instanceof Caller.Run(var run, _))
         || !specId.equals(run.specId())
         || !(result instanceof Result.Success<SpecMessagesResponse>(var response, var ignored))
         || response.messages().isEmpty()) {
@@ -370,7 +373,7 @@ final class LocalApiRouter implements LocalApiHandler {
    * the messages the caller showed ({@code delivered=<id>[,<id>...]}, idempotent).
    */
   private ApiResponse runMessages(LocalApiRequest request, Caller caller) {
-    if (!(caller instanceof Caller.Run(var run))) {
+    if (!(caller instanceof Caller.Run(var run, _))) {
       return problem(
           403,
           "Run message delivery requires a run credential; the box credential has no run"
@@ -408,7 +411,7 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     var form = request.form();
     return switch (caller) {
-      case Caller.Run(var run) ->
+      case Caller.Run(var run, _) ->
           ApiResponse.from(
               operations.recordRunSession(
                   run.id(),

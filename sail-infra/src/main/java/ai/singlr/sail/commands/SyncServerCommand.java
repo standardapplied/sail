@@ -188,7 +188,9 @@ public final class SyncServerCommand implements Callable<Integer> {
     var fde =
         Strings.isBlank(token)
             ? Optional.<FdeStore.Fde>empty()
-            : new AuthSessionStore(db).validate(token).flatMap(s -> roles.roster().byId(s.fdeId()));
+            : new AuthSessionStore(db)
+                .validate(token)
+                .flatMap(session -> new FdeStore(db).byId(session.fdeId()));
     if (fde.isEmpty()) {
       return Optional.of(Actor.sync(null, Role.VIEWER));
     }

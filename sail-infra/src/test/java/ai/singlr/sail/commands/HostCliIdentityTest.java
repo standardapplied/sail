@@ -8,18 +8,20 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -32,6 +34,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,9 +43,10 @@ import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 /**
- * The host CLI is the box's FDE: the token {@code sail server init} mints, and one {@code sail
- * migrate} binds, acts as that FDE over HTTP, with the role the role rule gives it — admin for
- * main's operator, the synced roster role on a node, and whatever role the roster holds now.
+ * The host CLI is the box's FDE: the token {@code sail server init} mints, and the FDE-less one an
+ * existing box already holds, acts over HTTP as the FDE the box's sync handle names when it is
+ * used, with the role the role rule gives it — admin for main's operator, the synced roster role on
+ * a node, and whatever role the roster holds now.
  */
 class HostCliIdentityTest {
 
@@ -70,6 +75,7 @@ class HostCliIdentityTest {
   private Path configPath;
   private SailOperations operations;
   private SailApiServer server;
+  private final AtomicReference<SyncConfig> box = new AtomicReference<>();
 
   @BeforeEach
   void setUp() {
@@ -96,38 +102,32 @@ class HostCliIdentityTest {
     fdes.add("uday", null, null, "member");
     serve(MAIN);
 
-    var minted = operations.identity().mintHostToken(configPath);
+    operations.identity().mintHostToken(configPath);
 
-    assertEquals("uday", minted.fde());
-    assertEquals(0, create(ServerConnectionConfig.savedToken(configPath), "auth"));
+    assertEquals(0, create(savedToken(), "auth"));
     assertEquals("uday", specs.findById("auth").orElseThrow().createdBy());
     assertEquals("uday", specs.findById("auth").orElseThrow().updatedBy());
+    assertTrue(HostToken.describe(MAIN).contains("'uday'"));
   }
 
   @Test
-  void afterMigrateBindsAnFdeLessHostTokenAHostCliWriteRecordsTheBoxsFde() throws Exception {
-    fdes.add("uday", null, null, "member");
-    var token = new TokenStore(db).create("admin", "admin").token();
-    ServerConnectionConfig.saveLocalToken(token, configPath);
+  void theFdeLessHostTokenAnExistingBoxHoldsActsAsItsFdeWithNoMigration() throws Exception {
+    var token = new TokenStore(db).create(HostToken.NAME, "admin").token();
     serve(MAIN);
-    assertEquals(0, create(token, "before"));
-    assertNull(specs.findById("before").orElseThrow().createdBy(), "an FDE-less token is no one");
 
-    MigrateCommand.bindHostToken(db, MAIN, true);
-
-    assertEquals(0, create(token, "after"));
-    assertEquals("uday", specs.findById("after").orElseThrow().createdBy());
-    assertNull(HostToken.bind(new TokenStore(db), fdes, MAIN), "a bound token is bound once");
+    assertEquals(0, create(token, "auth"), "main's operator is admin before its FDE is added");
+    assertEquals("uday", specs.findById("auth").orElseThrow().createdBy());
   }
 
   @Test
-  void aBoxWithNoSyncHandleKeepsAnFdeLessHostToken() throws Exception {
+  void aBoxWithNoSyncHandleHasAHostTokenThatActsAsNoFde() throws Exception {
     serve(SyncConfig.unset());
 
-    var minted = operations.identity().mintHostToken(configPath);
+    operations.identity().mintHostToken(configPath);
 
-    assertNull(minted.fde());
-    assertTrue(HostToken.describe(minted, SyncConfig.unset()).contains("no sync handle"));
+    assertEquals(0, create(savedToken(), "auth"));
+    assertNull(specs.findById("auth").orElseThrow().createdBy());
+    assertTrue(HostToken.describe(SyncConfig.unset()).contains("no sync handle"));
   }
 
   @Test
@@ -135,43 +135,55 @@ class HostCliIdentityTest {
     fdes.add("uday", null, null, "viewer");
     serve(NODE);
     operations.identity().mintHostToken(configPath);
-    var token = ServerConnectionConfig.savedToken(configPath);
 
-    assertNotEquals(0, create(token, "refused"), "a viewer node's CLI cannot write");
+    assertNotEquals(0, create(savedToken(), "refused"), "a viewer node's CLI cannot write");
     assertTrue(specs.findById("refused").isEmpty());
 
     fdes.update("uday", null, null, "member");
-    assertEquals(0, create(token, "allowed"));
+    assertEquals(0, create(savedToken(), "allowed"));
+    assertEquals("uday", specs.findById("allowed").orElseThrow().createdBy());
   }
 
   @Test
-  void anFdeLessHostTokenOnANodeActsAsTheBoxsFdeAndIsRefusedUntilTheRosterKnowsIt()
-      throws Exception {
-    var token = new TokenStore(db).create(HostToken.NAME, "admin").token();
+  void aNodeThatHasNotPulledItsRosterRefusesTheHostTokenAsAConflictToResolve() throws Exception {
     serve(NODE);
+    operations.identity().mintHostToken(configPath);
 
-    assertNotEquals(0, create(token, "unknown"), "a node's roster does not know its FDE yet");
-    fdes.add("uday", null, null, "viewer");
-    assertNotEquals(0, create(token, "viewer"), "an FDE-less token acts as the box's viewer FDE");
-    fdes.update("uday", null, null, "member");
-    assertEquals(0, create(token, "member"));
+    var refused = assertThrows(IOException.class, () -> whoami(savedToken()));
 
-    assertTrue(specs.findById("unknown").isEmpty());
-    assertTrue(specs.findById("viewer").isEmpty());
-  }
-
-  @Test
-  void aNodeWhoseRosterLacksItsFdeMintsAHostTokenTheNextBindNames() throws Exception {
-    serve(NODE);
-
-    var minted = operations.identity().mintHostToken(configPath);
-
-    assertNull(minted.fde());
-    assertTrue(HostToken.describe(minted, NODE).contains("acts with that FDE's role"));
+    assertTrue(refused.getMessage().contains("HTTP 409"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("sudo sail sync"), refused.getMessage());
     fdes.add("uday", null, null, "member");
-    assertEquals("uday", HostToken.bind(new TokenStore(db), fdes, NODE));
-    assertEquals(0, create(ServerConnectionConfig.savedToken(configPath), "bound"));
-    assertEquals("uday", specs.findById("bound").orElseThrow().createdBy());
+    assertEquals("uday", whoami(savedToken()).get("fde"));
+  }
+
+  @Test
+  void theHostTokenFollowsTheBoxsSyncHandle() throws Exception {
+    fdes.add("uday", null, null, "member");
+    fdes.add("raj", null, null, "member");
+    serve(NODE);
+    operations.identity().mintHostToken(configPath);
+    assertEquals("uday", whoami(savedToken()).get("fde"));
+
+    box.set(new SyncConfig("node", "sail@main", "raj", "node-box"));
+
+    assertEquals(0, create(savedToken(), "auth"));
+    assertEquals("raj", specs.findById("auth").orElseThrow().createdBy());
+  }
+
+  @Test
+  void aMachineTokenOnANodeActsUnderItsOwnNameWithItsBoxsRole() throws Exception {
+    fdes.add("uday", null, null, "member");
+    var token = new TokenStore(db).create("ci", "admin").token();
+    serve(NODE);
+
+    var whoami = whoami(token);
+
+    assertNull(whoami.get("fde"));
+    assertEquals("ci", whoami.get("name"));
+    assertEquals("member", whoami.get("role"));
+    assertEquals(0, create(token, "auth"));
+    assertNull(specs.findById("auth").orElseThrow().createdBy());
   }
 
   @Test
@@ -187,7 +199,8 @@ class HostCliIdentityTest {
     assertTrue(specs.findById("after").isEmpty());
   }
 
-  private void serve(SyncConfig box) throws IOException {
+  private void serve(SyncConfig config) throws IOException {
+    box.set(config);
     operations =
         OperationsFactory.create(
                 db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
@@ -198,7 +211,7 @@ class HostCliIdentityTest {
                     db,
                     "box",
                     tempDir,
-                    () -> box,
+                    box::get,
                     target -> {
                       throw new IOException("main unavailable");
                     }));
@@ -207,12 +220,22 @@ class HostCliIdentityTest {
             "127.0.0.1",
             0,
             operations,
-            TestAuth.sessions(db, box),
+            TestAuth.sessions(db, box::get),
             new EventBus(),
             null,
             null,
             null);
     server.start();
+  }
+
+  private String savedToken() throws IOException {
+    return YamlUtil.parseFile(configPath).get("token").toString();
+  }
+
+  private Map<String, Object> whoami(String token) throws IOException {
+    try (var client = new SailApiClient("http://127.0.0.1:" + server.port(), token)) {
+      return client.get("/v1/whoami");
+    }
   }
 
   private int create(String token, String id) {

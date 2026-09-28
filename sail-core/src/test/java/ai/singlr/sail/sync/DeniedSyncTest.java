@@ -191,7 +191,14 @@ class DeniedSyncTest {
             .mapToInt(
                 state ->
                     SyncWire.encodedLength(
-                        new SyncWire.Entry(99, "spec-99", state.rev(), false, state.snapshot())))
+                        new SyncWire.Entry(
+                            99,
+                            "spec-99",
+                            state.rev(),
+                            false,
+                            state.snapshot(),
+                            ChangeLog.Kind.REVISION,
+                            null)))
             .max()
             .orElseThrow();
     var frame = 256 + 4 * (entry + 2) + 40;

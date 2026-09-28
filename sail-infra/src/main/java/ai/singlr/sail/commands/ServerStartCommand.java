@@ -177,14 +177,13 @@ public final class ServerStartCommand implements Runnable {
     var tokenStore = new TokenStore(db);
     var configPath = SailPaths.clientConfigPath();
     if (tokenStore.list().isEmpty()) {
-      var box = BoxIdentity.config();
-      var minted = HostToken.mint(tokenStore, new FdeStore(db), box, null, configPath);
+      HostToken.mint(tokenStore, null, configPath);
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ API token created and saved to "
                   + configPath
                   + "; "
-                  + HostToken.describe(minted, box)));
+                  + HostToken.describe(BoxIdentity.config())));
       System.out.println();
     }
     var specStore = new SpecStore(db);
@@ -268,12 +267,13 @@ public final class ServerStartCommand implements Runnable {
     var passkeyService = configured ? buildPasskeyService(db, webauthn) : null;
     var enrollment =
         configured ? new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)) : null;
-    var roles = new RoleRule(BoxIdentity::config, new FdeStore(db));
+    var roster = new FdeStore(db);
+    var roles = new RoleRule(BoxIdentity::config, roster);
     var tokenAuth = new TokenAuth(tokenStore, roles);
     var passkeyHandler =
         new WebauthnAuthHandler(
             passkeyService, enrollment, tokenAuth, configured ? webauthn.origins() : null);
-    var auth = new SessionAwareAuth(new AuthSessionStore(db), roles, tokenAuth);
+    var auth = new SessionAwareAuth(new AuthSessionStore(db), roster, roles, tokenAuth);
 
     var server =
         new SailApiServer(

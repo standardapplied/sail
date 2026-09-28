@@ -13,6 +13,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -38,8 +39,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
             .validate(token)
             .orElseThrow(() -> new IOException("Session token is not valid or has expired."));
     var fde =
-        roles
-            .roster()
+        new FdeStore(db)
             .byId(session.fdeId())
             .orElseThrow(() -> new IOException("The session's FDE no longer exists."));
     return new PtyIdentity(fde.handle(), roleOf(fde.handle()) == Role.ADMIN);
@@ -61,7 +61,8 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + ".");
     }
     var actor = new Actor(who.fde(), roleOf(who.fde()), Actor.Lane.API);
-    if (Actor.call(actor, () -> SpecPolicy.post(room.id(), room.assignee(), room.createdBy()))
+    var owners = new RoomStore(db).owners(room.id());
+    if (Actor.call(actor, () -> SpecPolicy.post(room.id(), owners))
         instanceof AccessDecision.Refused refused) {
       throw new IOException(refused.message() + " " + refused.fix());
     }

@@ -26,15 +26,7 @@ public sealed interface CommitOutcome
    * Main accepted the push and minted {@code rev}, recording {@code author} as who made it and
    * holding {@code creator}, null when the entity carries no creator or main did not say.
    */
-  record Accepted(String rev, String author, Snapshots.Creator creator) implements CommitOutcome {
-    public Accepted(String rev) {
-      this(rev, null, null);
-    }
-
-    public Accepted(String rev, String author) {
-      this(rev, author, null);
-    }
-  }
+  record Accepted(String rev, String author, Snapshots.Creator creator) implements CommitOutcome {}
 
   /** Main moved since the node fetched; {@code current*} is its present state, left untouched. */
   record Rejected(String currentRev, Map<String, Object> currentSnapshot)
@@ -46,9 +38,5 @@ public sealed interface CommitOutcome
    * main holds none; {@code author} is who main recorded as making it.
    */
   record Denied(String reason, String rev, Map<String, Object> snapshot, String author)
-      implements CommitOutcome {
-    public Denied(String reason, String rev, Map<String, Object> snapshot) {
-      this(reason, rev, snapshot, null);
-    }
-  }
+      implements CommitOutcome {}
 }

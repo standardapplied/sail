@@ -92,19 +92,22 @@ public final class SailOperations implements HostOperations {
     this.catalog =
         new HostLanes.Catalog(
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
-    this.identity = new HostLanes.Identity(db, roles(), this::cliOperator);
+    this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
     this.pty = new HostLanes.Pty(db, roles(), eventStore);
     return this;
   }
 
-  /**
-   * The role rule over this box's roster and its sync configuration, read afresh each time; a box
-   * with no control plane wired has no sync configuration.
-   */
+  /** The role rule over this box's roster and its sync configuration ({@link #box}). */
   private RoleRule roles() {
-    return new RoleRule(
-        () -> syncOperations == null ? SyncConfig.unset() : syncOperations.configuration(),
-        fdeStore);
+    return new RoleRule(this::box, fdeStore);
+  }
+
+  /**
+   * This box's sync configuration, read afresh each time; a box with no control plane wired has
+   * none.
+   */
+  private SyncConfig box() {
+    return syncOperations == null ? SyncConfig.unset() : syncOperations.configuration();
   }
 
   /**
@@ -818,7 +821,7 @@ public final class SailOperations implements HostOperations {
     return safeWrite(
         () -> {
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(room.id(), room.assignee(), room.createdBy()).enforce();
+          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
           return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
@@ -1154,6 +1157,23 @@ public final class SailOperations implements HostOperations {
     return safe(() -> agentReportValue(project, localHandle));
   }
 
+  /**
+   * A run acting for no FDE acts for this box's, so a run credential never outranks the FDE whose
+   * box launched it.
+   */
+  @Override
+  public Optional<Actor> runActor(RunStore.RunRow run) {
+    var lane =
+        run.readOnlyLane()
+            ? Actor.roomPrincipal(run.principal(), run.owner())
+            : Actor.agentPrincipal(run.principal(), run.owner());
+    var role =
+        Strings.isBlank(run.owner())
+            ? roles().roleOfUnbound(lane.role())
+            : roles().roleOf(run.owner(), lane.role());
+    return role.map(granted -> new Actor(lane.handle(), granted, lane.lane(), lane.owner()));
+  }
+
   @Override
   public Optional<RunStore.RunRow> runForCredential(String credential) {
     return runStore == null ? Optional.empty() : runStore.findByCredential(credential);
@@ -1241,15 +1261,12 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    if (RunPolicy.access(run.id(), StopOperations.specIdOf(run), runOwner(run))
+    if (RunPolicy.access(
+            run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, this::specOwner))
         instanceof AccessDecision.Refused refused) {
       return Result.failure(refused.code(), refused.message(), refused.fix());
     }
     return served.apply(run);
-  }
-
-  private String runOwner(RunStore.RunRow run) {
-    return RunPolicy.ownerOf(run, this::specOwner);
   }
 
   /** The current owner of {@code specId}, empty when the spec is absent or the store not wired. */
@@ -1858,7 +1875,7 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(room.id(), room.assignee(), room.createdBy()).enforce();
+          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

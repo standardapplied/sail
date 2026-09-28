@@ -20,7 +20,6 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -158,9 +157,7 @@ public final class SyncOperations {
       }
       var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
       try {
-        var roster = new FdeStore(db);
-        reportRejectedFdes(applyFdes(roster, session.fetchFdes()));
-        HostToken.bind(new TokenStore(db), roster, configuration.get());
+        reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
       } catch (RuntimeException e) {
         failures.add(transportFailure("fde", e));
       }
@@ -356,9 +353,11 @@ public final class SyncOperations {
 
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
-   * for a malformed role or status — dropped, never written with a bad authorization.
+   * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
+   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}).
    */
   public static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
+    fdes.disableUnlisted(roster.stream().map(entry -> str(entry, "handle")).toList());
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {

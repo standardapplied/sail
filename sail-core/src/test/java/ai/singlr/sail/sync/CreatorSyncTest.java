@@ -122,17 +122,32 @@ class CreatorSyncTest {
     Acting.as("alice", () -> alice.specs.create(unassigned("twin")));
 
     round(alice);
+
     assertNull(creatorOf(alice, "twin"), "adopting main's version adopts its creator, none");
-
-    alice.db.execute("UPDATE specs SET created_by = 'alice' WHERE id = 'twin'");
-    retitle(alice, "twin", "Retitled");
-    round(alice);
-    round(alice);
-
-    assertEquals("Retitled", main.specs.findById("twin").orElseThrow().title());
     assertNull(creatorOf(main, "twin"));
-    assertNull(creatorOf(alice, "twin"), "the pusher adopts the none main holds");
-    assertEquals(main.replica.currentRev("twin"), alice.replica.currentRev("twin"));
+  }
+
+  @Test
+  void aCreatorMainNeverRecordedIsTakenOnlyFromThatCreatorsOwnPush() throws IOException {
+    Acting.as(null, () -> main.specs.create(unassigned("legacy")));
+    Acting.as(null, () -> main.specs.create(unassigned("other")));
+    round(alice);
+    round(bob);
+    alice.db.execute("UPDATE specs SET created_by = 'alice' WHERE id = 'legacy'");
+    bob.db.execute("UPDATE specs SET created_by = 'alice' WHERE id = 'other'");
+
+    retitle(bob, "other", "By bob");
+    retitle(alice, "legacy", "By alice");
+    round(bob);
+    round(alice);
+    round(bob);
+
+    assertNull(creatorOf(main, "other"), "a push may name only its own FDE as the creator");
+    assertNull(creatorOf(bob, "other"));
+    assertEquals("alice", creatorOf(main, "legacy"));
+    assertEquals("alice", creatorOf(alice, "legacy"));
+    assertEquals("alice", creatorOf(bob, "legacy"));
+    assertEquals(main.replica.currentRev("legacy"), alice.replica.currentRev("legacy"));
   }
 
   @Test

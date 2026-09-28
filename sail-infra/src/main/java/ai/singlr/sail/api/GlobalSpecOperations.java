@@ -206,10 +206,10 @@ final class GlobalSpecOperations {
 
   /**
    * Binding a spec to an existing room hands the spec's owner every membership write that room
-   * takes — engage rewrites its roster — so it needs the room's own post right: the room's assignee
-   * (or creator when unassigned) or an admin, in the room's project.
+   * takes — engage rewrites its roster — so it needs the room's post right ({@link
+   * RoomStore#owners}), in the room's project.
    */
-  private static void admitIntoRoom(RoomStore.RoomRow room, String project) {
+  private void admitIntoRoom(RoomStore.RoomRow room, String project) {
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
@@ -222,13 +222,13 @@ final class GlobalSpecOperations {
               + "'.",
           "A spec is born only into a room of its own project.");
     }
-    SpecPolicy.post(room.id(), room.assignee(), room.createdBy()).enforce();
+    SpecPolicy.post(room.id(), rooms.get().owners(room.id())).enforce();
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
     var actor = Actor.current();
     requireStore();
-    validAssignee(request.assignee());
+    var assignee = request.assignee() == null ? null : validAssignee(request.assignee());
     var existing = findOrThrow(specId);
     authorizeUpdate(existing, request);
     guardReassignment(specId, existing, request);
@@ -238,7 +238,7 @@ final class GlobalSpecOperations {
             request.project() != null ? request.project() : existing.project(),
             request.title() != null ? request.title() : existing.title(),
             parseStatus(request.status(), existing.status()),
-            request.assignee() != null ? request.assignee() : existing.assignee(),
+            request.assignee() != null ? assignee : existing.assignee(),
             request.agent() != null ? request.agent() : existing.agent(),
             request.model() != null ? validModel(request.model()) : existing.model(),
             request.reasoningEffort() != null
@@ -440,7 +440,7 @@ final class GlobalSpecOperations {
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
-    var targetAssignee = revisionAssignee(specId, request.rev());
+    var targetAssignee = validAssignee(revisionAssignee(specId, request.rev()));
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
       SpecPolicy.reassign(specId, existing.assignee(), targetAssignee).enforce();
     }

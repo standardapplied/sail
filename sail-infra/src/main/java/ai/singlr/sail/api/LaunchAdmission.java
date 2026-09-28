@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.FdeStore;
 import java.util.List;
 
@@ -55,7 +56,7 @@ public final class LaunchAdmission {
           "This box has no FDE handle, so room ownership cannot be established.",
           "Set it with: sail host config set sync-handle <handle>");
     }
-    if (!localHandle.equals(owner)) {
+    if (!Ownership.owns(localHandle, owner)) {
       throw new ApiException(
           ErrorCode.NOT_YOUR_SPEC,
           "Room '" + roomId + "' belongs to '" + owner + "', whose box serves its agents.",
@@ -67,7 +68,7 @@ public final class LaunchAdmission {
           "Your credential is read-only and cannot change room membership.",
           "Ask an admin for a member or admin credential.");
     }
-    if (!actor.isAdmin() && !owner.equals(actor.handle())) {
+    if (!actor.isAdmin() && !Ownership.owns(actor.handle(), owner)) {
       throw new ApiException(
           ErrorCode.NOT_YOUR_SPEC,
           "Room '" + roomId + "' belongs to '" + owner + "', not you.",

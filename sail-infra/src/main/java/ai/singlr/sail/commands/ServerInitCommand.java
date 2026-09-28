@@ -56,7 +56,8 @@ public final class ServerInitCommand implements Runnable {
       var existingAdmin = existing.stream().anyMatch(t -> HostToken.NAME.equals(t.name()));
       var configMissing = !Files.exists(configPath);
       if (existing.isEmpty()) {
-        announce(identity.mintHostToken(configPath), identity, configPath);
+        identity.mintHostToken(configPath);
+        announce(identity, configPath);
       } else if (configMissing) {
         if (existingAdmin) {
           identity.revokeToken(HostToken.NAME);
@@ -65,7 +66,8 @@ public final class ServerInitCommand implements Runnable {
                   "  @|yellow ↻|@ Config missing — rotating admin token (old plaintext is"
                       + " unrecoverable)."));
         }
-        announce(identity.mintHostToken(configPath), identity, configPath);
+        identity.mintHostToken(configPath);
+        announce(identity, configPath);
       } else {
         System.out.println(
             Ansi.AUTO.string(
@@ -77,12 +79,12 @@ public final class ServerInitCommand implements Runnable {
     }
   }
 
-  private static void announce(HostToken.Minted minted, HostIdentity identity, Path configPath) {
+  private static void announce(HostIdentity identity, Path configPath) {
     System.out.println(
         Ansi.AUTO.string(
             "  @|green ✓|@ API token created and saved to "
                 + configPath
                 + "; "
-                + HostToken.describe(minted, identity.box())));
+                + HostToken.describe(identity.box())));
   }
 }

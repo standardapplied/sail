@@ -11,6 +11,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
+import java.util.function.Supplier;
 
 /**
  * The API's production authentication over a test database, on a box with no sync handle unless a
@@ -42,8 +43,16 @@ public final class TestAuth {
 
   /** Session-then-token authentication over {@code db} on the box {@code box} configures. */
   public static SessionAwareAuth sessions(Sqlite db, SyncConfig box) {
-    var roles = roles(db, box);
+    return sessions(db, () -> box);
+  }
+
+  /** Session-then-token authentication over {@code db} on a box whose configuration may change. */
+  public static SessionAwareAuth sessions(Sqlite db, Supplier<SyncConfig> box) {
+    var roles = new RoleRule(box, new FdeStore(db));
     return new SessionAwareAuth(
-        new AuthSessionStore(db), roles, new TokenAuth(new TokenStore(db), roles));
+        new AuthSessionStore(db),
+        new FdeStore(db),
+        roles,
+        new TokenAuth(new TokenStore(db), roles));
   }
 }

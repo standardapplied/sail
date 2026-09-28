@@ -67,10 +67,6 @@ public interface MainReplica {
           snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION,
           author);
     }
-
-    public State(Map<String, Object> snapshot, String rev) {
-      this(snapshot, rev, null);
-    }
   }
 
   /**

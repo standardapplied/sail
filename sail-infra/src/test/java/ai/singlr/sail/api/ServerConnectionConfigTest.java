@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -22,20 +21,6 @@ class ServerConnectionConfigTest {
 
   private Path missingConfig() {
     return tempDir.resolve("missing-config.yaml");
-  }
-
-  @Test
-  void theSavedTokenIsReadBackAndAConfigWithoutOneHoldsNone() throws IOException {
-    var path = tempDir.resolve("saved").resolve("config.yaml");
-    assertNull(ServerConnectionConfig.savedToken(path), "no config file");
-
-    ServerConnectionConfig.saveLocalToken("sail_abc", path);
-    assertEquals("sail_abc", ServerConnectionConfig.savedToken(path));
-
-    Files.writeString(path, "server: http://localhost:7070\ntoken: ' '\n");
-    assertNull(ServerConnectionConfig.savedToken(path), "a blank token");
-    Files.writeString(path, "server: http://localhost:7070\n");
-    assertNull(ServerConnectionConfig.savedToken(path), "no token key");
   }
 
   @Test

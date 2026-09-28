@@ -10,11 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -99,8 +101,14 @@ class RoomPrincipalAccessTest {
                 null,
                 specStore,
                 new ReviewStore(db),
-                runStore)
-            .useMessages(messageStore);
+                runStore,
+                null,
+                ConnectEnvironment::detect,
+                SyncScheduler.disabled(),
+                new FdeStore(db),
+                SessionYield.NONE)
+            .useMessages(messageStore)
+            .useRooms(new RoomStore(db));
     router = new LocalApiRouter(bus, operations);
   }
 

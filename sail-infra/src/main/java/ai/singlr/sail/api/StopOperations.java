@@ -646,9 +646,9 @@ public final class StopOperations {
           "Your credential is read-only and cannot stop runs.",
           "Ask an admin for a member or admin credential.");
     }
-    var owner =
-        RunPolicy.ownerOf(run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
-    if (RunPolicy.access(run.id(), specIdOf(run), owner)
+    var owners =
+        RunPolicy.owners(run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
+    if (RunPolicy.access(run.id(), specIdOf(run), owners)
         instanceof AccessDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }

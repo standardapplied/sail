@@ -53,8 +53,10 @@ class SyncWireTest {
           new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
           new SyncWire.Page(
               List.of(
-                  new SyncWire.Entry(5, "auth", "3-abc", false, snapshot()),
-                  new SyncWire.Entry(9, "gone", "4-def", true, null),
+                  new SyncWire.Entry(
+                      5, "auth", "3-abc", false, snapshot(), ChangeLog.Kind.REVISION, null),
+                  new SyncWire.Entry(
+                      9, "gone", "4-def", true, null, ChangeLog.Kind.TOMBSTONE, null),
                   SyncWire.Entry.version("left", "5-ghi", null, "ada"),
                   new SyncWire.Entry(
                       11, "pruned", "6-jkl", true, null, ChangeLog.Kind.ERASURE, "ada")),
@@ -63,17 +65,17 @@ class SyncWireTest {
               12),
           new SyncWire.Results(
               List.of(
-                  new SyncWire.Accepted("auth", "7-feed"),
-                  new SyncWire.Accepted("mine", "8-feed", "ada"),
+                  new SyncWire.Accepted("auth", "7-feed", null, null),
+                  new SyncWire.Accepted("mine", "8-feed", "ada", null),
                   new SyncWire.Accepted("born", "9-feed", "ada", new Snapshots.Creator("carol")),
                   new SyncWire.Accepted("none", "10-feed", "ada", new Snapshots.Creator(null)),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
-                  new SyncWire.Denied("e", "read-only", "5-main", snapshot()),
-                  new SyncWire.Denied("f", "read-only", "6-tomb", null),
+                  new SyncWire.Denied("e", "read-only", "5-main", snapshot(), true, null),
+                  new SyncWire.Denied("f", "read-only", "6-tomb", null, true, null),
                   new SyncWire.Denied("i", "read-only", "7-tomb", null, true, "ada"),
-                  new SyncWire.Denied("g", "read-only", null, null),
-                  new SyncWire.Denied("h", "read-only", null, null, false)),
+                  new SyncWire.Denied("g", "read-only", null, null, true, null),
+                  new SyncWire.Denied("h", "read-only", null, null, false, null)),
               99),
           new SyncWire.Fdes(
               List.of(
@@ -83,7 +85,8 @@ class SyncWireTest {
 
   @Test
   void aDenialReadWithoutItsMarkerIsTheRefusalAnOlderNodeKnowsWithTheSameReason() {
-    var denied = new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot());
+    var denied =
+        new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot(), true, null);
     var line = SyncWire.encode(new SyncWire.Results(List.of(denied), 9));
     var marker = "\"denied\": true";
     assertTrue(line.contains(marker), line);
@@ -219,11 +222,13 @@ class SyncWireTest {
 
     assertEquals(
         List.of(
-            new SyncWire.Entry(1, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE),
-            new SyncWire.Entry(2, "pruned", "3-x", true, null, ChangeLog.Kind.ERASURE)),
+            new SyncWire.Entry(1, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE, null),
+            new SyncWire.Entry(2, "pruned", "3-x", true, null, ChangeLog.Kind.ERASURE, null)),
         page.entries());
     assertEquals(
-        List.of(new SyncWire.Accepted("a", "1-a"), new SyncWire.Denied("b", "no", "2-b", null)),
+        List.of(
+            new SyncWire.Accepted("a", "1-a", null, null),
+            new SyncWire.Denied("b", "no", "2-b", null, true, null)),
         results.results());
   }
 
@@ -250,7 +255,12 @@ class SyncWireTest {
   @Test
   void aTombstoneEntryCarriesNoSnapshotAndDecodesAsDeleted() {
     var page =
-        new SyncWire.Page(List.of(new SyncWire.Entry(3, "gone", "2-x", true, null)), 3, true, 3);
+        new SyncWire.Page(
+            List.of(
+                new SyncWire.Entry(3, "gone", "2-x", true, null, ChangeLog.Kind.TOMBSTONE, null)),
+            3,
+            true,
+            3);
     var line = SyncWire.encode(page);
     assertFalse(line.contains("snapshot"));
     var decoded = (SyncWire.Page) SyncWire.decodeResponse(line);
@@ -262,9 +272,10 @@ class SyncWireTest {
   void everyEntryNamesItsKindSoAnErasureIsNeverReadAsARevision() {
     var entries =
         List.of(
-            new SyncWire.Entry(1, "live", "1-a", false, Map.of("title", "t")),
-            new SyncWire.Entry(2, "gone", "2-b", true, null),
-            new SyncWire.Entry(3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE));
+            new SyncWire.Entry(
+                1, "live", "1-a", false, Map.of("title", "t"), ChangeLog.Kind.REVISION, null),
+            new SyncWire.Entry(2, "gone", "2-b", true, null, ChangeLog.Kind.TOMBSTONE, null),
+            new SyncWire.Entry(3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE, null));
     var line = SyncWire.encode(new SyncWire.Page(entries, 3, true, 3));
 
     var decoded = ((SyncWire.Page) SyncWire.decodeResponse(line)).entries();
@@ -288,12 +299,13 @@ class SyncWireTest {
                     + " \"deleted\": true}], \"next\": 1, \"done\": true, \"maxSeq\": 1}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SyncWire.Entry(1, "a", "1-a", false, null, ChangeLog.Kind.ERASURE));
+        () -> new SyncWire.Entry(1, "a", "1-a", false, null, ChangeLog.Kind.ERASURE, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new SyncWire.Entry(1, "a", "1-a", true, null, ChangeLog.Kind.REVISION));
+        () -> new SyncWire.Entry(1, "a", "1-a", true, null, ChangeLog.Kind.REVISION, null));
     assertThrows(
-        IllegalArgumentException.class, () -> new SyncWire.Entry(1, "a", "1-a", true, null, null));
+        IllegalArgumentException.class,
+        () -> new SyncWire.Entry(1, "a", "1-a", true, null, null, null));
   }
 
   @Test
@@ -347,7 +359,15 @@ class SyncWireTest {
     assertEquals(push, SyncWire.decodeRequest(SyncWire.encode(push)));
     var page =
         new SyncWire.Page(
-            List.of(new SyncWire.Entry(1, "m1", "1-main", false, Map.of("body", content))),
+            List.of(
+                new SyncWire.Entry(
+                    1,
+                    "m1",
+                    "1-main",
+                    false,
+                    Map.of("body", content),
+                    ChangeLog.Kind.REVISION,
+                    null)),
             1,
             true,
             1);
@@ -372,7 +392,8 @@ class SyncWireTest {
 
   @Test
   void anEntrysEncodedLengthIsExactlyWhatThePageCarriesForIt() {
-    var entry = new SyncWire.Entry(5, "auth", "3-abc", false, snapshot());
+    var entry =
+        new SyncWire.Entry(5, "auth", "3-abc", false, snapshot(), ChangeLog.Kind.REVISION, null);
     var lone = SyncWire.encode(new SyncWire.Page(List.of(entry), 5, true, 5));
     var pair = SyncWire.encode(new SyncWire.Page(List.of(entry, entry), 5, true, 5));
     assertEquals(SyncWire.encodedLength(entry) + 2, pair.length() - lone.length());

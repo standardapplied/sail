@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
+import java.util.List;
 
 /**
  * Resource-scoped authorization for the spec aggregate, shared by every lane (the HTTP API a member
@@ -46,21 +47,42 @@ public final class SpecPolicy {
   }
 
   /**
-   * Decides whether {@code actor} may post a message to spec {@code specId}'s room. Every lane but
-   * the room lane posts under the plain mutation gate. A room principal is read-only everywhere
-   * else — {@link #mutate} refuses it on capability before ownership is even consulted — so the
-   * lane's one write carries its own rule: it may post exactly when it acts for the room's owner
-   * ({@link Ownership#ownerOf}), the FDE whose box woke it — the creator of an unassigned one.
+   * Decides whether the actor may post in conversation {@code conversationId}, whose owners are
+   * {@code owners} (as {@code RoomStore.owners} decides them). Every lane but the room lane posts
+   * under the mutation gate: a writer who is an admin or acts for an owner. A room principal is
+   * read-only everywhere else, so the lane's one write carries its own rule: it may post exactly
+   * when it acts for an owner, the FDE whose box woke it.
    */
-  public static AccessDecision post(String specId, String assignee, String createdBy) {
+  public static AccessDecision post(String conversationId, List<String> owners) {
     var actor = Actor.current();
     if (!actor.roomLane()) {
-      return mutate(specId, assignee, createdBy);
+      if (!actor.canWrite()) {
+        return readOnly();
+      }
+      if (actor.isAdmin()) {
+        return AccessDecision.allowed();
+      }
     }
-    if (actor.actsFor(Ownership.ownerOf(assignee, createdBy))) {
+    if (owners.stream().anyMatch(actor::actsFor)) {
       return AccessDecision.allowed();
     }
-    return notAssignee(specId, assignee, createdBy);
+    if (owners.isEmpty()) {
+      return AccessDecision.refused(
+          ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+          "No one owns '" + conversationId + "' yet, so only an admin may post there.",
+          "Claim its spec first with --assignee <you>, or have an admin post.");
+    }
+    var named = String.join(" or ", owners);
+    return AccessDecision.refused(
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        "'"
+            + conversationId
+            + "' belongs to "
+            + named
+            + ": only "
+            + named
+            + " or an admin may post there, not you.",
+        "Ask " + named + " to post it, or have an admin do it.");
   }
 
   /**

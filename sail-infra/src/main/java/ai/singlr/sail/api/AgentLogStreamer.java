@@ -124,7 +124,7 @@ public final class AgentLogStreamer implements HttpHandler {
               ApiRouter.actorOf(exchange),
               () ->
                   RunPolicy.access(
-                      run.id(), StopOperations.specIdOf(run), RunPolicy.ownerOf(run, specOwner)))
+                      run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, specOwner)))
           instanceof AccessDecision.Refused refused) {
         var fix =
             Strings.isBlank(refused.fix())

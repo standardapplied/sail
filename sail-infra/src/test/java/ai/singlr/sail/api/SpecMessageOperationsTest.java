@@ -57,7 +57,8 @@ class SpecMessageOperationsTest {
                 null,
                 new SpecStore(db),
                 new ReviewStore(db))
-            .useMessages(new MessageStore(db));
+            .useMessages(new MessageStore(db))
+            .useRooms(new RoomStore(db));
   }
 
   @AfterEach

@@ -163,6 +163,10 @@ class DisabledFdeTest {
 
   private SshGateway.Decision gateway() {
     return SshGateway.authorize(
-        "sail spec list", "mady", TestAuth.roles(db, MAIN), new AuthSessionStore(db));
+        "sail spec list",
+        "mady",
+        new FdeStore(db),
+        TestAuth.roles(db, MAIN),
+        new AuthSessionStore(db));
   }
 }

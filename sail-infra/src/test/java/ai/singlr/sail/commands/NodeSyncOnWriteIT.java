@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.api.SailApiClient;
@@ -26,21 +27,25 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The sync-on-write bug reproduced end-to-end and proven fixed: a spec created through a node's
- * HTTP API becomes visible in main's database with no manual {@code sail sync} anywhere. The node
- * is a real control-plane server in a child JVM whose {@code host.yaml} declares a node role; its
- * write-triggered reconcile opens the real {@code ssh sail@mainbox sail _sync} lane, intercepted by
- * an {@code ssh} shim on {@code PATH} that runs the genuine {@code _sync} RPC server against main's
- * home directory. Runs under the {@code integration} profile; it needs a Unix JVM, not incus.
- * Deterministic synchronization: the server's "listening" line and bounded {@code waitFor} polls —
- * no bare sleeps.
+ * Sync-on-write end to end: once a node has finished joining, a spec created through its HTTP API
+ * becomes visible in main's database with no further {@code sail sync}. The node is a real
+ * control-plane server in a child JVM whose {@code host.yaml} declares a node role. It finishes its
+ * join the way {@code sail join} tells the operator to, with a first {@code sail sync} that pulls
+ * main's roster, so its host CLI token acts as its FDE. Its write-triggered reconcile opens the
+ * real {@code ssh sail@mainbox sail _sync} lane, intercepted by an {@code ssh} shim on {@code PATH}
+ * that runs the genuine {@code _sync} RPC server against main's home directory. Runs under the
+ * {@code integration} profile; it needs a Unix JVM, not incus. Deterministic synchronization: the
+ * server's "listening" line, the first sync's exit, and bounded {@code waitFor} polls — no bare
+ * sleeps.
  */
 class NodeSyncOnWriteIT {
 
@@ -76,7 +81,9 @@ class NodeSyncOnWriteIT {
     reader.start();
     try {
       awaitListening(server, lines);
+      finishJoin(nodeHome, shim.getParent());
       var nodeToken = readNodeToken(nodeSailDir.resolve("config.yaml"));
+      assertActsAsTheNodesFde(port, nodeToken);
       createSpecViaNodeApi(port, nodeToken);
       awaitSpecOnMain(server, mainDb);
     } finally {
@@ -120,21 +127,41 @@ class NodeSyncOnWriteIT {
   }
 
   private static Process startNodeServer(Path nodeHome, Path shimDir, int port) throws Exception {
-    var builder =
-        new ProcessBuilder(
-                javaBinary(),
-                "-Duser.home=" + nodeHome,
-                "--enable-native-access=ALL-UNNAMED",
-                "-cp",
-                classpath(),
-                MAIN_CLASS,
-                "server",
-                "start",
-                "--host",
-                "127.0.0.1",
-                "--port",
-                String.valueOf(port))
-            .redirectErrorStream(true);
+    return startNode(
+        nodeHome,
+        shimDir,
+        "server",
+        "start",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        String.valueOf(port));
+  }
+
+  /**
+   * What {@code sail join} tells the operator to finish with: the node's first {@code sail sync},
+   * which pulls main's roster, so the node knows its own FDE.
+   */
+  private static void finishJoin(Path nodeHome, Path shimDir) throws Exception {
+    var sync = startNode(nodeHome, shimDir, "sync");
+    var output = new String(sync.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertTrue(sync.waitFor(60, TimeUnit.SECONDS), "the first sync never finished: " + output);
+    assertEquals(0, sync.exitValue(), output);
+  }
+
+  /** A child JVM running {@code sail <args>} as this node, with the ssh shim on {@code PATH}. */
+  private static Process startNode(Path nodeHome, Path shimDir, String... args) throws Exception {
+    var command = new ArrayList<String>();
+    command.addAll(
+        List.of(
+            javaBinary(),
+            "-Duser.home=" + nodeHome,
+            "--enable-native-access=ALL-UNNAMED",
+            "-cp",
+            classpath(),
+            MAIN_CLASS));
+    command.addAll(List.of(args));
+    var builder = new ProcessBuilder(command).redirectErrorStream(true);
     var env = builder.environment();
     env.put("PATH", shimDir + ":" + env.getOrDefault("PATH", "/usr/bin:/bin"));
     env.put(NodeSync.DEBOUNCE_ENV, "50");
@@ -165,6 +192,14 @@ class NodeSyncOnWriteIT {
     var token = (String) YamlUtil.parseFile(configYaml).get("token");
     assertNotNull(token, "server start should have saved an admin token to " + configYaml);
     return token;
+  }
+
+  private static void assertActsAsTheNodesFde(int port, String token) throws Exception {
+    try (var client = new SailApiClient("http://127.0.0.1:" + port, token)) {
+      var whoami = client.get("/v1/whoami");
+      assertEquals("mady", whoami.get("fde"), whoami.toString());
+      assertEquals("member", whoami.get("role"), whoami.toString());
+    }
   }
 
   private static void createSpecViaNodeApi(int port, String token) throws Exception {

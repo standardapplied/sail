@@ -30,6 +30,15 @@ public final class Ownership {
    * nothing.
    */
   public static boolean owns(String identity, String assignee, String createdBy) {
-    return Strings.isNotBlank(identity) && identity.equals(ownerOf(assignee, createdBy));
+    return owns(identity, ownerOf(assignee, createdBy));
+  }
+
+  /**
+   * Whether {@code identity} is {@code owner} itself. An agent principal is its own handle here,
+   * never the FDE it acts for: the decisions that take this form are an FDE's alone. A blank
+   * identity owns nothing.
+   */
+  public static boolean owns(String identity, String owner) {
+    return Strings.isNotBlank(identity) && identity.equals(owner);
   }
 }

@@ -33,7 +33,10 @@ public enum Role {
     return capabilities.contains(capability);
   }
 
-  /** This role, or {@code cap} when {@code cap} grants less: a credential never outranks itself. */
+  /**
+   * This role, or {@code cap} when {@code cap} grants less: a credential never outranks itself. The
+   * constants are declared from most to least authority, and this comparison relies on that order.
+   */
   public Role cappedBy(Role cap) {
     return compareTo(cap) >= 0 ? this : cap;
   }

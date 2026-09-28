@@ -16,9 +16,11 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -77,9 +79,10 @@ class RunDeliveryOperationsTest {
                 runStore,
                 new ProjectStore(db),
                 SyncScheduler.disabled(),
-                null,
+                new FdeStore(db),
                 SessionYield.NONE)
-            .useMessages(messages);
+            .useMessages(messages)
+            .useRooms(new RoomStore(db));
     runId = newRun("room");
     principal = runStore.findById(runId).orElseThrow().principal();
   }

@@ -205,7 +205,9 @@ final class HostLanes {
     }
   }
 
-  record Identity(Sqlite db, RoleRule roles, Supplier<Actor> cliOperator) implements HostIdentity {
+  record Identity(
+      Sqlite db, Supplier<SyncConfig> boxConfig, RoleRule roles, Supplier<Actor> cliOperator)
+      implements HostIdentity {
     @Override
     public Actor operator() {
       return cliOperator.get();
@@ -223,14 +225,13 @@ final class HostLanes {
     }
 
     @Override
-    public HostToken.Minted mintHostToken(Path configPath) throws IOException {
-      return HostToken.mint(
-          new TokenStore(db), roles.roster(), box(), TokenStore.DEFAULT_TTL, configPath);
+    public void mintHostToken(Path configPath) throws IOException {
+      HostToken.mint(new TokenStore(db), TokenStore.DEFAULT_TTL, configPath);
     }
 
     @Override
     public SyncConfig box() {
-      return roles.box().get();
+      return boxConfig.get();
     }
 
     @Override
@@ -240,7 +241,7 @@ final class HostLanes {
 
     @Override
     public Optional<FdeStore.Fde> fde(String handle) {
-      return roles.roster().byHandle(handle);
+      return new FdeStore(db).byHandle(handle);
     }
 
     @Override
@@ -250,7 +251,8 @@ final class HostLanes {
 
     @Override
     public SshGateway.Decision authorizeGateway(String command, String handle) {
-      return SshGateway.authorize(command, handle, roles, new AuthSessionStore(db));
+      return SshGateway.authorize(
+          command, handle, new FdeStore(db), roles, new AuthSessionStore(db));
     }
   }
 

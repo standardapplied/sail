@@ -7,17 +7,14 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
-import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
@@ -33,12 +30,10 @@ import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.DataMigrator;
-import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.TokenStore;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -213,7 +208,6 @@ public final class MigrateCommand implements Runnable {
   private static void convergeHost(Sqlite db, boolean jsonOutput) {
     relocateHostConfig(jsonOutput);
     assignBoxId(jsonOutput);
-    bindHostToken(db, BoxIdentity.config(), jsonOutput);
     syncAuthorizedKeys(db, jsonOutput);
     ensureSshdKeepalive(jsonOutput);
     convergeContainers(jsonOutput);
@@ -545,19 +539,6 @@ public final class MigrateCommand implements Runnable {
       return ProjectApplyCommand.sailManaged(name, devices);
     } catch (Exception e) {
       return false;
-    }
-  }
-
-  /**
-   * Binds the FDE-less host token to the box's FDE, so the host CLI acts as that FDE: a token
-   * minted before the box had a sync handle, or before the roster knew its FDE. A no-op for a token
-   * already bound, and for a box with no FDE to be.
-   */
-  static void bindHostToken(Sqlite db, SyncConfig box, boolean jsonOutput) {
-    var fde = HostToken.bind(new TokenStore(db), new FdeStore(db), box);
-    if (fde != null && !jsonOutput) {
-      System.out.println(
-          Ansi.AUTO.string("  @|green ✓|@ The host CLI's API token now acts as FDE '" + fde + "'"));
     }
   }
 
