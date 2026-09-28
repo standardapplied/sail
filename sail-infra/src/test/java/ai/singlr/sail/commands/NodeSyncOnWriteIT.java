@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import ai.singlr.sail.Main;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -49,7 +50,7 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class NodeSyncOnWriteIT {
 
-  private static final String MAIN_CLASS = "Main";
+  private static final String MAIN_CLASS = Main.class.getName();
   private static final String SPEC_ID = "sync-e2e";
   private static final Duration PROPAGATION_DEADLINE = Duration.ofSeconds(60);
 
