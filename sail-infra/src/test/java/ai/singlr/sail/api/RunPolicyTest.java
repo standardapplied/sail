@@ -33,22 +33,25 @@ class RunPolicyTest {
 
   @Test
   void adminMayAccessAnyRun() {
-    assertAllowed(RunPolicy.access(actor("ops", Role.ADMIN), RUN, SPEC, "raj"));
+    assertAllowed(Actor.call(actor("ops", Role.ADMIN), () -> RunPolicy.access(RUN, SPEC, "raj")));
   }
 
   @Test
   void assigneeMayAccessTheirRun() {
-    assertAllowed(RunPolicy.access(actor("uday", Role.MEMBER), RUN, SPEC, "uday"));
+    assertAllowed(
+        Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, SPEC, "uday")));
   }
 
   @Test
   void viewerAssigneeMayReadTheirRun() {
-    assertAllowed(RunPolicy.access(actor("uday", Role.VIEWER), RUN, SPEC, "uday"));
+    assertAllowed(
+        Actor.call(actor("uday", Role.VIEWER), () -> RunPolicy.access(RUN, SPEC, "uday")));
   }
 
   @Test
   void nonAssigneeMemberIsRefusedNamingTheAssignee() {
-    var r = refused(RunPolicy.access(actor("uday", Role.MEMBER), RUN, SPEC, "raj"));
+    var r =
+        refused(Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, SPEC, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("raj"), r.message());
     assertTrue(r.message().contains(RUN), r.message());
@@ -57,26 +60,29 @@ class RunPolicyTest {
 
   @Test
   void unassignedSpecAllowsOnlyAdmin() {
-    var r = refused(RunPolicy.access(actor("uday", Role.MEMBER), RUN, SPEC, null));
+    var r =
+        refused(Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, SPEC, null)));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("unassigned"), r.message());
-    assertAllowed(RunPolicy.access(actor("ops", Role.ADMIN), RUN, SPEC, null));
+    assertAllowed(Actor.call(actor("ops", Role.ADMIN), () -> RunPolicy.access(RUN, SPEC, null)));
   }
 
   @Test
   void machineTokenWithoutHandleNeverMatchesAssignee() {
-    var r = refused(RunPolicy.access(actor(null, Role.MEMBER), RUN, SPEC, "raj"));
+    var r = refused(Actor.call(actor(null, Role.MEMBER), () -> RunPolicy.access(RUN, SPEC, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
 
   @Test
   void adhocLauncherMayAccessTheirOwnRun() {
-    assertAllowed(RunPolicy.access(actor("uday", Role.MEMBER), RUN, null, "uday"));
+    assertAllowed(
+        Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, null, "uday")));
   }
 
   @Test
   void adhocRunRefusesOtherMembersNamingTheLauncher() {
-    var r = refused(RunPolicy.access(actor("raj", Role.MEMBER), RUN, null, "uday"));
+    var r =
+        refused(Actor.call(actor("raj", Role.MEMBER), () -> RunPolicy.access(RUN, null, "uday")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("ad-hoc session"), r.message());
     assertTrue(r.message().contains("uday"), r.message());
@@ -84,9 +90,9 @@ class RunPolicyTest {
 
   @Test
   void adhocRunFromAHandlelessBoxAllowsOnlyAdmin() {
-    var r = refused(RunPolicy.access(actor("uday", Role.MEMBER), RUN, null, ""));
+    var r = refused(Actor.call(actor("uday", Role.MEMBER), () -> RunPolicy.access(RUN, null, "")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("ad-hoc session"), r.message());
-    assertAllowed(RunPolicy.access(actor("ops", Role.ADMIN), RUN, null, ""));
+    assertAllowed(Actor.call(actor("ops", Role.ADMIN), () -> RunPolicy.access(RUN, null, "")));
   }
 }

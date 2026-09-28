@@ -103,7 +103,10 @@ class LaunchAdmissionTest {
   @Test
   void requireAllowedAdmitsTheAssignee() {
     assertDoesNotThrow(
-        () -> LaunchAdmission.requireAllowed(Actor.cliOperator("uday"), spec("uday"), "uday"));
+        () ->
+            Actor.run(
+                Actor.cliOperator("uday"),
+                () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
   }
 
   @Test
@@ -112,8 +115,9 @@ class LaunchAdmissionTest {
         assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowed(
-                    new Actor("mady", Role.MEMBER, Actor.Lane.API), spec("uday"), "uday"));
+                Actor.run(
+                    new Actor("mady", Role.MEMBER, Actor.Lane.API),
+                    () -> LaunchAdmission.requireAllowed(spec("uday"), "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
   }
 
@@ -195,16 +199,18 @@ class LaunchAdmissionTest {
         org.junit.jupiter.api.Assertions.assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowedForRoom(
-                    Actor.agentPrincipal("claude/x", "uday"), "chat", "uday", "uday"));
+                Actor.run(
+                    Actor.agentPrincipal("claude/x", "uday"),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
     org.junit.jupiter.api.Assertions.assertEquals(ErrorCode.FORBIDDEN, agent.failure().errorCode());
 
     var noHandle =
         org.junit.jupiter.api.Assertions.assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowedForRoom(
-                    Actor.cliOperator("uday"), "chat", "uday", " "));
+                Actor.run(
+                    Actor.cliOperator("uday"),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", " ")));
     org.junit.jupiter.api.Assertions.assertEquals(
         ErrorCode.COMMAND_FAILED, noHandle.failure().errorCode());
 
@@ -212,8 +218,9 @@ class LaunchAdmissionTest {
         org.junit.jupiter.api.Assertions.assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowedForRoom(
-                    Actor.cliOperator("uday"), "chat", "ada", "uday"));
+                Actor.run(
+                    Actor.cliOperator("uday"),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "ada", "uday")));
     org.junit.jupiter.api.Assertions.assertEquals(
         ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
 
@@ -221,8 +228,9 @@ class LaunchAdmissionTest {
         org.junit.jupiter.api.Assertions.assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowedForRoom(
-                    new Actor("uday", Role.VIEWER, Actor.Lane.API, null), "chat", "uday", "uday"));
+                Actor.run(
+                    new Actor("uday", Role.VIEWER, Actor.Lane.API, null),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
     org.junit.jupiter.api.Assertions.assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
 
@@ -230,11 +238,14 @@ class LaunchAdmissionTest {
         org.junit.jupiter.api.Assertions.assertThrows(
             ApiException.class,
             () ->
-                LaunchAdmission.requireAllowedForRoom(
-                    new Actor("sam", Role.MEMBER, Actor.Lane.API, null), "chat", "uday", "uday"));
+                Actor.run(
+                    new Actor("sam", Role.MEMBER, Actor.Lane.API, null),
+                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
     org.junit.jupiter.api.Assertions.assertEquals(
         ErrorCode.NOT_YOUR_SPEC, notOwner.failure().errorCode());
 
-    LaunchAdmission.requireAllowedForRoom(Actor.cliOperator("uday"), "chat", "uday", "uday");
+    Actor.run(
+        Actor.cliOperator("uday"),
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
   }
 }

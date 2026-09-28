@@ -226,11 +226,13 @@ class BuildDispatchCoverageTest {
   }
 
   private static DispatchOperations.Outcome dispatch(DispatchOperations ops) {
-    return ops.dispatch(
-        "acme",
-        new DispatchOperations.Request("auth", "background", false, null, false),
+    return Actor.call(
         ADMIN,
-        HANDLE);
+        () ->
+            ops.dispatch(
+                "acme",
+                new DispatchOperations.Request("auth", "background", false, null, false),
+                HANDLE));
   }
 
   private static RecordingShell happyPath() {

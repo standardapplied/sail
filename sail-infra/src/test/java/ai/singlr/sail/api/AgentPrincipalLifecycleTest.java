@@ -140,7 +140,6 @@ class AgentPrincipalLifecycleTest {
                 dispatchOps.dispatch(
                     "acme",
                     new DispatchOperations.Request("auth", "background", false, null, false),
-                    ADMIN,
                     HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     var runId = dispatched.runId();
@@ -227,8 +226,7 @@ class AgentPrincipalLifecycleTest {
             (project, unit) -> agentAlive.set(false),
             StopOperations.Listener.NONE);
     var stopped =
-        Acting.by(
-            ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), ADMIN, HANDLE, false));
+        Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));
     assertInstanceOf(StopOperations.Stopped.class, stopped);
 
     var refused = router.handle(request("GET", "/v1/whoami", credential.get(), ""));
@@ -302,7 +300,6 @@ class AgentPrincipalLifecycleTest {
                 dispatchOps.dispatch(
                     "acme",
                     new DispatchOperations.Request("auth", "background", false, null, false),
-                    Actor.cliOperator("alice"),
                     HANDLE));
     var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
 

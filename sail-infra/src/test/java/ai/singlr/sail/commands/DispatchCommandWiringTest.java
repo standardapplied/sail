@@ -16,6 +16,7 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -146,6 +147,46 @@ class DispatchCommandWiringTest {
   }
 
   @Test
+  void aViewerNodesCliDispatchAndStopAreRefusedWithTheSyncedRole() throws Exception {
+    var operations = cliOperations(shell(), new ArrayList<>());
+    var fdes = new FdeStore(db);
+    fdes.add(HANDLE, null, null, "member");
+    operations.useControlPlane(
+        db,
+        tempDir,
+        new ai.singlr.sail.engine.SyncOperations(
+            db,
+            "box",
+            tempDir,
+            () -> new ai.singlr.sail.config.SyncConfig("node", "sail@main", HANDLE, "box"),
+            target -> {
+              throw new java.io.IOException("main unavailable");
+            }));
+    assertInstanceOf(
+        DispatchOperations.Dispatched.class,
+        DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
+
+    fdes.update(HANDLE, null, null, "viewer");
+
+    var stop =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ai.singlr.sail.identity.Actor.call(
+                    operations.identity().operator(),
+                    () ->
+                        operations
+                            .dispatching()
+                            .stop(new StopOperations.ProjectTarget("acme"), HANDLE, false)));
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
+    var dispatch =
+        assertThrows(
+            IllegalStateException.class,
+            () -> DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
+    assertTrue(dispatch.getMessage().contains("read-only"), dispatch.getMessage());
+  }
+
+  @Test
   void cliConstructionPathRecordsTheRunStampsTheBranchAndAnswersRuns() throws Exception {
     var events = new ArrayList<Event>();
     var operations = cliOperations(shell(), events);
@@ -199,9 +240,9 @@ class DispatchCommandWiringTest {
         assertThrows(
             ApiException.class,
             () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request, Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> operations.dispatching().dispatch("acme", request, HANDLE)));
 
     assertEquals(ErrorCode.INVALID_REQUEST, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("spec id"));
@@ -242,9 +283,9 @@ class DispatchCommandWiringTest {
         assertThrows(
             ApiException.class,
             () ->
-                operations
-                    .dispatching()
-                    .dispatch("acme", request(), Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> operations.dispatching().dispatch("acme", request(), HANDLE)));
 
     assertTrue(ex.getMessage().contains("roster"));
     assertEquals(

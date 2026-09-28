@@ -47,12 +47,6 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public SyncConflicts.Conflict resolveConflict(
-      String type, String id, Resolution resolution, Actor actor) {
-    return resolveConflict(type, id, resolution);
-  }
-
-  @Override
   public ProjectFiles projectFiles(String project) {
     throw new UnsupportedOperationException();
   }
@@ -164,12 +158,12 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
     return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
   }
 
   @Override
-  public Result<RoomsListResponse> rooms(String project, Actor actor) {
+  public Result<RoomsListResponse> rooms(String project) {
     return Result.success(new RoomsListResponse(List.of(), null, null));
   }
 
@@ -179,7 +173,7 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+  public Result<RoomDeletedResponse> deleteRoom(String roomId) {
     return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
   }
 
@@ -205,7 +199,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<SpecMessageResponse> postRoomMessage(
-      String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+      String roomId, SpecMessageRequest request, String authorHandle) {
     return Result.success(
         new SpecMessageResponse(
             SpecMessageView.from(
@@ -223,14 +217,13 @@ class TestOperations implements Operations {
 
   @Override
   public Result<EngageResponse> addRoomMember(
-      String roomId, EngageRequest request, Actor actor, String localHandle) {
+      String roomId, EngageRequest request, String localHandle) {
     return Result.success(
         new EngageResponse(request.agent(), request.mode() == null ? "full" : request.mode(), ""));
   }
 
   @Override
-  public Result<DisengageResponse> removeRoomMember(
-      String roomId, Actor actor, String localHandle) {
+  public Result<DisengageResponse> removeRoomMember(String roomId, String localHandle) {
     return Result.success(new DisengageResponse(null));
   }
 
@@ -270,7 +263,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<DispatchResponse> dispatch(
-      String project, DispatchRequest request, Actor actor, String localHandle) {
+      String project, DispatchRequest request, String localHandle) {
     return Result.success(
         new DispatchResponse(
             project,
@@ -338,12 +331,12 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
+  public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
     return Result.success(new RunLogResponse(runId, List.of(), null));
   }
 
   @Override
-  public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
+  public Result<StopRunResponse> stopRun(String runId, String localHandle) {
     return Result.success(new StopRunResponse(runId, false, null, null, false));
   }
 
@@ -453,8 +446,7 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecCreatedResponse> createGlobalSpec(
-      SpecCreateRequest request, Actor actor) {
+  public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
     return Result.success(
         new GlobalSpecCreatedResponse(
             new GlobalSpecView(
@@ -481,7 +473,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request, Actor actor) {
+      String specId, SpecUpdateRequest request) {
     return Result.success(
         new GlobalSpecUpdatedResponse(
             new GlobalSpecView(
@@ -507,7 +499,7 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
+  public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
     return Result.success(new GlobalSpecDeletedResponse(specId));
   }
 
@@ -518,7 +510,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request, Actor actor) {
+      String specId, SpecContentRequest request) {
     return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
   }
 
@@ -553,12 +545,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<RoomConversationResponse> recordRoomConversation(
-      String roomId,
-      String agent,
-      String sessionId,
-      String source,
-      String transcriptPath,
-      Actor actor) {
+      String roomId, String agent, String sessionId, String source, String transcriptPath) {
     return Result.success(new RoomConversationResponse(roomId, sessionId, agent));
   }
 
@@ -568,14 +555,14 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor) {
+  public Result<PruneReport> pruneSpecs(PruneRequest request) {
     return Result.success(
         new PruneReport(request.dryRun(), false, 0, 0, 0, 0, 0, 0, 0, 0, 0, List.of()));
   }
 
   @Override
   public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-      String specId, SpecRestoreRequest request, Actor actor) {
+      String specId, SpecRestoreRequest request) {
     return Result.success(
         new GlobalSpecRestoredResponse(
             GlobalSpecView.from(
@@ -622,13 +609,12 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
+  public Result<ReviewApproveResponse> approveReview(String reviewId) {
     return Result.success(new ReviewApproveResponse(reviewId, true));
   }
 
   @Override
-  public Result<FindingDismissResponse> dismissFinding(
-      String reviewId, String findingId, Actor actor) {
+  public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
     return Result.success(new FindingDismissResponse(findingId, true));
   }
 }

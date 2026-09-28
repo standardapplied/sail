@@ -150,8 +150,7 @@ final class LocalApiRouter implements LocalApiHandler {
               Resolution.Strategy.valueOf(text.toUpperCase(Locale.ROOT)), (String) merged);
       return ApiResponse.ok(
           SyncViews.conflict(
-              operations.resolveConflict(
-                  request.query().get("type"), id, resolution, caller.actor())));
+              operations.resolveConflict(request.query().get("type"), id, resolution)));
     }
     if (path.startsWith("/v1/conflicts/")
         && Boolean.parseBoolean(request.query().get("template"))) {
@@ -284,8 +283,7 @@ final class LocalApiRouter implements LocalApiHandler {
         if (caller.actor().roomLane()) {
           yield problem(403, "A room session reads and converses; it cannot create specs.");
         }
-        yield ApiResponse.fromCreated(
-            operations.createGlobalSpec(createFrom(request.form()), caller.actor()));
+        yield ApiResponse.fromCreated(operations.createGlobalSpec(createFrom(request.form())));
       }
       default -> problem(405, "specs accepts GET or POST");
     };
@@ -311,10 +309,8 @@ final class LocalApiRouter implements LocalApiHandler {
     }
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpec(tail));
-      case "PUT" ->
-          ApiResponse.from(
-              operations.updateGlobalSpec(tail, updateFrom(request.form()), caller.actor()));
-      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail, caller.actor()));
+      case "PUT" -> ApiResponse.from(operations.updateGlobalSpec(tail, updateFrom(request.form())));
+      case "DELETE" -> ApiResponse.from(operations.deleteGlobalSpec(tail));
       default -> problem(405, "spec accepts GET, PUT, or DELETE");
     };
   }
@@ -343,7 +339,6 @@ final class LocalApiRouter implements LocalApiHandler {
                     form.get("body"),
                     form.get("reply_to"),
                     Boolean.parseBoolean(form.get("question"))),
-                caller.actor(),
                 caller.actor().handle()));
       }
       default -> problem(405, "messages accepts GET or POST");
@@ -427,8 +422,7 @@ final class LocalApiRouter implements LocalApiHandler {
                   form.get("agent"),
                   form.get("session_id"),
                   form.get("source"),
-                  form.get("transcript_path"),
-                  box.actor()));
+                  form.get("transcript_path")));
     };
   }
 
@@ -457,7 +451,7 @@ final class LocalApiRouter implements LocalApiHandler {
         var form = request.form();
         yield ApiResponse.from(
             operations.setGlobalSpecContent(
-                id, new SpecContentRequest(form.get("body"), form.get("plan")), caller.actor()));
+                id, new SpecContentRequest(form.get("body"), form.get("plan"))));
       }
       default -> problem(405, "content accepts GET or PUT");
     };

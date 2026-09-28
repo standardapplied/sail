@@ -152,11 +152,14 @@ class DispatchLaunchCancelRaceTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.dispatch(
-                    "acme",
-                    new DispatchOperations.Request("auth", "background", false, null, false),
+                Actor.call(
                     ADMIN,
-                    HANDLE));
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, false),
+                            HANDLE)));
 
     assertEquals(ErrorCode.CONFLICT, conflict.failure().errorCode());
     var run = runStore.findById(cancelled.get()).orElseThrow();

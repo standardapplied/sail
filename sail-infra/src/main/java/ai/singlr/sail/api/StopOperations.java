@@ -213,14 +213,14 @@ public final class StopOperations {
    * forbidden_not_assignee} (the same {@link RunPolicy} the log routes enforce). A dry run resolves
    * and probes but writes and signals nothing, returning the outcome it would produce.
    */
-  public Outcome stop(Target target, Actor actor, String localHandle, boolean dryRun) {
+  public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
-      case RunTarget run -> stopRun(run.runId(), actor, localHandle, dryRun);
-      case ProjectTarget project -> stopProject(project.project(), actor, localHandle, dryRun);
+      case RunTarget run -> stopRun(run.runId(), localHandle, dryRun);
+      case ProjectTarget project -> stopProject(project.project(), localHandle, dryRun);
     };
   }
 
-  private Outcome stopRun(String runId, Actor actor, String localHandle, boolean dryRun) {
+  private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
     var run =
         runStore
             .findById(runId)
@@ -244,9 +244,9 @@ public final class StopOperations {
               + " stoppable agent session.",
           "Stop the spec's build run instead, or let the pipeline finish.");
     }
-    authorize(actor, run);
+    authorize(run, dryRun);
     projects.requireExists(run.project());
-    return stopResolved(run, actor, dryRun);
+    return stopResolved(run, dryRun);
   }
 
   /**
@@ -254,14 +254,14 @@ public final class StopOperations {
    * mutually exclusive by reservation — and applies the one resolved-run procedure. A project with
    * no active run on this box has nothing to stop.
    */
-  private Outcome stopProject(String project, Actor actor, String localHandle, boolean dryRun) {
+  private Outcome stopProject(String project, String localHandle, boolean dryRun) {
     projects.requireExists(project);
     var run = runStore.runningForProjectOnNode(project, localHandle).orElse(null);
     if (run == null) {
       return new NotRunning(null, null, false, false);
     }
-    authorize(actor, run);
-    return stopResolved(run, actor, dryRun);
+    authorize(run, dryRun);
+    return stopResolved(run, dryRun);
   }
 
   /**
@@ -275,10 +275,10 @@ public final class StopOperations {
    * while the run is still {@code running} — a launch that loses to this cancel discovers the loss
    * at the stamp and tears its agent down rather than escaping the reservation.
    */
-  private Outcome stopResolved(RunStore.RunRow run, Actor actor, boolean dryRun) {
+  private Outcome stopResolved(RunStore.RunRow run, boolean dryRun) {
     var spec = specOf(run);
     if (STOPPING.equals(run.status())) {
-      return resumeStop(run, actor, dryRun);
+      return resumeStop(run, dryRun);
     }
     if (!"running".equals(run.status())) {
       if (!cancelable(spec)) {
@@ -292,7 +292,7 @@ public final class StopOperations {
       if (!runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec))) {
         return new AlreadyTerminal(run.id(), run.specId(), run.status());
       }
-      events.publish(operatorCancelEvent(run, actor));
+      events.publish(operatorCancelEvent(run));
       return new NotRunning(run.id(), run.specId(), true, false);
     }
     var unit = runUnit(run);
@@ -301,14 +301,14 @@ public final class StopOperations {
       if (dryRun) {
         return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
       }
-      return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec, actor), true);
+      return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec), true);
     }
     requirePidOwnership(run, info.pid());
     listener.halting(run.project(), unit.unitName(), info.pid());
     if (dryRun) {
       return new Stopped(run.id(), specIdOf(run), info.pid(), previewCancel(run, spec));
     }
-    return killVerified(run, spec, actor, unit, info.pid());
+    return killVerified(run, spec, unit, info.pid());
   }
 
   /**
@@ -322,7 +322,7 @@ public final class StopOperations {
    * reconcilable.
    */
   private Outcome killVerified(
-      RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor, AgentUnit unit, int pid) {
+      RunStore.RunRow run, SpecStore.SpecRow spec, AgentUnit unit, int pid) {
     var cancelled = claimStop(run, spec);
     try {
       halt(run.project(), unit);
@@ -331,7 +331,7 @@ public final class StopOperations {
       abortStop(run, spec, cancelled);
       throw failure;
     }
-    finishStop(run, actor);
+    finishStop(run);
     return new Stopped(run.id(), specIdOf(run), pid, cancelled);
   }
 
@@ -344,12 +344,12 @@ public final class StopOperations {
    * occupies the unit. A failure leaves the claim in place for the next retry or the reconciler's
    * interrupted-stop pass — never restored, because the original operator intent still stands.
    */
-  private Outcome resumeStop(RunStore.RunRow run, Actor actor, boolean dryRun) {
+  private Outcome resumeStop(RunStore.RunRow run, boolean dryRun) {
     var unit = runUnit(run);
     var info = probe(run.project(), unit);
     if (info == null || !info.running()) {
       if (!dryRun) {
-        finishStop(run, actor);
+        finishStop(run);
       }
       return new NotRunning(run.id(), specIdOf(run), false, true);
     }
@@ -360,7 +360,7 @@ public final class StopOperations {
     }
     halt(run.project(), unit);
     verifyHalted(run.project(), unit);
-    finishStop(run, actor);
+    finishStop(run);
     return new Stopped(run.id(), specIdOf(run), info.pid(), false);
   }
 
@@ -411,9 +411,9 @@ public final class StopOperations {
   /**
    * Finalizes a claim whose halt is verified; the event is the winner's to publish, exactly once.
    */
-  private void finishStop(RunStore.RunRow run, Actor actor) {
+  private void finishStop(RunStore.RunRow run) {
     if (runStore.transition(run.id(), STOPPING, "stopped")) {
-      events.publish(operatorCancelEvent(run, actor));
+      events.publish(operatorCancelEvent(run));
     }
   }
 
@@ -580,13 +580,14 @@ public final class StopOperations {
    * writes are ordinary synced revisions, so every peer adopts the terminal state. Returns whether
    * the spec was cancelled.
    */
-  private boolean recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec, Actor actor) {
+  private boolean recordIntent(RunStore.RunRow run, SpecStore.SpecRow spec) {
     var cancelled = transitionAndCancel(run, spec, "stopped");
-    events.publish(operatorCancelEvent(run, actor));
+    events.publish(operatorCancelEvent(run));
     return cancelled;
   }
 
-  private static Event operatorCancelEvent(RunStore.RunRow run, Actor actor) {
+  private static Event operatorCancelEvent(RunStore.RunRow run) {
+    var actor = Actor.current();
     var agent = Strings.isNotBlank(actor.handle()) ? actor.handle() : Event.SAIL_AGENT;
     return cancelEvent(run, Event.WellKnownData.SOURCE_OPERATOR, agent);
   }
@@ -626,16 +627,30 @@ public final class StopOperations {
         && (spec.status() == SpecStatus.IN_PROGRESS || spec.status() == SpecStatus.REVIEW);
   }
 
-  private void authorize(Actor actor, RunStore.RunRow run) {
+  /**
+   * Refuses a stop the bound actor may not make. A dry run writes and signals nothing, so it is
+   * described for whoever asks, with no one bound.
+   */
+  private void authorize(RunStore.RunRow run, boolean dryRun) {
+    if (dryRun) {
+      return;
+    }
+    var actor = Actor.current();
     if (actor.agentLane()) {
       var refused = DispatchPolicy.agentLaneForbidden("stop runs");
       throw new ApiException(refused.code(), refused.message(), refused.fix());
+    }
+    if (!actor.canWrite()) {
+      throw new ApiException(
+          ErrorCode.READ_ONLY_CREDENTIAL,
+          "Your credential is read-only and cannot stop runs.",
+          "Ask an admin for a member or admin credential.");
     }
     var owner =
         Strings.isBlank(run.specId())
             ? run.node()
             : specStore.findById(run.specId()).map(SpecStore.SpecRow::assignee).orElse(null);
-    if (RunPolicy.access(actor, run.id(), specIdOf(run), owner)
+    if (RunPolicy.access(run.id(), specIdOf(run), owner)
         instanceof AccessDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }

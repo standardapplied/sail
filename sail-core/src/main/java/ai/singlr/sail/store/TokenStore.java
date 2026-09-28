@@ -108,6 +108,18 @@ public final class TokenStore {
         row.text(0), row.text(1), row.text(2), row.text(3), row.text(4), row.text(5));
   }
 
+  /**
+   * Binds the FDE-less {@code token} to FDE {@code fdeId}, so it acts as that FDE from now on.
+   * Whether it bound it: a token already bound, or one this store does not hold, is left as it is.
+   */
+  public boolean bind(String token, String fdeId) {
+    db.execute(
+        "UPDATE api_tokens SET fde_id = ? WHERE token_hash = ? AND fde_id IS NULL",
+        fdeId,
+        sha256(token));
+    return db.changes() > 0;
+  }
+
   public boolean revoke(String name) {
     db.execute("DELETE FROM api_tokens WHERE name = ?", name);
     return db.changes() > 0;

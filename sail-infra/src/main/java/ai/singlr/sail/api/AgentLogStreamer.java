@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -123,13 +124,15 @@ public final class AgentLogStreamer implements HttpHandler {
         sendForeign(exchange, run);
         return;
       }
-      if (RunPolicy.access(
+      if (Actor.call(
               ApiRouter.actorOf(exchange),
-              run.id(),
-              StopOperations.specIdOf(run),
-              Strings.isBlank(run.specId())
-                  ? run.node()
-                  : specAssignee.apply(run.specId()).orElse(null))
+              () ->
+                  RunPolicy.access(
+                      run.id(),
+                      StopOperations.specIdOf(run),
+                      Strings.isBlank(run.specId())
+                          ? run.node()
+                          : specAssignee.apply(run.specId()).orElse(null)))
           instanceof AccessDecision.Refused refused) {
         var fix =
             Strings.isBlank(refused.fix())

@@ -798,7 +798,9 @@ class SailOperationsTest {
 
     var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
     var result =
-        operations.dispatch("acme", request("auth", "background", true), member, LOCAL_HANDLE);
+        Actor.call(
+            member,
+            () -> operations.dispatch("acme", request("auth", "background", true), LOCAL_HANDLE));
 
     assertEquals(true, get(result, "dispatched"));
   }
@@ -810,7 +812,8 @@ class SailOperationsTest {
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
 
     var otherFde = new Actor("raj", Role.MEMBER, Actor.Lane.API);
-    var error = operations.dispatch("acme", request("auth"), otherFde, LOCAL_HANDLE);
+    var error =
+        Actor.call(otherFde, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
 
     assertError(ErrorCode.NOT_YOUR_SPEC, error);
   }
@@ -821,7 +824,8 @@ class SailOperationsTest {
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "draft", "pending", null));
 
-    var refused = operations.dispatch("acme", request("draft"), ADMIN, LOCAL_HANDLE);
+    var refused =
+        Actor.call(ADMIN, () -> operations.dispatch("acme", request("draft"), LOCAL_HANDLE));
 
     assertError(ErrorCode.RUNS_ON_OTHER_NODE, refused);
     assertEquals(
@@ -834,7 +838,7 @@ class SailOperationsTest {
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
 
-    var error = operations.dispatch("acme", request("auth"), ADMIN, LOCAL_HANDLE);
+    var error = Actor.call(ADMIN, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
 
     assertError(ErrorCode.RUNS_ON_OTHER_NODE, error);
     assertTrue(fullError(error).contains("raj"), fullError(error));
@@ -847,7 +851,8 @@ class SailOperationsTest {
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
 
     var viewer = new Actor(LOCAL_HANDLE, Role.VIEWER, Actor.Lane.API);
-    var error = operations.dispatch("acme", request("auth"), viewer, LOCAL_HANDLE);
+    var error =
+        Actor.call(viewer, () -> operations.dispatch("acme", request("auth"), LOCAL_HANDLE));
 
     assertError(ErrorCode.READ_ONLY_CREDENTIAL, error);
   }
@@ -858,7 +863,7 @@ class SailOperationsTest {
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", LOCAL_HANDLE));
 
-    var error = operations.dispatch("acme", request("auth"), ADMIN, "");
+    var error = Actor.call(ADMIN, () -> operations.dispatch("acme", request("auth"), ""));
 
     assertError(ErrorCode.NODE_HANDLE_UNSET, error);
   }
@@ -869,7 +874,7 @@ class SailOperationsTest {
         operationsWithStore(
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
 
-    var result = operations.dispatch("acme", request(), ADMIN, LOCAL_HANDLE);
+    var result = Actor.call(ADMIN, () -> operations.dispatch("acme", request(), LOCAL_HANDLE));
 
     assertEquals(false, get(result, "dispatched"));
     assertEquals("no_pending_specs", get(result, "reason"));
@@ -882,7 +887,7 @@ class SailOperationsTest {
             baseYaml(), idleShell(), store -> seedAssigned(store, "auth", "pending", "raj"));
 
     var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
-    var result = operations.dispatch("acme", request(), member, LOCAL_HANDLE);
+    var result = Actor.call(member, () -> operations.dispatch("acme", request(), LOCAL_HANDLE));
 
     assertEquals(false, get(result, "dispatched"));
     assertEquals("no_pending_specs", get(result, "reason"));
@@ -1033,7 +1038,7 @@ class SailOperationsTest {
                 .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
 
     var assignee = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.API);
-    var result = Acting.by(assignee, () -> operations.runLog(R1, 2, "node-a", assignee));
+    var result = Acting.by(assignee, () -> operations.runLog(R1, 2, "node-a"));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
   }
@@ -1045,7 +1050,7 @@ class SailOperationsTest {
     var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
     assertError(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        Acting.by(other, () -> operations.runLog(R1, 200, "node-a", other)));
+        Acting.by(other, () -> operations.runLog(R1, 200, "node-a")));
   }
 
   @Test
@@ -1054,8 +1059,7 @@ class SailOperationsTest {
 
     var other = new Actor("raj", Role.MEMBER, Actor.Lane.API);
     assertError(
-        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        Acting.by(other, () -> operations.stopRun(R1, "node-a", other)));
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE, Acting.by(other, () -> operations.stopRun(R1, "node-a")));
   }
 
   @Test
@@ -1066,7 +1070,7 @@ class SailOperationsTest {
                 .on("incus list ^acme$", RUNNING_JSON)
                 .on("tail -n 2 -- " + RUN_LOG, "one\ntwo\n"));
 
-    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a"));
 
     assertEquals(List.of("one", "two"), get(result, "lines"));
     assertEquals(R1, get(result, "run_id"));
@@ -1099,8 +1103,7 @@ class SailOperationsTest {
                     "sail-agent-" + R1));
 
     assertEquals(
-        List.of("safe"),
-        get(Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a", ADMIN)), "lines"));
+        List.of("safe"), get(Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a")), "lines"));
     assertTrue(shell.invocations().stream().noneMatch(cmd -> cmd.contains("id_ed25519")));
   }
 
@@ -1114,7 +1117,7 @@ class SailOperationsTest {
 
     assertEquals(
         "No log found for this run.",
-        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)), "error"));
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a")), "error"));
   }
 
   @Test
@@ -1126,15 +1129,14 @@ class SailOperationsTest {
                 .throwOn("tail -n 200 -- " + RUN_LOG, new IOException("no shell")));
 
     assertError(
-        ErrorCode.COMMAND_FAILED,
-        Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
+        ErrorCode.COMMAND_FAILED, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a")));
   }
 
   @Test
   void runLogRefusesAForeignRunWithStructuredProvenance() throws Exception {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
-    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 200, "sumesh", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.runLog(R1, 200, "sumesh"));
 
     assertError(ErrorCode.RUN_ON_OTHER_NODE, result);
     var fields =
@@ -1170,8 +1172,7 @@ class SailOperationsTest {
                     "sail-agent-" + R2));
 
     assertError(
-        ErrorCode.RUN_ON_OTHER_NODE,
-        Acting.by(ADMIN, () -> operations.runLog(R2, 200, "node-a", ADMIN)));
+        ErrorCode.RUN_ON_OTHER_NODE, Acting.by(ADMIN, () -> operations.runLog(R2, 200, "node-a")));
   }
 
   @Test
@@ -1198,8 +1199,7 @@ class SailOperationsTest {
                     RUN_LOG,
                     "sail-agent-" + R2));
 
-    assertEquals(
-        List.of("hi"), get(Acting.by(ADMIN, () -> operations.runLog(R2, 2, "", ADMIN)), "lines"));
+    assertEquals(List.of("hi"), get(Acting.by(ADMIN, () -> operations.runLog(R2, 2, "")), "lines"));
   }
 
   @Test
@@ -1207,7 +1207,7 @@ class SailOperationsTest {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
     assertError(
-        ErrorCode.RUN_ON_OTHER_NODE, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "", ADMIN)));
+        ErrorCode.RUN_ON_OTHER_NODE, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "")));
   }
 
   @Test
@@ -1215,8 +1215,7 @@ class SailOperationsTest {
     var operations = opsWithRun(shell());
 
     assertError(
-        ErrorCode.RUN_NOT_FOUND,
-        Acting.by(ADMIN, () -> operations.runLog("nope", 200, "node-a", ADMIN)));
+        ErrorCode.RUN_NOT_FOUND, Acting.by(ADMIN, () -> operations.runLog("nope", 200, "node-a")));
   }
 
   @Test
@@ -1233,8 +1232,7 @@ class SailOperationsTest {
     var operations = opsWithRun(shell().on("incus list ^acme$", RUNNING_JSON));
 
     assertError(
-        ErrorCode.RUN_ON_OTHER_NODE,
-        Acting.by(ADMIN, () -> operations.stopRun(R1, "sumesh", ADMIN)));
+        ErrorCode.RUN_ON_OTHER_NODE, Acting.by(ADMIN, () -> operations.stopRun(R1, "sumesh")));
   }
 
   @Test
@@ -1247,8 +1245,7 @@ class SailOperationsTest {
                     "cat /home/dev/.sail/runs/" + R1 + "/agent.pid",
                     new ShellExec.Result(1, "", "missing")));
 
-    assertEquals(
-        false, get(Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)), "stopped"));
+    assertEquals(false, get(Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a")), "stopped"));
   }
 
   @Test
@@ -1277,7 +1274,7 @@ class SailOperationsTest {
               runs.complete(R1, "completed", 0);
             });
 
-    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
 
     assertEquals(false, get(result, "stopped"));
     assertEquals("run_not_running", get(result, "reason"));
@@ -1293,7 +1290,7 @@ class SailOperationsTest {
             .on("cat /home/dev/.sail/runs/" + R1 + "/agent-session.json", "{\"task\": \"other\"}");
     var operations = opsWithRun(shell);
 
-    var error = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
+    var error = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
 
     assertError(ErrorCode.CONFLICT, error);
   }
@@ -1354,7 +1351,7 @@ class SailOperationsTest {
                   "sail-review-" + R3);
             });
 
-    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
 
     assertEquals(true, get(result, "stopped"));
     assertTrue(
@@ -1657,11 +1654,11 @@ class SailOperationsTest {
             .useMessages(new MessageStore(db));
 
     var result =
-        operations.postRoomMessage(
-            "auth",
-            new SpecMessageRequest("Ready", null, false),
+        Actor.call(
             new Actor("sail", Role.ADMIN, Actor.Lane.API),
-            "sail");
+            () ->
+                operations.postRoomMessage(
+                    "auth", new SpecMessageRequest("Ready", null, false), "sail"));
 
     assertTrue(result.isSuccess());
   }
@@ -2242,7 +2239,7 @@ class SailOperationsTest {
                 .on("kill -9 123", "")
                 .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""));
 
-    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(123, get(result, "pid"));
@@ -2286,7 +2283,7 @@ class SailOperationsTest {
                     RUN_LOG,
                     "sail-agent-" + R1));
 
-    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN));
+    var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
 
     assertEquals(true, get(result, "stopped"));
     assertEquals(true, get(result, "spec_cancelled"));
@@ -2306,8 +2303,7 @@ class SailOperationsTest {
                 .throwOn("kill 123", new IOException("permission denied")));
 
     assertError(
-        ErrorCode.AGENT_STOP_FAILED,
-        Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)));
+        ErrorCode.AGENT_STOP_FAILED, Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a")));
   }
 
   @Test
@@ -2364,8 +2360,7 @@ class SailOperationsTest {
                 .on("tail -n 200 -- " + RUN_LOG, new ShellExec.Result(1, "", "permission denied")));
 
     assertError(
-        ErrorCode.AGENT_LOG_FAILED,
-        Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
+        ErrorCode.AGENT_LOG_FAILED, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a")));
   }
 
   @Test
@@ -2581,8 +2576,7 @@ class SailOperationsTest {
     var rev = operations.globalSpecHistory("auth").orThrow().revisions().getLast().rev();
 
     var result =
-        Acting.by(
-            ADMIN, () -> operations.restoreGlobalSpec("auth", new SpecRestoreRequest(rev), ADMIN));
+        Acting.by(ADMIN, () -> operations.restoreGlobalSpec("auth", new SpecRestoreRequest(rev)));
 
     assertTrue(result.isSuccess());
     assertEquals(rev, get(result, "from_rev"));
@@ -2607,11 +2601,9 @@ class SailOperationsTest {
     var operations = operationsWithStores(baseYaml(), shell(), null, s -> {}, s -> {});
 
     assertError(ErrorCode.NOT_FOUND, operations.reviewDetail("nope"));
+    assertError(ErrorCode.NOT_FOUND, Acting.by(ADMIN, () -> operations.approveReview("nope")));
     assertError(
-        ErrorCode.NOT_FOUND, Acting.by(ADMIN, () -> operations.approveReview("nope", ADMIN)));
-    assertError(
-        ErrorCode.NOT_FOUND,
-        Acting.by(ADMIN, () -> operations.dismissFinding("nope", "f1", ADMIN)));
+        ErrorCode.NOT_FOUND, Acting.by(ADMIN, () -> operations.dismissFinding("nope", "f1")));
   }
 
   @Test
@@ -2645,9 +2637,8 @@ class SailOperationsTest {
             shell(), yaml.toString(), null, null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
-    assertTrue(
-        Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId, ADMIN)).isSuccess());
-    assertTrue(Acting.by(ADMIN, () -> operations.approveReview(reviewId, ADMIN)).isSuccess());
+    assertTrue(Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId)).isSuccess());
+    assertTrue(Acting.by(ADMIN, () -> operations.approveReview(reviewId)).isSuccess());
   }
 
   @Test
@@ -2747,10 +2738,8 @@ class SailOperationsTest {
 
     assertError(ErrorCode.INTERNAL, operations.runs("acme", null));
     assertError(ErrorCode.INTERNAL, operations.run(R1));
-    assertError(
-        ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)));
-    assertError(
-        ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a", ADMIN)));
+    assertError(ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a")));
+    assertError(ErrorCode.INTERNAL, Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a")));
   }
 
   @Test
@@ -2779,7 +2768,7 @@ class SailOperationsTest {
 
     assertEquals(
         "This run has no log file.",
-        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a", ADMIN)), "error"));
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 200, "node-a")), "error"));
   }
 
   @Test
@@ -2983,7 +2972,7 @@ class SailOperationsTest {
 
   private static Result<DispatchResponse> dispatch(
       SailOperations operations, String project, DispatchRequest request) {
-    return operations.dispatch(project, request, ADMIN, LOCAL_HANDLE);
+    return Actor.call(ADMIN, () -> operations.dispatch(project, request, LOCAL_HANDLE));
   }
 
   private static DispatchRequest request() {

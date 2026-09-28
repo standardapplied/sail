@@ -82,7 +82,16 @@ class ApiSpecPruneCommandTest {
                           target -> {
                             throw new IOException("no main");
                           }));
-          server = new SailApiServer("127.0.0.1", 0, operations, tokens, bus, persister);
+          server =
+              new SailApiServer(
+                  "127.0.0.1",
+                  0,
+                  operations,
+                  ai.singlr.sail.api.TestAuth.tokens(db),
+                  bus,
+                  persister,
+                  null,
+                  null);
           server.start();
           specs.create(archived("old"));
           specs.setContent("old", "a body only old holds", "");

@@ -100,9 +100,9 @@ final class GlobalSpecOperations {
     return runStore.listForSpec(specId).stream().findFirst().map(RunSummary::from).orElse(null);
   }
 
-  GlobalSpecCreatedResponse create(SpecCreateRequest request, Actor actor) {
+  GlobalSpecCreatedResponse create(SpecCreateRequest request) {
+    var actor = Actor.current();
     requireStore();
-    Objects.requireNonNull(actor, "spec creation needs the authenticated actor");
     if (request.id() == null || request.id().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
     }
@@ -134,7 +134,7 @@ final class GlobalSpecOperations {
             null,
             request.dependsOn(),
             request.repos());
-    var created = specStore.atomically(() -> birth(row, request, actor));
+    var created = specStore.atomically(() -> birth(row, request));
     publishBoardUpdated(created.project(), created.id(), principal(actor.handle()));
     return new GlobalSpecCreatedResponse(viewOf(created));
   }
@@ -145,11 +145,11 @@ final class GlobalSpecOperations {
    * all. That is what keeps {@code room_id == id} an exact record of "this spec minted this room" —
    * a room landing on the id mid-birth cannot slip between the check and the mint.
    */
-  private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request, Actor actor) {
+  private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request) {
     reserveIdentityRoom(request.id());
     var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
     if (home != null) {
-      admitIntoRoom(home, request.project(), actor);
+      admitIntoRoom(home, request.project());
     }
     specStore.create(row.withRoomId(home != null ? home.id() : request.id()));
     if (request.body() != null || request.plan() != null) {
@@ -209,7 +209,7 @@ final class GlobalSpecOperations {
    * takes — engage rewrites its roster — so it needs the room's own post right: the room's assignee
    * (or creator when unassigned) or an admin, in the room's project.
    */
-  private static void admitIntoRoom(RoomStore.RoomRow room, String project, Actor actor) {
+  private static void admitIntoRoom(RoomStore.RoomRow room, String project) {
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
           ErrorCode.INVALID_REQUEST,
@@ -222,14 +222,15 @@ final class GlobalSpecOperations {
               + "'.",
           "A spec is born only into a room of its own project.");
     }
-    SpecPolicy.post(actor, room.id(), room.assignee(), room.createdBy()).enforce();
+    SpecPolicy.post(room.id(), room.assignee(), room.createdBy()).enforce();
   }
 
-  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request, Actor actor) {
+  GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
+    var actor = Actor.current();
     requireStore();
     validAssignee(request.assignee());
     var existing = findOrThrow(specId);
-    authorizeUpdate(actor, existing, request);
+    authorizeUpdate(existing, request);
     guardReassignment(specId, existing, request);
     var updated =
         new SpecStore.SpecRow(
@@ -329,13 +330,12 @@ final class GlobalSpecOperations {
     }
   }
 
-  private static void authorizeUpdate(
-      Actor actor, SpecStore.SpecRow existing, SpecUpdateRequest request) {
+  private static void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
     var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
     if (reassigning) {
-      SpecPolicy.reassign(actor, existing.id(), existing.assignee(), request.assignee()).enforce();
+      SpecPolicy.reassign(existing.id(), existing.assignee(), request.assignee()).enforce();
     } else {
-      SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+      SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     }
   }
 
@@ -359,10 +359,10 @@ final class GlobalSpecOperations {
     }
   }
 
-  GlobalSpecDeletedResponse delete(String specId, Actor actor) {
+  GlobalSpecDeletedResponse delete(String specId) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     var store = rooms.get();
     var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
@@ -384,10 +384,10 @@ final class GlobalSpecOperations {
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
-  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request, Actor actor) {
+  GlobalSpecContentResponse setContent(String specId, SpecContentRequest request) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(actor, existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
     specStore.setContent(
         specId,
         Objects.requireNonNullElse(request.body(), ""),
@@ -433,16 +433,16 @@ final class GlobalSpecOperations {
    * otherwise an assignee could route around the admin-only reassign rule by restoring a revision
    * owned by someone else.
    */
-  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request, Actor actor) {
+  GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request) {
     requireStore();
     var existing = restorable(specId);
-    SpecPolicy.mutate(actor, specId, existing.assignee(), existing.createdBy()).enforce();
+    SpecPolicy.mutate(specId, existing.assignee(), existing.createdBy()).enforce();
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
     var targetAssignee = revisionAssignee(specId, request.rev());
     if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      SpecPolicy.reassign(actor, specId, existing.assignee(), targetAssignee).enforce();
+      SpecPolicy.reassign(specId, existing.assignee(), targetAssignee).enforce();
     }
     var store = rooms.get();
     specStore.atomically(

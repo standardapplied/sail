@@ -210,7 +210,9 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
 
     assertEquals("full", launch.mode(), "full is the default mode");
     assertEquals("", launch.snapshot(), "no snapshot unless asked — dir backends are slow");
@@ -226,7 +228,9 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", null, "opus-x", true, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", null, "opus-x", true, HANDLE));
 
     assertEquals("full", launch.mode(), "full is the default mode");
     assertTrue(launch.snapshot().startsWith("engage-"));
@@ -258,7 +262,9 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     launch.completion().run();
 
     assertNull(stored("auth"), "a failed payment engages nobody");
@@ -277,8 +283,9 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "ghost", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> ops.engage("ghost", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
 
@@ -288,7 +295,8 @@ class EngagementLifecycleTest {
 
     var ex =
         assertThrows(
-            ApiException.class, () -> ops.disengage("ghost", Actor.cliOperator(HANDLE), HANDLE));
+            ApiException.class,
+            () -> Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("ghost", HANDLE)));
     assertEquals(ErrorCode.ROOM_NOT_FOUND, ex.failure().errorCode());
   }
 
@@ -298,7 +306,9 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     specStore.delete("auth");
     launch.completion().run();
 
@@ -315,8 +325,9 @@ class EngagementLifecycleTest {
     seedSpec("auth");
 
     var launch =
-        ops.engage(
-            "auth", "claude-code", "read-only", null, true, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", "read-only", null, true, HANDLE));
 
     assertNull(launch.completion(), "nothing is deferred — no payment to make");
     assertEquals("", launch.snapshot());
@@ -335,8 +346,9 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "auth", "codex", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> ops.engage("auth", "codex", "read-only", null, false, HANDLE)));
 
     assertEquals(ErrorCode.BAD_REQUEST, refusal.failure().errorCode());
     assertNull(stored("auth"));
@@ -350,11 +362,15 @@ class EngagementLifecycleTest {
     assertThrows(
         ApiException.class,
         () ->
-            ops.engage(
-                "auth", "claude-code", "yolo", null, false, Actor.cliOperator(HANDLE), HANDLE));
+            Actor.call(
+                Actor.cliOperator(HANDLE),
+                () -> ops.engage("auth", "claude-code", "yolo", null, false, HANDLE)));
     assertThrows(
         ApiException.class,
-        () -> ops.engage("auth", "hal9000", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
+        () ->
+            Actor.call(
+                Actor.cliOperator(HANDLE),
+                () -> ops.engage("auth", "hal9000", null, null, false, HANDLE)));
     assertNull(stored("auth"));
     assertTrue(events.isEmpty());
   }
@@ -399,10 +415,7 @@ class EngagementLifecycleTest {
               requester,
               () ->
                   sailOps.addRoomMember(
-                      "auth",
-                      new EngageRequest("claude-code", null, null, true),
-                      requester,
-                      HANDLE));
+                      "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
       continued.get(30, TimeUnit.SECONDS);
 
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
@@ -435,11 +448,11 @@ class EngagementLifecycleTest {
               .useLaunchExecutor(Runnable::run);
 
       var engaged =
-          sailOps.addRoomMember(
-              "auth",
-              new EngageRequest("claude-code", null, null, true),
+          Actor.call(
               Actor.cliOperator(HANDLE),
-              HANDLE);
+              () ->
+                  sailOps.addRoomMember(
+                      "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
       assertTrue(engaged instanceof Result.Success<EngageResponse>);
       var response = ((Result.Success<EngageResponse>) engaged).value();
       assertEquals("full", response.mode());
@@ -447,49 +460,52 @@ class EngagementLifecycleTest {
       assertNotNull(stored("auth"), "the deferred snapshot ran inline and engaged the room");
 
       var refused =
-          sailOps.addRoomMember(
-              "auth",
-              new EngageRequest("codex", "read-only", null, false),
+          Actor.call(
               Actor.cliOperator(HANDLE),
-              HANDLE);
+              () ->
+                  sailOps.addRoomMember(
+                      "auth", new EngageRequest("codex", "read-only", null, false), HANDLE));
       assertTrue(refused instanceof Result.Failure<EngageResponse>);
 
       var membersAdd =
-          sailOps.addRoomMember(
-              "auth",
-              new EngageRequest("claude-code", "read_only", null, false),
+          Actor.call(
               Actor.cliOperator(HANDLE),
-              HANDLE);
+              () ->
+                  sailOps.addRoomMember(
+                      "auth", new EngageRequest("claude-code", "read_only", null, false), HANDLE));
       assertTrue(membersAdd instanceof Result.Success<EngageResponse>);
       assertEquals("read_only", ((Result.Success<EngageResponse>) membersAdd).value().mode());
       var listed = sailOps.roomMembers("auth");
       assertTrue(listed instanceof Result.Success<RoomMembersResponse>);
       assertEquals(1, ((Result.Success<RoomMembersResponse>) listed).value().members().size());
       var posted =
-          sailOps.postRoomMessage(
-              "auth",
-              new SpecMessageRequest("hello room", null, false),
+          Actor.call(
               Actor.cliOperator(HANDLE),
-              HANDLE);
+              () ->
+                  sailOps.postRoomMessage(
+                      "auth", new SpecMessageRequest("hello room", null, false), HANDLE));
       assertTrue(posted instanceof Result.Success<SpecMessageResponse>);
       var roomList = sailOps.roomMessages("auth", null, null, 10);
       assertTrue(roomList instanceof Result.Success<SpecMessagesResponse>);
       assertEquals(1, ((Result.Success<SpecMessagesResponse>) roomList).value().messages().size());
-      var removed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
+      var removed =
+          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(removed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) removed).value().agent());
-      sailOps.addRoomMember(
-          "auth",
-          new EngageRequest("claude-code", null, null, true),
+      Actor.call(
           Actor.cliOperator(HANDLE),
-          HANDLE);
+          () ->
+              sailOps.addRoomMember(
+                  "auth", new EngageRequest("claude-code", null, null, true), HANDLE));
 
-      var dismissed = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
+      var dismissed =
+          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(dismissed instanceof Result.Success<DisengageResponse>);
       assertEquals("claude-code", ((Result.Success<DisengageResponse>) dismissed).value().agent());
       assertNull(stored("auth"));
 
-      var empty = sailOps.removeRoomMember("auth", Actor.cliOperator(HANDLE), HANDLE);
+      var empty =
+          Actor.call(Actor.cliOperator(HANDLE), () -> sailOps.removeRoomMember("auth", HANDLE));
       assertTrue(empty instanceof Result.Success<DisengageResponse>);
       assertNull(((Result.Success<DisengageResponse>) empty).value().agent());
     }
@@ -499,9 +515,11 @@ class EngagementLifecycleTest {
   void disengageClearsTheRoomSpeaksOnTheBusAndIsIdempotent() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
-    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(
+        Actor.cliOperator(HANDLE),
+        () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
 
-    var dismissed = ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
+    var dismissed = Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
 
     assertEquals("claude-code", dismissed);
     assertNull(stored("auth"));
@@ -510,7 +528,7 @@ class EngagementLifecycleTest {
     assertEquals("claude-code", left.getFirst().data().get("agent"));
 
     assertNull(
-        ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),
+        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE)),
         "dismissing an empty room is a no-op, not an error");
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_DISENGAGED).size());
   }
@@ -545,8 +563,9 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                unwired.engage(
-                    "auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE));
+                Actor.call(
+                    Actor.cliOperator(HANDLE),
+                    () -> unwired.engage("auth", "claude-code", null, null, false, HANDLE)));
 
     assertEquals(ErrorCode.COMMAND_FAILED, refusal.failure().errorCode());
     assertNull(stored("auth"), "nothing was seated");
@@ -563,23 +582,20 @@ class EngagementLifecycleTest {
                     "chat-room", "acme", "Chat", HANDLE, null, null, HANDLE, null, null, HANDLE)));
 
     var launch =
-        ops.engage(
-            "chat-room",
-            "claude-code",
-            "read-only",
-            null,
-            false,
+        Actor.call(
             Actor.cliOperator(HANDLE),
-            HANDLE);
+            () -> ops.engage("chat-room", "claude-code", "read-only", null, false, HANDLE));
     assertEquals("read_only", launch.mode());
     assertNull(launch.completion(), "no spec, no snapshot offer — nothing to anchor a rollback");
     assertNotNull(roomMember("chat-room"), "the collaborator is seated on the room row");
     assertEquals(1, ofType(Event.WellKnownTypes.SPEC_ENGAGED).size());
 
-    assertEquals("claude-code", ops.disengage("chat-room", Actor.cliOperator(HANDLE), HANDLE));
+    assertEquals(
+        "claude-code",
+        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("chat-room", HANDLE)));
     assertNull(roomMember("chat-room"));
     assertNull(
-        ops.disengage("chat-room", Actor.cliOperator(HANDLE), HANDLE),
+        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("chat-room", HANDLE)),
         "dismissing an empty room is a no-op");
   }
 
@@ -606,28 +622,18 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "picky-room",
-                    "claude-code",
-                    "yolo",
-                    null,
-                    false,
+                Actor.call(
                     Actor.cliOperator(HANDLE),
-                    HANDLE));
+                    () -> ops.engage("picky-room", "claude-code", "yolo", null, false, HANDLE)));
     assertEquals(ErrorCode.BAD_REQUEST, badMode.failure().errorCode());
 
     var codexReadOnly =
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "picky-room",
-                    "codex",
-                    "read-only",
-                    null,
-                    false,
+                Actor.call(
                     Actor.cliOperator(HANDLE),
-                    HANDLE));
+                    () -> ops.engage("picky-room", "codex", "read-only", null, false, HANDLE)));
     assertEquals(ErrorCode.BAD_REQUEST, codexReadOnly.failure().errorCode());
     assertNull(roomMember("picky-room"), "no refused engage seats anyone");
   }
@@ -647,20 +653,19 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "open-room",
-                    "claude-code",
-                    null,
-                    null,
-                    false,
+                Actor.call(
                     Actor.cliOperator(HANDLE),
-                    HANDLE));
+                    () -> ops.engage("open-room", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
     assertTrue(ex.getMessage().contains("belongs to 'ada'"), ex.getMessage());
 
-    ops.engage("open-room", "claude-code", null, null, false, Actor.cliOperator("ada"), "ada");
+    Actor.call(
+        Actor.cliOperator("ada"),
+        () -> ops.engage("open-room", "claude-code", null, null, false, "ada"));
     assertNotNull(roomMember("open-room"), "its creator's box seats the member");
-    assertEquals("claude-code", ops.disengage("open-room", Actor.cliOperator("ada"), "ada"));
+    assertEquals(
+        "claude-code",
+        Actor.call(Actor.cliOperator("ada"), () -> ops.disengage("open-room", "ada")));
   }
 
   @Test
@@ -677,14 +682,9 @@ class EngagementLifecycleTest {
         assertThrows(
             ApiException.class,
             () ->
-                ops.engage(
-                    "ada-room",
-                    "claude-code",
-                    null,
-                    null,
-                    false,
+                Actor.call(
                     Actor.cliOperator(HANDLE),
-                    HANDLE));
+                    () -> ops.engage("ada-room", "claude-code", null, null, false, HANDLE)));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, ex.failure().errorCode());
   }
 
@@ -693,7 +693,9 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
 
-    ops.engage("auth", "claude-code", null, null, false, Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(
+        Actor.cliOperator(HANDLE),
+        () -> ops.engage("auth", "claude-code", null, null, false, HANDLE));
 
     var member = roomMember("auth");
     assertNotNull(member, "membership lives on the room row");
@@ -712,10 +714,12 @@ class EngagementLifecycleTest {
   void aDisengageClearsTheRoomRosterAndTheLegacyColumnTogether() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
-    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(
+        Actor.cliOperator(HANDLE),
+        () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     assertNotNull(roomMember("auth"));
 
-    ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
 
     assertNull(roomMember("auth"), "the roster empties");
     assertNull(stored("auth"), "the roster clears with it");
@@ -729,7 +733,9 @@ class EngagementLifecycleTest {
     var ops = operations(shell());
     seedSpec("auth");
     var launch =
-        ops.engage("auth", "claude-code", "full", null, true, Actor.cliOperator(HANDLE), HANDLE);
+        Actor.call(
+            Actor.cliOperator(HANDLE),
+            () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
     specStore.compareAndSetStatus(
         "auth",
         ai.singlr.sail.config.SpecStatus.DRAFT,
@@ -753,13 +759,15 @@ class EngagementLifecycleTest {
     roomStore.ensureFor("auth", seeded.project(), seeded.title(), seeded.assignee(), null);
     assertTrue(ops.roomMembers("auth").isEmpty(), "a fresh room seats nobody");
 
-    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(
+        Actor.cliOperator(HANDLE),
+        () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     var members = ops.roomMembers("auth");
     assertEquals(1, members.size());
     assertEquals("claude-code", members.getFirst().agent());
     assertEquals("read_only", members.getFirst().mode());
 
-    ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE));
     assertTrue(ops.roomMembers("auth").isEmpty(), "dismissal empties the roster");
 
     var missing = assertThrows(ApiException.class, () -> ops.roomMembers("ghost"));
@@ -807,11 +815,13 @@ class EngagementLifecycleTest {
   void anEmptiedRosterMeansNobodyIsSeated() throws Exception {
     var ops = operations(shell());
     seedSpec("auth");
-    ops.engage("auth", "claude-code", "read-only", null, false, Actor.cliOperator(HANDLE), HANDLE);
+    Actor.call(
+        Actor.cliOperator(HANDLE),
+        () -> ops.engage("auth", "claude-code", "read-only", null, false, HANDLE));
     roomStore.updateRoster("auth", null);
 
     assertNull(
-        ops.disengage("auth", Actor.cliOperator(HANDLE), HANDLE),
+        Actor.call(Actor.cliOperator(HANDLE), () -> ops.disengage("auth", HANDLE)),
         "the room row is authoritative: an empty roster means nobody is seated");
   }
 }

@@ -63,7 +63,16 @@ class ApiSpecCommandsTest {
                 new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore)
             .useMessages(new MessageStore(db))
             .useRooms(new RoomStore(db));
-    server = new SailApiServer("127.0.0.1", 0, operations, tokenStore, bus, persister);
+    server =
+        new SailApiServer(
+            "127.0.0.1",
+            0,
+            operations,
+            ai.singlr.sail.api.TestAuth.tokens(db),
+            bus,
+            persister,
+            null,
+            null);
     server.start();
   }
 

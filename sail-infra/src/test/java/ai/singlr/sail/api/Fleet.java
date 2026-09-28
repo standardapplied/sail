@@ -336,7 +336,7 @@ public final class Fleet implements AutoCloseable {
               "127.0.0.1",
               freePort(),
               operations,
-              new SessionAwareAuth(new AuthSessionStore(db), fdes, new TokenAuth(tokens)),
+              TestAuth.sessions(db),
               bus,
               null,
               home.resolve(".sail/sail-api.sock"),
@@ -367,11 +367,14 @@ public final class Fleet implements AutoCloseable {
           Acting.as(
               handle,
               () ->
-                  dispatcher.dispatch(
-                      PROJECT,
-                      new DispatchOperations.Request(specId, "background", false, null, false),
+                  Actor.call(
                       Actor.cliOperator(handle),
-                      handle));
+                      () ->
+                          dispatcher.dispatch(
+                              PROJECT,
+                              new DispatchOperations.Request(
+                                  specId, "background", false, null, false),
+                              handle)));
       return assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
     }
 
@@ -392,11 +395,9 @@ public final class Fleet implements AutoCloseable {
       return Acting.as(
           handle,
           () ->
-              stopper.stop(
-                  new StopOperations.ProjectTarget(PROJECT),
+              Actor.call(
                   Actor.cliOperator(handle),
-                  handle,
-                  false));
+                  () -> stopper.stop(new StopOperations.ProjectTarget(PROJECT), handle, false)));
     }
 
     /**
@@ -441,11 +442,11 @@ public final class Fleet implements AutoCloseable {
       return Acting.as(
               handle,
               () ->
-                  operations.postRoomMessage(
-                      specId,
-                      new SpecMessageRequest(body, null, false),
+                  Actor.call(
                       Actor.cliOperator(handle),
-                      handle))
+                      () ->
+                          operations.postRoomMessage(
+                              specId, new SpecMessageRequest(body, null, false), handle)))
           .orThrow()
           .message();
     }
@@ -471,7 +472,7 @@ public final class Fleet implements AutoCloseable {
     }
 
     public Result<RunLogResponse> runLog(String runId) {
-      return operations.runLog(runId, 100, handle, Actor.cliOperator(handle));
+      return Actor.call(Actor.cliOperator(handle), () -> operations.runLog(runId, 100, handle));
     }
 
     public String latestPeer(String specId) {

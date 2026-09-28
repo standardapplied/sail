@@ -7,10 +7,10 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.SailVersion;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.ReleaseFetcher;
 import ai.singlr.sail.engine.SailBinary;
@@ -18,7 +18,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
-import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -607,13 +606,15 @@ public final class UpgradeCommand implements Runnable {
           operations.schema().initialize();
         }
         if (operations.identity().tokens().isEmpty()) {
-          var created =
-              operations.identity().createToken("admin", "admin", null, TokenStore.DEFAULT_TTL);
           var configPath = SailPaths.clientConfigPath();
-          ServerConnectionConfig.saveLocalToken(created.token(), configPath);
+          var minted = operations.identity().mintHostToken(configPath);
           if (!json) {
             System.out.println(
-                Ansi.AUTO.string("    @|green ✓|@ API token created and saved to " + configPath));
+                Ansi.AUTO.string(
+                    "    @|green ✓|@ API token created and saved to "
+                        + configPath
+                        + "; "
+                        + HostToken.describe(minted, operations.identity().box())));
           }
         }
       }

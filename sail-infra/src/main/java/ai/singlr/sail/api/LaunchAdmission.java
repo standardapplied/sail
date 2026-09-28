@@ -41,8 +41,8 @@ public final class LaunchAdmission {
    * spec path — no agent lane, node handle set, this box owns the room (assignee, else creator),
    * write credential, admin-or-owner — with room wording, since no work-item is involved.
    */
-  public static void requireAllowedForRoom(
-      Actor actor, String roomId, String owner, String localHandle) {
+  public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
+    var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
           ErrorCode.FORBIDDEN,
@@ -75,9 +75,8 @@ public final class LaunchAdmission {
     }
   }
 
-  public static void requireAllowed(Actor actor, Spec spec, String localHandle) {
-    if (DispatchPolicy.check(actor, spec, localHandle)
-        instanceof DispatchDecision.Refused refused) {
+  public static void requireAllowed(Spec spec, String localHandle) {
+    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }
   }

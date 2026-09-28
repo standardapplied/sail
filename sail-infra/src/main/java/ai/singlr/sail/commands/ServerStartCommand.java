@@ -17,7 +17,6 @@ import ai.singlr.sail.api.RunActivityStamper;
 import ai.singlr.sail.api.RunPresenceEmitter;
 import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SailApiServer;
-import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
@@ -37,14 +36,17 @@ import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.BindPolicy;
 import ai.singlr.sail.engine.BoxCredentialFile;
+import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ContainerSetupSweep;
 import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DataMigration;
@@ -175,10 +177,14 @@ public final class ServerStartCommand implements Runnable {
     var tokenStore = new TokenStore(db);
     var configPath = SailPaths.clientConfigPath();
     if (tokenStore.list().isEmpty()) {
-      var created = tokenStore.create("admin", "admin");
-      ServerConnectionConfig.saveLocalToken(created.token(), configPath);
+      var box = BoxIdentity.config();
+      var minted = HostToken.mint(tokenStore, new FdeStore(db), box, null, configPath);
       System.out.println(
-          Ansi.AUTO.string("  @|green ✓|@ API token created and saved to " + configPath));
+          Ansi.AUTO.string(
+              "  @|green ✓|@ API token created and saved to "
+                  + configPath
+                  + "; "
+                  + HostToken.describe(minted, box)));
       System.out.println();
     }
     var specStore = new SpecStore(db);
@@ -262,14 +268,12 @@ public final class ServerStartCommand implements Runnable {
     var passkeyService = configured ? buildPasskeyService(db, webauthn) : null;
     var enrollment =
         configured ? new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db)) : null;
+    var roles = new RoleRule(BoxIdentity::config, new FdeStore(db));
+    var tokenAuth = new TokenAuth(tokenStore, roles);
     var passkeyHandler =
         new WebauthnAuthHandler(
-            passkeyService,
-            enrollment,
-            new TokenAuth(tokenStore),
-            configured ? webauthn.origins() : null);
-    var auth =
-        new SessionAwareAuth(new AuthSessionStore(db), new FdeStore(db), new TokenAuth(tokenStore));
+            passkeyService, enrollment, tokenAuth, configured ? webauthn.origins() : null);
+    var auth = new SessionAwareAuth(new AuthSessionStore(db), roles, tokenAuth);
 
     var server =
         new SailApiServer(

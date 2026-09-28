@@ -73,7 +73,7 @@ class DispatchOperationsResolveSpecTest {
 
   private static BuildDispatch.SpecResolution resolve(
       String specId, boolean restart, List<Spec> specs, SpecStore store) {
-    return BuildDispatch.resolveSpec(specs, specId, restart, OPERATOR, FDE);
+    return Actor.call(OPERATOR, () -> BuildDispatch.resolveSpec(specs, specId, restart, FDE));
   }
 
   @Test

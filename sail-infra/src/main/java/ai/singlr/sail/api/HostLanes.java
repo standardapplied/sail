@@ -6,15 +6,18 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -33,6 +36,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -52,8 +56,8 @@ final class HostLanes {
       implements HostDispatching {
     @Override
     public DispatchOperations.Outcome dispatch(
-        String project, DispatchOperations.Request request, Actor actor, String localHandle) {
-      return dispatchOps.dispatch(project, request, actor, localHandle);
+        String project, DispatchOperations.Request request, String localHandle) {
+      return dispatchOps.dispatch(project, request, localHandle);
     }
 
     @Override
@@ -73,8 +77,8 @@ final class HostLanes {
 
     @Override
     public StopOperations.Outcome stop(
-        StopOperations.Target target, Actor actor, String localHandle, boolean dryRun) {
-      return stopOps.stop(target, actor, localHandle, dryRun);
+        StopOperations.Target target, String localHandle, boolean dryRun) {
+      return stopOps.stop(target, localHandle, dryRun);
     }
 
     @Override
@@ -187,7 +191,7 @@ final class HostLanes {
     private PruneReport purge(String name, boolean dryRun) {
       schema.initialize();
       var actor = operator.get();
-      return Actor.call(actor, () -> pruner.prune(PruneRequest.project(name, dryRun), actor));
+      return Actor.call(actor, () -> pruner.prune(PruneRequest.project(name, dryRun)));
     }
 
     @Override
@@ -201,7 +205,7 @@ final class HostLanes {
     }
   }
 
-  record Identity(Sqlite db, FdeStore fdes, Supplier<Actor> cliOperator) implements HostIdentity {
+  record Identity(Sqlite db, RoleRule roles, Supplier<Actor> cliOperator) implements HostIdentity {
     @Override
     public Actor operator() {
       return cliOperator.get();
@@ -219,13 +223,24 @@ final class HostLanes {
     }
 
     @Override
+    public HostToken.Minted mintHostToken(Path configPath) throws IOException {
+      return HostToken.mint(
+          new TokenStore(db), roles.roster(), box(), TokenStore.DEFAULT_TTL, configPath);
+    }
+
+    @Override
+    public SyncConfig box() {
+      return roles.box().get();
+    }
+
+    @Override
     public boolean revokeToken(String name) {
       return new TokenStore(db).revoke(name);
     }
 
     @Override
     public Optional<FdeStore.Fde> fde(String handle) {
-      return fdes.byHandle(handle);
+      return roles.roster().byHandle(handle);
     }
 
     @Override
@@ -235,19 +250,19 @@ final class HostLanes {
 
     @Override
     public SshGateway.Decision authorizeGateway(String command, String handle) {
-      return SshGateway.authorize(command, handle, fdes, new AuthSessionStore(db));
+      return SshGateway.authorize(command, handle, roles, new AuthSessionStore(db));
     }
   }
 
-  record Pty(Sqlite db, EventStore events) implements HostPty {
+  record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
     @Override
     public PtyIdentity identity(String token, String boxHandle) throws IOException {
-      return new HostAccess(db).identity(token, boxHandle);
+      return new HostAccess(db, roles).identity(token, boxHandle);
     }
 
     @Override
     public void admitRoom(String room, String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db).admit(room, project, identity);
+      new HostAccess(db, roles).admit(room, project, identity);
     }
 
     @Override

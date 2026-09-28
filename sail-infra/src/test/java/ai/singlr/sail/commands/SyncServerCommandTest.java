@@ -183,6 +183,66 @@ class SyncServerCommandTest {
   }
 
   @Test
+  void aDisabledFdesSessionIsRefusedBeforeAnythingIsServed() throws Exception {
+    var token = tokenFor("member");
+    mainDb.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'uday'");
+    var out = new java.io.ByteArrayOutputStream();
+
+    var exit =
+        SyncServerCommand.serve(
+            mainReplicaDb,
+            "main",
+            token,
+            new java.io.ByteArrayInputStream(new byte[0]),
+            out,
+            SyncTransitionSink.NONE,
+            ai.singlr.sail.config.SyncConfig::unset);
+
+    assertEquals(1, exit);
+    assertEquals(0, out.size(), "nothing is served");
+  }
+
+  @Test
+  void mainsOperatorSyncsAsAnAdminWhateverItsRosterRole() throws Exception {
+    var token = tokenFor("viewer");
+    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    var toServer = new PipedOutputStream();
+    var serverIn = new BufferedInputStream(new PipedInputStream(toServer));
+    var toClient = new PipedOutputStream();
+    var clientIn = new BufferedInputStream(new PipedInputStream(toClient));
+    var serverThread =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    SyncServerCommand.serve(
+                        mainReplicaDb,
+                        "main",
+                        token,
+                        serverIn,
+                        toClient,
+                        SyncTransitionSink.NONE,
+                        () -> new ai.singlr.sail.config.SyncConfig("main", null, "uday", "main"));
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                });
+    try (var session =
+        SyncSession.open(
+            clientIn,
+            toServer,
+            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+            n -> {},
+            nodeDb)) {
+      assertEquals(
+          1,
+          Actor.call(Actor.main(), () -> session.reconcile("spec", nodeReplica)).report().pushed());
+    } finally {
+      serverThread.join();
+    }
+  }
+
+  @Test
   void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
     Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
     syncWithToken(null);

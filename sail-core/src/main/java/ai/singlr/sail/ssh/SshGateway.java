@@ -6,8 +6,9 @@
 package ai.singlr.sail.ssh;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
-import ai.singlr.sail.store.FdeStore;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,8 +63,13 @@ public final class SshGateway {
   /** The command is refused; {@code reason} is safe to show the caller. */
   public record Rejected(String reason) implements Decision {}
 
+  /**
+   * Whether the FDE pinned to the calling key may run {@code originalCommand}, with the role {@link
+   * RoleRule} gives it: an FDE that is disabled or unknown is refused every command, and an
+   * administration command needs admin.
+   */
   public static Decision authorize(
-      String originalCommand, String fdeHandle, FdeStore fdes, AuthSessionStore sessions) {
+      String originalCommand, String fdeHandle, RoleRule roles, AuthSessionStore sessions) {
     if (Strings.isBlank(originalCommand)) {
       return new Rejected(
           "No command supplied. Interactive shells are not permitted; run a 'sail' command.");
@@ -91,12 +97,13 @@ public final class SshGateway {
               + "' requires host privileges and is not available over an SSH-key session."
               + " SSH to the host directly to run it.");
     }
-    var fde = fdes.byHandle(fdeHandle);
-    if (fde.isEmpty() || !"active".equals(fde.get().status())) {
+    var fde = roles.roster().byHandle(fdeHandle);
+    var role = roles.roleOf(fdeHandle, Role.ADMIN);
+    if (fde.isEmpty() || role.isEmpty()) {
       return new Rejected("Unknown or disabled FDE.");
     }
     if (ADMIN_COMMANDS.contains(subcommand)
-        && !"admin".equals(fde.get().role())
+        && role.get() != Role.ADMIN
         && !isOwnPasskeyCommand(tokens, fdeHandle)
         && !isOwnEnrollCommand(tokens, fdeHandle)) {
       return new Rejected(adminRequiredReason(tokens, fdeHandle, subcommand));

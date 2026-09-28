@@ -31,8 +31,8 @@ public final class SpecPolicy {
    * creator when the spec is unassigned; an admin always passes. Order — write capability, then
    * admin, then ownership — so the most fundamental precondition names the refusal.
    */
-  public static AccessDecision mutate(
-      Actor actor, String specId, String assignee, String createdBy) {
+  public static AccessDecision mutate(String specId, String assignee, String createdBy) {
+    var actor = Actor.current();
     if (!actor.canWrite()) {
       return readOnly();
     }
@@ -52,9 +52,10 @@ public final class SpecPolicy {
    * lane's one write carries its own rule: it may post exactly when it acts for the room's owner
    * ({@link Ownership#ownerOf}), the FDE whose box woke it — the creator of an unassigned one.
    */
-  public static AccessDecision post(Actor actor, String specId, String assignee, String createdBy) {
+  public static AccessDecision post(String specId, String assignee, String createdBy) {
+    var actor = Actor.current();
     if (!actor.roomLane()) {
-      return mutate(actor, specId, assignee, createdBy);
+      return mutate(specId, assignee, createdBy);
     }
     if (actor.actsFor(Ownership.ownerOf(assignee, createdBy))) {
       return AccessDecision.allowed();
@@ -70,7 +71,8 @@ public final class SpecPolicy {
    * the node's FDE handle, so a run-principal assignee would leave the spec undispatchable.
    */
   public static AccessDecision reassign(
-      Actor actor, String specId, String currentAssignee, String requestedAssignee) {
+      String specId, String currentAssignee, String requestedAssignee) {
+    var actor = Actor.current();
     if (!actor.canWrite()) {
       return readOnly();
     }

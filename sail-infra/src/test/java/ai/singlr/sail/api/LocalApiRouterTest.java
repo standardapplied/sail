@@ -112,7 +112,7 @@ class LocalApiRouterTest {
         new TestOperations() {
           @Override
           public SyncConflicts.Conflict resolveConflict(
-              String type, String id, Resolution resolution, Actor actor) {
+              String type, String id, Resolution resolution) {
             asked.add(type + ":" + id);
             throw new ApiException(
                 type == null ? ErrorCode.BAD_REQUEST : ErrorCode.CONFLICT, "refused " + id);
@@ -872,21 +872,24 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecCreatedResponse> createGlobalSpec(
-        SpecCreateRequest request, Actor actor) {
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
+
+      var actor = Actor.current();
       lastCreate = request;
       lastActor = actor;
       lastBound = Actor.current();
-      return super.createGlobalSpec(request, actor);
+      return Actor.call(actor, () -> super.createGlobalSpec(request));
     }
 
     @Override
     public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-        String specId, SpecUpdateRequest request, Actor actor) {
+        String specId, SpecUpdateRequest request) {
+
+      var actor = Actor.current();
       lastUpdate = request;
       lastActor = actor;
       lastBound = Actor.current();
-      return super.updateGlobalSpec(specId, request, actor);
+      return Actor.call(actor, () -> super.updateGlobalSpec(specId, request));
     }
 
     @Override
@@ -902,9 +905,11 @@ class LocalApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
+    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
+
+      var actor = Actor.current();
       lastDeletedId = specId;
-      return super.deleteGlobalSpec(specId, actor);
+      return Actor.call(actor, () -> super.deleteGlobalSpec(specId));
     }
 
     @Override
@@ -915,10 +920,12 @@ class LocalApiRouterTest {
 
     @Override
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-        String specId, SpecContentRequest request, Actor actor) {
+        String specId, SpecContentRequest request) {
+
+      var actor = Actor.current();
       lastContent = request;
       lastActor = actor;
-      return super.setGlobalSpecContent(specId, request, actor);
+      return Actor.call(actor, () -> super.setGlobalSpecContent(specId, request));
     }
 
     @Override
@@ -929,11 +936,13 @@ class LocalApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postRoomMessage(
-        String specId, SpecMessageRequest request, Actor actor, String author) {
+        String specId, SpecMessageRequest request, String author) {
+
+      var actor = Actor.current();
       lastMessage = request;
       lastMessageAuthor = author;
       lastActor = actor;
-      return super.postRoomMessage(specId, request, actor, author);
+      return Actor.call(actor, () -> super.postRoomMessage(specId, request, author));
     }
 
     @Override
@@ -976,19 +985,18 @@ class LocalApiRouterTest {
 
     @Override
     public Result<RoomConversationResponse> recordRoomConversation(
-        String roomId,
-        String agent,
-        String sessionId,
-        String source,
-        String transcriptPath,
-        Actor actor) {
+        String roomId, String agent, String sessionId, String source, String transcriptPath) {
+
+      var actor = Actor.current();
       lastConversationRoom = roomId;
       lastConversationAgent = agent;
       lastSessionId = sessionId;
       lastSessionSource = source;
       lastTranscriptPath = transcriptPath;
       lastActor = actor;
-      return super.recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, actor);
+      return Actor.call(
+          actor,
+          () -> super.recordRoomConversation(roomId, agent, sessionId, source, transcriptPath));
     }
   }
 }

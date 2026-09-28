@@ -38,7 +38,13 @@ public final class FdeStore {
       String email,
       String role,
       String status,
-      String createdAt) {}
+      String createdAt) {
+
+    /** Whether this FDE may act at all: a {@code disabled} one is refused through every door. */
+    public boolean active() {
+      return "active".equals(status);
+    }
+  }
 
   /** Creates an FDE with the default {@code member} role. */
   public Fde add(String handle, String displayName, String email) {

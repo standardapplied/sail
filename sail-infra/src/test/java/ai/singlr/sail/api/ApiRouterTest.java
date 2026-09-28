@@ -1089,7 +1089,7 @@ class ApiRouterTest {
         ApiJson.withSchema(new ApiError("code", "message", "")).toString().contains("action"));
     assertTrue(
         ApiJson.withSchema(new ApiError("code", "message", "fix")).toString().contains("action"));
-    assertThrows(NullPointerException.class, () -> new TokenAuth(null));
+    assertThrows(NullPointerException.class, () -> new TokenAuth(null, null));
   }
 
   @Test
@@ -1922,12 +1922,14 @@ class ApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postRoomMessage(
-        String specId, SpecMessageRequest request, Actor actor, String author) {
+        String specId, SpecMessageRequest request, String author) {
+
+      var actor = Actor.current();
       this.actor = actor;
       this.author = author;
       this.body = request.body();
       this.question = request.question();
-      return super.postRoomMessage(specId, request, actor, author);
+      return Actor.call(actor, () -> super.postRoomMessage(specId, request, author));
     }
   }
 
@@ -2070,7 +2072,7 @@ class ApiRouterTest {
 
     @Override
     public Result<EngageResponse> addRoomMember(
-        String roomId, EngageRequest request, Actor actor, String localHandle) {
+        String roomId, EngageRequest request, String localHandle) {
       lastAddMember = new Engage(roomId, request, localHandle);
       return Result.success(
           new EngageResponse(
@@ -2078,8 +2080,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<DisengageResponse> removeRoomMember(
-        String roomId, Actor actor, String localHandle) {
+    public Result<DisengageResponse> removeRoomMember(String roomId, String localHandle) {
       lastRemoveMember = roomId;
       return Result.success(new DisengageResponse("claude-code"));
     }
@@ -2093,7 +2094,9 @@ class ApiRouterTest {
     String lastRoomDelete;
 
     @Override
-    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor) {
+    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+
+      var actor = Actor.current();
       lastRoomCreate = request;
       lastRoomCreator = Actor.current();
       return Result.success(
@@ -2117,7 +2120,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RoomsListResponse> rooms(String project, Actor actor) {
+    public Result<RoomsListResponse> rooms(String project) {
       lastRoomsProject = project;
       return Result.success(
           new RoomsListResponse(
@@ -2164,7 +2167,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor) {
+    public Result<RoomDeletedResponse> deleteRoom(String roomId) {
       lastRoomDelete = roomId;
       return Result.success(new RoomDeletedResponse(roomId));
     }
@@ -2178,7 +2181,7 @@ class ApiRouterTest {
 
     @Override
     public Result<SpecMessageResponse> postRoomMessage(
-        String roomId, SpecMessageRequest request, Actor principal, String authorHandle) {
+        String roomId, SpecMessageRequest request, String authorHandle) {
       lastRoomPost = roomId + ":" + request.body();
       return Result.success(
           new SpecMessageResponse(
@@ -2228,7 +2231,7 @@ class ApiRouterTest {
 
     @Override
     public Result<DispatchResponse> dispatch(
-        String project, DispatchRequest request, Actor actor, String localHandle) {
+        String project, DispatchRequest request, String localHandle) {
       return Result.success(
           new DispatchResponse(
               project,
@@ -2300,12 +2303,12 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor) {
+    public Result<RunLogResponse> runLog(String runId, int tail, String localHandle) {
       return Result.success(new RunLogResponse(runId, List.of("tail=" + tail), null));
     }
 
     @Override
-    public Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor) {
+    public Result<StopRunResponse> stopRun(String runId, String localHandle) {
       return Result.success(new StopRunResponse(runId, false, null, null, false));
     }
 
@@ -2416,8 +2419,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecCreatedResponse> createGlobalSpec(
-        SpecCreateRequest request, Actor actor) {
+    public Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request) {
       return Result.success(
           new GlobalSpecCreatedResponse(
               new GlobalSpecView(
@@ -2444,7 +2446,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-        String specId, SpecUpdateRequest request, Actor actor) {
+        String specId, SpecUpdateRequest request) {
       return Result.success(
           new GlobalSpecUpdatedResponse(
               new GlobalSpecView(
@@ -2470,7 +2472,7 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor) {
+    public Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId) {
       return Result.success(new GlobalSpecDeletedResponse(specId));
     }
 
@@ -2481,7 +2483,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecContentResponse> setGlobalSpecContent(
-        String specId, SpecContentRequest request, Actor actor) {
+        String specId, SpecContentRequest request) {
       return Result.success(new GlobalSpecContentResponse(specId, request.body(), request.plan()));
     }
 
@@ -2503,14 +2505,9 @@ class ApiRouterTest {
 
     @Override
     public Result<RoomConversationResponse> recordRoomConversation(
-        String roomId,
-        String agent,
-        String sessionId,
-        String source,
-        String transcriptPath,
-        Actor actor) {
+        String roomId, String agent, String sessionId, String source, String transcriptPath) {
       return new TestOperations()
-          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath, actor);
+          .recordRoomConversation(roomId, agent, sessionId, source, transcriptPath);
     }
 
     @Override
@@ -2525,7 +2522,7 @@ class ApiRouterTest {
 
     @Override
     public Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-        String specId, SpecRestoreRequest request, Actor actor) {
+        String specId, SpecRestoreRequest request) {
       return Result.success(
           new GlobalSpecRestoredResponse(
               GlobalSpecView.from(
@@ -2575,13 +2572,12 @@ class ApiRouterTest {
     }
 
     @Override
-    public Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor) {
+    public Result<ReviewApproveResponse> approveReview(String reviewId) {
       return Result.success(new ReviewApproveResponse(reviewId, true));
     }
 
     @Override
-    public Result<FindingDismissResponse> dismissFinding(
-        String reviewId, String findingId, Actor actor) {
+    public Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId) {
       return Result.success(new FindingDismissResponse(findingId, true));
     }
   }

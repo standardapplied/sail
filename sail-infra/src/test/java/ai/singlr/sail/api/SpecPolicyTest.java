@@ -44,22 +44,22 @@ class SpecPolicyTest {
 
   @Test
   void adminMayMutateAnyAssignedSpec() {
-    assertAllowed(SpecPolicy.mutate(admin("ops"), SPEC, "raj", "raj"));
+    assertAllowed(Actor.call(admin("ops"), () -> SpecPolicy.mutate(SPEC, "raj", "raj")));
   }
 
   @Test
   void adminMayMutateAnUnassignedSpecTheyDidNotCreate() {
-    assertAllowed(SpecPolicy.mutate(admin("ops"), SPEC, null, "raj"));
+    assertAllowed(Actor.call(admin("ops"), () -> SpecPolicy.mutate(SPEC, null, "raj")));
   }
 
   @Test
   void assigneeMayMutateTheirOwnSpec() {
-    assertAllowed(SpecPolicy.mutate(member("uday"), SPEC, "uday", "raj"));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.mutate(SPEC, "uday", "raj")));
   }
 
   @Test
   void nonAssigneeMemberIsRefusedNamingTheAssignee() {
-    var r = refused(SpecPolicy.mutate(member("uday"), SPEC, "raj", "raj"));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.mutate(SPEC, "raj", "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("'raj'"), r.message());
     assertTrue(r.message().contains("'auth'"), r.message());
@@ -67,12 +67,12 @@ class SpecPolicyTest {
 
   @Test
   void creatorMayMutateAnUnassignedSpec() {
-    assertAllowed(SpecPolicy.mutate(member("uday"), SPEC, null, "uday"));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.mutate(SPEC, null, "uday")));
   }
 
   @Test
   void nonCreatorMemberIsRefusedOnUnassignedSpecNamingTheCreator() {
-    var r = refused(SpecPolicy.mutate(member("uday"), SPEC, "", "raj"));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.mutate(SPEC, "", "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
     assertTrue(r.message().contains("raj"), r.message());
     assertTrue(r.message().contains("unassigned"), r.message());
@@ -80,29 +80,29 @@ class SpecPolicyTest {
 
   @Test
   void viewerIsRefusedReadOnlyEvenOnTheirOwnSpec() {
-    var r = refused(SpecPolicy.mutate(viewer("uday"), SPEC, "uday", "uday"));
+    var r = refused(Actor.call(viewer("uday"), () -> SpecPolicy.mutate(SPEC, "uday", "uday")));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, r.code());
   }
 
   @Test
   void machineTokenWithoutHandleNeverMatchesAnAssignee() {
-    var r = refused(SpecPolicy.mutate(member(null), SPEC, "raj", "raj"));
+    var r = refused(Actor.call(member(null), () -> SpecPolicy.mutate(SPEC, "raj", "raj")));
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
 
   @Test
   void machineAdminTokenMayMutate() {
-    assertAllowed(SpecPolicy.mutate(admin(null), SPEC, "raj", "raj"));
+    assertAllowed(Actor.call(admin(null), () -> SpecPolicy.mutate(SPEC, "raj", "raj")));
   }
 
   @Test
   void adminMayReassignAnyAssignedSpec() {
-    assertAllowed(SpecPolicy.reassign(admin("ops"), SPEC, "raj", "uday"));
+    assertAllowed(Actor.call(admin("ops"), () -> SpecPolicy.reassign(SPEC, "raj", "uday")));
   }
 
   @Test
   void memberCannotReassignSomeoneElsesSpec() {
-    var r = refused(SpecPolicy.reassign(member("uday"), SPEC, "raj", "uday"));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "raj", "uday")));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
     assertTrue(r.message().contains("admin-only"), r.message());
     assertTrue(r.message().contains("raj"), r.message());
@@ -110,31 +110,31 @@ class SpecPolicyTest {
 
   @Test
   void memberCannotReassignEvenTheirOwnSpecToAnother() {
-    var r = refused(SpecPolicy.reassign(member("uday"), SPEC, "uday", "raj"));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "uday", "raj")));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
   @Test
   void memberMayClaimAnUnassignedSpecForThemselves() {
-    assertAllowed(SpecPolicy.reassign(member("uday"), SPEC, null, "uday"));
-    assertAllowed(SpecPolicy.reassign(member("uday"), SPEC, "", "uday"));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday")));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, "", "uday")));
   }
 
   @Test
   void memberCannotClaimAnUnassignedSpecForSomeoneElse() {
-    var r = refused(SpecPolicy.reassign(member("uday"), SPEC, null, "raj"));
+    var r = refused(Actor.call(member("uday"), () -> SpecPolicy.reassign(SPEC, null, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
   @Test
   void viewerCannotReassign() {
-    var r = refused(SpecPolicy.reassign(viewer("uday"), SPEC, null, "uday"));
+    var r = refused(Actor.call(viewer("uday"), () -> SpecPolicy.reassign(SPEC, null, "uday")));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, r.code());
   }
 
   @Test
   void machineMemberTokenCannotClaimUnassigned() {
-    var r = refused(SpecPolicy.reassign(member(null), SPEC, null, "raj"));
+    var r = refused(Actor.call(member(null), () -> SpecPolicy.reassign(SPEC, null, "raj")));
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
 
@@ -142,15 +142,15 @@ class SpecPolicyTest {
   void agentPrincipalMayMutateItsOwnersSpec() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    assertAllowed(SpecPolicy.mutate(agent, SPEC, "raj", "someone"));
-    assertAllowed(SpecPolicy.mutate(agent, SPEC, null, "raj"));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.mutate(SPEC, "raj", "someone")));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.mutate(SPEC, null, "raj")));
   }
 
   @Test
   void agentPrincipalMayNotMutateAnotherFdesSpec() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    var refusal = refused(SpecPolicy.mutate(agent, SPEC, "sumesh", "sumesh"));
+    var refusal = refused(Actor.call(agent, () -> SpecPolicy.mutate(SPEC, "sumesh", "sumesh")));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refusal.code());
   }
@@ -159,15 +159,15 @@ class SpecPolicyTest {
   void agentPrincipalClaimsAnUnassignedSpecForItsOwningFde() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    assertAllowed(SpecPolicy.reassign(agent, SPEC, null, "raj"));
-    assertAllowed(SpecPolicy.reassign(agent, SPEC, "", "raj"));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "raj")));
+    assertAllowed(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, "", "raj")));
   }
 
   @Test
   void agentPrincipalCannotClaimForItsEphemeralRunHandle() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    var r = refused(SpecPolicy.reassign(agent, SPEC, null, "claude/a1b2c3"));
+    var r = refused(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "claude/a1b2c3")));
 
     assertEquals(
         ErrorCode.FORBIDDEN_ADMIN_ONLY,
@@ -179,7 +179,7 @@ class SpecPolicyTest {
   void agentPrincipalCannotClaimForAThirdFde() {
     var agent = Actor.agentPrincipal("claude/a1b2c3", "raj");
 
-    var r = refused(SpecPolicy.reassign(agent, SPEC, null, "sumesh"));
+    var r = refused(Actor.call(agent, () -> SpecPolicy.reassign(SPEC, null, "sumesh")));
 
     assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, r.code());
   }
@@ -188,14 +188,14 @@ class SpecPolicyTest {
   void roomPrincipalMayPostToItsOwnersSpecRoom() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    assertAllowed(SpecPolicy.post(room, SPEC, "raj", "raj"));
+    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, "raj", "raj")));
   }
 
   @Test
   void roomPrincipalMayNotPostToAnotherFdesSpecRoom() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    var r = refused(SpecPolicy.post(room, SPEC, "sumesh", "sumesh"));
+    var r = refused(Actor.call(room, () -> SpecPolicy.post(SPEC, "sumesh", "sumesh")));
 
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, r.code());
   }
@@ -204,12 +204,13 @@ class SpecPolicyTest {
   void roomPrincipalMayPostToTheRoomOfAnUnassignedSpecItsFdeCreated() {
     var room = Actor.roomPrincipal("claude/room-a1b2c3", "raj");
 
-    assertAllowed(SpecPolicy.post(room, SPEC, "", "raj"));
+    assertAllowed(Actor.call(room, () -> SpecPolicy.post(SPEC, "", "raj")));
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        refused(SpecPolicy.post(room, SPEC, "", "sumesh")).code());
+        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, "", "sumesh"))).code());
     assertEquals(
-        ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused(SpecPolicy.post(room, SPEC, null, null)).code());
+        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
+        refused(Actor.call(room, () -> SpecPolicy.post(SPEC, null, null))).code());
   }
 
   @Test
@@ -218,19 +219,21 @@ class SpecPolicyTest {
 
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        refused(SpecPolicy.mutate(room, SPEC, "raj", "raj")).code());
+        refused(Actor.call(room, () -> SpecPolicy.mutate(SPEC, "raj", "raj"))).code());
     assertEquals(
         ErrorCode.READ_ONLY_CREDENTIAL,
-        refused(SpecPolicy.reassign(room, SPEC, null, "raj")).code());
+        refused(Actor.call(room, () -> SpecPolicy.reassign(SPEC, null, "raj"))).code());
   }
 
   @Test
   void nonRoomLanesPostUnderThePlainMutationGate() {
-    assertAllowed(SpecPolicy.post(member("uday"), SPEC, "uday", "raj"));
+    assertAllowed(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, "uday", "raj")));
     assertAllowed(
-        SpecPolicy.post(Actor.agentPrincipal("claude/a1b2c3", "raj"), SPEC, "raj", "raj"));
+        Actor.call(
+            Actor.agentPrincipal("claude/a1b2c3", "raj"),
+            () -> SpecPolicy.post(SPEC, "raj", "raj")));
     assertEquals(
         ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        refused(SpecPolicy.post(member("uday"), SPEC, "raj", "raj")).code());
+        refused(Actor.call(member("uday"), () -> SpecPolicy.post(SPEC, "raj", "raj"))).code());
   }
 }

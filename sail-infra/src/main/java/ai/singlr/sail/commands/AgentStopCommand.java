@@ -23,7 +23,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashMap;
 import java.util.Objects;
@@ -99,9 +98,7 @@ public final class AgentStopCommand implements Runnable {
   }
 
   private StopOperations.Outcome stop(HostOperations operations, String handle) {
-    return operations
-        .dispatching()
-        .stop(new StopOperations.ProjectTarget(name), Actor.cliOperator(handle), handle, dryRun);
+    return operations.dispatching().stop(new StopOperations.ProjectTarget(name), handle, dryRun);
   }
 
   /**

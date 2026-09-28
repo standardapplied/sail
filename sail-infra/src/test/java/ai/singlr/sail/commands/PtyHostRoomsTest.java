@@ -90,11 +90,21 @@ class PtyHostRoomsTest {
         refusal("adas-room", "acme", new PtyIdentity("peek", false)).contains("read-only"),
         "a viewer's roster role, not the client's claim, decides");
     assertTrue(
-        refusal("adas-room", "acme", new PtyIdentity("nobody", false)).contains("read-only"),
-        "a handle absent from the roster fails closed");
+        refusal("adas-room", "acme", new PtyIdentity("nobody", false))
+            .contains("not in this box's roster"),
+        "a handle absent from the roster is refused");
     assertTrue(
         refusal("adas-room", "acme", new PtyIdentity("mallory", true)).contains("not you"),
         "the roster's role decides, never an admin bit riding the identity");
+  }
+
+  @Test
+  void aDisabledFdeIsRefused() throws Exception {
+    try (var db = Sqlite.open(path)) {
+      db.execute("UPDATE fdes SET status = 'disabled' WHERE handle = 'ada'");
+    }
+
+    assertTrue(refusal("adas-room", "acme", new PtyIdentity("ada", false)).contains("disabled"));
   }
 
   @Test

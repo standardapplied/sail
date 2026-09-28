@@ -77,9 +77,10 @@ final class SpecPruner {
   }
 
   /** Erases what {@code request} names, or, as a dry run, reports what that would erase. */
-  PruneReport prune(PruneRequest request, Actor actor) {
+  PruneReport prune(PruneRequest request) {
+    var actor = Actor.current();
     Objects.requireNonNull(request, "prune request");
-    authorize(request, actor);
+    authorize(request);
     var node = !authoritative.getAsBoolean();
     if (node && request.policy() != null) {
       throw new ApiException(
@@ -89,12 +90,12 @@ final class SpecPruner {
           "Run it on main, or name the specs: sail spec prune <id...>.");
     }
     var handle = principal(actor.handle());
-    IntFunction<List<Erasure.Target>> select = limit -> roots(request, actor, limit);
+    IntFunction<List<Erasure.Target>> select = limit -> roots(request, limit);
     var idle = request.project() == null;
     if (request.dryRun()) {
       return rehearse(select, idle);
     }
-    return node ? ask(request, actor, handle, select, idle) : apply(select, handle, idle);
+    return node ? ask(request, handle, select, idle) : apply(select, handle, idle);
   }
 
   /**
@@ -171,11 +172,7 @@ final class SpecPruner {
    * instead. What was discarded leaves the board and its content is collected at once.
    */
   private PruneReport ask(
-      PruneRequest request,
-      Actor actor,
-      String handle,
-      IntFunction<List<Erasure.Target>> select,
-      boolean idle) {
+      PruneRequest request, String handle, IntFunction<List<Erasure.Target>> select, boolean idle) {
     var rehearsed = rehearse(select, idle);
     var requests = new EraseRequests(db);
     var projects = new LinkedHashSet<String>();
@@ -183,7 +180,7 @@ final class SpecPruner {
     var asked =
         db.transaction(
             () -> {
-              var roots = roots(request, actor, Integer.MAX_VALUE);
+              var roots = roots(request, Integer.MAX_VALUE);
               var local =
                   roots.stream()
                       .filter(
@@ -240,8 +237,8 @@ final class SpecPruner {
     }
   }
 
-  private static void authorize(PruneRequest request, Actor actor) {
-    Objects.requireNonNull(actor, "a prune needs the authenticated actor");
+  private static void authorize(PruneRequest request) {
+    var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
           ErrorCode.AGENT_LANE_FORBIDDEN,
@@ -268,7 +265,7 @@ final class SpecPruner {
    * found. A project is a root only when this box holds something of it, so a name nobody used is
    * never spent.
    */
-  private List<Erasure.Target> roots(PruneRequest request, Actor actor, int limit) {
+  private List<Erasure.Target> roots(PruneRequest request, int limit) {
     var roots = new ArrayList<Erasure.Target>();
     for (var id : request.ids()) {
       var target = new Erasure.Target(Erasure.SPEC, id);
@@ -282,7 +279,7 @@ final class SpecPruner {
                   () ->
                       new ApiException(
                           ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found."));
-      SpecPolicy.mutate(actor, id, spec.assignee(), spec.createdBy()).enforce();
+      SpecPolicy.mutate(id, spec.assignee(), spec.createdBy()).enforce();
       if (!spec.prunable()) {
         throw new ApiException(
             ErrorCode.SPEC_NOT_PRUNABLE,

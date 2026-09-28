@@ -33,6 +33,16 @@ public enum Role {
     return capabilities.contains(capability);
   }
 
+  /** This role, or {@code cap} when {@code cap} grants less: a credential never outranks itself. */
+  public Role cappedBy(Role cap) {
+    return compareTo(cap) >= 0 ? this : cap;
+  }
+
+  /** The stored, lowercase form {@link #fromAttribute} resolves. */
+  public String attribute() {
+    return name().toLowerCase(Locale.ROOT);
+  }
+
   /**
    * Resolves the role from the {@code token.role} exchange attribute. Any null, blank, or
    * unrecognized value fails safe to {@link #VIEWER} so a malformed or absent role can never

@@ -14,7 +14,6 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RoomStore;
@@ -86,9 +85,7 @@ class UnassignedSpecTest {
                     target -> {
                       throw new IOException("main unavailable");
                     }));
-    var auth =
-        new SessionAwareAuth(
-            new AuthSessionStore(db), new FdeStore(db), new TokenAuth(new TokenStore(db)));
+    var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
   }

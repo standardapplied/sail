@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SyncConflicts;
 
 /**
@@ -24,17 +23,15 @@ public interface Operations extends LocalLaneOperations {
    */
   SyncConflicts.Conflict conflict(String type, String id);
 
-  SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution);
-
   ProjectFiles projectFiles(String project);
 
   Result<ReviewListResponse> reviewsForSpec(String specId);
 
   Result<ReviewDetailResponse> reviewDetail(String reviewId);
 
-  Result<ReviewApproveResponse> approveReview(String reviewId, Actor actor);
+  Result<ReviewApproveResponse> approveReview(String reviewId);
 
-  Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId, Actor actor);
+  Result<FindingDismissResponse> dismissFinding(String reviewId, String findingId);
 
   Result<HealthResponse> health();
 
@@ -55,8 +52,7 @@ public interface Operations extends LocalLaneOperations {
 
   Result<SpecResponse> spec(String project, String specId);
 
-  Result<DispatchResponse> dispatch(
-      String project, DispatchRequest request, Actor actor, String localHandle);
+  Result<DispatchResponse> dispatch(String project, DispatchRequest request, String localHandle);
 
   /** Lists the project's container snapshots with the source each name's prefix encodes. */
   Result<SnapshotListResponse> snapshots(String project);
@@ -96,10 +92,10 @@ public interface Operations extends LocalLaneOperations {
    * to the run's {@code node} and a mismatch returns a structured {@code run_on_other_node} refusal
    * rather than a foreign box's local file. Never tails the wrong execution's bytes.
    */
-  Result<RunLogResponse> runLog(String runId, int tail, String localHandle, Actor actor);
+  Result<RunLogResponse> runLog(String runId, int tail, String localHandle);
 
   /** Stops a run, but only when it is executing on this box (same provenance guard as the log). */
-  Result<StopRunResponse> stopRun(String runId, String localHandle, Actor actor);
+  Result<StopRunResponse> stopRun(String runId, String localHandle);
 
   /** Publishes an event onto the bus and returns the stamped copy. */
   Result<EventPublishResponse> publishEvent(Event event);
@@ -125,32 +121,30 @@ public interface Operations extends LocalLaneOperations {
 
   Result<GlobalSpecHistoryResponse> globalSpecHistory(String specId);
 
-  Result<GlobalSpecRestoredResponse> restoreGlobalSpec(
-      String specId, SpecRestoreRequest request, Actor actor);
+  Result<GlobalSpecRestoredResponse> restoreGlobalSpec(String specId, SpecRestoreRequest request);
 
   /**
    * Erases specs everywhere, or rehearses doing so; see {@code GlobalSpecOperations#prune}. The
    * HTTP lane only: no agent reaches it.
    */
-  Result<PruneReport> pruneSpecs(PruneRequest request, Actor actor);
+  Result<PruneReport> pruneSpecs(PruneRequest request);
 
   Result<RoomMembersResponse> roomMembers(String roomId);
 
   Result<SpecMessagesResponse> roomMessages(String roomId, String before, String after, int limit);
 
   Result<SpecMessageResponse> postRoomMessage(
-      String roomId, SpecMessageRequest request, Actor principal, String authorHandle);
+      String roomId, SpecMessageRequest request, String authorHandle);
 
-  Result<EngageResponse> addRoomMember(
-      String roomId, EngageRequest request, Actor actor, String localHandle);
+  Result<EngageResponse> addRoomMember(String roomId, EngageRequest request, String localHandle);
 
-  Result<DisengageResponse> removeRoomMember(String roomId, Actor actor, String localHandle);
+  Result<DisengageResponse> removeRoomMember(String roomId, String localHandle);
 
-  Result<RoomDetailResponse> createRoom(RoomCreateRequest request, Actor actor);
+  Result<RoomDetailResponse> createRoom(RoomCreateRequest request);
 
-  Result<RoomsListResponse> rooms(String project, Actor actor);
+  Result<RoomsListResponse> rooms(String project);
 
   Result<RoomDetailResponse> room(String roomId);
 
-  Result<RoomDeletedResponse> deleteRoom(String roomId, Actor actor);
+  Result<RoomDeletedResponse> deleteRoom(String roomId);
 }

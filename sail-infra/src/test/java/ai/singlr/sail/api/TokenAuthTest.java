@@ -36,7 +36,9 @@ class TokenAuthTest {
     new SchemaManager(db).migrate();
     tokenStore = new TokenStore(db);
     validToken = tokenStore.create("test-admin", "admin").token();
-    server = new SailApiServer("127.0.0.1", 0, new FakeOps(), tokenStore, new EventBus(), null);
+    server =
+        new SailApiServer(
+            "127.0.0.1", 0, new FakeOps(), TestAuth.tokens(db), new EventBus(), null, null);
     server.start();
   }
 
@@ -75,7 +77,8 @@ class TokenAuthTest {
 
   @Test
   void constructorRejectsNullStore() {
-    assertThrows(NullPointerException.class, () -> new TokenAuth(null));
+    assertThrows(NullPointerException.class, () -> new TokenAuth(null, TestAuth.roles(db)));
+    assertThrows(NullPointerException.class, () -> new TokenAuth(tokenStore, null));
   }
 
   @Test

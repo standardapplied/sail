@@ -166,9 +166,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var outcome =
           Acting.by(
               OPERATOR,
-              () ->
-                  stopOps.stop(
-                      new StopOperations.ProjectTarget(CONTAINER), OPERATOR, HANDLE, false));
+              () -> stopOps.stop(new StopOperations.ProjectTarget(CONTAINER), HANDLE, false));
 
       var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
       assertEquals(session.runId(), stopped.runId());
@@ -190,7 +188,6 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
             ops.dispatch(
                 CONTAINER,
                 new DispatchOperations.Request("spec-app", "background", false, null, false),
-                OPERATOR,
                 HANDLE));
   }
 

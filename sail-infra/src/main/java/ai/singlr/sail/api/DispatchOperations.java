@@ -12,7 +12,6 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -263,8 +262,8 @@ public final class DispatchOperations {
    * before any mutation; a failure after the reservation marks the run failed so the reservation is
    * released. Throws {@link ApiException} with a structured code on every refusal or failure.
    */
-  public Outcome dispatch(String project, Request request, Actor actor, String localHandle) {
-    return buildDispatch.dispatch(project, request, actor, localHandle);
+  public Outcome dispatch(String project, Request request, String localHandle) {
+    return buildDispatch.dispatch(project, request, localHandle);
   }
 
   /**
@@ -316,14 +315,13 @@ public final class DispatchOperations {
       String mode,
       String model,
       boolean takeSnapshot,
-      Actor actor,
       String localHandle) {
-    return membership.engage(specId, agentYamlName, mode, model, takeSnapshot, actor, localHandle);
+    return membership.engage(specId, agentYamlName, mode, model, takeSnapshot, localHandle);
   }
 
   /** Delegates to {@link EngagementService}: dismisses the room's engaged agent. */
-  public String disengage(String specId, Actor actor, String localHandle) {
-    return membership.disengage(specId, actor, localHandle);
+  public String disengage(String specId, String localHandle) {
+    return membership.disengage(specId, localHandle);
   }
 
   /** The members of {@code roomId}'s roster, room-first. */

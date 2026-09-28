@@ -75,16 +75,16 @@ class PersonalRoomMintTest {
     db.close();
   }
 
-  private List<RoomView> rooms(String project, Actor actor) {
-    var result = ops.rooms(project, actor);
+  private List<RoomView> rooms(String project) {
+    var result = ops.rooms(project);
     assertTrue(result instanceof Result.Success<RoomsListResponse>, result.toString());
     return ((Result.Success<RoomsListResponse>) result).value().rooms();
   }
 
   @Test
   void theFirstRoomsReadMintsTheReaderPersonalRoomOnceWithTheDefaultAgentSeated() {
-    var first = rooms("acme", Actor.cliOperator("rajesh"));
-    var second = rooms("acme", Actor.cliOperator("rajesh"));
+    var first = Actor.call(Actor.cliOperator("rajesh"), () -> rooms("acme"));
+    var second = Actor.call(Actor.cliOperator("rajesh"), () -> rooms("acme"));
 
     assertEquals(1, first.size());
     var personal = first.getFirst();
@@ -99,7 +99,7 @@ class PersonalRoomMintTest {
 
   @Test
   void anUnfilteredReadMintsOnePersonalRoomPerProject() {
-    var all = rooms(null, Actor.cliOperator("uday"));
+    var all = Actor.call(Actor.cliOperator("uday"), () -> rooms(null));
 
     assertEquals(
         List.of(PersonalRooms.idOf("uday", "acme"), PersonalRooms.idOf("uday", "nautilus")),
@@ -109,10 +109,10 @@ class PersonalRoomMintTest {
 
   @Test
   void eachFdeGetsTheirOwnRoomAndPrincipalsGetNone() {
-    rooms("acme", Actor.cliOperator("uday"));
-    rooms("acme", Actor.cliOperator("rajesh"));
-    rooms("acme", Actor.agentPrincipal("claude/room-1", "uday"));
-    rooms("acme", new Actor(null, Role.MEMBER, Actor.Lane.API));
+    Actor.call(Actor.cliOperator("uday"), () -> rooms("acme"));
+    Actor.call(Actor.cliOperator("rajesh"), () -> rooms("acme"));
+    Actor.call(Actor.agentPrincipal("claude/room-1", "uday"), () -> rooms("acme"));
+    Actor.call(new Actor(null, Role.MEMBER, Actor.Lane.API), () -> rooms("acme"));
 
     assertEquals(
         List.of(PersonalRooms.idOf("uday", "acme"), PersonalRooms.idOf("rajesh", "acme")),

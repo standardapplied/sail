@@ -25,8 +25,8 @@ public final class ReviewPolicy {
    * Decides whether {@code actor} may approve review {@code reviewId} or dismiss one of its
    * findings, given its spec {@code specId} is assigned to {@code specAssignee}.
    */
-  public static AccessDecision decide(
-      Actor actor, String reviewId, String specId, String specAssignee) {
+  public static AccessDecision decide(String reviewId, String specId, String specAssignee) {
+    var actor = Actor.current();
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }

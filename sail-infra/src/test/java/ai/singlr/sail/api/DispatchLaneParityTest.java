@@ -146,20 +146,24 @@ class DispatchLaneParityTest {
             DispatchOperations.Listener.NONE,
             SessionYield.NONE);
     var cliOutcome =
-        cliOps.dispatch(
-            "acme",
-            new DispatchOperations.Request("auth", "background", false, null, false),
+        Actor.call(
             ADMIN,
-            HANDLE);
+            () ->
+                cliOps.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, false),
+                    HANDLE));
     assertInstanceOf(DispatchOperations.Dispatched.class, cliOutcome);
     completeLatestRun(cli);
     cli.specStore().updateStatus("auth", SpecStatus.REVIEW);
     var cliRestart =
-        cliOps.dispatch(
-            "acme",
-            new DispatchOperations.Request("auth", "background", false, null, true),
+        Actor.call(
             ADMIN,
-            HANDLE);
+            () ->
+                cliOps.dispatch(
+                    "acme",
+                    new DispatchOperations.Request("auth", "background", false, null, true),
+                    HANDLE));
     assertTrue(
         assertInstanceOf(DispatchOperations.Dispatched.class, cliRestart).restarted(),
         "the CLI lane reports the re-dispatch as a restart");
@@ -204,15 +208,23 @@ class DispatchLaneParityTest {
               SessionYield.NONE);
 
       var result =
-          apiOps.dispatch(
-              "acme", new DispatchRequest("auth", "background", false, null), ADMIN, HANDLE);
+          Actor.call(
+              ADMIN,
+              () ->
+                  apiOps.dispatch(
+                      "acme", new DispatchRequest("auth", "background", false, null), HANDLE));
       assertTrue(result.isSuccess(), () -> String.valueOf(result.fullError()));
 
       completeLatestRun(api);
       api.specStore().updateStatus("auth", SpecStatus.REVIEW);
       var restartResult =
-          apiOps.dispatch(
-              "acme", new DispatchRequest("auth", "background", false, null, true), ADMIN, HANDLE);
+          Actor.call(
+              ADMIN,
+              () ->
+                  apiOps.dispatch(
+                      "acme",
+                      new DispatchRequest("auth", "background", false, null, true),
+                      HANDLE));
       assertTrue(restartResult.isSuccess(), () -> String.valueOf(restartResult.fullError()));
       assertTrue(
           restartResult.orThrow().restarted(), "the API lane reports the re-dispatch as a restart");

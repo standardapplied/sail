@@ -28,7 +28,8 @@ public final class RunPolicy {
    * ad-hoc session's launching handle. The provenance guard (does this run belong to this box) is a
    * separate, earlier check; this governs identity.
    */
-  public static AccessDecision access(Actor actor, String runId, String specId, String owner) {
+  public static AccessDecision access(String runId, String specId, String owner) {
+    var actor = Actor.current();
     if (actor.isAdmin()) {
       return AccessDecision.allowed();
     }

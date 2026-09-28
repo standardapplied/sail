@@ -86,10 +86,11 @@ class WebauthnAuthHandlerTest {
             "127.0.0.1",
             0,
             new TestOperations(),
-            tokenStore,
+            TestAuth.tokens(db),
             new EventBus(),
             null,
-            new WebauthnAuthHandler(ceremonies, enrollment, new TokenAuth(tokenStore), origins));
+            null,
+            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.tokens(db), origins));
     server.start();
   }
 

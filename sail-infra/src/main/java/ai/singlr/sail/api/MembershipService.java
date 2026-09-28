@@ -12,7 +12,6 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
@@ -119,13 +118,12 @@ public final class MembershipService {
       String mode,
       String model,
       boolean takeSnapshot,
-      Actor actor,
       String localHandle) {
     var spec = specStore.findById(specId).orElse(null);
     if (spec == null) {
-      return engageSpecless(specId, agentYamlName, mode, model, actor, localHandle);
+      return engageSpecless(specId, agentYamlName, mode, model, localHandle);
     }
-    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     admission.requireTrustedRoster(localHandle);
     requireRooms();
     var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
@@ -150,12 +148,12 @@ public final class MembershipService {
     projects.loadRunning(project);
     admission.requireInstalled(agentCli, project);
     if (!member.full() || !takeSnapshot) {
-      persistMembership(specId, member, actor);
+      persistMembership(specId, member);
       publishEngaged(project, specId, member, "");
       return new EngageLaunch(member.agent(), member.mode(), "", null);
     }
     var label = "engage-" + DateTimeUtils.newId();
-    Runnable completion = () -> completeEngage(project, specId, member, label, actor);
+    Runnable completion = () -> completeEngage(project, specId, member, label);
     return new EngageLaunch(member.agent(), member.mode(), label, completion);
   }
 
@@ -166,12 +164,7 @@ public final class MembershipService {
    * reservations, and there is no work-item whose rollback point a snapshot would anchor.
    */
   private EngageLaunch engageSpecless(
-      String roomId,
-      String agentYamlName,
-      String mode,
-      String model,
-      Actor actor,
-      String localHandle) {
+      String roomId, String agentYamlName, String mode, String model, String localHandle) {
     var store = requireRooms();
     var room =
         store
@@ -181,7 +174,7 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
     LaunchAdmission.requireAllowedForRoom(
-        actor, roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
+        roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
     admission.requireTrustedRoster(localHandle);
     var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -208,8 +201,7 @@ public final class MembershipService {
     return new EngageLaunch(member.agent(), member.mode(), "", null);
   }
 
-  private void completeEngage(
-      String project, String specId, Engagement member, String label, Actor actor) {
+  private void completeEngage(String project, String specId, Engagement member, String label) {
     try {
       try {
         new SnapshotManager(shell).create(project, label, SNAPSHOT_TIMEOUT);
@@ -221,7 +213,7 @@ public final class MembershipService {
             e);
       }
       publish(project, specId, Event.WellKnownTypes.SNAPSHOT_CREATED, Map.of("label", label));
-      persistMembership(specId, member, actor);
+      persistMembership(specId, member);
       publishEngaged(project, specId, member, label);
     } catch (RuntimeException e) {
       var data = new LinkedHashMap<String, Object>();
@@ -233,12 +225,12 @@ public final class MembershipService {
   }
 
   /** Dismisses the room's standing member. Idempotent: dismissing an empty room is a no-op. */
-  public String disengage(String specId, Actor actor, String localHandle) {
+  public String disengage(String specId, String localHandle) {
     var spec = specStore.findById(specId).orElse(null);
     if (spec == null) {
-      return disengageSpecless(specId, actor, localHandle);
+      return disengageSpecless(specId, localHandle);
     }
-    LaunchAdmission.requireAllowed(actor, spec.toSpec(), localHandle);
+    LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     var standing = stateOf(rooms.get(), spec).standing();
     if (standing == null) {
       return null;
@@ -252,7 +244,7 @@ public final class MembershipService {
     return standing.agent();
   }
 
-  private String disengageSpecless(String roomId, Actor actor, String localHandle) {
+  private String disengageSpecless(String roomId, String localHandle) {
     var store = requireRooms();
     var room =
         store
@@ -262,7 +254,7 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
     LaunchAdmission.requireAllowedForRoom(
-        actor, roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
+        roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {
       return null;
@@ -276,7 +268,7 @@ public final class MembershipService {
     return standing.agent();
   }
 
-  private void persistMembership(String specId, Engagement member, Actor actor) {
+  private void persistMembership(String specId, Engagement member) {
     var current =
         specStore
             .findById(specId)

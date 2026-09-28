@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -15,7 +14,7 @@ import java.util.Optional;
 /** Running and stopping agents from the host, and reading the runs that gate it. */
 public interface HostDispatching {
   DispatchOperations.Outcome dispatch(
-      String project, DispatchOperations.Request request, Actor actor, String localHandle);
+      String project, DispatchOperations.Request request, String localHandle);
 
   DispatchOperations.AdhocSession startAdhoc(
       String project, DispatchOperations.AdhocRequest request, String localHandle);
@@ -26,8 +25,7 @@ public interface HostDispatching {
       String localHandle,
       DispatchOperations.AdhocPreparer preparer);
 
-  StopOperations.Outcome stop(
-      StopOperations.Target target, Actor actor, String localHandle, boolean dryRun);
+  StopOperations.Outcome stop(StopOperations.Target target, String localHandle, boolean dryRun);
 
   Optional<RunStore.RunRow> latestRun(String project, String node);
 

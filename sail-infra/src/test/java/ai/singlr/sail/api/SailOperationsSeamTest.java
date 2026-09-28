@@ -452,8 +452,11 @@ class SailOperationsSeamTest {
             YamlUtil.dumpJson(local),
             YamlUtil.dumpJson(remote),
             List.of(field));
-        operations.resolveConflict(
-            entry.getKey(), entry.getValue(), new Resolution(Resolution.Strategy.THEIRS, null));
+        resolveAsOperator(
+            operations,
+            entry.getKey(),
+            entry.getValue(),
+            new Resolution(Resolution.Strategy.THEIRS, null));
         assertEquals(value, store.comparableSnapshot(entry.getValue()).get(field));
       }
       assertTrue(operations.conflicts().isEmpty());
@@ -521,8 +524,8 @@ class SailOperationsSeamTest {
           new TestOperations() {
             @Override
             public ai.singlr.sail.store.SyncConflicts.Conflict resolveConflict(
-                String type, String id, Resolution resolution, Actor actor) {
-              return operations.resolveConflict(type, id, resolution, actor);
+                String type, String id, Resolution resolution) {
+              return operations.resolveConflict(type, id, resolution);
             }
           };
       var response =
@@ -737,9 +740,7 @@ class SailOperationsSeamTest {
   }
 
   private static SailApiServer server(SailOperations operations, Sqlite db) throws IOException {
-    var auth =
-        new SessionAwareAuth(
-            new AuthSessionStore(db), new FdeStore(db), new TokenAuth(new TokenStore(db)));
+    var auth = TestAuth.sessions(db);
     var server =
         new SailApiServer("127.0.0.1", 0, operations, auth, new EventBus(), null, null, null);
     server.start();
@@ -838,8 +839,8 @@ class SailOperationsSeamTest {
       assertEquals("auth", operations.conflict(null, "auth").entityId());
       assertNull(operations.conflict(null, "missing"));
       var resolved =
-          operations.resolveConflict(
-              null, "auth", new Resolution(Resolution.Strategy.THEIRS, null));
+          resolveAsOperator(
+              operations, null, "auth", new Resolution(Resolution.Strategy.THEIRS, null));
       assertEquals("resolved", resolved.status());
       assertNotNull(resolved.resolvedRev());
       assertEquals("remote", box.specs.findById("auth").orElseThrow().title());
@@ -848,8 +849,8 @@ class SailOperationsSeamTest {
           assertThrows(
               ApiException.class,
               () ->
-                  operations.resolveConflict(
-                      "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
+                  resolveAsOperator(
+                      operations, "spec", "auth", new Resolution(Resolution.Strategy.MINE, null)));
       assertEquals(404, settled.status());
       Acting.system(() -> box.specs.update(SyncBox.spec("auth", "local", "pending")));
       box.conflicts.record(
@@ -859,7 +860,7 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
           List.of("title"));
-      operations.resolveConflict("spec", "auth", new Resolution(Resolution.Strategy.MINE, null));
+      resolveAsOperator(operations, "spec", "auth", new Resolution(Resolution.Strategy.MINE, null));
       assertEquals("local", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record(
           "spec",
@@ -872,15 +873,21 @@ class SailOperationsSeamTest {
           new LinkedHashMap<>(
               ConflictMerge.parseTemplate(operations.conflictMergeTemplate("spec", "auth")));
       merged.put("title", "merged");
-      operations.resolveConflict(
-          "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
+      resolveAsOperator(
+          operations,
+          "spec",
+          "auth",
+          new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged)));
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
       box.conflicts.record("file", "auth", null, null, null, List.of("content"));
       assertThrows(
           IllegalArgumentException.class,
           () ->
-              operations.resolveConflict(
-                  "file", "auth", new Resolution(Resolution.Strategy.MERGE, "title: edited")));
+              resolveAsOperator(
+                  operations,
+                  "file",
+                  "auth",
+                  new Resolution(Resolution.Strategy.MERGE, "title: edited")));
       box.conflicts.record("spec", "auth", null, null, null, List.of("title"));
       var ambiguous = assertThrows(ApiException.class, () -> operations.conflict(null, "auth"));
       assertEquals(
@@ -1067,11 +1074,9 @@ class SailOperationsSeamTest {
       var admin = new Actor("uday", Role.ADMIN, Actor.Lane.API);
 
       var rehearsed =
-          Acting.by(
-              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), true), admin));
+          Acting.by(admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), true)));
       var erased =
-          Acting.by(
-              admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), false), admin));
+          Acting.by(admin, () -> operations.pruneSpecs(PruneRequest.ids(List.of("old"), false)));
 
       assertEquals(1, ((Result.Success<PruneReport>) rehearsed).value().specs());
       assertEquals(1, ((Result.Success<PruneReport>) erased).value().specs());
@@ -1143,7 +1148,7 @@ class SailOperationsSeamTest {
             assertThrows(ApiException.class, () -> operations.catalog().purgeSummary("old"));
 
         assertEquals(ErrorCode.CONFLICT, refused.failure().errorCode());
-        assertTrue(refused.getMessage().contains("does not know its FDE's role yet"));
+        assertTrue(refused.getMessage().contains("does not know its FDE's role"));
       }
     }
   }
@@ -1309,13 +1314,12 @@ class SailOperationsSeamTest {
       assertThrows(
           ApiException.class,
           () ->
-              operations
-                  .dispatching()
-                  .stop(
-                      new StopOperations.RunTarget("missing"),
-                      Actor.cliOperator("node"),
-                      "node",
-                      false));
+              Actor.call(
+                  Actor.cliOperator("node"),
+                  () ->
+                      operations
+                          .dispatching()
+                          .stop(new StopOperations.RunTarget("missing"), "node", false)));
     }
   }
 
@@ -1369,5 +1373,11 @@ class SailOperationsSeamTest {
         }
       }
     };
+  }
+
+  private static ai.singlr.sail.store.SyncConflicts.Conflict resolveAsOperator(
+      HostOperations operations, String type, String id, Resolution resolution) {
+    return Actor.call(
+        operations.identity().operator(), () -> operations.resolveConflict(type, id, resolution));
   }
 }

@@ -5,11 +5,15 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.TokenStore;
+import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
@@ -22,6 +26,15 @@ public interface HostIdentity {
   List<TokenStore.TokenInfo> tokens();
 
   TokenStore.CreatedToken createToken(String name, String role, String fdeId, Duration ttl);
+
+  /**
+   * Mints this box's host CLI token, bound to the box's FDE when it has one, and saves it to the
+   * client config at {@code configPath}.
+   */
+  HostToken.Minted mintHostToken(Path configPath) throws IOException;
+
+  /** The box's sync configuration, which names the FDE its host CLI acts as. */
+  SyncConfig box();
 
   boolean revokeToken(String name);
 

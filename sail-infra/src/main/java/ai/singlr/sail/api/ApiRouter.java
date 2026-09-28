@@ -208,8 +208,7 @@ public final class ApiRouter implements HttpHandler {
     if (request.segments().equals(List.of(V1, SPECS_PRUNE))) {
       requireMethod(request, POST);
       return ApiResponse.from(
-          operations.pruneSpecs(
-              PruneRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
+          operations.pruneSpecs(PruneRequest.fromMap(JsonBody.readMap(exchange))));
     }
 
     if (request.hasGlobalSpecsPrefix()) {
@@ -225,7 +224,7 @@ public final class ApiRouter implements HttpHandler {
     }
 
     if (request.hasRunsPrefix()) {
-      return routeRuns(request, nodeHandle.get(), actorOf(exchange));
+      return routeRuns(request, nodeHandle.get());
     }
 
     if (!request.hasProjectPrefix()) {
@@ -286,8 +285,7 @@ public final class ApiRouter implements HttpHandler {
       var resolution =
           new Resolution(
               Resolution.Strategy.valueOf(strategy.toUpperCase(Locale.ROOT)), text(body, "merged"));
-      return ApiResponse.ok(
-          SyncViews.conflict(operations.resolveConflict(type, id, resolution, actorOf(exchange))));
+      return ApiResponse.ok(SyncViews.conflict(operations.resolveConflict(type, id, resolution)));
     }
     requireMethod(request, GET);
     var id = path.substring("/v1/conflicts/".length());
@@ -442,8 +440,7 @@ public final class ApiRouter implements HttpHandler {
     }
     requireMethod(request, POST);
     return ApiResponse.from(
-        operations.dispatch(
-            project, JsonBody.readDispatchRequest(exchange), actorOf(exchange), nodeHandle.get()));
+        operations.dispatch(project, JsonBody.readDispatchRequest(exchange), nodeHandle.get()));
   }
 
   /**
@@ -473,12 +470,11 @@ public final class ApiRouter implements HttpHandler {
       return switch (request.method()) {
         case GET -> {
           var params = QueryParameters.from(request.uri()).values();
-          yield ApiResponse.from(operations.rooms(params.get("project"), actorOf(exchange)));
+          yield ApiResponse.from(operations.rooms(params.get("project")));
         }
         case POST ->
             ApiResponse.fromCreated(
-                operations.createRoom(
-                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
+                operations.createRoom(RoomCreateRequest.fromMap(JsonBody.readMap(exchange))));
         default -> throw methodNotAllowed();
       };
     }
@@ -487,7 +483,7 @@ public final class ApiRouter implements HttpHandler {
       NameValidator.requireValidSpecId(soloRoom);
       return switch (request.method()) {
         case GET -> ApiResponse.from(operations.room(soloRoom));
-        case DELETE -> ApiResponse.from(operations.deleteRoom(soloRoom, actorOf(exchange)));
+        case DELETE -> ApiResponse.from(operations.deleteRoom(soloRoom));
         default -> throw methodNotAllowed();
       };
     }
@@ -503,13 +499,8 @@ public final class ApiRouter implements HttpHandler {
         case POST ->
             ApiResponse.from(
                 operations.addRoomMember(
-                    roomId,
-                    EngageRequest.fromMap(JsonBody.readMap(exchange)),
-                    actorOf(exchange),
-                    nodeHandle.get()));
-        case DELETE ->
-            ApiResponse.from(
-                operations.removeRoomMember(roomId, actorOf(exchange), nodeHandle.get()));
+                    roomId, EngageRequest.fromMap(JsonBody.readMap(exchange)), nodeHandle.get()));
+        case DELETE -> ApiResponse.from(operations.removeRoomMember(roomId, nodeHandle.get()));
         default -> throw methodNotAllowed();
       };
     }
@@ -543,7 +534,6 @@ public final class ApiRouter implements HttpHandler {
               operations.postRoomMessage(
                   roomId,
                   SpecMessageRequest.fromMap(JsonBody.readMessageMap(exchange)),
-                  principal,
                   principal.handle()));
         }
         default -> throw methodNotAllowed();
@@ -569,8 +559,7 @@ public final class ApiRouter implements HttpHandler {
         }
         case POST ->
             ApiResponse.fromCreated(
-                operations.createGlobalSpec(
-                    SpecCreateRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
+                operations.createGlobalSpec(SpecCreateRequest.fromMap(JsonBody.readMap(exchange))));
         default -> throw methodNotAllowed();
       };
     }
@@ -589,13 +578,11 @@ public final class ApiRouter implements HttpHandler {
           checkIfMatch(exchange, specId);
           yield ApiResponse.from(
               operations.updateGlobalSpec(
-                  specId,
-                  SpecUpdateRequest.fromMap(JsonBody.readMap(exchange)),
-                  actorOf(exchange)));
+                  specId, SpecUpdateRequest.fromMap(JsonBody.readMap(exchange))));
         }
         case DELETE -> {
           checkIfMatch(exchange, specId);
-          yield ApiResponse.from(operations.deleteGlobalSpec(specId, actorOf(exchange)));
+          yield ApiResponse.from(operations.deleteGlobalSpec(specId));
         }
         default -> throw methodNotAllowed();
       };
@@ -611,9 +598,7 @@ public final class ApiRouter implements HttpHandler {
             checkIfMatch(exchange, specId);
             yield ApiResponse.from(
                 operations.setGlobalSpecContent(
-                    specId,
-                    SpecContentRequest.fromMap(JsonBody.readMap(exchange)),
-                    actorOf(exchange)));
+                    specId, SpecContentRequest.fromMap(JsonBody.readMap(exchange))));
           }
           default -> throw methodNotAllowed();
         };
@@ -630,7 +615,7 @@ public final class ApiRouter implements HttpHandler {
         requireMethod(request, POST);
         return ApiResponse.from(
             operations.restoreGlobalSpec(
-                specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange)), actorOf(exchange)));
+                specId, SpecRestoreRequest.fromMap(JsonBody.readMap(exchange))));
       }
       if (FOLLOWUP.equals(sub)) {
         requireMethod(request, POST);
@@ -654,7 +639,7 @@ public final class ApiRouter implements HttpHandler {
       return switch (sub) {
         case APPROVE -> {
           requireMethod(request, POST);
-          yield ApiResponse.from(operations.approveReview(reviewId, actorOf(exchange)));
+          yield ApiResponse.from(operations.approveReview(reviewId));
         }
         default -> throw notFound();
       };
@@ -665,7 +650,7 @@ public final class ApiRouter implements HttpHandler {
       var findingId = request.segments().get(4);
       if (DISMISS.equals(sub)) {
         requireMethod(request, POST);
-        return ApiResponse.from(operations.dismissFinding(reviewId, findingId, actorOf(exchange)));
+        return ApiResponse.from(operations.dismissFinding(reviewId, findingId));
       }
     }
     throw notFound();
@@ -756,7 +741,7 @@ public final class ApiRouter implements HttpHandler {
    * here; it is intercepted up front like the agent stream. The log and stop handlers pass this
    * box's handle so the operation's provenance guard can refuse a run that executed elsewhere.
    */
-  private ApiResponse routeRuns(RouteRequest request, String localHandle, Actor actor) {
+  private ApiResponse routeRuns(RouteRequest request, String localHandle) {
     if (request.size() == 2) {
       requireMethod(request, GET);
       var params = QueryParameters.from(request.uri());
@@ -775,12 +760,11 @@ public final class ApiRouter implements HttpHandler {
       case LOG -> {
         requireMethod(request, GET);
         yield ApiResponse.from(
-            operations.runLog(
-                runId, QueryParameters.from(request.uri()).tail(), localHandle, actor));
+            operations.runLog(runId, QueryParameters.from(request.uri()).tail(), localHandle));
       }
       case STOP -> {
         requireMethod(request, POST);
-        yield ApiResponse.from(operations.stopRun(runId, localHandle, actor));
+        yield ApiResponse.from(operations.stopRun(runId, localHandle));
       }
       default -> throw notFound();
     };

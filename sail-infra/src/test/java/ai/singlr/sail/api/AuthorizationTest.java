@@ -35,7 +35,8 @@ class AuthorizationTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     tokenStore = new TokenStore(db);
-    server = new SailApiServer("127.0.0.1", 0, ops, tokenStore, new EventBus(), null);
+    server =
+        new SailApiServer("127.0.0.1", 0, ops, TestAuth.tokens(db), new EventBus(), null, null);
     server.start();
   }
 

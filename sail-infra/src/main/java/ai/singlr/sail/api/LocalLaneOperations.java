@@ -33,8 +33,7 @@ public interface LocalLaneOperations {
    */
   String conflictMergeTemplate(String type, String id);
 
-  SyncConflicts.Conflict resolveConflict(
-      String type, String id, Resolution resolution, Actor actor);
+  SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution);
 
   /**
    * Resolves a run credential — the bearer the in-container agent lane presents over the local
@@ -63,22 +62,20 @@ public interface LocalLaneOperations {
    * sitting on the spec's own id — binds under that room's post right, so a member cannot land work
    * in somebody else's room.
    */
-  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request, Actor actor);
+  Result<GlobalSpecCreatedResponse> createGlobalSpec(SpecCreateRequest request);
 
-  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(
-      String specId, SpecUpdateRequest request, Actor actor);
+  Result<GlobalSpecUpdatedResponse> updateGlobalSpec(String specId, SpecUpdateRequest request);
 
-  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId, Actor actor);
+  Result<GlobalSpecDeletedResponse> deleteGlobalSpec(String specId);
 
   Result<GlobalSpecContentResponse> globalSpecContent(String specId);
 
-  Result<GlobalSpecContentResponse> setGlobalSpecContent(
-      String specId, SpecContentRequest request, Actor actor);
+  Result<GlobalSpecContentResponse> setGlobalSpecContent(String specId, SpecContentRequest request);
 
   Result<GlobalBoardResponse> globalBoard(String project);
 
   Result<SpecMessageResponse> postRoomMessage(
-      String roomId, SpecMessageRequest request, Actor actor, String author);
+      String roomId, SpecMessageRequest request, String author);
 
   /**
    * A page of a room's conversation: {@code before} pages backward from the newest (the default),
@@ -126,10 +123,5 @@ public interface LocalLaneOperations {
    * resume-through-either-door builds on.
    */
   Result<RoomConversationResponse> recordRoomConversation(
-      String roomId,
-      String agent,
-      String sessionId,
-      String source,
-      String transcriptPath,
-      Actor actor);
+      String roomId, String agent, String sessionId, String source, String transcriptPath);
 }

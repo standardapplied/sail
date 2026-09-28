@@ -43,7 +43,7 @@ class WhoamiTest {
     fdes = new FdeStore(db);
     sessions = new AuthSessionStore(db);
     tokenStore = new TokenStore(db);
-    var auth = new SessionAwareAuth(sessions, fdes, new TokenAuth(tokenStore));
+    var auth = TestAuth.sessions(db);
     server =
         new SailApiServer(
             "127.0.0.1", 0, new TestOperations(), auth, new EventBus(), null, null, null);
