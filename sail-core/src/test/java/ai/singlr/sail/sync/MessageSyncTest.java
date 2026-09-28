@@ -11,14 +11,18 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PushOutcome;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -99,7 +103,7 @@ class MessageSyncTest {
   void theQuestionFlagSurvivesSyncAndDerivesTheSameAnswerEverywhere() {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(runId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var principal = runs.findById(runId).orElseThrow().principal();
     var question = node.messages.append("room", principal, "Which flow?", null, true);
@@ -139,7 +143,7 @@ class MessageSyncTest {
   void aMessageAuthoredBeforePrincipalRotationStillSyncs() {
     var reviewId = "019fee00-0000-7000-8000-0000000000aa";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(reviewId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
     var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
     runs.rotateCredential(reviewId, "claude-code", "fix");
@@ -154,7 +158,7 @@ class MessageSyncTest {
                     null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "a reviewer-authored message that synchronizes after the fix lane rotated the run's"
             + " principal authenticates against the replicated history, never wedging sync");
   }
@@ -174,14 +178,14 @@ class MessageSyncTest {
                     "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "a spec's ownership fields are authoritative for policy before its room row exists");
   }
 
   @Test
   void thePipelineNarratorSyncsFromTheBoxThatRanTheReview() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new ai.singlr.sail.store.RunStore(main.db);
+    var runs = new RunStore(main.db);
     runs.createReview(
         "019fee00-0000-7000-8000-0000000000bb",
         "acme",
@@ -202,7 +206,7 @@ class MessageSyncTest {
                     "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
 
     assertTrue(
-        accepted instanceof ai.singlr.sail.store.PushOutcome.Accepted,
+        accepted instanceof PushOutcome.Accepted,
         "the review pipeline narrates verdicts as 'sail' on the box that ran the review;"
             + " refusing those rows wedges that box's sync forever");
   }
@@ -243,13 +247,13 @@ class MessageSyncTest {
 
   @Test
   void mainDecidesAPostByTheConversationsOwnerForEveryBlankAndSetAssigneeAndCreator() {
-    new ai.singlr.sail.store.SpecStore(main.db)
+    new SpecStore(main.db)
         .create(
-            new ai.singlr.sail.store.SpecStore.SpecRow(
+            new SpecStore.SpecRow(
                 "spec-room",
                 "acme",
                 "Spec",
-                ai.singlr.sail.config.SpecStatus.PENDING,
+                SpecStatus.PENDING,
                 null,
                 null,
                 null,
@@ -280,7 +284,7 @@ class MessageSyncTest {
                   () -> main.messages.commitRevision(id, snapshot("mady", conversation), null));
 
           assertEquals(
-              ai.singlr.sail.identity.Ownership.owns("mady", assignee, creator),
+              Ownership.owns("mady", assignee, creator),
               outcome instanceof PushOutcome.Accepted,
               table + " assignee=" + assignee + " creator=" + creator + ": " + outcome);
         }

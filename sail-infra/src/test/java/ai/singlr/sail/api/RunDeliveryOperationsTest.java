@@ -27,6 +27,9 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -303,8 +306,8 @@ class RunDeliveryOperationsTest {
 
   @Test
   void recordRoomConversationLandsARecordClassEventInTheRoom() throws Exception {
-    var seen = new java.util.concurrent.atomic.AtomicReference<Event>();
-    var latch = new java.util.concurrent.CountDownLatch(1);
+    var seen = new AtomicReference<Event>();
+    var latch = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
             BusTesting.latching(
@@ -315,7 +318,7 @@ class RunDeliveryOperationsTest {
                   }
 
                   @Override
-                  public java.util.function.Predicate<Event> filter() {
+                  public Predicate<Event> filter() {
                     return e -> true;
                   }
 

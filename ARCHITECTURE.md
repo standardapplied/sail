@@ -676,30 +676,51 @@ these roles distinct is what lets the synced catalog stay identity-free.
   standalone box, the FDE its sync handle names, is admin, because they hold root on it; every
   other FDE acts with the role main's roster gives it; the credential's own role caps both; and
   an FDE the roster marks `disabled`, or one it does not know, is refused. An API token, a
-  passkey session, the box credential on the socket, the host CLI (`CliOperator`), a sync
-  session, the SSH gateway and the terminal all decide through it, so demoting or disabling an
-  FDE on main takes effect at every door on every box once the roster syncs. The host CLI is
-  the box's FDE: when the box has a sync handle, its API token is bound to that FDE — minted
-  bound by `sail server init`, `sail server start` and `sail upgrade`'s token repair
-  (`HostToken`), and an FDE-less one bound by `sail migrate` and by every sync round once the
-  roster knows the FDE — so a host CLI write names that FDE and, on a node, acts with its synced
-  role. A token that names no FDE, the host token before it is bound included, acts as the box's
-  FDE when the box has a sync handle (`RoleRule.roleOfUnbound`), so on a node it is refused until
-  the roster knows that FDE and never acts beyond it. A box with no sync handle has no FDE to be,
-  and its token names none: a machine token acts with its minted role.
+  passkey session, the box credential on the socket, a run's credential, the host CLI
+  (`CliOperator`), a sync session, the SSH gateway and the terminal all decide through it, so
+  demoting or disabling an FDE on main takes effect at every door on every box once the roster
+  syncs. A node mirrors main's roster each round: an FDE main no longer lists is disabled there
+  too (`FdeStore.disableUnlisted`).
+  - **The host CLI is the box's FDE.** Its API token (`HostToken`, named `admin`) names no FDE
+    of its own: when it is used, `TokenAuth` resolves it to the FDE the box's sync handle names
+    at that moment, so a host CLI write names that FDE and acts with the role `RoleRule` gives
+    it, however the handle or the roster changes after minting. Nothing binds it and nothing
+    needs migrating.
+  - **A machine token** (any other token that names no FDE) acts as no FDE, so it records no
+    author, with the role of the box's FDE capped by its minted role (`RoleRule.roleOfUnbound`):
+    on a node it never acts beyond the FDE whose box it lives on. On a box with no sync handle there is no
+    FDE to be, and a machine token acts with its minted role.
+  - **Before the roster arrives.** On a node whose roster does not know its own FDE yet, a token
+    that acts for that FDE is answered `409` with the fix `sudo sail sync`, and the host CLI,
+    the box credential and the terminal are refused: nothing acts as an FDE the box cannot
+    place.
+  - **A run's credential** acts as the run's principal, with the role `RoleRule` gives the FDE
+    the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
+    A run whose FDE is disabled is refused at the socket.
 - **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
   a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
-  (mutation, reassignment and the posting rule, room lane included), `EraseAuthority`, the room
-  wake (whose box wakes a conversation), membership, the terminal door, who may read or stop a
-  spec's run and approve its review, and main's check of who may post a synced message all read
-  it. A spec left without an assignee stays unassigned, and
-  so does its identity room; any member may claim it by assigning it to themselves, an agent
-  for the FDE it acts for, and dispatch refuses it until then. An assignee is an FDE handle,
-  never an agent type or a run's principal (`RunStore.isPrincipalHandle`). `created_by` is the
-  acting FDE (`Actor.actingFde`: the handle, or the FDE a run acts for), written once at
-  create; a spec's creator travels as `_created_by` beside `_actor`, main keeps the one it holds
-  (recording the pusher when a node-born create names none), and a node adopts main's — the
-  pushing node from the creator main names when it accepts the push.
+  (mutation and reassignment), `EraseAuthority`, the room wake (whose box wakes a
+  conversation), membership and review approval read it; `Ownership.owns` is the one identity
+  comparison beside it. Two rules derive from it and are each implemented once:
+  - **Who owns a conversation** (`RoomStore.owners`): a spec's conversation is its identity
+    room, or the room it was born in, and the spec's owner owns it; a standalone room is owned
+    by its own owner and by the owner of every spec born in it. The posting rule
+    (`SpecPolicy.post`, room lane included), the terminal door and main's check of who may post
+    a synced message (`MessageStore.mayPostAs`) all read it, so the same post is admitted or
+    refused alike on every box.
+  - **Who may read or stop a run** (`RunPolicy.owners`): the FDE the run acts for, and its
+    spec's owner (for a spec-less run, the box that ran it), or an admin. A run's own FDE keeps
+    it after its spec is reassigned.
+
+  A spec left without an assignee stays unassigned, and so does its identity room; any member
+  may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
+  refuses it until then. An assignee is an FDE handle, never an agent type or a run's principal
+  (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
+  handle, or the FDE a run acts for), written once at create. A spec's creator travels as
+  `_created_by` beside `_actor`: main keeps the one it holds, records the pusher when a
+  node-born create names none, and fills a creator it never recorded only from that creator's
+  own push; a node adopts main's, the pushing node from the creator main names when it accepts
+  the push.
 - **Every write names who is acting.** One `Actor` (`ai.singlr.sail.identity`: handle,
   `Role`, `Lane`, owner) is the identity of every write, whichever door it came through. Its
   lane names the door:
@@ -707,8 +728,8 @@ these roles distinct is what lets the synced catalog stay identity-free.
   | Lane | Who | Handle and role |
   |---|---|---|
   | `CLI` | the box's operator, root on this box | `CliOperator`: the box FDE with the role `RoleRule` gives it — admin on main or a standalone box, the synced roster role on a node; refused while the roster is unsynced or the FDE is disabled |
-  | `API` | an HTTP token or passkey session | its FDE with the role `RoleRule` gives it, or a null handle and the minted role for a machine token |
-  | `AGENT`, `ROOM` | a run's principal on the socket | the principal, owned by the FDE it acts for |
+  | `API` | an HTTP token or passkey session | its FDE (the box's FDE for the host token) with the role `RoleRule` gives it, or no handle and the box FDE's role for a machine token |
+  | `AGENT`, `ROOM` | a run's principal on the socket | the principal, owned by the FDE it acts for, with that FDE's role capped by the lane |
   | `SYNC` | an FDE pushing through `_sync` to main | the role `RoleRule` gives the session's FDE |
   | `MAIN` | a node adopting main's revisions | `main`, or the author main recorded for what it adopts; main has already decided them |
   | `SYSTEM` | this box's own machinery | `sail` |
@@ -796,8 +817,8 @@ support GUI and direct-API clients:
    supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
    session token still has no forwarded-command consumer.
 3. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
-   them out everywhere, since every door refuses a disabled FDE, but the row lingers on
-   nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
+   them out everywhere, since every door refuses a disabled FDE and a node disables an FDE
+   main no longer lists, but the row lingers on nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
    change.
 4. **One platform per OS.** Mac arm64 and Linux amd64 only.
 

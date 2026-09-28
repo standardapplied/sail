@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
@@ -698,10 +700,7 @@ class RoomWakeLaunchTest {
           rooms.ensureFor(specId, spec.project(), spec.title(), spec.assignee(), null);
           rooms.updateRoster(
               specId,
-              ai.singlr.sail.config.Roster.solo(
-                      ai.singlr.sail.config.Engagement.of(
-                          agent, mode, null, "2026-08-18T00:00:00Z"))
-                  .toJson());
+              Roster.solo(Engagement.of(agent, mode, null, "2026-08-18T00:00:00Z")).toJson());
         });
   }
 

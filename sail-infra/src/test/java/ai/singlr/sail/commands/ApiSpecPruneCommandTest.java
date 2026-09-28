@@ -14,6 +14,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -84,14 +85,7 @@ class ApiSpecPruneCommandTest {
                           }));
           server =
               new SailApiServer(
-                  "127.0.0.1",
-                  0,
-                  operations,
-                  ai.singlr.sail.api.TestAuth.tokens(db),
-                  bus,
-                  persister,
-                  null,
-                  null);
+                  "127.0.0.1", 0, operations, TestAuth.tokens(db), bus, persister, null, null);
           server.start();
           specs.create(archived("old"));
           specs.setContent("old", "a body only old holds", "");

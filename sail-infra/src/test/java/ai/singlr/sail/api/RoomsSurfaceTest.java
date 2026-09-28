@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -170,7 +171,7 @@ class RoomsSurfaceTest {
                     "auth",
                     "acme",
                     "Auth",
-                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    SpecStatus.DRAFT,
                     HANDLE,
                     null,
                     null,
@@ -446,7 +447,7 @@ class RoomsSurfaceTest {
                     "legacy",
                     "acme",
                     "Legacy spec",
-                    ai.singlr.sail.config.SpecStatus.DRAFT,
+                    SpecStatus.DRAFT,
                     HANDLE,
                     null,
                     null,

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * Spec CRUD on SQLite. Every method maps to a small number of SQL statements. No caching, no lazy
@@ -368,7 +369,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * every composed scope is a check-then-write: under WAL a deferred begin would let another
    * process commit between the check and the write.
    */
-  public <T> T atomically(java.util.function.Supplier<T> work) {
+  public <T> T atomically(Supplier<T> work) {
     return db.transaction(work);
   }
 

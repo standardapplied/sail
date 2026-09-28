@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
@@ -189,7 +190,7 @@ public final class RoomWakeLauncher {
     if (room == null) {
       throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
     }
-    var member = ai.singlr.sail.config.Roster.fromJson(room.roster()).standing();
+    var member = Roster.fromJson(room.roster()).standing();
     if (member == null) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,

@@ -41,9 +41,9 @@ import java.util.function.Supplier;
  * unreferenced. A node never authors an erasure: it asks main for what main acknowledged, which
  * main decides on its own copy, and discards on the spot what it alone ever held.
  *
- * <p>Authority: write capability, never an agent; for a spec named by id, its owner ({@link
- * ai.singlr.sail.identity.Ownership#ownerOf}) or an admin, and only once it is archived, cancelled
- * or deleted with no run of it still going; a policy, a project or retention, an admin only.
+ * <p>Authority: write capability, never an agent; for a spec named by id, its owner ({@code
+ * Ownership.ownerOf}) or an admin, and only once it is archived, cancelled or deleted with no run
+ * of it still going; a policy, a project or retention, an admin only.
  */
 final class SpecPruner {
 

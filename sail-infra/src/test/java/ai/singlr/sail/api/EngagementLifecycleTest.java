@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -164,9 +165,7 @@ class EngagementLifecycleTest {
     StubShell(List<String> order) {
       this.order = order;
       on("incus config device add", "");
-      on(
-          "cat " + ai.singlr.sail.engine.ContainerSailSetup.STAMP_PATH,
-          ai.singlr.sail.engine.ContainerSailSetup.fingerprint());
+      on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
     }
 
     StubShell on(String pattern, String stdout) {
@@ -736,16 +735,13 @@ class EngagementLifecycleTest {
         Actor.call(
             Actor.cliOperator(HANDLE),
             () -> ops.engage("auth", "claude-code", "full", null, true, HANDLE));
-    specStore.compareAndSetStatus(
-        "auth",
-        ai.singlr.sail.config.SpecStatus.DRAFT,
-        ai.singlr.sail.config.SpecStatus.IN_PROGRESS);
+    specStore.compareAndSetStatus("auth", SpecStatus.DRAFT, SpecStatus.IN_PROGRESS);
 
     launch.completion().run();
 
     var after = specStore.findById("auth").orElseThrow();
     assertEquals(
-        ai.singlr.sail.config.SpecStatus.IN_PROGRESS,
+        SpecStatus.IN_PROGRESS,
         after.status(),
         "a membership write never touches the spec row — it cannot clobber a status race");
     assertNotNull(roomMember("auth"));
@@ -781,7 +777,7 @@ class EngagementLifecycleTest {
             "solo",
             "acme",
             "Solo",
-            ai.singlr.sail.config.SpecStatus.DRAFT,
+            SpecStatus.DRAFT,
             HANDLE,
             null,
             null,

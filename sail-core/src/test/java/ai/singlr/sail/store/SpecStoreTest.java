@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -70,7 +71,7 @@ class SpecStoreTest {
     var blobs = new BlobStore(db);
     store.create(spec("template", "Template", "pending"));
     var snapshot = new java.util.LinkedHashMap<>(store.comparableSnapshot("template"));
-    var hash = BlobStore.hash("remote body".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    var hash = BlobStore.hash("remote body".getBytes(StandardCharsets.UTF_8));
     snapshot.put("body_hash", hash);
     var failure =
         assertThrows(
@@ -82,8 +83,7 @@ class SpecStoreTest {
     store.adoptForSync("incoming", snapshot, "1-main");
     assertEquals("remote body", store.getContent("incoming").orElseThrow().body());
     assertFalse(
-        ai.singlr.sail.config.YamlUtil.parseMap(store.history("incoming").getFirst().snapshot())
-            .containsKey("body"));
+        YamlUtil.parseMap(store.history("incoming").getFirst().snapshot()).containsKey("body"));
   }
 
   @Test

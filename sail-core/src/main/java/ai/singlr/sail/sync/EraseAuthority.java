@@ -18,11 +18,11 @@ import java.util.Optional;
 /**
  * Main's decision on a node's request to erase, made against main's own copy — never the node's. A
  * spec is erased once it is archived, cancelled or deleted, by an admin or by its owner ({@link
- * ai.singlr.sail.identity.Ownership#ownerOf}), and never while a run of it is unfinished. One main
- * has already erased has nothing left to protect, so asking again only answers the erasure it has;
- * one main holds nothing of has no owner main can establish. A whole project is erased only by an
- * admin, and only one main holds something of; nothing else is erased on request: messages and runs
- * go with what they belong to, or by main's own retention.
+ * Ownership#ownerOf}), and never while a run of it is unfinished. One main has already erased has
+ * nothing left to protect, so asking again only answers the erasure it has; one main holds nothing
+ * of has no owner main can establish. A whole project is erased only by an admin, and only one main
+ * holds something of; nothing else is erased on request: messages and runs go with what they belong
+ * to, or by main's own retention.
  */
 final class EraseAuthority {
 

@@ -7,13 +7,17 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.RoleRule;
+import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RoomStore;
@@ -118,6 +122,33 @@ class UnassignedSpecTest {
     assertEquals(200, claimed.statusCode(), claimed.body());
     assertEquals("mady", specs.findById("auth").orElseThrow().assignee());
     assertEquals(403, send("PUT", "/v1/specs/auth", uday, "{\"title\": \"X\"}").statusCode());
+  }
+
+  @Test
+  void onceClaimedItsRoomIsTheNewOwnersAtEveryDoor() throws Exception {
+    var uday = token("uday", "member");
+    var mady = token("mady", "member");
+    send("POST", "/v1/specs", uday, "{\"id\": \"auth\", \"project\": \"acme\", \"title\": \"A\"}");
+    assertEquals(200, send("PUT", "/v1/specs/auth", mady, "{\"assignee\": \"mady\"}").statusCode());
+
+    var byOwner = send("POST", "/v1/rooms/auth/messages", mady, "{\"body\": \"mine now\"}");
+    var byCreator = send("POST", "/v1/rooms/auth/messages", uday, "{\"body\": \"still?\"}");
+
+    assertEquals(201, byOwner.statusCode(), byOwner.body());
+    assertEquals(403, byCreator.statusCode(), byCreator.body());
+    assertTrue(byCreator.body().contains("only mady"), byCreator.body());
+    var room = roomRunCredential("mady", "auth");
+    var router = new LocalApiRouter(new EventBus(), operations);
+    var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
+    assertEquals(201, answered.status(), answered.body().toString());
+    var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
+    terminal.admit("auth", "acme", new PtyIdentity("mady", false));
+    var refused =
+        assertThrows(
+            IOException.class,
+            () -> terminal.admit("auth", "acme", new PtyIdentity("uday", false)));
+    assertTrue(refused.getMessage().contains("only mady"), refused.getMessage());
+    assertEquals(List.of("mady"), new RoomStore(db).owners("auth"), "and main decides the same");
   }
 
   @Test
@@ -229,6 +260,28 @@ class UnassignedSpecTest {
                         "claude-code",
                         "feat/x",
                         "do it",
+                        "/tmp/" + id + ".log",
+                        "sail-agent-" + id));
+    return ((RunStore.Reservation.Reserved) reservation).credential();
+  }
+
+  private String roomRunCredential(String owner, String specId) {
+    var id = "019fee00-0000-7000-8000-00000000aa02";
+    var reservation =
+        Acting.system(
+            () ->
+                new RunStore(db)
+                    .reserveDispatch(
+                        id,
+                        "acme",
+                        specId,
+                        "box",
+                        owner,
+                        "room",
+                        List.of(),
+                        "claude-code",
+                        null,
+                        "answer the room",
                         "/tmp/" + id + ".log",
                         "sail-agent-" + id));
     return ((RunStore.Reservation.Reserved) reservation).credential();

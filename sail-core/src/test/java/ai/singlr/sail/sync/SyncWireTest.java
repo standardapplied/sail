@@ -12,8 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FastCdc;
 import ai.singlr.sail.store.Snapshots;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,7 +104,7 @@ class SyncWireTest {
   @Test
   void aChunkCannotBeAnnouncedUntilItsBytesMatchItsHash() {
     var output = new java.io.ByteArrayOutputStream();
-    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    var hash = BlobStore.hash(new byte[] {1});
     assertThrows(
         IllegalArgumentException.class, () -> SyncWire.writeChunk(output, hash, new byte[] {2}));
     assertEquals(0, output.size());
@@ -109,7 +112,7 @@ class SyncWireTest {
 
   @Test
   void contentLengthsMustBeIntegersAndEntriesMustBeObjects() {
-    var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+    var hash = BlobStore.hash(new byte[] {1});
     for (var size : List.of("\"1\"", "1.5", "null")) {
       var line = "{\"op\":\"chunk\",\"hash\":\"" + hash + "\",\"size\":" + size + "}";
       assertThrows(IllegalArgumentException.class, () -> SyncWire.decodeRequest(line));
@@ -405,7 +408,7 @@ class SyncWireTest {
 
   @Test
   void readFramedReadsOneLinePerCallWithoutTheTerminator() throws Exception {
-    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\nsecond\n");
+    var in = new ByteStreams.Input("first\nsecond\n");
     assertEquals("first", SyncWire.readFramed(in));
     assertEquals("second", SyncWire.readFramed(in));
     assertNull(SyncWire.readFramed(in));
@@ -413,7 +416,7 @@ class SyncWireTest {
 
   @Test
   void readFramedNamesAChannelThatClosedMidMessageInsteadOfReturningTheFragment() {
-    var in = new ai.singlr.sail.sync.ByteStreams.Input("first\n{\"op\": \"page\", \"entr");
+    var in = new ByteStreams.Input("first\n{\"op\": \"page\", \"entr");
 
     var thrown =
         assertThrows(
@@ -429,11 +432,9 @@ class SyncWireTest {
 
   @Test
   void readFramedAcceptsAMessageExactlyAtTheBoundAndRejectsOneOver() throws Exception {
-    assertEquals(
-        "abcd", SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcd\n"), 4));
+    assertEquals("abcd", SyncWire.readFramed(new ByteStreams.Input("abcd\n"), 4));
     assertThrows(
-        SyncTransportException.class,
-        () -> SyncWire.readFramed(new ai.singlr.sail.sync.ByteStreams.Input("abcde"), 4));
+        SyncTransportException.class, () -> SyncWire.readFramed(new ByteStreams.Input("abcde"), 4));
   }
 
   @Test
@@ -451,8 +452,8 @@ class SyncWireTest {
   void binaryChunksPreserveEveryByteAndReturnToLineMode() throws Exception {
     var payload = new byte[] {0, -1, -2, 10, 13, 65};
     var output = new java.io.ByteArrayOutputStream();
-    SyncWire.writeChunk(output, ai.singlr.sail.store.BlobStore.hash(payload), payload);
-    output.write("{\"op\":\"done\"}\n".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    SyncWire.writeChunk(output, BlobStore.hash(payload), payload);
+    output.write("{\"op\":\"done\"}\n".getBytes(StandardCharsets.UTF_8));
     var input = new java.io.ByteArrayInputStream(output.toByteArray());
     var chunk = (SyncWire.Chunk) SyncWire.decodeResponse(SyncWire.readLine(input));
     org.junit.jupiter.api.Assertions.assertArrayEquals(
@@ -475,8 +476,6 @@ class SyncWireTest {
     assertEquals("unreachable", cut.kind());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            SyncWire.readBytes(
-                java.io.InputStream.nullInputStream(), ai.singlr.sail.store.FastCdc.MAX + 1));
+        () -> SyncWire.readBytes(java.io.InputStream.nullInputStream(), FastCdc.MAX + 1));
   }
 }

@@ -281,6 +281,27 @@ class ErasureSyncTest {
   }
 
   @Test
+  void theCreatorOfAnUnassignedSpecMayPruneItAndAnotherMemberMayNot() throws IOException {
+    Acting.as("node", () -> main.specs.create(owned("draft", "Draft", "archived", null)));
+    Acting.as("uday", () -> main.specs.create(owned("theirs", "Theirs", "archived", null)));
+    round(NODE);
+    new EraseRequests(node.db).request(Erasure.SPEC, "draft", "node");
+
+    round(NODE);
+
+    assertTrue(main.specs.findById("draft").isEmpty(), "its creator owns an unassigned spec");
+    assertTrue(node.specs.findById("draft").isEmpty());
+    new EraseRequests(node.db).request(Erasure.SPEC, "theirs", "node");
+    try (var link = SyncBox.connect(main.server(NODE), node)) {
+      var refused =
+          assertThrows(
+              SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
+      assertTrue(refused.getMessage().contains("belongs to 'uday'"), refused.getMessage());
+    }
+    assertTrue(main.specs.findById("theirs").isPresent());
+  }
+
+  @Test
   void aNodeDemotedToReadOnlyHearsItsPruneRefusedOnceAndStopsAsking() throws IOException {
     seedArchivedSpec(main, "mine", "node");
     round(NODE);

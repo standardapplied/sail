@@ -18,6 +18,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -314,7 +315,7 @@ public final class Fleet implements AutoCloseable {
                   reviews,
                   runs,
                   projects,
-                  ai.singlr.sail.engine.ConnectEnvironment::detect,
+                  ConnectEnvironment::detect,
                   SyncScheduler.disabled(),
                   fdes,
                   SessionYield.NONE)

@@ -42,7 +42,11 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -615,7 +619,7 @@ class SailOperationsTest {
   @Test
   void aLiveDispatchRefusesAnOverlapAtomicallyBeforeClaimingTheSpec() throws Exception {
     var stores = new SpecStore[1];
-    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var runs = new AtomicReference<RunStore>();
     var operations =
         operationsWithStores(
             multiRepoYaml(),
@@ -1200,7 +1204,7 @@ class SailOperationsTest {
     assertError(ErrorCode.RUN_ON_OTHER_NODE, result);
     var fields =
         result.fieldErrors().stream()
-            .collect(java.util.stream.Collectors.toMap(FieldError::field, FieldError::message));
+            .collect(Collectors.toMap(FieldError::field, FieldError::message));
     assertEquals("node-a", fields.get("node"));
     assertEquals("auth", fields.get("spec"));
     assertEquals("acme", fields.get("project"));
@@ -1530,7 +1534,7 @@ class SailOperationsTest {
 
   @Test
   void dispatchLaunchesBackgroundAgent() throws Exception {
-    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var runs = new AtomicReference<RunStore>();
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
@@ -1560,7 +1564,7 @@ class SailOperationsTest {
 
   @Test
   void aForegroundRunRecordsItsDurableRunScopedIdentity() throws Exception {
-    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var runs = new AtomicReference<RunStore>();
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
@@ -1907,7 +1911,7 @@ class SailOperationsTest {
 
   @Test
   void dispatchMapsLaunchFailure() throws Exception {
-    var runs = new java.util.concurrent.atomic.AtomicReference<RunStore>();
+    var runs = new AtomicReference<RunStore>();
     var operations =
         operationsWithStores(
             baseYaml(),
@@ -1996,8 +2000,8 @@ class SailOperationsTest {
             .on("-- mkdir -p /home/dev/.sail", "")
             .on("claude", "");
     try (var bus = new EventBus()) {
-      var started = new java.util.concurrent.atomic.AtomicReference<Event>();
-      var latch = new java.util.concurrent.CountDownLatch(1);
+      var started = new AtomicReference<Event>();
+      var latch = new CountDownLatch(1);
       bus.subscribe(
           BusTesting.latching(
               new EventSubscriber() {
@@ -2483,7 +2487,7 @@ class SailOperationsTest {
   void recentEventsReplaysFromPersister(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var latch = new java.util.concurrent.CountDownLatch(2);
+      var latch = new CountDownLatch(2);
       bus.subscribe(BusTesting.latching(persister, latch));
       var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
 
@@ -3053,8 +3057,7 @@ class SailOperationsTest {
 
   /** Builds operations backed by a migrated spec database seeded with {@code seed}. */
   private SailOperations operationsWithStore(
-      String yamlContent, FakeShell shell, java.util.function.Consumer<SpecStore> seed)
-      throws Exception {
+      String yamlContent, FakeShell shell, Consumer<SpecStore> seed) throws Exception {
     return operationsWithStore(yamlContent, shell, seed, null);
   }
 
@@ -3063,8 +3066,8 @@ class SailOperationsTest {
       String yamlContent,
       FakeShell shell,
       EventBus bus,
-      java.util.function.Consumer<SpecStore> seedSpecs,
-      java.util.function.Consumer<RunStore> seedSessions)
+      Consumer<SpecStore> seedSpecs,
+      Consumer<RunStore> seedSessions)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, yamlContent);
@@ -3088,9 +3091,7 @@ class SailOperationsTest {
 
   /** Builds operations with a seeded project catalog and a fixed connect environment. */
   private SailOperations operationsWith(
-      FakeShell shell,
-      java.util.function.Consumer<ProjectStore> seedProjects,
-      ConnectEnvironment environment)
+      FakeShell shell, Consumer<ProjectStore> seedProjects, ConnectEnvironment environment)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
@@ -3120,7 +3121,7 @@ class SailOperationsTest {
   private SailOperations operationsWithStore(
       String yamlContent,
       FakeShell shell,
-      java.util.function.Consumer<SpecStore> seed,
+      Consumer<SpecStore> seed,
       WatcherSpawner.ProcessSpawner watcher)
       throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");

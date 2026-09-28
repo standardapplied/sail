@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -217,8 +218,8 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
         });
   }
 
-  private static ai.singlr.sail.engine.ShellExec refusingShell() {
-    return new ai.singlr.sail.engine.ShellExec() {
+  private static ShellExec refusingShell() {
+    return new ShellExec() {
       @Override
       public Result exec(List<String> command) {
         return new Result(1, "", "refused");

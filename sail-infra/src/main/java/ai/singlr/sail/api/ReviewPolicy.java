@@ -23,7 +23,7 @@ public final class ReviewPolicy {
   private ReviewPolicy() {}
 
   /**
-   * Decides whether {@code actor} may approve review {@code reviewId} or dismiss one of its
+   * Decides whether the bound actor may approve review {@code reviewId} or dismiss one of its
    * findings, given its spec {@code specId} is owned by {@code specOwner}.
    */
   public static AccessDecision decide(String reviewId, String specId, String specOwner) {

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -196,7 +197,7 @@ class SyncServerCommandTest {
             new java.io.ByteArrayInputStream(new byte[0]),
             out,
             SyncTransitionSink.NONE,
-            ai.singlr.sail.config.SyncConfig::unset);
+            SyncConfig::unset);
 
     assertEquals(1, exit);
     assertEquals(0, out.size(), "nothing is served");
@@ -222,7 +223,7 @@ class SyncServerCommandTest {
                         serverIn,
                         toClient,
                         SyncTransitionSink.NONE,
-                        () -> new ai.singlr.sail.config.SyncConfig("main", null, "uday", "main"));
+                        () -> new SyncConfig("main", null, "uday", "main"));
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
                   }
@@ -334,7 +335,7 @@ class SyncServerCommandTest {
 
   @Test
   void rosterExposesMainsFdesAsMaps() {
-    new ai.singlr.sail.store.FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
+    new FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
 
     var roster = SyncServerCommand.roster(mainDb);
 

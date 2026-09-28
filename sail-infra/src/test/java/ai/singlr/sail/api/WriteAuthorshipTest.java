@@ -15,7 +15,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -165,12 +164,14 @@ class WriteAuthorshipTest {
       var refused =
           assertThrows(
               ApiException.class,
-              () -> resolveAsOperator(operations, "spec", "auth", mine()),
+              () ->
+                  TestAuth.asOperator(
+                      operations, () -> operations.resolveConflict("spec", "auth", mine())),
               "a viewer node is refused, as main would refuse it — never a hard-coded admin");
       assertEquals(ErrorCode.FORBIDDEN, refused.failure().errorCode());
 
       fdes.update("mady", null, null, "member");
-      resolveAsOperator(operations, "spec", "auth", mine());
+      TestAuth.asOperator(operations, () -> operations.resolveConflict("spec", "auth", mine()));
 
       assertAuthoredBy("auth", "mady");
     }
@@ -288,11 +289,5 @@ class WriteAuthorshipTest {
         null,
         List.of(),
         List.of());
-  }
-
-  private static ai.singlr.sail.store.SyncConflicts.Conflict resolveAsOperator(
-      HostOperations operations, String type, String id, Resolution resolution) {
-    return Actor.call(
-        operations.identity().operator(), () -> operations.resolveConflict(type, id, resolution));
   }
 }

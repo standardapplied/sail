@@ -16,11 +16,12 @@ import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
-import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -154,11 +155,11 @@ class DispatchCommandWiringTest {
     operations.useControlPlane(
         db,
         tempDir,
-        new ai.singlr.sail.engine.SyncOperations(
+        new SyncOperations(
             db,
             "box",
             tempDir,
-            () -> new ai.singlr.sail.config.SyncConfig("node", "sail@main", HANDLE, "box"),
+            () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
             target -> {
               throw new java.io.IOException("main unavailable");
             }));
@@ -171,13 +172,7 @@ class DispatchCommandWiringTest {
     var stop =
         assertThrows(
             ApiException.class,
-            () ->
-                ai.singlr.sail.identity.Actor.call(
-                    operations.identity().operator(),
-                    () ->
-                        operations
-                            .dispatching()
-                            .stop(new StopOperations.ProjectTarget("acme"), HANDLE, false)));
+            () -> AgentStopCommand.stopAsOperator(operations, "acme", HANDLE, false));
     assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, stop.failure().errorCode());
     var dispatch =
         assertThrows(

@@ -15,6 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.FastCdc;
+import ai.singlr.sail.store.FileStore;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -75,9 +78,8 @@ class SyncRpcServerTest {
 
   private static List<SyncWire.Response> serveLines(
       SyncRpcServer server, int frame, List<String> lines) throws Exception {
-    var out = new ai.singlr.sail.sync.ByteStreams.Output();
-    server.serve(
-        new ai.singlr.sail.sync.ByteStreams.Input(String.join("\n", lines) + "\n"), out, frame);
+    var out = new ByteStreams.Output();
+    server.serve(new ByteStreams.Input(String.join("\n", lines) + "\n"), out, frame);
     return out.toString().lines().map(SyncWire::decodeResponse).toList();
   }
 
@@ -110,20 +112,16 @@ class SyncRpcServerTest {
     try (var main = new SyncBox("main")) {
       var requests = new ArrayList<String>();
       requests.add(SyncWire.encode(HELLO));
-      var blobs =
-          List.of(
-              ai.singlr.sail.store.BlobStore.hash(new byte[] {1}),
-              ai.singlr.sail.store.BlobStore.hash(new byte[] {2}));
+      var blobs = List.of(BlobStore.hash(new byte[] {1}), BlobStore.hash(new byte[] {2}));
       requests.add(SyncWire.encode(new SyncWire.Announce(blobs)));
       for (var index = 0; index < blobs.size(); index++) {
         var chunks = new ArrayList<String>();
         for (var chunk = 0; chunk < 7; chunk++)
-          chunks.add(ai.singlr.sail.store.BlobStore.hash(new byte[] {(byte) index, (byte) chunk}));
+          chunks.add(BlobStore.hash(new byte[] {(byte) index, (byte) chunk}));
         requests.add(
             SyncWire.encode(
                 new SyncWire.Manifest(
-                    new ai.singlr.sail.store.BlobStore.Manifest(
-                        blobs.get(index), 7L * ai.singlr.sail.store.FastCdc.MIN, chunks))));
+                    new BlobStore.Manifest(blobs.get(index), 7L * FastCdc.MIN, chunks))));
       }
       requests.add(SyncWire.encode(new SyncWire.Done()));
       var response =
@@ -161,8 +159,7 @@ class SyncRpcServerTest {
               SyncWire.Failed.class,
               after(
                   main.server(Actor.sync("node", Role.MEMBER)),
-                  new SyncWire.Announce(
-                      List.of(ai.singlr.sail.store.BlobStore.hash(new byte[] {1})))));
+                  new SyncWire.Announce(List.of(BlobStore.hash(new byte[] {1})))));
       assertEquals("unreachable", failure.kind());
       assertEquals(
           0L, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
@@ -172,7 +169,7 @@ class SyncRpcServerTest {
   @Test
   void unheldContentCannotBeCommitted() throws Exception {
     try (var main = new SyncBox("main")) {
-      var hash = ai.singlr.sail.store.BlobStore.hash(new byte[] {1});
+      var hash = BlobStore.hash(new byte[] {1});
       var response =
           after(
               main.server(Actor.sync("node", Role.MEMBER)),
@@ -187,14 +184,14 @@ class SyncRpcServerTest {
       assertEquals(
           "blob " + hash + " not held",
           assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason());
-      assertTrue(new ai.singlr.sail.store.FileStore(main.db).list("project").isEmpty());
+      assertTrue(new FileStore(main.db).list("project").isEmpty());
     }
   }
 
   @Test
   void tamperedAndTruncatedUploadChunksAreNeverStoredAndNameTheirFailure() throws Exception {
     var bytes = new byte[] {1, 2, 3};
-    var hash = ai.singlr.sail.store.BlobStore.hash(bytes);
+    var hash = BlobStore.hash(bytes);
     for (var truncated : List.of(false, true)) {
       try (var main = new SyncBox("main")) {
         var request = new java.io.ByteArrayOutputStream();
@@ -203,11 +200,10 @@ class SyncRpcServerTest {
                 SyncWire.encode(HELLO),
                 SyncWire.encode(new SyncWire.Announce(List.of(hash))),
                 SyncWire.encode(
-                    new SyncWire.Manifest(
-                        new ai.singlr.sail.store.BlobStore.Manifest(hash, 3, List.of(hash)))),
+                    new SyncWire.Manifest(new BlobStore.Manifest(hash, 3, List.of(hash)))),
                 SyncWire.encode(new SyncWire.Done()),
                 SyncWire.encode(new SyncWire.Chunk(hash, 3))))
-          request.writeBytes((content + "\n").getBytes(java.nio.charset.StandardCharsets.UTF_8));
+          request.writeBytes((content + "\n").getBytes(StandardCharsets.UTF_8));
         request.writeBytes(truncated ? new byte[] {1, 2} : new byte[] {3, 2, 1});
         var output = new ByteStreams.Output();
         main.server(Actor.sync("node", Role.MEMBER))
@@ -245,9 +241,8 @@ class SyncRpcServerTest {
   @Test
   void anUnknownOpBeforeHelloIsRefusedNamingTheRemedy() throws Exception {
     var fetch = "{\"op\": \"fetch\", \"entityType\": \"spec\", \"upgradeFloor\": \"0.34.0\"}";
-    var out = new ai.singlr.sail.sync.ByteStreams.Output();
-    new SyncRpcServer(new FakeMain(), true)
-        .serve(new ai.singlr.sail.sync.ByteStreams.Input(fetch + "\n"), out);
+    var out = new ByteStreams.Output();
+    new SyncRpcServer(new FakeMain(), true).serve(new ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
     assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
@@ -644,9 +639,7 @@ class SyncRpcServerTest {
   @Test
   void anEmptyStreamOrAByeEndsTheSessionCleanly() throws Exception {
     new SyncRpcServer(new FakeMain(), true)
-        .serve(
-            new ai.singlr.sail.sync.ByteStreams.Input(""),
-            new ai.singlr.sail.sync.ByteStreams.Output());
+        .serve(new ByteStreams.Input(""), new ByteStreams.Output());
     var replies =
         serve(
             new SyncRpcServer(new FakeMain(), true),

@@ -87,9 +87,7 @@ public final class AgentStopCommand implements Runnable {
             SailPaths.PROJECT_DESCRIPTOR,
             hooks(shell, this::publishLifecycle, listener()),
             SessionYield.NONE)) {
-      var outcome =
-          CliOperator.actingUnlessPreview(
-              dryRun, operations.identity()::operator, () -> stop(operations, handle));
+      var outcome = stopAsOperator(operations, name, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
         sync.syncNow();
@@ -97,8 +95,19 @@ public final class AgentStopCommand implements Runnable {
     }
   }
 
-  private StopOperations.Outcome stop(HostOperations operations, String handle) {
-    return operations.dispatching().stop(new StopOperations.ProjectTarget(name), handle, dryRun);
+  /**
+   * Stops {@code project}'s run as this box's operator — acting as no one for a preview, which
+   * writes and signals nothing.
+   */
+  static StopOperations.Outcome stopAsOperator(
+      HostOperations operations, String project, String handle, boolean dryRun) {
+    return CliOperator.actingUnlessPreview(
+        dryRun,
+        operations.identity()::operator,
+        () ->
+            operations
+                .dispatching()
+                .stop(new StopOperations.ProjectTarget(project), handle, dryRun));
   }
 
   /**

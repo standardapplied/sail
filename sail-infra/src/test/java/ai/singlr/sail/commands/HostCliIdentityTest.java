@@ -172,7 +172,7 @@ class HostCliIdentityTest {
   }
 
   @Test
-  void aMachineTokenOnANodeActsUnderItsOwnNameWithItsBoxsRole() throws Exception {
+  void aMachineTokenOnANodeActsAsNoFdeWithItsBoxsRole() throws Exception {
     fdes.add("uday", null, null, "member");
     var token = new TokenStore(db).create("ci", "admin").token();
     serve(NODE);
@@ -184,6 +184,18 @@ class HostCliIdentityTest {
     assertEquals("member", whoami.get("role"));
     assertEquals(0, create(token, "auth"));
     assertNull(specs.findById("auth").orElseThrow().createdBy());
+  }
+
+  @Test
+  void aTokenNeverOutranksItsFdesRosterRole() throws Exception {
+    var raj = fdes.add("raj", null, null, "member");
+    var token = new TokenStore(db).create("raj", "admin", raj.id(), null).token();
+    serve(MAIN);
+
+    var whoami = whoami(token);
+
+    assertEquals("raj", whoami.get("fde"));
+    assertEquals("member", whoami.get("role"), "the roster caps a token minted as admin");
   }
 
   @Test

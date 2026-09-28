@@ -30,8 +30,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -167,7 +169,7 @@ class AgentPrincipalLifecycleTest {
             new FdeStore(db),
             SessionYield.NONE);
     var router = new LocalApiRouter(bus, operations);
-    var delivered = new java.util.concurrent.CountDownLatch(1);
+    var delivered = new CountDownLatch(1);
     var subscription =
         bus.subscribe(
             BusTesting.latching(
@@ -178,7 +180,7 @@ class AgentPrincipalLifecycleTest {
                   }
 
                   @Override
-                  public java.util.function.Predicate<Event> filter() {
+                  public Predicate<Event> filter() {
                     return e -> Event.WellKnownTypes.AGENT_TOOL_FINISHED.equals(e.type());
                   }
 

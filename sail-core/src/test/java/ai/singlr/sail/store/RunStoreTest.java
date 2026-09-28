@@ -25,7 +25,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -1445,8 +1447,8 @@ class RunStoreTest {
   void concurrentReservationsAcrossConnectionsAdmitExactlyOne() throws Exception {
     var path = tempDir.resolve("test.db");
     var contenders = 4;
-    var start = new java.util.concurrent.CountDownLatch(1);
-    var admitted = new java.util.concurrent.atomic.AtomicInteger();
+    var start = new CountDownLatch(1);
+    var admitted = new AtomicInteger();
     var threads = new java.util.ArrayList<Thread>();
     for (var i = 0; i < contenders; i++) {
       var spec = "spec-" + i;
@@ -1998,8 +2000,7 @@ class RunStoreTest {
   }
 
   @Test
-  void aRoomKeyedRunSyncsItsRoomAcrossTheFleet(
-      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+  void aRoomKeyedRunSyncsItsRoomAcrossTheFleet(@org.junit.jupiter.api.io.TempDir Path dir) {
     try (var ownerDb = Sqlite.open(dir.resolve("owner.db"));
         var peerDb = Sqlite.open(dir.resolve("peer.db"))) {
       new SchemaManager(ownerDb).migrate();
@@ -2035,8 +2036,7 @@ class RunStoreTest {
   }
 
   @Test
-  void aRoomKeyedReservationTracksAndSerializesByRoom(
-      @org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) {
+  void aRoomKeyedReservationTracksAndSerializesByRoom(@org.junit.jupiter.api.io.TempDir Path dir) {
     try (var roomDb = Sqlite.open(dir.resolve("room-runs.db"))) {
       new SchemaManager(roomDb).migrate();
       var runs = new RunStore(roomDb);

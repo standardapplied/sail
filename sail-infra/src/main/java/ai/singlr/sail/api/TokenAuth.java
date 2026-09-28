@@ -18,12 +18,12 @@ import java.util.Objects;
  * RoleRule} gives it capped by the token's minted role, and is refused when the FDE is disabled.
  * The host CLI's token ({@link HostToken}) names no FDE: it acts as the box's FDE, whichever the
  * box's sync handle names when it is used. Any other token that names no FDE is a machine token: it
- * acts under its own name, with the role of the box's FDE when the box has a sync handle, and with
- * its minted role when it has none. On a node that has not synced its roster yet, a token that acts
- * as or for the box's FDE is refused as a conflict to resolve, not as a bad credential.
- * Authentication only — {@link Authorizer} is the authorization tier and enforces {@code
- * token.role} per route (it runs immediately after this in {@code ApiRouter}). The loopback bind is
- * an additional network boundary, not a substitute for the role check.
+ * acts as no FDE, with the role of the box's FDE when the box has a sync handle, and with its
+ * minted role when it has none. On a node that has not synced its roster yet, a token that acts as
+ * or for the box's FDE is refused as a conflict to resolve, not as a bad credential. Authentication
+ * only — {@link Authorizer} is the authorization tier and enforces {@code token.role} per route (it
+ * runs immediately after this in {@code ApiRouter}). The loopback bind is an additional network
+ * boundary, not a substitute for the role check.
  */
 public final class TokenAuth implements ApiAuth {
 
@@ -84,12 +84,16 @@ public final class TokenAuth implements ApiAuth {
     return roles
         .roleOfUnbound(minted)
         .orElseThrow(
-            () ->
-                new ApiException(
-                    ErrorCode.CONFLICT,
-                    "This token acts as this box's FDE '"
-                        + roles.boxFde().orElse("")
-                        + "', which this box's roster does not know yet or has disabled.",
-                    "Run 'sudo sail sync' to pull main's roster."));
+            () -> {
+              var boxFde = roles.boxFde().orElse("");
+              return new ApiException(
+                  ErrorCode.CONFLICT,
+                  "This token acts for this box's FDE '"
+                      + boxFde
+                      + "', which this box's roster does not know yet or has disabled.",
+                  "Run 'sudo sail sync' to pull main's roster, or ask an admin to re-enable '"
+                      + boxFde
+                      + "'.");
+            });
   }
 }

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Engagement;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
@@ -262,17 +263,17 @@ class ApiRouterTest {
       var download = get(server, "/v1/projects/acme/files/data", "token");
       assertEquals("3", download.headers().firstValue("content-length").orElseThrow());
       var etag = download.headers().firstValue("etag").orElseThrow();
-      assertEquals("\"" + ai.singlr.sail.store.BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
+      assertEquals("\"" + BlobStore.hash(new byte[] {1, 2, 3}) + "\"", etag);
       var request =
-          java.net.http.HttpRequest.newBuilder(
+          HttpRequest.newBuilder(
                   java.net.URI.create(
                       "http://127.0.0.1:" + server.port() + "/v1/projects/acme/files/data"))
               .header("Authorization", "Bearer token")
               .header("If-None-Match", etag)
               .GET()
               .build();
-      try (var client = java.net.http.HttpClient.newHttpClient()) {
-        var cached = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString());
+      try (var client = HttpClient.newHttpClient()) {
+        var cached = client.send(request, HttpResponse.BodyHandlers.ofString());
         assertEquals(304, cached.statusCode());
         assertEquals("", cached.body());
       }
@@ -331,13 +332,13 @@ class ApiRouterTest {
               new FileStore(main.db),
               directory.resolve("main-projects"),
               "acme",
-              ai.singlr.sail.config.FileLimits.defaults());
+              FileLimits.defaults());
       var nodeFiles =
           new SharedProjectFiles(
               new FileStore(node.db),
               directory.resolve("node-projects"),
               "acme",
-              ai.singlr.sail.config.FileLimits.defaults());
+              FileLimits.defaults());
       var path = "dir/config";
       if (existingMode != null) {
         var original = "original\n".getBytes(StandardCharsets.UTF_8);
@@ -501,16 +502,16 @@ class ApiRouterTest {
                       new FileStore.FileRow(
                           project,
                           entry.getKey(),
-                          ai.singlr.sail.store.BlobStore.hash(entry.getValue()),
+                          BlobStore.hash(entry.getValue()),
                           entry.getValue().length,
                           0644,
                           "binary"))
               .toList();
         }
 
-        public ai.singlr.sail.config.FileLimits limits() {
+        public FileLimits limits() {
           capConsulted++;
-          return new ai.singlr.sail.config.FileLimits(1024);
+          return new FileLimits(1024);
         }
 
         public Optional<FileStore.FileRow> find(String path) {

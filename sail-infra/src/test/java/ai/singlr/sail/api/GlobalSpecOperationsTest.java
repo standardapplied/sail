@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
@@ -582,8 +583,7 @@ class GlobalSpecOperationsTest {
     assertEquals("auth", event.spec());
   }
 
-  private Event captureOne(java.util.function.Consumer<GlobalSpecOperations> mutation)
-      throws Exception {
+  private Event captureOne(Consumer<GlobalSpecOperations> mutation) throws Exception {
     try (var bus = new EventBus()) {
       var seen = new ArrayList<Event>();
       var latch = new CountDownLatch(1);

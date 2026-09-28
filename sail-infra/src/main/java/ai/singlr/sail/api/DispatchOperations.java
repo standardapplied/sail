@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentSession;
@@ -325,7 +326,7 @@ public final class DispatchOperations {
   }
 
   /** The members of {@code roomId}'s roster, room-first. */
-  public List<ai.singlr.sail.config.Engagement> roomMembers(String roomId) {
+  public List<Engagement> roomMembers(String roomId) {
     return membership.members(roomId);
   }
 

@@ -28,8 +28,8 @@ public final class SpecPolicy {
   private SpecPolicy() {}
 
   /**
-   * Decides whether {@code actor} may mutate spec {@code specId}. Ownership is the assignee, or the
-   * creator when the spec is unassigned; an admin always passes. Order — write capability, then
+   * Decides whether the bound actor may mutate spec {@code specId}. Ownership is the assignee, or
+   * the creator when the spec is unassigned; an admin always passes. Order — write capability, then
    * admin, then ownership — so the most fundamental precondition names the refusal.
    */
   public static AccessDecision mutate(String specId, String assignee, String createdBy) {
@@ -86,7 +86,7 @@ public final class SpecPolicy {
   }
 
   /**
-   * Decides whether {@code actor} may set spec {@code specId}'s assignee to {@code
+   * Decides whether the bound actor may set spec {@code specId}'s assignee to {@code
    * requestedAssignee}. Reassignment is an admin act; the one member-allowed case is claiming a
    * spec that is currently unassigned for oneself. An agent principal claims for the FDE it acts
    * for, never for its ephemeral run-scoped handle — dispatch locality matches the assignee against

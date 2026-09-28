@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
@@ -54,5 +55,10 @@ public final class TestAuth {
         new FdeStore(db),
         roles,
         new TokenAuth(new TokenStore(db), roles));
+  }
+
+  /** Runs {@code work} as this box's CLI operator, as the host CLI binds it. */
+  public static <T> T asOperator(HostOperations operations, Supplier<T> work) {
+    return Actor.call(operations.identity().operator(), work::get);
   }
 }

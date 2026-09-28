@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
@@ -107,7 +108,7 @@ class TokenAuthTest {
 
   @Test
   void tokenOwnedByFdeAuthenticates() throws Exception {
-    var fde = new ai.singlr.sail.store.FdeStore(db).add("uday", null, null);
+    var fde = new FdeStore(db).add("uday", null, null);
     var token = tokenStore.create("uday-laptop", "admin", fde.id(), null).token();
     assertEquals(200, get("/v1/specs/board", token).statusCode());
   }

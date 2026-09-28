@@ -14,6 +14,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -30,6 +31,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -65,14 +67,7 @@ class ApiSpecCommandsTest {
             .useRooms(new RoomStore(db));
     server =
         new SailApiServer(
-            "127.0.0.1",
-            0,
-            operations,
-            ai.singlr.sail.api.TestAuth.tokens(db),
-            bus,
-            persister,
-            null,
-            null);
+            "127.0.0.1", 0, operations, TestAuth.tokens(db), bus, persister, null, null);
     server.start();
   }
 
@@ -394,8 +389,8 @@ class ApiSpecCommandsTest {
     var bodyFile = tempDir.resolve("body.md");
     var planFile = tempDir.resolve("plan.md");
     try {
-      java.nio.file.Files.writeString(bodyFile, "# Spec Body");
-      java.nio.file.Files.writeString(planFile, "## Plan");
+      Files.writeString(bodyFile, "# Spec Body");
+      Files.writeString(planFile, "## Plan");
     } catch (Exception e) {
       fail(e);
     }

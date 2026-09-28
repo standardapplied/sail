@@ -32,6 +32,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -513,6 +514,20 @@ class StopOperationsTest {
     var creator = new Actor("me", Role.MEMBER, Actor.Lane.API);
     var outcome =
         Actor.call(creator, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+  }
+
+  @Test
+  void theFdeWhoseBoxRunsAnAgentMayStopItAfterItsSpecMoved() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, "raj");
+    seedRun(123, UNIT);
+    var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    var outcome =
+        Actor.call(member, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
 
     assertInstanceOf(StopOperations.Stopped.class, outcome);
   }
@@ -1238,7 +1253,7 @@ class StopOperationsTest {
   @Test
   void haltVerificationAbsorbsReapLatencyByPolling() throws Exception {
     var shell = liveAgentShell();
-    var probes = new java.util.concurrent.atomic.AtomicInteger();
+    var probes = new AtomicInteger();
     shell.hookOn(
         "kill -0 123",
         () -> {

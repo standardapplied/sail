@@ -30,7 +30,7 @@ public final class DispatchPolicy {
   private DispatchPolicy() {}
 
   /**
-   * Decides whether {@code actor} may dispatch {@code spec} on the node identified by {@code
+   * Decides whether the bound actor may dispatch {@code spec} on the node identified by {@code
    * localHandle}. Rules are checked in order — node identity, execution locality, caller
    * capability, then ownership — so the most fundamental precondition names the refusal.
    */
