@@ -747,7 +747,7 @@ these roles distinct is what lets the synced catalog stay identity-free.
   per request, a command that writes without the API around its write, the `_sync` session
   around each commit and erase, the node's round as `MAIN`, and each background entry that
   writes (the event bus drain, the reactors, retention, the reconcilers, periodic passes, the
-  sync scheduler, the room-wake launch, migrations, `PersonalRooms.ensure`) as `SYSTEM`. A
+  sync scheduler, the room-wake launch, migrations) as `SYSTEM`. A
   `ScopedValue` does not cross into a plain executor, so work that continues a request is
   submitted through `Actor.carrying(task)` and captures its requester. Resolving a conflict
   adopts main's version as `MAIN`, so it keeps main's author, before the chosen state is

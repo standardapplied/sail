@@ -25,8 +25,8 @@ runs a full host. macOS (arm64) runs as a thin client that drives a remote host 
 
 ### Upgrade compatibility
 
-Sync requires version 0.46.0 on main and every node: its change log carries erasures, which
-an older box would misread. Upgrade main first, then nodes; older peers are refused before sync
+Sync requires version 0.46.2 on main and every node: an older box would mint personal rooms
+main has already erased. Upgrade main first, then nodes; older peers are refused before sync
 touches data, with an error naming the remedy. Migrations resume after an interruption, and
 startup finishes them before serving requests or syncing.
 

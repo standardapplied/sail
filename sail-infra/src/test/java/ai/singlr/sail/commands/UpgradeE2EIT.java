@@ -47,7 +47,9 @@ import org.junit.jupiter.api.Timeout;
  * <p>The shared script stands for a box the content migration converted: its row carries the mode
  * the old rule gave a script (0755), its history records none, and the copy an older materializer
  * wrote on disk is 0644 — on main and on the node alike. Main's record of the orphan erasure is
- * dropped before the hop, so the candidate's migrate has a data migration to run and record.
+ * dropped before the hop, so the candidate's migrate has a data migration to run and record. Main
+ * holds uday's personal room in the demo project as the released sail minted it, and the hop erases
+ * it.
  */
 @Timeout(value = 8, unit = TimeUnit.MINUTES)
 class UpgradeE2EIT extends AbstractIncusIT {
@@ -76,6 +78,19 @@ class UpgradeE2EIT extends AbstractIncusIT {
           "/var/lib/sail/host.yaml",
           SshIdentityProvisioner.DROP_IN,
           SshdKeepalive.DROP_IN_PATH);
+  private static final String PERSONAL_ROOM = "fde-uday-demo-b67a43c29afbe133";
+  private static final String MINT_PERSONAL_ROOM =
+      """
+      INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at,
+          updated_by)
+      VALUES ('%s', 'demo', 'uday', 'uday', 'uday', 't0', 't0', 'uday')"""
+          .formatted(PERSONAL_ROOM);
+  private static final String PERSONAL_ROOM_ERASED =
+      "SELECT count(*) FROM rooms WHERE id = '"
+          + PERSONAL_ROOM
+          + "' UNION ALL SELECT count(*) FROM change_log WHERE entity_id = '"
+          + PERSONAL_ROOM
+          + "' AND kind = 'erasure'";
   private static final String SPECS =
       "SELECT id, title, status, body_hash FROM specs WHERE id LIKE 'seed-%' ORDER BY id";
   private static final String SCRIPT_REVISIONS =
@@ -217,6 +232,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
     rootOk(SEED);
     nodeOk("sail sync");
     query(LEGACY_HISTORY);
+    query(MINT_PERSONAL_ROOM);
     rootOk("chmod 644 " + SCRIPT_ON_MAIN);
     nodeQuery(LEGACY_HISTORY);
     ok(List.of("runuser", "-u", NODE, "--", "chmod", "644", SCRIPT_ON_NODE));
@@ -290,6 +306,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
       assertTrue(recorded.contains(migration.name()), migration.name() + " not in " + recorded);
     }
     assertEquals("1", query(ORPHANS_ERASED), "the candidate ran its data migrations");
+    assertEquals("0\n1", query(PERSONAL_ROOM_ERASED), "the personal room is erased on main");
     assertEquals(specs, query(SPECS), "the seeded specs are intact");
   }
 

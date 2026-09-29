@@ -262,6 +262,18 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aNodeAtTheFloorThatStillMintedPersonalRoomsIsRefusedUntilItUpgrades() throws Exception {
+    var refusal =
+        assertInstanceOf(
+            SyncWire.Refuse.class,
+            serve(
+                    new SyncRpcServer(new FakeMain(), true),
+                    new SyncWire.Hello(4, "0.46.1", "0.46.0", "b"))
+                .getFirst());
+    assertEquals("upgrade to 0.46.2: sail upgrade", refusal.reason());
+  }
+
+  @Test
   void aFloorAboveMainsIsRefusedNamingTheOrder() throws Exception {
     var server =
         new SyncRpcServer(

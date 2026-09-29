@@ -2,6 +2,14 @@
 
 ## 0.46.2
 
+- **Personal rooms are retired, and every one is erased on upgrade.** Rooms are created on purpose, from Mast: `GET /v1/rooms` no longer mints a room for its reader in every project, and rooms no longer render `personal_of`.
+  - Sync every node, then upgrade main first. Its upgrade erases every personal room with its messages and runs, and each node adopts those erasures on its next sync. A standalone box erases its own.
+  - Main decides on its own copy, as every erasure does: a run or spec a node started in a personal room and has not synced yet goes with main's erasure. A node's upgrade names each one.
+  - Then upgrade every node. A node's upgrade removes the personal rooms main never held, which only that box ever had, and they never reach main.
+  - **The fleet floor moves to 0.46.2.** An older node would mint a personal room and push it to a main that has already erased them all, so main refuses it and tells it to run `sail upgrade`.
+  - A personal room deleted before the upgrade is erased too, with the messages and runs its deletion kept.
+  - A personal room with a run still under way, or with a spec born in it, is left as an ordinary room, and the upgrade names it. The upgrade prints how many rooms it erased.
+  - A personal room is recognized by its exact id, derived from its creator and project. A room whose id merely starts with `fde-` is untouched.
 - **A spec left without an assignee is unassigned, and any member may claim it.** Creating a spec with no assignee used to assign it to whoever created it, which on the in-container socket was the run's principal (`claude/…`), leaving it undispatchable.
   - This holds through HTTP, the CLI and the socket (a run's credential or the box credential), and its identity room is unassigned too.
   - Its creator, the FDE who created it (a run records the FDE it acts for), may edit it while it is unassigned. Any member claims it with `sail spec update <id> --assignee <you>`; an agent claims it for the FDE it acts for. Dispatch refuses it until then, naming that claim.
@@ -23,7 +31,7 @@
   - A run's credential on the in-container socket acts with the role main's roster gives the FDE the run acts for, capped by its lane (member for an agent run, viewer for a room run), and is refused once that FDE is disabled. It used to act with its lane's role whatever the roster said.
   - Main decides whether a synced post is an admin's by the session's role, not by a second roster lookup.
 - **A viewer node's CLI can no longer dispatch or stop.** `sail spec dispatch` and `sail agent stop` decide as the box's FDE with the role main's roster gives it, where they used to decide as a hard-coded admin. A stop needs write access. A preview (`--dry-run`) still describes what it would do.
-- **Every box records the same author for a revision.** Main names the author it recorded when it accepts a node's push, and on a tombstone or an erasure it hands a node, including one a denial answers with. A node used to record `main` for these, and its own push without an author as `main` where main recorded the pusher. The new fields are optional on the wire; the sync floor does not change.
+- **Every box records the same author for a revision.** Main names the author it recorded when it accepts a node's push, and on a tombstone or an erasure it hands a node, including one a denial answers with. A node used to record `main` for these, and its own push without an author as `main` where main recorded the pusher. The new fields are optional on the wire.
 
 - **A push main refuses on authority settles, and the node keeps syncing.** Main answers each such offer `denied`, with its current version. The node adopts that version, keeps its own in history, and carries on. It used to fail the round, and offer the same revision again every round.
   - Main denies a read-only session's offers, a message posted as someone the pusher may not post as, a reply to a message main does not hold, and a run whose provenance is not the pusher's. A denied offer never fails the offers beside it. A viewer's push used to fail whole, a forged author failed the push with every other offer in it, and a foreign run was answered as a race.
