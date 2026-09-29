@@ -1028,9 +1028,21 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       return findById(id).map(SpecStore.this::snapshotMap).orElse(null);
     }
 
+    /**
+     * A revision re-creating a deleted spec keeps the creator its tombstone recorded, as an update
+     * keeps the row's ({@link Snapshots#adoptedCreator}): a restore never renames its creator.
+     */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      applySnapshot(id, withSync(id, snapshot));
+      var full = withSync(id, snapshot);
+      if (!exists(id)) {
+        lastKnown(id)
+            .ifPresent(
+                tombstone ->
+                    full.put(
+                        "created_by", Snapshots.adoptedCreator(snapshot, tombstone.createdBy())));
+      }
+      applySnapshot(id, full);
     }
 
     @Override

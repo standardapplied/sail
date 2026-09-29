@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -23,8 +24,10 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -489,6 +492,98 @@ class PushAuthoritySyncTest {
         reviews.findingsForReview(review).stream().map(Finding::id).toList(),
         "the old box keeps its findings");
     assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
+  }
+
+  @Test
+  void aSpecBornOnAnotherMembersRoomIdIsDeniedAndTheRoomStaysTheirs() throws IOException {
+    room(main, "bob", "den");
+    var den = new RoomStore(main.db).findById("den").orElseThrow();
+    sync(ada, ADA);
+
+    Acting.as("ada", () -> ada.specs.create(spec("den", "ada")));
+    assertEquals(List.of("den"), denied(push(ada, ADA, "spec")));
+
+    assertTrue(main.specs.findById("den").isEmpty());
+    assertEquals(List.of("bob"), new RoomStore(main.db).owners("den"));
+    Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
+    assertEquals(List.of("den"), denied(push(ada, ADA, "room")));
+    assertEquals(den, new RoomStore(main.db).findById("den").orElseThrow());
+  }
+
+  @Test
+  void aSpecWhoseOwnRoomReachedMainFirstStillLands() throws IOException {
+    ownSpec(ada, "ada", "mine", "ada");
+
+    assertEquals(List.of(), denied(push(ada, ADA, "room")));
+    assertEquals(List.of(), denied(push(ada, ADA, "spec")));
+
+    assertEquals("ada", main.specs.findById("mine").orElseThrow().assignee());
+    assertEquals(List.of("ada"), new RoomStore(main.db).owners("mine"));
+  }
+
+  @Test
+  void aReviewCarryingAnotherReviewsStageIsDeniedAndThatReviewIsUntouched() {
+    ownSpec(main, "ada", "ours", "ada");
+    ownSpec(main, "bob", "theirs", "bob");
+    var reviews = new ReviewStore(main.db);
+    var ours = Acting.as("ada", () -> reviews.createReview("ours", 1));
+    var theirs = Acting.as("bob", () -> reviews.createReview("theirs", 1));
+    var stage =
+        Acting.as(
+            "bob",
+            () -> {
+              var created = reviews.createStage(theirs, "security", "agent");
+              reviews.addFinding(created, finding());
+              return created;
+            });
+    var replica = SyncedEntities.replicas(main.db, "main", "main").get("review");
+    var theirsRev = replica.currentRev(theirs);
+    var offer = new LinkedHashMap<>(replica.current(ours));
+    offer.put("stages", replica.current(theirs).get("stages"));
+
+    var outcome = Actor.call(ADA, () -> replica.commit(ours, offer, replica.currentRev(ours)));
+
+    assertInstanceOf(CommitOutcome.Denied.class, outcome);
+    assertEquals(theirs, reviews.findStage(stage).orElseThrow().reviewId());
+    assertEquals(1, reviews.findingsForReview(theirs).size());
+    assertEquals(List.of(), reviews.findingsForReview(ours));
+    assertEquals(theirsRev, replica.currentRev(theirs));
+  }
+
+  @Test
+  void restoringAnotherMembersDeletedSpecAsAClaimIsDenied() {
+    Acting.as("bob", () -> main.specs.create(spec("orphan", null)));
+    Acting.as("bob", () -> main.specs.delete("orphan"));
+    var claim = new LinkedHashMap<>(main.specs.held("orphan"));
+    claim.put("assignee", "ada");
+    claim.put(Snapshots.ACTOR, "ada");
+
+    var outcome =
+        Actor.call(
+            ADA, () -> main.replica.commit("orphan", claim, main.replica.currentRev("orphan")));
+
+    assertInstanceOf(CommitOutcome.Denied.class, outcome);
+    assertTrue(main.specs.findById("orphan").isEmpty());
+  }
+
+  @Test
+  void anOwnersRestoreClaimsItAndKeepsItsCreatorWhateverTheOfferNames() {
+    Acting.as("bob", () -> main.specs.create(spec("orphan", null)));
+    Acting.as("bob", () -> main.specs.delete("orphan"));
+    var restore = new LinkedHashMap<>(main.specs.held("orphan"));
+    restore.put("assignee", "bob");
+    restore.put(Snapshots.ACTOR, "bob");
+    restore.put(Snapshots.CREATOR, "ada");
+
+    var outcome =
+        Actor.call(
+            BOB, () -> main.replica.commit("orphan", restore, main.replica.currentRev("orphan")));
+
+    var accepted = assertInstanceOf(CommitOutcome.Accepted.class, outcome);
+    assertEquals(new Snapshots.Creator("bob"), accepted.creator());
+    var restored = main.specs.findById("orphan").orElseThrow();
+    assertEquals("bob", restored.createdBy());
+    assertEquals("bob", restored.assignee());
   }
 
   private static Finding finding() {

@@ -350,6 +350,34 @@ class SpecAuthorityTest {
   }
 
   @Test
+  void aCreateOnARoomIdIsRefusedUnlessThatRoomIsTheActorsOwnOrAnAdminAsks() {
+    var create = projection("title", "Den", "assignee", null, "room_id", "den");
+    board.db.execute(
+        """
+        INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at)
+        VALUES ('nook', 'acme', 'nook', ?, ?, 'now', 'now')""",
+        OTHER,
+        OWNER);
+
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_OWNER,
+                "Room 'den' already exists, and a spec's id is reserved for its own room.",
+                "Pick another spec id.")),
+        rule.decide(OWNER_SYNC, "den", null, create));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OWNER_API, "den", null, create).map(Refusal::kind));
+    assertEquals(Optional.empty(), rule.decide(OTHER_SYNC, "den", null, create));
+    assertEquals(Optional.empty(), rule.decide(ADMIN, "den", null, create));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(OWNER_SYNC, "nook", null, with(create, "room_id", "nook")),
+        "a room the pusher minted reaches main before its spec");
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(

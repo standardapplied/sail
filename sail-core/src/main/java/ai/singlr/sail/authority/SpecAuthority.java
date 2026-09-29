@@ -10,6 +10,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
 import java.util.Objects;
@@ -18,11 +19,14 @@ import java.util.Optional;
 /**
  * Who may write a spec. Any writer creates one; a spec born in another room ({@code room_id} not
  * its own id) needs the right to post there ({@link PostingRule}), and a named assignee must pass
- * the claim rule into that room. Changing the assignee is decided by the claim rule alone: an admin
- * reassigns, and anyone else may only claim an unassigned spec for the FDE they act as — and, for a
- * spec born in a room, only where they may already post, since its owner gains a voice there. Any
- * other revision, a tombstone or a restore is its owner's ({@link Ownership#ownerOf}, read from
- * {@code held}) or an admin's. {@code room_id} never changes after create.
+ * the claim rule into that room. A spec's id is reserved for its own room, so a create whose id
+ * names a room someone else owns is refused: it would take that room over. Changing the assignee of
+ * a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
+ * claim an unassigned spec for the FDE they act as — and, for a spec born in a room, only where
+ * they may already post, since its owner gains a voice there. Any other revision, a tombstone or a
+ * restore is its owner's ({@link Ownership#ownerOf}, read from {@code held}) or an admin's, and a
+ * restore that changes the assignee must pass the claim rule too. {@code room_id} never changes
+ * after create.
  */
 public final class SpecAuthority implements WriteAuthority {
 
@@ -30,10 +34,12 @@ public final class SpecAuthority implements WriteAuthority {
   private static final String ROOM_ID = "room_id";
 
   private final RoomStore rooms;
+  private final SpecStore specs;
   private final Attribution attribution;
 
   public SpecAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
+    this.specs = new SpecStore(db);
     this.attribution = new Attribution(db);
   }
 
@@ -57,13 +63,28 @@ public final class SpecAuthority implements WriteAuthority {
       return Refusal.fixed("spec", id, ROOM_ID);
     }
     var assignee = assigneeOf(held);
-    if (next != null && !Objects.equals(assignee, assigneeOf(next))) {
-      return claim(actor, id, assignee, assigneeOf(next), bornIn(id, held));
+    var creator = Snapshots.text(held, Snapshots.CREATOR);
+    if (next == null || Objects.equals(assignee, assigneeOf(next))) {
+      return owner(actor, id, assignee, creator);
     }
-    return owner(actor, id, assignee, Snapshots.text(held, Snapshots.CREATOR));
+    if (restoring(id)) {
+      var refused = owner(actor, id, assignee, creator);
+      if (refused.isPresent()) {
+        return refused;
+      }
+    }
+    return claim(actor, id, assignee, assigneeOf(next), bornIn(id, held));
+  }
+
+  private boolean restoring(String id) {
+    return specs.lastKnown(id).filter(spec -> !spec.live()).isPresent();
   }
 
   private Optional<Refusal> birth(Actor actor, String id, Map<String, Object> next) {
+    var taken = takenRoom(actor, id);
+    if (taken.isPresent()) {
+      return taken;
+    }
     var bornIn = bornIn(id, next);
     if (bornIn == null) {
       return Optional.empty();
@@ -74,6 +95,26 @@ public final class SpecAuthority implements WriteAuthority {
     }
     var assignee = assigneeOf(next);
     return assignee == null ? Optional.empty() : claim(actor, id, null, assignee, bornIn);
+  }
+
+  /**
+   * Why a spec {@code id} may not be born over the room already holding its id: that room would
+   * become the spec's, its owner displaced. A room the actor owns or created, or any room for an
+   * admin, is theirs to hand to the spec — a node's own identity room can reach main before its
+   * spec does.
+   */
+  private Optional<Refusal> takenRoom(Actor actor, String id) {
+    var room = rooms.findById(id);
+    if (room.isEmpty()
+        || actor.isAdmin()
+        || actor.actsFor(Ownership.ownerOf(room.get().assignee(), room.get().createdBy()))
+        || actor.actsFor(room.get().createdBy())) {
+      return Optional.empty();
+    }
+    return Refusal.of(
+        Refusal.Kind.NOT_OWNER,
+        "Room '" + id + "' already exists, and a spec's id is reserved for its own room.",
+        "Pick another spec id.");
   }
 
   /**

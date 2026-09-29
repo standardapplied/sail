@@ -148,6 +148,40 @@ class ReviewAuthorityTest {
   }
 
   @Test
+  void aReviewCarriesOnlyItsOwnStagesEvenForAnAdmin() {
+    var theirs = "019fee00-0000-7000-8000-0000000000d2";
+    board.db.execute(
+        "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, 'auth', 1,"
+            + " 'running', 'now')",
+        REVIEW);
+    board.db.execute(
+        "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, 'auth', 1,"
+            + " 'running', 'now')",
+        theirs);
+    for (var stage : List.of(List.of("s-own", REVIEW), List.of("s-theirs", theirs))) {
+      board.db.execute(
+          "INSERT INTO review_stages (id, review_id, name, stage_type, status) VALUES (?, ?,"
+              + " 'security', 'agent', 'running')",
+          stage.get(0),
+          stage.get(1));
+    }
+    var own = with(RUNNING, "stages", List.of(Map.of("id", "s-own"), Map.of("id", "s-new")));
+
+    assertEquals(Optional.empty(), rule.decide(OWNER_SYNC, REVIEW, RUNNING, own));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.FIXED,
+                "Stage s-theirs belongs to review " + theirs + ", not review " + REVIEW + ".",
+                "A stage is set when its review creates it and never moves to another review.")),
+        rule.decide(
+            ADMIN_SYNC,
+            REVIEW,
+            RUNNING,
+            with(RUNNING, "stages", List.of(Map.of("id", "s-theirs")))));
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(
