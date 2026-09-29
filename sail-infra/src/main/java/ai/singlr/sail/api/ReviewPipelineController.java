@@ -275,7 +275,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     if (!isAuthoritative(event)) return;
 
-    var exitCode = exitCodeOf(event);
+    var exitCode = RunTracker.exitCodeOf(event.data());
     if (exitCode != null && exitCode != 0) {
       publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, "exit " + exitCode);
       return;
@@ -1049,12 +1049,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return runId != null
         && !runId.isBlank()
         && runStore.findById(runId).map(row -> !row.triggersReview()).orElse(false);
-  }
-
-  private static Integer exitCodeOf(Event event) {
-    return event.data().get(Event.WellKnownData.EXIT_CODE) instanceof Number n
-        ? n.intValue()
-        : null;
   }
 
   private static String hostname() {

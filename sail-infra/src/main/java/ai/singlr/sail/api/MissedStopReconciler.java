@@ -447,7 +447,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     var session = latest.get();
-    var coverage = stopCoverage(spec.id(), session.startedAt());
+    var coverage = stopCoverage(spec.id(), session);
     var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {
       case MissedStops.Outcome.ReplayStop replay -> {
@@ -489,32 +489,54 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   /**
    * The {@link MissedStops.StopCoverage} of this session: when an authoritative ({@code
-   * source}-carrying) stop was recorded since the session started, and whether the pipeline left
-   * evidence of acting on it — an {@code agent_failed} verdict or review stage activity since the
-   * same instant. Observed-but-unacted is the field failure this rescues: a raced statement killed
-   * the review kickoff after the watcher's stop landed, and the old observed-means-covered check
-   * made every later sweep skip the stranded spec. Unreadable stop rows count as covering and
-   * in-flight (timestamp {@code MAX}) — the sweep prefers doing nothing over acting on data it
-   * cannot interpret.
+   * source}-carrying) stop for it was recorded since it started, the exit code that stop carried,
+   * and whether the pipeline left evidence of acting on it — an {@code agent_failed} verdict or
+   * review stage activity since the same instant. A stop is this session's when it names this run,
+   * or names none, as stops did before they named their run: another run's stop — a room run of the
+   * same spec — never speaks for it. Observed-but-unacted is the field failure this rescues: a
+   * raced statement killed the review kickoff after the watcher's stop landed, and the old
+   * observed-means-covered check made every later sweep skip the stranded spec. Unreadable stop
+   * rows count as covering and in-flight (timestamp {@code MAX}) — the sweep prefers doing nothing
+   * over acting on data it cannot interpret.
    */
-  private MissedStops.StopCoverage stopCoverage(String specId, String startedAt) {
-    var since = MissedStops.parseOr(startedAt, Instant.MIN);
+  private MissedStops.StopCoverage stopCoverage(String specId, RunStore.RunRow session) {
+    var since = MissedStops.parseOr(session.startedAt(), Instant.MIN);
     var newest =
         eventStore.forSpecAndType(specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
-            .filter(row -> carriesSource(row) && !timestampOf(row).isBefore(since))
-            .max(Comparator.comparing(MissedStopReconciler::timestampOf));
+            .map(RecordedStop::of)
+            .filter(stop -> stop.authoritative() && stop.speaksFor(session.id()))
+            .filter(stop -> !stop.at().isBefore(since))
+            .max(Comparator.comparing(RecordedStop::at));
     if (newest.isEmpty()) {
       return MissedStops.StopCoverage.none();
     }
     return new MissedStops.StopCoverage(
-        timestampOf(newest.get()), exitCodeOf(newest.get()), actedOnSince(specId, since));
+        newest.get().at(), newest.get().exitCode(), actedOnSince(specId, since));
   }
 
-  private static Integer exitCodeOf(EventStore.EventRow row) {
-    try {
-      return RunTracker.exitCodeOf(YamlUtil.parseMap(row.data()));
-    } catch (Exception e) {
-      return null;
+  /**
+   * One recorded stop as the sweep reads it: when it was recorded, whether it carries a {@code
+   * source}, the run it names (null for none) and the exit code it carried for that run. An
+   * unreadable row is an authoritative stop naming no run.
+   */
+  private record RecordedStop(Instant at, boolean authoritative, String runId, Integer exitCode) {
+
+    static RecordedStop of(EventStore.EventRow row) {
+      try {
+        var data = YamlUtil.parseMap(row.data());
+        var runId = Objects.toString(data.get(Event.WellKnownData.RUN_ID), null);
+        return new RecordedStop(
+            timestampOf(row),
+            data.get(Event.WellKnownData.SOURCE) != null,
+            runId,
+            runId == null ? null : RunTracker.exitCodeOf(data));
+      } catch (Exception e) {
+        return new RecordedStop(timestampOf(row), true, null, null);
+      }
+    }
+
+    boolean speaksFor(String sessionId) {
+      return runId == null || runId.equals(sessionId);
     }
   }
 
@@ -532,14 +554,6 @@ public final class MissedStopReconciler implements AutoCloseable {
             type ->
                 eventStore.forSpecAndType(specId, type).stream()
                     .anyMatch(row -> !timestampOf(row).isBefore(since)));
-  }
-
-  private static boolean carriesSource(EventStore.EventRow row) {
-    try {
-      return YamlUtil.parseMap(row.data()).get(Event.WellKnownData.SOURCE) != null;
-    } catch (Exception e) {
-      return true;
-    }
   }
 
   private static Instant timestampOf(EventStore.EventRow row) {

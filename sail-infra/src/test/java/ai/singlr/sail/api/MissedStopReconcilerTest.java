@@ -1240,6 +1240,53 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void anotherRunsStopNeverSpeaksForTheBuildRunOrLendsItItsExitCode() throws Exception {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var room = session("auth", "node-a", DispatchGate.ROOM_ROLE);
+    Acting.system(() -> sessionStore.transition(room, "running", "stopped", 1));
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER,
+            Event.WellKnownData.RUN_ID,
+            room,
+            Event.WellKnownData.RUN_ROLE,
+            DispatchGate.ROOM_ROLE,
+            Event.WellKnownData.EXIT_CODE,
+            1));
+    var latch = new CountDownLatch(1);
+    var replayed = captureStops(latch);
+
+    assertEquals(1, reconciler(new CountingProbe(false), PAST_GRACE).sweep());
+
+    BusTesting.awaitDelivery(latch);
+    var stop = replayed.poll();
+    assertEquals(build, stop.data().get(Event.WellKnownData.RUN_ID), "the build's own stop");
+    assertNull(stop.data().get(Event.WellKnownData.EXIT_CODE), "never the room run's exit 1");
+    assertNull(sessionStore.findById(build).orElseThrow().exitCode());
+  }
+
+  @Test
+  void aFrozenContainersRunsReadAsAlive() {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    var adhoc = session(null, "node-a", "adhoc");
+    var claim = session(null, "node-a", "adhoc");
+    Acting.system(() -> sessionStore.transition(claim, "running", "stopping"));
+    var frozen = incus("[{\"name\": \"test-project\", \"status\": \"Frozen\"}]", "frozen");
+
+    assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(frozen), PAST_GRACE).sweep());
+
+    assertEquals("running", sessionStore.findById(build).orElseThrow().status());
+    assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
+    assertEquals("stopping", sessionStore.findById(claim).orElseThrow().status());
+    assertEquals(0, bus.publishedCount());
+  }
+
+  @Test
   void aContainerTheProbeCannotReachReadsAsAliveNotAsEveryRunInItGone() {
     createInProgressSpec("auth");
     var room = session("auth", "node-a", DispatchGate.ROOM_FULL_ROLE);
