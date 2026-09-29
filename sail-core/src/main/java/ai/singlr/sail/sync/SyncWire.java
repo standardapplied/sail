@@ -53,7 +53,7 @@ public final class SyncWire {
    * Bump again only when a change makes older peers unsafe, never for a routine release; patch
    * releases above the floor are wire-compatible with each other.
    */
-  public static final String UPGRADE_FLOOR = "0.46.2";
+  public static final String UPGRADE_FLOOR = "0.46.3";
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
@@ -92,6 +92,7 @@ public final class SyncWire {
   private static final String FLOOR = "floor";
   private static final String BOX = "box";
   private static final String MAIN_ID = "mainId";
+  private static final String HANDLE = "handle";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -329,8 +330,18 @@ public final class SyncWire {
     };
   }
 
-  /** Main accepted the hello: its protocol, build, and the box id the node checkpoints against. */
-  public record Welcome(int protocol, String version, String mainId) implements Response {}
+  /**
+   * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
+   * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
+   * null from an older main, which never says.
+   */
+  public record Welcome(int protocol, String version, String mainId, String handle)
+      implements Response {
+    /** A welcome that names no handle, as a main that predates saying so sends it. */
+    public Welcome(int protocol, String version, String mainId) {
+      this(protocol, version, mainId, null);
+    }
+  }
 
   /** Main refused the session before serving anything, naming the remedy. */
   public record Refuse(String reason) implements Response {}
@@ -589,6 +600,9 @@ public final class SyncWire {
         map.put(PROTOCOL_KEY, welcome.protocol());
         map.put(VERSION, welcome.version());
         map.put(MAIN_ID, welcome.mainId());
+        if (welcome.handle() != null) {
+          map.put(HANDLE, welcome.handle());
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -668,7 +682,11 @@ public final class SyncWire {
     var op = string(map, OP);
     return switch (op) {
       case OP_WELCOME ->
-          new Welcome(intValue(map, PROTOCOL_KEY), string(map, VERSION), string(map, MAIN_ID));
+          new Welcome(
+              intValue(map, PROTOCOL_KEY),
+              string(map, VERSION),
+              string(map, MAIN_ID),
+              string(map, HANDLE));
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->

@@ -175,6 +175,7 @@ class SyncCliTest {
             "idx_specs_room",
             "idx_run_delivered_message")) db.execute("DROP INDEX " + index);
     db.execute("DROP TABLE erase_requests");
+    db.execute("DROP TABLE fde_boxes");
     db.execute("DROP TRIGGER specs_status_since_insert");
     db.execute("DROP TRIGGER specs_status_since_update");
     for (var column : List.of("archived_at", "cancelled_at"))

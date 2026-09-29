@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -91,6 +92,7 @@ public final class JoinCommand implements Runnable {
     var plan =
         plan(
             SailPaths.hostConfigPath(),
+            SailPaths.controlPlaneDb(),
             identity,
             normalized,
             resolvedHandle,
@@ -102,11 +104,14 @@ public final class JoinCommand implements Runnable {
 
   /**
    * Generates the sync key if needed and points the local host config at {@code target} as a node.
-   * Pure of any prompting or stdout so it can be exercised directly in tests with a
-   * {@code @TempDir} config and a stub identity.
+   * A change of handle is refused while a run main holds under the old one would be stranded, and
+   * once written every run main has not taken is stamped with the new one ({@link HandleChange}),
+   * in the box's database {@code db}. Pure of any prompting or stdout so it can be exercised
+   * directly in tests with a {@code @TempDir} config and a stub identity.
    */
   static Plan plan(
       Path hostConfig,
+      Path db,
       SyncIdentity identity,
       String target,
       String handle,
@@ -125,7 +130,8 @@ public final class JoinCommand implements Runnable {
             "sync-handle",
             handle);
     requireWritable(hostConfig, target);
-    YamlUtil.dumpToFile(updated.toMap(), hostConfig);
+    HandleChange.apply(
+        db, host.sync(), updated.sync(), () -> YamlUtil.dumpToFile(updated.toMap(), hostConfig));
     return new Plan(target, handle, name, email, publicKey);
   }
 

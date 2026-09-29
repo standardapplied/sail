@@ -47,12 +47,7 @@ class ParkedConflictSyncTest {
     nodeRuns = new RunStore(node.db);
     nodeReplica =
         new StoreReplica(
-            node.id,
-            nodeRuns,
-            new ChangeLog(node.db),
-            node.conflicts,
-            node.syncState,
-            runId -> nodeRuns.pushableFrom(runId, node.id));
+            node.id, nodeRuns, new ChangeLog(node.db), node.conflicts, node.syncState, node.id);
   }
 
   @AfterEach

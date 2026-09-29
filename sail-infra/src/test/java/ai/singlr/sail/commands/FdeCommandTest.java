@@ -12,6 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.FdeBoxes;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -41,6 +44,24 @@ class FdeCommandTest {
     assertTrue(message.contains("main devbox"));
     assertTrue(message.contains("Run this on main"));
     assertTrue(message.contains("overwritten on the next sync"));
+  }
+
+  @Test
+  void releasingAnFdesBoxLetsTheNextBoxThatSyncsAsItBeRecorded() {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var boxes = new FdeBoxes(db);
+      boxes.claim("ada", "devbox");
+
+      var released = FdeCommand.ReleaseBox.release(boxes, "ada", false);
+
+      assertTrue(released.contains("Released box 'devbox' for ada"), released);
+      assertTrue(boxes.claim("ada", "laptop").isEmpty(), "the next box is recorded");
+      assertTrue(FdeCommand.ReleaseBox.release(boxes, "bob", false).contains("No box"));
+      var json = YamlUtil.parseMap(FdeCommand.ReleaseBox.release(boxes, "ada", true));
+      assertEquals(true, json.get("released"));
+      assertEquals("laptop", json.get("box"));
+    }
   }
 
   @Test

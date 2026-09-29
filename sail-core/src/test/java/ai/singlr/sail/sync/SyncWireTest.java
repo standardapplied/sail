@@ -57,6 +57,8 @@ class SyncWireTest {
   private static final List<SyncWire.Response> RESPONSES =
       List.of(
           new SyncWire.Welcome(4, "0.44.0", "main-box"),
+          new SyncWire.Welcome(4, "0.46.3", "main-box", "ada"),
+          new SyncWire.Welcome(4, "0.46.3", "main-box", ""),
           new SyncWire.Refuse("hello required"),
           new SyncWire.Tips(Map.of("spec", 7L, "file", 0L)),
           new SyncWire.Page(
@@ -90,6 +92,25 @@ class SyncWireTest {
                   Map.of("handle", "ada", "role", "admin", "status", "active"),
                   Map.of("handle", "uday", "role", "member", "status", "disabled"))),
           new SyncWire.Failed("disk full", "store"));
+
+  @Test
+  void aWelcomeNamesTheHandleOnlyWhenMainSaysOne() {
+    assertFalse(
+        SyncWire.encode(new SyncWire.Welcome(4, "0.44.0", "main-box")).contains("handle"),
+        "an older main's welcome carries no handle");
+    assertEquals(
+        "ada",
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada"))))
+            .handle());
+    assertNull(
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.46.2\","
+                        + " \"mainId\": \"m\"}"))
+            .handle());
+  }
 
   @Test
   void aDenialReadWithoutItsMarkerIsTheRefusalAnOlderNodeKnowsWithTheSameReason() {

@@ -461,6 +461,36 @@ class StopOperationsTest {
   }
 
   @Test
+  void aRunStampedBeforeTheBoxHadAHandleStopsOnceTheHandleChangeStampsIt() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, (project, unit) -> agentDies(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                "auth",
+                null,
+                null,
+                "build",
+                "codex",
+                "feat/auth",
+                "do it",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    runStore.restamp(LOCAL_HANDLE, false);
+
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+  }
+
+  @Test
   void aMemberWhoIsNotTheAssigneeIsRefused() throws Exception {
     var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
@@ -1454,7 +1484,6 @@ class StopOperationsTest {
               "acme",
               "",
               LOCAL_HANDLE,
-              LOCAL_HANDLE,
               "adhoc",
               List.of(),
               "codex",
@@ -1493,7 +1522,6 @@ class StopOperationsTest {
         R2,
         "acme",
         "auth",
-        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "codex",
         "feat/auth",
@@ -1600,7 +1628,6 @@ class StopOperationsTest {
                       R1,
                       "acme",
                       "auth",
-                      LOCAL_HANDLE,
                       LOCAL_HANDLE,
                       "build",
                       List.of(),

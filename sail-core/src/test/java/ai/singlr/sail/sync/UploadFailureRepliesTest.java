@@ -149,7 +149,8 @@ class UploadFailureRepliesTest {
     request.writeBytes(trailing);
     var expected = new StringBuilder();
     expected.append(
-        SyncWire.encode(new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main")));
+        SyncWire.encode(
+            new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", "node")));
     expected.append('\n');
     expected.append(SyncWire.encode(new SyncWire.Lack(List.of(HASH)))).append('\n');
     for (var reply : replies) expected.append(SyncWire.encode(reply)).append('\n');

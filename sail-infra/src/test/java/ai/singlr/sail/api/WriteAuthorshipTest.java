@@ -122,7 +122,6 @@ class WriteAuthorshipTest {
                       "review-1",
                       "acme",
                       "auth",
-                      "node-a",
                       "uday",
                       "claude-code",
                       "main",

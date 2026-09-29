@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -82,6 +83,7 @@ public final class PagedSyncSession implements SyncSession {
   private List<SyncSession.Denial> denials = new ArrayList<>();
   private Consumer<String> notice = ignored -> {};
   private String broken;
+  private String handle;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
@@ -111,6 +113,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.asked = asked;
     copy.contentFields = contentFields;
     copy.notice = notice;
+    copy.handle = handle;
     return copy;
   }
 
@@ -147,6 +150,7 @@ public final class PagedSyncSession implements SyncSession {
     }
     var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
+    session.handle = welcome.handle();
     return session;
   }
 
@@ -606,6 +610,21 @@ public final class PagedSyncSession implements SyncSession {
       return new SyncTransportException("refused", context + ": " + refuse.reason(), null);
     }
     return new SyncTransportException(context + ": Expected a " + expected + ", got: " + response);
+  }
+
+  @Override
+  public Optional<String> handle() {
+    return Optional.ofNullable(handle);
+  }
+
+  @Override
+  public List<SyncWire.Entry> held(String type, List<String> ids) {
+    return onLiveChannel(
+        () -> {
+          var held = new ArrayList<SyncWire.Entry>();
+          need(type, ids, (consumed, entries) -> held.addAll(entries));
+          return List.copyOf(held);
+        });
   }
 
   @Override

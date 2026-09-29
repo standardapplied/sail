@@ -2,6 +2,16 @@
 
 ## 0.46.3
 
+- **A box's runs carry the handle main knows it by, and a live run is never rewritten.** Every run a box reserves — dispatch, build, restart, ad-hoc (`sail run`, `agent sweep`, the API), the review pipeline and its fix lane, and room wakes — carries the box's handle as both `node` and `owner`. Runs used to be stamped with a blank node, a stale handle, or the spec's or room's owner, and main then denied them, sometimes mid-run, and the node deleted them.
+  - Main's `welcome` names the handle it authenticated the session as. A node whose configured sync handle is blank or another fails its round before offering or adopting anything, naming both handles and the fix.
+  - One box syncs as each FDE. Main records the first box that syncs as an FDE and refuses any other, naming both boxes; an admin runs `sail fde release-box <handle>` on main after retiring the old box. Main's own FDE syncs from no box but main.
+  - Every round, before anything else, a node stamps every run main has never acknowledged with its handle. A run main took whose answer was lost is adopted as acknowledged instead, keeping the stamp main holds it under.
+  - `sail host config set sync-handle` and `sail join` refuse to change the handle while a run main holds under the old one is live here or has changes main has not taken, naming each; on main, while any run the box executed is live. Once changed, every run main has not taken is stamped with the new handle. A box becoming main stamps its unstamped runs.
+  - Main takes a run only acting for the pusher. A run acting for no one is denied.
+  - Main's version, pulled or denied, never rewrites or removes a run or review still live on the box that executes it. It stays as it is and settles once finished. Another box's run is always adopted.
+  - A room wake whose spec or room moved off the box before launch is refused and reserves nothing.
+  - The reconciler finishes every dead session this box runs within one pass: superseded build sessions, room and full room runs of specs under way, and a dead newest build run of a spec in review.
+  - **The fleet floor moves to 0.46.3.** An older node pushes runs acting for no one, which main now denies, so main refuses it and tells it to run `sail upgrade`.
 - **Main decides every pushed revision by the rule the doors ask.** Each synced type has one write rule in sail-core, and main's commit asks it for every revision a node pushes, after its compare-and-set and before it writes. The same edit gets the same answer through HTTP, the host CLI, the socket, the terminal and a sync. A member with an edited box database, or a crafted client, used to have almost every push committed.
   - A spec is edited, deleted or restored only by its owner or an admin, and its assignee changes only by an admin or a claim of an unassigned spec for oneself. A spec never moves to another room. Main used to commit anyone's edit, including taking someone else's spec, and the prune that followed then erased that FDE's spec, room, messages, runs and reviews on every box.
   - Restoring a deleted spec is its owner's or an admin's before any assignee change is decided as a claim, and a restore keeps the creator its tombstone recorded, whatever the push names.

@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.EnrollmentTicketStore;
+import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
@@ -48,6 +49,7 @@ import picocli.CommandLine.Spec;
       FdeCommand.ListFdes.class,
       FdeCommand.Update.class,
       FdeCommand.Remove.class,
+      FdeCommand.ReleaseBox.class,
       FdeCommand.Enroll.class,
       FdeCommand.Key.class,
       FdeCommand.Passkey.class
@@ -225,6 +227,67 @@ public final class FdeCommand implements Runnable {
                       "  @|green ✓|@ Updated " + updated.handle() + " (" + updated.role() + ")"));
             }
           });
+    }
+  }
+
+  @Command(
+      name = "release-box",
+      description =
+          "Forget the box an FDE syncs from, so the next box to sync as it is recorded instead.",
+      mixinStandardHelpOptions = true)
+  static final class ReleaseBox implements Runnable {
+
+    @Parameters(index = "0", description = "FDE handle.")
+    private String handle;
+
+    @Option(names = "--json", description = "Output in JSON format.")
+    private boolean json;
+
+    @Spec private CommandSpec spec;
+
+    @Override
+    public void run() {
+      CliCommand.run(
+          spec,
+          () -> {
+            if (HostSync.isNode(HostSync.config())) {
+              throw new IllegalStateException(
+                  "Main records the box each FDE syncs from, and a node records none. Run 'sail"
+                      + " fde release-box "
+                      + handle
+                      + "' on main.");
+            }
+            try (var db = Sqlite.open(dbPath())) {
+              System.out.println(release(new FdeBoxes(db), handle, json));
+            }
+          });
+    }
+
+    /**
+     * Releases {@code handle}'s box and says what that did: the box it syncs from is forgotten, or
+     * none was recorded. The old box should be retired first — it is refused once another box has
+     * synced as the FDE.
+     */
+    static String release(FdeBoxes boxes, String handle, boolean json) {
+      var box = boxes.boxOf(handle);
+      var released = boxes.release(handle);
+      if (json) {
+        var map = new LinkedHashMap<String, Object>();
+        map.put("handle", handle);
+        map.put("released", released);
+        map.put("box", box.orElse(null));
+        return YamlUtil.dumpJson(map);
+      }
+      return released
+          ? Ansi.AUTO.string(
+              "  @|green ✓|@ Released box '"
+                  + box.orElseThrow()
+                  + "' for "
+                  + handle
+                  + ". The next box to sync as "
+                  + handle
+                  + " is recorded as its box.")
+          : Ansi.AUTO.string("  @|faint No box is recorded for " + handle + "; nothing to do.|@");
     }
   }
 

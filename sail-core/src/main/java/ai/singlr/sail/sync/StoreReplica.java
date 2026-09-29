@@ -18,7 +18,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -29,10 +28,11 @@ import java.util.function.Supplier;
  * store (revisions), {@link SyncConflicts} (parked conflicts), and {@link SyncState} (checkpoint) —
  * the one adapter behind every entity type, replacing the six hand-written per-store copies.
  *
- * <p>{@code pushPolicy} decides whether this node may push its own change for an id up to main: the
- * default always may (multi-writer entities — specs, files, projects), and a single-writer entity
- * like a run supplies a policy so a reader box never pushes a run it did not author. Main's commit
- * asks the store's {@link SyncedStore#authority} for every revision a node pushes.
+ * <p>{@code handle} is this box's FDE handle: the store answers for it whether this node may push
+ * its own change for an id up to main ({@link SyncedStore#mayPush}) — a multi-writer entity always
+ * may, a run only when this box executed it — and whether an id is work still live on this box
+ * ({@link SyncedStore#live}). Main's commit asks the store's {@link SyncedStore#authority} for
+ * every revision a node pushes.
  */
 public final class StoreReplica implements LocalReplica, MainReplica {
 
@@ -41,7 +41,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private final ChangeLog changeLog;
   private final SyncConflicts conflicts;
   private final SyncState syncState;
-  private final Predicate<String> pushPolicy;
+  private final String handle;
 
   public StoreReplica(
       String id,
@@ -49,7 +49,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState) {
-    this(id, store, changeLog, conflicts, syncState, entityId -> true);
+    this(id, store, changeLog, conflicts, syncState, null);
   }
 
   public StoreReplica(
@@ -58,13 +58,13 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState,
-      Predicate<String> pushPolicy) {
+      String handle) {
     this.id = Objects.requireNonNull(id, "id");
     this.store = Objects.requireNonNull(store, "store");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
-    this.pushPolicy = Objects.requireNonNull(pushPolicy, "pushPolicy");
+    this.handle = handle;
   }
 
   @Override
@@ -86,12 +86,12 @@ public final class StoreReplica implements LocalReplica, MainReplica {
 
   @Override
   public boolean mayPush(String entityId) {
-    return pushPolicy.test(entityId);
+    return store.mayPush(entityId, handle);
   }
 
   @Override
   public boolean live(String entityId) {
-    return store.live(entityId);
+    return store.live(entityId, handle);
   }
 
   @Override

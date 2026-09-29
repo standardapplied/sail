@@ -59,7 +59,8 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var boxId = BoxIdentity.config().boxId();
+    var box = BoxIdentity.config();
+    var boxId = box.boxId();
     SyncDatabase mainDb;
     try {
       mainDb = SyncDatabase.converge(SailPaths.controlPlaneDb(), boxId);
@@ -76,7 +77,8 @@ public final class SyncServerCommand implements Callable<Integer> {
           System.getenv("SAIL_TOKEN"),
           in,
           out,
-          transitionBridge(mainDb.db(), HostInfo.hostname()));
+          transitionBridge(mainDb.db(), HostInfo.hostname()),
+          () -> box);
     }
   }
 
@@ -99,8 +101,9 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   /**
    * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
-   * this main ({@code box}). A session with no token is a read-only one that owns nothing; a token
-   * whose FDE is disabled is refused before anything is served.
+   * this main ({@code box}), whose own FDE syncs from no box but main. A session with no token is a
+   * read-only one that owns nothing; a token whose FDE is disabled is refused before anything is
+   * served.
    */
   static int serve(
       SyncDatabase converged,
@@ -119,7 +122,13 @@ public final class SyncServerCommand implements Callable<Integer> {
       return 1;
     }
     SyncRpcServer.over(
-            db, mainId, principal.get(), () -> roster(db), transitionSink, SailVersion.version())
+            db,
+            mainId,
+            box.get().handle(),
+            principal.get(),
+            () -> roster(db),
+            transitionSink,
+            SailVersion.version())
         .serve(in, out);
     return 0;
   }

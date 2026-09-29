@@ -179,8 +179,8 @@ and the spec that closes it.
 |---|---|---|
 | I1 | Every write on every box is made by exactly one bound `Actor`, whichever door it came through. | `ActorTest`, `OperationsTakeNoActorTest` |
 | I2 | On a node only the box's FDE, its runs and FDE-less credentials write; any other credential reads. | `RoleRuleTest`, `NodeWritesTest`, `DeniedSyncTest` |
-| I3 | Main and the node agree who the node is, and one box syncs as each FDE. | open: `sail-runs-follow-the-box` |
-| I4 | Every run a box executes carries that box's handle as `node` and `owner`. | open: `sail-runs-follow-the-box` |
+| I3 | Main and the node agree who the node is, and one box syncs as each FDE. | `NodeIdentitySyncTest`, `SyncServerCommandTest` (main's own FDE), `FdeCommandTest` (`release-box`) |
+| I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps), `HandleChangeTest`, `JoinCommandTest`, `RoomWakeLaunchTest` |
 | A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | `OneDecisionTest` (spec edits, posts); open for every door: `sail-journal-authority` |
 | A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
 | A3 | An event, hook or reactor never makes the machinery do what its sender could not. | socket: `LocalApiRouterTest`; open for HTTP: `sail-events-door-authority` |
@@ -190,8 +190,8 @@ and the spec that closes it.
 | L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
-| L4 | Main's version, by denial or pull, never removes or rewrites a run or review still running here. | by denial: `DeniedSyncTest`, `PushAuthoritySyncTest`; open for pulls: `sail-runs-follow-the-box` |
-| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest` (newest sessions); open for the rest: `sail-runs-follow-the-box` |
+| L4 | Main's version, by denial or pull, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, lost answers, another box's run), `DeniedSyncTest`, `PushAuthoritySyncTest` |
+| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest` |
 | L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | open (holds on main today): `sail-sync-liveness` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
@@ -242,7 +242,13 @@ O(what it asks for), never O(history).
 ### The wire: sync protocol 4
 
 A session opens with `hello` (protocol, build, fleet floor, box id) and is `welcome`d or
-`refuse`d once; floors compare as versions. The box id names the node in main's log; who the
+`refuse`d once; floors compare as versions. The `welcome` names the handle main authenticated the
+session as, and a node whose configured sync handle is blank or another does nothing that round
+(`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
+syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
+from any other until an admin runs `sail fde release-box`. Before its first type, the node asks
+`need` for every run main has never acknowledged: one main holds is adopted as acknowledged, and
+every other is stamped with the node's handle, so main takes it. The box id names the node in main's log; who the
 node is stays the authenticated SSH principal, bound as the `SYNC` actor around
 every commit and erase: it is each revision's `peer`, and its author unless the revision
 offers its own `_actor`. The node binds `MAIN` around its round, so what it adopts records
@@ -339,9 +345,11 @@ A push from a node of this release therefore never gets results larger than the 
 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
 main's rev, or removes its row when main holds none. A denied message leaves the room with the
-replies this box posted under it. Work still under way here is the exception: a run that has not
-finished keeps its row, credential and room guard, is offered again, and settles once it has
-finished. The node's own revision stays in its change log, no conflict is parked, and the round
+replies this box posted under it. Work still under way here is the exception, whether main's
+version arrives by denial or by pull: a run this box executes that has not finished (it carries
+this box's handle) keeps its row, credential and room guard, is offered again, and settles once it
+has finished. One guard in the engine covers every adoption; another box's run is always adopted
+as main holds it. The node's own revision stays in its change log, no conflict is parked, and the round
 carries on, so the next round has nothing to offer again. Each denial is announced as main
 answers it, naming where the node's version is kept, so `sail sync` and a node's running server
 print it even when the round then fails; `sail sync --json` and `GET /v1/sync` list them (type,

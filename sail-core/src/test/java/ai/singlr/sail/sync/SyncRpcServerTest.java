@@ -270,7 +270,7 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.1", "0.46.0", "b"))
                 .getFirst());
-    assertEquals("upgrade to 0.46.2: sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
   }
 
   @Test
@@ -291,6 +291,18 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aNodeAtTheFloorThatPushedRunsActingForNoOneIsRefusedUntilItUpgrades() throws Exception {
+    var refusal =
+        assertInstanceOf(
+            SyncWire.Refuse.class,
+            serve(
+                    new SyncRpcServer(new FakeMain(), true),
+                    new SyncWire.Hello(4, "0.46.2", "0.46.2", "b"))
+                .getFirst());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+  }
+
+  @Test
   void theSameFloorAtANewerPatchIsWelcomedWithMainsIdentity() throws Exception {
     var welcome =
         assertInstanceOf(
@@ -299,7 +311,10 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.44.9", SyncWire.UPGRADE_FLOOR, "b"))
                 .getFirst());
-    assertEquals(new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main"), welcome);
+    assertEquals(
+        new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", ""),
+        welcome,
+        "a session naming no FDE is welcomed as no one");
   }
 
   @Test

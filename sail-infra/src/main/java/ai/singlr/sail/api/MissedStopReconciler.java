@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -215,30 +216,31 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Releases a reservation orphaned by a crash: a run committed {@code running} whose agent is
-   * provably not coming — a dispatch whose spec never left {@code pending} (a crash between reserve
-   * and claim), or a spec-less ad-hoc session whose recorded identity probes dead (its watcher died
-   * with it, or its foreground launcher crashed, so no stop was ever recorded). Only a run older
-   * than {@link #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never
-   * disturbed, and a run whose recorded identity still probes <em>live</em> is always left alone —
-   * a reservation must never be freed under a working agent. The probe reads the run-scoped pid
-   * file before the systemd unit, so it covers foreground sessions (which launch no service) and
-   * background sessions that crashed before their pid was persisted alike; an unprobeable run reads
-   * as alive. The release is the same {@code running → stopped} compare-and-set every finisher
-   * uses, so racing the watcher's own completion can never overwrite a recorded exit. Foreign runs
-   * are left to their executing box. A run whose spec was already handled earlier in this same
-   * sweep is skipped, so an async status flip caused by the sweep's own replayed stop can never
-   * make one pass both reconcile and release the one run.
+   * Finishes every running session this box owns whose process is gone and that no other pass
+   * finishes: a dispatch whose spec never left {@code pending} (a crash between reserve and claim)
+   * or outlived its work, a spec-less ad-hoc session, a superseded build session, a room or
+   * room-full run of a spec still under way, and the newest build session of a spec in {@code
+   * review}, which the review rescue leaves {@code running}. The one run this pass leaves is the
+   * newest build session of an {@code in_progress} spec, or of a spec whose stop this sweep already
+   * replayed: the in-progress pass replays that spec's stop, and a spec stop is never replayed for
+   * any other run. Only a run older than {@link #LAUNCH_GRACE} is touched, so a run still inside a
+   * healthy launch window is never disturbed, and a run whose recorded identity still probes
+   * <em>live</em> is always left alone — a reservation must never be freed under a working agent.
+   * The probe reads the run-scoped pid file before the systemd unit, so it covers foreground
+   * sessions (which launch no service) and background sessions that crashed before their pid was
+   * persisted alike; an unprobeable run reads as alive. The finish is the same {@code running →
+   * stopped} compare-and-set every finisher uses, so racing the watcher's own completion can never
+   * overwrite a recorded exit, and it is logged as reconstructed. Foreign runs are left to their
+   * executing box and never probed.
    */
   int releaseStrandedReservations(Set<String> handledThisSweep) {
     var node = localHandle.get();
     var deadline = clock.get().minus(LAUNCH_GRACE);
     var released = 0;
     for (var run : sessionStore.running()) {
-      if (handledThisSweep.contains(run.specId())
-          || !run.ownedBy(node)
+      if (!run.ownedBy(node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
-          || specBeingWorked(run.specId())
+          || stopReplayedFor(run, handledThisSweep)
           || agentProbablyAlive(run)) {
         continue;
       }
@@ -246,16 +248,37 @@ public final class MissedStopReconciler implements AutoCloseable {
           "  [reconcile] releasing stranded reservation "
               + run.id()
               + (Strings.isBlank(run.specId())
-                  ? " (ad-hoc session whose recorded process is gone)"
-                  : " for spec "
-                      + run.specId()
-                      + " (running with no agent working it; spec is not in_progress or"
-                      + " review)"));
+                  ? " (session with no spec whose recorded process is gone)"
+                  : " for spec " + run.specId() + " (running with its recorded process gone)"));
       if (sessionStore.transition(run.id(), "running", "stopped")) {
         released++;
       }
     }
     return released;
+  }
+
+  /**
+   * Whether the in-progress pass owns {@code run}: it is its spec's newest build session, and the
+   * spec is {@code in_progress} or had its stop replayed earlier in this sweep, whose async status
+   * flip must not make one pass both replay and release the one run.
+   */
+  private boolean stopReplayedFor(RunStore.RunRow run, Set<String> handledThisSweep) {
+    if (Strings.isBlank(run.specId()) || !newestBuildSession(run)) {
+      return false;
+    }
+    return handledThisSweep.contains(run.specId())
+        || specStore
+            .findById(run.specId())
+            .map(spec -> spec.status() == SpecStatus.IN_PROGRESS)
+            .orElse(false);
+  }
+
+  private boolean newestBuildSession(RunStore.RunRow run) {
+    return sessionStore.listForSpec(run.specId()).stream()
+        .filter(RunStore.RunRow::buildRole)
+        .findFirst()
+        .map(newest -> newest.id().equals(run.id()))
+        .orElse(false);
   }
 
   /**
@@ -319,21 +342,6 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   private static Event cancelledEvent(RunStore.RunRow run) {
     return StopOperations.cancelEvent(run, Event.WellKnownData.SOURCE_RECONCILE, Event.SAIL_AGENT);
-  }
-
-  /**
-   * Whether the run's spec is actively being worked on this box, so a {@code running} run for it is
-   * legitimate and left to the in-progress and review sweeps. Any other spec state — pending (a
-   * crash between reserve and claim), or a terminal state the run outlived (a dropped completion,
-   * terminal state the run outlived (a dropped completion) — means the reservation is dead and
-   * blocking the dispatch gate for no agent.
-   */
-  private boolean specBeingWorked(String specId) {
-    return specStore
-        .findById(specId)
-        .map(spec -> spec.status().wire())
-        .map(status -> "in_progress".equals(status) || "review".equals(status))
-        .orElse(false);
   }
 
   /**

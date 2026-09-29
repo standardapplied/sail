@@ -261,6 +261,8 @@ re-points it at a main; `sail host sync` with no flags prints the current role.
 | `Permission denied (publickey)` on the gate (§4) | The operator hasn't run the `sail fde add … --key` line `sail join` printed (or ran it against a different handle). `fde add --key` auto-syncs `authorized_keys`, so no separate step is needed. |
 | Gate gives a password prompt | The `sail` user isn't the one answering — check `sudo sail host ssh-identity` ran on MAIN and `authorized_keys` has the `command="sail _gateway --fde …"` line. |
 | `sail sync` says "Single devbox — nothing to sync" | `sail join …` wasn't run on the node (no main configured). |
+| `sail sync` fails: "main knows this box as FDE 'x', but this box's sync handle is 'y'" | The node's `sync-handle` differs from the FDE its key is tied to on main. Set it to the one main knows (`sudo sail host config set sync-handle x`), or re-run the authorize line on main for the node's handle. The round does nothing until they agree. |
+| `sail sync` is refused: "FDE 'x' syncs from box 'a', not this box 'b'" | One box syncs as each FDE. Retire the old box, then run `sail fde release-box x` on MAIN; the next box to sync as `x` is recorded. |
 | Push silently does nothing on a node | The FDE's role is `viewer`. Bump it: re-run the authorize line with `--role member`. |
 | Conflicts never clear | Resolve them: `sail conflicts` then re-`sail sync`. A round only converges once same-field disputes are decided. |
 

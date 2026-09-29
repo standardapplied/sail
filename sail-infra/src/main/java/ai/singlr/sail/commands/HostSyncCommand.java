@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
@@ -73,7 +74,11 @@ public final class HostSyncCommand implements Runnable {
     }
 
     var updated = configure(host, asMain, mainTarget, HostInfo.hostname());
-    YamlUtil.dumpToFile(updated.toMap(), path);
+    HandleChange.apply(
+        SailPaths.controlPlaneDb(),
+        host.sync(),
+        updated.sync(),
+        () -> YamlUtil.dumpToFile(updated.toMap(), path));
     printRole(updated.sync());
   }
 

@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -32,6 +33,7 @@ import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
+import ai.singlr.sail.sync.SyncTransportException;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
@@ -207,9 +209,8 @@ class SyncServerCommandTest {
   }
 
   @Test
-  void mainsOperatorSyncsAsAnAdminWhateverItsRosterRole() throws Exception {
+  void mainsOwnFdeSyncsFromNoBoxButMain() throws Exception {
     var token = tokenFor("viewer");
-    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var toServer = new PipedOutputStream();
     var serverIn = new BufferedInputStream(new PipedInputStream(toServer));
     var toClient = new PipedOutputStream();
@@ -231,17 +232,21 @@ class SyncServerCommandTest {
                     throw new UncheckedIOException(e);
                   }
                 });
-    try (var session =
-        SyncSession.open(
-            clientIn,
-            toServer,
-            SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
-            n -> {},
-            nodeDb)) {
-      assertEquals(
-          1,
-          Actor.call(Actor.main(), () -> session.reconcile("spec", nodeReplica)).report().pushed());
+    try {
+      var refused =
+          assertThrows(
+              SyncTransportException.class,
+              () ->
+                  SyncSession.open(
+                      clientIn,
+                      toServer,
+                      SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
+                      n -> {},
+                      nodeDb));
+      assertTrue(refused.getMessage().contains("box 'main'"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("'node-box'"), refused.getMessage());
     } finally {
+      toServer.close();
       serverThread.join();
     }
   }
@@ -262,7 +267,7 @@ class SyncServerCommandTest {
         new ChangeLog(nodeDb),
         new SyncConflicts(nodeDb),
         new SyncState(nodeDb),
-        id -> runStore.pushableFrom(id, "uday"));
+        "uday");
   }
 
   private String createNodeRun(String node) {

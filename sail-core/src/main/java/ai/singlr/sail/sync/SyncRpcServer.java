@@ -14,6 +14,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncedStore;
 import java.io.IOException;
@@ -75,6 +76,7 @@ public final class SyncRpcServer {
   private Erasure erasure;
   private EraseAuthority authority;
   private boolean erasedInSession;
+  private MainBox mainBox;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(
@@ -120,8 +122,8 @@ public final class SyncRpcServer {
   }
 
   /**
-   * The server for main's database: every registered entity's authoritative replica and its change
-   * log as the page source, identified as {@code boxId} and built {@code version}.
+   * As {@link #over(Sqlite, String, String, Actor, FdeRoster, SyncTransitionSink, String)}, for a
+   * main that names no FDE of its own.
    */
   public static SyncRpcServer over(
       Sqlite db,
@@ -130,15 +132,41 @@ public final class SyncRpcServer {
       FdeRoster fdeRoster,
       SyncTransitionSink transitionSink,
       String version) {
+    return over(db, boxId, null, principal, fdeRoster, transitionSink, version);
+  }
+
+  /**
+   * The server for main's database: every registered entity's authoritative replica and its change
+   * log as the page source, identified as {@code boxId} and built {@code version}. {@code mainFde}
+   * is main's own FDE, whose box is main's.
+   */
+  public static SyncRpcServer over(
+      Sqlite db,
+      String boxId,
+      String mainFde,
+      Actor principal,
+      FdeRoster fdeRoster,
+      SyncTransitionSink transitionSink,
+      String version) {
     var changes = new ChangeLog(db);
     return new SyncRpcServer(
-            new LinkedHashMap<>(SyncedEntities.replicas(db, boxId, boxId)),
+            new LinkedHashMap<>(SyncedEntities.replicas(db, boxId, mainFde)),
             principal,
             fdeRoster,
             transitionSink,
             changes::headsAfter,
             version)
-        .content(db, FileLimits.load());
+        .content(db, FileLimits.load())
+        .boxes(new MainBox(mainFde, boxId));
+  }
+
+  /** Main's own FDE and box id: main's FDE syncs from no box but main. */
+  public record MainBox(String fde, String box) {}
+
+  /** Refuses a session from any box but the one recorded for its FDE, main's own FDE included. */
+  SyncRpcServer boxes(MainBox main) {
+    this.mainBox = Objects.requireNonNull(main, "main");
+    return this;
   }
 
   /**
@@ -366,7 +394,9 @@ public final class SyncRpcServer {
    * strings: a node below main's floor is told to upgrade, a node whose floor is above main's is
    * told the order — main first — and a node at the same floor is welcomed whatever its patch
    * level. The box id names the node in main's log; who the node is stays the authenticated
-   * principal, which every commit is attributed to.
+   * principal, which every commit is attributed to, and the welcome names it so the node stamps its
+   * runs with the handle main knows it by. One box syncs as each FDE: a session from another box
+   * than the FDE's is refused before anything is exchanged.
    */
   private SyncWire.Response onHello(SyncWire.Hello hello) {
     if (welcomed) {
@@ -396,8 +426,39 @@ public final class SyncRpcServer {
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse("hello names no box id: " + upgradeRemedy());
     }
+    var claimed = claimedBox(hello.box());
+    if (claimed.isPresent()) {
+      return new SyncWire.Refuse(
+          "FDE '"
+              + principal.handle()
+              + "' syncs from box '"
+              + claimed.get()
+              + "', not this box '"
+              + hello.box()
+              + "': one box syncs as each FDE. After retiring the old box, an admin runs 'sail"
+              + " fde release-box "
+              + principal.handle()
+              + "' on main, and the next box to sync as it is recorded.");
+    }
     welcomed = true;
-    return new SyncWire.Welcome(SyncWire.PROTOCOL, version, mainId());
+    return new SyncWire.Welcome(
+        SyncWire.PROTOCOL, version, mainId(), Objects.toString(principal.handle(), ""));
+  }
+
+  /**
+   * The box another than {@code box} that the session's FDE syncs from, or empty when {@code box}
+   * is its box: main's own box for main's FDE, else the first box that synced as it, recorded now
+   * when none has. A session naming no FDE claims nothing.
+   */
+  private Optional<String> claimedBox(String box) {
+    var handle = principal.handle();
+    if (mainBox == null || handle == null || handle.isBlank()) {
+      return Optional.empty();
+    }
+    if (handle.equals(mainBox.fde())) {
+      return mainBox.box().equals(box) ? Optional.empty() : Optional.of(mainBox.box());
+    }
+    return new FdeBoxes(db).claim(handle, box);
   }
 
   private String mainId() {

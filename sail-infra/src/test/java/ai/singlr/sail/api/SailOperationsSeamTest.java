@@ -46,6 +46,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.ConflictMerge;
+import ai.singlr.sail.sync.FdeRoster;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
@@ -219,7 +220,7 @@ class SailOperationsSeamTest {
                   target -> {
                     attempts.incrementAndGet();
                     if (offline.get()) throw new IOException("main port blocked");
-                    return channel(main);
+                    return channel(main, "owner");
                   }));
       Consumer<Duration> advance =
           duration -> {
@@ -957,6 +958,73 @@ class SailOperationsSeamTest {
     }
   }
 
+  private SyncOperations syncingAs(SyncBox main, SyncBox node, String configured, Actor session) {
+    return new SyncOperations(
+        node.db,
+        "node",
+        tempDir,
+        () -> new SyncConfig("node", "main-target", configured, "node-box"),
+        target ->
+            channel(
+                SyncRpcServer.over(
+                    main.db,
+                    "main",
+                    session,
+                    FdeRoster.EMPTY,
+                    SyncTransitionSink.NONE,
+                    SyncWire.UPGRADE_FLOOR)));
+  }
+
+  private static String finishedRunStampedFor(SyncBox box, String handle) {
+    var id = DateTimeUtils.newId().toString();
+    var runs = new RunStore(box.db);
+    Acting.system(
+        () -> {
+          runs.reserveDispatch(
+              id, "acme", null, handle, "adhoc", List.of(), "claude-code", "b", "t", "/l", "u");
+          runs.complete(id, "completed", 0);
+        });
+    return id;
+  }
+
+  @Test
+  void aRoundStampsTheRunsTheBoxMadeBeforeItHadAHandleAndMainTakesThem() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      operations.useControlPlane(
+          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("node", Role.MEMBER)));
+      operations.schema().prepareSync();
+      var run = finishedRunStampedFor(node, null);
+
+      operations.sync(new SyncRequest(null));
+
+      assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
+      assertEquals("node", new RunStore(node.db).findById(run).orElseThrow().node());
+    }
+  }
+
+  @Test
+  void aRoundMainKnowsByAnotherHandleFailsHavingDoneNothing() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var run = finishedRunStampedFor(node, "node");
+      Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
+      operations.useControlPlane(
+          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("uday", Role.MEMBER)));
+      operations.schema().prepareSync();
+
+      var failure =
+          assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
+
+      assertTrue(failure.getMessage().contains("'uday'"), failure.getMessage());
+      assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing is offered");
+      assertTrue(node.specs.findById("auth").isEmpty(), "nothing is adopted");
+      assertTrue(new RunStore(node.db).findById(run).isPresent(), "nothing is removed");
+    }
+  }
+
   @Test
   void aRoundDisablesAnFdeMainsRosterNoLongerLists() throws Exception {
     try (var main = new SyncBox("main");
@@ -1384,11 +1452,16 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncBox main) throws IOException {
+    return channel(main, "node");
+  }
+
+  /** A session to {@code main} authenticated as {@code handle}, the node's own FDE. */
+  private static SyncOperations.Channel channel(SyncBox main, String handle) throws IOException {
     return channel(
         SyncRpcServer.over(
             main.db,
             "main",
-            Actor.sync("node", Role.MEMBER),
+            Actor.sync(handle, Role.MEMBER),
             () -> rosterOf(main),
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR));

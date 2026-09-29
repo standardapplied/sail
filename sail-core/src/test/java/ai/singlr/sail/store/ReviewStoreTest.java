@@ -1007,10 +1007,10 @@ class ReviewStoreTest {
     var runs = new RunStore(db);
     var mine = store.createReview("auth", 1);
     store.updateReviewStatus(mine, "running");
-    runs.createReview(mine, "acme", "auth", "ada", "ada", "claude-code", "b", "t", "/l", "u");
+    runs.createReview(mine, "acme", "auth", "ada", "claude-code", "b", "t", "/l", "u");
     var theirs = store.createReview("auth", 2);
     store.updateReviewStatus(theirs, "running");
-    runs.createReview(theirs, "acme", "auth", "bob", "bob", "claude-code", "b", "t", "/l", "u");
+    runs.createReview(theirs, "acme", "auth", "bob", "claude-code", "b", "t", "/l", "u");
     var synced = "019fee00-0000-7000-8000-0000000000c1";
     var snapshot = new LinkedHashMap<>(store.comparableSnapshot(theirs));
     Actor.run(Actor.main(), () -> store.applyRevision(synced, snapshot, "1-synced"));

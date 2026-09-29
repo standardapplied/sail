@@ -20,6 +20,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -44,11 +45,13 @@ import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs the shared node-to-main round and its existing local projections. The round walks the entity
- * registry in its order — the dependency order, a spec before its runs, a room before its messages
- * — and one type's failure is recorded against that type while the rest of the round, post-steps
- * included, still runs; the first failure is thrown afterwards with the others suppressed, so a
- * broken type never silences the materialization of the ones that succeeded.
+ * Runs the shared node-to-main round and its existing local projections. The round begins by
+ * agreeing with main who this node is and stamping every run main has not taken ({@link
+ * NodeRound#begin}); a node main knows by another handle fails there, having done nothing. It then
+ * walks the entity registry in its order — the dependency order, a spec before its runs, a room
+ * before its messages — and one type's failure is recorded against that type while the rest of the
+ * round, post-steps included, still runs; the first failure is thrown afterwards with the others
+ * suppressed, so a broken type never silences the materialization of the ones that succeeded.
  */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
@@ -126,15 +129,17 @@ public final class SyncOperations {
     var projects = new ProjectStore(db);
     try (var channel = channels.open(target)) {
       var boxId = requireBoxId(config);
-      var replicas = SyncedEntities.replicas(db, boxId, Objects.toString(config.handle(), ""));
+      var handle = Objects.toString(config.handle(), "");
+      var replicas = SyncedEntities.replicas(db, boxId, handle);
       var hello = SyncWire.Hello.of(SailVersion.version(), boxId);
-      return reconcile(channel, hello, replicas, messages, specs, files, projects);
+      return reconcile(channel, hello, handle, replicas, messages, specs, files, projects);
     }
   }
 
   private Round reconcile(
       Channel channel,
       SyncWire.Hello hello,
+      String handle,
       Map<String, StoreReplica> replicas,
       MessageStore messages,
       SpecStore specs,
@@ -143,6 +148,7 @@ public final class SyncOperations {
       throws Exception {
     try (var session =
         SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice, db)) {
+      NodeRound.begin(session, db, handle);
       var types = new ArrayList<SyncSession.TypeReport>();
       var failures = new ArrayList<SyncTransportException>();
       var knownMessages = messages.syncEntityIds();

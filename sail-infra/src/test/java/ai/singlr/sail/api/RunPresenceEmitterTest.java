@@ -170,6 +170,17 @@ class RunPresenceEmitterTest {
   }
 
   @Test
+  void aRunStampedBeforeTheBoxHadAHandleIsReportedOnceTheHandleChangeStampsIt() {
+    var id = runningRunOn(null);
+    stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
+    assertEquals(0, emitter.sweep(), "no box's run yet");
+
+    runStore.restamp("node-a", false);
+
+    assertEquals(1, emitter.sweep(), "the box's own run narrates its quiet crossing");
+  }
+
+  @Test
   void aFinishedRunDropsItsEdgeStateInsteadOfEmitting() {
     var id = runningRunOn("node-a");
     stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));

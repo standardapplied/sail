@@ -146,6 +146,34 @@ class WatcherRearmerTest {
   }
 
   @Test
+  void aRunStampedBeforeTheBoxHadAHandleIsRearmedOnceTheHandleChangeStampsIt() {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            sessionStore.create(
+                id,
+                "test-project",
+                "auth",
+                null,
+                null,
+                "build",
+                "claude-code",
+                "feat/test",
+                "task",
+                1,
+                5678,
+                "/home/dev/.sail/runs/" + id + "/agent.log",
+                "sail-agent-" + id));
+    var rearmer =
+        rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED));
+    assertEquals(0, rearmer.rearm(), "no box's run yet");
+
+    sessionStore.restamp("node-a", false);
+
+    assertEquals(1, rearmer.rearm());
+  }
+
+  @Test
   void rearmsAnUncoveredRunningAgentAsAUnit() {
     runningSession("auth", 5678);
     var relaunches = new AtomicInteger();

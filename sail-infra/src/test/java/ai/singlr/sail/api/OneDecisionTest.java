@@ -341,7 +341,6 @@ class OneDecisionTest {
                         specId,
                         roomId,
                         "ada",
-                        "ada",
                         role,
                         List.of(),
                         "claude-code",

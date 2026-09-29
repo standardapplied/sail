@@ -233,7 +233,6 @@ class NodeWritesTest {
                         id,
                         "acme",
                         "seed",
-                        "ada-box",
                         "ada",
                         "build",
                         List.of(),

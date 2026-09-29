@@ -207,6 +207,33 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
+   * Records main's revision {@code rev} of {@code id}, holding {@code held}, as the synced base of
+   * a row main took whose answer never reached this box, keeping the row as it stands here: the
+   * base is adopted as the bound actor, and when the row has moved on since, its state is journaled
+   * on top, by {@link Actor#system()}, as a change main has not taken yet. A row that already has a
+   * base, or none at all, is left alone. Returns whether the base was recorded.
+   */
+  public boolean acknowledge(String id, Map<String, Object> held, String rev) {
+    return db.transaction(
+        () -> {
+          if (!schema.exists(id) || rawBaseRev(id) != null) {
+            return false;
+          }
+          var mine = comparableSnapshot(id);
+          applyRevision(id, held, rev);
+          if (!sameContent(mine, held)) {
+            Actor.run(
+                Actor.system(),
+                () -> {
+                  schema.apply(id, mine);
+                  recordRevision(id, "local", false);
+                });
+          }
+          return true;
+        });
+  }
+
+  /**
    * Compare-and-set commit as main: mints a new authoritative rev only if {@code expectedRev} still
    * equals the entity's current rev (a brand-new entity expects {@code null}); otherwise returns
    * {@link PushOutcome.Stale} with main's present state, never overwriting a concurrent change. A

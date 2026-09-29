@@ -323,7 +323,7 @@ class AgentAttachCommandTest {
     Acting.system(
         () -> {
           runs.reserveDispatch(
-              id, "acme", "spec-" + id, "it", "it", role, repos, "codex", null, "t", "l", "u");
+              id, "acme", "spec-" + id, "it", role, repos, "codex", null, "t", "l", "u");
         });
   }
 

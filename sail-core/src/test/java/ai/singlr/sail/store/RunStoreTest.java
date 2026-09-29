@@ -75,6 +75,90 @@ class RunStoreTest {
         "sail-agent-" + id);
   }
 
+  @Test
+  void aReservationStampsTheRunWithTheBoxsHandleAsItsNodeAndOwner() {
+    var id = DateTimeUtils.newId().toString();
+
+    store.reserveDispatch(
+        id, "p", "s", " ada ", "build", List.of(), "claude-code", "b", "t", "/l", "u");
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("ada", run.node());
+    assertEquals("ada", run.owner());
+    assertTrue(run.ownedBy("ada"));
+    var unhandled = DateTimeUtils.newId().toString();
+    store.reserveDispatch(
+        unhandled, "q", "s", "", "build", List.of(), "claude-code", "b", "t", "/l", "u");
+    assertNull(store.findById(unhandled).orElseThrow().node(), "a box with no handle stamps none");
+    assertNull(store.findById(unhandled).orElseThrow().owner());
+  }
+
+  @Test
+  void aStampIsARevisionBySailAndARunCarryingItIsUntouched() {
+    var stale = newRunOn("p", "s", "ada");
+    var stamped = newRunOn("q", "s", "uday");
+    var before = store.latestRev(stamped);
+
+    assertEquals(List.of(stale), store.stamp("uday", List.of(stale, stamped, "gone")));
+
+    assertEquals("uday", store.findById(stale).orElseThrow().owner());
+    assertEquals(before, store.latestRev(stamped));
+    var head = new ChangeLog(db).head("run", stale).orElseThrow();
+    assertEquals(Actor.system().handle(), head.actor());
+    assertTrue(store.dirtyIds().contains(stale), "the next push carries it");
+  }
+
+  @Test
+  void aNodeRestampsEveryRunMainNeverAcknowledgedWhileMainStampsOnlyItsUnstampedOnes() {
+    var acknowledged = newRunOn("p", "s", "ada");
+    store.applyRevision(acknowledged, store.comparableSnapshot(acknowledged), "9-main");
+    var unheld = newRunOn("q", "s", "ada");
+    var unstamped = newRunOn("r", "s", null);
+
+    assertEquals(List.of(unstamped), store.restamp("uday", true), "main stamps the unstamped");
+    assertEquals(List.of(unheld), store.restamp("uday", false), "a node every unheld run");
+
+    assertEquals("ada", store.findById(acknowledged).orElseThrow().node());
+  }
+
+  @Test
+  void aHandleChangeOnMainIsStrandedOnlyByRunsThisBoxExecutesThatAreLive() {
+    var live = newRunOn("p", "s", "ada");
+    var finished = newRunOn("q", "s", "ada");
+    store.complete(finished, "completed", 0);
+    newRunOn("r", "s", "bob");
+
+    assertEquals(
+        List.of(live),
+        store.strandedByHandleChange("ada", true).stream().map(RunStore.RunRow::id).toList());
+    assertEquals(
+        List.of(),
+        store.strandedByHandleChange("ada", false),
+        "on a node, a run main never acknowledged strands nothing: it is re-stamped");
+  }
+
+  @Test
+  void acknowledgingARunMainTookRecordsMainsRevisionAndKeepsTheRunAsItStands() {
+    var id = newRunOn("p", "s", "ada");
+    var held = store.comparableSnapshot(id);
+    store.recordSession(id, "sess-1", "claude", "/t");
+
+    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "7-main")));
+
+    assertEquals("7-main", store.baseRevOf(id));
+    assertEquals("sess-1", store.findById(id).orElseThrow().sessionId());
+    assertTrue(store.dirtyIds().contains(id), "its progress is still to be offered");
+    assertFalse(
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "8-main")),
+        "a run with a base is left alone");
+    var unchanged = newRunOn("q", "s", "ada");
+    assertTrue(
+        Actor.call(
+            Actor.main("ada"),
+            () -> store.acknowledge(unchanged, store.comparableSnapshot(unchanged), "3-main")));
+    assertFalse(store.dirtyIds().contains(unchanged), "nothing is left to offer");
+  }
+
   private static RunStore.RunRow runOnNode(String node) {
     return new RunStore.RunRow(
         "r", "proj", "spec", node, "build", "codex", "b", "t", null, null, "running", null, "log",
@@ -235,7 +319,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "node-a",
         "claude-code",
         "feat/x",
         "review",
@@ -295,7 +378,6 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
-            "node-a",
             "codex",
             "feat/x",
             "review",
@@ -328,7 +410,6 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
-        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -508,7 +589,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "node-a",
         "codex",
         "feat/x",
         "review it",
@@ -530,21 +610,11 @@ class RunStoreTest {
     var local = DateTimeUtils.newId().toString();
     var foreign = DateTimeUtils.newId().toString();
     store.createReview(
-        local,
-        "backend",
-        "auth",
-        "node-a",
-        "node-a",
-        "codex",
-        "b",
-        "t",
-        "/runs/" + local,
-        "sail-review-l");
+        local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local, "sail-review-l");
     store.createReview(
         foreign,
         "backend",
         "auth",
-        "node-b",
         "node-b",
         "codex",
         "b",
@@ -866,6 +936,8 @@ class RunStoreTest {
         "auth",
         "node",
         "node-a",
+        "owner",
+        "node-a",
         "role",
         "build",
         "agent",
@@ -881,6 +953,8 @@ class RunStoreTest {
         "spec_id",
         "auth",
         "node",
+        "node-a",
+        "owner",
         "node-a",
         "role",
         "build",
@@ -901,7 +975,6 @@ class RunStoreTest {
             id,
             "backend",
             specId,
-            node,
             node,
             "build",
             repos,
@@ -924,7 +997,6 @@ class RunStoreTest {
             id,
             "backend",
             "",
-            node,
             node,
             "adhoc",
             List.of(),
@@ -993,7 +1065,6 @@ class RunStoreTest {
             id,
             "backend",
             specId,
-            node,
             node,
             "room",
             List.of(),
@@ -1150,7 +1221,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "node-a",
         "codex",
         "feat/x",
         "review",
@@ -1182,7 +1252,6 @@ class RunStoreTest {
         id,
         "backend",
         "auth",
-        "node-a",
         "node-a",
         "codex",
         "feat/auth",
@@ -1262,7 +1331,6 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
-            "node-a",
             "build",
             List.of("app"),
             "claude-code",
@@ -1324,7 +1392,6 @@ class RunStoreTest {
         "backend",
         "auth",
         node,
-        node,
         "claude-code",
         "feat/x",
         "review",
@@ -1351,7 +1418,6 @@ class RunStoreTest {
         invite,
         "backend",
         "",
-        "node-a",
         "node-a",
         "invite",
         List.of(),
@@ -1500,7 +1566,6 @@ class RunStoreTest {
             "backend",
             specId,
             "node-a",
-            "uday",
             "build",
             repos,
             "claude-code",
@@ -1536,7 +1601,7 @@ class RunStoreTest {
 
     var run = store.findById(id).orElseThrow();
     assertEquals("claude/" + id, run.principal());
-    assertEquals("uday", run.owner());
+    assertEquals("node-a", run.owner());
     assertTrue(credential.startsWith("sailrun_"));
     assertEquals(id, store.findByCredential(credential).orElseThrow().id());
     assertTrue(
@@ -1574,7 +1639,7 @@ class RunStoreTest {
   }
 
   @Test
-  void createReviewMintsAReviewMarkedPrincipalOwnedByTheAssignee() {
+  void createReviewMintsAReviewMarkedPrincipalActingForTheBoxsFde() {
     var id = DateTimeUtils.newId().toString();
 
     store.createReview(
@@ -1582,7 +1647,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "uday",
         "codex",
         "feat/x",
         "review it",
@@ -1591,7 +1655,7 @@ class RunStoreTest {
 
     var run = store.findById(id).orElseThrow();
     assertEquals("codex/review-" + id, run.principal());
-    assertEquals("uday", run.owner());
+    assertEquals("node-a", run.owner());
     assertEquals(1, credentialRows(id));
   }
 
@@ -1668,7 +1732,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "uday",
         "codex",
         "feat/x",
         "review it",
@@ -1717,7 +1780,6 @@ class RunStoreTest {
             "backend",
             "auth",
             "node-a",
-            "uday",
             "build",
             List.of("app"),
             "claude-code",
@@ -1808,7 +1870,7 @@ class RunStoreTest {
     var snapshot = store.comparableSnapshot(id);
 
     assertEquals("claude/" + id, snapshot.get("principal"));
-    assertEquals("uday", snapshot.get("owner"));
+    assertEquals("node-a", snapshot.get("owner"));
     assertFalse(
         snapshot.containsKey("credential_hash"), "secrets never join a replicated snapshot");
   }
@@ -1958,7 +2020,6 @@ class RunStoreTest {
                 "backend",
                 "auth",
                 "node-a",
-                "node-a",
                 "build",
                 List.of(),
                 "claude-code",
@@ -2025,7 +2086,6 @@ class RunStoreTest {
           null,
           "chat-room",
           "uday",
-          "uday",
           "room",
           List.of(),
           "claude-code",
@@ -2059,7 +2119,6 @@ class RunStoreTest {
               null,
               "chat-room",
               "uday",
-              "uday",
               "room",
               List.of(),
               "claude-code",
@@ -2079,7 +2138,6 @@ class RunStoreTest {
               "acme",
               null,
               "chat-room",
-              "uday",
               "uday",
               "room",
               List.of(),

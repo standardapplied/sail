@@ -197,8 +197,8 @@ class StopGateIT extends AbstractIncusIT {
             Acting.system(
                 () ->
                     runStore.reserveDispatch(
-                        runId, CONTAINER, SPEC_ID, "it", "it", "build", List.of(), agent, null,
-                        "probe", null, ""));
+                        runId, CONTAINER, SPEC_ID, "it", "build", List.of(), agent, null, "probe",
+                        null, ""));
     return reservation.credential();
   }
 

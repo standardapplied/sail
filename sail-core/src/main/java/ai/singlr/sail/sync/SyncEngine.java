@@ -21,7 +21,9 @@ import java.util.Objects;
  * MainReplica}, reconciling every entity through the pure {@link ConflictDetector}. Main is the
  * authority: a local-only change pushes (main mints the rev), a main-only change pulls, disjoint
  * edits auto-merge into a new authoritative rev both sides adopt, and a true same-field conflict is
- * parked locally with the node's row untouched.
+ * parked locally with the node's row untouched. Work this box executes that is still live — a run
+ * or review under way here — is never rewritten or removed by main's version, pulled or denied: it
+ * stays as it is and is offered once it has finished.
  *
  * <p>Every push is a compare-and-set against the rev the node fetched, so two nodes syncing
  * concurrently are safe: if main moved under us the push is {@linkplain CommitOutcome.Rejected
@@ -71,7 +73,8 @@ public final class SyncEngine {
     MERGED,
     CONFLICT,
     OFFERED,
-    DENIED
+    DENIED,
+    HELD
   }
 
   public Report reconcile(LocalReplica local, MainReplica main) {
@@ -121,7 +124,7 @@ public final class SyncEngine {
     }
 
     private void record(Outcome outcome) {
-      if (outcome != Outcome.OFFERED && outcome != Outcome.DENIED) {
+      if (outcome != Outcome.OFFERED && outcome != Outcome.DENIED && outcome != Outcome.HELD) {
         tally.merge(outcome, 1, Integer::sum);
       }
     }
@@ -160,7 +163,7 @@ public final class SyncEngine {
           if (localSnap == null && Objects.equals(localRev, remoteRev)) {
             return Outcome.CONVERGED;
           }
-          return adoptOrRedetect(
+          return take(
               id, localRev, null, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
         }
         remoteSnap = null;
@@ -178,7 +181,7 @@ public final class SyncEngine {
         case ConflictDetector.Converged ignored ->
             remoteRev == null || Objects.equals(localRev, remoteRev)
                 ? Outcome.CONVERGED
-                : adoptOrRedetect(
+                : take(
                     id,
                     localRev,
                     remoteSnap,
@@ -187,7 +190,7 @@ public final class SyncEngine {
                     Outcome.CONVERGED,
                     redetectsLeft);
         case ConflictDetector.TakeRemote ignored ->
-            adoptOrRedetect(
+            take(
                 id,
                 localRev,
                 remoteSnap,
@@ -198,7 +201,7 @@ public final class SyncEngine {
         case ConflictDetector.KeepLocal ignored ->
             local.mayPush(id)
                 ? offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
-                : adoptOrRedetect(
+                : take(
                     id,
                     localRev,
                     remoteSnap,
@@ -209,7 +212,7 @@ public final class SyncEngine {
         case ConflictDetector.Merged m ->
             local.mayPush(id)
                 ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
-                : adoptOrRedetect(
+                : take(
                     id,
                     localRev,
                     remoteSnap,
@@ -222,6 +225,33 @@ public final class SyncEngine {
           yield Outcome.CONFLICT;
         }
       };
+    }
+
+    /**
+     * Adopts main's version as {@link #adoptOrRedetect} does, unless {@code id} is work still live
+     * here ({@link #liveHere}): then the local row stays as it is, and it is offered once it has
+     * finished. Every path of the walk that takes main's version comes through here.
+     */
+    private Outcome take(
+        String id,
+        String expectedLocalRev,
+        Map<String, Object> snapshot,
+        String rev,
+        String author,
+        Outcome onAdopted,
+        int redetectsLeft) {
+      if (liveHere(id)) {
+        return Outcome.HELD;
+      }
+      return adoptOrRedetect(id, expectedLocalRev, snapshot, rev, author, onAdopted, redetectsLeft);
+    }
+
+    /**
+     * The one guard: main's version, by denial or by pull, never rewrites or removes an entity this
+     * box executes that is still live ({@link LocalReplica#live}).
+     */
+    private boolean liveHere(String id) {
+      return local.live(id);
     }
 
     /**
@@ -302,7 +332,7 @@ public final class SyncEngine {
                 : reconcileEntity(
                     offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
         case CommitOutcome.Denied d ->
-            !local.live(offer.id())
+            !liveHere(offer.id())
                     && adopt(offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev(), d.author())
                 ? Outcome.PULLED
                 : Outcome.DENIED;

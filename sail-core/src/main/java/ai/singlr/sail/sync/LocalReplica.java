@@ -44,8 +44,9 @@ public interface LocalReplica {
   }
 
   /**
-   * Whether {@code id} is work still under way on this box, which main's denial never rewrites or
-   * removes. None by default; see {@link ai.singlr.sail.store.SyncedStore#live}.
+   * Whether {@code id} is work this box executes that is still under way, which main's version, by
+   * denial or by pull, never rewrites or removes. None by default; see {@link
+   * ai.singlr.sail.store.SyncedStore#live}.
    */
   default boolean live(String id) {
     return false;

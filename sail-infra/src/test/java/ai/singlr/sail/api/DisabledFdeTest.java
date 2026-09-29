@@ -233,7 +233,6 @@ class DisabledFdeTest {
                         id,
                         project,
                         specId,
-                        "box",
                         owner,
                         "build",
                         List.of(),

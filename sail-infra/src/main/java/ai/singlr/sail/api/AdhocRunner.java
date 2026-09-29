@@ -133,7 +133,7 @@ public final class AdhocRunner {
   private String reserveAdhocRun(
       String runId,
       String project,
-      String node,
+      String boxHandle,
       String agentType,
       String branch,
       String task,
@@ -148,8 +148,7 @@ public final class AdhocRunner {
         runId,
         project,
         "",
-        node,
-        node,
+        boxHandle,
         Lane.ADHOC.wire(),
         List.of(),
         agentType,

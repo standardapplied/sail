@@ -20,6 +20,8 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -28,6 +30,10 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.NodeRound;
+import ai.singlr.sail.sync.SyncBox;
+import ai.singlr.sail.sync.SyncWire;
+import ai.singlr.sail.sync.SyncedEntities;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -205,7 +211,7 @@ class RoomWakeLaunchTest {
   }
 
   @Test
-  void aSpeclessFullWakeClaimsTheRepoSetAndActsForTheRoomsOwner() throws Exception {
+  void aSpeclessFullWakeClaimsTheRepoSetAndActsForTheBoxsFde() throws Exception {
     var ops = operations(liveAgentShell());
     var rooms = new RoomStore(db);
     Acting.as(
@@ -226,7 +232,7 @@ class RoomWakeLaunchTest {
     var run = runStore.findById(runId).orElseThrow();
     assertEquals("room-full", run.role());
     assertTrue(run.task().contains("Collaborator Turn (full access)"));
-    assertEquals(HANDLE, run.owner(), "an unassigned room's run acts for its creator");
+    assertEquals(HANDLE, run.owner(), "a room run acts for the FDE of the box that runs it");
   }
 
   @Test
@@ -396,19 +402,17 @@ class RoomWakeLaunchTest {
         });
   }
 
-  @Test
-  void anUnassignedSpecsRoomRunActsForItsCreator() throws Exception {
-    var ops = operations(liveAgentShell());
+  private void createSpec(String creator, String id, String assignee) {
     Acting.as(
-        "mady",
+        creator,
         () ->
             specStore.create(
                 new SpecStore.SpecRow(
-                    "draft",
+                    id,
                     "acme",
                     "Draft",
                     SpecStatus.PENDING,
-                    null,
+                    assignee,
                     null,
                     null,
                     null,
@@ -420,11 +424,85 @@ class RoomWakeLaunchTest {
                     null,
                     List.of(),
                     List.of("app"))));
-    Acting.system(() -> specStore.setContent("draft", "Draft it.", ""));
+    Acting.system(() -> specStore.setContent(id, "Draft it.", ""));
+  }
+
+  @Test
+  void anUnassignedSpecsRoomRunActsForTheBoxsFde() throws Exception {
+    var ops = operations(liveAgentShell());
+    createSpec(HANDLE, "draft", null);
 
     var run = runStore.findById(ops.startRoomRun("acme", "draft", HANDLE)).orElseThrow();
 
-    assertEquals("mady", run.owner(), "the run acts for the spec's owner, never the waker");
+    assertEquals(HANDLE, run.node());
+    assertEquals(HANDLE, run.owner(), "a room run acts for the FDE of the box that runs it");
+  }
+
+  @Test
+  void aWakeForASpecThatMovedOffThisBoxBeforeLaunchReservesNothing() throws Exception {
+    var ops = operations(liveAgentShell());
+    createSpec("mady", "draft", null);
+    createSpec(HANDLE, "moved", "mady");
+
+    for (var spec : List.of("draft", "moved")) {
+      var refusal = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", spec, HANDLE));
+
+      assertEquals(ErrorCode.NOT_YOUR_SPEC, refusal.failure().errorCode());
+      assertTrue(refusal.getMessage().contains("'mady'"), refusal.getMessage());
+    }
+    assertEquals(List.of(), runStore.listForProject("acme"), "no run was reserved");
+    assertNull(launched.get(), "nothing was launched");
+  }
+
+  @Test
+  void aWakeForARoomThatMovedOffThisBoxBeforeLaunchReservesNothing() throws Exception {
+    var ops = operations(liveAgentShell());
+    var rooms = new RoomStore(db);
+    Acting.as(
+        "mady",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "hers", "acme", "Hers", "mady", null, null, null, null, null, null)));
+    Acting.system(
+        () ->
+            rooms.updateRoster(
+                "hers", "[{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}]"));
+    ops.useRooms(rooms);
+
+    var refusal = assertThrows(ApiException.class, () -> ops.startRoomRun("acme", "hers", HANDLE));
+
+    assertEquals(ErrorCode.NOT_YOUR_SPEC, refusal.failure().errorCode());
+    assertEquals(List.of(), runStore.listForProject("acme"));
+  }
+
+  @Test
+  void mainTakesTheRoomRunThisBoxExecutedAndWhatItsAgentPosted() throws Exception {
+    var ops = operations(liveAgentShell());
+    createSpec(HANDLE, "draft", null);
+    var runId = ops.startRoomRun("acme", "draft", HANDLE);
+    var run = runStore.findById(runId).orElseThrow();
+    var agent = run.principalActor();
+    var posted = Acting.by(agent, () -> messageStore.append("draft", agent.handle(), "here", null));
+    Acting.system(() -> runStore.complete(runId, "completed", 0));
+
+    try (var main = new SyncBox("main");
+        var link =
+            SyncBox.connect(
+                main.server(Actor.sync(HANDLE, Role.MEMBER)),
+                db,
+                "uday-box",
+                SyncWire.MAX_FRAME,
+                out -> out)) {
+      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), db, HANDLE));
+      var replicas = SyncedEntities.replicas(db, "uday-box", HANDLE);
+      for (var entity : SyncedEntities.all()) {
+        var report = link.reconcile(entity.type(), replicas.get(entity.type()));
+        assertEquals(List.of(), report.denials(), report.toString());
+      }
+      assertEquals(HANDLE, new RunStore(main.db).findById(runId).orElseThrow().owner());
+      assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    }
   }
 
   @Test

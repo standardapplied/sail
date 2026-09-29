@@ -177,7 +177,6 @@ public final class BuildDispatch {
             project,
             nextSpec.id(),
             localHandle,
-            dispatchOwner(localHandle),
             taskSpec.repos(),
             agentType,
             branch,
@@ -472,8 +471,7 @@ public final class BuildDispatch {
       String runId,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       List<String> repos,
       String agentType,
       String branch,
@@ -487,8 +485,7 @@ public final class BuildDispatch {
         runId,
         project,
         specId,
-        node,
-        owner,
+        boxHandle,
         Lane.BUILD.wire(),
         repos,
         agentType,
@@ -496,15 +493,6 @@ public final class BuildDispatch {
         task,
         unit,
         config);
-  }
-
-  /**
-   * The FDE a dispatched run acts for: the box's handle, which {@link DispatchPolicy} has already
-   * matched to the spec's assignee. An admin dispatching on another FDE's box initiates the run but
-   * never becomes its authorization owner.
-   */
-  private static String dispatchOwner(String localHandle) {
-    return localHandle;
   }
 
   private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> rendered) {

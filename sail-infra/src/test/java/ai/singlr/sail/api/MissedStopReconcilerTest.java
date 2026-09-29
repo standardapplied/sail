@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -390,7 +391,6 @@ class MissedStopReconcilerTest {
                 "test-project",
                 "",
                 "node-a",
-                "node-a",
                 "adhoc",
                 List.of(),
                 "claude-code",
@@ -420,6 +420,98 @@ class MissedStopReconcilerTest {
         "running",
         sessionStore.listForSpec("auth").getFirst().status(),
         "a run whose spec is actively in progress is left to the in-progress sweep, not reaped");
+  }
+
+  private String session(String specId, String node, String role) {
+    return Acting.system(
+        () -> {
+          var id = DateTimeUtils.newId().toString();
+          return sessionStore.create(
+              id,
+              "test-project",
+              specId,
+              node,
+              node,
+              role,
+              "claude-code",
+              "feat/test",
+              "task",
+              1,
+              null,
+              "/home/dev/.sail/runs/" + id + "/agent.log",
+              "sail-agent-" + id);
+        });
+  }
+
+  private static MissedStopReconciler.UnitProbe aliveOnly(String runId) {
+    return (project, id, unit) -> id.equals(runId);
+  }
+
+  @Test
+  void aDeadSupersededSessionOfASpecUnderWayIsFinishedWithoutReplayingItsSpecsStop() {
+    createInProgressSpec("auth");
+    var superseded = runningSession("auth");
+    var newest = runningSession("auth");
+
+    assertEquals(1, reconciler(aliveOnly(newest), PAST_GRACE).sweep());
+
+    assertEquals("stopped", sessionStore.findById(superseded).orElseThrow().status());
+    assertEquals("running", sessionStore.findById(newest).orElseThrow().status());
+    assertEquals(0, bus.publishedCount(), "a spec stop is replayed only for its newest session");
+  }
+
+  @Test
+  void deadRoomAndRoomFullRunsOfSpecsUnderWayAreFinished() {
+    createInProgressSpec("auth");
+    createSpec("docs", SpecStatus.REVIEW);
+    var build = runningSession("auth");
+    var room = session("auth", "node-a", DispatchGate.ROOM_ROLE);
+    var full = session("docs", "node-a", DispatchGate.ROOM_FULL_ROLE);
+
+    reconciler(aliveOnly(build), PAST_GRACE).sweep();
+
+    assertEquals("stopped", sessionStore.findById(room).orElseThrow().status());
+    assertEquals("stopped", sessionStore.findById(full).orElseThrow().status());
+    assertEquals("running", sessionStore.findById(build).orElseThrow().status());
+  }
+
+  @Test
+  void aDeadNewestBuildRunOfASpecInReviewIsFinished() {
+    createSpec("auth", SpecStatus.REVIEW);
+    var newest = runningSession("auth");
+
+    assertEquals(1, reconciler(new CountingProbe(false), PAST_GRACE).sweep());
+
+    assertEquals("stopped", sessionStore.findById(newest).orElseThrow().status());
+    assertEquals(0, bus.publishedCount(), "finished, not replayed as a stop");
+  }
+
+  @Test
+  void aLiveSupersededSessionIsLeftAloneAndAForeignOneIsNeverProbed() {
+    createInProgressSpec("auth");
+    var live = runningSession("auth");
+    session("auth", "node-b", DispatchGate.ROOM_ROLE);
+    runningSession("auth");
+    var probe = new CountingProbe(true);
+
+    reconciler(probe, PAST_GRACE).sweep();
+
+    assertEquals("running", sessionStore.findById(live).orElseThrow().status());
+    assertEquals(2, probe.calls.get(), "only this box's two sessions are probed");
+  }
+
+  @Test
+  void aDeadRunStampedBeforeTheBoxHadAHandleIsFinishedOnceTheHandleChangeStampsIt() {
+    var adhoc = session("", null, "adhoc");
+    var probe = new CountingProbe(false);
+    reconciler(probe, PAST_GRACE).sweep();
+    assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
+    assertEquals(0, probe.calls.get(), "no box's run is probed");
+
+    sessionStore.restamp("node-a", false);
+
+    assertEquals(1, reconciler(probe, PAST_GRACE).sweep());
+    assertEquals("stopped", sessionStore.findById(adhoc).orElseThrow().status());
   }
 
   @Test
@@ -453,7 +545,6 @@ class MissedStopReconcilerTest {
               id,
               "test-project",
               "",
-              "node-a",
               "node-a",
               "adhoc",
               List.of(),
@@ -1379,7 +1470,6 @@ class MissedStopReconcilerTest {
                   id,
                   "test-project",
                   "",
-                  "node-a",
                   "node-a",
                   "adhoc",
                   List.of(),

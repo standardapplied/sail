@@ -243,6 +243,32 @@ class SchemaManagerTest {
   }
 
   @Test
+  void theBoxEachFdeSyncsFromMigratesFromThe0_46_2ReleaseKeepingItsRuns() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE fde_boxes");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        """
+        INSERT INTO runs (id, project, node, role, agent, status, started_at, owner)
+        VALUES ('01a0ecdf-0000-7000-8000-000000000001', 'acme', 'ada', 'build', 'claude-code', 'running',
+            't0', 'ada')""");
+
+    new SchemaManager(db).migrate();
+
+    var boxes = new FdeBoxes(db);
+    assertTrue(boxes.boxOf("ada").isEmpty());
+    assertTrue(boxes.claim("ada", "ada-box").isEmpty());
+    assertEquals("ada-box", boxes.claim("ada", "laptop").orElseThrow());
+    assertTrue(new RunStore(db).findById("01a0ecdf-0000-7000-8000-000000000001").isPresent());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void backfillClosesOnlyTheResidueOfADoneSpecsPassedReview() {
     new SchemaManager(db).migrate();
     var specs = new SpecStore(db);

@@ -106,7 +106,7 @@ class MessageSyncTest {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createReview(runId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
+    runs.createReview(runId, "acme", "room", "node", "codex", "b", "t", "/log", "unit");
     var principal = runs.findById(runId).orElseThrow().principal();
     var question = node.messages.append("room", principal, "Which flow?", null, true);
     var engine = new SyncEngine();
@@ -148,7 +148,7 @@ class MessageSyncTest {
     var reviewId = "019fee00-0000-7000-8000-0000000000aa";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createReview(reviewId, "acme", "room", "node", "node", "codex", "b", "t", "/log", "unit");
+    runs.createReview(reviewId, "acme", "room", "node", "codex", "b", "t", "/log", "unit");
     var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
     runs.rotateCredential(reviewId, "claude-code", "fix");
 
@@ -198,7 +198,6 @@ class MessageSyncTest {
         "019fee00-0000-7000-8000-0000000000bb",
         "acme",
         "room",
-        "node",
         "node",
         "codex",
         "b",

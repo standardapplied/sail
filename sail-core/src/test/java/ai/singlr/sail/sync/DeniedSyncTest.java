@@ -72,6 +72,10 @@ class DeniedSyncTest {
     return SyncedEntities.replicas(node.db, "node", "ada").get(type);
   }
 
+  private LocalReplica unhandled(String type) {
+    return SyncedEntities.replicas(node.db, "node", "").get(type);
+  }
+
   private void assertNextRoundIsClean(Actor as, String type, LocalReplica local)
       throws IOException {
     try (var link = SyncBox.connect(main.server(as), node)) {
@@ -424,7 +428,10 @@ class DeniedSyncTest {
     var human = messages.append("room", "ada", "carry on", null);
 
     assertEquals(
-        List.of(id), round(ADA, "run").denials().stream().map(SyncSession.Denial::id).toList());
+        List.of(id),
+        round(ADA, "run", unhandled("run")).denials().stream()
+            .map(SyncSession.Denial::id)
+            .toList());
     var round = round(ADA, "message");
 
     assertEquals(1, round.report().pushed(), "a human's post never waits on a run");
@@ -461,7 +468,7 @@ class DeniedSyncTest {
     var reply = messages.append("room", "ada", "answering it", posted.id());
     runs.complete(id, "completed", 0);
 
-    var run = round(ADA, "run");
+    var run = round(ADA, "run", unhandled("run"));
 
     assertEquals(List.of(id), run.denials().stream().map(SyncSession.Denial::id).toList());
     assertTrue(runs.findById(id).isEmpty(), "a run with no node stamp is never main's to take");
@@ -561,12 +568,12 @@ class DeniedSyncTest {
             null,
             "/log",
             "unit");
-    var unhandled = SyncedEntities.replicas(node.db, "node", "").get("run");
-    round(ADA, "run", unhandled);
+    var believesItOwnsIt = SyncedEntities.replicas(node.db, "node", "grace").get("run");
+    round(ADA, "run", believesItOwnsIt);
     var runs = new RunStore(node.db);
     runs.complete(id, "stopped", 0);
 
-    var report = round(ADA, "run", unhandled);
+    var report = round(ADA, "run", believesItOwnsIt);
 
     assertNull(report.failure());
     assertEquals(List.of(id), report.denials().stream().map(SyncSession.Denial::id).toList());
@@ -574,6 +581,6 @@ class DeniedSyncTest {
     assertEquals("running", runs.findById(id).orElseThrow().status());
     assertEquals(new RunStore(main.db).latestRev(id), runs.latestRev(id));
     assertEquals("running", new RunStore(main.db).findById(id).orElseThrow().status());
-    assertNextRoundIsClean(ADA, "run", unhandled);
+    assertNextRoundIsClean(ADA, "run", believesItOwnsIt);
   }
 }

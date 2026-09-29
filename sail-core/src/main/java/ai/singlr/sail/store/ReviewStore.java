@@ -97,14 +97,15 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * A running review this box executes is live here: the pipeline writes its stages and findings
-   * through its row, so main's denial never removes it mid-run. This box executes it while the run
-   * of the same id is live here, or — before that run is recorded — when its first revision began
-   * here. Once it finishes, a denial settles it like any other.
+   * through its row, so main's version never rewrites or removes it mid-run. This box executes it
+   * while the run of the same id is live on the box whose FDE handle is {@code handle}, or — before
+   * that run is recorded — when its first revision began here. Another box's review is never live
+   * here. Once it finishes, main's version settles it like any other.
    */
   @Override
-  public boolean live(String id) {
+  public boolean live(String id, String handle) {
     return findReview(id).filter(review -> "running".equals(review.status())).isPresent()
-        && (new RunStore(db).live(id) || begunHere(id));
+        && (new RunStore(db).live(id, handle) || begunHere(id));
   }
 
   private boolean begunHere(String id) {
