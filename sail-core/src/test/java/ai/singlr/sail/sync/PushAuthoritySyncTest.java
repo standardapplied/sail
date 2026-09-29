@@ -645,8 +645,9 @@ class PushAuthoritySyncTest {
     room(ada, "ada", "lab");
     Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("lab")));
 
-    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
-    assertTrue(refused.getMessage().contains("room 'lab'"), refused.getMessage());
+    var first = push(ada, ADA, "spec");
+    assertNull(first.failure(), "the round completes");
+    assertEquals(0, first.report().pushed(), "the spec waits for its room");
     assertTrue(ada.specs.findById("child").isPresent(), "the node keeps its spec");
 
     assertEquals(List.of(), denied(push(ada, ADA, "room")));
@@ -654,6 +655,33 @@ class PushAuthoritySyncTest {
 
     assertEquals("lab", main.specs.findById("child").orElseThrow().roomIdOrIdentity());
     assertCleanRound(ada, ADA, "spec");
+  }
+
+  @Test
+  void aRoomReCreatedOverItsTombstoneConvergesOnTheCreatorMainKeeps() throws IOException {
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(main.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "nook", "acme", "nook", "bob", null, null, null, null, null, null)));
+    sync(bob, BOB);
+    var rooms = new RoomStore(bob.db);
+    Acting.as("bob", () -> rooms.delete("nook"));
+    assertEquals(List.of(), denied(push(bob, BOB, "room")));
+    Acting.as(
+        "bob",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "nook", "acme", "nook", null, null, null, null, null, null, null)));
+
+    assertEquals(List.of(), denied(push(bob, BOB, "room")));
+    push(bob, BOB, "room");
+
+    assertEquals("ada", new RoomStore(main.db).findById("nook").orElseThrow().createdBy());
+    assertEquals("ada", rooms.findById("nook").orElseThrow().createdBy(), "the node adopts it");
   }
 
   @Test

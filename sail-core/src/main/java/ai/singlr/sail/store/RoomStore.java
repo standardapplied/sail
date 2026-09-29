@@ -488,6 +488,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET project = excluded.project, title = excluded.title,
               assignee = excluded.assignee, wake = excluded.wake, roster = excluded.roster,
+              created_by = CASE WHEN ? = 1 THEN excluded.created_by ELSE rooms.created_by END,
               updated_at = excluded.updated_at, updated_by = excluded.updated_by""",
           id,
           Snapshots.text(snapshot, "project"),
@@ -498,13 +499,14 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           creatorOf(id, snapshot),
           Strings.isBlank(createdAt) ? now : createdAt,
           now,
-          Snapshots.actor(snapshot));
+          Snapshots.actor(snapshot),
+          Actor.current().lane() == Actor.Lane.MAIN ? 1 : 0);
     }
 
     /**
      * The creator a write of {@code snapshot} records: a creator is written once, so a revision
      * re-creating a deleted room keeps the one its tombstone recorded, as an update keeps the
-     * row's. Main's own revision names the creator main holds.
+     * row's. Main's own revision names the creator main holds, which a node adopts over its own.
      */
     private String creatorOf(String id, Map<String, Object> snapshot) {
       var offered = Snapshots.text(snapshot, "created_by");

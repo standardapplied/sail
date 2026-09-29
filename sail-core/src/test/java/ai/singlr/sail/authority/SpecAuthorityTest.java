@@ -336,6 +336,13 @@ class SpecAuthorityTest {
   }
 
   @Test
+  void aBirthInARoomThisBoxHasNeverHeldIsRefusedNotDenied() {
+    var next = with(BORN_IN_LOBBY, "room_id", "elsewhere");
+
+    assertThrows(SyncedStore.Unheld.class, () -> rule.decide(OWNER_SYNC, "child", null, next));
+  }
+
+  @Test
   void aBirthNeverAdmitsItselfButOwningASpecBornThereIsAVoice() {
     var claimingBirth = with(BORN_IN_DEN, "assignee", OWNER);
 

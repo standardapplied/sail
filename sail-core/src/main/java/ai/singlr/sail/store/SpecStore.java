@@ -935,8 +935,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.entityIds();
   }
 
+  /**
+   * Every spec with a change main has not taken, but a spec born in a room main has never
+   * acknowledged: main decides a birth by its room, and rooms sync after specs, so the spec waits a
+   * round for its room rather than be refused.
+   */
   public Set<String> dirtyIds() {
-    return journal.dirtyIds();
+    var dirty = journal.dirtyIds();
+    dirty.removeAll(
+        db.query(
+            """
+            SELECT s.id FROM specs s JOIN rooms r ON r.id = s.room_id
+            WHERE s.room_id <> s.id AND (r.base_rev IS NULL OR r.base_rev = '')""",
+            row -> row.text(0)));
+    return dirty;
   }
 
   /** Attributes a spec solely for the retained versioned 0.14 data migration. */
