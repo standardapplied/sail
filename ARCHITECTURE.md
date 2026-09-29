@@ -282,18 +282,20 @@ log, so no choice loses work.
 
 Main answers each offer on its own: `accepted` with the rev it minted, `stale` when it moved
 since the node fetched, `refused` on integrity grounds (content it does not hold, a pruned id, a
-run pushed with no node handle), or `denied` when this principal may not make this change. A
-denial is decided inside the commit's transaction, never thrown, and never fails the offers
-beside it. Main denies a read-only principal's offers (erase requests keep their own path), a
-message whose author the pusher may not post as, a reply to a message main does not hold, and a
-run whose execution provenance is not the pusher's. A message in a room main has never held is
-refused instead, because its room has simply not arrived; rooms sync before messages, so the next
-round decides it. Main decides an agent's post by its run, and the review pipeline's by a run
-of the same owner, placing a run in a conversation through its room or its spec's room. So the
-node holds such a post, with the replies under it, until main holds what decides it: while the
-agent's run, or that run's spec, has a change main has not taken, or while the pipeline's owner
-has no run there that main holds. Runs sync before messages, so the post normally goes later in
-the same round; one that arrived first would be denied for good. The
+run pushed with no node handle, a principal naming a run main does not hold yet), or `denied`
+when this principal may not make this change. A denial is decided inside the commit's
+transaction, after its compare-and-set and integrity checks and before its first write, never
+thrown, and never fails the offers beside it. Main denies what the type's write rule refuses the
+pusher (below, **One rule per type**), and a reply to a message main does not hold. A message in
+a room main has never held is refused instead, because its room has simply not arrived; rooms
+sync before messages, so the next round decides it. Main decides an agent's post by its
+principal's run, in whatever conversation it runs, and the review pipeline's by a run of the
+same owner in the conversation, placing a run in a conversation through its room or its spec's
+room. So the node holds such a post, with the replies under it, until main holds what decides
+it: while the agent's run, or that run's spec, has a change main has not taken, or while the
+pipeline's owner has no run there that main holds. Runs sync before messages, so the post
+normally goes later in the same round. A run main denies leaves the node with the posts its
+principals made that main never took, since nothing could ever decide them. The
 answer carries main's current version of the entity: a revision, a tombstone, or nothing. The
 node budgets every offer for its answer as well as its bytes, and a version that would take the
 answer past that room is withheld; the node fetches it with `need`, as it does for a stale offer.
@@ -700,25 +702,26 @@ these roles distinct is what lets the synced catalog stay identity-free.
     the run acts for, capped by its lane (`member` for an agent run, `viewer` for a room run).
     A run whose FDE is disabled is refused at the socket.
 - **One owner rule.** `Ownership.ownerOf(assignee, createdBy)` is the only derivation of whose
-  a spec or room is: its assignee, or its creator while it is unassigned. `SpecPolicy`
-  (mutation and reassignment), `EraseAuthority`, the room wake and membership (whose box serves
-  a room's agents: the room's own owner, one box) and review approval read it. Two rules derive
-  from it and are each implemented once:
-  - **Who owns a conversation** (`RoomStore.owners`): a spec's conversation is its identity
-    room, or the room it was born in, and the spec's owner owns it; a standalone room is owned
-    by its own owner and by the owner of every spec born in it. The posting rule
-    (`SpecPolicy.post`, room lane included), the terminal door and main's check of who may post
-    a synced message (`MessageStore.mayPostAs`) all read it, so the same post is admitted or
-    refused alike on every box.
-  - **Who may read or stop a run** (`RunPolicy.owners`): the FDE the run acts for, and its
-    spec's owner (for a spec-less run, the box that ran it), or an admin. A run's own FDE keeps
-    it after its spec is reassigned.
+  a spec or room is: its assignee, or its creator while it is unassigned. The spec rule, the
+  erase rule, the room rule, the room wake and membership (whose box serves a room's agents: the
+  room's own owner, one box) and the review rule read it. Three rules derive from it and are each
+  implemented once:
+  - **Who owns a room** (`RoomStore.ownerOf`): a spec's identity room is its spec's owner's, as
+    this box last knew the spec, live or deleted (`SpecStore.lastKnown`); any other room is its
+    own row's. A room's settings (roster, wake, title, assignee) are its owner's.
+  - **Who owns a conversation** (`RoomStore.owners`): the room's owner, and the owner of every
+    spec born in it. The posting rule (`PostingRule`, room lane included), the terminal door and
+    main's decision on a synced message all read it, so the same post is admitted or refused
+    alike on every box. Owning a spec born in a room is a voice there, never its settings.
+  - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
+    (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
+    change it; a run's own FDE keeps it after its spec is reassigned.
 
   A spec left without an assignee stays unassigned, and so does its identity room; any member
   may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
   refuses it until then. Owning a spec gives a voice in its conversation, so a spec born in a
   room is claimed, or created with an assignee, only by one who may already post there and only
-  for themselves (`SpecPolicy.reassign`); giving it to anyone else is an admin's act. A claim
+  for themselves (the claim rule, in `SpecAuthority`); giving it to anyone else is an admin's act. A claim
   never opens someone else's room. An assignee is an FDE handle, never an agent type or a run's principal
   (`RunStore.isPrincipalHandle`). `created_by` is the acting FDE (`Actor.actingFde`: the
   handle, or the FDE a run acts for), written once at create. A spec's creator travels as
@@ -726,6 +729,35 @@ these roles distinct is what lets the synced catalog stay identity-free.
   node-born create names none, and fills a creator it never recorded only from that creator's
   own push; a node adopts main's, the pushing node from the creator main names when it accepts
   the push.
+- **One rule per type, asked by the doors and by main's commit.** Who may write a synced row
+  is one `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared beside its
+  push policy in `SyncedEntities`: `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
+  `RunAuthority`, `MessageAuthority`, and `WriterAuthority` for files and projects. A rule reads
+  the type's synced projection — `held`, what this box holds (the last live state over a
+  tombstone), and `next`, the revision (null for a tombstone) — may read this box's database for
+  owners, never writes, and reads an owner of the row it decides from `held`, so a revision never
+  admits itself. It answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `ADMIN_ONLY`, `NOT_AUTHOR`,
+  `FIXED`) with the message and fix clients see. `MAIN` and `SYSTEM` always pass; a read-only
+  role is refused, except a run's principal reporting its own session and a room principal
+  posting where the posting rule lets it.
+  - **The doors** ask the rule where they decide today — HTTP, the host CLI, the socket, the
+    terminal — and one translator (`Refusals`) turns a refusal into the error clients get.
+    Admission for side effects keeps its place (`DispatchPolicy`, `LaunchAdmission`,
+    `RoomWakePolicy`, the run-owner rule for stop and logs), reading the same predicates.
+  - **Main's commit** (`RevisionJournal`, `ProjectStore`, `MessageStore`, each handed the type's
+    rule by `StoreReplica.commit`) asks it for every pushed revision with the pusher as the
+    actor. On `SYNC` it also decides whom a revision names: its `_actor` is the pusher, `sail` or
+    a principal of a run the pusher owns (a principal of a run main does not hold yet is refused,
+    not denied, until the run lands); a create's creator is the pusher; a message's author is the
+    pusher, its runs' principals, or `sail` where a run of its is in the conversation. A run is its
+    executing box's: `node` is the pusher, it acts for the pusher or no one, every principal names
+    the run itself, and a deleted run is never brought back.
+  - **The erase rule** (`EraseAuthority`) is one rule for a local prune and main's decision on a
+    node's request: write capability, the owner or an admin, a whole project admin-only, a
+    prunable status, no unfinished run.
+  - **A node's writes speak for its FDE.** On a node, `RoleRule` caps a credential naming any FDE
+    but the box's own at `viewer`: only the box's FDE and the runs acting for it write there,
+    because anything else would reach main as that FDE's on the box's session, and be denied.
 - **Every write names who is acting.** One `Actor` (`ai.singlr.sail.identity`: handle,
   `Role`, `Lane`, owner) is the identity of every write, whichever door it came through. Its
   lane names the door:
@@ -741,8 +773,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
 
   Each entry point binds the actor it acts as, at its edge and nowhere deeper, and that binding
   is the one channel for who is acting: no operation takes an `Actor` argument
-  (`OperationsTakeNoActorTest`), and every policy and admission — `SpecPolicy`, `ReviewPolicy`,
-  `DispatchPolicy`, `RunPolicy`, `LaunchAdmission` — reads `Actor.current()`. It binds with
+  (`OperationsTakeNoActorTest`), and every door reads `Actor.current()` where it decides and
+  hands it to the rule it asks; the admissions for side effects — `DispatchPolicy`,
+  `LaunchAdmission`, `RoomWakePolicy` — read it too. It binds with
   `Actor.run`/`Actor.call` (a `ScopedValue`): `ApiRouter` around routing, `LocalApiRouter`
   per request, a command that writes without the API around its write, the `_sync` session
   around each commit and erase, the node's round as `MAIN`, and each background entry that
@@ -890,6 +923,9 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
   never a string or an argument a caller threads through. A write with nothing bound fails.
 - One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once
   and read by every door: a second derivation of either is a bug.
+- One write rule per synced type (`ai.singlr.sail.authority`), implemented once in sail-core and
+  asked by every door that writes the type and by main's commit of every pushed revision: a
+  door that decides a write itself, or a commit that writes without asking, is a bug.
 - Sync is CAS-safe, idempotent, order-independent, and conflict-parking, so local work is
   never lost. The `SyncEngine` is entity-agnostic, and a new synced entity adds a replica,
   not engine logic.

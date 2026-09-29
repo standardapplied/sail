@@ -469,7 +469,13 @@ class SailOperationsSeamTest {
   }
 
   @ParameterizedTest
-  @CsvSource({"owner,member,200", "other,member,403", "other,admin,200", "owner,viewer,403"})
+  @CsvSource({
+    "owner,member,200",
+    "owner,admin,200",
+    "other,member,403",
+    "other,admin,403",
+    "owner,viewer,403"
+  })
   void localBoxCredentialsUseTheSameConflictOwnerPolicy(String handle, String role, int expected) {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
@@ -1082,7 +1088,9 @@ class SailOperationsSeamTest {
 
       assertTrue(
           err.toString(StandardCharsets.UTF_8)
-              .contains("spec auth: main denied this change — your role is read-only"),
+              .contains(
+                  "spec auth: main denied this change — Your credential is read-only and cannot"
+                      + " change specs."),
           err.toString(StandardCharsets.UTF_8));
       assertEquals("Auth", node.specs.findById("auth").orElseThrow().title());
     }

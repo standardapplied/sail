@@ -1428,10 +1428,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     new MessageStore(db).withdrawUnsynced(orphaned);
   }
 
+  /** The principals of run {@code id} that name the run itself, the only ones its posts carry. */
   private List<String> principalsOf(String id) {
     var principals = new LinkedHashSet<>(principals(id));
     findById(id).map(RunRow::principal).ifPresent(principals::add);
-    return List.copyOf(principals);
+    return principals.stream().filter(principal -> namesRun(principal, id)).toList();
   }
 
   /** Removes an erased run's row, with the box-local credential it was issued. */

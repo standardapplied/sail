@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.46.3
+
+- **Main decides every pushed revision by the rule the doors ask.** Each synced type has one write rule in sail-core, and main's commit asks it for every revision a node pushes, after its compare-and-set and before it writes. The same edit gets the same answer through HTTP, the host CLI, the socket, the terminal and a sync. A member with an edited box database, or a crafted client, used to have almost every push committed.
+  - A spec is edited, deleted or restored only by its owner or an admin, and its assignee changes only by an admin or a claim of an unassigned spec for oneself. A spec never moves to another room. Main used to commit anyone's edit, including taking someone else's spec, and the prune that followed then erased that FDE's spec, room, messages, runs and reviews on every box.
+  - A room's later revisions, and a review and its verdict, are their owner's or an admin's. A review never moves to another spec.
+  - A run is its executing box's: its `node` is the pusher, it acts for the pusher or no one, a deleted run is never brought back, and every `principal` it carries names the run itself (`<family>/<marker><run id>`). A run naming another FDE or run could post as anyone.
+  - A pushed revision names as its author (`_actor`) only the pusher, its box's machinery (`sail`) or a principal of a run the pusher owns, and a create names only the pusher as its creator. Admins are bound by this too. A principal of a run main does not hold yet is refused for that round and decided once the run lands, so an agent's spec lands the round after its run.
+  - A post is authored by the pusher, a principal of any run it owns (in any conversation), or `sail` where a run it owns is in the conversation, and only where the pusher may post. An agent's post in another spec's room, where its FDE may post, is accepted at the socket and on main alike. A node holds an agent's post until main holds its run, in whatever conversation it runs.
+  - A denied revision is settled as before: the node adopts main's version and keeps its own in history. Adopting main's review never deletes the finding rows the node holds, and the posts of a run main denied leave the node with it.
+  - After an admin reassigns a spec away from a box, that box's status changes, reviews and pipeline posts on it are denied, and it adopts main's version. Its run is still its own to finish or stop, and a stop cancels the spec only when the stopper may change it.
+  - A restart fails only the reviews this box executed, where it used to fail every running review, another box's included.
+  - Local prune and main's decision on a node's prune ask one erase rule, with one set of texts: main's refusals now read like the CLI's (`Spec 'x' is assigned to 'bob', not you.`).
+- **A node's writes speak for its FDE.** On a node, a credential naming an FDE other than the box's own acts with at most `viewer`: another FDE's token, passkey session, gateway key and terminal, admins included, read but write nothing there. Their writes would reach main as the box FDE's, on the box's session, and be denied. The box's FDE, its runs and its FDE-less credentials write as before.
+- **A room's settings are its owner's.** A room's roster, wake, title and assignee are changed only by its owner or an admin. Setting a wake, or engaging or dismissing an agent, through a spec born in someone else's room is refused with the room owner's text, before anything is probed or launched; owning a spec born in a room still gives a voice there. Deleting a room refuses with room wording (`Room 'x' belongs to 'bob', not you.`).
+  - Every door asks the rules it used to skip: drafting a follow-up acts on the source review under the review rule, and a read-only credential on the socket can no longer create a spec (`read_only_credential`, where a room session used to get a plain 403).
+- **New refusal code `forbidden_not_author` (403).** A write that names an author or creator its actor may not write as is refused with it.
+
 ## 0.46.2
 
 - **Personal rooms are retired, and every one is erased on upgrade.** Rooms are created on purpose, from Mast: `GET /v1/rooms` no longer mints a room for its reader in every project, and rooms no longer render `personal_of`.

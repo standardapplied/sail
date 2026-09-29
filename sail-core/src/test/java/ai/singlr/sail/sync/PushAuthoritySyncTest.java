@@ -1,0 +1,507 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.sync;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.EraseRequests;
+import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import java.io.IOException;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Main decides every pushed revision by the rules the doors ask, over a real session. Ada's box
+ * holds an edited database: whatever it writes that is not Ada's to write — another member's spec,
+ * room, review or verdict, a run naming someone else, a post or revision as another FDE — is
+ * denied, the node adopts main's version, keeps nothing main refused but its history, and the next
+ * round is clean. An admin's session passes every owner rule, and none of the attribution ones.
+ */
+class PushAuthoritySyncTest {
+
+  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
+  private static final Actor ADA_ADMIN = Actor.sync("ada", Role.ADMIN);
+  private static final Actor BOB = Actor.sync("bob", Role.MEMBER);
+
+  private SyncBox main;
+  private SyncBox ada;
+  private SyncBox bob;
+
+  @BeforeEach
+  void setUp() {
+    main = new SyncBox("main");
+    ada = new SyncBox("ada");
+    bob = new SyncBox("bob");
+  }
+
+  @AfterEach
+  void tearDown() {
+    bob.close();
+    ada.close();
+    main.close();
+  }
+
+  private SyncSession.TypeReport push(SyncBox box, Actor as, String type) throws IOException {
+    try (var link = SyncBox.connect(main.server(as), box)) {
+      return link.reconcile(type, SyncedEntities.replicas(box.db, box.id, box.id).get(type));
+    }
+  }
+
+  private void sync(SyncBox box, Actor as) throws IOException {
+    for (var entity : SyncedEntities.all()) {
+      push(box, as, entity.type());
+    }
+  }
+
+  private static List<String> denied(SyncSession.TypeReport report) {
+    return report.denials().stream().map(SyncSession.Denial::id).toList();
+  }
+
+  private void assertCleanRound(SyncBox box, Actor as, String type) throws IOException {
+    var next = push(box, as, type);
+    assertNull(next.failure());
+    assertEquals(List.of(), next.denials(), "nothing is offered again");
+    assertEquals(0, next.report().total(), next.toString());
+  }
+
+  private void assertConverged(String type, String id) {
+    var mains = SyncedEntities.replicas(main.db, "main", "main").get(type);
+    var nodes = SyncedEntities.replicas(ada.db, "ada", "ada").get(type);
+    assertEquals(mains.current(id), nodes.current(id), type + " " + id + " is main's again");
+    assertEquals(mains.currentRev(id), nodes.currentRev(id));
+  }
+
+  private static SpecStore.SpecRow spec(String id, String assignee) {
+    return new SpecStore.SpecRow(
+        id,
+        "acme",
+        "Spec " + id,
+        SpecStatus.PENDING,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        "",
+        "",
+        null,
+        List.of(),
+        List.of());
+  }
+
+  /** A spec {@code as} creates on {@code box} in its own room, with that room. */
+  private static void ownSpec(SyncBox box, String as, String id, String assignee) {
+    Acting.as(
+        as,
+        () -> {
+          box.specs.create(spec(id, assignee));
+          new RoomStore(box.db)
+              .create(
+                  new RoomStore.RoomRow(
+                      id, "acme", "Spec " + id, assignee, null, null, null, null, null, null));
+        });
+  }
+
+  private static void room(SyncBox box, String as, String id) {
+    Acting.as(
+        as,
+        () ->
+            new RoomStore(box.db)
+                .create(
+                    new RoomStore.RoomRow(id, "acme", id, as, null, null, null, null, null, null)));
+  }
+
+  private static String run(SyncBox box, String fde, String specId) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.as(
+        fde,
+        () ->
+            new RunStore(box.db)
+                .create(
+                    id,
+                    "acme",
+                    specId,
+                    fde,
+                    fde,
+                    "build",
+                    "claude-code",
+                    "b",
+                    "t",
+                    null,
+                    null,
+                    "/log",
+                    "unit"));
+    return id;
+  }
+
+  private static String principal(SyncBox box, String runId) {
+    return new RunStore(box.db).findById(runId).orElseThrow().principal();
+  }
+
+  private static void retitle(SyncBox box, String as, String id, String title) {
+    var row = box.specs.findById(id).orElseThrow();
+    Acting.as(
+        as,
+        () ->
+            box.specs.update(
+                new SpecStore.SpecRow(
+                    row.id(),
+                    row.project(),
+                    title,
+                    row.status(),
+                    row.assignee(),
+                    row.agent(),
+                    row.model(),
+                    row.reasoningEffort(),
+                    row.branch(),
+                    row.priority(),
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt(),
+                    row.updatedBy(),
+                    row.dependsOn(),
+                    row.repos(),
+                    row.roomId())));
+  }
+
+  private static void assign(SyncBox box, String as, String id, String assignee) {
+    var row = box.specs.findById(id).orElseThrow();
+    Acting.as(
+        as,
+        () ->
+            box.specs.update(
+                new SpecStore.SpecRow(
+                    row.id(),
+                    row.project(),
+                    row.title(),
+                    row.status(),
+                    assignee,
+                    row.agent(),
+                    row.model(),
+                    row.reasoningEffort(),
+                    row.branch(),
+                    row.priority(),
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt(),
+                    row.updatedBy(),
+                    row.dependsOn(),
+                    row.repos(),
+                    row.roomId())));
+  }
+
+  @Test
+  void editingDeletingOrMovingAnotherMembersSpecIsDeniedAndBothBoxesConverge() throws IOException {
+    ownSpec(main, "bob", "theirs", "bob");
+    room(main, "ada", "lobby");
+    sync(ada, ADA);
+
+    retitle(ada, "ada", "theirs", "Taken over");
+    assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
+    assertConverged("spec", "theirs");
+    assertCleanRound(ada, ADA, "spec");
+
+    Acting.as("ada", () -> ada.specs.delete("theirs"));
+    assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
+    assertConverged("spec", "theirs");
+    assertEquals("Spec theirs", ada.specs.findById("theirs").orElseThrow().title());
+
+    ada.db.execute("UPDATE specs SET room_id = 'lobby' WHERE id = 'theirs'");
+    Acting.as("ada", () -> ada.specs.updateStatus("theirs", SpecStatus.PENDING));
+    assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
+    assertConverged("spec", "theirs");
+    assertEquals("theirs", ada.specs.findById("theirs").orElseThrow().roomId());
+    assertCleanRound(ada, ADA, "spec");
+    assertEquals("Spec theirs", main.specs.findById("theirs").orElseThrow().title());
+  }
+
+  @Test
+  void takingAnotherMembersSpecOrClaimingOneBornWhereYouMayNotPostIsDeniedAndNothingIsErased()
+      throws IOException {
+    ownSpec(main, "bob", "theirs", "bob");
+    Acting.as("bob", () -> new MessageStore(main.db).append("theirs", "bob", "mine", null));
+    var bobsRun = run(main, "bob", "theirs");
+    room(main, "bob", "den");
+    Acting.as("bob", () -> main.specs.create(spec("child", null).withRoomId("den")));
+    sync(ada, ADA);
+    sync(bob, BOB);
+
+    assign(ada, "ada", "theirs", "ada");
+    assign(ada, "ada", "child", "ada");
+    assertEquals(List.of("theirs", "child"), denied(push(ada, ADA, "spec")));
+    assertEquals("bob", main.specs.findById("theirs").orElseThrow().assignee());
+    assertNull(main.specs.findById("child").orElseThrow().assignee());
+
+    var requests = new EraseRequests(ada.db);
+    for (var id : List.of("theirs", "child")) {
+      requests.request(Erasure.SPEC, id, "ada");
+      var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
+      assertTrue(refused.getMessage().contains("bob"), refused.getMessage());
+    }
+    sync(ada, ADA);
+    sync(bob, BOB);
+
+    for (var box : List.of(main, ada, bob)) {
+      assertTrue(box.specs.findById("theirs").isPresent(), box.id);
+      assertTrue(box.specs.findById("child").isPresent(), box.id);
+      assertTrue(new RoomStore(box.db).findById("theirs").isPresent(), box.id);
+      assertEquals(1, new MessageStore(box.db).list("theirs", null, 10).size(), box.id);
+      assertTrue(new RunStore(box.db).findById(bobsRun).isPresent(), box.id);
+    }
+  }
+
+  @Test
+  void anOfflineEditToASpecAnAdminReassignsIsDeniedAndAdoptedAndTheNextRoundIsClean()
+      throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    assign(main, "root", "mine", "bob");
+
+    retitle(ada, "ada", "mine", "Offline edit");
+    var report = push(ada, ADA, "spec");
+
+    assertNull(report.failure());
+    assertEquals(List.of("mine"), denied(report));
+    assertConverged("spec", "mine");
+    assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
+    assertTrue(
+        ada.specs.history("mine").stream()
+            .anyMatch(entry -> entry.snapshot().contains("Offline edit")),
+        "the node's edit stays in its history");
+    assertCleanRound(ada, ADA, "spec");
+  }
+
+  @Test
+  void anotherMembersRoomReviewAndVerdictAreDeniedAndTheNodeKeepsItsFindings() throws IOException {
+    ownSpec(main, "bob", "theirs", "bob");
+    room(main, "bob", "den");
+    var review = Acting.as("bob", () -> new ReviewStore(main.db).createReview("theirs", 1));
+    sync(ada, ADA);
+
+    Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
+    assertEquals(List.of("den"), denied(push(ada, ADA, "room")));
+    assertConverged("room", "den");
+
+    var reviews = new ReviewStore(ada.db);
+    var finding =
+        Acting.as(
+            "ada",
+            () -> {
+              var stage = reviews.createStage(review, "security", "agent");
+              var found = finding();
+              reviews.addFinding(stage, found);
+              reviews.updateReviewStatus(review, "passed");
+              return found;
+            });
+    assertEquals(List.of(review), denied(push(ada, ADA, "review")));
+
+    assertEquals("pending", reviews.findReview(review).orElseThrow().status());
+    assertEquals(
+        List.of(finding.id()),
+        reviews.findingsForReview(review).stream().map(Finding::id).toList(),
+        "adopting main's review never deletes the findings this box holds");
+    assertEquals("pending", new ReviewStore(main.db).findReview(review).orElseThrow().status());
+    assertEquals(List.of(), new ReviewStore(main.db).findingsForReview(review));
+  }
+
+  @Test
+  void aRunNamingAnFdeOrAnotherRunIsDeniedAndSoIsAPostAsThatFde() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    var runs = new RunStore(ada.db);
+    var namingBob = run(ada, "ada", "mine");
+    var namingAnother = run(ada, "ada", "mine");
+    ada.db.execute(
+        "INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob'), (?, ?)",
+        namingBob,
+        namingAnother,
+        "claude/" + namingBob);
+    Acting.as(
+        "ada",
+        () -> {
+          runs.complete(namingBob, "completed", 0);
+          runs.complete(namingAnother, "completed", 0);
+        });
+    var forged =
+        Acting.as("ada", () -> new MessageStore(ada.db).append("mine", "bob", "as bob", null));
+
+    assertEquals(List.of(namingBob, namingAnother), denied(push(ada, ADA, "run")));
+    assertTrue(new RunStore(main.db).findById(namingBob).isEmpty());
+    assertTrue(new RunStore(main.db).findById(namingAnother).isEmpty());
+    assertEquals(List.of(forged.id()), denied(push(ada, ADA, "message")));
+    assertTrue(new MessageStore(main.db).findById(forged.id()).isEmpty());
+    assertCleanRound(ada, ADA, "run");
+    assertCleanRound(ada, ADA, "message");
+  }
+
+  @Test
+  void anAgentPostsInAnotherSpecsRoomOnlyWhereItsFdeMayPost() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    ownSpec(main, "ada", "also-mine", "ada");
+    ownSpec(main, "bob", "theirs", "bob");
+    sync(ada, ADA);
+    var agentRun = run(ada, "ada", "mine");
+    var agent = principal(ada, agentRun);
+    var messages = new MessageStore(ada.db);
+    var allowed = Acting.as("ada", () -> messages.append("also-mine", agent, "here", null));
+    var refused = Acting.as("ada", () -> messages.append("theirs", agent, "there", null));
+
+    push(ada, ADA, "run");
+    var report = push(ada, ADA, "message");
+
+    assertEquals(List.of(refused.id()), denied(report));
+    assertEquals(agent, new MessageStore(main.db).findById(allowed.id()).orElseThrow().author());
+    assertTrue(new MessageStore(main.db).findById(refused.id()).isEmpty());
+    assertCleanRound(ada, ADA, "message");
+  }
+
+  @Test
+  void anAgentsSpecAndPostBeforeItsRunIsOnMainAreRefusedAndLandTheRoundAfterTheRunDoes()
+      throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    var agentRun = run(ada, "ada", "mine");
+    var agent = Actor.agentPrincipal(principal(ada, agentRun), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    var post =
+        Acting.by(
+            agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "early", null));
+
+    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
+    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
+    assertEquals(0, push(ada, ADA, "message").report().pushed(), "the post waits for its run");
+    assertTrue(main.specs.findById("born").isEmpty());
+
+    assertEquals(1, push(ada, ADA, "run").report().pushed());
+    assertEquals(1, push(ada, ADA, "spec").report().pushed());
+    assertEquals(1, push(ada, ADA, "message").report().pushed());
+
+    assertEquals("ada", main.specs.findById("born").orElseThrow().createdBy());
+    assertEquals(agent.handle(), main.specs.findById("born").orElseThrow().updatedBy());
+    assertTrue(new MessageStore(main.db).findById(post.id()).isPresent());
+  }
+
+  @Test
+  void aRevisionOrACreateNamingAnotherFdeIsDeniedEvenForAnAdmin() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+
+    for (var as : List.of(ADA, ADA_ADMIN)) {
+      retitle(ada, "bob", "mine", "As bob");
+      assertEquals(List.of("mine"), denied(push(ada, as, "spec")), as.toString());
+      assertConverged("spec", "mine");
+
+      Acting.as("bob", () -> ada.specs.create(spec("for-bob", null)));
+      assertEquals(List.of("for-bob"), denied(push(ada, as, "spec")), as.toString());
+      assertTrue(main.specs.findById("for-bob").isEmpty());
+      assertTrue(ada.specs.findById("for-bob").isEmpty());
+      assertEquals(
+          "bob",
+          new ChangeLog(ada.db).history("spec", "for-bob").getFirst().actor(),
+          "the denied create stays in the node's history");
+    }
+  }
+
+  @Test
+  void anAdminsSessionPassesEveryOwnerRule() throws IOException {
+    ownSpec(main, "bob", "theirs", "bob");
+    room(main, "bob", "den");
+    var review = Acting.as("bob", () -> new ReviewStore(main.db).createReview("theirs", 1));
+    sync(ada, ADA_ADMIN);
+
+    retitle(ada, "ada", "theirs", "Edited by an admin");
+    Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
+    Acting.as("ada", () -> new ReviewStore(ada.db).updateReviewStatus(review, "passed"));
+    for (var type : List.of("spec", "room", "review")) {
+      var report = push(ada, ADA_ADMIN, type);
+      assertEquals(List.of(), report.denials(), type);
+      assertEquals(1, report.report().pushed(), type);
+    }
+    assign(ada, "ada", "theirs", "ada");
+    assertEquals(1, push(ada, ADA_ADMIN, "spec").report().pushed());
+
+    assertEquals("ada", main.specs.findById("theirs").orElseThrow().assignee());
+    assertEquals("off", new RoomStore(main.db).findById("den").orElseThrow().wake());
+    assertEquals("passed", new ReviewStore(main.db).findReview(review).orElseThrow().status());
+  }
+
+  @Test
+  void afterAForceReassignTheOldBoxsSpecReviewAndPostWritesAreDeniedButItsRunIsItsOwn()
+      throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    Acting.as("ada", () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
+    var agentRun = run(ada, "ada", "mine");
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("mine", 1));
+    push(ada, ADA, "spec");
+    push(ada, ADA, "run");
+    push(ada, ADA, "review");
+    assign(main, "root", "mine", "bob");
+
+    Acting.as("ada", () -> ada.specs.updateStatus("mine", SpecStatus.REVIEW));
+    var finding =
+        Acting.system(
+            () -> {
+              var stage = reviews.createStage(review, "security", "agent");
+              var found = finding();
+              reviews.addFinding(stage, found);
+              reviews.updateReviewStatus(review, "failed");
+              return found;
+            });
+    var narration =
+        Acting.system(
+            () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
+    Acting.system(() -> new RunStore(ada.db).complete(agentRun, "stopped", null));
+
+    assertEquals(List.of("mine"), denied(push(ada, ADA, "spec")));
+    assertEquals(1, push(ada, ADA, "run").report().pushed(), "the run is still the box's");
+    assertEquals(List.of(review), denied(push(ada, ADA, "review")));
+    assertEquals(List.of(narration.id()), denied(push(ada, ADA, "message")));
+
+    assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("mine").orElseThrow().status());
+    assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
+    assertEquals("stopped", new RunStore(main.db).findById(agentRun).orElseThrow().status());
+    assertEquals(
+        List.of(finding.id()),
+        reviews.findingsForReview(review).stream().map(Finding::id).toList(),
+        "the old box keeps its findings");
+    assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
+  }
+
+  private static Finding finding() {
+    return Finding.create(
+        Finding.Severity.HIGH,
+        Finding.Category.SECURITY,
+        "A.java",
+        1,
+        2,
+        "issue",
+        "desc",
+        "evidence",
+        new Finding.Suggestion("a", "b", "c"),
+        0.9);
+  }
+}

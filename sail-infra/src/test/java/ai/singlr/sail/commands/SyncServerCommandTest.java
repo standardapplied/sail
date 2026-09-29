@@ -166,7 +166,7 @@ class SyncServerCommandTest {
 
   @Test
   void aMemberTokenMayPushToMain() throws Exception {
-    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var report = syncWithToken(tokenFor("member"));
 
     assertEquals(1, report.pushed());
@@ -211,7 +211,7 @@ class SyncServerCommandTest {
   @Test
   void mainsOperatorSyncsAsAnAdminWhateverItsRosterRole() throws Exception {
     var token = tokenFor("viewer");
-    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var toServer = new PipedOutputStream();
     var serverIn = new BufferedInputStream(new PipedInputStream(toServer));
     var toClient = new PipedOutputStream();
@@ -250,7 +250,7 @@ class SyncServerCommandTest {
 
   @Test
   void anAbsentTokenIsTreatedAsReadOnly() throws Exception {
-    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     syncWithToken(null);
     assertTrue(mainSpecs.findById("auth").isEmpty());
     assertTrue(nodeSpecs.findById("auth").isEmpty());
@@ -315,8 +315,8 @@ class SyncServerCommandTest {
 
   @Test
   void aCommittedPushHandsItsTransitionsToTheSink() throws Exception {
-    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
-    Acting.system(() -> nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress")));
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.as("uday", () -> nodeSpecs.updateStatus("auth", SpecStatus.fromWire("in_progress")));
     var seen = new ArrayList<SyncTransition>();
 
     syncWithToken(tokenFor("member"), "spec", nodeReplica, seen::add);
@@ -329,7 +329,7 @@ class SyncServerCommandTest {
 
   @Test
   void aReSyncedUnchangedSpecEmitsNoTransition() throws Exception {
-    Acting.system(() -> nodeSpecs.create(spec("auth", "Auth")));
+    Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");
     syncWithToken(token);
     var seen = new ArrayList<SyncTransition>();
