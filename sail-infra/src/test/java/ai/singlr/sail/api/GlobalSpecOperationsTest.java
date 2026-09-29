@@ -267,6 +267,21 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void aWakeEditOnABoxThatKeepsNoRoomsHasNothingToWrite() {
+    Acting.by(ADMIN, () -> ops.create(createReq(Map.of())));
+
+    var updated =
+        Acting.by(
+            ADMIN,
+            () ->
+                ops.update(
+                    "auth", SpecUpdateRequest.fromMap(Map.of("wake", "mention", "title", "T2"))));
+
+    assertEquals("T2", updated.spec().title());
+    assertNull(updated.spec().wake());
+  }
+
+  @Test
   void updateClearsReasoningEffortWhenBlank() {
     Acting.by(
         ADMIN,

@@ -318,23 +318,18 @@ final class GlobalSpecOperations {
    * Validates an explicit wake edit and asks the room rule whether the actor may set it on the
    * spec's home room — the room the wake lives on, whoever's it is — before anything is written.
    * The spec update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still
-   * works; the value lands only on the room.
+   * works; the value lands only on the room. Null when this box keeps no rooms to write it on.
    */
   private Wake authorizeWake(SpecStore.SpecRow spec, String requested) {
-    var wake = new Wake(validWake(requested));
     var store = rooms.get();
-    if (store != null) {
-      var roomId = spec.roomIdOrIdentity();
-      var held = store.comparableSnapshot(roomId);
-      Refusals.enforce(
-          store
-              .authority()
-              .decide(
-                  Actor.current(),
-                  roomId,
-                  held,
-                  held == null ? null : with(held, "wake", wake.value())));
+    if (store == null) {
+      return null;
     }
+    var wake = new Wake(validWake(requested));
+    var roomId = spec.roomIdOrIdentity();
+    var held = store.comparableSnapshot(roomId);
+    var next = with(held == null ? Map.of() : held, "wake", wake.value());
+    Refusals.enforce(store.authority().decide(Actor.current(), roomId, held, next));
     return wake;
   }
 
@@ -344,9 +339,6 @@ final class GlobalSpecOperations {
    */
   private void writeWake(SpecStore.SpecRow updated, String wake) {
     var store = rooms.get();
-    if (store == null) {
-      return;
-    }
     var roomId = updated.roomIdOrIdentity();
     var room =
         store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
