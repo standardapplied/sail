@@ -91,12 +91,12 @@ class SyncTransportTest {
   }
 
   private SyncBox.Link connect(SyncBox node) throws IOException {
-    return SyncBox.connect(main.server(Actor.sync(node.id, Role.MEMBER)), node);
+    return SyncBox.connect(main.server(Actor.sync(node.id, Role.ADMIN)), node);
   }
 
   private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    return SyncBox.connect(main.server(Actor.sync(node.id, Role.MEMBER)), node, frame, serverOut);
+    return SyncBox.connect(main.server(Actor.sync(node.id, Role.ADMIN)), node, frame, serverOut);
   }
 
   private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
@@ -114,7 +114,7 @@ class SyncTransportTest {
   }
 
   private void bigSpec(SyncBox box, String id) {
-    box.specs.create(spec(id, id.repeat(600 / id.length()), "pending"));
+    box.create(spec(id, id.repeat(600 / id.length()), "pending"));
   }
 
   @Test
@@ -186,7 +186,7 @@ class SyncTransportTest {
     new RunStore(nodeA.db).complete(id, "stopped", 0);
     var changed = new LinkedHashMap<>(runs.comparableSnapshot(id));
     changed.put("branch", "from-main");
-    runs.commitRevision(id, changed, runs.latestRev(id));
+    runs.commitRevision(id, changed, runs.latestRev(id), runs.authority());
     var mainRev = runs.latestRev(id);
 
     try (var link = connect(nodeA)) {
@@ -213,7 +213,7 @@ class SyncTransportTest {
             SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("spec"),
             () -> {
               assertTrue(writes.incrementAndGet() <= 10, "adoption retries must be bounded");
-              nodeA.specs.update(spec("auth", "Auth", "in_progress"));
+              Acting.system(() -> nodeA.specs.update(spec("auth", "Auth", "in_progress")));
             });
 
     try (var link = connect(nodeA)) {
@@ -288,7 +288,7 @@ class SyncTransportTest {
 
   @Test
   void aLocalCreatePropagatesAcrossTheWire() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     var pushed = syncToMain(nodeA);
     assertEquals(1, pushed.report().pushed());
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
@@ -300,27 +300,27 @@ class SyncTransportTest {
 
   @Test
   void authorsReachEveryReplicaOnCreateAndEdit() throws Exception {
-    Acting.as("ada", () -> nodeA.specs.create(specBy("auth", "Auth", "ada")));
+    Acting.as("A", () -> nodeA.specs.create(specBy("auth", "Auth", "A")));
     syncToMain(nodeA);
     syncToMain(nodeB);
-    assertEquals("ada", main.specs.findById("auth").orElseThrow().updatedBy());
-    assertEquals("ada", nodeB.specs.findById("auth").orElseThrow().updatedBy());
-    Acting.as("bob", () -> nodeB.specs.update(specBy("auth", "Revised", "bob")));
+    assertEquals("A", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("A", nodeB.specs.findById("auth").orElseThrow().updatedBy());
+    Acting.as("B", () -> nodeB.specs.update(specBy("auth", "Revised", "B")));
     syncToMain(nodeB);
     syncToMain(nodeA);
-    assertEquals("bob", main.specs.findById("auth").orElseThrow().updatedBy());
-    assertEquals("bob", nodeA.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("B", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("B", nodeA.specs.findById("auth").orElseThrow().updatedBy());
     var committed = main.specs.history("auth").getLast();
-    assertEquals("bob", committed.actor(), "main records the author the push offered");
+    assertEquals("B", committed.actor(), "main records the author the push offered");
     assertEquals("B", committed.peer(), "and the FDE whose session pushed it");
     var adopted = nodeA.specs.history("auth").getLast();
-    assertEquals("bob", adopted.actor(), "a node adopts the author main recorded");
+    assertEquals("B", adopted.actor(), "a node adopts the author main recorded");
     assertEquals("main", adopted.peer());
   }
 
   @Test
   void aPushThatOffersNoAuthorIsRecordedAsThePushingFde() throws Exception {
-    Acting.as(null, () -> nodeA.specs.create(spec("auth", "Auth", "pending")));
+    Acting.as(null, () -> nodeA.create(spec("auth", "Auth", "pending")));
 
     syncToMain(nodeA);
 
@@ -331,7 +331,7 @@ class SyncTransportTest {
 
   @Test
   void aDeletedSpecThatNeverReachedMainConvergesQuietly() throws Exception {
-    nodeA.specs.create(spec("local", "Local", "pending"));
+    nodeA.create(spec("local", "Local", "pending"));
     nodeA.specs.delete("local");
     assertEquals(0, syncToMain(nodeA).report().total());
     assertTrue(main.specs.findById("local").isEmpty());
@@ -339,7 +339,7 @@ class SyncTransportTest {
 
   @Test
   void disjointEditsAutoMergeOverTheWire() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.updateStatus("auth", SpecStatus.fromWire("in_progress"));
@@ -356,7 +356,7 @@ class SyncTransportTest {
 
   @Test
   void sameFieldEditConflictsOverTheWireAndLeavesLocalWorkUntouched() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.update(spec("auth", "Title from A", "pending"));
@@ -371,7 +371,7 @@ class SyncTransportTest {
 
   @Test
   void aLocalDeletePropagatesAcrossTheWire() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.delete("auth");
@@ -383,7 +383,7 @@ class SyncTransportTest {
 
   @Test
   void deleteVersusEditConflictsOverTheWire() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.delete("auth");
@@ -422,7 +422,7 @@ class SyncTransportTest {
   @Test
   void theCheckpointAdvancesOnlyToWhatTheNodeHasSeenAndAnIdleRoundIsOneHeadsExchange()
       throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     try (var link = connect(nodeA)) {
       var first = link.reconcile("spec", nodeA.replica);
       assertEquals(1, first.report().pushed());
@@ -562,7 +562,7 @@ class SyncTransportTest {
 
   @Test
   void aLocalEditRacingADisjointMainEditMergesThroughTheRejectionPath() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.update(spec("auth", "Title from A", "pending"));
@@ -589,7 +589,7 @@ class SyncTransportTest {
 
   @Test
   void aLocalEditRacingTheSameFieldOnMainParksAConflictAndKeepsLocalWork() throws Exception {
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     syncToMain(nodeA);
     syncToMain(nodeB);
     nodeA.specs.update(spec("auth", "Title from A", "pending"));
@@ -675,7 +675,7 @@ class SyncTransportTest {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().pulled());
     }
     assertEquals("Shared", nodeA.specs.findById("board").orElseThrow().title());
-    nodeA.specs.create(spec("mine", "Local only", "pending"));
+    nodeA.create(spec("mine", "Local only", "pending"));
     try (var link = SyncBox.connect(main.server(Actor.sync("A", Role.VIEWER)), nodeA)) {
       var report = link.reconcile("spec", nodeA.replica);
       assertNull(report.failure());
@@ -691,7 +691,7 @@ class SyncTransportTest {
     var nodeFileReplica =
         new StoreReplica(
             "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
-    nodeA.specs.create(spec("auth", "Auth", "pending"));
+    nodeA.create(spec("auth", "Auth", "pending"));
     ai.singlr.sail.store.ContentFixtures.put(nodeFiles, "acme", "scripts/deploy.sh", "ZGVwbG95");
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));
     var server =

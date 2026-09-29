@@ -538,6 +538,11 @@ class PtySessionHostTest {
         assertAttachPrologue(writer);
         awaitText(writer, "hi");
         PtyWire.write(writer, new PtyMessage.Resize(126, 40));
+        PtyWire.write(writer, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+        assertInstanceOf(
+            PtyMessage.Sessions.class,
+            readControl(writer),
+            "the host answers a connection in order, so the resize has landed");
 
         try (var observer = connect("tok-root")) {
           PtyWire.write(observer, new PtyMessage.Attach("sized", true));

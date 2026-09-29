@@ -25,13 +25,13 @@ import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A revision keeps the author who wrote it on every replica, including entities with no author
- * column of their own (runs, reviews, files), whose author lives only in the journal. Carol writes
- * on Alice's node, Alice pushes, Bob pulls: all three journals name Carol, never the pushing FDE or
- * main.
+ * column of their own (runs, reviews, files), whose author lives only in the journal. The machinery
+ * of Alice's box writes on her node, Alice pushes, Bob pulls: all three journals name the
+ * machinery, never the pushing FDE or main.
  */
 class AuthorshipSyncTest {
 
-  private static final Actor CAROL = Actor.cliOperator("carol");
+  private static final Actor MACHINERY = Actor.system();
 
   @TempDir Path tempDir;
   private SyncBox main;
@@ -57,7 +57,7 @@ class AuthorshipSyncTest {
     var runs = new RunStore(alice.db);
     var id = DateTimeUtils.newId().toString();
     Actor.run(
-        CAROL,
+        MACHINERY,
         () ->
             runs.create(
                 id,
@@ -79,8 +79,12 @@ class AuthorshipSyncTest {
 
   @Test
   void aReviewKeepsItsAuthorOnEveryReplica() throws IOException {
+    main.db.execute(
+        """
+        INSERT INTO specs (id, project, title, status, assignee, created_at, updated_at)
+        VALUES ('auth', 'acme', 'Auth', 'pending', 'alice', 'now', 'now')""");
     var reviews = new ReviewStore(alice.db);
-    var id = Actor.call(CAROL, () -> reviews.createReview("auth", 1));
+    var id = Actor.call(MACHINERY, () -> reviews.createReview("auth", 1));
 
     assertAuthoredEverywhere("review", id);
   }
@@ -89,7 +93,7 @@ class AuthorshipSyncTest {
   void aFileKeepsItsAuthorOnEveryReplica() throws IOException {
     var files = new FileStore(alice.db);
     Actor.run(
-        CAROL,
+        MACHINERY,
         () ->
             files.put(
                 "acme",
@@ -102,14 +106,14 @@ class AuthorshipSyncTest {
   }
 
   private void assertAuthoredEverywhere(String type, String id) throws IOException {
-    assertEquals("carol", authorOf(alice, type, id));
+    assertEquals("sail", authorOf(alice, type, id));
 
     round(alice, type);
     round(bob, type);
 
-    assertEquals("carol", authorOf(main, type, id), "main");
-    assertEquals("carol", authorOf(alice, type, id), "the originating node");
-    assertEquals("carol", authorOf(bob, type, id), "a pulling node");
+    assertEquals("sail", authorOf(main, type, id), "main");
+    assertEquals("sail", authorOf(alice, type, id), "the originating node");
+    assertEquals("sail", authorOf(bob, type, id), "a pulling node");
   }
 
   private void round(SyncBox box, String type) throws IOException {

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.RoomAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -266,6 +268,67 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .toList();
   }
 
+  /**
+   * Who owns room {@code roomId} — its roster, wake, title and assignee — the one rule every door
+   * that changes a room, every waker and main's check of a synced room decide by. A spec's identity
+   * room is its spec's, as this box last knew the spec, live or deleted ({@link
+   * SpecStore#lastKnown}); any other room is its own row's ({@link Ownership#ownerOf}). Posting is
+   * wider ({@link #owners}): owning a spec born in a room gives a voice there, not its settings.
+   * Blank when no one is known.
+   */
+  public String ownerOf(String roomId) {
+    return ownerOf(roomId, comparableSnapshot(roomId));
+  }
+
+  /**
+   * As {@link #ownerOf(String)}, reading a standalone room's owner from {@code held}, the room's
+   * projection as this box holds it, so a revision being decided never names its own owner.
+   */
+  public String ownerOf(String roomId, Map<String, Object> held) {
+    return new SpecStore(db)
+        .lastKnown(roomId)
+        .filter(spec -> spec.roomIdOrIdentity().equals(roomId))
+        .map(SpecStore.LastKnown::owner)
+        .orElseGet(
+            () ->
+                held == null
+                    ? ""
+                    : Ownership.ownerOf(
+                        Snapshots.text(held, "assignee"), Snapshots.text(held, "created_by")));
+  }
+
+  /**
+   * What this box holds of room {@code id}, as a rule reads it: its comparable snapshot, or the
+   * last live state its tombstone kept. Null for a room this box never held.
+   */
+  public Map<String, Object> held(String id) {
+    return journal.held(id);
+  }
+
+  /**
+   * Whether this box holds conversation {@code roomId} — a room, a spec living in it, or either's
+   * history — so a revision placed in it can be decided here. One this box has never held is
+   * refused ({@link SyncedStore.Unheld}), never denied: its room syncs in its own page, and the
+   * next round decides what lives in it.
+   */
+  public boolean holdsConversation(String roomId) {
+    return db.queryOne(
+            """
+            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
+                OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
+            row -> true,
+            roomId)
+        .orElse(false);
+  }
+
+  /** Who may write a room on this box: the rule every door and main's commit decide by. */
+  @Override
+  public RoomAuthority authority() {
+    return new RoomAuthority(db);
+  }
+
   public Optional<RoomRow> findById(String id) {
     return db.queryOne(
         """
@@ -347,8 +410,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   @Override
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**
@@ -424,6 +488,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET project = excluded.project, title = excluded.title,
               assignee = excluded.assignee, wake = excluded.wake, roster = excluded.roster,
+              created_by = CASE WHEN ? = 1 THEN excluded.created_by ELSE rooms.created_by END,
               updated_at = excluded.updated_at, updated_by = excluded.updated_by""",
           id,
           Snapshots.text(snapshot, "project"),
@@ -431,10 +496,25 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Snapshots.text(snapshot, "assignee"),
           Snapshots.text(snapshot, "wake"),
           Snapshots.text(snapshot, "roster"),
-          Snapshots.text(snapshot, "created_by"),
+          creatorOf(id, snapshot),
           Strings.isBlank(createdAt) ? now : createdAt,
           now,
-          Snapshots.actor(snapshot));
+          Snapshots.actor(snapshot),
+          Actor.current().lane() == Actor.Lane.MAIN ? 1 : 0);
+    }
+
+    /**
+     * The creator a write of {@code snapshot} records: a creator is written once, so a revision
+     * re-creating a deleted room keeps the one its tombstone recorded, as an update keeps the
+     * row's. Main's own revision names the creator main holds, which a node adopts over its own.
+     */
+    private String creatorOf(String id, Map<String, Object> snapshot) {
+      var offered = Snapshots.text(snapshot, "created_by");
+      if (Actor.current().lane() == Actor.Lane.MAIN || exists(id)) {
+        return offered;
+      }
+      var tombstone = journal.held(id);
+      return tombstone == null ? offered : Snapshots.text(tombstone, "created_by");
     }
 
     @Override

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
@@ -210,8 +211,9 @@ public final class StopOperations {
    * Executes one clean stop. Refusals throw {@link ApiException} with a structured code before any
    * mutation: an unknown run is a 404, a run that executed elsewhere a {@code run_on_other_node},
    * and a caller who is neither the run's spec assignee nor an admin a {@code
-   * forbidden_not_assignee} (the same {@link RunPolicy} the log routes enforce). A dry run resolves
-   * and probes but writes and signals nothing, returning the outcome it would produce.
+   * forbidden_not_assignee} (the same run-owner rule, {@link RunAuthority#access}, the log routes
+   * enforce). A dry run resolves and probes but writes and signals nothing, returning the outcome
+   * it would produce.
    */
   public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
@@ -281,7 +283,7 @@ public final class StopOperations {
       return resumeStop(run, dryRun);
     }
     if (!"running".equals(run.status())) {
-      if (!cancelable(spec)) {
+      if (!(dryRun ? cancelable(spec) : mayCancel(spec))) {
         return new AlreadyTerminal(run.id(), specIdOf(run), run.status());
       }
       if (dryRun) {
@@ -394,7 +396,7 @@ public final class StopOperations {
             "running",
             status,
             () -> {
-              if (cancelable(spec)) {
+              if (mayCancel(spec)) {
                 cancelled.set(
                     runStore.runIfLatestAttempt(run.id(), run.specId(), () -> commitCancel(spec)));
               }
@@ -628,6 +630,21 @@ public final class StopOperations {
   }
 
   /**
+   * Whether this stop cancels {@code spec}: work still in flight, which the stopper may change by
+   * the spec rule. The FDE whose box runs an agent may stop it after its spec moved to someone
+   * else; the run stops and the spec is left to its new owner.
+   */
+  private boolean mayCancel(SpecStore.SpecRow spec) {
+    if (!cancelable(spec)) {
+      return false;
+    }
+    var held = specStore.held(spec.id());
+    var cancelled = new LinkedHashMap<>(held);
+    cancelled.put("status", SpecStatus.CANCELLED.wire());
+    return specStore.authority().decide(Actor.current(), spec.id(), held, cancelled).isEmpty();
+  }
+
+  /**
    * Refuses a stop the bound actor may not make. A dry run writes and signals nothing, so it is
    * described for whoever asks, with no one bound.
    */
@@ -647,11 +664,9 @@ public final class StopOperations {
           "Ask an admin for a member or admin credential.");
     }
     var owners =
-        RunPolicy.owners(run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
-    if (RunPolicy.access(run.id(), specIdOf(run), owners)
-        instanceof AccessDecision.Refused refused) {
-      throw new ApiException(refused.code(), refused.message(), refused.fix());
-    }
+        RunAuthority.owners(
+            run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
+    Refusals.enforce(RunAuthority.access(actor, run.id(), specIdOf(run), owners));
   }
 
   /**

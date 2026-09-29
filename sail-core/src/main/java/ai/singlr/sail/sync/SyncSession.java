@@ -58,7 +58,8 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
           "spec".equals(type)
               ? "Yours is in its history: sail spec history " + id + "."
               : "Yours stays in this box's change log.";
-      return type + " " + id + ": main denied this change — " + reason + ". " + kept;
+      var why = reason.endsWith(".") ? reason : reason + ".";
+      return type + " " + id + ": main denied this change — " + why + " " + kept;
     }
   }
 

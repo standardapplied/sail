@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
@@ -41,9 +42,10 @@ import java.util.function.Supplier;
  * unreferenced. A node never authors an erasure: it asks main for what main acknowledged, which
  * main decides on its own copy, and discards on the spot what it alone ever held.
  *
- * <p>Authority: write capability, never an agent; for a spec named by id, its owner ({@code
- * Ownership.ownerOf}) or an admin, and only once it is archived, cancelled or deleted with no run
- * of it still going; a policy, a project or retention, an admin only.
+ * <p>Authority: never an agent, and otherwise the erase rule ({@link EraseAuthority}) main's own
+ * decision on a node's request asks too: write capability; for a spec named by id, its owner or an
+ * admin, and only once it is archived, cancelled or deleted with no run of it still going; a
+ * policy, a project or retention, an admin only.
  */
 final class SpecPruner {
 
@@ -59,6 +61,7 @@ final class SpecPruner {
   private final MessageStore messages;
   private final RunStore runs;
   private final Erasure erasure;
+  private final EraseAuthority authority;
   private final BlobStore blobs;
   private final EventBus eventBus;
   private final BooleanSupplier authoritative;
@@ -70,6 +73,7 @@ final class SpecPruner {
     this.messages = new MessageStore(db);
     this.runs = new RunStore(db);
     this.erasure = new Erasure(db);
+    this.authority = new EraseAuthority(db);
     this.blobs = new BlobStore(db);
     this.eventBus = eventBus;
     this.authoritative = Objects.requireNonNull(authoritative, "authoritative");
@@ -237,7 +241,7 @@ final class SpecPruner {
     }
   }
 
-  private static void authorize(PruneRequest request) {
+  private void authorize(PruneRequest request) {
     var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
@@ -245,18 +249,7 @@ final class SpecPruner {
           "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
           "Ask the FDE who owns the work to run 'sail spec prune'.");
     }
-    if (!actor.canWrite()) {
-      throw new ApiException(
-          ErrorCode.READ_ONLY_CREDENTIAL,
-          "Your role is read-only: it cannot prune.",
-          "Ask an admin to prune, or for a member role.");
-    }
-    if (request.ids().isEmpty() && !actor.isAdmin()) {
-      throw new ApiException(
-          ErrorCode.FORBIDDEN_ADMIN_ONLY,
-          "Pruning by policy or a whole project is admin-only.",
-          "Name the specs you own by id: sail spec prune <id...>.");
-    }
+    Refusals.enforce(authority.request(actor, request.ids().isEmpty()));
   }
 
   /**
@@ -279,18 +272,7 @@ final class SpecPruner {
                   () ->
                       new ApiException(
                           ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found."));
-      SpecPolicy.mutate(id, spec.assignee(), spec.createdBy()).enforce();
-      if (!spec.prunable()) {
-        throw new ApiException(
-            ErrorCode.SPEC_NOT_PRUNABLE,
-            "Spec '"
-                + id
-                + "' is "
-                + spec.status().wire()
-                + ": only archived, cancelled or deleted"
-                + " specs are pruned.",
-            "Archive it first: sail spec update " + id + " --status archived.");
-      }
+      Refusals.enforce(authority.spec(Actor.current(), spec));
       roots.add(target);
     }
     if (request.policy() != null) {
@@ -310,22 +292,8 @@ final class SpecPruner {
   }
 
   private void requireIdle(List<Erasure.Target> plan, boolean idle) {
-    if (!idle) {
-      return;
-    }
-    var unfinished =
-        runs.unfinished(
-            plan.stream()
-                .filter(target -> Erasure.RUN.equals(target.type()))
-                .map(Erasure.Target::id)
-                .toList());
-    if (!unfinished.isEmpty()) {
-      throw new ApiException(
-          ErrorCode.SPEC_NOT_PRUNABLE,
-          "Run '"
-              + unfinished.getFirst()
-              + "' has not finished; a prune never erases work going on.",
-          "Stop it first: sail agent stop, then prune.");
+    if (idle) {
+      Refusals.enforce(authority.idle(plan));
     }
   }
 

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -133,9 +134,8 @@ class DeniedSyncTest {
       report = link.reconcile("spec", replica("spec"));
       assertEquals(
           List.of(
-              "spec auth: main denied this change — "
-                  + StoreReplica.READ_ONLY
-                  + ". Yours is in its history: sail spec history auth."),
+              "spec auth: main denied this change — Your credential is read-only and cannot"
+                  + " change specs. Yours is in its history: sail spec history auth."),
           link.notices(),
           "each denial is announced as it settles");
     }
@@ -367,8 +367,8 @@ class DeniedSyncTest {
     for (var box : List.of(main, node)) {
       box.db.execute(
           """
-          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
-          VALUES ('home', 'Home', 'acme', 'ada', 'now', 'now')""");
+          INSERT INTO rooms (id, title, project, assignee, created_at, updated_at, rev, base_rev)
+          VALUES ('home', 'Home', 'acme', 'ada', 'now', 'now', 'r0', 'r0')""");
     }
     node.specs.create(SyncBox.spec("auth", "Auth", "pending").withRoomId("home"));
     var runs = new RunStore(node.db);
@@ -451,33 +451,37 @@ class DeniedSyncTest {
   }
 
   @Test
-  void theMessagesOfARunMainDeniesAreDeniedAfterItNeverRefused() throws IOException {
+  void thePostsOfARunMainDeniesLeaveWithItAndNothingIsOfferedAgain() throws IOException {
     sharedRoom();
     var runs = new RunStore(node.db);
     var id = startRun(runs, null);
     var messages = new MessageStore(node.db);
     var posted =
         messages.append("room", runs.findById(id).orElseThrow().principal(), "unstamped", null);
+    var reply = messages.append("room", "ada", "answering it", posted.id());
     runs.complete(id, "completed", 0);
 
     var run = round(ADA, "run");
 
     assertEquals(List.of(id), run.denials().stream().map(SyncSession.Denial::id).toList());
     assertTrue(runs.findById(id).isEmpty(), "a run with no node stamp is never main's to take");
+    assertTrue(messages.findById(posted.id()).isEmpty(), "main holds no run to decide its post");
+    assertTrue(messages.findById(reply.id()).isEmpty(), "and the replies under it go too");
     var message = round(ADA, "message");
     assertNull(message.failure());
-    assertEquals(
-        List.of(posted.id()), message.denials().stream().map(SyncSession.Denial::id).toList());
-    assertTrue(messages.findById(posted.id()).isEmpty());
+    assertEquals(List.of(), message.denials());
     assertNextRoundIsClean(ADA, "message", replica("message"));
   }
 
   @Test
   void aMessageInARoomMainDoesNotHoldYetIsRefusedAndLandsAfterTheRoom() throws IOException {
-    new RoomStore(node.db)
-        .create(
-            new RoomStore.RoomRow(
-                "fresh", "acme", "Fresh", "ada", null, null, null, null, null, null));
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(node.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "fresh", "acme", "Fresh", "ada", null, null, null, null, null, null)));
     var messages = new MessageStore(node.db);
     var posted = messages.append("fresh", "ada", "first words", null);
 

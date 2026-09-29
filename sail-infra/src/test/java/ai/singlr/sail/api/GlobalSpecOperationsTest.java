@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -263,6 +264,39 @@ class GlobalSpecOperationsTest {
                         withRooms.update(
                             "auth", SpecUpdateRequest.fromMap(Map.of("wake", "loud")))));
     assertTrue(refusal.getMessage().contains("on, mention, or off"));
+  }
+
+  @Test
+  void aMemberClaimingAnUnassignedSpecSetsItsWakeInTheSameUpdate() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+    Acting.by(bob, () -> withRooms.create(createReq(Map.of())));
+
+    var claimed =
+        Acting.by(
+            UDAY,
+            () ->
+                withRooms.update(
+                    "auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday", "wake", "off"))));
+
+    assertEquals("uday", claimed.spec().assignee());
+    assertEquals("off", rooms.findById("auth").orElseThrow().wake());
+  }
+
+  @Test
+  void aWakeEditOnABoxThatKeepsNoRoomsHasNothingToWrite() {
+    Acting.by(ADMIN, () -> ops.create(createReq(Map.of())));
+
+    var updated =
+        Acting.by(
+            ADMIN,
+            () ->
+                ops.update(
+                    "auth", SpecUpdateRequest.fromMap(Map.of("wake", "mention", "title", "T2"))));
+
+    assertEquals("T2", updated.spec().title());
+    assertNull(updated.spec().wake());
   }
 
   @Test
@@ -1162,6 +1196,56 @@ class GlobalSpecOperationsTest {
     assertEquals("mention", rooms.findById("design-room").orElseThrow().wake());
     assertEquals("mention", updated.spec().wake(), "the view reads the same room it wrote");
     assertTrue(rooms.findById("auth").isEmpty(), "no phantom room is minted under the spec id");
+  }
+
+  @Test
+  void aWakeThroughASpecBornInSomeoneElsesRoomIsRefusedWithTheRoomOwnersText() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    Acting.as(
+        "uday",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "design-room",
+                    "manatee",
+                    "Design talk",
+                    "uday",
+                    "on",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)));
+    Acting.by(
+        ADMIN,
+        () -> withRooms.create(createReq(Map.of("room_id", "design-room", "assignee", "bob"))));
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(
+                    bob,
+                    () ->
+                        withRooms.update(
+                            "auth",
+                            SpecUpdateRequest.fromMap(
+                                Map.of("wake", "off", "title", "Bob's retitle")))));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertEquals("Room 'design-room' belongs to 'uday', not you.", refused.getMessage());
+    assertEquals("on", rooms.findById("design-room").orElseThrow().wake());
+    assertNotEquals(
+        "Bob's retitle", specStore.findById("auth").orElseThrow().title(), "nothing is written");
+    var retitled =
+        Acting.by(
+            bob,
+            () ->
+                withRooms.update(
+                    "auth", SpecUpdateRequest.fromMap(Map.of("title", "Bob's retitle"))));
+    assertEquals("Bob's retitle", retitled.spec().title(), "the spec itself is still bob's");
   }
 
   @Test

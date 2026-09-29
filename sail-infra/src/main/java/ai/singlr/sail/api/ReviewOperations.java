@@ -13,6 +13,7 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Review-workflow operations against the {@link ReviewStore}. Split out of {@code SailOperations}
@@ -61,7 +62,7 @@ final class ReviewOperations {
   ReviewApproveResponse approve(String reviewId) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
-    ReviewPolicy.decide(reviewId, review.specId(), specOwner(review.specId())).enforce();
+    authorize(reviewId);
     var humanStage =
         reviewStore.stagesForReview(reviewId).stream()
             .filter(s -> "human".equals(s.stageType()) && "running".equals(s.status()))
@@ -94,6 +95,7 @@ final class ReviewOperations {
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
     var review =
         reviewStore.latestReviewForSpec(sourceSpecId).orElseThrow(() -> noReview(sourceSpecId));
+    authorize(review.id());
     var findings = reviewStore.openFindingsForReview(review.id());
     if (findings.isEmpty()) {
       throw new ApiException(
@@ -108,6 +110,10 @@ final class ReviewOperations {
           "Spec '" + followupId + "' already exists.",
           "Pass --id <id> to choose a different id for the follow-up spec.");
     }
+    Refusals.enforce(
+        specStore
+            .authority()
+            .decide(Actor.current(), followupId, null, Map.of("room_id", followupId)));
     specStore.create(
         new SpecStore.SpecRow(
             followupId,
@@ -162,8 +168,8 @@ final class ReviewOperations {
 
   FindingDismissResponse dismissFinding(String reviewId, String findingId) {
     requireStore();
-    var review = findReviewOrThrow(reviewId);
-    ReviewPolicy.decide(reviewId, review.specId(), specOwner(review.specId())).enforce();
+    findReviewOrThrow(reviewId);
+    authorize(reviewId);
     var finding =
         reviewStore.findingsForReview(reviewId).stream()
             .filter(candidate -> candidate.id().equals(findingId))
@@ -177,9 +183,10 @@ final class ReviewOperations {
     return new FindingDismissResponse(finding.id(), true);
   }
 
-  /** The current owner of the review's spec, or null when the spec is absent — fail closed. */
-  private String specOwner(String specId) {
-    return specStore.findById(specId).map(SpecStore.SpecRow::owner).orElse(null);
+  /** Asks the review rule whether the bound actor may act on review {@code reviewId}. */
+  private void authorize(String reviewId) {
+    var held = reviewStore.comparableSnapshot(reviewId);
+    Refusals.enforce(reviewStore.authority().decide(Actor.current(), reviewId, held, held));
   }
 
   /** Attribution for an approval: the acting FDE's handle, or {@code sail} for a machine token. */

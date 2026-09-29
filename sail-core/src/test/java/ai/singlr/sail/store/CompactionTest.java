@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
@@ -24,7 +25,7 @@ import org.junit.jupiter.api.io.TempDir;
  * an entity, its synced base, and every tombstone and erasure, compacted only outside a transaction
  * under the exclusive retention lease.
  */
-@ActingAs
+@ActingAs(value = Actor.Lane.CLI, handle = "node")
 class CompactionTest {
 
   private Sqlite db;

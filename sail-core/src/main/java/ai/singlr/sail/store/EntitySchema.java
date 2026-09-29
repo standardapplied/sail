@@ -16,9 +16,9 @@ import java.util.Map;
  * projects to and from a snapshot. Who a revision is attributed to is the bound {@link
  * ai.singlr.sail.identity.Actor}, never the row.
  *
- * <p>Implemented by the five mutable synced stores (specs, runs, reviews, projects, files).
- * Immutable or specially-authorized entities (e.g. messages) keep their own bespoke logic and do
- * not ride this journal.
+ * <p>Implemented by the five mutable synced stores that ride the journal: specs, rooms, runs,
+ * reviews and files. Projects, which weave a resurrection-blocking marker into their revisions, and
+ * messages, which never change, keep their own commit and do not ride it.
  */
 public interface EntitySchema {
 

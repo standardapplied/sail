@@ -51,7 +51,7 @@ public final class DispatchPolicy {
           "Your credential is read-only and cannot dispatch specs.",
           "Ask an admin for a member or admin credential.");
     }
-    if (!actor.isAdmin() && !spec.assignee().equals(actor.handle())) {
+    if (!actor.isAdmin() && !actor.actsFor(spec.assignee())) {
       return new DispatchDecision.Refused(
           ErrorCode.NOT_YOUR_SPEC,
           "Spec '"

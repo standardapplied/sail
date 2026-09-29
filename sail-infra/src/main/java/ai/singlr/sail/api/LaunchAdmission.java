@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.RoomAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentCli;
@@ -34,9 +36,10 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when the actor may not act on a spec-less room from this box: same four rules as the
-   * spec path — no agent lane, node handle set, this box owns the room (assignee, else creator),
-   * write credential, admin-or-owner — with room wording, since no work-item is involved.
+   * Refuses when the actor may not act on a spec-less room from this box: no agent lane, node
+   * handle set, this box owns the room (assignee, else creator), and the room-owner rule ({@link
+   * RoomAuthority#owned}). A room its actor does not own is refused as not theirs ({@code
+   * not_your_spec}), as this admission always has.
    */
   public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
     var actor = Actor.current();
@@ -58,18 +61,13 @@ public final class LaunchAdmission {
           "Room '" + roomId + "' belongs to '" + owner + "', whose box serves its agents.",
           "Manage the room from that box, or have an admin reassign it.");
     }
-    if (!actor.canWrite()) {
-      throw new ApiException(
-          ErrorCode.READ_ONLY_CREDENTIAL,
-          "Your credential is read-only and cannot change room membership.",
-          "Ask an admin for a member or admin credential.");
-    }
-    if (!actor.isAdmin() && !Ownership.owns(actor.handle(), owner)) {
-      throw new ApiException(
-          ErrorCode.NOT_YOUR_SPEC,
-          "Room '" + roomId + "' belongs to '" + owner + "', not you.",
-          "Ask " + owner + " to manage it, or have an admin do it.");
-    }
+    RoomAuthority.owned(actor, roomId, owner)
+        .ifPresent(
+            refusal -> {
+              throw refusal.kind() == Refusal.Kind.NOT_OWNER
+                  ? new ApiException(ErrorCode.NOT_YOUR_SPEC, refusal.message(), refusal.fix())
+                  : Refusals.exception(refusal);
+            });
   }
 
   /**

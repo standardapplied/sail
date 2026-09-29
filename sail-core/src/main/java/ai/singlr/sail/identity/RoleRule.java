@@ -22,6 +22,11 @@ import java.util.function.Supplier;
  * unless it is the operator. A null {@code roster} is a box that keeps none yet: it knows no FDE
  * but its operator. A credential that names no FDE acts with the role of the box's FDE ({@link
  * #roleOfUnbound}), so no credential on a box acts beyond the FDE whose box it is.
+ *
+ * <p>A node's writes speak for its FDE: every revision it pushes reaches main on the box's session,
+ * which main decides as that FDE's. So on a node a credential naming any other FDE, an admin's
+ * included, acts with at most {@link Role#VIEWER}, and the node refuses its writes up front rather
+ * than pushing what main would deny.
  */
 public final class RoleRule {
 
@@ -48,7 +53,14 @@ public final class RoleRule {
     if (isOperator(handle)) {
       return Optional.of(Role.ADMIN.cappedBy(cap));
     }
-    return fde.map(found -> Role.fromAttribute(found.role()).cappedBy(cap));
+    var bound = foreignOnNode(handle) ? cap.cappedBy(Role.VIEWER) : cap;
+    return fde.map(found -> Role.fromAttribute(found.role()).cappedBy(bound));
+  }
+
+  /** Whether {@code handle} names an FDE other than this node's own. */
+  private boolean foreignOnNode(String handle) {
+    var config = box.get();
+    return config.isNode() && !handle.equals(config.handle());
   }
 
   /**

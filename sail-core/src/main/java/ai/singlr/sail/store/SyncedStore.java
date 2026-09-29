@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import java.util.Map;
 import java.util.Set;
 
@@ -88,8 +89,17 @@ public interface SyncedStore {
    */
   void eraseRow(String id);
 
-  /** Compare-and-set commit of an authoritative state ({@code null} = delete). */
-  PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev);
+  /** Who may write this type on this box: the one rule its doors and main's commit decide by. */
+  WriteAuthority authority();
+
+  /**
+   * Compare-and-set commit of an authoritative state ({@code null} = delete). After the
+   * compare-and-set and the store's integrity checks, and before its first write, {@code authority}
+   * decides the revision for the bound actor; a refusal is {@link PushOutcome.Denied} with the
+   * store's present state.
+   */
+  PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority);
 
   /**
    * The state the replica reports as "current" to the sync engine — {@link #comparableSnapshot} for

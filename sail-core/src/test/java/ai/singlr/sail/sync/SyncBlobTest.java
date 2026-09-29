@@ -48,7 +48,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @Timeout(value = 3, unit = TimeUnit.MINUTES)
-@ActingAs
+@ActingAs(value = Actor.Lane.CLI, handle = "node")
 class SyncBlobTest {
 
   @Test

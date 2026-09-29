@@ -12,7 +12,7 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.identity.Ownership;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -32,8 +32,9 @@ import java.util.function.Supplier;
  *
  * <p>The roster seats many members by schema; this surface currently seats one standing agent per
  * room, so adding a member replaces the previous one exactly as engagement always did. A spec-less
- * room is managed from its owner's box ({@link Ownership#ownerOf}), a spec's room under the spec's
- * dispatch tier.
+ * room is managed from its owner's box ({@link RoomStore#ownerOf}), a spec's room under the spec's
+ * dispatch tier; either way the roster is the room owner's to change, so engaging through a spec
+ * born in someone else's room is refused before anything is probed or launched.
  */
 public final class MembershipService {
 
@@ -124,8 +125,8 @@ public final class MembershipService {
       return engageSpecless(specId, agentYamlName, mode, model, localHandle);
     }
     LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
+    authorizeRoster(spec.roomIdOrIdentity());
     admission.requireTrustedRoster(localHandle);
-    requireRooms();
     var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
     try {
@@ -173,8 +174,7 @@ public final class MembershipService {
                 () ->
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    LaunchAdmission.requireAllowedForRoom(
-        roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
+    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     admission.requireTrustedRoster(localHandle);
     var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -231,6 +231,7 @@ public final class MembershipService {
       return disengageSpecless(specId, localHandle);
     }
     LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
+    authorizeRoster(spec.roomIdOrIdentity());
     var standing = stateOf(rooms.get(), spec).standing();
     if (standing == null) {
       return null;
@@ -253,8 +254,7 @@ public final class MembershipService {
                 () ->
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
-    LaunchAdmission.requireAllowedForRoom(
-        roomId, Ownership.ownerOf(room.assignee(), room.createdBy()), localHandle);
+    LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {
       return null;
@@ -266,6 +266,17 @@ public final class MembershipService {
         Event.WellKnownTypes.SPEC_DISENGAGED,
         Map.of("agent", standing.agent(), "mode", standing.mode()));
     return standing.agent();
+  }
+
+  /**
+   * Asks the room rule whether the actor may change the roster of {@code roomId}, the room the spec
+   * converses in — its own, or the room it was born in, whoever's that is.
+   */
+  private void authorizeRoster(String roomId) {
+    var store = requireRooms();
+    var held = store.comparableSnapshot(roomId);
+    Refusals.enforce(
+        store.authority().decide(Actor.current(), roomId, held, held == null ? Map.of() : held));
   }
 
   private void persistMembership(String specId, Engagement member) {

@@ -12,12 +12,14 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CyclicBarrier;
 import org.junit.jupiter.api.AfterEach;
@@ -189,7 +191,11 @@ class FileStoreTest {
     files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "AAA"), "1-base");
 
     var outcome =
-        files.commitRevision(id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "1-base");
+        files.commitRevision(
+            id("a.txt"),
+            ContentFixtures.snapshot(files, "BBB"),
+            "1-base",
+            new WriterAuthority(db, "files"));
 
     assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertEquals("BBB", ContentFixtures.text(files, "acme", "a.txt"));
@@ -200,7 +206,11 @@ class FileStoreTest {
     files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "AAA"), "1-base");
 
     var outcome =
-        files.commitRevision(id("a.txt"), ContentFixtures.snapshot(files, "BBB"), "9-stale");
+        files.commitRevision(
+            id("a.txt"),
+            ContentFixtures.snapshot(files, "BBB"),
+            "9-stale",
+            new WriterAuthority(db, "files"));
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals("1-base", stale.currentRev());
@@ -210,7 +220,9 @@ class FileStoreTest {
 
   @Test
   void committingADeleteOfAnAbsentFileIsANoOpAccept() {
-    assertInstanceOf(PushOutcome.Accepted.class, files.commitRevision(id("ghost"), null, null));
+    assertInstanceOf(
+        PushOutcome.Accepted.class,
+        files.commitRevision(id("ghost"), null, null, (actor, id, held, next) -> Optional.empty()));
     assertTrue(files.find("acme", "ghost").isEmpty());
   }
 
@@ -376,7 +388,11 @@ class FileStoreTest {
               try {
                 gate.await();
                 outcomes.add(
-                    store.commitRevision(fid, ContentFixtures.snapshot(store, content), base));
+                    store.commitRevision(
+                        fid,
+                        ContentFixtures.snapshot(store, content),
+                        base,
+                        (actor, id, held, next) -> Optional.empty()));
               } catch (Throwable t) {
                 errors.add(t);
               }

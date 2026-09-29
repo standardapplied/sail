@@ -46,6 +46,11 @@ public final class SyncedEntities {
     List<SyncTransition> detect(String id, Map<String, Object> before, Map<String, Object> after);
   }
 
+  /**
+   * One replicated type: its store, which declares who may write it ({@link
+   * SyncedStore#authority}), how it resolves a parked conflict, which of its changes a node pushes
+   * ({@code pushPolicy}), and which of its revisions are transitions worth narrating.
+   */
   public record Entity(
       String type,
       Function<Sqlite, SyncedStore> factory,

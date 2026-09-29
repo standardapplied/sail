@@ -138,7 +138,9 @@ class MessageSyncTest {
         () -> main.messages.applyRevision(row.id(), changed, row.rev()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> main.messages.commitRevision(row.id(), null, main.messages.latestRev(row.id())));
+        () ->
+            main.messages.commitRevision(
+                row.id(), null, main.messages.latestRev(row.id()), main.messages.authority()));
   }
 
   @Test
@@ -157,7 +159,8 @@ class MessageSyncTest {
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000ab",
                     snapshot(reviewerPrincipal, "room"),
-                    null));
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -177,7 +180,10 @@ class MessageSyncTest {
             Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
+                    "019fee00-0000-7000-8000-0000000000ac",
+                    snapshot("node", "orphan"),
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -205,7 +211,10 @@ class MessageSyncTest {
             Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
+                    "019fee00-0000-7000-8000-0000000000bc",
+                    snapshot("sail", "room"),
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -224,13 +233,17 @@ class MessageSyncTest {
                 Actor.sync("node", Role.MEMBER),
                 () ->
                     main.messages.commitRevision(
-                        "019fee00-0000-7000-8000-0000000000bd", snapshot("sail", "room"), null)));
+                        "019fee00-0000-7000-8000-0000000000bd",
+                        snapshot("sail", "room"),
+                        null,
+                        main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'sail'"), denied.reason());
   }
 
   @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     new FdeStore(main.db).add("admin", null, null, "admin");
     var messageId = "00000000-0000-7000-8000-000000000001";
 
@@ -239,7 +252,9 @@ class MessageSyncTest {
             PushOutcome.Denied.class,
             Actor.call(
                 Actor.sync("node", Role.MEMBER),
-                () -> main.messages.commitRevision(messageId, snapshot("admin", "room"), null)));
+                () ->
+                    main.messages.commitRevision(
+                        messageId, snapshot("admin", "room"), null, main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'admin'"), denied.reason());
     assertNull(denied.currentRev(), "main holds no version of a message it never took");
@@ -283,7 +298,9 @@ class MessageSyncTest {
           var outcome =
               Actor.call(
                   Actor.sync("mady", Role.MEMBER),
-                  () -> main.messages.commitRevision(id, snapshot("mady", conversation), null));
+                  () ->
+                      main.messages.commitRevision(
+                          id, snapshot("mady", conversation), null, main.messages.authority()));
 
           assertEquals(
               Ownership.owns("mady", assignee, creator),
@@ -304,7 +321,10 @@ class MessageSyncTest {
             Actor.sync("mallory", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "00000000-0000-7000-8000-000000000002", snapshot("mallory", "room"), null)));
+                    "00000000-0000-7000-8000-000000000002",
+                    snapshot("mallory", "room"),
+                    null,
+                    main.messages.authority())));
 
     assertTrue(main.messages.list("room", null, 10).isEmpty());
   }
@@ -321,14 +341,38 @@ class MessageSyncTest {
                         main.messages.commitRevision(
                             "00000000-0000-7000-8000-000000000003",
                             snapshot("node", "missing"),
-                            null)));
+                            null,
+                            main.messages.authority())));
 
     assertTrue(refused.getMessage().contains("room 'missing'"), refused.getMessage());
     assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000003").isEmpty());
   }
 
   @Test
+  void anAuthorNamingARunMainHasNeverHeldIsRefusedUntilItLands() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    var unheld = "codex/00000000-0000-7000-8000-0000000000ee";
+
+    var refused =
+        assertThrows(
+            SyncedStore.Unheld.class,
+            () ->
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
+                    () ->
+                        main.messages.commitRevision(
+                            "00000000-0000-7000-8000-000000000004",
+                            snapshot(unheld, "room"),
+                            null,
+                            main.messages.authority())));
+
+    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
+    assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000004").isEmpty());
+  }
+
+  @Test
   void anAuthorMainCannotPlaceIsDenied() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var denied =
         assertInstanceOf(
             PushOutcome.Denied.class,
@@ -337,14 +381,15 @@ class MessageSyncTest {
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000004",
-                        snapshot("codex/unknown-run", "room"),
-                        null)));
+                        snapshot("codex-not-a-run", "room"),
+                        null,
+                        main.messages.authority())));
 
-    assertTrue(denied.reason().contains("may not post as 'codex/unknown-run'"), denied.reason());
+    assertTrue(denied.reason().contains("may not post as 'codex-not-a-run'"), denied.reason());
   }
 
   @Test
-  void authenticatedPeerMayPostAsItsRunPrincipalOnlyOnThatRunsSpec() {
+  void aPeerPostsAsItsRunsPrincipalWhereverItMayPost() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     main.db.execute(
         """
@@ -353,19 +398,38 @@ class MessageSyncTest {
              principal, owner)
         VALUES
             ('00000000-0000-7000-8000-000000000010', 'acme', 'room', 'node', 'build',
-             'codex', 'agent/messages', 'task', 'running', 'now', 'codex/run-1', 'node')""");
+             'codex', 'agent/messages', 'task', 'running', 'now', 'codex/00000000-0000-7000-8000-000000000010', 'node')""");
     var acceptedId = "00000000-0000-7000-8000-000000000011";
 
     Actor.call(
         Actor.sync("node", Role.MEMBER),
-        () -> main.messages.commitRevision(acceptedId, snapshot("codex/run-1", "room"), null));
+        () ->
+            main.messages.commitRevision(
+                acceptedId,
+                snapshot("codex/00000000-0000-7000-8000-000000000010", "room"),
+                null,
+                main.messages.authority()));
 
-    assertEquals("codex/run-1", main.messages.findById(acceptedId).orElseThrow().author());
+    assertEquals(
+        "codex/00000000-0000-7000-8000-000000000010",
+        main.messages.findById(acceptedId).orElseThrow().author());
 
     main.db.execute(
         """
-        INSERT INTO rooms (id, title, project, created_at, updated_at)
-        VALUES ('other-room', 'Other room', 'acme', 'now', 'now')""");
+        INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+        VALUES ('mine', 'Mine', 'acme', 'node', 'now', 'now'),
+            ('other-room', 'Other room', 'acme', 'else', 'now', 'now')""");
+    assertInstanceOf(
+        PushOutcome.Accepted.class,
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000013",
+                    snapshot("codex/00000000-0000-7000-8000-000000000010", "mine"),
+                    null,
+                    main.messages.authority())),
+        "a run's principal posts beyond its own conversation, where its FDE may");
     assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(
@@ -373,8 +437,9 @@ class MessageSyncTest {
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000012",
-                    snapshot("codex/run-1", "other-room"),
-                    null)));
+                    snapshot("codex/00000000-0000-7000-8000-000000000010", "other-room"),
+                    null,
+                    main.messages.authority())));
   }
 
   private static Map<String, Object> snapshot(String author, String specId) {

@@ -227,7 +227,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     return new Target(
         id,
         room.project(),
-        Ownership.owns(localHandle.get(), room.assignee(), room.createdBy()),
+        Ownership.owns(localHandle.get(), roomStore.ownerOf(id)),
         MembershipService.RoomState.of(room),
         false,
         false,

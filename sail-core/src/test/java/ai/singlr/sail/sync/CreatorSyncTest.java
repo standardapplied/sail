@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -15,15 +16,17 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * A spec's creator travels with it as {@code _created_by} and is written once. Carol creates an
- * unassigned spec on Alice's node; Alice pushes, Bob pulls, and all three name Carol, whatever a
- * later offer carries. A create that names no creator, as an older node's does, records the pusher.
+ * A spec's creator travels with it as {@code _created_by} and is written once. Alice creates an
+ * unassigned spec on her node; she pushes, Bob pulls, and all three name Alice, whatever a later
+ * offer carries. A create that names no creator, as an older node's does, records the pusher, and a
+ * create naming anyone else is denied: a box creates only as its own FDE.
  */
 class CreatorSyncTest {
 
@@ -48,19 +51,33 @@ class CreatorSyncTest {
 
   @Test
   void aNodeBornSpecsCreatorIsRecordedOnMainAndAdoptedByAThirdBox() throws IOException {
-    Acting.as("carol", () -> alice.specs.create(unassigned("draft")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("draft")));
 
     round(alice);
     round(bob);
 
-    assertEquals("carol", creatorOf(main, "draft"), "main");
-    assertEquals("carol", creatorOf(alice, "draft"), "the originating node");
-    assertEquals("carol", creatorOf(bob, "draft"), "a pulling node");
+    assertEquals("alice", creatorOf(main, "draft"), "main");
+    assertEquals("alice", creatorOf(alice, "draft"), "the originating node");
+    assertEquals("alice", creatorOf(bob, "draft"), "a pulling node");
+  }
+
+  @Test
+  void aCreateForAnotherFdeIsDeniedAndLeavesEveryBox() throws IOException {
+    Acting.as("carol", () -> alice.specs.create(unassigned("draft")));
+
+    var report = round(alice);
+
+    assertEquals(List.of("draft"), report.denials().stream().map(SyncSession.Denial::id).toList());
+    assertTrue(main.specs.findById("draft").isEmpty(), "main never holds it");
+    assertTrue(alice.specs.findById("draft").isEmpty(), "the node adopts main's absence");
+    assertTrue(
+        alice.specs.history("draft").stream().anyMatch(entry -> entry.snapshot().contains("carol")),
+        "the denied create stays in the node's history");
   }
 
   @Test
   void aCreateThatNamesNoCreatorRecordsThePusher() throws IOException {
-    Acting.as("carol", () -> alice.specs.create(unassigned("legacy")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("legacy")));
     alice.db.execute("UPDATE specs SET created_by = NULL WHERE id = 'legacy'");
 
     round(alice);
@@ -73,7 +90,7 @@ class CreatorSyncTest {
 
   @Test
   void anOfferWithoutACreatorKeepsMainsCreator() throws IOException {
-    Acting.as("carol", () -> alice.specs.create(unassigned("draft")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("draft")));
     round(alice);
     alice.db.execute("UPDATE specs SET created_by = NULL WHERE id = 'draft'");
 
@@ -82,14 +99,14 @@ class CreatorSyncTest {
     round(bob);
 
     assertEquals("Retitled", main.specs.findById("draft").orElseThrow().title());
-    assertEquals("carol", creatorOf(main, "draft"));
-    assertEquals("carol", creatorOf(alice, "draft"), "the pusher adopts main's creator");
-    assertEquals("carol", creatorOf(bob, "draft"));
+    assertEquals("alice", creatorOf(main, "draft"));
+    assertEquals("alice", creatorOf(alice, "draft"), "the pusher adopts main's creator");
+    assertEquals("alice", creatorOf(bob, "draft"));
   }
 
   @Test
   void aLaterOfferNamingAnotherCreatorDoesNotChangeIt() throws IOException {
-    Acting.as("carol", () -> alice.specs.create(unassigned("draft")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("draft")));
     round(alice);
     alice.db.execute("UPDATE specs SET created_by = 'mallory' WHERE id = 'draft'");
 
@@ -98,14 +115,14 @@ class CreatorSyncTest {
     round(bob);
 
     assertEquals("Retitled", bob.specs.findById("draft").orElseThrow().title());
-    assertEquals("carol", creatorOf(main, "draft"));
-    assertEquals("carol", creatorOf(alice, "draft"), "the pusher adopts main's creator");
-    assertEquals("carol", creatorOf(bob, "draft"));
+    assertEquals("alice", creatorOf(main, "draft"));
+    assertEquals("alice", creatorOf(alice, "draft"), "the pusher adopts main's creator");
+    assertEquals("alice", creatorOf(bob, "draft"));
   }
 
   @Test
   void anExistingSpecGainsItsCreatorOnItsNextRevision() throws IOException {
-    Acting.as("carol", () -> alice.specs.create(unassigned("draft")));
+    Acting.as("alice", () -> alice.specs.create(unassigned("draft")));
     round(alice);
     round(bob);
     bob.db.execute("UPDATE specs SET created_by = NULL WHERE id = 'draft'");
@@ -113,7 +130,7 @@ class CreatorSyncTest {
     retitle(main, "draft", "Retitled");
     round(bob);
 
-    assertEquals("carol", creatorOf(bob, "draft"));
+    assertEquals("alice", creatorOf(bob, "draft"));
   }
 
   @Test
@@ -138,9 +155,9 @@ class CreatorSyncTest {
 
     retitle(bob, "other", "By bob");
     retitle(alice, "legacy", "By alice");
-    round(bob);
-    round(alice);
-    round(bob);
+    round(bob, "spec", Role.ADMIN);
+    round(alice, "spec", Role.ADMIN);
+    round(bob, "spec", Role.ADMIN);
 
     assertNull(creatorOf(main, "other"), "a push may name only its own FDE as the creator");
     assertNull(creatorOf(bob, "other"));
@@ -165,20 +182,24 @@ class CreatorSyncTest {
     assertEquals("alice", posted.getFirst().author());
   }
 
-  private void round(SyncBox box) throws IOException {
-    round(box, "spec");
+  private SyncSession.TypeReport round(SyncBox box) throws IOException {
+    return round(box, "spec");
   }
 
-  private void round(SyncBox box, String type) throws IOException {
-    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, Role.MEMBER)), box)) {
-      link.reconcile(type, SyncedEntities.replicas(box.db, box.id, box.id).get(type));
+  private SyncSession.TypeReport round(SyncBox box, String type) throws IOException {
+    return round(box, type, Role.MEMBER);
+  }
+
+  private SyncSession.TypeReport round(SyncBox box, String type, Role role) throws IOException {
+    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, role)), box)) {
+      return link.reconcile(type, SyncedEntities.replicas(box.db, box.id, box.id).get(type));
     }
   }
 
   private static void retitle(SyncBox box, String id, String title) {
     var row = box.specs.findById(id).orElseThrow();
     Acting.as(
-        "carol",
+        box.id,
         () ->
             box.specs.update(
                 new SpecStore.SpecRow(

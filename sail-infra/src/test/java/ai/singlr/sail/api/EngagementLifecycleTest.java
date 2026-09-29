@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -161,7 +162,7 @@ class EngagementLifecycleTest {
     return events.stream().filter(e -> type.equals(e.type())).toList();
   }
 
-  private static final class StubShell implements ShellExec {
+  private static class StubShell implements ShellExec {
     private final Map<String, ShellExec.Result> scripts = new LinkedHashMap<>();
     private final List<String> order;
 
@@ -571,6 +572,68 @@ class EngagementLifecycleTest {
 
     assertEquals(ErrorCode.COMMAND_FAILED, refusal.failure().errorCode());
     assertNull(stored("auth"), "nothing was seated");
+  }
+
+  @Test
+  void aRosterInSomeoneElsesRoomIsRefusedThroughASpecBornThereBeforeAnythingIsProbed()
+      throws Exception {
+    var probed = new ArrayList<String>();
+    var ops =
+        operations(
+            new StubShell(order) {
+              @Override
+              public ShellExec.Result exec(List<String> command) {
+                probed.add(String.join(" ", command));
+                return super.exec(command);
+              }
+            });
+    Acting.as(
+        "bob",
+        () ->
+            roomStore.create(
+                new RoomStore.RoomRow(
+                    "den", "acme", "Den", "bob", null, null, null, null, null, null)));
+    Acting.as(
+        HANDLE,
+        () ->
+            specStore.create(
+                new SpecStore.SpecRow(
+                        "child",
+                        "acme",
+                        "Child",
+                        SpecStatus.DRAFT,
+                        HANDLE,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        HANDLE,
+                        "",
+                        "",
+                        null,
+                        List.of(),
+                        List.of("app"))
+                    .withRoomId("den")));
+    var uday = new Actor(HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    for (var engaging : List.of(true, false)) {
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () ->
+                  Actor.call(
+                      uday,
+                      () ->
+                          engaging
+                              ? ops.engage("child", "claude-code", null, null, false, HANDLE)
+                              : ops.disengage("child", HANDLE)));
+      assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+      assertEquals("Room 'den' belongs to 'bob', not you.", refused.getMessage());
+    }
+    assertEquals(List.of(), probed, "nothing is probed or launched");
+    assertNull(roomMember("den"));
+    assertTrue(ofType(Event.WellKnownTypes.SPEC_ENGAGED).isEmpty());
   }
 
   @Test

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.SpecAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -875,6 +877,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return Set.of("body_hash", "plan_hash");
   }
 
+  /** Who may write a spec on this box: the rule every door and main's commit decide by. */
+  @Override
+  public SpecAuthority authority() {
+    return new SpecAuthority(db);
+  }
+
+  /**
+   * Spec {@code id} as a rule reads what this box holds: its projection, or the last live one its
+   * tombstone kept ({@link RevisionJournal#held}); null for a spec this box never held.
+   */
+  public Map<String, Object> held(String id) {
+    return journal.held(id);
+  }
+
   @Override
   public Set<String> liveContentHashes() {
     var hashes =
@@ -919,8 +935,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.entityIds();
   }
 
+  /**
+   * Every spec with a change main has not taken, but a spec born in a room main has never
+   * acknowledged: main decides a birth by its room, and rooms sync after specs, so the spec waits a
+   * round for its room rather than be refused.
+   */
   public Set<String> dirtyIds() {
-    return journal.dirtyIds();
+    var dirty = journal.dirtyIds();
+    dirty.removeAll(
+        db.query(
+            """
+            SELECT s.id FROM specs s JOIN rooms r ON r.id = s.room_id
+            WHERE s.room_id <> s.id AND (r.base_rev IS NULL OR r.base_rev = '')""",
+            row -> row.text(0)));
+    return dirty;
   }
 
   /** Attributes a spec solely for the retained versioned 0.14 data migration. */
@@ -963,8 +991,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * null snapshot commits a deletion. The check and the write share one transaction, so two nodes
    * pushing the same row can never both win. Used by the sync engine on the main side.
    */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**
@@ -1012,9 +1041,21 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       return findById(id).map(SpecStore.this::snapshotMap).orElse(null);
     }
 
+    /**
+     * A revision re-creating a deleted spec keeps the creator its tombstone recorded, as an update
+     * keeps the row's ({@link Snapshots#adoptedCreator}): a restore never renames its creator.
+     */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      applySnapshot(id, withSync(id, snapshot));
+      var full = withSync(id, snapshot);
+      if (!exists(id)) {
+        lastKnown(id)
+            .ifPresent(
+                tombstone ->
+                    full.put(
+                        "created_by", Snapshots.adoptedCreator(snapshot, tombstone.createdBy())));
+      }
+      applySnapshot(id, full);
     }
 
     @Override

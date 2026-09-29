@@ -255,6 +255,23 @@ class ReviewOperationsTest {
   }
 
   @Test
+  void createFollowupActsOnTheSourceReviewUnderTheReviewRuleBeforeWritingAnything() {
+    seedPassedReviewWithOpenFindings();
+    var mady = new Actor("mady", Role.MEMBER, Actor.Lane.API);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Acting.by(mady, () -> ops.createFollowup("auth", new FollowupCreateRequest(null))));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertTrue(refused.getMessage().contains("which has no owner"), refused.getMessage());
+    assertTrue(specStore.findById("auth-followup").isEmpty());
+    assertEquals(List.of(), reviewStore.sourceFindingIds("auth-followup"));
+  }
+
+  @Test
   void createFollowupRejectsAnInvalidExplicitId() {
     seedPassedReviewWithOpenFindings();
 

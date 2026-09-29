@@ -528,7 +528,29 @@ class StopOperationsTest {
     var outcome =
         Actor.call(member, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
 
-    assertInstanceOf(StopOperations.Stopped.class, outcome);
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertFalse(stopped.specCancelled(), "the spec is its new owner's to change");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+  }
+
+  @Test
+  void aTerminalRunOfASpecThatMovedLeavesTheSpecToItsNewOwner() throws Exception {
+    var ops =
+        stopOps(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            failingHalter(),
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, "raj");
+    seedRun(123, UNIT);
+    runStore.complete(R1, "completed", 0);
+    var member = new Actor(LOCAL_HANDLE, Role.MEMBER, Actor.Lane.CLI);
+
+    var outcome =
+        Actor.call(member, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.AlreadyTerminal.class, outcome);
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test

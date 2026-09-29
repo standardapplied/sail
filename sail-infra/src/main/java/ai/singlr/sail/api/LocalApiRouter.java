@@ -31,8 +31,8 @@ import java.util.Set;
  * box.credential} file sharing the socket's bind mount), resolving to the box FDE with its roster
  * role. Run credentials resolve first, so a launched agent is always its principal. A missing,
  * revoked, or unknown credential fails loud with 401 and never falls back to a client-chosen actor.
- * Spec writes flow through {@link SpecPolicy} either way; the events route is run-only, and the
- * dispatch/stop routes do not exist here at all.
+ * Spec writes are decided by the spec rule ({@code SpecAuthority}) either way; the events route is
+ * run-only, and the dispatch/stop routes do not exist here at all.
  */
 final class LocalApiRouter implements LocalApiHandler {
 
@@ -188,7 +188,7 @@ final class LocalApiRouter implements LocalApiHandler {
       return runSession(request, caller);
     }
     if (SPECS.equals(path)) {
-      return specsCollection(request, caller);
+      return specsCollection(request);
     }
     if ((SPECS + "/board").equals(path)) {
       return board(request);
@@ -280,18 +280,14 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * Spec creation takes no policy actor today, so the room lane's refusal lives here at the route:
-   * a chat session reads and converses, it never mints work items.
+   * Spec creation is the spec rule's, like every spec write: a read-only credential — a room
+   * session's, or a viewer's box credential — is refused there, never minting a work item.
    */
-  private ApiResponse specsCollection(LocalApiRequest request, Caller caller) {
+  private ApiResponse specsCollection(LocalApiRequest request) {
     return switch (request.method()) {
       case "GET" -> ApiResponse.from(operations.globalSpecs(filterFrom(request.query())));
-      case "POST" -> {
-        if (caller.actor().roomLane()) {
-          yield problem(403, "A room session reads and converses; it cannot create specs.");
-        }
-        yield ApiResponse.fromCreated(operations.createGlobalSpec(createFrom(request.form())));
-      }
+      case "POST" ->
+          ApiResponse.fromCreated(operations.createGlobalSpec(createFrom(request.form())));
       default -> problem(405, "specs accepts GET or POST");
     };
   }

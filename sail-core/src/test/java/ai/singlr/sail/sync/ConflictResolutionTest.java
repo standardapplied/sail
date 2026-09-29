@@ -12,8 +12,11 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,12 +57,18 @@ class ConflictResolutionTest {
     main.close();
   }
 
-  private void sync(SyncBox box) {
-    SyncBox.round(main.db, box.db, "spec");
+  /** One spec round of {@code box}, pushing as the FDE whose box it is, an admin. */
+  private SyncEngine.Report sync(SyncBox box) {
+    try (var link = SyncBox.connect(main.server(Actor.sync(box.id, Role.ADMIN)), box)) {
+      return link.reconcile("spec", SyncedEntities.replicas(box.db, box.id, box.id).get("spec"))
+          .report();
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   private SyncConflicts.Conflict raiseTitleConflict() {
-    node.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    node.create(SyncBox.spec("auth", "Auth", "pending"));
     sync(node);
     sync(other);
 
@@ -104,7 +113,7 @@ class ConflictResolutionTest {
 
     assertEquals("Title from other", node.specs.findById("auth").orElseThrow().title());
 
-    var second = SyncBox.round(main.db, node.db, "spec");
+    var second = sync(node);
     assertEquals(0, second.conflicts());
     assertEquals("Title from other", main.specs.findById("auth").orElseThrow().title());
     assertTrue(
@@ -114,36 +123,36 @@ class ConflictResolutionTest {
 
   @Test
   void takeTheirsKeepsMainsAuthorOnTheResolvingNode() {
-    var theirs = snapshot(raiseTitleConflictBetween("mady", "rajesh").remoteSnapshot());
+    var theirs = snapshot(raiseTitleConflictBetween("other", "node").remoteSnapshot());
 
-    Acting.as("rajesh", () -> node.specs.resolveConflict("auth", theirs, theirs));
+    Acting.as("node", () -> node.specs.resolveConflict("auth", theirs, theirs));
 
-    assertEquals("mady", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("other", main.specs.findById("auth").orElseThrow().updatedBy());
     assertEquals(
-        "mady",
+        "other",
         node.specs.findById("auth").orElseThrow().updatedBy(),
-        "main's title, adopted, is still mady's");
+        "main's title, adopted, is still other's");
     var head = node.specs.history("auth").getLast();
-    assertEquals("mady", head.actor());
+    assertEquals("other", head.actor());
     assertEquals(Actor.MAIN_HANDLE, head.peer());
   }
 
   @Test
   void keepMineCreditsTheResolverOnlyWithItsOwnEdit() {
-    var conflict = raiseTitleConflictBetween("mady", "rajesh");
+    var conflict = raiseTitleConflictBetween("other", "node");
     var mine = snapshot(conflict.localSnapshot());
     var theirs = snapshot(conflict.remoteSnapshot());
 
-    Acting.as("rajesh", () -> node.specs.resolveConflict("auth", mine, theirs));
+    Acting.as("node", () -> node.specs.resolveConflict("auth", mine, theirs));
 
     var history = node.specs.history("auth");
-    assertEquals("mady", history.get(history.size() - 2).actor(), "the adopted base is main's");
-    assertEquals("rajesh", history.getLast().actor());
-    assertEquals("rajesh", node.specs.findById("auth").orElseThrow().updatedBy());
+    assertEquals("other", history.get(history.size() - 2).actor(), "the adopted base is main's");
+    assertEquals("node", history.getLast().actor());
+    assertEquals("node", node.specs.findById("auth").orElseThrow().updatedBy());
   }
 
   private SyncConflicts.Conflict raiseTitleConflictBetween(String onOther, String onNode) {
-    Acting.as(onNode, () -> node.specs.create(SyncBox.spec("auth", "Auth", "pending")));
+    Acting.as(onNode, () -> node.create(SyncBox.spec("auth", "Auth", "pending")));
     sync(node);
     sync(other);
     Acting.as(
@@ -174,7 +183,7 @@ class ConflictResolutionTest {
 
   @Test
   void resolvingDeleteVersusEditByTakingTheRemoteEditReCreatesLocally() {
-    node.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    node.create(SyncBox.spec("auth", "Auth", "pending"));
     sync(node);
     sync(other);
 
@@ -191,13 +200,13 @@ class ConflictResolutionTest {
     node.conflicts.resolve(conflict.id(), rev);
 
     assertEquals("Edited by other", node.specs.findById("auth").orElseThrow().title());
-    var second = SyncBox.round(main.db, node.db, "spec");
+    var second = sync(node);
     assertEquals(0, second.conflicts());
   }
 
   @Test
   void resolvingDeleteVersusEditByKeepingTheLocalDeleteRemovesItEverywhere() {
-    node.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    node.create(SyncBox.spec("auth", "Auth", "pending"));
     sync(node);
     sync(other);
 
@@ -220,7 +229,7 @@ class ConflictResolutionTest {
 
   @Test
   void resolvingEditVersusRemoteDeleteByKeepingMineReCreatesOnMain() {
-    other.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    other.create(SyncBox.spec("auth", "Auth", "pending"));
     sync(other);
     sync(node);
 

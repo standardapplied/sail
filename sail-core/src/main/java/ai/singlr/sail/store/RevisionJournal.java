@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
@@ -209,19 +210,29 @@ public final class RevisionJournal implements ConflictResolver {
    * Compare-and-set commit as main: mints a new authoritative rev only if {@code expectedRev} still
    * equals the entity's current rev (a brand-new entity expects {@code null}); otherwise returns
    * {@link PushOutcome.Stale} with main's present state, never overwriting a concurrent change. A
-   * null snapshot commits a deletion. The check and the write share one transaction, so two nodes
-   * pushing the same row can never both win. Used by the sync engine on the main side.
+   * null snapshot commits a deletion. Once the offer is current, {@code authority} decides it for
+   * the bound actor before anything is written, and a refusal is {@link PushOutcome.Denied} with
+   * main's present state; a read-only role's content is never uploaded, so it is decided before the
+   * content an accepted revision needs is required. The check, the decision and the write share one
+   * transaction, so two nodes pushing the same row can never both win. Used by the sync engine on
+   * the main side.
    */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
     return db.transaction(
         () -> {
           if (!Objects.equals(latestRev(id), expectedRev)) {
             return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
           }
+          if (snapshot == null && !schema.exists(id)) {
+            return new PushOutcome.Accepted(latestRev(id));
+          }
+          var refusal = authority.decide(Actor.current(), id, held(id), snapshot);
+          if (refusal.isPresent()) {
+            return new PushOutcome.Denied(
+                refusal.get().message(), latestRev(id), comparableSnapshot(id));
+          }
           if (snapshot == null) {
-            if (!schema.exists(id)) {
-              return new PushOutcome.Accepted(latestRev(id));
-            }
             var rev = recordRevision(id, null, null, "sync", true, false);
             schema.deleteRow(id);
             return new PushOutcome.Accepted(rev);
@@ -231,6 +242,23 @@ public final class RevisionJournal implements ConflictResolver {
               recordRevision(
                   id, null, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, false));
         });
+  }
+
+  /**
+   * What this box holds of {@code id}, as a rule reads it: its comparable snapshot, or for an
+   * entity whose latest word is a tombstone the last live state the tombstone kept, so a restore is
+   * decided against what it restores. Null for an entity this box never held.
+   */
+  public Map<String, Object> held(String id) {
+    var live = comparableSnapshot(id);
+    if (live != null) {
+      return live;
+    }
+    return changeLog
+        .head(schema.entityType(), id)
+        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .map(head -> authored(schema.comparable(YamlUtil.parseMap(head.snapshot())), head.actor()))
+        .orElse(null);
   }
 
   /**

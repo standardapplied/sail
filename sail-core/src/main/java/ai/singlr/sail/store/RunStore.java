@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.RunAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Secrets;
@@ -413,12 +415,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
    * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the reviewed spec's assignee — the FDE the review principal acts for. Fails if an exclusive
-   * container lease (see {@link #acquireContainerLease}) is held — a review must never launch into
-   * a container mid-restore; the pipeline surfaces the error and the reconciler's rescue replay
-   * retries the kickoff after the lease is released. Returns the run's plaintext credential,
-   * surfaced exactly once so the launched review agent can actually act as the principal this row
-   * records; only the hash is at rest.
+   * is the FDE the review principal acts for: the box's own FDE, whose box runs and pushes it, or
+   * the spec's owner on a box that names no FDE. Fails if an exclusive container lease (see {@link
+   * #acquireContainerLease}) is held — a review must never launch into a container mid-restore; the
+   * pipeline surfaces the error and the reconciler's rescue replay retries the kickoff after the
+   * lease is released. Returns the run's plaintext credential, surfaced exactly once so the
+   * launched review agent can actually act as the principal this row records; only the hash is at
+   * rest.
    */
   public String createReview(
       String reviewId,
@@ -713,9 +716,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /**
    * Reservation for a chat lane that may serve a room with no spec: {@code roomId} is stored on the
-   * run (a sync-local column, like the credential and delivery ledger — never journaled) and
-   * substitutes for the spec in the gate's serialization scope, so two wakes of the same spec-less
-   * room still conflict.
+   * run, replicated in its snapshot like the spec it stands in for, and substitutes for the spec in
+   * the gate's serialization scope, so two wakes of the same spec-less room still conflict.
    */
   public Reservation reserveDispatch(
       String id,
@@ -792,6 +794,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   private static List<String> repoList(String json) {
     return json == null ? List.of() : YamlUtil.parseStringList(json);
+  }
+
+  /** Who may write a run on this box: the rule every door and main's commit decide by. */
+  @Override
+  public RunAuthority authority() {
+    return new RunAuthority(db);
   }
 
   public Optional<RunRow> findById(String id) {
@@ -940,13 +948,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
-   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
-   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
-   * it must be exactly as collision-proof as the run id itself.
-   */
-  /**
    * The run's replicated, append-only principal history: every identity a legitimate invocation of
    * this run has ever posted under. The runs row keeps only the current principal for honest live
    * attribution; message authorization on main checks membership here, so a room message authored
@@ -958,6 +959,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         "SELECT principal FROM run_principals WHERE run_id = ? ORDER BY principal",
         row -> row.text(0),
         id);
+  }
+
+  /** The run whose current or past principals name {@code principal}, if this box holds one. */
+  public Optional<RunRow> byPrincipal(String principal) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE principal = ?1 OR id IN"
+            + " (SELECT run_id FROM run_principals WHERE principal = ?1) LIMIT 1",
+        this::mapRow,
+        principal);
   }
 
   private void recordPrincipal(String id, String principal) {
@@ -983,6 +995,39 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return handle != null && handle.contains("/");
   }
 
+  /**
+   * Whether {@code principal} names run {@code runId} in the shape {@link #principalHandle} mints —
+   * {@code <family>/<marker><run id>}, the marker one of none, {@code review-}, {@code fix-} or
+   * {@code room-} — so a run can carry no principal but its own.
+   */
+  public static boolean namesRun(String principal, String runId) {
+    return runId != null && runOf(principal).filter(runId::equals).isPresent();
+  }
+
+  /** The run {@code principal} names, when it has the shape {@link #principalHandle} mints. */
+  public static Optional<String> runOf(String principal) {
+    if (!isPrincipalHandle(principal) || principal.indexOf('/') != principal.lastIndexOf('/')) {
+      return Optional.empty();
+    }
+    var tail = principal.substring(principal.indexOf('/') + 1);
+    var marker = PRINCIPAL_MARKERS.stream().filter(tail::startsWith).findFirst().orElse("");
+    var runId = tail.substring(marker.length());
+    return runId.isEmpty() ? Optional.empty() : Optional.of(runId);
+  }
+
+  private static final String REVIEW_MARKER = "review-";
+  private static final String FIX_MARKER = "fix-";
+  private static final String ROOM_MARKER = "room-";
+  private static final List<String> PRINCIPAL_MARKERS =
+      List.of(REVIEW_MARKER, FIX_MARKER, ROOM_MARKER);
+
+  /**
+   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
+   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
+   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
+   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
+   * it must be exactly as collision-proof as the run id itself.
+   */
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
@@ -990,9 +1035,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     var runId = Objects.requireNonNull(id, "run id");
     var marker =
         switch (Lane.of(role).orElse(null)) {
-          case REVIEW -> "review-";
-          case FIX -> "fix-";
-          case ROOM -> "room-";
+          case REVIEW -> REVIEW_MARKER;
+          case FIX -> FIX_MARKER;
+          case ROOM -> ROOM_MARKER;
           case null, default -> "";
         };
     return base + "/" + marker + runId;
@@ -1111,7 +1156,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         project);
   }
 
-  /** Chat runs of a room — spec-less rooms track their turns here; a sync-local read. */
+  /** Chat runs of a room — spec-less rooms track their turns here. */
   public List<RunRow> listForRoom(String roomId) {
     return db.query(
         "SELECT " + COLUMNS + " FROM runs WHERE room_id = ? ORDER BY started_at DESC, id DESC",
@@ -1373,6 +1418,25 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     journal.applyRevision(id, snapshot, rev);
   }
 
+  /**
+   * Adopts main's run. Main holding none of it — no snapshot and no rev — is how a run main denied
+   * leaves this box, and the posts its principals made that main never took go with it: main holds
+   * no run to decide them by, so they could never land.
+   */
+  @Override
+  public void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
+    var orphaned = snapshot == null && rev == null ? principalsOf(id) : List.<String>of();
+    applyRevision(id, snapshot, rev);
+    new MessageStore(db).withdrawUnsynced(orphaned);
+  }
+
+  /** The principals of run {@code id} that name the run itself, the only ones its posts carry. */
+  private List<String> principalsOf(String id) {
+    var principals = new LinkedHashSet<>(principals(id));
+    findById(id).map(RunRow::principal).ifPresent(principals::add);
+    return principals.stream().filter(principal -> namesRun(principal, id)).toList();
+  }
+
   /** Removes an erased run's row, with the box-local credential it was issued. */
   @Override
   public void eraseRow(String id) {
@@ -1380,52 +1444,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
-  /**
-   * Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. A sync
-   * session is bound to execution provenance and denied, with main's run, what is not its own to
-   * change ({@link #provenanceDenial}), decided in the same transaction as the commit.
-   */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return db.transaction(
-        () -> {
-          var actor = Actor.current();
-          if (actor.lane() == Actor.Lane.SYNC) {
-            var current = comparableSnapshot(id);
-            var currentRev = latestRev(id);
-            var denial = provenanceDenial(actor.handle(), snapshot, current, currentRev);
-            if (denial.isPresent()) {
-              return new PushOutcome.Denied(denial.get(), currentRev, current);
-            }
-          }
-          return journal.commitRevision(id, snapshot, expectedRev);
-        });
-  }
-
-  /**
-   * Why a session acting as {@code handle} may not commit {@code incoming} over main's run, if it
-   * may not: both the incoming run's {@code node} and the run main holds must be the session's own
-   * handle, which refuses a forged foreign stamp and the clobbering of another node's run with a
-   * re-stamped one; a missing or blank stamp fails closed. A tombstone is not a fresh id: its owner
-   * is no longer readable, so bringing it back is refused outright.
-   */
-  private static Optional<String> provenanceDenial(
-      String handle, Map<String, Object> incoming, Map<String, Object> current, String currentRev) {
-    if (incoming != null && current == null && currentRev != null) {
-      return Optional.of("a deleted run cannot be brought back");
-    }
-    if (!executedBy(handle, incoming) || !executedBy(handle, current)) {
-      return Optional.of(
-          "only the node that executed a run may change it, and this is '" + handle + "'");
-    }
-    return Optional.empty();
-  }
-
-  private static boolean executedBy(String handle, Map<String, Object> run) {
-    if (run == null) {
-      return true;
-    }
-    var node = Objects.toString(run.get("node"), "");
-    return !node.isBlank() && node.equals(handle);
+  /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
+  @Override
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**

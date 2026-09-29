@@ -79,8 +79,7 @@ class ConflictOperationsTest {
     try (var link =
         SyncBox.connect(
             Acting.by(
-                Actor.sync("node", Role.MEMBER),
-                () -> main.server(Actor.sync("node", Role.MEMBER))),
+                Actor.sync("node", Role.ADMIN), () -> main.server(Actor.sync("node", Role.ADMIN))),
             node)) {
       for (var type : List.of("spec", "room")) {
         link.reconcile(type, replicas.get(type));
@@ -343,8 +342,7 @@ class ConflictOperationsTest {
     try (var link =
         SyncBox.connect(
             Acting.by(
-                Actor.sync("node", Role.MEMBER),
-                () -> main.server(Actor.sync("node", Role.MEMBER))),
+                Actor.sync("node", Role.ADMIN), () -> main.server(Actor.sync("node", Role.ADMIN))),
             node)) {
       link.reconcile("spec", replicas.get("spec"));
       wire = link.log().toString();

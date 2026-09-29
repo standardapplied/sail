@@ -5,8 +5,7 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.api.AccessDecision;
-import ai.singlr.sail.api.SpecPolicy;
+import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -61,10 +60,9 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + ".");
     }
     var actor = new Actor(who.fde(), roleOf(who.fde()), Actor.Lane.API);
-    var owners = new RoomStore(db).owners(room.id());
-    if (Actor.call(actor, () -> SpecPolicy.post(room.id(), owners))
-        instanceof AccessDecision.Refused refused) {
-      throw new IOException(refused.message() + " " + refused.fix());
+    var refused = PostingRule.decide(actor, room.id(), new RoomStore(db).owners(room.id()));
+    if (refused.isPresent()) {
+      throw new IOException(refused.get().message() + " " + refused.get().fix());
     }
   }
 

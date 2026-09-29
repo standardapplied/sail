@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.SpecAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
@@ -16,8 +16,9 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -103,6 +104,7 @@ final class GlobalSpecOperations {
 
   GlobalSpecCreatedResponse create(SpecCreateRequest request) {
     var actor = Actor.current();
+    Refusals.enforce(SpecAuthority.writer(actor));
     requireStore();
     if (request.id() == null || request.id().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
@@ -150,9 +152,11 @@ final class GlobalSpecOperations {
     reserveIdentityRoom(request.id());
     var home = Strings.isNotBlank(request.roomId()) ? requireHomeRoom(request.roomId()) : null;
     if (home != null) {
-      admitIntoRoom(home, row);
+      requireSameProject(home, row);
     }
-    specStore.create(row.withRoomId(home != null ? home.id() : request.id()));
+    var attached = row.withRoomId(home != null ? home.id() : request.id());
+    authorize(attached.id(), null, projection(attached.roomIdOrIdentity(), attached.assignee()));
+    specStore.create(attached);
     if (request.body() != null || request.plan() != null) {
       specStore.setContent(
           request.id(),
@@ -200,18 +204,17 @@ final class GlobalSpecOperations {
     if (store != null && store.findById(specId).isPresent()) {
       throw new ApiException(
           ErrorCode.CONFLICT,
-          "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
+          SpecAuthority.reservedRoom(specId),
           "Pick another spec id, or pass --room " + specId + " to be born in that room.");
     }
   }
 
   /**
-   * Binding a spec to an existing room hands the spec's owner a voice there and every membership
-   * write the room takes — engage rewrites its roster — so it needs the room's post right ({@link
-   * RoomStore#owners}), in the room's project, and naming its assignee is a claim or a reassignment
-   * into that room ({@link #authorizeReassign}).
+   * A spec is born only into a room of its own project. Binding it hands the spec's owner a voice
+   * there and every membership write the room takes, so the spec rule then asks for the room's post
+   * right, and a named assignee is a claim into that room.
    */
-  private void admitIntoRoom(RoomStore.RoomRow room, SpecStore.SpecRow spec) {
+  private static void requireSameProject(RoomStore.RoomRow room, SpecStore.SpecRow spec) {
     var project = spec.project();
     if (!Objects.equals(room.project(), project)) {
       throw new ApiException(
@@ -225,10 +228,6 @@ final class GlobalSpecOperations {
               + "'.",
           "A spec is born only into a room of its own project.");
     }
-    SpecPolicy.post(room.id(), rooms.get().owners(room.id())).enforce();
-    if (Strings.isNotBlank(spec.assignee())) {
-      authorizeReassign(spec.id(), null, room.id(), spec.assignee());
-    }
   }
 
   GlobalSpecUpdatedResponse update(String specId, SpecUpdateRequest request) {
@@ -236,7 +235,9 @@ final class GlobalSpecOperations {
     requireStore();
     var assignee = request.assignee() == null ? null : validAssignee(request.assignee());
     var existing = findOrThrow(specId);
-    authorizeUpdate(existing, request);
+    var held = specStore.held(specId);
+    authorize(specId, held, request.assignee() == null ? held : with(held, "assignee", assignee));
+    var wake = request.wake() == null ? null : authorizeWake(existing, request.wake());
     guardReassignment(specId, existing, request);
     var updated =
         new SpecStore.SpecRow(
@@ -260,7 +261,9 @@ final class GlobalSpecOperations {
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
     specStore.update(updated);
-    writeWake(updated, request);
+    if (wake != null) {
+      writeWake(updated, wake.value());
+    }
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
@@ -310,18 +313,38 @@ final class GlobalSpecOperations {
             null));
   }
 
+  /** A validated wake edit: the mode to store, null to clear it back to the default. */
+  private record Wake(String value) {}
+
+  /**
+   * Validates an explicit wake edit and, for a spec living in another room, asks the room rule
+   * whether the actor may set it there before anything is written. A spec's own room is its spec's,
+   * so the spec rule that admitted the update, a claim included, has already decided it. The spec
+   * update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still works;
+   * the value lands only on the room. Null when this box keeps no rooms to write it on.
+   */
+  private Wake authorizeWake(SpecStore.SpecRow spec, String requested) {
+    var store = rooms.get();
+    if (store == null) {
+      return null;
+    }
+    var wake = new Wake(validWake(requested));
+    var roomId = spec.roomIdOrIdentity();
+    if (roomId.equals(spec.id())) {
+      return wake;
+    }
+    var held = store.comparableSnapshot(roomId);
+    var next = with(held == null ? Map.of() : held, "wake", wake.value());
+    Refusals.enforce(store.authority().decide(Actor.current(), roomId, held, next));
+    return wake;
+  }
+
   /**
    * Writes an explicit wake edit onto the spec's home room — the one home the wake mode has, and
-   * the same room messages, roster, and the spec view read. The spec update door keeps accepting
-   * {@code wake} so the CLI's {@code spec update --wake} still works; the value lands only on the
-   * room.
+   * the same room messages, roster, and the spec view read.
    */
-  private void writeWake(SpecStore.SpecRow updated, SpecUpdateRequest request) {
+  private void writeWake(SpecStore.SpecRow updated, String wake) {
     var store = rooms.get();
-    if (store == null || request.wake() == null) {
-      return;
-    }
-    var wake = validWake(request.wake());
     var roomId = updated.roomIdOrIdentity();
     var room =
         store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
@@ -330,32 +353,19 @@ final class GlobalSpecOperations {
     }
   }
 
-  /**
-   * The resource-scoped gate for an update: a request that changes the assignee is a reassignment
-   * ({@link #authorizeReassign}); any other edit is governed by the general mutate policy (assignee
-   * or admin, creator or admin when unassigned). Runs before the status-based claim lock so
-   * identity is validated first.
-   */
-  private void authorizeUpdate(SpecStore.SpecRow existing, SpecUpdateRequest request) {
-    var reassigning = request.assignee() != null && !request.assignee().equals(existing.assignee());
-    if (reassigning) {
-      authorizeReassign(
-          existing.id(), existing.assignee(), existing.roomIdOrIdentity(), request.assignee());
-    } else {
-      SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
-    }
+  /** Asks the spec rule whether the bound actor may write {@code next} over {@code held}. */
+  private void authorize(String specId, Map<String, Object> held, Map<String, Object> next) {
+    Refusals.enforce(specStore.authority().decide(Actor.current(), specId, held, next));
   }
 
-  /**
-   * Enforces {@link SpecPolicy#reassign} for giving spec {@code specId}, held by {@code
-   * currentAssignee} in conversation {@code room}, to {@code assignee}.
-   */
-  private void authorizeReassign(
-      String specId, String currentAssignee, String room, String assignee) {
-    var bornIn = specId.equals(room) ? null : room;
-    var store = rooms.get();
-    var bornInOwners = bornIn == null || store == null ? List.<String>of() : store.owners(bornIn);
-    SpecPolicy.reassign(specId, currentAssignee, assignee, bornIn, bornInOwners).enforce();
+  private static Map<String, Object> projection(String roomId, String assignee) {
+    return with(Map.of("room_id", roomId), "assignee", assignee);
+  }
+
+  private static Map<String, Object> with(Map<String, Object> base, String key, Object value) {
+    var next = new LinkedHashMap<>(base);
+    next.put(key, value);
+    return next;
   }
 
   private static void guardReassignment(
@@ -381,7 +391,7 @@ final class GlobalSpecOperations {
   GlobalSpecDeletedResponse delete(String specId) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    authorize(specId, specStore.held(specId), null);
     var store = rooms.get();
     var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
@@ -406,7 +416,8 @@ final class GlobalSpecOperations {
   GlobalSpecContentResponse setContent(String specId, SpecContentRequest request) {
     requireStore();
     var existing = findOrThrow(specId);
-    SpecPolicy.mutate(existing.id(), existing.assignee(), existing.createdBy()).enforce();
+    var held = specStore.held(specId);
+    authorize(specId, held, held);
     specStore.setContent(
         specId,
         Objects.requireNonNullElse(request.body(), ""),
@@ -447,22 +458,22 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * A historical snapshot carries the assignee, so a restore that changes it is a reassignment in
-   * disguise and must clear {@link SpecPolicy#reassign} on top of the plain mutation gate —
-   * otherwise an assignee could route around the admin-only reassign rule by restoring a revision
-   * owned by someone else.
+   * A restore is a revision of the spec, so it is its owner's or an admin's; a historical snapshot
+   * carries the assignee, so one that changes it is a reassignment in disguise and must pass the
+   * claim rule too — otherwise an assignee could route around the admin-only reassign rule by
+   * restoring a revision owned by someone else.
    */
   GlobalSpecRestoredResponse restore(String specId, SpecRestoreRequest request) {
     requireStore();
     var existing = restorable(specId);
-    SpecPolicy.mutate(specId, existing.assignee(), existing.createdBy()).enforce();
+    var held = specStore.held(specId);
+    authorize(specId, held, held);
     if (request.rev() == null || request.rev().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "rev is required.");
     }
-    var targetAssignee = validAssignee(revisionAssignee(specId, request.rev()));
-    if (!Objects.equals(existing.assignee(), targetAssignee)) {
-      authorizeReassign(specId, existing.assignee(), existing.roomIdOrIdentity(), targetAssignee);
-    }
+    var revision = revision(specId, request.rev());
+    validAssignee(Snapshots.text(revision, "assignee"));
+    authorize(specId, held, revision);
     var store = rooms.get();
     specStore.atomically(
         () -> {
@@ -498,17 +509,13 @@ final class GlobalSpecOperations {
     return specStore.lastKnown(specId).orElseThrow();
   }
 
-  private String revisionAssignee(String specId, String rev) {
-    var entry =
-        specStore.history(specId).stream()
-            .filter(candidate -> candidate.kind() != ChangeLog.Kind.ERASURE)
-            .filter(candidate -> rev.equals(candidate.rev()))
-            .findFirst()
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev)));
-    return Objects.toString(YamlUtil.parseMap(entry.snapshot()).get("assignee"), null);
+  /** Revision {@code rev} of spec {@code specId} as the spec rule reads it. */
+  private Map<String, Object> revision(String specId, String rev) {
+    var revision = specStore.comparableAtRev(specId, rev);
+    if (revision == null) {
+      throw new ApiException(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev));
+    }
+    return revision;
   }
 
   private void publishStatusChanged(

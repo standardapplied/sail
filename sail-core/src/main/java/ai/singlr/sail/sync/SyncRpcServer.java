@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.authority.EraseAuthority;
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
@@ -34,13 +36,13 @@ import java.util.Optional;
  * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
  * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
  * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
- * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, carries the push half of Door-2
- * authorization: a {@code viewer} opens a session and pulls every type, but its offers are denied
- * so only {@code member}+ work propagates. The principal's handle additionally binds run offers to
- * execution provenance — a session may create, update, or delete only runs stamped with its own
- * node, so no member can forge run metadata another box would treat as its own execution. Every
- * such decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the
- * node settles it instead of offering the same change again every round.
+ * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is
+ * decided for, by its type's {@code WriteAuthority} — the same rule every door that writes the type
+ * asks: a {@code viewer} opens a session and pulls every type, but its offers are denied; a member
+ * changes only what is theirs, names only themselves, their box's machinery or their runs as its
+ * author, and creates only as themselves; and a run is only ever its executing box's. Every such
+ * decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the node
+ * settles it instead of offering the same change again every round.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
@@ -542,14 +544,16 @@ public final class SyncRpcServer {
         () ->
             db.<SyncWire.Result>transaction(
                 () -> {
-                  var refusal = authority.refusal(type, offer.id());
+                  var refusal = authority.requested(principal, type, offer.id());
                   if (refusal.isPresent()) {
-                    return new SyncWire.Refused(offer.id(), refusal.get());
+                    return new SyncWire.Refused(offer.id(), refusal.get().message());
                   }
                   if (!erasure.isErased(root)) {
                     var plan = erasure.closure(List.of(root));
                     var busy =
-                        Erasure.SPEC.equals(type) ? authority.busy(plan) : Optional.<String>empty();
+                        Erasure.SPEC.equals(type)
+                            ? authority.idle(plan).map(Refusal::message)
+                            : Optional.<String>empty();
                     if (busy.isPresent()) {
                       return new SyncWire.Refused(offer.id(), busy.get());
                     }

@@ -1519,6 +1519,30 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aReviewRunActsForTheBoxThatRunsItWhoeverTheSpecIsAssignedTo() {
+    createSpec("auth", "in_progress");
+    db.execute("UPDATE specs SET assignee = 'bob' WHERE id = 'auth'");
+    var runStore = new RunStore(db);
+    var ctrl =
+        new ReviewPipelineController(
+            specStore,
+            reviewStore,
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
+            null,
+            () -> {},
+            new DirectExecutorService(),
+            runStore,
+            () -> "node-a");
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var review = reviewStore.reviewsForSpec("auth").getFirst();
+    assertEquals("node-a", runStore.findById(review.id()).orElseThrow().owner());
+  }
+
+  @Test
   void theFixTaskCarriesTheRoomAndSeedsTheDeliveryWatermark() throws Exception {
     createSpec("auth", "in_progress", List.of("api"));
     var messages = new MessageStore(db);

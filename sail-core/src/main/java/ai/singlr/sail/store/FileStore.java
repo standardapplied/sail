@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.WriteAuthority;
+import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -282,9 +284,16 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
+  /** Who may write files on this box: any writer, as its doors and main's commit decide. */
+  @Override
+  public WriterAuthority authority() {
+    return new WriterAuthority(db, "files");
+  }
+
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**
