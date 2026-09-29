@@ -239,6 +239,28 @@ class PersonalRoomErasureTest {
   }
 
   @Test
+  void aNodeLeavesAPersonalRoomParkedInAConflictToMainWhichHoldsItToo() throws IOException {
+    room(main.db, UDAY, "uday", "uday");
+    room(node.db, UDAY, "uday", "uday, minted apart");
+    round();
+    assertTrue(
+        new SyncConflicts(node.db).pendingFor(Erasure.ROOM, UDAY).isPresent(), "parked here");
+    var running = run(main.db, UDAY, false);
+
+    var local = new PersonalRoomErasure(() -> false).apply(node.db, null, null);
+    new PersonalRoomErasure(() -> true).apply(main.db, null, null);
+    round();
+
+    assertEquals(
+        List.of(
+            "Removed 0 personal rooms this box alone held: 0 messages, 0 runs",
+            "1 personal rooms are main's to erase; this node adopts its erasures"),
+        local.notes());
+    assertTrue(new RoomStore(node.db).findById(UDAY).isPresent(), "main kept it, so does the node");
+    assertEquals(1, count(node.db, "SELECT count(*) FROM runs WHERE id = ?", running));
+  }
+
+  @Test
   void aMigrationKilledAfterTwoRoomsIsFinishedByASecondProcessErasingNothingTwice()
       throws Exception {
     var path = dir.resolve("killed.db");

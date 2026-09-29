@@ -30,13 +30,14 @@ import java.util.function.BooleanSupplier;
  *
  * <p>An authoritative box — main, or a standalone box — erases each one with its messages and runs,
  * recording an erasure row per entity that every node adopts through its pages. A node removes only
- * the personal rooms main never acknowledged, which exist on that box alone, and leaves no erasure
- * row, so nothing of them ever reaches main; every other one is main's to erase, decided on main's
- * copy as every erasure is, and the report names this box's work it would take. A room with a run
- * that has not finished, or one a spec converses in, is left as an ordinary room and named in the
- * report: erasing it would take work going on, or leave a spec talking into nothing. One room per
- * transaction, re-checked under its lock, so an upgrade killed partway resumes where it stopped and
- * running it twice erases nothing twice. The count is printed.
+ * the personal rooms main never acknowledged and no parked conflict shows main holding, which exist
+ * on that box alone, and leaves no erasure row, so nothing of them ever reaches main; every other
+ * one is main's to erase, decided on main's copy as every erasure is, and the report names this
+ * box's work it would take. A room with a run that has not finished, or one a spec converses in, is
+ * left as an ordinary room and named in the report: erasing it would take work going on, or leave a
+ * spec talking into nothing. One room per transaction, re-checked under its lock, so an upgrade
+ * killed partway resumes where it stopped and running it twice erases nothing twice. The count is
+ * printed.
  */
 public final class PersonalRoomErasure implements DataMigration {
 
@@ -73,6 +74,7 @@ public final class PersonalRoomErasure implements DataMigration {
     var erasure = new Erasure(db);
     var runs = new RunStore(db);
     var specs = new SpecStore(db);
+    var conflicts = new SyncConflicts(db);
     var removed = new ArrayList<Erasure.Target>();
     var kept = new ArrayList<String>();
     var mains = new ArrayList<String>();
@@ -87,7 +89,7 @@ public final class PersonalRoomErasure implements DataMigration {
                 }
                 var closure = erasure.closure(List.of(room));
                 var inUse = inUse(runs, specs, closure, id);
-                if (!main && !erasure.unacknowledged(room)) {
+                if (!main && !onlyHere(erasure, conflicts, room)) {
                   mains.add(id);
                   inUse.ifPresent(
                       reason ->
@@ -171,6 +173,15 @@ public final class PersonalRoomErasure implements DataMigration {
 
   private static boolean isPersonal(String id, String creator, String project) {
     return creator != null && project != null && id.equals(idOf(creator, project));
+  }
+
+  /**
+   * Whether this box alone holds {@code room}: main never acknowledged it, and no parked conflict
+   * holds main's version of it — an older release minted the same id on every box, so a conflict
+   * means main holds it too.
+   */
+  private static boolean onlyHere(Erasure erasure, SyncConflicts conflicts, Erasure.Target room) {
+    return erasure.unacknowledged(room) && conflicts.pendingFor(room.type(), room.id()).isEmpty();
   }
 
   /** Why room {@code id} must not go yet: a run in it that has not finished, or a spec in it. */
