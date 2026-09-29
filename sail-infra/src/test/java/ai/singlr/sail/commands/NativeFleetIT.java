@@ -146,15 +146,21 @@ class NativeFleetIT {
 
       var ahead = mady.sail("sync");
 
-      if (ahead.exit() != 0) {
+      var refused = ahead.exit() != 0;
+      if (refused) {
         assertTrue(ahead.output().contains("upgrade main"), ahead::output);
+      } else {
+        fleet.offline(mady, () -> mady.createSpecs("node-ahead", 1, BODY_BYTES));
       }
-      fleet.offline(mady, () -> mady.createSpecs("node-ahead", 1, BODY_BYTES));
       main.serving(() -> main.createSpecs("before-upgrade", 1, BODY_BYTES));
 
       main.install(fleet.candidate());
       main.serving(() -> main.createSpecs("after-upgrade", 1, BODY_BYTES));
       mady.sailOk("sync");
+      if (refused) {
+        fleet.offline(mady, () -> mady.createSpecs("node-ahead", 1, BODY_BYTES));
+        mady.sailOk("sync");
+      }
 
       assertEquals("6", main.query("SELECT count(*) FROM specs WHERE project = 'demo'").strip());
       fleet.assertConverged(mady);
