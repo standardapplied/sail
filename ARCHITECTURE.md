@@ -168,6 +168,42 @@ from git history only.
 This is the heart of multi-FDE coordination. Sync is opt-in, and a standalone box does
 nothing here.
 
+### The sync contract
+
+Every invariant the sync layer holds, each stated so a test can prove it. A change to sync names
+the invariants it touches and the tests that prove them; a scenario that breaks one is a bug in
+the change that allowed it, fixed there. An invariant marked **open** has a failing reproduction
+and the spec that closes it.
+
+| | Invariant | Proven by |
+|---|---|---|
+| I1 | Every write on every box is made by exactly one bound `Actor`, whichever door it came through. | `ActorTest`, `OperationsTakeNoActorTest` |
+| I2 | On a node only the box's FDE, its runs and FDE-less credentials write; any other credential reads. | `RoleRuleTest`, `NodeWritesTest`, `DeniedSyncTest` |
+| I3 | Main and the node agree who the node is, and one box syncs as each FDE. | open: `sail-runs-follow-the-box` |
+| I4 | Every run a box executes carries that box's handle as `node` and `owner`. | open: `sail-runs-follow-the-box` |
+| A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | `OneDecisionTest` (spec edits, posts); open for every door: `sail-journal-authority` |
+| A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
+| A3 | An event, hook or reactor never makes the machinery do what its sender could not. | socket: `LocalApiRouterTest`; open for HTTP: `sail-events-door-authority` |
+| A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest`, `EraseRequestTest`, `SpecPruneTest`; purge case open: `sail-journal-authority` |
+| T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest`; open for resolves: `sail-sync-convergence` |
+| T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores) |
+| L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
+| L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
+| L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
+| L4 | Main's version, by denial or pull, never removes or rewrites a run or review still running here. | by denial: `DeniedSyncTest`, `PushAuthoritySyncTest`; open for pulls: `sail-runs-follow-the-box` |
+| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest` (newest sessions); open for the rest: `sail-runs-follow-the-box` |
+| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | open (holds on main today): `sail-sync-liveness` |
+| C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
+| C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
+| C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
+| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | open: `sail-sync-liveness`, `sail-review-findings-sync`, `sail-files-materialized-version` |
+| E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; open for a prune racing a born-in spec: `sail-sync-liveness` |
+
+Every sync test ends each scenario by quiescing every box and asserting each replica equals
+main, so a divergence cannot pass unseen: `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, added
+by `sail-runs-follow-the-box` and adopted across the sync tests by `sail-sync-convergence`, which
+also has the fleet lane (`NativeFleetIT`) assert the same across real boxes.
+
 ### What syncs, and how
 
 `sail sync` runs one bidirectional reconciliation per registered entity type, in the
