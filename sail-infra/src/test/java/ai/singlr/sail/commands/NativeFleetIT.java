@@ -37,6 +37,7 @@ class NativeFleetIT {
                 "dd if=/dev/urandom of=/tmp/shared.bin bs=1M count=3 status=none && chmod 644 /tmp/shared.bin");
             main.sailOk(
                 "project", "files", "add", "-p", "demo", "/tmp/shared.bin", "--as", "shared.bin");
+            main.apiOk("spec", "update", "seed-1", "--assignee", "mady");
           });
       var sharedHash = main.shOk("sha256sum /tmp/shared.bin").split(" ")[0];
       var sharedMode =
