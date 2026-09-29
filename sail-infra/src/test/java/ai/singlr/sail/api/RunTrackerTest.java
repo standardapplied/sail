@@ -156,7 +156,7 @@ class RunTrackerTest {
     tracker.onEvent(stopped("backend", id, Map.of()));
     assertEquals("running", runStore.findById(id).orElseThrow().status(), "no box's run yet");
 
-    runStore.restamp("node-a", false);
+    runStore.stamp("node-a", runStore.unacknowledged());
     tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
 
     assertEquals("stopped", runStore.findById(id).orElseThrow().status());

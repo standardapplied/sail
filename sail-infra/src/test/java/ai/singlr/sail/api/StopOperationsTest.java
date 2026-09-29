@@ -481,7 +481,7 @@ class StopOperationsTest {
                 null,
                 RUN_LOG,
                 UNIT));
-    runStore.restamp(LOCAL_HANDLE, false);
+    runStore.stamp(LOCAL_HANDLE, runStore.unacknowledged());
 
     var outcome =
         Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));

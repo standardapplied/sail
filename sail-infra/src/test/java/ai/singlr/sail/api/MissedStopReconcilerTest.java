@@ -508,7 +508,7 @@ class MissedStopReconcilerTest {
     assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
     assertEquals(0, probe.calls.get(), "no box's run is probed");
 
-    sessionStore.restamp("node-a", false);
+    sessionStore.stamp("node-a", sessionStore.unacknowledged());
 
     assertEquals(1, reconciler(probe, PAST_GRACE).sweep());
     assertEquals("stopped", sessionStore.findById(adhoc).orElseThrow().status());

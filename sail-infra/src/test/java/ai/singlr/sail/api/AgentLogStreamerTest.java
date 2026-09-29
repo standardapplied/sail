@@ -174,7 +174,7 @@ class AgentLogStreamerTest {
       streamer(runs::findById, "node-a").handle(before);
       assertEquals(409, before.status, "no box's run yet");
 
-      runs.restamp("node-a", false);
+      runs.stamp("node-a", runs.unacknowledged());
       var after = new CapturingExchange("/v1/runs/" + id + "/stream").as("ops", "admin");
       streamer(runs::findById, "node-a").handle(after);
 

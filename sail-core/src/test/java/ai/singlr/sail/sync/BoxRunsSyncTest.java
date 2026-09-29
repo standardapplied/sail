@@ -254,22 +254,28 @@ class BoxRunsSyncTest {
 
     assertEquals(
         List.of(acknowledged),
-        runs(ada).strandedByHandleChange("ada", false).stream().map(RunStore.RunRow::id).toList(),
+        runs(ada).strandedByHandleChange("ada", false, List.of()).stream()
+            .map(RunStore.RunRow::id)
+            .toList(),
         "a live run main holds under the old handle refuses the change");
     finish(ada, acknowledged);
     assertEquals(
         List.of(acknowledged),
-        runs(ada).strandedByHandleChange("ada", false).stream().map(RunStore.RunRow::id).toList(),
+        runs(ada).strandedByHandleChange("ada", false, List.of()).stream()
+            .map(RunStore.RunRow::id)
+            .toList(),
         "so does its change main has not taken");
     SyncBox.quiesce(main, ada);
-    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false));
+    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false, List.of()));
 
     var finishedUnheld = reserve(ada, "ada", "mine", "room");
     finish(ada, finishedUnheld);
     var liveUnheld = reserve(ada, "ada", "mine", "room");
-    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false));
+    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false, List.of()));
     assertEquals(
-        List.of(finishedUnheld, liveUnheld), runs(ada).restamp("uday", false), "only the unheld");
+        List.of(finishedUnheld, liveUnheld),
+        runs(ada).stamp("uday", runs(ada).unacknowledged()),
+        "only the unheld");
     SyncBox.quiesce(main, ada.syncsAs(UDAY));
 
     SyncBox.assertEqualToMain(main, ada);
@@ -315,6 +321,37 @@ class BoxRunsSyncTest {
     assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
     SyncBox.quiesce(main, ada);
     SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aRunMainTookWhoseAnswerWasLostAndThenChangedNeverRevertsMainsChange() throws IOException {
+    var run = reserve(ada, "ada", null, "adhoc");
+    finish(ada, run);
+    SyncBox.pushLosingTheAnswer(main, ada);
+    Acting.system(() -> runs(main).recordSession(run, "main-session", "claude", "/main-t"));
+
+    assertNoDenials(SyncBox.round(main, ada));
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("main-session", runs(main).findById(run).orElseThrow().sessionId());
+    SyncBox.assertEqualToMain(main, ada);
+    assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
+  }
+
+  @Test
+  void aRunBothSidesChangedAfterALostAnswerParksAConflictForTheFde() throws IOException {
+    var run = reserve(ada, "ada", null, "adhoc");
+    SyncBox.pushLosingTheAnswer(main, ada);
+    Acting.system(() -> runs(main).recordSession(run, "main-session", "claude", "/main-t"));
+    Acting.system(() -> runs(ada).recordSession(run, "ada-session", "claude", "/t"));
+    finish(ada, run);
+
+    assertNoDenials(SyncBox.round(main, ada));
+
+    assertEquals("main-session", runs(main).findById(run).orElseThrow().sessionId());
+    assertEquals("ada-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
+    var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
+    assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
   }
 
   @Test

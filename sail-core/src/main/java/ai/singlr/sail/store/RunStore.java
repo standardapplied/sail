@@ -823,19 +823,16 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Stamps every run this box executed that main has not taken as the box's, now that its FDE
-   * handle is {@code boxHandle}: on a node or a standalone box every run main has never
-   * acknowledged, whatever it carries; on {@code main}, whose own runs are acknowledged as it makes
-   * them, only the runs that carry no node. Returns the ids stamped.
+   * Stamps every run this box made that carries no node as the box's, now that it is main and its
+   * FDE handle is {@code boxHandle}: main's own runs are acknowledged as it makes them, so only an
+   * unstamped one is not yet its own. Returns the ids stamped.
    */
-  public List<String> restamp(String boxHandle, boolean main) {
+  public List<String> stampUnstamped(String boxHandle) {
     return stamp(
         boxHandle,
-        main
-            ? db.query(
-                "SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid",
-                row -> row.text(0))
-            : unacknowledged());
+        db.query(
+            "SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid",
+            row -> row.text(0)));
   }
 
   /**
@@ -850,10 +847,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /**
    * The runs a change of this box's FDE handle away from {@code handle} would strand, because main
    * holds them under it and they would stop being this box's: on {@code main}, every run this box
-   * executed that is still live; elsewhere, every run main acknowledged under {@code handle} that
-   * is still live here or carries a change main has not taken.
+   * executed that is still live; elsewhere, every run under {@code handle} main acknowledged, or is
+   * among the {@code held} ones main said it took though this box never heard, that is still live
+   * here or carries a change main has not taken.
    */
-  public List<RunRow> strandedByHandleChange(String handle, boolean main) {
+  public List<RunRow> strandedByHandleChange(String handle, boolean main, Collection<String> held) {
     var unacknowledged = Set.copyOf(unacknowledged());
     var untaken = dirtyIds();
     return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY rowid", this::mapRow).stream()
@@ -862,7 +860,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             run ->
                 main
                     ? !RunStatus.isTerminal(run.status())
-                    : !unacknowledged.contains(run.id())
+                    : (!unacknowledged.contains(run.id()) || held.contains(run.id()))
                         && (!RunStatus.isTerminal(run.status()) || untaken.contains(run.id())))
         .toList();
   }

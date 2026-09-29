@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.commands;
+package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -22,21 +22,20 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The per-project claim lock: a second holder of the same project waits for the first release, the
- * lock is a real OS file lock (so a separate process is excluded, not just a thread), and projects
- * lock independently.
+ * A lock file: a second holder of the same file waits for the first release, the lock is a real OS
+ * file lock (so a separate process is excluded, not just a thread), and files lock independently.
  */
-class SessionDispatchLockTest {
+public class FileMutexTest {
 
   @Test
-  void aSecondAcquireOfTheSameProjectWaitsForTheFirstRelease(@TempDir Path dir) throws Exception {
-    var first = SessionDispatchLock.acquire(dir, "acme");
+  void aSecondAcquireOfTheSameFileWaitsForTheFirstRelease(@TempDir Path dir) throws Exception {
+    var first = FileMutex.acquire(dir.resolve("acme.lock"));
     var acquired = new CountDownLatch(1);
     var second =
         Thread.ofVirtual()
             .start(
                 () -> {
-                  try (var hold = SessionDispatchLock.acquire(dir, "acme")) {
+                  try (var hold = FileMutex.acquire(dir.resolve("acme.lock"))) {
                     acquired.countDown();
                   } catch (IOException e) {
                     throw new UncheckedIOException(e);
@@ -54,7 +53,7 @@ class SessionDispatchLockTest {
   @Test
   void theLockIsHeldOnDiskWhileHeldAndFreeOnceReleased(@TempDir Path dir) throws Exception {
     var file = dir.resolve("acme.lock");
-    var hold = SessionDispatchLock.acquire(dir, "acme");
+    var hold = FileMutex.acquire(dir.resolve("acme.lock"));
     try (var probe = FileChannel.open(file, StandardOpenOption.WRITE)) {
       assertThrows(
           OverlappingFileLockException.class,
@@ -69,18 +68,18 @@ class SessionDispatchLockTest {
   }
 
   @Test
-  void differentProjectsLockIndependently(@TempDir Path dir) throws Exception {
-    try (var acme = SessionDispatchLock.acquire(dir, "acme");
-        var beta = SessionDispatchLock.acquire(dir, "beta")) {
+  void differentFilesLockIndependently(@TempDir Path dir) throws Exception {
+    try (var acme = FileMutex.acquire(dir.resolve("acme.lock"));
+        var beta = FileMutex.acquire(dir.resolve("beta.lock"))) {
       assertNotNull(acme);
       assertNotNull(beta);
     }
-    try (var again = SessionDispatchLock.acquire(dir, "acme")) {
-      assertNotNull(again, "a released project lock is reacquirable");
+    try (var again = FileMutex.acquire(dir.resolve("acme.lock"))) {
+      assertNotNull(again, "a released lock is reacquirable");
     }
   }
 
-  static void awaitParked(Thread thread) {
+  public static void awaitParked(Thread thread) {
     while (thread.isAlive() && thread.getState() != Thread.State.WAITING) {
       Thread.onSpinWait();
     }

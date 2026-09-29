@@ -247,8 +247,13 @@ session as, and a node whose configured sync handle is blank or another does not
 (`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
 from any other until an admin runs `sail fde release-box`. Before its first type, the node asks
-`need` for every run main has never acknowledged: one main holds is adopted as acknowledged, and
-every other is stamped with the node's handle, so main takes it. The box id names the node in main's log; who the
+`need` for every run main has never acknowledged: one main holds a state of that this box wrote
+is adopted as acknowledged at it, with the box's later changes on top; one main has moved on since
+is left without a base, so the round parks any field the two hold differently for the FDE rather
+than revert main's change; neither is re-stamped. Every other is stamped with the node's handle, so
+main takes it. A handle change asks the same before re-stamping anything, and holds every round of
+the box off from the ask until its stamps are written (`SyncOperations.holdRounds`, a lock file
+beside the database), so no run is offered, and its answer lost, in between. The box id names the node in main's log; who the
 node is stays the authenticated SSH principal, bound as the `SYNC` actor around
 every commit and erase: it is each revision's `peer`, and its author unless the revision
 offers its own `_actor`. The node binds `MAIN` around its round, so what it adopts records

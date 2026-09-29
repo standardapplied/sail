@@ -110,13 +110,30 @@ public final class SyncOperations {
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
-    var config = configuration.get();
-    var target = resolveMain(request.main(), config);
-    if (target.target() == null) {
-      return new SyncReport(SyncEngine.Report.NONE, target.message());
+    try (var rounds = holdRounds(db)) {
+      var config = configuration.get();
+      var target = resolveMain(request.main(), config);
+      if (target.target() == null) {
+        return new SyncReport(SyncEngine.Report.NONE, target.message());
+      }
+      var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
+      return new SyncReport(round.report(), null, round.types());
     }
-    var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
-    return new SyncReport(round.report(), null, round.types());
+  }
+
+  /**
+   * Holds off every other sync round of the box whose database is {@code db} until closed. Each
+   * round runs under it, from reading the box's identity to its last answer, and a handle change
+   * holds it from asking main which runs it took until they are re-stamped ({@link HandleChange}),
+   * so no run can be offered, or its answer lost, between the two. It is a lock file beside the
+   * database, so a round in the API server and a handle change in the CLI exclude each other; an
+   * in-memory database has no other process to exclude.
+   */
+  public static AutoCloseable holdRounds(Sqlite db) throws IOException {
+    var path = db.path();
+    return path == null
+        ? () -> {}
+        : FileMutex.acquire(path.resolveSibling(path.getFileName() + ".rounds.lock"));
   }
 
   private record Round(
@@ -189,9 +206,10 @@ public final class SyncOperations {
    * Asks the main the node {@code config} syncs to, over one session opened through {@code
    * channels}, which of this box's runs it took whose answer was lost, and acknowledges them
    * ({@link NodeRound#acknowledgeHeld}). Nothing is offered, and whose handle main knows this box
-   * by is not checked: a handle change asks it before deciding which runs it may re-stamp.
+   * by is not checked: a handle change asks it before deciding which runs it may re-stamp. Returns
+   * the runs main does not hold.
    */
-  public static void acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
+  public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
       throws Exception {
     try (var channel = channels.open(config.main());
         var session =
@@ -201,7 +219,7 @@ public final class SyncOperations {
                 SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
                 SyncOperations::notice,
                 db)) {
-      NodeRound.acknowledgeHeld(session, db);
+      return NodeRound.acknowledgeHeld(session, db);
     }
   }
 

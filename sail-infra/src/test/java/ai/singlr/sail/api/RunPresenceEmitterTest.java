@@ -175,7 +175,7 @@ class RunPresenceEmitterTest {
     stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
     assertEquals(0, emitter.sweep(), "no box's run yet");
 
-    runStore.restamp("node-a", false);
+    runStore.stamp("node-a", runStore.unacknowledged());
 
     assertEquals(1, emitter.sweep(), "the box's own run narrates its quiet crossing");
   }

@@ -210,13 +210,17 @@ public final class RevisionJournal implements ConflictResolver {
    * Records main's revision {@code rev} of {@code id}, holding {@code held}, as the synced base of
    * a row main took whose answer never reached this box, keeping the row as it stands here: the
    * base is adopted as the bound actor, and when the row has moved on since, its state is journaled
-   * on top, by {@link Actor#system()}, as a change main has not taken yet. A row that already has a
-   * base, or none at all, is left alone. Returns whether the base was recorded.
+   * on top, by {@link Actor#system()}, as a change main has not taken yet. Only a state this box
+   * wrote is taken as that base: it is what main accepted. When main has moved the row on since,
+   * which of this box's changes it took is unknown, and journaling the row on top would revert
+   * main's changes unseen, so nothing is recorded and the round reconciles the row with no base —
+   * any field the two sides hold differently parks a conflict for the FDE. A row that already has a
+   * base, or none at all, is left alone too. Returns whether the base was recorded.
    */
   public boolean acknowledge(String id, Map<String, Object> held, String rev) {
     return db.transaction(
         () -> {
-          if (!schema.exists(id) || rawBaseRev(id) != null) {
+          if (!schema.exists(id) || rawBaseRev(id) != null || !wroteHere(id, held)) {
             return false;
           }
           var mine = comparableSnapshot(id);
@@ -336,6 +340,13 @@ public final class RevisionJournal implements ConflictResolver {
     }
     schema.apply(id, chosen);
     return recordRevision(id, null, null, "resolve", false, false);
+  }
+
+  private boolean wroteHere(String id, Map<String, Object> held) {
+    return changeLog.history(schema.entityType(), id).stream()
+        .filter(entry -> entry.kind() == ChangeLog.Kind.REVISION)
+        .anyMatch(
+            entry -> sameContent(schema.comparable(YamlUtil.parseMap(entry.snapshot())), held));
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

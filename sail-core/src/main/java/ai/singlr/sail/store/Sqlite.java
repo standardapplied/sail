@@ -119,7 +119,8 @@ public final class Sqlite implements AutoCloseable {
     }
   }
 
-  Path path() {
+  /** The file this database lives in, or null for an in-memory one. */
+  public Path path() {
     return path;
   }
 

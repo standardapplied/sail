@@ -168,7 +168,7 @@ class WatcherRearmerTest {
         rearmer((project, runId, unit) -> true, NO_UNIT, DEAD, run -> Optional.of(LAUNCHED));
     assertEquals(0, rearmer.rearm(), "no box's run yet");
 
-    sessionStore.restamp("node-a", false);
+    sessionStore.stamp("node-a", sessionStore.unacknowledged());
 
     assertEquals(1, rearmer.rearm());
   }

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
@@ -303,7 +304,7 @@ class AgentAttachCommandTest {
                       done.countDown();
                     }
                   });
-      SessionDispatchLockTest.awaitParked(attach);
+      FileMutexTest.awaitParked(attach);
       claim.run();
       assertEquals(0, host.sessionCount(), "the claim's yield scan finds nothing live");
       dispatchClaiming.close();

@@ -115,8 +115,9 @@ class RunStoreTest {
     var unheld = newRunOn("q", "s", "ada");
     var unstamped = newRunOn("r", "s", null);
 
-    assertEquals(List.of(unstamped), store.restamp("uday", true), "main stamps the unstamped");
-    assertEquals(List.of(unheld), store.restamp("uday", false), "a node every unheld run");
+    assertEquals(List.of(unstamped), store.stampUnstamped("uday"), "main stamps the unstamped");
+    assertEquals(
+        List.of(unheld), store.stamp("uday", store.unacknowledged()), "a node every unheld run");
 
     assertEquals("ada", store.findById(acknowledged).orElseThrow().node());
   }
@@ -130,10 +131,12 @@ class RunStoreTest {
 
     assertEquals(
         List.of(live),
-        store.strandedByHandleChange("ada", true).stream().map(RunStore.RunRow::id).toList());
+        store.strandedByHandleChange("ada", true, List.of()).stream()
+            .map(RunStore.RunRow::id)
+            .toList());
     assertEquals(
         List.of(),
-        store.strandedByHandleChange("ada", false),
+        store.strandedByHandleChange("ada", false, List.of()),
         "on a node, a run main never acknowledged strands nothing: it is re-stamped");
   }
 
@@ -157,6 +160,20 @@ class RunStoreTest {
             Actor.main("ada"),
             () -> store.acknowledge(unchanged, store.comparableSnapshot(unchanged), "3-main")));
     assertFalse(store.dirtyIds().contains(unchanged), "nothing is left to offer");
+  }
+
+  @Test
+  void aRunMainMovedOnSinceItTookItIsNeverAcknowledgedOverMainsChange() {
+    var id = newRunOn("p", "s", "ada");
+    var moved = new LinkedHashMap<>(store.comparableSnapshot(id));
+    moved.put("session_id", "main-session");
+
+    assertFalse(
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, moved, "7-main")),
+        "main holds a state this box never wrote");
+
+    assertNull(store.baseRevOf(id));
+    assertNull(store.findById(id).orElseThrow().sessionId());
   }
 
   private static RunStore.RunRow runOnNode(String node) {

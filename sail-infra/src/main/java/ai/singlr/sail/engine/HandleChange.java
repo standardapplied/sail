@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -20,8 +21,9 @@ import java.util.stream.Collectors;
  * handle, and main takes a run only from the box whose handle it carries, so a handle change is
  * refused while a run main holds under the old handle would be stranded by it, and once the new
  * identity is written every run main has not taken is stamped as the box's ({@link
- * RunStore#restamp}) — as it is, too, when a box becomes main. Called where the box's identity is
- * written: {@code sail host config set}, {@code sail join} and {@code sail host sync}.
+ * RunStore#stamp}); a box that becomes main stamps each run it made that carries no node ({@link
+ * RunStore#stampUnstamped}). Called where the box's identity is written: {@code sail host config
+ * set}, {@code sail join} and {@code sail host sync}.
  */
 public final class HandleChange {
 
@@ -39,6 +41,8 @@ public final class HandleChange {
    * is live here or carries a change main has not taken — on main, while any run this box executed
    * is live — naming each and the fix. A node first asks its main, over {@code channels}, which of
    * the runs it never heard acknowledged main holds; when main cannot be asked, it is refused too.
+   * Every sync round of the box is held off from the ask until the stamps are written ({@link
+   * SyncOperations#holdRounds}), so none can offer a run main would then hold under the old handle.
    * Returns the runs stamped for the new identity.
    */
   public static List<String> apply(
@@ -54,32 +58,42 @@ public final class HandleChange {
       write.run();
       return List.of();
     }
-    try (var db = Sqlite.open(dbPath)) {
+    try (var db = Sqlite.open(dbPath);
+        var rounds = SyncOperations.holdRounds(db)) {
       var runs = new RunStore(db);
+      var held = renamed ? heldByMain(db, before, after, channels) : Set.<String>of();
       if (renamed) {
-        acknowledgeHeld(db, before, after, channels);
-        var stranded = runs.strandedByHandleChange(before.handle(), before.isMain());
+        var stranded = runs.strandedByHandleChange(before.handle(), before.isMain(), held);
         if (!stranded.isEmpty()) {
           throw new IllegalStateException(refusal(before, after, stranded));
         }
       }
       write.run();
-      return runs.restamp(after.handle(), after.isMain());
+      return after.isMain()
+          ? runs.stampUnstamped(after.handle())
+          : runs.stamp(
+              after.handle(),
+              runs.unacknowledged().stream().filter(id -> !held.contains(id)).toList());
     }
   }
 
   /**
-   * A missing acknowledgement does not prove main never took a run: its answer may have been lost.
-   * So before a node re-stamps any, it asks main which it holds, and those are acknowledged — held
-   * under the old handle, and weighed as such. When main cannot be asked, nothing is changed.
+   * The runs main says it took whose answer this box never heard. A missing acknowledgement does
+   * not prove main never took a run: its answer may have been lost. So a node asks main which it
+   * holds ({@link SyncOperations#acknowledgeHeld}), and those are weighed as held under the old
+   * handle and never re-stamped. When main cannot be asked, nothing is changed.
    */
-  private static void acknowledgeHeld(
+  private static Set<String> heldByMain(
       Sqlite db, SyncConfig before, SyncConfig after, SyncOperations.Channels channels) {
-    if (!before.isNode() || new RunStore(db).unacknowledged().isEmpty()) {
-      return;
+    var unacknowledged = new RunStore(db).unacknowledged();
+    if (!before.isNode() || unacknowledged.isEmpty()) {
+      return Set.of();
     }
     try {
-      SyncOperations.acknowledgeHeld(db, before, channels);
+      var unheld = SyncOperations.acknowledgeHeld(db, before, channels);
+      return unacknowledged.stream()
+          .filter(id -> !unheld.contains(id))
+          .collect(Collectors.toUnmodifiableSet());
     } catch (Exception e) {
       throw new IllegalStateException(
           "Cannot change this box's sync handle from '"

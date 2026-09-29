@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.RunTracker;
+import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
@@ -28,6 +29,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,6 +45,7 @@ class HandleChangeTest {
 
   private static final SyncConfig STANDALONE = SyncConfig.unset();
   private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
+  private static final Actor UDAY = Actor.sync("uday", Role.MEMBER);
   private static final SyncOperations.Channels UNREACHABLE =
       target -> {
         throw new IOException("ssh: connect to host main: Connection refused");
@@ -182,6 +186,18 @@ class HandleChangeTest {
   }
 
   @Test
+  void aRunReservedWhileTheIdentityIsWrittenIsStampedForTheNewOne() throws Exception {
+    var during = new AtomicReference<String>();
+
+    var stamped =
+        HandleChange.apply(
+            dbPath, node("ada"), node("uday"), UNREACHABLE, () -> during.set(run("ada", "p")));
+
+    assertEquals(List.of(during.get()), stamped);
+    assertEquals("uday", runs.findById(during.get()).orElseThrow().owner());
+  }
+
+  @Test
   void aChangeThatLeavesTheHandleAloneOnlyWrites() throws Exception {
     var unstamped = run(null, "p");
 
@@ -224,6 +240,70 @@ class HandleChangeTest {
       assertEquals("completed", new RunStore(main.db).findById(live).orElseThrow().status());
       assertEquals("ada", runs.findById(live).orElseThrow().node());
     }
+  }
+
+  @Test
+  void aRunMainTookAndMovedOnWhoseAnswerWasLostStillHoldsTheOldHandle() throws Exception {
+    try (var ada = new SyncBox(dir, "box").syncsAs(ADA)) {
+      var held = run("ada", "p");
+      finish(held);
+      SyncBox.pushLosingTheAnswer(main, ada);
+      Acting.system(
+          () -> new RunStore(main.db).recordSession(held, "main-session", "claude", "/t"));
+
+      var refused =
+          assertThrows(IllegalStateException.class, () -> apply(node("ada"), node("uday")));
+
+      assertTrue(refused.getMessage().contains(held), refused.getMessage());
+      assertFalse(written.get(), "nothing is written");
+      assertEquals(null, runs.baseRevOf(held), "main moved on: not acknowledged over it");
+      assertEquals("ada", runs.findById(held).orElseThrow().node(), "nor re-stamped");
+    }
+  }
+
+  @Test
+  void aRoundStartedWhileTheHandleChangesWaitsForItAndOffersTheRunUnderTheNewHandle()
+      throws Exception {
+    var unheld = run("ada", "p");
+    var opened = new AtomicInteger();
+    var syncing =
+        new SyncOperations(
+            db,
+            "box",
+            dir.resolve("projects"),
+            () -> node("uday"),
+            target -> {
+              opened.incrementAndGet();
+              return PipedSyncChannel.to(main.server(UDAY));
+            });
+    var failure = new AtomicReference<Throwable>();
+    var round = new AtomicReference<Thread>();
+
+    var stamped =
+        apply(
+            node("ada"),
+            node("uday"),
+            target -> {
+              round.set(
+                  Thread.ofVirtual()
+                      .start(
+                          () -> {
+                            try {
+                              syncing.sync(new SyncRequest(null));
+                            } catch (Throwable e) {
+                              failure.set(e);
+                            }
+                          }));
+              FileMutexTest.awaitParked(round.get());
+              assertEquals(0, opened.get(), "no round runs while the handle changes");
+              return PipedSyncChannel.to(main.server(ADA));
+            });
+    round.get().join();
+
+    assertEquals(null, failure.get());
+    assertEquals(List.of(unheld), stamped);
+    assertEquals(1, opened.get());
+    assertEquals("uday", new RunStore(main.db).findById(unheld).orElseThrow().node());
   }
 
   @Test
