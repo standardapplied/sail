@@ -61,7 +61,8 @@ class RunSyncTest {
               new ChangeLog(db),
               conflicts,
               new SyncState(db),
-              runId -> runs.pushableFrom(runId, id));
+              runId -> runs.pushableFrom(runId, id),
+              SyncedEntities.require(runs.entityType()).authority(db));
     }
 
     @Override

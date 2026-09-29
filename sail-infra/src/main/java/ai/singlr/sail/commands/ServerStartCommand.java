@@ -441,7 +441,7 @@ public final class ServerStartCommand implements Runnable {
   static Orphans failOrphans(ReviewStore reviews, RunStore runs, String node) {
     return Actor.call(
         Actor.system(),
-        () -> new Orphans(reviews.failOrphanedRunning(), runs.failRunningReviewsOnNode(node)));
+        () -> new Orphans(reviews.failOrphanedRunning(node), runs.failRunningReviewsOnNode(node)));
   }
 
   /**

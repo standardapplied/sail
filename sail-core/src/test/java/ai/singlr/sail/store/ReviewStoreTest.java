@@ -14,7 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -987,7 +989,7 @@ class ReviewStoreTest {
     var finished = store.createReview("auth", 2);
     store.updateReviewStatus(finished, "passed");
 
-    var swept = store.failOrphanedRunning();
+    var swept = store.failOrphanedRunning("ada");
 
     assertEquals(1, swept, "exactly the interrupted review is swept");
     assertEquals(
@@ -997,6 +999,29 @@ class ReviewStoreTest {
             + " future review for the spec");
     assertEquals(
         "passed", store.findReview(finished).orElseThrow().status(), "terminal rows untouched");
-    assertEquals(0, store.failOrphanedRunning(), "idempotent: a second sweep finds nothing");
+    assertEquals(0, store.failOrphanedRunning("ada"), "idempotent: a second sweep finds nothing");
+  }
+
+  @Test
+  void failOrphanedRunningLeavesAReviewAnotherBoxRunsToThatBox() {
+    var runs = new RunStore(db);
+    var mine = store.createReview("auth", 1);
+    store.updateReviewStatus(mine, "running");
+    runs.createReview(mine, "acme", "auth", "ada", "ada", "claude-code", "b", "t", "/l", "u");
+    var theirs = store.createReview("auth", 2);
+    store.updateReviewStatus(theirs, "running");
+    runs.createReview(theirs, "acme", "auth", "bob", "bob", "claude-code", "b", "t", "/l", "u");
+    var synced = "019fee00-0000-7000-8000-0000000000c1";
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(theirs));
+    Actor.run(Actor.main(), () -> store.applyRevision(synced, snapshot, "1-synced"));
+
+    assertEquals(1, store.failOrphanedRunning("ada"));
+
+    assertEquals("failed", store.findReview(mine).orElseThrow().status());
+    assertEquals("running", store.findReview(theirs).orElseThrow().status());
+    assertEquals(
+        "running",
+        store.findReview(synced).orElseThrow().status(),
+        "a review this box only adopted, whose run has not arrived, is its executor's to finish");
   }
 }

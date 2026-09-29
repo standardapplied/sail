@@ -745,10 +745,13 @@ class RunStoreTest {
     other.applyRevision("00000000-0000-7000-8000-000000000001", base(), "rev-base");
 
     var accepted =
-        other.commitRevision("00000000-0000-7000-8000-000000000001", moved(), "rev-base");
+        other.commitRevision(
+            "00000000-0000-7000-8000-000000000001", moved(), "rev-base", other.authority());
     assertInstanceOf(PushOutcome.Accepted.class, accepted);
 
-    var stale = other.commitRevision("00000000-0000-7000-8000-000000000001", moved(), "rev-base");
+    var stale =
+        other.commitRevision(
+            "00000000-0000-7000-8000-000000000001", moved(), "rev-base", other.authority());
     assertInstanceOf(PushOutcome.Stale.class, stale);
   }
 
@@ -757,21 +760,25 @@ class RunStoreTest {
     var id = "00000000-0000-7000-8000-000000000001";
     var own = Actor.sync("node-a", Role.MEMBER);
     assertInstanceOf(
-        PushOutcome.Accepted.class, Actor.call(own, () -> store.commitRevision(id, base(), null)));
+        PushOutcome.Accepted.class,
+        Actor.call(own, () -> store.commitRevision(id, base(), null, store.authority())));
     var rev = store.latestRev(id);
     assertInstanceOf(
-        PushOutcome.Accepted.class, Actor.call(own, () -> store.commitRevision(id, null, rev)));
+        PushOutcome.Accepted.class,
+        Actor.call(own, () -> store.commitRevision(id, null, rev, store.authority())));
     var tombstone = store.latestRev(id);
     assertInstanceOf(
         PushOutcome.Accepted.class,
-        Actor.call(own, () -> store.commitRevision(id, null, tombstone)),
+        Actor.call(own, () -> store.commitRevision(id, null, tombstone, store.authority())),
         "replaying a delete over a tombstone stays allowed");
   }
 
   @Test
   void aSyncSessionIsDeniedARunAnotherNodeExecutedWithMainsRun() {
     var id = "00000000-0000-7000-8000-000000000001";
-    Actor.call(Actor.sync("node-a", Role.MEMBER), () -> store.commitRevision(id, base(), null));
+    Actor.call(
+        Actor.sync("node-a", Role.MEMBER),
+        () -> store.commitRevision(id, base(), null, store.authority()));
     var rev = store.latestRev(id);
     var other = Actor.sync("node-b", Role.MEMBER);
     var restamped = new HashMap<>(moved());
@@ -781,7 +788,7 @@ class RunStoreTest {
       var denied =
           assertInstanceOf(
               PushOutcome.Denied.class,
-              Actor.call(other, () -> store.commitRevision(id, offered, rev)));
+              Actor.call(other, () -> store.commitRevision(id, offered, rev, store.authority())));
       assertTrue(denied.reason().contains("'node-b'"), denied.reason());
       assertEquals(rev, denied.currentRev());
       assertEquals("node-a", denied.currentSnapshot().get("node"));
@@ -798,22 +805,26 @@ class RunStoreTest {
         PushOutcome.Denied.class,
         Actor.call(
             Actor.sync("node-b", Role.MEMBER),
-            () -> store.commitRevision("00000000-0000-7000-8000-000000000002", base(), null)));
+            () ->
+                store.commitRevision(
+                    "00000000-0000-7000-8000-000000000002", base(), null, store.authority())));
     assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(
             own,
-            () -> store.commitRevision("00000000-0000-7000-8000-000000000003", unstamped, null)));
+            () ->
+                store.commitRevision(
+                    "00000000-0000-7000-8000-000000000003", unstamped, null, store.authority())));
 
     var id = "00000000-0000-7000-8000-000000000004";
-    Actor.call(own, () -> store.commitRevision(id, base(), null));
+    Actor.call(own, () -> store.commitRevision(id, base(), null, store.authority()));
     var rev = store.latestRev(id);
-    Actor.call(own, () -> store.commitRevision(id, null, rev));
+    Actor.call(own, () -> store.commitRevision(id, null, rev, store.authority()));
     var tombstone = store.latestRev(id);
     var resurrected =
         assertInstanceOf(
             PushOutcome.Denied.class,
-            Actor.call(own, () -> store.commitRevision(id, base(), tombstone)));
+            Actor.call(own, () -> store.commitRevision(id, base(), tombstone, store.authority())));
     assertTrue(resurrected.reason().contains("deleted run"), resurrected.reason());
     assertEquals(tombstone, resurrected.currentRev());
     assertNull(resurrected.currentSnapshot());

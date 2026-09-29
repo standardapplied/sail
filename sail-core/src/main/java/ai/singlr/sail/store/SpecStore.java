@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.SpecAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
@@ -822,6 +824,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         roomIdOf(s));
   }
 
+  private static final Set<String> CONTENT_FIELDS = Set.of("body_hash", "plan_hash");
+
   private static final Set<String> SYNC_FIELDS =
       Set.of(
           "project",
@@ -872,7 +876,20 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   @Override
   public Set<String> contentFields() {
-    return Set.of("body_hash", "plan_hash");
+    return CONTENT_FIELDS;
+  }
+
+  /** Who may write a spec on this box: the rule every door and main's commit decide by. */
+  public SpecAuthority authority() {
+    return new SpecAuthority(db);
+  }
+
+  /**
+   * Spec {@code id} as a rule reads what this box holds: its projection, or the last live one its
+   * tombstone kept ({@link RevisionJournal#held}); null for a spec this box never held.
+   */
+  public Map<String, Object> held(String id) {
+    return journal.held(id);
   }
 
   @Override
@@ -963,8 +980,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * null snapshot commits a deletion. The check and the write share one transaction, so two nodes
    * pushing the same row can never both win. Used by the sync engine on the main side.
    */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**
@@ -1015,6 +1033,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       applySnapshot(id, withSync(id, snapshot));
+    }
+
+    @Override
+    public Set<String> contentFields() {
+      return CONTENT_FIELDS;
     }
 
     @Override

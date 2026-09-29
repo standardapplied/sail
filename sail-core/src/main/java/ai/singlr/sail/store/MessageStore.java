@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.MessageAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
@@ -103,6 +105,11 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           changeLog.append(ENTITY, id, rev, "local", false, YamlUtil.dumpJson(snapshot));
           return findById(id).orElseThrow();
         });
+  }
+
+  /** Who may post on this box, and as whom: the rule every door and main's commit decide by. */
+  public MessageAuthority authority() {
+    return new MessageAuthority(db);
   }
 
   public List<MessageRow> list(String roomId, String before, int limit) {
@@ -305,11 +312,12 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers. Main decides an agent's post by its run, and the pipeline's by a
-   * run of the same owner in the conversation, so such a post waits, with the replies under it,
-   * until main holds what decides it: a run it names has a change main has not taken, or the
-   * pipeline's conversation has a run of that owner only this box holds. A post arriving first
-   * would be denied for good. Runs sync before messages, so it normally goes later in the round.
+   * after the message it answers. Main decides an agent's post by its principal's run, in whatever
+   * conversation it runs, and the pipeline's by a run of the same owner in the conversation, so
+   * such a post waits, with the replies under it, until main holds what decides it: a run it names
+   * has a change main has not taken, or the pipeline's conversation has a run of that owner only
+   * this box holds. A post arriving first would be denied for good. Runs sync before messages, so
+   * it normally goes later in the round.
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
@@ -322,7 +330,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
               held(id) AS (
                 SELECT p.id FROM pending p
                 WHERE EXISTS (SELECT 1 FROM runs r
-                    WHERE %1$s AND (NOT %2$s OR r.rev <> r.base_rev)
+                    WHERE (NOT %2$s OR r.rev <> r.base_rev)
                       AND (r.principal = p.author OR EXISTS (SELECT 1 FROM run_principals rp
                           WHERE rp.run_id = r.id AND rp.principal = p.author)))
                   OR (p.author = ?1 AND EXISTS (SELECT 1 FROM runs r
@@ -406,7 +414,15 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     db.execute("DELETE FROM room_messages WHERE id = ?", id);
   }
 
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
+  /**
+   * Compare-and-set commit as main of a message a node posted. A message never changes, so only a
+   * new one commits. One in a conversation main has never held is refused ({@link Unheld}), and one
+   * replying to a message main does not hold is denied; {@code authority} then decides who may post
+   * it, and as whom, before anything is written.
+   */
+  @Override
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
     return db.transaction(
         () -> {
           var currentRev = latestRev(id);
@@ -419,18 +435,17 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           if (currentRev != null) {
             throw new IllegalArgumentException("message '" + id + "' is immutable");
           }
-          var json = YamlUtil.dumpJson(snapshot);
-          var rev = Revisions.next(null, json);
           var row = fromSnapshot(id, snapshot);
-          var peer = Actor.current().peer();
-          if (!mayPostAs(peer, row.author(), row.roomId())) {
-            requireDecidable(row);
-            return new PushOutcome.Denied(
-                "'" + peer + "' may not post as '" + row.author() + "' in this room", null, null);
-          }
+          requireDecidable(row);
           if (!holdsReplyTarget(row)) {
             return new PushOutcome.Denied("it replies to a message main does not hold", null, null);
           }
+          var refusal = authority.decide(Actor.current(), id, null, snapshot);
+          if (refusal.isPresent()) {
+            return new PushOutcome.Denied(refusal.get().message(), null, null);
+          }
+          var json = YamlUtil.dumpJson(snapshot);
+          var rev = Revisions.next(null, json);
           write(row, rev, null);
           changeLog.appendSynced(ENTITY, id, rev, row.author(), "sync", false, json);
           return new PushOutcome.Accepted(rev);
@@ -439,38 +454,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /** The platform narrator: the review pipeline posts room verdicts under this author. */
   public static final String SAIL_AUTHOR = "sail";
-
-  /**
-   * Whether {@code peer} may sync a message authored by {@code author} into {@code roomId}. A peer
-   * owns its own handle, the agent principals of runs its box executed (current or historical), and
-   * the platform narrator {@link #SAIL_AUTHOR} — but the narrator only for conversations the peer's
-   * box ran something in: the review pipeline narrates where it executed, and runs sync before
-   * messages, so the run row is the evidence. Posting authority over the room is required on top:
-   * the session's role is admin, or the peer owns the conversation ({@link RoomStore#owners}).
-   */
-  private boolean mayPostAs(String peer, String author, String roomId) {
-    if (peer == null) {
-      return false;
-    }
-    var ownsAuthor =
-        peer.equals(author)
-            || (SAIL_AUTHOR.equals(author) && ranInConversation(peer, roomId))
-            || db.queryOne(
-                    """
-                    SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s
-                        AND (r.principal = ?3 OR EXISTS (SELECT 1 FROM run_principals rp
-                            WHERE rp.run_id = r.id AND rp.principal = ?3)) LIMIT 1"""
-                        .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
-                    row -> true,
-                    peer,
-                    roomId,
-                    author)
-                .orElse(false);
-    if (!ownsAuthor) {
-      return false;
-    }
-    return Actor.current().isAdmin() || new RoomStore(db).owners(roomId).contains(peer);
-  }
 
   /**
    * Refuses to decide a post in a conversation main has never held ({@link SyncedStore.Unheld}):
@@ -499,12 +482,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         .orElse(false);
   }
 
-  private boolean ranInConversation(String peer, String roomId) {
+  /**
+   * Whether a run acting for {@code owner} is in conversation {@code roomId}: the evidence that the
+   * owner's box ran the pipeline that narrates there as {@link #SAIL_AUTHOR}.
+   */
+  public boolean ranInConversation(String owner, String roomId) {
     return db.queryOne(
             "SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s LIMIT 1"
                 .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
             row -> true,
-            peer,
+            owner,
             roomId)
         .orElse(false);
   }
@@ -627,7 +614,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * pre-rename journal entries and pre-rename revisions carry — rooms kept the spec's id at the
    * split, so the value is the same room either way.
    */
-  private static String roomIdOf(Map<String, Object> snapshot) {
+  public static String roomIdOf(Map<String, Object> snapshot) {
     var roomId = Objects.toString(snapshot.get("room_id"), null);
     return roomId != null ? roomId : required(snapshot, "spec_id");
   }

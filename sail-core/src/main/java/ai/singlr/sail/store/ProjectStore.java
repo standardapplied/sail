@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
@@ -242,8 +243,14 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     db.execute("DELETE FROM projects WHERE name = ?", id);
   }
 
-  /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
+  /**
+   * Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. A
+   * blocks-resurrection marker is a tombstone to {@code authority}, which decides the offer before
+   * anything is written.
+   */
+  @Override
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
     return db.transaction(
         () -> {
           if (!Objects.equals(latestRev(id), expectedRev)) {
@@ -254,11 +261,20 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
             return new PushOutcome.Stale(latestRev(id), current);
           }
           var blocks = isBlocksResurrectionMarker(snapshot);
-          if (snapshot == null || blocks) {
-            var present = findByName(id).orElse(null);
-            if (present == null && !blocks) {
-              return new PushOutcome.Accepted(latestRev(id));
-            }
+          var tombstone = snapshot == null || blocks;
+          var present = findByName(id).orElse(null);
+          if (tombstone && present == null && !blocks) {
+            return new PushOutcome.Accepted(latestRev(id));
+          }
+          var definition = tombstone ? null : definitionOf(snapshot);
+          var refusal =
+              authority.decide(
+                  Actor.current(), id, comparableSnapshot(id), tombstone ? null : snapshot);
+          if (refusal.isPresent()) {
+            return new PushOutcome.Denied(
+                refusal.get().message(), latestRev(id), comparableSnapshot(id));
+          }
+          if (tombstone) {
             var rev =
                 recordRevision(
                     id,
@@ -274,7 +290,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
             }
             return new PushOutcome.Accepted(rev);
           }
-          var definition = definitionOf(snapshot);
           writeRow(id, definition, Snapshots.actor(snapshot));
           return new PushOutcome.Accepted(
               recordRevision(

@@ -60,7 +60,12 @@ class MessageSyncTest {
       messages = new MessageStore(db);
       replica =
           new StoreReplica(
-              id, messages, new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
+              id,
+              messages,
+              new ChangeLog(db),
+              new SyncConflicts(db),
+              new SyncState(db),
+              SyncedEntities.require(messages.entityType()).authority(db));
     }
 
     @Override
@@ -138,7 +143,9 @@ class MessageSyncTest {
         () -> main.messages.applyRevision(row.id(), changed, row.rev()));
     assertThrows(
         IllegalArgumentException.class,
-        () -> main.messages.commitRevision(row.id(), null, main.messages.latestRev(row.id())));
+        () ->
+            main.messages.commitRevision(
+                row.id(), null, main.messages.latestRev(row.id()), main.messages.authority()));
   }
 
   @Test
@@ -157,7 +164,8 @@ class MessageSyncTest {
                 main.messages.commitRevision(
                     "019fee00-0000-7000-8000-0000000000ab",
                     snapshot(reviewerPrincipal, "room"),
-                    null));
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -177,7 +185,10 @@ class MessageSyncTest {
             Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "019fee00-0000-7000-8000-0000000000ac", snapshot("node", "orphan"), null));
+                    "019fee00-0000-7000-8000-0000000000ac",
+                    snapshot("node", "orphan"),
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -205,7 +216,10 @@ class MessageSyncTest {
             Actor.sync("node", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "019fee00-0000-7000-8000-0000000000bc", snapshot("sail", "room"), null));
+                    "019fee00-0000-7000-8000-0000000000bc",
+                    snapshot("sail", "room"),
+                    null,
+                    main.messages.authority()));
 
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
@@ -224,7 +238,10 @@ class MessageSyncTest {
                 Actor.sync("node", Role.MEMBER),
                 () ->
                     main.messages.commitRevision(
-                        "019fee00-0000-7000-8000-0000000000bd", snapshot("sail", "room"), null)));
+                        "019fee00-0000-7000-8000-0000000000bd",
+                        snapshot("sail", "room"),
+                        null,
+                        main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'sail'"), denied.reason());
   }
@@ -239,7 +256,9 @@ class MessageSyncTest {
             PushOutcome.Denied.class,
             Actor.call(
                 Actor.sync("node", Role.MEMBER),
-                () -> main.messages.commitRevision(messageId, snapshot("admin", "room"), null)));
+                () ->
+                    main.messages.commitRevision(
+                        messageId, snapshot("admin", "room"), null, main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'admin'"), denied.reason());
     assertNull(denied.currentRev(), "main holds no version of a message it never took");
@@ -283,7 +302,9 @@ class MessageSyncTest {
           var outcome =
               Actor.call(
                   Actor.sync("mady", Role.MEMBER),
-                  () -> main.messages.commitRevision(id, snapshot("mady", conversation), null));
+                  () ->
+                      main.messages.commitRevision(
+                          id, snapshot("mady", conversation), null, main.messages.authority()));
 
           assertEquals(
               Ownership.owns("mady", assignee, creator),
@@ -304,7 +325,10 @@ class MessageSyncTest {
             Actor.sync("mallory", Role.MEMBER),
             () ->
                 main.messages.commitRevision(
-                    "00000000-0000-7000-8000-000000000002", snapshot("mallory", "room"), null)));
+                    "00000000-0000-7000-8000-000000000002",
+                    snapshot("mallory", "room"),
+                    null,
+                    main.messages.authority())));
 
     assertTrue(main.messages.list("room", null, 10).isEmpty());
   }
@@ -321,7 +345,8 @@ class MessageSyncTest {
                         main.messages.commitRevision(
                             "00000000-0000-7000-8000-000000000003",
                             snapshot("node", "missing"),
-                            null)));
+                            null,
+                            main.messages.authority())));
 
     assertTrue(refused.getMessage().contains("room 'missing'"), refused.getMessage());
     assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000003").isEmpty());
@@ -338,7 +363,8 @@ class MessageSyncTest {
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000004",
                         snapshot("codex/unknown-run", "room"),
-                        null)));
+                        null,
+                        main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'codex/unknown-run'"), denied.reason());
   }
@@ -358,7 +384,9 @@ class MessageSyncTest {
 
     Actor.call(
         Actor.sync("node", Role.MEMBER),
-        () -> main.messages.commitRevision(acceptedId, snapshot("codex/run-1", "room"), null));
+        () ->
+            main.messages.commitRevision(
+                acceptedId, snapshot("codex/run-1", "room"), null, main.messages.authority()));
 
     assertEquals("codex/run-1", main.messages.findById(acceptedId).orElseThrow().author());
 
@@ -374,7 +402,8 @@ class MessageSyncTest {
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000012",
                     snapshot("codex/run-1", "other-room"),
-                    null)));
+                    null,
+                    main.messages.authority())));
   }
 
   private static Map<String, Object> snapshot(String author, String specId) {

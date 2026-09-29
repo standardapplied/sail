@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
@@ -165,7 +166,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   @Override
   public Set<String> contentFields() {
-    return Set.of("content_hash");
+    return CONTENT_FIELDS;
   }
 
   @Override
@@ -283,8 +284,9 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**
@@ -356,7 +358,14 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   /** The file's store-specific half of the shared {@link RevisionJournal} sync protocol. */
+  private static final Set<String> CONTENT_FIELDS = Set.of("content_hash");
+
   private final class FileSchema implements EntitySchema {
+
+    @Override
+    public Set<String> contentFields() {
+      return CONTENT_FIELDS;
+    }
 
     @Override
     public String entityType() {

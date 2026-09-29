@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.sync.SyncedEntities;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.identity.Actor;
@@ -52,10 +53,10 @@ class ParkedConflictFleetIT {
                 mainRuns,
                 new ChangeLog(mainDb),
                 new SyncConflicts(mainDb),
-                new SyncState(mainDb));
+                new SyncState(mainDb), SyncedEntities.require(mainRuns.entityType()).authority(mainDb));
         var nodeReplica =
             new StoreReplica(
-                "mady-box", nodeRuns, new ChangeLog(nodeDb), conflicts, new SyncState(nodeDb));
+                "mady-box", nodeRuns, new ChangeLog(nodeDb), conflicts, new SyncState(nodeDb), SyncedEntities.require(nodeRuns.entityType()).authority(nodeDb));
         var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(runId));
         pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
         Actor.call(

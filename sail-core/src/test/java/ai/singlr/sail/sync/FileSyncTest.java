@@ -50,7 +50,14 @@ class FileSyncTest {
       new SchemaManager(db).migrate();
       this.files = new FileStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica = new StoreReplica(id, files, new ChangeLog(db), conflicts, new SyncState(db));
+      this.replica =
+          new StoreReplica(
+              id,
+              files,
+              new ChangeLog(db),
+              conflicts,
+              new SyncState(db),
+              SyncedEntities.require(files.entityType()).authority(db));
     }
 
     @Override

@@ -187,11 +187,14 @@ class RoomStoreTest {
     rooms.create(room("auth"));
     var current = rooms.latestRev("auth");
 
-    var stale = rooms.commitRevision("auth", rooms.comparableSnapshot("auth"), "0-stale");
+    var stale =
+        rooms.commitRevision(
+            "auth", rooms.comparableSnapshot("auth"), "0-stale", rooms.authority());
     assertInstanceOf(PushOutcome.Stale.class, stale);
     assertEquals(current, ((PushOutcome.Stale) stale).currentRev());
 
-    var accepted = rooms.commitRevision("auth", rooms.comparableSnapshot("auth"), current);
+    var accepted =
+        rooms.commitRevision("auth", rooms.comparableSnapshot("auth"), current, rooms.authority());
     assertInstanceOf(PushOutcome.Accepted.class, accepted);
   }
 

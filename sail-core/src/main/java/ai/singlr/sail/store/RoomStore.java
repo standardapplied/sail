@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.RoomAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -266,6 +268,40 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .toList();
   }
 
+  /**
+   * Who owns room {@code roomId} — its roster, wake, title and assignee — the one rule every door
+   * that changes a room, every waker and main's check of a synced room decide by. A spec's identity
+   * room is its spec's, as this box last knew the spec, live or deleted ({@link
+   * SpecStore#lastKnown}); any other room is its own row's ({@link Ownership#ownerOf}). Posting is
+   * wider ({@link #owners}): owning a spec born in a room gives a voice there, not its settings.
+   * Blank when no one is known.
+   */
+  public String ownerOf(String roomId) {
+    return ownerOf(roomId, comparableSnapshot(roomId));
+  }
+
+  /**
+   * As {@link #ownerOf(String)}, reading a standalone room's owner from {@code held}, the room's
+   * projection as this box holds it, so a revision being decided never names its own owner.
+   */
+  public String ownerOf(String roomId, Map<String, Object> held) {
+    return new SpecStore(db)
+        .lastKnown(roomId)
+        .filter(spec -> spec.roomIdOrIdentity().equals(roomId))
+        .map(SpecStore.LastKnown::owner)
+        .orElseGet(
+            () ->
+                held == null
+                    ? ""
+                    : Ownership.ownerOf(
+                        Snapshots.text(held, "assignee"), Snapshots.text(held, "created_by")));
+  }
+
+  /** Who may write a room on this box: the rule every door and main's commit decide by. */
+  public RoomAuthority authority() {
+    return new RoomAuthority(db);
+  }
+
   public Optional<RoomRow> findById(String id) {
     return db.queryOne(
         """
@@ -347,8 +383,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
   @Override
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return journal.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /**

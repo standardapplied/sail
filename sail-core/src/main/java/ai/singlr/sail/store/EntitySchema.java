@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The store-specific half of a synced entity, supplied to {@link RevisionJournal}. The journal owns
@@ -16,9 +17,9 @@ import java.util.Map;
  * projects to and from a snapshot. Who a revision is attributed to is the bound {@link
  * ai.singlr.sail.identity.Actor}, never the row.
  *
- * <p>Implemented by the five mutable synced stores (specs, runs, reviews, projects, files).
- * Immutable or specially-authorized entities (e.g. messages) keep their own bespoke logic and do
- * not ride this journal.
+ * <p>Implemented by the five mutable synced stores that ride the journal: specs, rooms, runs,
+ * reviews and files. Projects, which weave a resurrection-blocking marker into their revisions, and
+ * messages, which never change, keep their own commit and do not ride it.
  */
 public interface EntitySchema {
 
@@ -40,6 +41,14 @@ public interface EntitySchema {
    * journal's transaction.
    */
   void apply(String id, Map<String, Object> snapshot);
+
+  /**
+   * Snapshot fields whose values name blobs, which main must hold before it commits a revision
+   * naming them. None by default.
+   */
+  default Set<String> contentFields() {
+    return Set.of();
+  }
 
   /**
    * Projects a full snapshot onto the subset that carries an FDE's actual work — the fields

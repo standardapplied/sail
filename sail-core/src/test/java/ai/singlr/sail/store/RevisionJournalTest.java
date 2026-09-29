@@ -17,6 +17,7 @@ import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -101,7 +102,9 @@ class RevisionJournalTest {
     createWidget("w4", "one", "uday");
     var current = journal.latestRev("w4");
 
-    var outcome = journal.commitRevision("w4", snapshot("two", "uday"), current);
+    var outcome =
+        journal.commitRevision(
+            "w4", snapshot("two", "uday"), current, (actor, id, held, next) -> Optional.empty());
 
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals(current, accepted.rev());
@@ -113,7 +116,12 @@ class RevisionJournalTest {
     createWidget("w5", "kept", "uday");
     var current = journal.latestRev("w5");
 
-    var outcome = journal.commitRevision("w5", snapshot("clobber", "bob"), "0-stale");
+    var outcome =
+        journal.commitRevision(
+            "w5",
+            snapshot("clobber", "bob"),
+            "0-stale",
+            (actor, id, held, next) -> Optional.empty());
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals(current, stale.currentRev());
@@ -122,7 +130,9 @@ class RevisionJournalTest {
 
   @Test
   void commitRevisionForABrandNewEntityExpectsNull() {
-    var outcome = journal.commitRevision("w6", snapshot("fresh", "uday"), null);
+    var outcome =
+        journal.commitRevision(
+            "w6", snapshot("fresh", "uday"), null, (actor, id, held, next) -> Optional.empty());
 
     assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertEquals("fresh", journal.comparableSnapshot("w6").get("value"));

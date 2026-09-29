@@ -52,7 +52,8 @@ class ParkedConflictSyncTest {
             new ChangeLog(node.db),
             node.conflicts,
             node.syncState,
-            runId -> nodeRuns.pushableFrom(runId, node.id));
+            runId -> nodeRuns.pushableFrom(runId, node.id),
+            SyncedEntities.require(nodeRuns.entityType()).authority(node.db));
   }
 
   @AfterEach
@@ -87,7 +88,13 @@ class ParkedConflictSyncTest {
     round();
     var mainRuns = new RunStore(main.db);
     var mainReplica =
-        new StoreReplica(main.id, mainRuns, new ChangeLog(main.db), main.conflicts, main.syncState);
+        new StoreReplica(
+            main.id,
+            mainRuns,
+            new ChangeLog(main.db),
+            main.conflicts,
+            main.syncState,
+            SyncedEntities.require(mainRuns.entityType()).authority(main.db));
     var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(id));
     pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
     mainReplica.commit(id, pushedButNeverAcknowledged, mainReplica.currentRev(id));

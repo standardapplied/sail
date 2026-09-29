@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
@@ -89,7 +90,9 @@ class ProjectStoreSyncTest {
   void commitAcceptsWhenExpectedRevMatchesAndMintsANewOne() {
     store.applyRevision("acme", def("base"), "rev-base");
 
-    var outcome = store.commitRevision("acme", def("pushed"), "rev-base");
+    var outcome =
+        store.commitRevision(
+            "acme", def("pushed"), "rev-base", new WriterAuthority(db, "projects"));
 
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals("rev-base", accepted.rev());
@@ -101,9 +104,11 @@ class ProjectStoreSyncTest {
   @ActingAs(value = Actor.Lane.SYNC, handle = "node")
   void commitRejectsAsStaleWhenMainMovedUnderUs() {
     store.applyRevision("acme", def("base"), "rev-base");
-    store.commitRevision("acme", def("moved"), "rev-base");
+    store.commitRevision("acme", def("moved"), "rev-base", new WriterAuthority(db, "projects"));
 
-    var outcome = store.commitRevision("acme", def("racing"), "rev-base");
+    var outcome =
+        store.commitRevision(
+            "acme", def("racing"), "rev-base", new WriterAuthority(db, "projects"));
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
     assertEquals(def("moved", "node"), stale.currentSnapshot());

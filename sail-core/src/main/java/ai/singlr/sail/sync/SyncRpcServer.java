@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.authority.EraseAuthority;
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
@@ -12,6 +14,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncedStore;
 import java.io.IOException;
@@ -34,13 +37,13 @@ import java.util.Optional;
  * change log for {@link SyncWire.Pull}, reads current rows for {@link SyncWire.Need}, routes each
  * offer of a {@link SyncWire.Push} to the authoritative {@link MainReplica} for its entity type,
  * serves the node's roster pull, and returns at {@link SyncWire.Bye} or end of stream. The
- * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, carries the push half of Door-2
- * authorization: a {@code viewer} opens a session and pulls every type, but its offers are denied
- * so only {@code member}+ work propagates. The principal's handle additionally binds run offers to
- * execution provenance — a session may create, update, or delete only runs stamped with its own
- * node, so no member can forge run metadata another box would treat as its own execution. Every
- * such decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the
- * node settles it instead of offering the same change again every round.
+ * session's {@link Actor}, on the {@link Actor.Lane#SYNC} lane, is the pusher every offer is
+ * decided for, by its type's {@code WriteAuthority} — the same rule every door that writes the type
+ * asks: a {@code viewer} opens a session and pulls every type, but its offers are denied; a member
+ * changes only what is theirs, names only themselves, their box's machinery or their runs as its
+ * author, and creates only as themselves; and a run is only ever its executing box's. Every such
+ * decision is a {@link SyncWire.Denied} for that one offer, carrying main's version, so the node
+ * settles it instead of offering the same change again every round.
  *
  * <p>An offer carrying {@code erase} asks main to prune: main decides it on its own copy ({@link
  * EraseAuthority}), erases the entity and what belongs to it in one transaction, and answers the
@@ -542,14 +545,16 @@ public final class SyncRpcServer {
         () ->
             db.<SyncWire.Result>transaction(
                 () -> {
-                  var refusal = authority.refusal(type, offer.id());
+                  var refusal = eraseRefusal(type, offer.id());
                   if (refusal.isPresent()) {
                     return new SyncWire.Refused(offer.id(), refusal.get());
                   }
                   if (!erasure.isErased(root)) {
                     var plan = erasure.closure(List.of(root));
                     var busy =
-                        Erasure.SPEC.equals(type) ? authority.busy(plan) : Optional.<String>empty();
+                        Erasure.SPEC.equals(type)
+                            ? authority.idle(plan).map(Refusal::message)
+                            : Optional.<String>empty();
                     if (busy.isPresent()) {
                       return new SyncWire.Refused(offer.id(), busy.get());
                     }
@@ -559,6 +564,40 @@ public final class SyncRpcServer {
                   var erased = changeLog.erasure(type, offer.id()).orElseThrow();
                   return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor(), null);
                 }));
+  }
+
+  /**
+   * Why main refuses to erase {@code type} {@code id} for the principal, decided on main's own copy
+   * by the erase rule ({@link EraseAuthority}). Only specs and projects are erased on request; one
+   * main has already erased has nothing left to protect, so asking again only answers the erasure
+   * it has; one main holds nothing of has no owner main can establish.
+   */
+  private Optional<String> eraseRefusal(String type, String id) {
+    var project = Erasure.PROJECT.equals(type);
+    var denied = authority.request(principal, project);
+    if (denied.isPresent()) {
+      return denied.map(Refusal::message);
+    }
+    if (!Erasure.SPEC.equals(type) && !project) {
+      return Optional.of("only specs and projects are pruned on request, not a " + type);
+    }
+    if (changeLog.isErased(type, id)) {
+      return Optional.empty();
+    }
+    if (project) {
+      return erasure.holds(new Erasure.Target(type, id))
+          ? Optional.empty()
+          : Optional.of("main holds no project '" + id + "'");
+    }
+    return new SpecStore(db)
+        .lastKnown(id)
+        .map(spec -> authority.spec(principal, spec).map(Refusal::message))
+        .orElseGet(
+            () ->
+                Optional.of(
+                    "main holds no spec '"
+                        + id
+                        + "', so it cannot tell whose it is; sync it before pruning"));
   }
 
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {

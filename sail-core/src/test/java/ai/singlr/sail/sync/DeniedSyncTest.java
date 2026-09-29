@@ -133,9 +133,8 @@ class DeniedSyncTest {
       report = link.reconcile("spec", replica("spec"));
       assertEquals(
           List.of(
-              "spec auth: main denied this change — "
-                  + StoreReplica.READ_ONLY
-                  + ". Yours is in its history: sail spec history auth."),
+              "spec auth: main denied this change — Your credential is read-only and cannot"
+                  + " change specs. Yours is in its history: sail spec history auth."),
           link.notices(),
           "each denial is announced as it settles");
     }

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.ReviewAuthority;
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
@@ -93,6 +95,11 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return id;
   }
 
+  /** Who may write a review on this box: the rule every door and main's commit decide by. */
+  public ReviewAuthority authority() {
+    return new ReviewAuthority(db);
+  }
+
   public Optional<ReviewRow> findReview(String reviewId) {
     return db.queryOne(
         "SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,"
@@ -167,21 +174,37 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Marks every {@code running} review {@code failed}, returning how many were swept. A review's
-   * execution lives only in the controller's memory, so after a server restart a {@code running}
-   * row is an orphan of an interrupted run; left in place it silently blocks every future review
-   * for its spec (the pipeline skips a spec whose latest review is running). Called once at server
-   * start, before missed stops are replayed.
+   * Marks every {@code running} review this box executed {@code failed}, returning how many were
+   * swept. A review's execution lives only in the controller's memory, so after a server restart a
+   * {@code running} row this box ran is an orphan of an interrupted run; left in place it silently
+   * blocks every future review for its spec (the pipeline skips a spec whose latest review is
+   * running). A review another box runs is that box's to finish, so it is left alone: this box ran
+   * a review whose run was stamped with its handle, {@code localHandle}, or — before the review's
+   * run was recorded — one its own first revision began here. Called once at server start, before
+   * missed stops are replayed.
    */
-  public int failOrphanedRunning() {
+  public int failOrphanedRunning(String localHandle) {
     return db.transaction(
         () -> {
           var affected =
-              db.query("SELECT id FROM reviews WHERE status = 'running'", row -> row.text(0));
-          db.execute(
-              "UPDATE reviews SET status = 'failed', completed_at = ? WHERE status = 'running'",
-              DateTimeUtils.now().toString());
-          affected.forEach(this::journal);
+              db.query(
+                  """
+                  SELECT r.id FROM reviews r WHERE r.status = 'running'
+                  AND CASE WHEN EXISTS (SELECT 1 FROM runs WHERE id = r.id)
+                      THEN EXISTS (SELECT 1 FROM runs WHERE id = r.id AND IFNULL(node, '') = ?)
+                      ELSE (SELECT peer IS NULL FROM change_log
+                          WHERE entity_type = 'review' AND entity_id = r.id
+                          ORDER BY seq LIMIT 1) END""",
+                  row -> row.text(0),
+                  Objects.toString(localHandle, ""));
+          affected.forEach(
+              id -> {
+                db.execute(
+                    "UPDATE reviews SET status = 'failed', completed_at = ? WHERE id = ?",
+                    DateTimeUtils.now().toString(),
+                    id);
+                journal(id);
+              });
           return affected.size();
         });
   }
@@ -670,8 +693,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   /**
    * Adopts main's authoritative aggregate at its exact rev as the new synced ancestor. When the
    * adopted content already matches the local aggregate — the normal case on the executing node
-   * after its own successful push — only the revision is linked: rebuilding would delete the
-   * finding rows (which never replicate) that carry-forward and dispute resolution read.
+   * after its own successful push — only the revision is linked. Adopting a version that differs,
+   * after a denial or on any pull, never deletes the finding rows this box holds (which never
+   * replicate), which carry-forward and dispute resolution read.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     revisions.applyRevision(id, snapshot, rev);
@@ -683,8 +707,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /** Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. */
-  public PushOutcome commitRevision(String id, Map<String, Object> snapshot, String expectedRev) {
-    return revisions.commitRevision(id, snapshot, expectedRev);
+  public PushOutcome commitRevision(
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
+    return revisions.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   @Override
@@ -766,17 +791,22 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Writes an aggregate snapshot: the review row and its stages (with finding counts), replacing
-   * any existing children.
+   * Writes an aggregate snapshot: the review row and its stages (with finding counts). Finding rows
+   * never replicate, so they are never deleted here: a stage this box holds findings in is kept
+   * even where the snapshot drops it, and its counts stay the ones its findings give.
    */
   @SuppressWarnings("unchecked")
   private void writeAggregate(String id, Map<String, Object> snapshot) {
-    deleteAggregate(id);
     db.execute(
         """
         INSERT INTO reviews (id, spec_id, iteration, status, created_at, completed_at,
             decided_by, superseded_at, error)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET spec_id = excluded.spec_id,
+            iteration = excluded.iteration, status = excluded.status,
+            created_at = excluded.created_at, completed_at = excluded.completed_at,
+            decided_by = excluded.decided_by, superseded_at = excluded.superseded_at,
+            error = excluded.error""",
         id,
         Snapshots.text(snapshot, "spec_id"),
         Snapshots.integer(snapshot, "iteration"),
@@ -786,27 +816,41 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "decided_by"),
         Snapshots.text(snapshot, "superseded_at"),
         Snapshots.text(snapshot, "error"));
-    var stages = (List<Map<String, Object>>) snapshot.get("stages");
-    if (stages != null) {
-      for (var stage : stages) {
-        var counts = stage.get("finding_counts");
-        db.execute(
-            """
-            INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
-                started_at, completed_at, error, finding_counts)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            Snapshots.text(stage, "id"),
-            id,
-            Snapshots.text(stage, "name"),
-            Snapshots.text(stage, "stage_type"),
-            Snapshots.text(stage, "status"),
-            Snapshots.text(stage, "reviewer"),
-            Snapshots.text(stage, "started_at"),
-            Snapshots.text(stage, "completed_at"),
-            Snapshots.text(stage, "error"),
-            counts == null ? null : YamlUtil.dumpJson((Map<String, Object>) counts));
-      }
+    var stages =
+        Objects.requireNonNullElse(
+            (List<Map<String, Object>>) snapshot.get("stages"), List.<Map<String, Object>>of());
+    for (var stage : stages) {
+      var counts = stage.get("finding_counts");
+      db.execute(
+          """
+          INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
+              started_at, completed_at, error, finding_counts)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET review_id = excluded.review_id, name = excluded.name,
+              stage_type = excluded.stage_type, status = excluded.status,
+              reviewer = excluded.reviewer, started_at = excluded.started_at,
+              completed_at = excluded.completed_at, error = excluded.error,
+              finding_counts = CASE WHEN EXISTS (SELECT 1 FROM review_findings f
+                  WHERE f.stage_id = review_stages.id) THEN NULL
+                  ELSE excluded.finding_counts END""",
+          Snapshots.text(stage, "id"),
+          id,
+          Snapshots.text(stage, "name"),
+          Snapshots.text(stage, "stage_type"),
+          Snapshots.text(stage, "status"),
+          Snapshots.text(stage, "reviewer"),
+          Snapshots.text(stage, "started_at"),
+          Snapshots.text(stage, "completed_at"),
+          Snapshots.text(stage, "error"),
+          counts == null ? null : YamlUtil.dumpJson((Map<String, Object>) counts));
     }
+    db.execute(
+        """
+        DELETE FROM review_stages WHERE review_id = ?
+        AND id NOT IN (SELECT value FROM json_each(?))
+        AND NOT EXISTS (SELECT 1 FROM review_findings f WHERE f.stage_id = review_stages.id)""",
+        id,
+        YamlUtil.dumpJson(stages.stream().map(stage -> Snapshots.text(stage, "id")).toList()));
   }
 
   private void deleteAggregate(String id) {
@@ -861,11 +905,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       return aggregateMap(id);
     }
 
-    /**
-     * Adopts main's aggregate, but only when it actually differs: rebuilding rewrites the stage and
-     * finding rows, and the finding rows (which never replicate) carry data that carry-forward and
-     * dispute resolution read on the executing node.
-     */
+    /** Adopts main's aggregate, but only when it actually differs ({@link #writeAggregate}). */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       if (!sameContent(aggregateMap(id), snapshot)) {

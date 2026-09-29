@@ -5,8 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.Snapshots;
@@ -32,12 +32,11 @@ import java.util.function.Supplier;
  *
  * <p>{@code pushPolicy} decides whether this node may push its own change for an id up to main: the
  * default always may (multi-writer entities — specs, files, projects), and a single-writer entity
- * like a run supplies a policy so a reader box never pushes a run it did not author.
+ * like a run supplies a policy so a reader box never pushes a run it did not author. {@code
+ * authority} is the type's {@link WriteAuthority}, which main's commit asks for every revision a
+ * node pushes.
  */
 public final class StoreReplica implements LocalReplica, MainReplica {
-
-  static final String READ_ONLY =
-      "your role is read-only: it can pull the shared board but not push changes";
 
   private final String id;
   private final SyncedStore store;
@@ -45,14 +44,16 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private final SyncConflicts conflicts;
   private final SyncState syncState;
   private final Predicate<String> pushPolicy;
+  private final WriteAuthority authority;
 
   public StoreReplica(
       String id,
       SyncedStore store,
       ChangeLog changeLog,
       SyncConflicts conflicts,
-      SyncState syncState) {
-    this(id, store, changeLog, conflicts, syncState, entityId -> true);
+      SyncState syncState,
+      WriteAuthority authority) {
+    this(id, store, changeLog, conflicts, syncState, entityId -> true, authority);
   }
 
   public StoreReplica(
@@ -61,13 +62,15 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState,
-      Predicate<String> pushPolicy) {
+      Predicate<String> pushPolicy,
+      WriteAuthority authority) {
     this.id = Objects.requireNonNull(id, "id");
     this.store = Objects.requireNonNull(store, "store");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
     this.pushPolicy = Objects.requireNonNull(pushPolicy, "pushPolicy");
+    this.authority = Objects.requireNonNull(authority, "authority");
   }
 
   @Override
@@ -169,8 +172,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
    * against its erasure, so the node adopts it and nothing brings the entity back — and a state
    * that would belong to an erased entity is refused by the journal ({@link ChangeLog.Pruned}),
    * inside the commit's own transaction, so a prune cannot slip between the two. Who may write is
-   * decided in the same transaction: a read-only actor's offer is {@linkplain CommitOutcome.Denied
-   * denied} with main's version, as is any change the store itself refuses the actor.
+   * decided in the same transaction, by the type's {@link WriteAuthority} the store asks: an offer
+   * it refuses is {@linkplain CommitOutcome.Denied denied} with main's version.
    */
   @Override
   public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
@@ -180,11 +183,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
           }
-          if (!Actor.current().canWrite()) {
-            return new CommitOutcome.Denied(
-                READ_ONLY, store.latestRev(entityId), current(entityId), recordedAuthor(entityId));
-          }
-          return switch (store.commitRevision(entityId, snapshot, expectedRev)) {
+          return switch (store.commitRevision(entityId, snapshot, expectedRev, authority)) {
             case PushOutcome.Accepted a ->
                 new CommitOutcome.Accepted(
                     a.rev(), recordedAuthor(entityId), recordedCreator(entityId));

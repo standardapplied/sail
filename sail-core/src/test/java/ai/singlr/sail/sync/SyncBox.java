@@ -57,7 +57,14 @@ public final class SyncBox implements AutoCloseable {
     this.specs = new SpecStore(db);
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);
-    this.replica = new StoreReplica(id, specs, new ChangeLog(db), conflicts, syncState);
+    this.replica =
+        new StoreReplica(
+            id,
+            specs,
+            new ChangeLog(db),
+            conflicts,
+            syncState,
+            SyncedEntities.require(specs.entityType()).authority(db));
   }
 
   public static SpecStore.SpecRow spec(String id, String title, String status) {

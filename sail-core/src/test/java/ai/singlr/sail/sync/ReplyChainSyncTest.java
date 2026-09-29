@@ -55,7 +55,8 @@ class ReplyChainSyncTest {
             nodeMessages,
             new ChangeLog(node.db),
             new SyncConflicts(node.db),
-            new SyncState(node.db));
+            new SyncState(node.db),
+            SyncedEntities.require(nodeMessages.entityType()).authority(node.db));
   }
 
   @AfterEach

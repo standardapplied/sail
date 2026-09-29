@@ -186,7 +186,7 @@ class SyncTransportTest {
     new RunStore(nodeA.db).complete(id, "stopped", 0);
     var changed = new LinkedHashMap<>(runs.comparableSnapshot(id));
     changed.put("branch", "from-main");
-    runs.commitRevision(id, changed, runs.latestRev(id));
+    runs.commitRevision(id, changed, runs.latestRev(id), runs.authority());
     var mainRev = runs.latestRev(id);
 
     try (var link = connect(nodeA)) {
@@ -690,7 +690,12 @@ class SyncTransportTest {
     var nodeFiles = new FileStore(nodeA.db);
     var nodeFileReplica =
         new StoreReplica(
-            "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
+            "A",
+            nodeFiles,
+            new ChangeLog(nodeA.db),
+            nodeA.conflicts,
+            new SyncState(nodeA.db),
+            SyncedEntities.require(nodeFiles.entityType()).authority(nodeA.db));
     nodeA.specs.create(spec("auth", "Auth", "pending"));
     ai.singlr.sail.store.ContentFixtures.put(nodeFiles, "acme", "scripts/deploy.sh", "ZGVwbG95");
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));

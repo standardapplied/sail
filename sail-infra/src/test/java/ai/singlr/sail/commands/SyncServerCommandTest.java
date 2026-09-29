@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.sync.SyncedEntities;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -81,7 +82,7 @@ class SyncServerCommandTest {
             nodeSpecs,
             new ChangeLog(nodeDb),
             new SyncConflicts(nodeDb),
-            new SyncState(nodeDb));
+            new SyncState(nodeDb), SyncedEntities.require(nodeSpecs.entityType()).authority(nodeDb));
   }
 
   @AfterEach
@@ -262,7 +263,7 @@ class SyncServerCommandTest {
         new ChangeLog(nodeDb),
         new SyncConflicts(nodeDb),
         new SyncState(nodeDb),
-        id -> runStore.pushableFrom(id, "uday"));
+        id -> runStore.pushableFrom(id, "uday"), SyncedEntities.require(runStore.entityType()).authority(nodeDb));
   }
 
   private String createNodeRun(String node) {
