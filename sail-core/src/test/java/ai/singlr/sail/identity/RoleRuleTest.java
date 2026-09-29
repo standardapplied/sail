@@ -69,6 +69,25 @@ class RoleRuleTest {
   }
 
   @Test
+  void onANodeEveryOtherFdeReadsOnlyWhateverItsRoleOrItsCredential() {
+    assertEquals(Optional.of(Role.VIEWER), roleOf(NODE, "raj", Role.ADMIN), "an admin included");
+    assertEquals(Optional.of(Role.VIEWER), roleOf(NODE, "mady", Role.MEMBER));
+    assertEquals(Optional.of(Role.VIEWER), roleOf(NODE, "mady", Role.VIEWER));
+    assertEquals(Optional.of(Role.MEMBER), roleOf(NODE, "uday", Role.MEMBER), "the box's own FDE");
+    assertEquals(Optional.of(Role.ADMIN), roleOf(MAIN, "raj", Role.ADMIN), "main caps no one");
+    assertEquals(Optional.of(Role.MEMBER), roleOf(STANDALONE, "mady", Role.ADMIN));
+  }
+
+  @Test
+  void onANodeACredentialNamingNoFdeActsWithTheBoxFdesRole() {
+    var rule = new RoleRule(() -> NODE, roster);
+
+    assertEquals(Optional.of(Role.MEMBER), rule.roleOfUnbound(Role.ADMIN));
+    roster.update("uday", null, null, "admin");
+    assertEquals(Optional.of(Role.ADMIN), rule.roleOfUnbound(Role.ADMIN));
+  }
+
+  @Test
   void aDemotedFdeActsWithItsDemotedRole() {
     roster.update("raj", null, null, "viewer");
 
