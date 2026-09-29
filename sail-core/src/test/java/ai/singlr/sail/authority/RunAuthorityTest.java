@@ -282,6 +282,36 @@ class RunAuthorityTest {
   }
 
   @Test
+  void aRunIsOwnedByItsFdeAndItsSpecsOwnerOrTheBoxThatRanIt() {
+    assertEquals(
+        List.of("uday", "raj"),
+        RunAuthority.owners("uday", "auth", "box", spec -> Optional.of("raj")),
+        "its own FDE may still reach it after its spec moved");
+    assertEquals(
+        List.of("uday", "box"), RunAuthority.owners("uday", null, "box", spec -> Optional.empty()));
+    assertEquals(List.of("box"), RunAuthority.owners(null, " ", "box", spec -> Optional.empty()));
+    assertEquals(List.of(), RunAuthority.owners(" ", "auth", "box", spec -> Optional.empty()));
+    assertEquals(
+        List.of("uday"), RunAuthority.owners("uday", "auth", "box", spec -> Optional.of("uday")));
+  }
+
+  @Test
+  void accessIsAnAdminsOrAnOwnersOrOneActingForAnOwnerReadOnlyIncluded() {
+    var owners = List.of(OWNER, "carol");
+
+    assertEquals(Optional.empty(), RunAuthority.access(ADMIN, "r1", "auth", List.of()));
+    assertEquals(Optional.empty(), RunAuthority.access(OWNER_API, "r1", "auth", owners));
+    assertEquals(Optional.empty(), RunAuthority.access(VIEWER, "r1", "auth", owners));
+    assertEquals(Optional.empty(), RunAuthority.access(ROOM, "r1", "auth", owners));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        RunAuthority.access(MACHINE, "r1", "auth", owners).map(Refusal::kind));
+    assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        RunAuthority.access(OTHERS_AGENT, "r1", "auth", owners).map(Refusal::kind));
+  }
+
+  @Test
   void accessSpeaksTheTextsClientsSee() {
     assertEquals(
         Optional.of(

@@ -64,7 +64,7 @@ public final class LaunchAdmission {
           "Your credential is read-only and cannot change room membership.",
           "Ask an admin for a member or admin credential.");
     }
-    if (!actor.isAdmin() && !Ownership.owns(actor.handle(), owner)) {
+    if (!actor.isAdmin() && !actor.actsFor(owner)) {
       throw new ApiException(
           ErrorCode.NOT_YOUR_SPEC,
           "Room '" + roomId + "' belongs to '" + owner + "', not you.",

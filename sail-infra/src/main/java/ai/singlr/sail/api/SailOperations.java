@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.PostingRule;
+import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
@@ -820,7 +822,11 @@ public final class SailOperations implements HostOperations {
     return safeWrite(
         () -> {
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
+          var post = new LinkedHashMap<String, Object>();
+          post.put("room_id", room.id());
+          post.put("author", authorHandle);
+          Refusals.enforce(
+              requireMessageStore().authority().decide(Actor.current(), null, null, post));
           return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
@@ -906,11 +912,14 @@ public final class SailOperations implements HostOperations {
               }
               NameValidator.requireValidSpecId(request.id());
               requireValidWake(request.wake());
-              if (!actor.canWrite()) {
-                throw new ApiException(
-                    ErrorCode.READ_ONLY_CREDENTIAL,
-                    "Your credential is read-only and cannot create rooms.");
-              }
+              Refusals.enforce(
+                  store
+                      .authority()
+                      .decide(
+                          actor,
+                          request.id(),
+                          null,
+                          Map.of("project", request.project(), "title", request.title())));
               return store.atomically(
                   () -> {
                     requireUnclaimedRoomId(store, request.id());
@@ -1002,7 +1011,14 @@ public final class SailOperations implements HostOperations {
                                     new ApiException(
                                         ErrorCode.ROOM_NOT_FOUND,
                                         "Room '" + roomId + "' was not found."));
-                    SpecPolicy.mutate(row.id(), row.assignee(), row.createdBy()).enforce();
+                    Refusals.enforce(
+                        store
+                            .authority()
+                            .decide(
+                                Actor.current(),
+                                row.id(),
+                                store.comparableSnapshot(row.id()),
+                                null));
                     var attached = specIdsOf(roomId);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
@@ -1209,12 +1225,12 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * Resolves a run, applies the provenance guard, then the resource-scoped {@link RunPolicy} before
-   * handing it to {@code served}: an absent store is an internal error, an unknown run a 404, a run
-   * that executed elsewhere a structured {@code run_on_other_node} refusal, and a caller who is
-   * neither the run's spec assignee nor an admin a {@code forbidden_not_assignee}. The served
-   * branch only ever sees a local run the caller may access — one guard for both the log tail and
-   * stop.
+   * Resolves a run, applies the provenance guard, then the run-owner rule ({@link
+   * RunAuthority#access}) before handing it to {@code served}: an absent store is an internal
+   * error, an unknown run a 404, a run that executed elsewhere a structured {@code
+   * run_on_other_node} refusal, and a caller who is neither the run's spec assignee nor an admin a
+   * {@code forbidden_not_assignee}. The served branch only ever sees a local run the caller may
+   * access — one guard for both the log tail and stop.
    */
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
@@ -1230,10 +1246,14 @@ public final class SailOperations implements HostOperations {
     if (isForeign(run, localHandle)) {
       return foreignRun(run);
     }
-    if (RunPolicy.access(
-            run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, this::specOwner))
-        instanceof AccessDecision.Refused refused) {
-      return Result.failure(refused.code(), refused.message(), refused.fix());
+    var refused =
+        RunAuthority.access(
+            Actor.current(),
+            run.id(),
+            StopOperations.specIdOf(run),
+            RunAuthority.owners(run, this::specOwner));
+    if (refused.isPresent()) {
+      return Refusals.failure(refused.get());
     }
     return served.apply(run);
   }
@@ -1829,6 +1849,11 @@ public final class SailOperations implements HostOperations {
           var session = sessionId.strip();
           var sessionSource = Strings.isBlank(source) ? null : source.strip();
           var transcript = Strings.isBlank(transcriptPath) ? null : transcriptPath.strip();
+          var held = runStore.comparableSnapshot(runId);
+          var reported = new LinkedHashMap<>(held);
+          reported.put("session_id", session);
+          reported.put("session_source", sessionSource);
+          Refusals.enforce(runStore.authority().decide(Actor.current(), runId, held, reported));
           runStore.recordSession(runId, session, sessionSource, transcript);
           return new RunSessionResponse(runId, session, sessionSource);
         });
@@ -1844,7 +1869,8 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(ErrorCode.BAD_REQUEST, "session_id must not be blank.");
           }
           var room = requireRoomOrSpec(roomId);
-          SpecPolicy.post(room.id(), requireRoomStore().owners(room.id())).enforce();
+          Refusals.enforce(
+              PostingRule.decide(actor, room.id(), requireRoomStore().owners(room.id())));
           var cli = Strings.isBlank(agent) ? null : agent.strip();
           var data = new LinkedHashMap<String, Object>();
           data.put("room_id", room.id());

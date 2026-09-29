@@ -25,9 +25,9 @@ import java.util.stream.Stream;
  * Who may write a run. Every principal a run carries names the run itself ({@link
  * RunStore#namesRun}), and its spec and room never change. On this box's lanes a revision is an
  * admin's or its owners' ({@link #owners}), the rule stop and log access admit by; a run's own
- * principal may report its session even on a read-only lane. On {@link Actor.Lane#SYNC} a run is
- * its executing box's: its {@code node} is the pusher before and after, it acts for the pusher or
- * for no one, and a deleted run is never brought back.
+ * principal may report its own session, even on a read-only lane. On {@link Actor.Lane#SYNC} a run
+ * is its executing box's: its {@code node} is the pusher before and after, it acts for the pusher
+ * or for no one, and a deleted run is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
@@ -86,7 +86,8 @@ public final class RunAuthority implements WriteAuthority {
     if (WriteAuthority.decided(actor) || (held == null && next == null)) {
       return Optional.empty();
     }
-    if (!actor.canWrite() && !reportsOwnSession(actor, held, next)) {
+    var ownSession = reportsOwnSession(actor, held, next);
+    if (!actor.canWrite() && !ownSession) {
       return Refusal.readOnly("change runs");
     }
     var foreign =
@@ -111,7 +112,7 @@ public final class RunAuthority implements WriteAuthority {
     if (actor.lane() == Actor.Lane.SYNC) {
       return executed(actor.handle(), id, held, next);
     }
-    if (held == null) {
+    if (held == null || ownSession) {
       return Optional.empty();
     }
     var specId = Snapshots.text(held, "spec_id");
@@ -170,7 +171,9 @@ public final class RunAuthority implements WriteAuthority {
 
   private static boolean reportsOwnSession(
       Actor actor, Map<String, Object> held, Map<String, Object> next) {
-    if (held == null || next == null || principalsOf(held).noneMatch(actor.handle()::equals)) {
+    if (held == null
+        || next == null
+        || principalsOf(held).noneMatch(principal -> principal.equals(actor.handle()))) {
       return false;
     }
     return Stream.concat(held.keySet().stream(), next.keySet().stream())

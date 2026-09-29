@@ -5,12 +5,12 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -33,12 +33,12 @@ import java.util.function.Supplier;
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
  * it resolves the run, applies the same provenance guard as the buffered log/stop endpoints — a run
  * whose {@code node} is not this box is refused with a structured {@code run_on_other_node} error
- * rather than tailing a foreign box's local file — then applies the same {@link RunPolicy} the
- * buffered log endpoint does (the run's spec assignee or an admin, else {@code
- * forbidden_not_assignee}), and finally tails the run's own {@code ~/.sail/runs/<id>/agent.log} via
- * {@code incus exec}, sending each line as an SSE {@code data:} event. Because REST and SSE call
- * the one pure policy, they return an identical verdict for an identical caller. {@code ?since=N}
- * replays from a line number for client reconnection.
+ * rather than tailing a foreign box's local file — then applies the same run-owner rule ({@link
+ * RunAuthority#access}) the buffered log endpoint does (the run's spec assignee or an admin, else
+ * {@code forbidden_not_assignee}), and finally tails the run's own {@code
+ * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
+ * event. Because REST and SSE call the one pure policy, they return an identical verdict for an
+ * identical caller. {@code ?since=N} replays from a line number for client reconnection.
  *
  * <p>Mounted by {@link ApiRouter}, which delegates the stream path straight to this handler so the
  * long-lived connection never runs through the buffered request/response path. It is not registered
@@ -120,18 +120,20 @@ public final class AgentLogStreamer implements HttpHandler {
         sendForeign(exchange, run);
         return;
       }
-      if (Actor.call(
+      var refusal =
+          RunAuthority.access(
               ApiRouter.actorOf(exchange),
-              () ->
-                  RunPolicy.access(
-                      run.id(), StopOperations.specIdOf(run), RunPolicy.owners(run, specOwner)))
-          instanceof AccessDecision.Refused refused) {
+              run.id(),
+              StopOperations.specIdOf(run),
+              RunAuthority.owners(run, specOwner));
+      if (refusal.isPresent()) {
+        var refused = refusal.get();
+        var code = Refusals.code(refused.kind());
         var fix =
             Strings.isBlank(refused.fix())
                 ? null
                 : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
-        sendError(
-            exchange, refused.code().httpCode(), refused.code().code(), refused.message(), fix);
+        sendError(exchange, code.httpCode(), code.code(), refused.message(), fix);
         return;
       }
       if (Strings.isBlank(run.logPath())) {

@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -217,7 +216,7 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<SailYaml.Repo>of();
     var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
-    var owner = Ownership.ownerOf(room.assignee(), room.createdBy());
+    var owner = rooms.ownerOf(roomId);
     var credential =
         runReservation.reserve(
             runId,

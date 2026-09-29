@@ -12,6 +12,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -56,13 +57,10 @@ public final class MessageAuthority implements WriteAuthority {
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {
-    if (author == null) {
-      return false;
-    }
-    if (author.equals(actor.handle())) {
+    if (Objects.equals(author, actor.handle())) {
       return true;
     }
-    if (actor.lane() != Actor.Lane.SYNC) {
+    if (actor.lane() != Actor.Lane.SYNC || author == null) {
       return false;
     }
     if (MessageStore.SAIL_AUTHOR.equals(author)) {
