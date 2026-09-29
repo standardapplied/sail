@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -17,6 +19,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -87,6 +90,23 @@ class ProjectSyncTest {
 
   private String definitionOn(Box box, String name) {
     return box.projects.findByName(name).orElseThrow().definition();
+  }
+
+  @Test
+  void aViewersPushOfAProjectIsDeniedAndMainKeepsItsDefinition() {
+    main.projects.upsert("acme", "A1");
+    var viewer = Actor.sync("ada", Role.VIEWER);
+    var rev = main.replica.currentRev("acme");
+    var edit = new LinkedHashMap<>(main.replica.current("acme"));
+    edit.put("definition", "A2");
+
+    var edited = Actor.call(viewer, () -> main.replica.commit("acme", edit, rev));
+    var deleted = Actor.call(viewer, () -> main.replica.commit("acme", null, rev));
+
+    assertInstanceOf(CommitOutcome.Denied.class, edited);
+    assertInstanceOf(CommitOutcome.Denied.class, deleted);
+    assertEquals("A1", definitionOn(main, "acme"));
+    assertEquals(rev, main.replica.currentRev("acme"));
   }
 
   @Test
