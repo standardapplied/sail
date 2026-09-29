@@ -85,8 +85,20 @@ class MissedStopsTest {
   }
 
   @Test
-  void anAuthoritativeStopAlreadyRecordedSkipsARunningSession() {
+  void aRunningSessionWhoseActedOnStopWasRecordedHasItsRowFinishedNeverItsStopReplayed() {
     var outcome = assess(session("running", null, "2026-07-06T11:00:00Z"), true);
+
+    assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+  }
+
+  @Test
+  void aRunningSessionWhoseStopIsStillInFlightIsLeftToItsFinisher() {
+    var outcome =
+        MissedStops.assess(
+            session("running", null, "2026-07-06T11:00:00Z"),
+            new MissedStops.StopCoverage(NOW.minusSeconds(30), true),
+            NOW,
+            GRACE);
 
     assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
@@ -121,10 +133,19 @@ class MissedStopsTest {
   }
 
   @Test
-  void anObservedUnactedStopOnANonTerminalSessionIsNeverReplayed() {
+  void anObservedUnactedStopOnARunningSessionFinishesTheRowAndIsNeverReplayedOverIt() {
     var outcome =
         assessDropped(
             session("running", null, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
+
+    assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+  }
+
+  @Test
+  void anObservedUnactedStopOnAStoppingSessionIsLeftToItsStop() {
+    var outcome =
+        assessDropped(
+            session("stopping", null, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
 
     assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }

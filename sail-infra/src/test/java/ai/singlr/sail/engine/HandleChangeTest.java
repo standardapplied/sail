@@ -16,6 +16,7 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -239,6 +240,8 @@ class HandleChangeTest {
       assertEquals(List.of(), apply(node("ada"), node("uday")));
       assertEquals("completed", new RunStore(main.db).findById(live).orElseThrow().status());
       assertEquals("ada", runs.findById(live).orElseThrow().node());
+      SyncBox.quiesce(main, ada.syncsAs(UDAY));
+      SyncBox.assertEqualToMain(main, ada);
     }
   }
 
@@ -258,7 +261,84 @@ class HandleChangeTest {
       assertFalse(written.get(), "nothing is written");
       assertEquals(null, runs.baseRevOf(held), "main moved on: not acknowledged over it");
       assertEquals("ada", runs.findById(held).orElseThrow().node(), "nor re-stamped");
+
+      SyncBox.round(main, ada);
+      var parked = ada.conflicts.pendingFor("run", held).orElseThrow();
+      Acting.as(
+          "ada",
+          () ->
+              ada.conflicts.resolve(
+                  parked.id(),
+                  runs.resolveConflict(
+                      held,
+                      YamlUtil.parseMap(parked.localSnapshot()),
+                      YamlUtil.parseMap(parked.remoteSnapshot()))));
+      SyncBox.round(main, ada);
+      assertEquals(List.of(), apply(node("ada"), node("uday")), "settled, the change is taken");
+      assertEquals("ada", runs.findById(held).orElseThrow().node(), "main holds it as 'ada''s");
+      SyncBox.quiesce(main, ada.syncsAs(UDAY));
+      SyncBox.assertEqualToMain(main, ada);
     }
+  }
+
+  @Test
+  void aHandleChangeIsRefusedUntilSettledAndThenTheFleetConvergesUnderTheNewHandle()
+      throws Exception {
+    try (var ada = new SyncBox(dir, "box").syncsAs(ADA)) {
+      var acknowledged = run("ada", "p");
+      SyncBox.quiesce(main, ada);
+
+      assertThrows(IllegalStateException.class, () -> apply(node("ada"), node("uday")));
+      finish(acknowledged);
+      SyncBox.quiesce(main, ada);
+      var finishedUnheld = run("ada", "q");
+      finish(finishedUnheld);
+      var liveUnheld = run("ada", "r");
+
+      assertEquals(List.of(finishedUnheld, liveUnheld), apply(node("ada"), node("uday")));
+      SyncBox.quiesce(main, ada.syncsAs(UDAY));
+
+      SyncBox.assertEqualToMain(main, ada);
+      var onMain = new RunStore(main.db);
+      assertEquals("ada", onMain.findById(acknowledged).orElseThrow().node(), "never re-stamped");
+      assertEquals("uday", onMain.findById(finishedUnheld).orElseThrow().owner());
+      assertEquals("uday", onMain.findById(liveUnheld).orElseThrow().owner());
+      assertEquals("running", runs.findById(liveUnheld).orElseThrow().status(), "never removed");
+    }
+  }
+
+  @Test
+  void aMainBecomingANodeStampsOnlyTheRunsItMadeNeverOneAnotherBoxExecuted() throws Exception {
+    var own = run(null, "p");
+    finish(own);
+    String madys;
+    try (var asMain = new SyncBox(dir, "box");
+        var mady = new SyncBox("mady")) {
+      madys = DateTimeUtils.newId().toString();
+      var id = madys;
+      Acting.system(
+          () ->
+              new RunStore(mady.db)
+                  .reserveDispatch(
+                      id,
+                      "acme",
+                      null,
+                      "mady",
+                      "adhoc",
+                      List.of(),
+                      "claude-code",
+                      "b",
+                      "t",
+                      "/l",
+                      "u"));
+      SyncBox.quiesce(asMain, mady);
+    }
+
+    assertEquals(List.of(own), apply(main(null), node("uday"), UNREACHABLE));
+
+    assertEquals("uday", runs.findById(own).orElseThrow().owner());
+    assertEquals("mady", runs.findById(madys).orElseThrow().node(), "mady's run stays hers");
+    assertEquals("mady", runs.findById(madys).orElseThrow().owner());
   }
 
   @Test
@@ -304,6 +384,10 @@ class HandleChangeTest {
     assertEquals(List.of(unheld), stamped);
     assertEquals(1, opened.get());
     assertEquals("uday", new RunStore(main.db).findById(unheld).orElseThrow().node());
+    try (var box = new SyncBox(dir, "box").syncsAs(UDAY)) {
+      SyncBox.quiesce(main, box);
+      SyncBox.assertEqualToMain(main, box);
+    }
   }
 
   @Test

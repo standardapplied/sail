@@ -80,7 +80,7 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
 
     store.reserveDispatch(
-        id, "p", "s", " ada ", "build", List.of(), "claude-code", "b", "t", "/l", "u");
+        id, "p", "s", "ada", "build", List.of(), "claude-code", "b", "t", "/l", "u");
 
     var run = store.findById(id).orElseThrow();
     assertEquals("ada", run.node());
@@ -123,20 +123,37 @@ class RunStoreTest {
   }
 
   @Test
+  void aRunThisBoxOnlyHoldsFromAnotherBoxIsNeverItsToAcknowledgeOrStamp() {
+    var pushed = "00000000-0000-7000-8000-000000000001";
+    var pulled = "00000000-0000-7000-8000-000000000002";
+    assertInstanceOf(
+        PushOutcome.Accepted.class,
+        Actor.call(
+            Actor.sync("node-a", Role.MEMBER),
+            () -> store.commitRevision(pushed, base(), null, store.authority())));
+    var unstamped = new HashMap<>(base());
+    unstamped.put("node", null);
+    unstamped.put("owner", null);
+    Actor.run(Actor.main("uday"), () -> store.applyRevision(pulled, unstamped, "1-main"));
+    var own = newRunOn("q", "s", null);
+
+    assertEquals(List.of(own), store.unacknowledged(), "what main took from a node is not its own");
+    assertEquals(List.of(own), store.stampUnstamped("uday"), "nor what it pulled with no node");
+    assertEquals("node-a", store.findById(pushed).orElseThrow().node());
+    assertNull(store.findById(pulled).orElseThrow().node());
+  }
+
+  @Test
   void aHandleChangeOnMainIsStrandedOnlyByRunsThisBoxExecutesThatAreLive() {
     var live = newRunOn("p", "s", "ada");
     var finished = newRunOn("q", "s", "ada");
     store.complete(finished, "completed", 0);
     newRunOn("r", "s", "bob");
 
-    assertEquals(
-        List.of(live),
-        store.strandedByHandleChange("ada", true, List.of()).stream()
-            .map(RunStore.RunRow::id)
-            .toList());
+    assertEquals(List.of(live), store.liveUnder("ada").stream().map(RunStore.RunRow::id).toList());
     assertEquals(
         List.of(),
-        store.strandedByHandleChange("ada", false, List.of()),
+        store.heldUnder("ada", Set.of()),
         "on a node, a run main never acknowledged strands nothing: it is re-stamped");
   }
 

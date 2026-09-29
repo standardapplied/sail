@@ -414,6 +414,22 @@ public final class ChangeLog {
         entityId);
   }
 
+  /**
+   * Whether an entity began on this box: the oldest entry its log keeps is a write this box made
+   * itself, not one synced from another box ({@link Actor#peer}). False for an entity it never
+   * logged.
+   */
+  public boolean begunHere(String entityType, String entityId) {
+    return db.queryOne(
+            """
+            SELECT peer IS NULL FROM change_log WHERE entity_type = ? AND entity_id = ?
+            ORDER BY seq LIMIT 1""",
+            row -> row.integer(0) == 1,
+            entityType,
+            entityId)
+        .orElse(false);
+  }
+
   /** The latest entry of an entity — its current revision or tombstone — read through its head. */
   public Optional<Entry> head(String entityType, String entityId) {
     return db.queryOne(

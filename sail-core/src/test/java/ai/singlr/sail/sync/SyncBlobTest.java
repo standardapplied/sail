@@ -195,6 +195,7 @@ class SyncBlobTest {
         SyncRpcServer.over(
                 db,
                 "main",
+                null,
                 Actor.sync("viewer", Role.VIEWER),
                 FdeRoster.EMPTY,
                 SyncTransitionSink.NONE,

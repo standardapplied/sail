@@ -1093,7 +1093,7 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aRecordedAuthoritativeStopMakesTheSweepANoOpForeverAfter() {
+  void aRecordedStopWhoseRunNeverFinishedHasItsRowFinishedAndTheStopReplayedOnlyAfter() {
     createInProgressSpec("auth");
     var sessionId = runningSession("auth");
     recordStopEvent(
@@ -1103,10 +1103,81 @@ class MissedStopReconcilerTest {
     var probe = new CountingProbe(false);
     var reconciler = reconciler(probe, PAST_GRACE);
 
-    assertEquals(0, reconciler.sweep());
-    assertEquals(0, reconciler.sweep());
-    assertEquals(0, probe.calls.get());
-    assertEquals("running", sessionStore.findById(sessionId).orElseThrow().status());
+    assertEquals(1, reconciler.sweep());
+    assertEquals("stopped", sessionStore.findById(sessionId).orElseThrow().status());
+    assertEquals(0, bus.publishedCount(), "a recorded stop is not replayed over a running row");
+
+    assertEquals(1, reconciler.sweep(), "finished, its never-acted-on stop is rescued");
+    assertEquals(2, probe.calls.get(), "each pass probes before it acts");
+  }
+
+  @Test
+  void aReStampedRunWhoseStopTheTrackerDroppedIsFinishedAndFreesItsSpec() {
+    createInProgressSpec("auth");
+    var run = session("auth", "old-handle", "build");
+    var stop =
+        Map.<String, Object>of(
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER,
+            Event.WellKnownData.RUN_ID,
+            run,
+            Event.WellKnownData.EXIT_CODE,
+            1);
+    new RunTracker(sessionStore, SyncScheduler.disabled(), () -> "node-a")
+        .onEvent(
+            Event.of(
+                "test-project",
+                "auth",
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                "claude-code",
+                "host",
+                stop));
+    assertEquals("running", sessionStore.findById(run).orElseThrow().status(), "stale: dropped");
+    recordStopEvent("auth", Instant.now().plusSeconds(1).toString(), stop);
+    recordEvent("auth", Event.WellKnownTypes.AGENT_FAILED, Instant.now().plusSeconds(2).toString());
+    Acting.system(() -> sessionStore.stamp("node-a", sessionStore.unacknowledged()));
+    var reconciler = reconciler(new CountingProbe(false), PAST_GRACE);
+
+    reconciler.sweep();
+    reconciler.sweep();
+
+    assertEquals("stopped", sessionStore.findById(run).orElseThrow().status());
+    assertEquals(0, bus.publishedCount(), "its stop was acted on: never replayed");
+    assertTrue(
+        DispatchGate.decide(
+                "auth", "build", List.of(), sessionStore.runningOnNode("test-project", "node-a"))
+            .isEmpty(),
+        "the failed spec can be dispatched again");
+  }
+
+  @Test
+  void aContainerTheProbeCannotReachReadsAsAliveNotAsEveryRunInItGone() {
+    createInProgressSpec("auth");
+    var room = session("auth", "node-a", DispatchGate.ROOM_FULL_ROLE);
+    var build = runningSession("auth");
+    var outage =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            return new Result(1, "", "Error: websocket: close 1006 (abnormal closure)");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(outage), PAST_GRACE).sweep());
+
+    assertEquals("running", sessionStore.findById(room).orElseThrow().status());
+    assertEquals("running", sessionStore.findById(build).orElseThrow().status());
+    assertEquals(0, bus.publishedCount());
   }
 
   @Test
@@ -1384,6 +1455,9 @@ class MissedStopReconcilerTest {
           return new Result(0, "123", "");
         }
         if (joined.contains("kill -0 123") && alive) {
+          return new Result(0, "", "");
+        }
+        if (joined.endsWith(" true")) {
           return new Result(0, "", "");
         }
         return new Result(1, "", "no such file");

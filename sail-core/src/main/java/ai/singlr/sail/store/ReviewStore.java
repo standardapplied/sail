@@ -105,17 +105,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   @Override
   public boolean live(String id, String handle) {
     return findReview(id).filter(review -> "running".equals(review.status())).isPresent()
-        && (new RunStore(db).live(id, handle) || begunHere(id));
-  }
-
-  private boolean begunHere(String id) {
-    return db.queryOne(
-            """
-            SELECT peer IS NULL FROM change_log WHERE entity_type = 'review' AND entity_id = ?
-            ORDER BY seq LIMIT 1""",
-            row -> row.integer(0) == 1,
-            id)
-        .orElse(false);
+        && (new RunStore(db).live(id, handle) || changeLog.begunHere(ENTITY, id));
   }
 
   /** Who may write a review on this box: the rule every door and main's commit decide by. */

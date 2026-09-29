@@ -62,6 +62,14 @@ public final class SyncBox implements AutoCloseable {
     this(id, Sqlite.openMemory());
   }
 
+  /**
+   * The box {@code id} over the database file {@code file} a test's production wiring already
+   * opened, so its rounds and convergence can be checked with this fixture.
+   */
+  public static SyncBox opening(Path file, String id) {
+    return new SyncBox(id, Sqlite.open(file));
+  }
+
   private SyncBox(String id, Sqlite db) {
     this.id = id;
     this.db = db;
@@ -248,7 +256,7 @@ public final class SyncBox implements AutoCloseable {
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
     return SyncRpcServer.over(
-        db, id, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR);
+        db, id, null, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR);
   }
 
   /** A protocol-4 session over a pipe to {@code server}, plus the wire log and the notices. */
@@ -459,6 +467,7 @@ public final class SyncBox implements AutoCloseable {
         SyncRpcServer.over(
             main,
             "main",
+            null,
             Actor.sync("node", Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,

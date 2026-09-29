@@ -13,7 +13,9 @@ import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SshSyncChannel;
+import ai.singlr.sail.engine.SyncOperations;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -74,14 +76,39 @@ public final class HostSyncCommand implements Runnable {
               + (asMain ? "--as-main" : "--main " + mainTarget));
     }
 
-    var updated = configure(host, asMain, mainTarget, HostInfo.hostname());
+    printRole(
+        takeRole(
+            path,
+            SailPaths.controlPlaneDb(),
+            host,
+            asMain,
+            mainTarget,
+            HostInfo.hostname(),
+            SshSyncChannel::open));
+  }
+
+  /**
+   * Gives the box whose config is {@code host} at {@code hostYamlPath} its chosen role ({@link
+   * #configure}) as a change of its identity ({@link HandleChange}) in its database {@code db}, so
+   * a box becoming main stamps its unstamped runs as its own. Returns the role it now has.
+   */
+  static SyncConfig takeRole(
+      Path hostYamlPath,
+      Path db,
+      HostYaml host,
+      boolean asMain,
+      String mainTarget,
+      String hostname,
+      SyncOperations.Channels channels)
+      throws Exception {
+    var updated = configure(host, asMain, mainTarget, hostname);
     HandleChange.apply(
-        SailPaths.controlPlaneDb(),
+        db,
         host.sync(),
         updated.sync(),
-        SshSyncChannel::open,
-        () -> YamlUtil.dumpToFile(updated.toMap(), path));
-    printRole(updated.sync());
+        channels,
+        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+    return updated.sync();
   }
 
   /**

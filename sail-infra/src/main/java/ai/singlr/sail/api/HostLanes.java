@@ -39,7 +39,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
 
@@ -105,7 +104,7 @@ final class HostLanes {
     public String reviewLog(String project, String node) {
       return runs.listForProject(project).stream()
           .filter(RunStore.RunRow::buildRole)
-          .filter(run -> Objects.toString(run.node(), "").equals(Objects.toString(node, "")))
+          .filter(run -> run.ownedBy(node))
           .findFirst()
           .map(RunStore.RunRow::specId)
           .flatMap(reviews::latestReviewForSpec)

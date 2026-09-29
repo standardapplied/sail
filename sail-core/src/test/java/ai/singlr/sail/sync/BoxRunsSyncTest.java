@@ -17,12 +17,14 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.io.IOException;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -269,24 +271,20 @@ class BoxRunsSyncTest {
 
     assertEquals(
         List.of(acknowledged),
-        runs(ada).strandedByHandleChange("ada", false, List.of()).stream()
-            .map(RunStore.RunRow::id)
-            .toList(),
+        runs(ada).heldUnder("ada", Set.of()).stream().map(RunStore.RunRow::id).toList(),
         "a live run main holds under the old handle refuses the change");
     finish(ada, acknowledged);
     assertEquals(
         List.of(acknowledged),
-        runs(ada).strandedByHandleChange("ada", false, List.of()).stream()
-            .map(RunStore.RunRow::id)
-            .toList(),
+        runs(ada).heldUnder("ada", Set.of()).stream().map(RunStore.RunRow::id).toList(),
         "so does its change main has not taken");
     SyncBox.quiesce(main, ada);
-    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false, List.of()));
+    assertEquals(List.of(), runs(ada).heldUnder("ada", Set.of()));
 
     var finishedUnheld = reserve(ada, "ada", "mine", "room");
     finish(ada, finishedUnheld);
     var liveUnheld = reserve(ada, "ada", "mine", "room");
-    assertEquals(List.of(), runs(ada).strandedByHandleChange("ada", false, List.of()));
+    assertEquals(List.of(), runs(ada).heldUnder("ada", Set.of()));
     assertEquals(
         List.of(finishedUnheld, liveUnheld),
         runs(ada).stamp("uday", runs(ada).unacknowledged()),
@@ -398,6 +396,11 @@ class BoxRunsSyncTest {
     assertEquals("offered-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
     var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
     assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
+    resolveMine(ada, parked);
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("offered-session", runs(main).findById(run).orElseThrow().sessionId());
+    SyncBox.assertEqualToMain(main, ada);
   }
 
   @Test
@@ -414,6 +417,70 @@ class BoxRunsSyncTest {
     assertEquals("ada-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
     var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
     assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
+    resolveMine(ada, parked);
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("ada-session", runs(main).findById(run).orElseThrow().sessionId());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aLiveRunMainNeverHeldIsRestampedAndSurvivesAHandleChange() {
+    ownSpec(main, "uday", "mine");
+    SyncBox.quiesce(main, ada);
+    var live = reserve(ada, "ada", "mine", "build");
+
+    SyncBox.quiesce(main, ada.syncsAs(UDAY));
+
+    assertEquals("running", runs(ada).findById(live).orElseThrow().status(), "never removed");
+    assertEquals("uday", runs(ada).findById(live).orElseThrow().owner());
+    assertEquals("uday", runs(main).findById(live).orElseThrow().owner());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aBoxThatWasMainStampsOnlyTheRunsItMadeWhenItJoinsANewMain() {
+    try (var mady = new SyncBox("mady");
+        var newMain = new SyncBox("newmain")) {
+      var madys = reserve(mady, "mady", null, "adhoc");
+      finish(mady, madys);
+      SyncBox.quiesce(main, mady);
+      var own = reserve(main, null, null, "adhoc");
+      finish(main, own);
+
+      assertNoDenials(SyncBox.round(newMain, main.syncsAs(UDAY)));
+      SyncBox.quiesce(newMain, main);
+
+      assertEquals("uday", runs(newMain).findById(own).orElseThrow().owner(), "its own run");
+      assertTrue(runs(newMain).findById(madys).isEmpty(), "never mady's run, as uday's");
+      SyncBox.assertEqualToMain(newMain, main);
+    }
+  }
+
+  @Test
+  void anotherBoxsRunningReviewIsAdoptedAsMainHoldsIt() {
+    try (var bob = new SyncBox("bob").syncsAs(BOB)) {
+      ownSpec(main, "bob", "theirs");
+      SyncBox.quiesce(main, bob);
+      var reviews = new ReviewStore(bob.db);
+      var review = Acting.system(() -> reviews.createReview("theirs", 1));
+      Acting.system(
+          () ->
+              runs(bob)
+                  .createReview(review, "acme", "theirs", "bob", "codex", "b", "t", "/l", "u"));
+      Acting.system(() -> reviews.updateReviewStatus(review, "running"));
+      SyncBox.quiesce(main, bob, ada);
+
+      Acting.system(() -> reviews.createStage(review, "security", "agent"));
+      SyncBox.quiesce(main, bob, ada);
+
+      assertEquals("running", new ReviewStore(ada.db).findReview(review).orElseThrow().status());
+      assertEquals(
+          1,
+          new ReviewStore(ada.db).stagesForReview(review).size(),
+          "a review bob's box runs is never live here");
+      SyncBox.assertEqualToMain(main, ada);
+    }
   }
 
   @Test
@@ -436,6 +503,11 @@ class BoxRunsSyncTest {
     assertEquals(List.of("completed_at"), parked.fields(), "both completed it: the FDE decides");
     assertEquals("completed", runs(ada).findById(live).orElseThrow().status());
     assertEquals("sess-1", runs(ada).findById(live).orElseThrow().sessionId(), "nothing is lost");
+    resolveMine(ada, parked);
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("sess-1", runs(main).findById(live).orElseThrow().sessionId());
+    SyncBox.assertEqualToMain(main, ada);
   }
 
   @Test

@@ -180,7 +180,7 @@ and the spec that closes it.
 | I1 | Every write on every box is made by exactly one bound `Actor`, whichever door it came through. | `ActorTest`, `OperationsTakeNoActorTest` |
 | I2 | On a node only the box's FDE, its runs and FDE-less credentials write; any other credential reads. | `RoleRuleTest`, `NodeWritesTest`, `DeniedSyncTest` |
 | I3 | Main and the node agree who the node is, and one box syncs as each FDE. | `NodeIdentitySyncTest`, `SyncServerCommandTest` (main's own FDE), `FdeCommandTest` (`release-box`) |
-| I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps), `HandleChangeTest`, `JoinCommandTest`, `RoomWakeLaunchTest` |
+| I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps; never another box's run), `SyncConfigTest` (one handle), `HandleChangeTest`, `JoinCommandTest`, `HostConfigSetCommandTest`, `HostSyncCommandTest`, `RoomWakeLaunchTest` |
 | A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | `OneDecisionTest` (spec edits, posts); open for every door: `sail-journal-authority` |
 | A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
 | A3 | An event, hook or reactor never makes the machinery do what its sender could not. | socket: `LocalApiRouterTest`; open for HTTP: `sail-events-door-authority` |
@@ -190,8 +190,8 @@ and the spec that closes it.
 | L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
-| L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run), `DeniedSyncTest`, `PushAuthoritySyncTest` |
-| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest` |
+| L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
+| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest` |
 | L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | open (holds on main today): `sail-sync-liveness` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
@@ -247,7 +247,8 @@ session as, and a node whose configured sync handle is blank or another does not
 (`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
 from any other until an admin runs `sail fde release-box`. Before its first type, the node asks
-`need` for every run main has never acknowledged: one main holds at its first revision, the one it
+`need` for every run it made (its oldest entry is its own write) that main has never acknowledged —
+a box that was main holds every box's runs with no base, and another box's run is never its to stamp: one main holds at its first revision, the one it
 took from this box, is adopted as acknowledged at it, with the box's later changes on top; one main
 has revised since, even back to a state this box once wrote, is left without a base, so the round parks any field the two hold differently for the FDE rather
 than revert main's change; neither is re-stamped. Every other is stamped with the node's handle, so

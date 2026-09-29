@@ -122,20 +122,6 @@ public final class SyncRpcServer {
   }
 
   /**
-   * As {@link #over(Sqlite, String, String, Actor, FdeRoster, SyncTransitionSink, String)}, for a
-   * main that names no FDE of its own.
-   */
-  public static SyncRpcServer over(
-      Sqlite db,
-      String boxId,
-      Actor principal,
-      FdeRoster fdeRoster,
-      SyncTransitionSink transitionSink,
-      String version) {
-    return over(db, boxId, null, principal, fdeRoster, transitionSink, version);
-  }
-
-  /**
    * The server for main's database: every registered entity's authoritative replica and its change
    * log as the page source, identified as {@code boxId} and built {@code version}. {@code mainFde}
    * is main's own FDE, whose box is main's.
@@ -426,19 +412,9 @@ public final class SyncRpcServer {
     if (hello.box() == null || hello.box().isBlank()) {
       return new SyncWire.Refuse("hello names no box id: " + upgradeRemedy());
     }
-    var claimed = claimedBox(hello.box());
-    if (claimed.isPresent()) {
-      return new SyncWire.Refuse(
-          "FDE '"
-              + principal.handle()
-              + "' syncs from box '"
-              + claimed.get()
-              + "', not this box '"
-              + hello.box()
-              + "': one box syncs as each FDE. After retiring the old box, an admin runs 'sail"
-              + " fde release-box "
-              + principal.handle()
-              + "' on main, and the next box to sync as it is recorded.");
+    var otherBox = boxRefusal(hello.box());
+    if (otherBox.isPresent()) {
+      return new SyncWire.Refuse(otherBox.get());
     }
     welcomed = true;
     return new SyncWire.Welcome(
@@ -446,19 +422,43 @@ public final class SyncRpcServer {
   }
 
   /**
-   * The box another than {@code box} that the session's FDE syncs from, or empty when {@code box}
-   * is its box: main's own box for main's FDE, else the first box that synced as it, recorded now
-   * when none has. A session naming no FDE claims nothing.
+   * Why a session from {@code box} is refused because its FDE syncs from another box, naming the
+   * fix; empty when {@code box} is the FDE's box. Main's own FDE syncs from main alone; any other
+   * FDE from the first box that synced as it, recorded now when none has, until an admin releases
+   * it. A session naming no FDE claims nothing.
    */
-  private Optional<String> claimedBox(String box) {
+  private Optional<String> boxRefusal(String box) {
     var handle = principal.handle();
     if (mainBox == null || handle == null || handle.isBlank()) {
       return Optional.empty();
     }
     if (handle.equals(mainBox.fde())) {
-      return mainBox.box().equals(box) ? Optional.empty() : Optional.of(mainBox.box());
+      return mainBox.box().equals(box)
+          ? Optional.empty()
+          : Optional.of(
+              "FDE '"
+                  + handle
+                  + "' is main's own FDE, so it syncs from main ('"
+                  + mainBox.box()
+                  + "') and no other box, not this box '"
+                  + box
+                  + "'. Sync this box as an FDE of its own: have an admin tie its sync key to that"
+                  + " FDE on main, then set this box's sync handle to it.");
     }
-    return new FdeBoxes(db).claim(handle, box);
+    return new FdeBoxes(db)
+        .claim(handle, box)
+        .map(
+            recorded ->
+                "FDE '"
+                    + handle
+                    + "' syncs from box '"
+                    + recorded
+                    + "', not this box '"
+                    + box
+                    + "': one box syncs as each FDE. After retiring the old box, an admin runs"
+                    + " 'sail fde release-box "
+                    + handle
+                    + "' on main, and the next box to sync as it is recorded.");
   }
 
   private String mainId() {

@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -243,8 +244,12 @@ class SyncServerCommandTest {
                       SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
                       n -> {},
                       nodeDb));
-      assertTrue(refused.getMessage().contains("box 'main'"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("main's own FDE"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());
       assertTrue(refused.getMessage().contains("'node-box'"), refused.getMessage());
+      assertFalse(
+          refused.getMessage().contains("release-box"),
+          "releasing a box does nothing for main's own FDE: " + refused.getMessage());
     } finally {
       toServer.close();
       serverThread.join();

@@ -48,14 +48,16 @@ import java.util.function.Supplier;
  * session replays the stop with its recorded exit code — after probing its recorded unit, because
  * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
  * the replay). A running session past the launch grace period whose recorded run identity is
- * inactive or absent gets a synthesized stop. Every session — background or foreground — records
- * its run-scoped identity, and the probe reads the pid file before the systemd unit, so foreground
- * sessions reconcile the same way; only a legacy row with no recorded unit is skipped, because its
- * blocking launcher owned its completion. The synthesized stop carries <em>no exit code</em>: the
- * transient unit is garbage-collected on exit, so the real code is unrecoverable, and the replay
- * path makes the same choice for a terminal session that never recorded one — the pipeline treats
- * the absent code as not-a-failure and lets review judge the work. Every replayed stop carries
- * {@code source=reconcile} so the event log shows it was reconstructed, not observed.
+ * inactive or absent gets a synthesized stop, unless its stop was recorded already and reached no
+ * finisher: then the row alone is finished once its process probes gone. Every session — background
+ * or foreground — records its run-scoped identity, and the probe reads the pid file before the
+ * systemd unit, so foreground sessions reconcile the same way; only a legacy row with no recorded
+ * unit is skipped, because its blocking launcher owned its completion. The synthesized stop carries
+ * <em>no exit code</em>: the transient unit is garbage-collected on exit, so the real code is
+ * unrecoverable, and the replay path makes the same choice for a terminal session that never
+ * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
+ * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
+ * reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -117,13 +119,19 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   /**
    * Probes the run-scoped pid file first, then its systemd unit. The pid path also covers
-   * foreground builds, which use the same run identity without creating a service.
+   * foreground builds, which use the same run identity without creating a service. A run that reads
+   * as not running is reported gone only once its container answers at all: a container it cannot
+   * reach fails the probe, which every pass reads as alive.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     return (project, runId, unit) -> {
       var info = agentSession.queryStatus(project, AgentUnit.recorded(runId, unit));
-      return info != null && info.running();
+      if (info != null && info.running()) {
+        return true;
+      }
+      agentSession.requireReachable(project);
+      return false;
     };
   }
 
@@ -216,22 +224,22 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Finishes every running session this box owns whose process is gone and that no other pass
-   * finishes: a dispatch whose spec never left {@code pending} (a crash between reserve and claim)
-   * or outlived its work, a spec-less ad-hoc session, a superseded build session, a room or
-   * room-full run of a spec still under way, and the newest build session of a spec in {@code
-   * review}, which the review rescue leaves {@code running}. The one run this pass leaves is the
-   * newest build session of an {@code in_progress} spec, or of a spec whose stop this sweep already
-   * replayed: the in-progress pass replays that spec's stop, and a spec stop is never replayed for
-   * any other run. Only a run older than {@link #LAUNCH_GRACE} is touched, so a run still inside a
-   * healthy launch window is never disturbed, and a run whose recorded identity still probes
-   * <em>live</em> is always left alone — a reservation must never be freed under a working agent.
-   * The probe reads the run-scoped pid file before the systemd unit, so it covers foreground
-   * sessions (which launch no service) and background sessions that crashed before their pid was
-   * persisted alike; an unprobeable run reads as alive. The finish is the same {@code running →
-   * stopped} compare-and-set every finisher uses, so racing the watcher's own completion can never
-   * overwrite a recorded exit, and it is logged as reconstructed. Foreign runs are left to their
-   * executing box and never probed.
+   * Finishes every running session this box owns whose process is gone, other than the one the
+   * in-progress pass reconciles: a dispatch whose spec never left {@code pending} (a crash between
+   * reserve and claim) or outlived its work, a spec-less ad-hoc session, a superseded build
+   * session, a room or room-full run of a spec still under way, and the newest build session of a
+   * spec in {@code review}, which the review rescue leaves {@code running}. The newest build
+   * session of an {@code in_progress} spec, or of a spec whose stop this sweep already replayed, is
+   * the in-progress pass's: it replays that spec's stop, or finishes a row whose recorded stop
+   * reached no finisher, and a spec stop is never replayed for any other run. Only a run older than
+   * {@link #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never
+   * disturbed, and a run whose recorded identity still probes <em>live</em> is always left alone —
+   * a reservation must never be freed under a working agent. The probe reads the run-scoped pid
+   * file before the systemd unit, so it covers foreground sessions (which launch no service) and
+   * background sessions that crashed before their pid was persisted alike; an unprobeable run reads
+   * as alive. The finish is the same {@code running → stopped} compare-and-set every finisher uses,
+   * so racing the watcher's own completion can never overwrite a recorded exit, and it is logged as
+   * reconstructed. Foreign runs are left to their executing box and never probed.
    */
   int releaseStrandedReservations(Set<String> handledThisSweep) {
     var node = localHandle.get();
@@ -240,17 +248,15 @@ public final class MissedStopReconciler implements AutoCloseable {
     for (var run : sessionStore.running()) {
       if (!run.ownedBy(node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
-          || stopReplayedFor(run, handledThisSweep)
+          || reconciledBySpec(run, handledThisSweep)
           || agentProbablyAlive(run)) {
         continue;
       }
-      System.err.println(
-          "  [reconcile] releasing stranded reservation "
-              + run.id()
-              + (Strings.isBlank(run.specId())
-                  ? " (session with no spec whose recorded process is gone)"
-                  : " for spec " + run.specId() + " (running with its recorded process gone)"));
-      if (sessionStore.transition(run.id(), "running", "stopped")) {
+      if (finish(
+          run,
+          Strings.isBlank(run.specId())
+              ? "session with no spec whose recorded process is gone"
+              : "running with its recorded process gone")) {
         released++;
       }
     }
@@ -258,12 +264,31 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Whether the in-progress pass owns {@code run}: it is its spec's newest build session, and the
-   * spec is {@code in_progress} or had its stop replayed earlier in this sweep, whose async status
-   * flip must not make one pass both replay and release the one run.
+   * Finishes {@code run}, whose recorded process is gone, as {@code stopped}: the same compare-and-
+   * set every finisher uses, logged as reconstructed. Returns whether this call finished it.
    */
-  private boolean stopReplayedFor(RunStore.RunRow run, Set<String> handledThisSweep) {
-    if (Strings.isBlank(run.specId()) || !newestBuildSession(run)) {
+  private boolean finish(RunStore.RunRow run, String why) {
+    System.err.println(
+        "  [reconcile] finishing run "
+            + run.id()
+            + (Strings.isBlank(run.specId()) ? "" : " of spec " + run.specId())
+            + " ("
+            + why
+            + ")");
+    return sessionStore.transition(run.id(), "running", "stopped");
+  }
+
+  /**
+   * Whether {@code run} is the in-progress pass's to reconcile: its spec's newest build session,
+   * while the spec is {@code in_progress} or had its stop replayed earlier in this sweep, whose
+   * async status flip must not make one sweep both replay and release the one run.
+   */
+  private boolean reconciledBySpec(RunStore.RunRow run, Set<String> handledThisSweep) {
+    if (Strings.isBlank(run.specId())
+        || sessionStore
+            .latestBuildAttempt(run.specId())
+            .filter(newest -> newest.id().equals(run.id()))
+            .isEmpty()) {
       return false;
     }
     return handledThisSweep.contains(run.specId())
@@ -271,14 +296,6 @@ public final class MissedStopReconciler implements AutoCloseable {
             .findById(run.specId())
             .map(spec -> spec.status() == SpecStatus.IN_PROGRESS)
             .orElse(false);
-  }
-
-  private boolean newestBuildSession(RunStore.RunRow run) {
-    return sessionStore.listForSpec(run.specId()).stream()
-        .filter(RunStore.RunRow::buildRole)
-        .findFirst()
-        .map(newest -> newest.id().equals(run.id()))
-        .orElse(false);
   }
 
   /**
@@ -366,9 +383,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     }
     var node = localHandle.get();
     var latest =
-        sessionStore.listForSpec(spec.id()).stream()
-            .filter(RunStore.RunRow::buildRole)
-            .findFirst()
+        sessionStore
+            .latestBuildAttempt(spec.id())
             .filter(run -> run.ownedBy(node))
             .filter(run -> RunStatus.isTerminal(run.status()));
     if (latest.isEmpty() || unitStillActive(spec, latest.get())) {
@@ -408,11 +424,7 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   private boolean reconcile(SpecStore.SpecRow spec) throws Exception {
     var node = localHandle.get();
-    var latest =
-        sessionStore.listForSpec(spec.id()).stream()
-            .filter(RunStore.RunRow::buildRole)
-            .findFirst()
-            .filter(run -> run.ownedBy(node));
+    var latest = sessionStore.latestBuildAttempt(spec.id()).filter(run -> run.ownedBy(node));
     if (latest.isEmpty()) {
       return false;
     }
@@ -434,6 +446,8 @@ public final class MissedStopReconciler implements AutoCloseable {
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
         yield true;
       }
+      case MissedStops.Outcome.FinishRun unfinished ->
+          !agentProbablyAlive(session) && finish(session, unfinished.why());
       case MissedStops.Outcome.Skip ignored -> false;
     };
   }

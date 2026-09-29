@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.NodeRound;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -21,9 +22,9 @@ import java.util.stream.Collectors;
  * handle, and main takes a run only from the box whose handle it carries, so a handle change is
  * refused while a run main holds under the old handle would be stranded by it, and once the new
  * identity is written every run main has not taken is stamped as the box's ({@link
- * RunStore#stamp}); a box that becomes main stamps each run it made that carries no node ({@link
- * RunStore#stampUnstamped}). Called where the box's identity is written: {@code sail host config
- * set}, {@code sail join} and {@code sail host sync}.
+ * NodeRound#stampUnheld}); a box that becomes main stamps each run it made that carries no node
+ * ({@link RunStore#stampUnstamped}). Called where the box's identity is written: {@code sail host
+ * config set}, {@code sail join} and {@code sail host sync}.
  */
 public final class HandleChange {
 
@@ -52,7 +53,7 @@ public final class HandleChange {
       SyncOperations.Channels channels,
       Write write)
       throws Exception {
-    var renamed = !Objects.equals(normalized(before.handle()), normalized(after.handle()));
+    var renamed = !Objects.equals(before.handle(), after.handle());
     var promoted = after.isMain() && !before.isMain();
     if (!(renamed || promoted) || !Files.exists(dbPath)) {
       write.run();
@@ -63,7 +64,10 @@ public final class HandleChange {
       var runs = new RunStore(db);
       var held = renamed ? heldByMain(db, before, after, channels) : Set.<String>of();
       if (renamed) {
-        var stranded = runs.strandedByHandleChange(before.handle(), before.isMain(), held);
+        var stranded =
+            before.isMain()
+                ? runs.liveUnder(before.handle())
+                : runs.heldUnder(before.handle(), held);
         if (!stranded.isEmpty()) {
           throw new IllegalStateException(refusal(before, after, stranded));
         }
@@ -71,9 +75,7 @@ public final class HandleChange {
       write.run();
       return after.isMain()
           ? runs.stampUnstamped(after.handle())
-          : runs.stamp(
-              after.handle(),
-              runs.unacknowledged().stream().filter(id -> !held.contains(id)).toList());
+          : NodeRound.stampUnheld(db, after.handle(), held);
     }
   }
 
@@ -85,21 +87,17 @@ public final class HandleChange {
    */
   private static Set<String> heldByMain(
       Sqlite db, SyncConfig before, SyncConfig after, SyncOperations.Channels channels) {
-    var unacknowledged = new RunStore(db).unacknowledged();
-    if (!before.isNode() || unacknowledged.isEmpty()) {
+    if (!before.isNode() || new RunStore(db).unacknowledged().isEmpty()) {
       return Set.of();
     }
     try {
-      var unheld = SyncOperations.acknowledgeHeld(db, before, channels);
-      return unacknowledged.stream()
-          .filter(id -> !unheld.contains(id))
-          .collect(Collectors.toUnmodifiableSet());
+      return SyncOperations.acknowledgeHeld(db, before, channels);
     } catch (Exception e) {
       throw new IllegalStateException(
           "Cannot change this box's sync handle from '"
-              + normalized(before.handle())
+              + named(before.handle())
               + "' to '"
-              + normalized(after.handle())
+              + named(after.handle())
               + "': main ("
               + before.main()
               + ") must say which of this box's runs it took before any is re-stamped, and asking"
@@ -123,8 +121,8 @@ public final class HandleChange {
                         + run.status()
                         + ")")
             .collect(Collectors.joining(", "));
-    var from = normalized(before.handle());
-    var to = normalized(after.handle());
+    var from = named(before.handle());
+    var to = named(after.handle());
     var why =
         before.isMain()
             ? "these runs this box executed as '" + from + "' are still live: "
@@ -139,11 +137,13 @@ public final class HandleChange {
         + why
         + named
         + ". Stop them or let them finish"
-        + (before.isMain() ? "" : ", run 'sail sync'")
+        + (before.isMain()
+            ? ""
+            : ", run 'sail sync' while main still knows this box as '" + from + "'")
         + ", then change the handle.";
   }
 
-  private static String normalized(String handle) {
-    return Strings.isBlank(handle) ? "" : handle.strip();
+  private static String named(String handle) {
+    return Objects.toString(handle, "");
   }
 }

@@ -960,12 +960,13 @@ class SailOperationsSeamTest {
         node.db,
         "node",
         tempDir,
-        () -> new SyncConfig("node", "main-target", configured, "node-box"),
+        () -> new SyncConfig("node", "main-target", configured, node.id),
         target ->
             channel(
                 SyncRpcServer.over(
                     main.db,
                     "main",
+                    null,
                     session,
                     FdeRoster.EMPTY,
                     SyncTransitionSink.NONE,
@@ -998,6 +999,8 @@ class SailOperationsSeamTest {
 
       assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
       assertEquals("node", new RunStore(node.db).findById(run).orElseThrow().node());
+      SyncBox.quiesce(main, node);
+      SyncBox.assertEqualToMain(main, node);
     }
   }
 
@@ -1019,6 +1022,9 @@ class SailOperationsSeamTest {
       assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing is offered");
       assertTrue(node.specs.findById("auth").isEmpty(), "nothing is adopted");
       assertTrue(new RunStore(node.db).findById(run).isPresent(), "nothing is removed");
+      SyncBox.quiesce(main, node);
+      SyncBox.assertEqualToMain(main, node);
+      assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
     }
   }
 
@@ -1043,6 +1049,7 @@ class SailOperationsSeamTest {
                       SyncRpcServer.over(
                           main.db,
                           "main",
+                          null,
                           Actor.sync("node", Role.MEMBER),
                           () ->
                               List.of(
@@ -1458,6 +1465,7 @@ class SailOperationsSeamTest {
         SyncRpcServer.over(
             main.db,
             "main",
+            null,
             Actor.sync(handle, Role.MEMBER),
             () -> rosterOf(main),
             SyncTransitionSink.NONE,

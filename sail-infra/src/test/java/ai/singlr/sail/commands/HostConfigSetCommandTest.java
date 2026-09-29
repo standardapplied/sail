@@ -12,14 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -253,6 +260,62 @@ class HostConfigSetCommandTest {
     assertEquals("node", pointed.sync().role());
     assertEquals("sail@maindevbox", pointed.sync().main());
     assertEquals("10.0.0.1", pointed.serverIp());
+  }
+
+  @Test
+  void settingTheSyncHandleStampsTheRunsMainHasNotTakenAndIsRefusedWhenMainCannotBeAsked(
+      @TempDir Path dir) throws Exception {
+    var hostYaml = dir.resolve("host.yaml");
+    var dbPath = dir.resolve("sail.db");
+    var standalone = HostSyncCommand.withBoxId(BASE, "devbox");
+    YamlUtil.dumpToFile(standalone.toMap(), hostYaml);
+    String run;
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      run = DateTimeUtils.newId().toString();
+      var id = run;
+      Acting.system(
+          () ->
+              new RunStore(db)
+                  .reserveDispatch(
+                      id,
+                      "acme",
+                      null,
+                      null,
+                      "adhoc",
+                      List.of(),
+                      "claude-code",
+                      "b",
+                      "t",
+                      "/l",
+                      "u"));
+    }
+    SyncOperations.Channels unreachable =
+        target -> {
+          throw new IOException("ssh: connect to host main: Connection refused");
+        };
+    var named = HostConfigSetCommand.applyChange(standalone, "sync-handle", "ada");
+
+    assertEquals(
+        List.of(run), HostConfigSetCommand.write(hostYaml, dbPath, standalone, named, unreachable));
+
+    var asNode =
+        HostConfigSetCommand.applyChange(
+            HostConfigSetCommand.applyChange(named, "sync-role", "node"),
+            "sync-main",
+            "sail@maindevbox");
+    YamlUtil.dumpToFile(asNode.toMap(), hostYaml);
+    var renamed = HostConfigSetCommand.applyChange(asNode, "sync-handle", "uday");
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> HostConfigSetCommand.write(hostYaml, dbPath, asNode, renamed, unreachable));
+
+    assertTrue(refused.getMessage().contains("Connection refused"), refused.getMessage());
+    assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync().handle());
+    try (var db = Sqlite.open(dbPath)) {
+      assertEquals("ada", new RunStore(db).findById(run).orElseThrow().owner());
+    }
   }
 
   @Test

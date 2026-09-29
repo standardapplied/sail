@@ -301,6 +301,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     public boolean ownedBy(String localHandle) {
       return Strings.isBlank(localHandle) ? Strings.isBlank(node) : localHandle.equals(node);
     }
+
+    /**
+     * Whether this run is work still under way on the box whose FDE handle is {@code localHandle}:
+     * that box executed it ({@link #ownedBy}) and it has not finished.
+     */
+    public boolean liveOn(String localHandle) {
+      return ownedBy(localHandle) && !RunStatus.isTerminal(status);
+    }
   }
 
   /** The {@code role IN (...)} clause over every session role, live and retired. */
@@ -777,17 +785,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * RunRow#ownedBy}) and act for its FDE, the run main accepts only from that box.
    */
   private static String stamp(String boxHandle) {
-    return Strings.isBlank(boxHandle) ? null : boxHandle.strip();
+    return Strings.isBlank(boxHandle) ? null : boxHandle;
   }
 
   /**
-   * Every run this box holds that main has never acknowledged — no synced base, so it was made here
-   * and main never took it, or took it and the answer was lost — in the order it was written.
+   * Every run this box made that main has never acknowledged — it began here ({@link
+   * ChangeLog#begunHere}) and has no synced base, so main never took it, or took it and the answer
+   * was lost — in the order it was written. A run synced from another box is never among them, even
+   * on a box that was main, which records no base for what it holds.
    */
   public List<String> unacknowledged() {
-    return db.query(
-        "SELECT id FROM runs WHERE base_rev IS NULL OR base_rev = '' ORDER BY rowid",
-        row -> row.text(0));
+    return madeHere("SELECT id FROM runs WHERE base_rev IS NULL OR base_rev = '' ORDER BY rowid");
   }
 
   /**
@@ -823,16 +831,19 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Stamps every run this box made that carries no node as the box's, now that it is main and its
-   * FDE handle is {@code boxHandle}: main's own runs are acknowledged as it makes them, so only an
-   * unstamped one is not yet its own. Returns the ids stamped.
+   * Stamps every run this box made ({@link ChangeLog#begunHere}) that carries no node as the box's,
+   * now that it is main and its FDE handle is {@code boxHandle}: main's own runs are acknowledged
+   * as it makes them, so only an unstamped one is not yet its own. Returns the ids stamped.
    */
   public List<String> stampUnstamped(String boxHandle) {
     return stamp(
-        boxHandle,
-        db.query(
-            "SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid",
-            row -> row.text(0)));
+        boxHandle, madeHere("SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid"));
+  }
+
+  private List<String> madeHere(String selectIds) {
+    return db.query(selectIds, row -> row.text(0)).stream()
+        .filter(id -> changeLog.begunHere(ENTITY, id))
+        .toList();
   }
 
   /**
@@ -844,25 +855,29 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return journal.acknowledge(id, held, rev);
   }
 
+  /** Every run the box whose FDE handle is {@code handle} executed that is still live there. */
+  public List<RunRow> liveUnder(String handle) {
+    return allRuns().stream().filter(run -> run.liveOn(handle)).toList();
+  }
+
   /**
-   * The runs a change of this box's FDE handle away from {@code handle} would strand, because main
-   * holds them under it and they would stop being this box's: on {@code main}, every run this box
-   * executed that is still live; elsewhere, every run under {@code handle} main acknowledged, or is
-   * among the {@code held} ones main said it took though this box never heard, that is still live
-   * here or carries a change main has not taken.
+   * The runs main holds under {@code handle} — acknowledged, or among {@code held}, the ones main
+   * said it took though this box never heard — that are still live here or carry a change main has
+   * not taken: what a change of this node's handle away from {@code handle} would strand, since
+   * they would stop being this box's to finish and push.
    */
-  public List<RunRow> strandedByHandleChange(String handle, boolean main, Collection<String> held) {
+  public List<RunRow> heldUnder(String handle, Set<String> held) {
     var unacknowledged = Set.copyOf(unacknowledged());
     var untaken = dirtyIds();
-    return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY rowid", this::mapRow).stream()
+    return allRuns().stream()
         .filter(run -> run.ownedBy(handle))
-        .filter(
-            run ->
-                main
-                    ? !RunStatus.isTerminal(run.status())
-                    : (!unacknowledged.contains(run.id()) || held.contains(run.id()))
-                        && (!RunStatus.isTerminal(run.status()) || untaken.contains(run.id())))
+        .filter(run -> !unacknowledged.contains(run.id()) || held.contains(run.id()))
+        .filter(run -> run.liveOn(handle) || untaken.contains(run.id()))
         .toList();
+  }
+
+  private List<RunRow> allRuns() {
+    return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY rowid", this::mapRow);
   }
 
   /**
@@ -1262,6 +1277,21 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         specId);
   }
 
+  /**
+   * The newest build attempt of {@code specId} — the one run whose stop moves the spec, which a
+   * stop, a reconciler replay and a review rescue act on — or empty when it has none. Ties on
+   * {@code started_at} break on the UUIDv7 id, which orders by mint time.
+   */
+  public Optional<RunRow> latestBuildAttempt(String specId) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE spec_id = ? AND role = ? ORDER BY started_at DESC, id DESC LIMIT 1",
+        this::mapRow,
+        specId,
+        Lane.BUILD.wire());
+  }
+
   /** Runs for a spec, optionally scoped to a project — the read behind {@code GET /v1/runs}. */
   public List<RunRow> list(String project, String specId) {
     if (project != null && specId != null) {
@@ -1362,13 +1392,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
     return db.transaction(
         () -> {
-          var latest =
-              db.queryOne(
-                  "SELECT id FROM runs WHERE spec_id = ? AND role = 'build'"
-                      + " ORDER BY started_at DESC, id DESC LIMIT 1",
-                  row -> row.text(0),
-                  specId);
-          if (latest.isEmpty() || !latest.get().equals(id)) {
+          if (latestBuildAttempt(specId).filter(latest -> latest.id().equals(id)).isEmpty()) {
             return false;
           }
           work.run();
@@ -1472,10 +1496,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    */
   @Override
   public boolean live(String id, String handle) {
-    return findById(id)
-        .filter(run -> run.ownedBy(handle))
-        .map(run -> !RunStatus.isTerminal(run.status()))
-        .orElse(false);
+    return findById(id).filter(run -> run.liveOn(handle)).isPresent();
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

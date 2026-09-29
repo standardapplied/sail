@@ -14,8 +14,10 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.channels.FileChannel;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
@@ -48,6 +50,27 @@ public class FileMutexTest {
     first.close();
     assertTrue(acquired.await(30, TimeUnit.SECONDS), "the release admits the waiter");
     second.join();
+  }
+
+  @Test
+  void aLockFileItCreatesIsWritableByItsGroupWhateverTheUmask(@TempDir Path dir) throws Exception {
+    var file = dir.resolve("sail.db.rounds.lock");
+
+    try (var hold = FileMutex.acquire(file)) {
+      assertEquals(
+          PosixFilePermissions.fromString("rw-rw----"), Files.getPosixFilePermissions(file));
+    }
+  }
+
+  @Test
+  void aLockFileAnotherMadeIsTakenAsItIs(@TempDir Path dir) throws Exception {
+    var file = Files.createFile(dir.resolve("acme.lock"));
+    Files.setPosixFilePermissions(file, PosixFilePermissions.fromString("rw-------"));
+
+    try (var hold = FileMutex.acquire(file)) {
+      assertEquals(
+          PosixFilePermissions.fromString("rw-------"), Files.getPosixFilePermissions(file));
+    }
   }
 
   @Test

@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -228,7 +229,9 @@ class NodeIdentitySyncTest {
     var refused =
         assertThrows(SyncTransportException.class, () -> SyncBox.connect(server, ada).close());
 
-    assertTrue(refused.getMessage().contains("box 'main'"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("main's own FDE"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());
+    assertFalse(refused.getMessage().contains("release-box"), "releasing does nothing for it");
     assertTrue(new FdeBoxes(main.db).boxOf("ada").isEmpty(), "main's FDE records no other box");
     SyncBox.quiesce(main, ada);
     SyncBox.assertEqualToMain(main, ada);

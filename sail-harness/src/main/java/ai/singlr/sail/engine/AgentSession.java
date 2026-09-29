@@ -138,6 +138,20 @@ public final class AgentSession {
     }
   }
 
+  /**
+   * Fails unless a command runs in the container at all, so a caller that read no live session can
+   * tell a process that is gone from a container it could not reach — incusd restarting, the
+   * container stopped — whose sessions it knows nothing about.
+   */
+  public void requireReachable(String containerName)
+      throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(ContainerExec.asDevUser(containerName, List.of("true")));
+    if (!result.ok()) {
+      throw new IOException(
+          "Container '" + containerName + "' could not be reached: " + result.stderr());
+    }
+  }
+
   /** Queries the given role's session status. Returns null if no session exists for it. */
   @SuppressWarnings("unchecked")
   public SessionInfo queryStatus(String containerName, AgentUnit unit)

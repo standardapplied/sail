@@ -10,7 +10,9 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -31,18 +33,18 @@ public final class NodeRound {
    * unless main authenticated the session as that handle; a main that predates saying which handle
    * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
    * #acknowledgeHeld}), and every one main does not hold is stamped as this box's ({@link
-   * RunStore#stamp}).
+   * #stampUnheld}).
    */
   public static void begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
-    new RunStore(db).stamp(handle, acknowledgeHeld(session, db));
+    stampUnheld(db, handle, acknowledgeHeld(session, db));
   }
 
   /**
-   * Asks main which of the runs it has never acknowledged here it holds — its answer lost on the
-   * way back — and adopts each as acknowledged, keeping the run as it stands here. Nothing is
-   * offered, and nothing but main's acknowledgement is adopted. Returns the rest: the runs main
-   * does not hold, in the order they were written.
+   * Asks main which of the runs this box made that it never heard acknowledged main holds — its
+   * answer lost on the way back — and adopts each as acknowledged where main still holds the
+   * revision it took ({@link RunStore#acknowledge}), keeping the run as it stands here. Nothing is
+   * offered, and nothing but main's acknowledgement is adopted. Returns the ids main holds.
    */
   public static Set<String> acknowledgeHeld(SyncSession session, Sqlite db) {
     var runs = new RunStore(db);
@@ -50,16 +52,28 @@ public final class NodeRound {
     if (unacknowledged.isEmpty()) {
       return Set.of();
     }
-    var unheld = new LinkedHashSet<>(unacknowledged);
+    var held = new LinkedHashSet<String>();
     for (var entry : session.held(RUN, unacknowledged)) {
-      unheld.remove(entry.id());
+      held.add(entry.id());
       if (entry.kind() == ChangeLog.Kind.REVISION) {
         Actor.run(
             Actor.main(entry.author()),
             () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
       }
     }
-    return unheld;
+    return Collections.unmodifiableSet(held);
+  }
+
+  /**
+   * Stamps as the box whose FDE handle is {@code handle} executes them ({@link RunStore#stamp})
+   * every run this box made that main has never acknowledged and does not hold — {@code held} is
+   * what main said it holds ({@link #acknowledgeHeld}) — so main takes each from this box. Returns
+   * the ids stamped.
+   */
+  public static List<String> stampUnheld(Sqlite db, String handle, Set<String> held) {
+    var runs = new RunStore(db);
+    return runs.stamp(
+        handle, runs.unacknowledged().stream().filter(id -> !held.contains(id)).toList());
   }
 
   /**

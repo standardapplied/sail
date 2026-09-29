@@ -207,7 +207,7 @@ public final class SyncOperations {
    * channels}, which of this box's runs it took whose answer was lost, and acknowledges them
    * ({@link NodeRound#acknowledgeHeld}). Nothing is offered, and whose handle main knows this box
    * by is not checked: a handle change asks it before deciding which runs it may re-stamp. Returns
-   * the runs main does not hold.
+   * the runs main holds.
    */
   public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
       throws Exception {

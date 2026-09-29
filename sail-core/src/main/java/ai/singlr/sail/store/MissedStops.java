@@ -57,6 +57,14 @@ public final class MissedStops {
      */
     record ProbeUnit(String why) implements Outcome {}
 
+    /**
+     * An authoritative stop was recorded longer ago than the grace window, yet the session still
+     * claims to be running: the stop reached nothing that finishes runs — a tracker that dropped it
+     * or failed. Probe the agent and, only if it is gone, finish the row; the stop itself was
+     * recorded already and is never replayed over a running row.
+     */
+    record FinishRun(String why) implements Outcome {}
+
     /** Leave the session alone. */
     record Skip(String why) implements Outcome {}
   }
@@ -88,13 +96,20 @@ public final class MissedStops {
   public static Outcome assess(
       RunStore.RunRow session, StopCoverage coverage, Instant now, Duration grace) {
     if (coverage.observedAt() != null) {
+      var inFlight = Duration.between(coverage.observedAt(), now).compareTo(grace) < 0;
+      if ("running".equals(session.status())) {
+        return inFlight
+            ? new Outcome.Skip("an authoritative stop is still in flight")
+            : new Outcome.FinishRun(
+                "an authoritative stop was recorded but the session still runs");
+      }
       if (coverage.actedOn()) {
         return new Outcome.Skip("an authoritative stop was recorded and acted on");
       }
       if (!TERMINAL.contains(session.status())) {
         return new Outcome.Skip("stop observed but session status is " + session.status());
       }
-      if (Duration.between(coverage.observedAt(), now).compareTo(grace) < 0) {
+      if (inFlight) {
         return new Outcome.Skip("an authoritative stop is still in flight");
       }
       return new Outcome.ReplayStop(

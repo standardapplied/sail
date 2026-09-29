@@ -698,6 +698,7 @@ class SyncTransportTest {
         SyncRpcServer.over(
             main.db,
             "main",
+            null,
             Actor.sync("A", Role.MEMBER),
             () -> roster,
             SyncTransitionSink.NONE,
