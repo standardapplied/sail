@@ -6,9 +6,11 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
@@ -21,7 +23,9 @@ import java.util.function.BooleanSupplier;
  *
  * <p>A personal room is recognized by its id alone: the id an older release derived from its
  * creator and project, a readable slug and a fingerprint of the exact pair. A room whose id merely
- * shares the prefix is any other room, and is untouched.
+ * shares the prefix is any other room, and is untouched. A personal room deleted before the upgrade
+ * is recognized by the state its tombstone kept, and erased with the messages and runs its deletion
+ * left behind.
  *
  * <p>An authoritative box — main, or a standalone box — erases each one with its messages and runs,
  * recording an erasure row per entity that every node adopts through its pages. A node removes only
@@ -70,11 +74,7 @@ public final class PersonalRoomErasure implements DataMigration {
     var removed = new ArrayList<Erasure.Target>();
     var kept = new ArrayList<String>();
     var mains = new ArrayList<String>();
-    for (var id :
-        db.query(
-            "SELECT id FROM rooms WHERE id LIKE ? ORDER BY rowid",
-            row -> row.text(0),
-            PREFIX + "%")) {
+    for (var id : candidates(db)) {
       var room = new Erasure.Target(Erasure.ROOM, id);
       var result =
           db.transaction(
@@ -126,13 +126,49 @@ public final class PersonalRoomErasure implements DataMigration {
     return new Report(rooms, 0, kept.size(), notes);
   }
 
-  /** Whether the live room {@code id} is the personal room of its creator in its project. */
+  /** Every room, live or deleted, whose id could be a personal room's. */
+  private static Set<String> candidates(Sqlite db) {
+    var ids =
+        new LinkedHashSet<>(
+            db.query(
+                "SELECT id FROM rooms WHERE id LIKE ? ORDER BY rowid",
+                row -> row.text(0),
+                PREFIX + "%"));
+    new ChangeLog(db)
+        .tombstonedBy(Erasure.ROOM, "project").values().stream()
+            .flatMap(List::stream)
+            .filter(id -> id.startsWith(PREFIX))
+            .sorted()
+            .forEach(ids::add);
+    return ids;
+  }
+
+  /**
+   * Whether room {@code id}, as this box last knew it — its live row, or the state its tombstone
+   * kept — is the personal room of its creator in its project.
+   */
   private static boolean isPersonal(Sqlite db, String id) {
     return db.queryOne(
             "SELECT created_by, project FROM rooms WHERE id = ?",
-            row -> row.text(0) != null && id.equals(idOf(row.text(0), row.text(1))),
+            row -> isPersonal(id, row.text(0), row.text(1)),
             id)
-        .orElse(false);
+        .orElseGet(
+            () ->
+                new ChangeLog(db)
+                    .head(Erasure.ROOM, id)
+                    .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+                    .map(head -> YamlUtil.parseMap(head.snapshot()))
+                    .map(
+                        last ->
+                            isPersonal(
+                                id,
+                                Snapshots.text(last, "created_by"),
+                                Snapshots.text(last, "project")))
+                    .orElse(false));
+  }
+
+  private static boolean isPersonal(String id, String creator, String project) {
+    return creator != null && project != null && id.equals(idOf(creator, project));
   }
 
   private static String keptNote(String id, String reason) {

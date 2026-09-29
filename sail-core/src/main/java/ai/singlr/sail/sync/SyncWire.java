@@ -48,13 +48,12 @@ public final class SyncWire {
   public static final int PROTOCOL = 4;
 
   /**
-   * The fleet floor both sides must advertise before exchanging rows: the release whose page
-   * entries name their kind, so an erasure is never read as a revision with an empty snapshot, and
-   * whose offers can ask main to erase. Bump again only when a change makes older peers unsafe,
-   * never for a routine release; patch releases above the floor are wire-compatible with each
-   * other.
+   * The fleet floor both sides must advertise before exchanging rows: the release that mints no
+   * personal room, so an older node can never push one to a main that has already erased them all.
+   * Bump again only when a change makes older peers unsafe, never for a routine release; patch
+   * releases above the floor are wire-compatible with each other.
    */
-  public static final String UPGRADE_FLOOR = "0.46.0";
+  public static final String UPGRADE_FLOOR = "0.46.2";
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;

@@ -136,6 +136,41 @@ class PersonalRoomErasureTest {
   }
 
   @Test
+  void aPersonalRoomDeletedBeforeTheUpgradeIsErasedWithWhatItsDeletionKeptOnEveryBox()
+      throws IOException {
+    var deleted = personalRoom(main.db, UDAY, "uday", true);
+    new RoomStore(main.db).delete(UDAY);
+    room(main.db, M_DAY, "uday", "uday");
+    new MessageStore(main.db).append(M_DAY, "uday", "not M.Day's", null);
+    new RoomStore(main.db).delete(M_DAY);
+    round();
+    var nodes = personalRoom(node.db, NODES, "node", false);
+    new RoomStore(node.db).delete(NODES);
+
+    var local = new PersonalRoomErasure(() -> false).apply(node.db, null, null);
+    var report = new PersonalRoomErasure(() -> true).apply(main.db, null, null);
+    round();
+
+    assertEquals(
+        List.of("Removed 1 personal rooms this box alone held: 1 messages, 0 runs"), local.notes());
+    assertEquals(List.of("Erased 1 personal rooms: 2 messages, 1 runs"), report.notes());
+    for (var box : List.of(main, node)) {
+      assertGone(box.db, deleted);
+      assertGone(box.db, nodes);
+      assertEquals(1, count(box.db, "SELECT count(*) FROM room_messages WHERE room_id = ?", M_DAY));
+      assertEquals(
+          0,
+          count(
+              box.db,
+              "SELECT count(*) FROM change_log WHERE entity_id = ? AND kind = 'erasure'",
+              M_DAY),
+          "a deleted room another FDE made under M.Day's id is untouched");
+    }
+    assertEquals(
+        0, count(main.db, "SELECT count(*) FROM change_log WHERE entity_id = ?", nodes.room()));
+  }
+
+  @Test
   void aPersonalRoomWithAnUnfinishedRunOrASpecInItIsLeftAsAnOrdinaryRoomAndReported() {
     var working = personalRoom(main.db, UDAY, "uday", false);
     var running = run(main.db, UDAY, false);
