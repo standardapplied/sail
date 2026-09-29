@@ -2,6 +2,11 @@
 
 ## 0.46.2
 
+- **Personal rooms are retired, and every one is erased on upgrade.** Rooms are created on purpose, from Mast: `GET /v1/rooms` no longer mints a room for its reader in every project, and rooms no longer render `personal_of`.
+  - Upgrade main first. Its upgrade erases every personal room with its messages and runs, and each node adopts those erasures on its next sync. A standalone box erases its own.
+  - Then upgrade every node. A node's upgrade removes the personal rooms main never held, which only that box ever had, and they never reach main.
+  - A personal room with a run still under way, or with a spec born in it, is left as an ordinary room, and the upgrade names it. The upgrade prints how many rooms it erased.
+  - A personal room is recognized by its exact id, derived from its creator and project. A room whose id merely starts with `fde-` is untouched.
 - **A spec left without an assignee is unassigned, and any member may claim it.** Creating a spec with no assignee used to assign it to whoever created it, which on the in-container socket was the run's principal (`claude/…`), leaving it undispatchable.
   - This holds through HTTP, the CLI and the socket (a run's credential or the box credential), and its identity room is unassigned too.
   - Its creator, the FDE who created it (a run records the FDE it acts for), may edit it while it is unassigned. Any member claims it with `sail spec update <id> --assignee <you>`; an agent claims it for the FDE it acts for. Dispatch refuses it until then, naming that claim.

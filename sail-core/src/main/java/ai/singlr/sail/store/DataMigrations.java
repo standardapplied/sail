@@ -19,7 +19,8 @@ public final class DataMigrations {
           new ContentMigration(),
           new LegacyDataMigration(),
           new RoomsBackfillMigration(),
-          new OrphanErasure());
+          new OrphanErasure(),
+          new PersonalRoomErasure());
 
   private DataMigrations() {}
 

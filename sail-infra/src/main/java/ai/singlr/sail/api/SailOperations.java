@@ -41,7 +41,6 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.PersonalRooms;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -954,19 +953,12 @@ public final class SailOperations implements HostOperations {
     }
   }
 
-  /**
-   * Lists rooms, minting the reading FDE's personal room in every project in scope first — the
-   * new-FDE on-ramp, lazy and idempotent ({@link PersonalRooms}). A minted room is pushed on the
-   * next sync; a box that already holds it (minted there, or synced) mints nothing.
-   */
+  /** Lists rooms, every project's or one project's, each with its attached specs. */
   @Override
   public Result<RoomsListResponse> rooms(String project) {
     return safeRead(
         () -> {
           var store = requireRoomStore();
-          if (mintPersonalRooms(store, project)) {
-            triggerSyncAfterWrite();
-          }
           var rows = project == null || project.isBlank() ? store.listAll() : store.list(project);
           var views = rows.stream().map(row -> RoomView.from(row, specIdsOf(row.id()))).toList();
           if (messageStore == null) {
@@ -1026,26 +1018,6 @@ public final class SailOperations implements HostOperations {
       triggerSyncAfterWrite();
     }
     return result;
-  }
-
-  private boolean mintPersonalRooms(RoomStore store, String project) {
-    var actor = Actor.current();
-    if (fdeStore == null || projectStore == null || actor.handle() == null) {
-      return false;
-    }
-    var fde = fdeStore.byHandle(actor.handle()).orElse(null);
-    if (fde == null) {
-      return false;
-    }
-    var scope =
-        project == null || project.isBlank()
-            ? projectStore.list()
-            : projectStore.findByName(project).stream().toList();
-    var minted = false;
-    for (var row : scope) {
-      minted |= PersonalRooms.ensure(store, specStore, fde, row);
-    }
-    return minted;
   }
 
   private RoomDetailResponse detailOf(RoomStore.RoomRow row) {
