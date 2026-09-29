@@ -339,6 +339,24 @@ class BoxRunsSyncTest {
   }
 
   @Test
+  void aRunMainTookWhoseAnswerWasLostAndThenSetBackToAnEarlierStateNeverRevertsMainsChange()
+      throws IOException {
+    var run = reserve(ada, "ada", null, "adhoc");
+    finish(ada, run);
+    Acting.system(() -> runs(ada).recordSession(run, "old-session", "claude", "/t"));
+    Acting.system(() -> runs(ada).recordSession(run, "offered-session", "claude", "/t"));
+    SyncBox.pushLosingTheAnswer(main, ada);
+    Acting.system(() -> runs(main).recordSession(run, "old-session", "claude", "/t"));
+
+    assertNoDenials(SyncBox.round(main, ada));
+
+    assertEquals("old-session", runs(main).findById(run).orElseThrow().sessionId());
+    assertEquals("offered-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
+    var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
+    assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
+  }
+
+  @Test
   void aRunBothSidesChangedAfterALostAnswerParksAConflictForTheFde() throws IOException {
     var run = reserve(ada, "ada", null, "adhoc");
     SyncBox.pushLosingTheAnswer(main, ada);

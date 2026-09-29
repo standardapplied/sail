@@ -247,9 +247,9 @@ session as, and a node whose configured sync handle is blank or another does not
 (`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
 from any other until an admin runs `sail fde release-box`. Before its first type, the node asks
-`need` for every run main has never acknowledged: one main holds a state of that this box wrote
-is adopted as acknowledged at it, with the box's later changes on top; one main has moved on since
-is left without a base, so the round parks any field the two hold differently for the FDE rather
+`need` for every run main has never acknowledged: one main holds at its first revision, the one it
+took from this box, is adopted as acknowledged at it, with the box's later changes on top; one main
+has revised since, even back to a state this box once wrote, is left without a base, so the round parks any field the two hold differently for the FDE rather
 than revert main's change; neither is re-stamped. Every other is stamped with the node's handle, so
 main takes it. A handle change asks the same before re-stamping anything, and holds every round of
 the box off from the ask until its stamps are written (`SyncOperations.holdRounds`, a lock file

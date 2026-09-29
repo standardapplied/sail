@@ -146,19 +146,19 @@ class RunStoreTest {
     var held = store.comparableSnapshot(id);
     store.recordSession(id, "sess-1", "claude", "/t");
 
-    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "7-main")));
+    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "1-main")));
 
-    assertEquals("7-main", store.baseRevOf(id));
+    assertEquals("1-main", store.baseRevOf(id));
     assertEquals("sess-1", store.findById(id).orElseThrow().sessionId());
     assertTrue(store.dirtyIds().contains(id), "its progress is still to be offered");
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "8-main")),
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "1-main")),
         "a run with a base is left alone");
     var unchanged = newRunOn("q", "s", "ada");
     assertTrue(
         Actor.call(
             Actor.main("ada"),
-            () -> store.acknowledge(unchanged, store.comparableSnapshot(unchanged), "3-main")));
+            () -> store.acknowledge(unchanged, store.comparableSnapshot(unchanged), "1-main")));
     assertFalse(store.dirtyIds().contains(unchanged), "nothing is left to offer");
   }
 
@@ -167,10 +167,14 @@ class RunStoreTest {
     var id = newRunOn("p", "s", "ada");
     var moved = new LinkedHashMap<>(store.comparableSnapshot(id));
     moved.put("session_id", "main-session");
+    var wroteHereBefore = store.comparableSnapshot(id);
 
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, moved, "7-main")),
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, moved, "2-main")),
         "main holds a state this box never wrote");
+    assertFalse(
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, wroteHereBefore, "3-main")),
+        "a later revision on main that holds a state this box once wrote is not what main took");
 
     assertNull(store.baseRevOf(id));
     assertNull(store.findById(id).orElseThrow().sessionId());
