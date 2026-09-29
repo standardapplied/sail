@@ -152,6 +152,36 @@ class ConflictDetectorTest {
   }
 
   @Test
+  void withNoCommonAncestorAValueAgainstNoneIsAConflictNotAnEdit() {
+    var local = snap("title", "X", "session", "offered");
+    var remote = snap("title", "X", "session", null);
+
+    var conflict =
+        assertInstanceOf(
+            ConflictDetector.Conflict.class, ConflictDetector.detect(null, local, remote));
+    var reversed =
+        assertInstanceOf(
+            ConflictDetector.Conflict.class, ConflictDetector.detect(null, remote, local));
+
+    assertEquals(List.of("session"), conflict.fields());
+    assertEquals(List.of("session"), reversed.fields());
+  }
+
+  @Test
+  void withNoCommonAncestorOnlyALatestWinsFieldMerges() {
+    var local = snap("title", "X", "beat", "2026-09-01T00:00:09Z", "_actor", "ada");
+    var remote = snap("title", "X", "beat", null, "_actor", "uday");
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class,
+            ConflictDetector.detect(null, local, remote, Set.of("beat")));
+
+    assertEquals(
+        snap("title", "X", "beat", "2026-09-01T00:00:09Z", "_actor", "ada"), merged.result());
+  }
+
+  @Test
   void newFieldAddedOnlyLocallyMergesWithoutConflict() {
     var base = snap("title", "A");
     var local = snap("title", "A", "assignee", "uday");

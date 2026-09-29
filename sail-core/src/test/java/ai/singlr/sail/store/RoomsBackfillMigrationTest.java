@@ -212,7 +212,7 @@ class RoomsBackfillMigrationTest {
   }
 
   @Test
-  void divergedSpecsStillConvergeThroughTheOrdinarySyncPath() {
+  void divergedSpecsSurfaceThroughTheOrdinaryConflictPathAndConvergeOnceResolved() {
     try (var node = Sqlite.open(tempDir.resolve("node.db"))) {
       new SchemaManager(node).migrate();
       seedSpec(db, "auth", "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}");
@@ -223,27 +223,29 @@ class RoomsBackfillMigrationTest {
 
       var mainRooms = new RoomStore(db);
       var nodeRooms = new RoomStore(node);
-      var report =
-          new SyncEngine()
-              .reconcile(
-                  new StoreReplica(
-                      "node",
-                      nodeRooms,
-                      new ChangeLog(node),
-                      new SyncConflicts(node),
-                      new SyncState(node)),
-                  new StoreReplica(
-                      "main",
-                      mainRooms,
-                      new ChangeLog(db),
-                      new SyncConflicts(db),
-                      new SyncState(db)));
+      var nodeConflicts = new SyncConflicts(node);
+      var nodeReplica =
+          new StoreReplica(
+              "node", nodeRooms, new ChangeLog(node), nodeConflicts, new SyncState(node));
+      var mainReplica =
+          new StoreReplica(
+              "main", mainRooms, new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
 
-      assertTrue(report.total() > 0, "genuine divergence is reconciled, never silently equal");
+      var report = new SyncEngine().reconcile(nodeReplica, mainReplica);
+
+      assertEquals(1, report.conflicts(), "genuine divergence is reconciled, never silently equal");
+      var parked = nodeConflicts.pendingFor("room", "auth").orElseThrow();
+      assertEquals(List.of("roster"), parked.fields(), "neither box's roster is picked for it");
+      assertNull(nodeRooms.findById("auth").orElseThrow().roster());
+
+      var theirs = mainReplica.current("auth");
+      nodeConflicts.resolve(parked.id(), nodeRooms.resolveConflict("auth", theirs, theirs));
+      new SyncEngine().reconcile(nodeReplica, mainReplica);
+
       assertEquals(
           mainRooms.findById("auth").orElseThrow().roster(),
           nodeRooms.findById("auth").orElseThrow().roster(),
-          "the boxes converge on main's authoritative roster");
+          "the boxes converge on the roster the FDE chose");
     }
   }
 }

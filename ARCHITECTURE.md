@@ -311,6 +311,10 @@ granularity:
 - **Conflict.** The same field changed to different values, or a delete raced an edit. The
   local row is left untouched and the conflict is parked.
 
+A row both sides hold with no merge base has an unknown ancestor: main took it and its answer was
+lost, or both boxes made it. Which side changed a field cannot be told, so every work field the two
+hold differently, a value against none included, is a conflict; only a latest-wins clock merges.
+
 Pushes are compare-and-set. Main mints the revision and rejects a stale expected revision,
 so the engine re-reconciles against main's fresh state under a bounded retry rather than
 overwriting silently. Revisions are content-addressed as `<counter>-<shortHash>`, so two
