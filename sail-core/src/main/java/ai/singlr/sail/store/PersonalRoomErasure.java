@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -30,7 +31,8 @@ import java.util.function.BooleanSupplier;
  * <p>An authoritative box — main, or a standalone box — erases each one with its messages and runs,
  * recording an erasure row per entity that every node adopts through its pages. A node removes only
  * the personal rooms main never acknowledged, which exist on that box alone, and leaves no erasure
- * row, so nothing of them ever reaches main; every other one is main's to erase. A room with a run
+ * row, so nothing of them ever reaches main; every other one is main's to erase, decided on main's
+ * copy as every erasure is, and the report names this box's work it would take. A room with a run
  * that has not finished, or one a spec converses in, is left as an ordinary room and named in the
  * report: erasing it would take work going on, or leave a spec talking into nothing. One room per
  * transaction, re-checked under its lock, so an upgrade killed partway resumes where it stopped and
@@ -74,6 +76,7 @@ public final class PersonalRoomErasure implements DataMigration {
     var removed = new ArrayList<Erasure.Target>();
     var kept = new ArrayList<String>();
     var mains = new ArrayList<String>();
+    var contested = new ArrayList<String>();
     for (var id : candidates(db)) {
       var room = new Erasure.Target(Erasure.ROOM, id);
       var result =
@@ -83,25 +86,23 @@ public final class PersonalRoomErasure implements DataMigration {
                   return Erasure.Result.NONE;
                 }
                 var closure = erasure.closure(List.of(room));
-                var unfinished = runs.unfinished(idsOf(closure, Erasure.RUN));
-                if (!unfinished.isEmpty()) {
-                  kept.add(keptNote(id, "run '" + unfinished.getFirst() + "' has not finished"));
+                var inUse = inUse(runs, specs, closure, id);
+                if (!main && !erasure.unacknowledged(room)) {
+                  mains.add(id);
+                  inUse.ifPresent(
+                      reason ->
+                          contested.add(
+                              "Personal room '"
+                                  + id
+                                  + "' is main's to erase, decided on main's copy, though here "
+                                  + reason));
                   return Erasure.Result.NONE;
                 }
-                var conversing = specs.inRooms(List.of(id)).getOrDefault(id, Set.of());
-                if (!conversing.isEmpty()) {
-                  kept.add(
-                      keptNote(id, "spec '" + conversing.iterator().next() + "' converses in it"));
+                if (inUse.isPresent()) {
+                  kept.add("Left personal room '" + id + "' as an ordinary room: " + inUse.get());
                   return Erasure.Result.NONE;
                 }
-                if (main) {
-                  return erasure.erase(closure, "migration");
-                }
-                if (erasure.unacknowledged(room)) {
-                  return erasure.discard(List.of(room));
-                }
-                mains.add(id);
-                return Erasure.Result.NONE;
+                return main ? erasure.erase(closure, "migration") : erasure.discard(List.of(room));
               });
       removed.addAll(result.entities());
     }
@@ -122,6 +123,7 @@ public final class PersonalRoomErasure implements DataMigration {
       notes.add(
           mains.size() + " personal rooms are main's to erase; this node adopts its erasures");
     }
+    notes.addAll(contested);
     notes.addAll(kept);
     return new Report(rooms, 0, kept.size(), notes);
   }
@@ -171,8 +173,16 @@ public final class PersonalRoomErasure implements DataMigration {
     return creator != null && project != null && id.equals(idOf(creator, project));
   }
 
-  private static String keptNote(String id, String reason) {
-    return "Left personal room '" + id + "' as an ordinary room: " + reason;
+  /** Why room {@code id} must not go yet: a run in it that has not finished, or a spec in it. */
+  private static Optional<String> inUse(
+      RunStore runs, SpecStore specs, List<Erasure.Target> closure, String id) {
+    var unfinished = runs.unfinished(idsOf(closure, Erasure.RUN));
+    if (!unfinished.isEmpty()) {
+      return Optional.of("run '" + unfinished.getFirst() + "' has not finished");
+    }
+    return specs.inRooms(List.of(id)).getOrDefault(id, Set.of()).stream()
+        .findFirst()
+        .map(spec -> "spec '" + spec + "' converses in it");
   }
 
   /**

@@ -3,7 +3,8 @@
 ## 0.46.2
 
 - **Personal rooms are retired, and every one is erased on upgrade.** Rooms are created on purpose, from Mast: `GET /v1/rooms` no longer mints a room for its reader in every project, and rooms no longer render `personal_of`.
-  - Upgrade main first. Its upgrade erases every personal room with its messages and runs, and each node adopts those erasures on its next sync. A standalone box erases its own.
+  - Sync every node, then upgrade main first. Its upgrade erases every personal room with its messages and runs, and each node adopts those erasures on its next sync. A standalone box erases its own.
+  - Main decides on its own copy, as every erasure does: a run or spec a node started in a personal room and has not synced yet goes with main's erasure. A node's upgrade names each one.
   - Then upgrade every node. A node's upgrade removes the personal rooms main never held, which only that box ever had, and they never reach main.
   - **The fleet floor moves to 0.46.2.** An older node would mint a personal room and push it to a main that has already erased them all, so main refuses it and tells it to run `sail upgrade`.
   - A personal room deleted before the upgrade is erased too, with the messages and runs its deletion kept.

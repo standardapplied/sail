@@ -212,6 +212,33 @@ class PersonalRoomErasureTest {
   }
 
   @Test
+  void aNodeNamesItsOwnWorkInAPersonalRoomMainDecidesOnWithoutClaimingToKeepIt()
+      throws IOException {
+    personalRoom(main.db, UDAY, "uday", true);
+    round();
+    var running = run(node.db, UDAY, false);
+    node.specs.create(SyncBox.spec("born-there", "Born there", "pending"));
+    node.db.execute("UPDATE specs SET room_id = ? WHERE id = 'born-there'", UDAY);
+
+    new PersonalRoomErasure(() -> true).apply(main.db, null, null);
+    var report = new PersonalRoomErasure(() -> false).apply(node.db, null, null);
+
+    assertEquals(0, report.skipped());
+    assertEquals(
+        List.of(
+            "Removed 0 personal rooms this box alone held: 0 messages, 0 runs",
+            "1 personal rooms are main's to erase; this node adopts its erasures",
+            "Personal room '"
+                + UDAY
+                + "' is main's to erase, decided on main's copy, though here run '"
+                + running
+                + "' has not finished"),
+        report.notes());
+    round();
+    assertFalse(new RoomStore(node.db).findById(UDAY).isPresent(), "main's erasure is adopted");
+  }
+
+  @Test
   void aMigrationKilledAfterTwoRoomsIsFinishedByASecondProcessErasingNothingTwice()
       throws Exception {
     var path = dir.resolve("killed.db");
