@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import ai.singlr.sail.store.OrphanErasure;
+import ai.singlr.sail.store.PersonalRoomErasure;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.channels.SocketChannel;
@@ -46,10 +47,10 @@ import org.junit.jupiter.api.Timeout;
  *
  * <p>The shared script stands for a box the content migration converted: its row carries the mode
  * the old rule gave a script (0755), its history records none, and the copy an older materializer
- * wrote on disk is 0644 — on main and on the node alike. Main's record of the orphan erasure is
- * dropped before the hop, so the candidate's migrate has a data migration to run and record. Main
- * holds uday's personal room in the demo project as the released sail minted it, and the hop erases
- * it.
+ * wrote on disk is 0644 — on main and on the node alike. Main's records of the orphan and the
+ * personal-room erasures are dropped before the hop, so the candidate's migrate has data migrations
+ * to run and record whichever release it hops from. Main holds uday's personal room in the demo
+ * project as an older sail minted it, and the hop erases it.
  */
 @Timeout(value = 8, unit = TimeUnit.MINUTES)
 class UpgradeE2EIT extends AbstractIncusIT {
@@ -161,7 +162,12 @@ class UpgradeE2EIT extends AbstractIncusIT {
       seed();
       var socket = ptyProxy();
       var pid = openSession(socket);
-      query("DELETE FROM data_migrations WHERE name = '" + OrphanErasure.NAME + "'");
+      query(
+          "DELETE FROM data_migrations WHERE name IN ('"
+              + OrphanErasure.NAME
+              + "', '"
+              + PersonalRoomErasure.NAME
+              + "')");
       rootOk(
           "install -d -m 700 "
               + REHEARSAL
