@@ -115,6 +115,16 @@ class WriterAuthorityTest {
   }
 
   @Test
+  void aRunsRecordedPrincipalThatDoesNotNameItNeverLendsItsOwnerAnotherName() {
+    board.db.execute(
+        "INSERT INTO run_principals (run_id, principal) VALUES (?, ?)", Actors.RUN, OTHER);
+
+    assertEquals(
+        Optional.of(Kind.NOT_AUTHOR),
+        rule.decide(OWNER_SYNC, "f", FILE, with(FILE, "_actor", OTHER)).map(Refusal::kind));
+  }
+
+  @Test
   void aReadOnlyRoleIsToldWhatItCannotChange() {
     assertEquals(
         "Your credential is read-only and cannot change files.",

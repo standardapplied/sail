@@ -66,30 +66,9 @@ class FleetSyncTest {
       this.files = new FileStore(db);
       this.projects = new ProjectStore(db);
       this.fdes = new FdeStore(db);
-      this.specReplica =
-          new StoreReplica(
-              id,
-              specs,
-              changeLog,
-              conflicts,
-              syncState,
-              SyncedEntities.require(specs.entityType()).authority(db));
-      this.fileReplica =
-          new StoreReplica(
-              id,
-              files,
-              changeLog,
-              conflicts,
-              syncState,
-              SyncedEntities.require(files.entityType()).authority(db));
-      this.projectReplica =
-          new StoreReplica(
-              id,
-              projects,
-              changeLog,
-              conflicts,
-              syncState,
-              SyncedEntities.require(projects.entityType()).authority(db));
+      this.specReplica = new StoreReplica(id, specs, changeLog, conflicts, syncState);
+      this.fileReplica = new StoreReplica(id, files, changeLog, conflicts, syncState);
+      this.projectReplica = new StoreReplica(id, projects, changeLog, conflicts, syncState);
     }
 
     @Override

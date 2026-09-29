@@ -15,7 +15,6 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncDatabase;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -60,12 +59,7 @@ class SyncSchemaConvergenceTest {
 
   private static StoreReplica replica(String id, Sqlite db) {
     return new StoreReplica(
-        id,
-        new SpecStore(db),
-        new ChangeLog(db),
-        new SyncConflicts(db),
-        new SyncState(db),
-        SyncedEntities.require(new SpecStore(db).entityType()).authority(db));
+        id, new SpecStore(db), new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
   }
 
   private static SpecStore.SpecRow spec(String id, String title, String status) {

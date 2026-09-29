@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
@@ -32,9 +31,8 @@ import java.util.function.Supplier;
  *
  * <p>{@code pushPolicy} decides whether this node may push its own change for an id up to main: the
  * default always may (multi-writer entities — specs, files, projects), and a single-writer entity
- * like a run supplies a policy so a reader box never pushes a run it did not author. {@code
- * authority} is the type's {@link WriteAuthority}, which main's commit asks for every revision a
- * node pushes.
+ * like a run supplies a policy so a reader box never pushes a run it did not author. Main's commit
+ * asks the store's {@link SyncedStore#authority} for every revision a node pushes.
  */
 public final class StoreReplica implements LocalReplica, MainReplica {
 
@@ -44,16 +42,14 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private final SyncConflicts conflicts;
   private final SyncState syncState;
   private final Predicate<String> pushPolicy;
-  private final WriteAuthority authority;
 
   public StoreReplica(
       String id,
       SyncedStore store,
       ChangeLog changeLog,
       SyncConflicts conflicts,
-      SyncState syncState,
-      WriteAuthority authority) {
-    this(id, store, changeLog, conflicts, syncState, entityId -> true, authority);
+      SyncState syncState) {
+    this(id, store, changeLog, conflicts, syncState, entityId -> true);
   }
 
   public StoreReplica(
@@ -62,15 +58,13 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       ChangeLog changeLog,
       SyncConflicts conflicts,
       SyncState syncState,
-      Predicate<String> pushPolicy,
-      WriteAuthority authority) {
+      Predicate<String> pushPolicy) {
     this.id = Objects.requireNonNull(id, "id");
     this.store = Objects.requireNonNull(store, "store");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
     this.pushPolicy = Objects.requireNonNull(pushPolicy, "pushPolicy");
-    this.authority = Objects.requireNonNull(authority, "authority");
   }
 
   @Override
@@ -183,7 +177,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
           }
-          return switch (store.commitRevision(entityId, snapshot, expectedRev, authority)) {
+          return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
             case PushOutcome.Accepted a ->
                 new CommitOutcome.Accepted(
                     a.rev(), recordedAuthor(entityId), recordedCreator(entityId));

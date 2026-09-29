@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.SpecAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
@@ -103,6 +104,7 @@ final class GlobalSpecOperations {
 
   GlobalSpecCreatedResponse create(SpecCreateRequest request) {
     var actor = Actor.current();
+    Refusals.enforce(SpecAuthority.writer(actor));
     requireStore();
     if (request.id() == null || request.id().isBlank()) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, "spec id is required.");
@@ -202,7 +204,7 @@ final class GlobalSpecOperations {
     if (store != null && store.findById(specId).isPresent()) {
       throw new ApiException(
           ErrorCode.CONFLICT,
-          "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
+          SpecAuthority.reservedRoom(specId),
           "Pick another spec id, or pass --room " + specId + " to be born in that room.");
     }
   }
@@ -315,10 +317,11 @@ final class GlobalSpecOperations {
   private record Wake(String value) {}
 
   /**
-   * Validates an explicit wake edit and asks the room rule whether the actor may set it on the
-   * spec's home room — the room the wake lives on, whoever's it is — before anything is written.
-   * The spec update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still
-   * works; the value lands only on the room. Null when this box keeps no rooms to write it on.
+   * Validates an explicit wake edit and, for a spec living in another room, asks the room rule
+   * whether the actor may set it there before anything is written. A spec's own room is its spec's,
+   * so the spec rule that admitted the update, a claim included, has already decided it. The spec
+   * update door keeps accepting {@code wake} so the CLI's {@code spec update --wake} still works;
+   * the value lands only on the room. Null when this box keeps no rooms to write it on.
    */
   private Wake authorizeWake(SpecStore.SpecRow spec, String requested) {
     var store = rooms.get();
@@ -327,6 +330,9 @@ final class GlobalSpecOperations {
     }
     var wake = new Wake(validWake(requested));
     var roomId = spec.roomIdOrIdentity();
+    if (roomId.equals(spec.id())) {
+      return wake;
+    }
     var held = store.comparableSnapshot(roomId);
     var next = with(held == null ? Map.of() : held, "wake", wake.value());
     Refusals.enforce(store.authority().decide(Actor.current(), roomId, held, next));

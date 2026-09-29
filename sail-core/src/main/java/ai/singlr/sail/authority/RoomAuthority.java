@@ -22,6 +22,7 @@ public final class RoomAuthority implements WriteAuthority {
   private final RoomStore rooms;
   private final Attribution attribution;
 
+  /** The rule, deciding on {@code db}'s copy. */
   public RoomAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.attribution = new Attribution(db);
@@ -40,7 +41,17 @@ public final class RoomAuthority implements WriteAuthority {
     if (attributed.isPresent() || held == null) {
       return attributed;
     }
-    var owner = rooms.ownerOf(id, held);
+    return owned(actor, id, rooms.ownerOf(id, held));
+  }
+
+  /**
+   * Why {@code actor} may not change room {@code id}, owned by {@code owner}: the room-owner rule,
+   * which every later revision of a room and every door that manages one decide by.
+   */
+  public static Optional<Refusal> owned(Actor actor, String id, String owner) {
+    if (!actor.canWrite()) {
+      return Refusal.readOnly("change rooms");
+    }
     if (actor.isAdmin() || actor.actsFor(owner)) {
       return Optional.empty();
     }

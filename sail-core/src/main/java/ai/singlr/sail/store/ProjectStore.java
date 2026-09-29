@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.WriteAuthority;
+import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
@@ -241,6 +242,12 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   @Override
   public void eraseRow(String id) {
     db.execute("DELETE FROM projects WHERE name = ?", id);
+  }
+
+  /** Who may write projects on this box: any writer, as its doors and main's commit decide. */
+  @Override
+  public WriterAuthority authority() {
+    return new WriterAuthority(db, "projects");
   }
 
   /**

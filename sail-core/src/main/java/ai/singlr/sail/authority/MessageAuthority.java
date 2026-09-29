@@ -29,6 +29,7 @@ public final class MessageAuthority implements WriteAuthority {
   private final MessageStore messages;
   private final Attribution attribution;
 
+  /** The rule, deciding on {@code db}'s copy. */
   public MessageAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.messages = new MessageStore(db);

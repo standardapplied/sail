@@ -12,6 +12,7 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncedStore;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -37,6 +38,7 @@ public final class SpecAuthority implements WriteAuthority {
   private final SpecStore specs;
   private final Attribution attribution;
 
+  /** The rule, deciding on {@code db}'s copy. */
   public SpecAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
@@ -46,11 +48,9 @@ public final class SpecAuthority implements WriteAuthority {
   @Override
   public Optional<Refusal> decide(
       Actor actor, String id, Map<String, Object> held, Map<String, Object> next) {
-    if (WriteAuthority.decided(actor)) {
-      return Optional.empty();
-    }
-    if (!actor.canWrite()) {
-      return Refusal.readOnly("change specs");
+    var writer = writer(actor);
+    if (writer.isPresent() || WriteAuthority.decided(actor)) {
+      return writer;
     }
     var attributed = attribution.decide(actor, held, next, Snapshots.CREATOR, null);
     if (attributed.isPresent()) {
@@ -76,18 +76,37 @@ public final class SpecAuthority implements WriteAuthority {
     return claim(actor, id, assignee, assigneeOf(next), bornIn(id, held));
   }
 
+  /**
+   * Why {@code actor} may not write specs at all: a read-only role. Asked first, before a door
+   * looks at what is being written, so a read-only credential learns nothing else about it.
+   */
+  public static Optional<Refusal> writer(Actor actor) {
+    return WriteAuthority.decided(actor) || actor.canWrite()
+        ? Optional.empty()
+        : Refusal.readOnly("change specs");
+  }
+
   private boolean restoring(String id) {
     return specs.lastKnown(id).filter(spec -> !spec.live()).isPresent();
   }
 
   private Optional<Refusal> birth(Actor actor, String id, Map<String, Object> next) {
-    var taken = takenRoom(actor, id);
+    var taken = takenRoom(actor, id, next);
     if (taken.isPresent()) {
       return taken;
     }
     var bornIn = bornIn(id, next);
     if (bornIn == null) {
       return Optional.empty();
+    }
+    if (!rooms.holdsConversation(bornIn)) {
+      throw new SyncedStore.Unheld(
+          "room '"
+              + bornIn
+              + "', which spec '"
+              + id
+              + "' is born in, is not held here yet; it syncs in its own page, so the next round"
+              + " settles this");
     }
     var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn));
     if (posting.isPresent()) {
@@ -98,23 +117,26 @@ public final class SpecAuthority implements WriteAuthority {
   }
 
   /**
-   * Why a spec {@code id} may not be born over the room already holding its id: that room would
-   * become the spec's, its owner displaced. A room the actor owns or created, or any room for an
-   * admin, is theirs to hand to the spec — a node's own identity room can reach main before its
-   * spec does.
+   * Why spec {@code id} may not be born over the room already holding its id, live or deleted: the
+   * room, and the conversation in it, would become the spec's. It may when that moves no ownership
+   * — the room is already its owner's ({@link RoomStore#ownerOf}), as when a node's own identity
+   * room reaches main before its spec does — or for an admin.
    */
-  private Optional<Refusal> takenRoom(Actor actor, String id) {
-    var room = rooms.findById(id);
-    if (room.isEmpty()
+  private Optional<Refusal> takenRoom(Actor actor, String id, Map<String, Object> next) {
+    var room = rooms.held(id);
+    if (room == null
         || actor.isAdmin()
-        || actor.actsFor(Ownership.ownerOf(room.get().assignee(), room.get().createdBy()))
-        || actor.actsFor(room.get().createdBy())) {
+        || rooms
+            .ownerOf(id, room)
+            .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)))) {
       return Optional.empty();
     }
-    return Refusal.of(
-        Refusal.Kind.NOT_OWNER,
-        "Room '" + id + "' already exists, and a spec's id is reserved for its own room.",
-        "Pick another spec id.");
+    return Refusal.of(Refusal.Kind.NOT_OWNER, reservedRoom(id), "Pick another spec id.");
+  }
+
+  /** The refusal text of a spec born over room {@code id}, which holds the spec's reserved id. */
+  public static String reservedRoom(String id) {
+    return "Room '" + id + "' already exists, and a spec's id is reserved for its own room.";
   }
 
   /**
@@ -172,6 +194,11 @@ public final class SpecAuthority implements WriteAuthority {
         Refusal.Kind.NOT_OWNER,
         "Spec '" + id + "' is unassigned; only " + creator + " or an admin may change it.",
         "Have an admin change it, or claim it first with --assignee <you>.");
+  }
+
+  private static String creatorOf(Actor actor, Map<String, Object> next) {
+    var creator = Snapshots.text(next, Snapshots.CREATOR);
+    return Strings.isBlank(creator) ? actor.actingFde() : creator;
   }
 
   private static String assigneeOf(Map<String, Object> projection) {

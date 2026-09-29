@@ -14,7 +14,6 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncedStore;
 import java.io.IOException;
@@ -545,9 +544,9 @@ public final class SyncRpcServer {
         () ->
             db.<SyncWire.Result>transaction(
                 () -> {
-                  var refusal = eraseRefusal(type, offer.id());
+                  var refusal = authority.requested(principal, type, offer.id());
                   if (refusal.isPresent()) {
-                    return new SyncWire.Refused(offer.id(), refusal.get());
+                    return new SyncWire.Refused(offer.id(), refusal.get().message());
                   }
                   if (!erasure.isErased(root)) {
                     var plan = erasure.closure(List.of(root));
@@ -564,40 +563,6 @@ public final class SyncRpcServer {
                   var erased = changeLog.erasure(type, offer.id()).orElseThrow();
                   return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor(), null);
                 }));
-  }
-
-  /**
-   * Why main refuses to erase {@code type} {@code id} for the principal, decided on main's own copy
-   * by the erase rule ({@link EraseAuthority}). Only specs and projects are erased on request; one
-   * main has already erased has nothing left to protect, so asking again only answers the erasure
-   * it has; one main holds nothing of has no owner main can establish.
-   */
-  private Optional<String> eraseRefusal(String type, String id) {
-    var project = Erasure.PROJECT.equals(type);
-    var denied = authority.request(principal, project);
-    if (denied.isPresent()) {
-      return denied.map(Refusal::message);
-    }
-    if (!Erasure.SPEC.equals(type) && !project) {
-      return Optional.of("only specs and projects are pruned on request, not a " + type);
-    }
-    if (changeLog.isErased(type, id)) {
-      return Optional.empty();
-    }
-    if (project) {
-      return erasure.holds(new Erasure.Target(type, id))
-          ? Optional.empty()
-          : Optional.of("main holds no project '" + id + "'");
-    }
-    return new SpecStore(db)
-        .lastKnown(id)
-        .map(spec -> authority.spec(principal, spec).map(Refusal::message))
-        .orElseGet(
-            () ->
-                Optional.of(
-                    "main holds no spec '"
-                        + id
-                        + "', so it cannot tell whose it is; sync it before pruning"));
   }
 
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {

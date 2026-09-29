@@ -29,6 +29,7 @@ public final class ReviewAuthority implements WriteAuthority {
   private final ReviewStore reviews;
   private final Attribution attribution;
 
+  /** The rule, deciding on {@code db}'s copy. */
   public ReviewAuthority(Sqlite db) {
     this.specs = new SpecStore(db);
     this.reviews = new ReviewStore(db);

@@ -60,12 +60,7 @@ class MessageSyncTest {
       messages = new MessageStore(db);
       replica =
           new StoreReplica(
-              id,
-              messages,
-              new ChangeLog(db),
-              new SyncConflicts(db),
-              new SyncState(db),
-              SyncedEntities.require(messages.entityType()).authority(db));
+              id, messages, new ChangeLog(db), new SyncConflicts(db), new SyncState(db));
     }
 
     @Override

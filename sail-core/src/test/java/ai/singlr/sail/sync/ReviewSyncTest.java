@@ -52,14 +52,7 @@ class ReviewSyncTest {
       new SchemaManager(db).migrate();
       this.reviews = new ReviewStore(db);
       this.conflicts = new SyncConflicts(db);
-      this.replica =
-          new StoreReplica(
-              id,
-              reviews,
-              new ChangeLog(db),
-              conflicts,
-              new SyncState(db),
-              SyncedEntities.require(reviews.entityType()).authority(db));
+      this.replica = new StoreReplica(id, reviews, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override

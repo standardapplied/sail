@@ -81,7 +81,7 @@ final class Attribution {
   boolean principalOfOwnedRun(String pusher, String author) {
     var run = runs.byPrincipal(author);
     if (run.isPresent()) {
-      return Objects.equals(run.get().owner(), pusher);
+      return RunStore.namesRun(author, run.get().id()) && Objects.equals(run.get().owner(), pusher);
     }
     var named = RunStore.runOf(author);
     if (named.isPresent() && runs.latestRev(named.get()) == null) {

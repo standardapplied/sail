@@ -13,7 +13,6 @@ import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncEngine;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -155,15 +154,13 @@ class RoomsBackfillMigrationTest {
                       nodeRooms,
                       new ChangeLog(node),
                       new SyncConflicts(node),
-                      new SyncState(node),
-                      SyncedEntities.require(nodeRooms.entityType()).authority(node)),
+                      new SyncState(node)),
                   new StoreReplica(
                       "main",
                       mainRooms,
                       new ChangeLog(db),
                       new SyncConflicts(db),
-                      new SyncState(db),
-                      SyncedEntities.require(mainRooms.entityType()).authority(db)));
+                      new SyncState(db)));
 
       assertEquals(0, report.total(), "the first fleet sync after backfill moves nothing");
     }
@@ -187,15 +184,13 @@ class RoomsBackfillMigrationTest {
                       nodeRooms,
                       new ChangeLog(node),
                       new SyncConflicts(node),
-                      new SyncState(node),
-                      SyncedEntities.require(nodeRooms.entityType()).authority(node)),
+                      new SyncState(node)),
                   new StoreReplica(
                       "main",
                       mainRooms,
                       new ChangeLog(db),
                       new SyncConflicts(db),
-                      new SyncState(db),
-                      SyncedEntities.require(mainRooms.entityType()).authority(db)));
+                      new SyncState(db)));
 
       assertEquals(1, report.pushed(), "the node's room reaches main");
       assertTrue(nodeRooms.findById("node-only").isPresent(), "the node keeps its room");
@@ -236,15 +231,13 @@ class RoomsBackfillMigrationTest {
                       nodeRooms,
                       new ChangeLog(node),
                       new SyncConflicts(node),
-                      new SyncState(node),
-                      SyncedEntities.require(nodeRooms.entityType()).authority(node)),
+                      new SyncState(node)),
                   new StoreReplica(
                       "main",
                       mainRooms,
                       new ChangeLog(db),
                       new SyncConflicts(db),
-                      new SyncState(db),
-                      SyncedEntities.require(mainRooms.entityType()).authority(db)));
+                      new SyncState(db)));
 
       assertTrue(report.total() > 0, "genuine divergence is reconciled, never silently equal");
       assertEquals(

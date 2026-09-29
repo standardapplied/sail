@@ -38,6 +38,7 @@ public final class RunAuthority implements WriteAuthority {
   private final RunStore runs;
   private final Attribution attribution;
 
+  /** The rule, deciding on {@code db}'s copy. */
   public RunAuthority(Sqlite db) {
     this.specs = new SpecStore(db);
     this.runs = new RunStore(db);

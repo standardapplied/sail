@@ -95,7 +95,30 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return id;
   }
 
+  /**
+   * A running review this box executes is live here: the pipeline writes its stages and findings
+   * through its row, so main's denial never removes it mid-run. This box executes it while the run
+   * of the same id is live here, or — before that run is recorded — when its first revision began
+   * here. Once it finishes, a denial settles it like any other.
+   */
+  @Override
+  public boolean live(String id) {
+    return findReview(id).filter(review -> "running".equals(review.status())).isPresent()
+        && (new RunStore(db).live(id) || begunHere(id));
+  }
+
+  private boolean begunHere(String id) {
+    return db.queryOne(
+            """
+            SELECT peer IS NULL FROM change_log WHERE entity_type = 'review' AND entity_id = ?
+            ORDER BY seq LIMIT 1""",
+            row -> row.integer(0) == 1,
+            id)
+        .orElse(false);
+  }
+
   /** Who may write a review on this box: the rule every door and main's commit decide by. */
+  @Override
   public ReviewAuthority authority() {
     return new ReviewAuthority(db);
   }

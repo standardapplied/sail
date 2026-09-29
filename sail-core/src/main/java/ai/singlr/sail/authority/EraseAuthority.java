@@ -23,9 +23,14 @@ import java.util.Optional;
 public final class EraseAuthority {
 
   private final RunStore runs;
+  private final SpecStore specs;
+  private final Erasure erasure;
 
+  /** The erase rule, deciding on {@code db}'s copy. */
   public EraseAuthority(Sqlite db) {
     this.runs = new RunStore(db);
+    this.specs = new SpecStore(db);
+    this.erasure = new Erasure(db);
   }
 
   /**
@@ -46,6 +51,49 @@ public final class EraseAuthority {
           "Name the specs you own by id: sail spec prune <id...>.");
     }
     return Optional.empty();
+  }
+
+  /**
+   * Why main refuses a node's request, made as {@code actor}, to erase {@code type} {@code id},
+   * decided on main's own copy. Only specs and projects are erased on request. One main has already
+   * erased has nothing left to protect, so asking again only answers the erasure it has; one main
+   * holds nothing of has no owner main can establish.
+   */
+  public Optional<Refusal> requested(Actor actor, String type, String id) {
+    var project = Erasure.PROJECT.equals(type);
+    var denied = request(actor, project);
+    if (denied.isPresent()) {
+      return denied;
+    }
+    if (!Erasure.SPEC.equals(type) && !project) {
+      return Refusal.of(
+          Refusal.Kind.NOT_PRUNABLE,
+          "only specs and projects are pruned on request, not a " + type,
+          "Prune the spec or project it belongs to.");
+    }
+    var target = new Erasure.Target(type, id);
+    if (erasure.isErased(target)) {
+      return Optional.empty();
+    }
+    if (project) {
+      return erasure.holds(target)
+          ? Optional.empty()
+          : Refusal.of(
+              Refusal.Kind.NOT_PRUNABLE,
+              "main holds no project '" + id + "'",
+              "Sync the project before pruning it.");
+    }
+    return specs
+        .lastKnown(id)
+        .map(spec -> spec(actor, spec))
+        .orElseGet(
+            () ->
+                Refusal.of(
+                    Refusal.Kind.NOT_PRUNABLE,
+                    "main holds no spec '"
+                        + id
+                        + "', so it cannot tell whose it is; sync it before pruning",
+                    "Sync the spec before pruning it."));
   }
 
   /** Why {@code actor} may not erase {@code spec}, as this box last knew it. */

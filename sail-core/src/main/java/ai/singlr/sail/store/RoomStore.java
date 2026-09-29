@@ -297,7 +297,34 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
                         Snapshots.text(held, "assignee"), Snapshots.text(held, "created_by")));
   }
 
+  /**
+   * What this box holds of room {@code id}, as a rule reads it: its comparable snapshot, or the
+   * last live state its tombstone kept. Null for a room this box never held.
+   */
+  public Map<String, Object> held(String id) {
+    return journal.held(id);
+  }
+
+  /**
+   * Whether this box holds conversation {@code roomId} — a room, a spec living in it, or either's
+   * history — so a revision placed in it can be decided here. One this box has never held is
+   * refused ({@link SyncedStore.Unheld}), never denied: its room syncs in its own page, and the
+   * next round decides what lives in it.
+   */
+  public boolean holdsConversation(String roomId) {
+    return db.queryOne(
+            """
+            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
+                OR EXISTS (SELECT 1 FROM change_heads
+                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
+            row -> true,
+            roomId)
+        .orElse(false);
+  }
+
   /** Who may write a room on this box: the rule every door and main's commit decide by. */
+  @Override
   public RoomAuthority authority() {
     return new RoomAuthority(db);
   }
@@ -468,10 +495,24 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Snapshots.text(snapshot, "assignee"),
           Snapshots.text(snapshot, "wake"),
           Snapshots.text(snapshot, "roster"),
-          Snapshots.text(snapshot, "created_by"),
+          creatorOf(id, snapshot),
           Strings.isBlank(createdAt) ? now : createdAt,
           now,
           Snapshots.actor(snapshot));
+    }
+
+    /**
+     * The creator a write of {@code snapshot} records: a creator is written once, so a revision
+     * re-creating a deleted room keeps the one its tombstone recorded, as an update keeps the
+     * row's. Main's own revision names the creator main holds.
+     */
+    private String creatorOf(String id, Map<String, Object> snapshot) {
+      var offered = Snapshots.text(snapshot, "created_by");
+      if (Actor.current().lane() == Actor.Lane.MAIN || exists(id)) {
+        return offered;
+      }
+      var tombstone = journal.held(id);
+      return tombstone == null ? offered : Snapshots.text(tombstone, "created_by");
     }
 
     @Override

@@ -55,13 +55,7 @@ class ProjectSyncTest {
       this.projects = new ProjectStore(db);
       this.conflicts = new SyncConflicts(db);
       this.replica =
-          new StoreReplica(
-              id,
-              projects,
-              new ChangeLog(db),
-              conflicts,
-              new SyncState(db),
-              SyncedEntities.require(projects.entityType()).authority(db));
+          new StoreReplica(id, projects, new ChangeLog(db), conflicts, new SyncState(db));
     }
 
     @Override

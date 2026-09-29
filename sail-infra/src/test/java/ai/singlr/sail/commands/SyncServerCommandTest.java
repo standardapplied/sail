@@ -33,7 +33,6 @@ import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncTransition;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.io.BufferedInputStream;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -82,8 +81,7 @@ class SyncServerCommandTest {
             nodeSpecs,
             new ChangeLog(nodeDb),
             new SyncConflicts(nodeDb),
-            new SyncState(nodeDb),
-            SyncedEntities.require(nodeSpecs.entityType()).authority(nodeDb));
+            new SyncState(nodeDb));
   }
 
   @AfterEach
@@ -264,8 +262,7 @@ class SyncServerCommandTest {
         new ChangeLog(nodeDb),
         new SyncConflicts(nodeDb),
         new SyncState(nodeDb),
-        id -> runStore.pushableFrom(id, "uday"),
-        SyncedEntities.require(runStore.entityType()).authority(nodeDb));
+        id -> runStore.pushableFrom(id, "uday"));
   }
 
   private String createNodeRun(String node) {

@@ -586,6 +586,106 @@ class PushAuthoritySyncTest {
     assertEquals("bob", restored.assignee());
   }
 
+  @Test
+  void theCreatorOfARoomAssignedAwayCannotTakeItBackWithASpec() throws IOException {
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(main.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "den", "acme", "den", "bob", null, null, null, null, null, null)));
+    sync(ada, ADA);
+
+    Acting.as("ada", () -> ada.specs.create(spec("den", "ada")));
+
+    assertEquals(List.of("den"), denied(push(ada, ADA, "spec")));
+    assertTrue(main.specs.findById("den").isEmpty());
+    assertEquals(List.of("bob"), new RoomStore(main.db).owners("den"));
+    assertCleanRound(ada, ADA, "spec");
+  }
+
+  @Test
+  void aDeletedRoomCannotBeTakenOverWithASpecAndRestoredWithItsConversation() throws IOException {
+    room(main, "bob", "den");
+    Acting.as("bob", () -> new MessageStore(main.db).append("den", "bob", "mine", null));
+    Acting.as("bob", () -> new RoomStore(main.db).delete("den"));
+    sync(ada, ADA);
+
+    Acting.as("ada", () -> ada.specs.create(spec("den", "ada")));
+
+    assertEquals(List.of("den"), denied(push(ada, ADA, "spec")));
+    assertTrue(main.specs.findById("den").isEmpty());
+    assertEquals("bob", new RoomStore(main.db).ownerOf("den", new RoomStore(main.db).held("den")));
+  }
+
+  @Test
+  void aRoomRestoredByItsOwnerKeepsTheCreatorItsTombstoneRecorded() {
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(main.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "nook", "acme", "nook", "bob", null, null, null, null, null, null)));
+    Acting.as("bob", () -> new RoomStore(main.db).delete("nook"));
+    var rooms = SyncedEntities.replicas(main.db, "main", "main").get("room");
+    var restore = new LinkedHashMap<>(new RoomStore(main.db).held("nook"));
+    restore.put("created_by", "bob");
+    restore.put(Snapshots.ACTOR, "bob");
+
+    var outcome = Actor.call(BOB, () -> rooms.commit("nook", restore, rooms.currentRev("nook")));
+
+    assertInstanceOf(CommitOutcome.Accepted.class, outcome);
+    assertEquals("ada", new RoomStore(main.db).findById("nook").orElseThrow().createdBy());
+  }
+
+  @Test
+  void aSpecBornInTheNodesNewRoomWaitsForTheRoomAndLandsTheRoundAfter() throws IOException {
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("lab")));
+
+    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
+    assertTrue(refused.getMessage().contains("room 'lab'"), refused.getMessage());
+    assertTrue(ada.specs.findById("child").isPresent(), "the node keeps its spec");
+
+    assertEquals(List.of(), denied(push(ada, ADA, "room")));
+    assertEquals(1, push(ada, ADA, "spec").report().pushed());
+
+    assertEquals("lab", main.specs.findById("child").orElseThrow().roomIdOrIdentity());
+    assertCleanRound(ada, ADA, "spec");
+  }
+
+  @Test
+  void aReviewTheNodeIsRunningKeepsItsFindingsThroughADenialUntilItFinishes() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("mine", 1));
+    var finding =
+        Acting.system(
+            () -> {
+              reviews.updateReviewStatus(review, "running");
+              var stage = reviews.createStage(review, "security", "agent");
+              var found = finding();
+              reviews.addFinding(stage, found);
+              return found;
+            });
+    assign(main, "root", "mine", "bob");
+    sync(ada, ADA);
+
+    assertEquals(List.of(review), denied(push(ada, ADA, "review")));
+    assertEquals(
+        List.of(finding.id()),
+        reviews.findingsForReview(review).stream().map(Finding::id).toList(),
+        "main's denial never removes a review mid-run");
+
+    Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
+    assertEquals(List.of(review), denied(push(ada, ADA, "review")));
+    assertTrue(reviews.findReview(review).isEmpty(), "a finished review settles like any other");
+    assertCleanRound(ada, ADA, "review");
+  }
+
   private static Finding finding() {
     return Finding.create(
         Finding.Severity.HIGH,

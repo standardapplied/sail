@@ -690,12 +690,7 @@ class SyncTransportTest {
     var nodeFiles = new FileStore(nodeA.db);
     var nodeFileReplica =
         new StoreReplica(
-            "A",
-            nodeFiles,
-            new ChangeLog(nodeA.db),
-            nodeA.conflicts,
-            new SyncState(nodeA.db),
-            SyncedEntities.require(nodeFiles.entityType()).authority(nodeA.db));
+            "A", nodeFiles, new ChangeLog(nodeA.db), nodeA.conflicts, new SyncState(nodeA.db));
     nodeA.create(spec("auth", "Auth", "pending"));
     ai.singlr.sail.store.ContentFixtures.put(nodeFiles, "acme", "scripts/deploy.sh", "ZGVwbG95");
     var roster = List.<Map<String, Object>>of(Map.of("handle", "ada", "role", "admin"));

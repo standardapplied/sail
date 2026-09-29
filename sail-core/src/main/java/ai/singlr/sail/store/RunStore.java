@@ -415,12 +415,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
    * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the reviewed spec's assignee — the FDE the review principal acts for. Fails if an exclusive
-   * container lease (see {@link #acquireContainerLease}) is held — a review must never launch into
-   * a container mid-restore; the pipeline surfaces the error and the reconciler's rescue replay
-   * retries the kickoff after the lease is released. Returns the run's plaintext credential,
-   * surfaced exactly once so the launched review agent can actually act as the principal this row
-   * records; only the hash is at rest.
+   * is the FDE the review principal acts for: the box's own FDE, whose box runs and pushes it, or
+   * the spec's owner on a box that names no FDE. Fails if an exclusive container lease (see {@link
+   * #acquireContainerLease}) is held — a review must never launch into a container mid-restore; the
+   * pipeline surfaces the error and the reconciler's rescue replay retries the kickoff after the
+   * lease is released. Returns the run's plaintext credential, surfaced exactly once so the
+   * launched review agent can actually act as the principal this row records; only the hash is at
+   * rest.
    */
   public String createReview(
       String reviewId,
@@ -796,6 +797,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /** Who may write a run on this box: the rule every door and main's commit decide by. */
+  @Override
   public RunAuthority authority() {
     return new RunAuthority(db);
   }

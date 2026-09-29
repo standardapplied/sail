@@ -181,6 +181,14 @@ class RoomPrincipalAccessTest {
         "read_only_credential",
         assertInstanceOf(Map.class, created.body().get("error")).get("code"),
         "the spec rule refuses a room session's create, as every read-only credential's");
+    assertEquals(
+        403,
+        call("POST", "/v1/specs", "id=sneakier&title=New&project=acme&room_id=nowhere").status(),
+        "refused before the room it names is looked up");
+    assertEquals(
+        403,
+        call("POST", "/v1/specs", "id=auth&title=New&project=acme").status(),
+        "refused before the id it takes is checked");
 
     assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
     assertTrue(specStore.findById("sneaky").isEmpty(), "no spec was created");

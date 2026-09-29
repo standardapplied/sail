@@ -15,7 +15,6 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.sync.StoreReplica;
-import ai.singlr.sail.sync.SyncedEntities;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -53,16 +52,10 @@ class ParkedConflictFleetIT {
                 mainRuns,
                 new ChangeLog(mainDb),
                 new SyncConflicts(mainDb),
-                new SyncState(mainDb),
-                SyncedEntities.require(mainRuns.entityType()).authority(mainDb));
+                new SyncState(mainDb));
         var nodeReplica =
             new StoreReplica(
-                "mady-box",
-                nodeRuns,
-                new ChangeLog(nodeDb),
-                conflicts,
-                new SyncState(nodeDb),
-                SyncedEntities.require(nodeRuns.entityType()).authority(nodeDb));
+                "mady-box", nodeRuns, new ChangeLog(nodeDb), conflicts, new SyncState(nodeDb));
         var pushedButNeverAcknowledged = new LinkedHashMap<>(nodeReplica.current(runId));
         pushedButNeverAcknowledged.put("last_activity_at", "2000-01-01T00:00:00Z");
         Actor.call(

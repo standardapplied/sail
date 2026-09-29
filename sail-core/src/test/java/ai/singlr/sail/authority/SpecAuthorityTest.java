@@ -350,13 +350,15 @@ class SpecAuthorityTest {
   }
 
   @Test
-  void aCreateOnARoomIdIsRefusedUnlessThatRoomIsTheActorsOwnOrAnAdminAsks() {
+  void aCreateOnARoomIdIsRefusedUnlessItMovesNoOwnershipOrAnAdminAsks() {
     var create = projection("title", "Den", "assignee", null, "room_id", "den");
     board.db.execute(
         """
         INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at)
-        VALUES ('nook', 'acme', 'nook', ?, ?, 'now', 'now')""",
+        VALUES ('nook', 'acme', 'nook', ?, ?, 'now', 'now'),
+            ('mine', 'acme', 'mine', NULL, ?, 'now', 'now')""",
         OTHER,
+        OWNER,
         OWNER);
 
     assertEquals(
@@ -372,8 +374,16 @@ class SpecAuthorityTest {
     assertEquals(Optional.empty(), rule.decide(OTHER_SYNC, "den", null, create));
     assertEquals(Optional.empty(), rule.decide(ADMIN, "den", null, create));
     assertEquals(
+        Optional.of(Kind.NOT_OWNER),
+        rule.decide(OWNER_SYNC, "nook", null, with(create, "room_id", "nook")).map(Refusal::kind),
+        "the creator of a room assigned away cannot take it back through a spec");
+    assertEquals(
         Optional.empty(),
-        rule.decide(OWNER_SYNC, "nook", null, with(create, "room_id", "nook")),
+        rule.decide(OTHER_SYNC, "nook", null, with(create, "room_id", "nook")),
+        "a spec its room's owner would own moves nothing");
+    assertEquals(
+        Optional.empty(),
+        rule.decide(OWNER_SYNC, "mine", null, with(create, "room_id", "mine")),
         "a room the pusher minted reaches main before its spec");
   }
 

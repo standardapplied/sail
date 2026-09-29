@@ -5,13 +5,6 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.authority.MessageAuthority;
-import ai.singlr.sail.authority.ReviewAuthority;
-import ai.singlr.sail.authority.RoomAuthority;
-import ai.singlr.sail.authority.RunAuthority;
-import ai.singlr.sail.authority.SpecAuthority;
-import ai.singlr.sail.authority.WriteAuthority;
-import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ConflictResolver;
 import ai.singlr.sail.store.FileStore;
@@ -54,25 +47,19 @@ public final class SyncedEntities {
   }
 
   /**
-   * One replicated type: its store, how it resolves a parked conflict, which of its changes a node
-   * pushes ({@code pushPolicy}), who may write it ({@code authorityFactory}, the rule main's commit
-   * asks), and which of its revisions are transitions worth narrating.
+   * One replicated type: its store, which declares who may write it ({@link
+   * SyncedStore#authority}), how it resolves a parked conflict, which of its changes a node pushes
+   * ({@code pushPolicy}), and which of its revisions are transitions worth narrating.
    */
   public record Entity(
       String type,
       Function<Sqlite, SyncedStore> factory,
       Function<Sqlite, ConflictResolver> resolverFactory,
       PushPolicy pushPolicy,
-      Function<Sqlite, WriteAuthority> authorityFactory,
       TransitionDetector transitions,
       Map<String, TransitionKind> transitionKinds) {
     public SyncedStore store(Sqlite db) {
       return factory.apply(db);
-    }
-
-    /** Who may write this type on {@code db}'s box. */
-    public WriteAuthority authority(Sqlite db) {
-      return authorityFactory.apply(db);
     }
 
     /** Every replicated entity resolves its parked conflicts; the type system says so. */
@@ -90,33 +77,16 @@ public final class SyncedEntities {
               SpecStore::new,
               SpecStore::new,
               ALL,
-              SpecAuthority::new,
               (id, before, after) -> SyncTransitions.statusChange("spec", id, before, after),
               Map.of("spec", TransitionKind.SPEC_STATUS)),
-          new Entity(
-              "room", RoomStore::new, RoomStore::new, ALL, RoomAuthority::new, NONE, Map.of()),
-          new Entity(
-              "file",
-              FileStore::new,
-              FileStore::new,
-              ALL,
-              db -> new WriterAuthority(db, "files"),
-              NONE,
-              Map.of()),
-          new Entity(
-              "project",
-              ProjectStore::new,
-              ProjectStore::new,
-              ALL,
-              db -> new WriterAuthority(db, "projects"),
-              NONE,
-              Map.of()),
+          new Entity("room", RoomStore::new, RoomStore::new, ALL, NONE, Map.of()),
+          new Entity("file", FileStore::new, FileStore::new, ALL, NONE, Map.of()),
+          new Entity("project", ProjectStore::new, ProjectStore::new, ALL, NONE, Map.of()),
           new Entity(
               "run",
               RunStore::new,
               RunStore::new,
               (store, handle) -> id -> ((RunStore) store).pushableFrom(id, handle),
-              RunAuthority::new,
               (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
               Map.of("run", TransitionKind.RUN_STATUS)),
           new Entity(
@@ -124,7 +94,6 @@ public final class SyncedEntities {
               ReviewStore::new,
               ReviewStore::new,
               ALL,
-              ReviewAuthority::new,
               SyncTransitions::reviewChanges,
               Map.of(
                   "review",
@@ -136,7 +105,6 @@ public final class SyncedEntities {
               MessageStore::new,
               MessageStore::new,
               ALL,
-              MessageAuthority::new,
               (id, before, after) ->
                   before == null
                       ? List.of(new SyncTransition("message", id, null, "posted", after))
@@ -181,8 +149,7 @@ public final class SyncedEntities {
               changes,
               conflicts,
               state,
-              entity.pushPolicy().forStore(store, handle),
-              entity.authority(db)));
+              entity.pushPolicy().forStore(store, handle)));
     }
     return Collections.unmodifiableMap(replicas);
   }

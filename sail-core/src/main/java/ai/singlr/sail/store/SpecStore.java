@@ -878,6 +878,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /** Who may write a spec on this box: the rule every door and main's commit decide by. */
+  @Override
   public SpecAuthority authority() {
     return new SpecAuthority(db);
   }

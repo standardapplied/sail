@@ -89,6 +89,9 @@ public interface SyncedStore {
    */
   void eraseRow(String id);
 
+  /** Who may write this type on this box: the one rule its doors and main's commit decide by. */
+  WriteAuthority authority();
+
   /**
    * Compare-and-set commit of an authoritative state ({@code null} = delete). After the
    * compare-and-set and the store's integrity checks, and before its first write, {@code authority}

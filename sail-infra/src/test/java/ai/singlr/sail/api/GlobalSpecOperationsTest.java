@@ -267,6 +267,24 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void aMemberClaimingAnUnassignedSpecSetsItsWakeInTheSameUpdate() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+    Acting.by(bob, () -> withRooms.create(createReq(Map.of())));
+
+    var claimed =
+        Acting.by(
+            UDAY,
+            () ->
+                withRooms.update(
+                    "auth", SpecUpdateRequest.fromMap(Map.of("assignee", "uday", "wake", "off"))));
+
+    assertEquals("uday", claimed.spec().assignee());
+    assertEquals("off", rooms.findById("auth").orElseThrow().wake());
+  }
+
+  @Test
   void aWakeEditOnABoxThatKeepsNoRoomsHasNothingToWrite() {
     Acting.by(ADMIN, () -> ops.create(createReq(Map.of())));
 

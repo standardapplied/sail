@@ -109,6 +109,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /** Who may post on this box, and as whom: the rule every door and main's commit decide by. */
+  @Override
   public MessageAuthority authority() {
     return new MessageAuthority(db);
   }
@@ -483,24 +484,12 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * decided like any other.
    */
   private void requireDecidable(MessageRow row) {
-    if (!knowsConversation(row.roomId())) {
+    if (!new RoomStore(db).holdsConversation(row.roomId())) {
       throw new Unheld(
           "main does not hold room '"
               + row.roomId()
               + "' yet; rooms sync before their messages, so the next round settles this");
     }
-  }
-
-  private boolean knowsConversation(String roomId) {
-    return db.queryOne(
-            """
-            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
-                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
-                OR EXISTS (SELECT 1 FROM change_heads
-                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
-            row -> true,
-            roomId)
-        .orElse(false);
   }
 
   /**

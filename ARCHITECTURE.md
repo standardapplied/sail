@@ -730,14 +730,14 @@ these roles distinct is what lets the synced catalog stay identity-free.
   own push; a node adopts main's, the pushing node from the creator main names when it accepts
   the push.
 - **One rule per type, asked by the doors and by main's commit.** Who may write a synced row
-  is one `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared beside its
-  push policy in `SyncedEntities`: `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
+  is one `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared by its
+  store (`SyncedStore.authority`): `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
   `RunAuthority`, `MessageAuthority`, and `WriterAuthority` for files and projects. A rule reads
   the type's synced projection — `held`, what this box holds (the last live state over a
   tombstone), and `next`, the revision (null for a tombstone) — may read this box's database for
   owners, never writes, and reads an owner of the row it decides from `held`, so a revision never
   admits itself. It answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `ADMIN_ONLY`, `NOT_AUTHOR`,
-  `FIXED`) with the message and fix clients see. `MAIN` and `SYSTEM` always pass; a read-only
+  `FIXED`, and the erase rule's `NOT_PRUNABLE`) with the message and fix clients see. `MAIN` and `SYSTEM` always pass; a read-only
   role is refused, except a run's principal reporting its own session and a room principal
   posting where the posting rule lets it.
   - **The doors** ask the rule where they decide today — HTTP, the host CLI, the socket, the
@@ -751,10 +751,19 @@ these roles distinct is what lets the synced catalog stay identity-free.
     not denied, until the run lands); a create's creator is the pusher; a message's author is the
     pusher, its runs' principals, or `sail` where a run of its is in the conversation. A run is its
     executing box's: `node` is the pusher, it acts for the pusher or no one, every principal names
-    the run itself, and a deleted run is never brought back.
+    the run itself, and a deleted run is never brought back; so a review run acts for the box's
+    own FDE. Blob presence is checked after the rule, not before: a denied offer's content is
+    never uploaded, so a read-only session's push is denied, not refused for a missing blob, and
+    an accepted one still lands only with its blob. A spec born in a room main has never held is
+    refused, not denied, like a message there: specs sync before rooms, so the next round decides
+    it. A spec is never born over a room holding its id, live or deleted, unless that moves no
+    ownership (a node's own identity room reaching main first) or an admin asks, and a restore
+    keeps the creator its tombstone recorded, for rooms as for specs. Main's denial never removes
+    work still under way on the node (`SyncedStore.live`): a run that has not finished, or a
+    review the node is still running; once it finishes, the denial settles it.
   - **The erase rule** (`EraseAuthority`) is one rule for a local prune and main's decision on a
     node's request: write capability, the owner or an admin, a whole project admin-only, a
-    prunable status, no unfinished run.
+    prunable status, no unfinished run; on a request, only a spec or project main holds.
   - **A node's writes speak for its FDE.** On a node, `RoleRule` caps a credential naming any FDE
     but the box's own at `viewer`: only the box's FDE and the runs acting for it write there,
     because anything else would reach main as that FDE's on the box's session, and be denied.
