@@ -15,6 +15,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Drives one sync round between a node ({@link LocalReplica}) and the authoritative {@link
@@ -209,17 +210,21 @@ public final class SyncEngine {
                     main.author(id),
                     Outcome.PULLED,
                     redetectsLeft);
-        case ConflictDetector.Merged m ->
-            local.mayPush(id)
-                ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
-                : take(
-                    id,
-                    localRev,
-                    remoteSnap,
-                    remoteRev,
-                    main.author(id),
-                    Outcome.PULLED,
-                    redetectsLeft);
+        case ConflictDetector.Merged m -> {
+          if (rewritesLive(id, localSnap, m.result())) {
+            yield Outcome.HELD;
+          }
+          yield local.mayPush(id)
+              ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
+              : take(
+                  id,
+                  localRev,
+                  remoteSnap,
+                  remoteRev,
+                  main.author(id),
+                  Outcome.PULLED,
+                  redetectsLeft);
+        }
         case ConflictDetector.Conflict c -> {
           local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
           yield Outcome.CONFLICT;
@@ -247,11 +252,21 @@ public final class SyncEngine {
     }
 
     /**
-     * The one guard: main's version, by denial or by pull, never rewrites or removes an entity this
-     * box executes that is still live ({@link LocalReplica#live}).
+     * The one guard: main's version, by denial, by pull or inside a merge, never rewrites or
+     * removes an entity this box executes that is still live ({@link LocalReplica#live}).
      */
     private boolean liveHere(String id) {
       return local.live(id);
+    }
+
+    /**
+     * Whether adopting {@code merged} over {@code localSnap} would take any of main's changes into
+     * work still live here ({@link #liveHere}). A merge that keeps the local row as it is — a
+     * heartbeat whose later stamp is this box's — is offered like any local change.
+     */
+    private boolean rewritesLive(
+        String id, Map<String, Object> localSnap, Map<String, Object> merged) {
+      return liveHere(id) && !ConflictDetector.drift(localSnap, merged, Set.of()).isEmpty();
     }
 
     /**

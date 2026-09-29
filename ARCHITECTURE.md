@@ -190,7 +190,7 @@ and the spec that closes it.
 | L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
-| L4 | Main's version, by denial or pull, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, lost answers, another box's run), `DeniedSyncTest`, `PushAuthoritySyncTest` |
+| L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest` |
 | L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | open (holds on main today): `sail-sync-liveness` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
@@ -346,7 +346,7 @@ A push from a node of this release therefore never gets results larger than the 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
 main's rev, or removes its row when main holds none. A denied message leaves the room with the
 replies this box posted under it. Work still under way here is the exception, whether main's
-version arrives by denial or by pull: a run this box executes that has not finished (it carries
+version arrives by denial, by pull or inside a merge with this box's own change: a run this box executes that has not finished (it carries
 this box's handle) keeps its row, credential and room guard, is offered again, and settles once it
 has finished. One guard in the engine covers every adoption; another box's run is always adopted
 as main holds it. The node's own revision stays in its change log, no conflict is parked, and the round

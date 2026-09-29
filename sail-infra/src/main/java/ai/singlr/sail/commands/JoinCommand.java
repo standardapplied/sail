@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
@@ -131,7 +132,11 @@ public final class JoinCommand implements Runnable {
             handle);
     requireWritable(hostConfig, target);
     HandleChange.apply(
-        db, host.sync(), updated.sync(), () -> YamlUtil.dumpToFile(updated.toMap(), hostConfig));
+        db,
+        host.sync(),
+        updated.sync(),
+        SshSyncChannel::open,
+        () -> YamlUtil.dumpToFile(updated.toMap(), hostConfig));
     return new Plan(target, handle, name, email, publicKey);
   }
 

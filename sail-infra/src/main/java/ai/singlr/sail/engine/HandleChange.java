@@ -37,9 +37,16 @@ public final class HandleChange {
    * Moves this box, whose database is {@code dbPath}, from {@code before} to {@code after} through
    * {@code write}. Refused, before anything is written, while a run main holds under the old handle
    * is live here or carries a change main has not taken — on main, while any run this box executed
-   * is live — naming each and the fix. Returns the runs stamped for the new identity.
+   * is live — naming each and the fix. A node first asks its main, over {@code channels}, which of
+   * the runs it never heard acknowledged main holds; when main cannot be asked, it is refused too.
+   * Returns the runs stamped for the new identity.
    */
-  public static List<String> apply(Path dbPath, SyncConfig before, SyncConfig after, Write write)
+  public static List<String> apply(
+      Path dbPath,
+      SyncConfig before,
+      SyncConfig after,
+      SyncOperations.Channels channels,
+      Write write)
       throws Exception {
     var renamed = !Objects.equals(normalized(before.handle()), normalized(after.handle()));
     var promoted = after.isMain() && !before.isMain();
@@ -50,6 +57,7 @@ public final class HandleChange {
     try (var db = Sqlite.open(dbPath)) {
       var runs = new RunStore(db);
       if (renamed) {
+        acknowledgeHeld(db, before, after, channels);
         var stranded = runs.strandedByHandleChange(before.handle(), before.isMain());
         if (!stranded.isEmpty()) {
           throw new IllegalStateException(refusal(before, after, stranded));
@@ -57,6 +65,34 @@ public final class HandleChange {
       }
       write.run();
       return runs.restamp(after.handle(), after.isMain());
+    }
+  }
+
+  /**
+   * A missing acknowledgement does not prove main never took a run: its answer may have been lost.
+   * So before a node re-stamps any, it asks main which it holds, and those are acknowledged — held
+   * under the old handle, and weighed as such. When main cannot be asked, nothing is changed.
+   */
+  private static void acknowledgeHeld(
+      Sqlite db, SyncConfig before, SyncConfig after, SyncOperations.Channels channels) {
+    if (!before.isNode() || new RunStore(db).unacknowledged().isEmpty()) {
+      return;
+    }
+    try {
+      SyncOperations.acknowledgeHeld(db, before, channels);
+    } catch (Exception e) {
+      throw new IllegalStateException(
+          "Cannot change this box's sync handle from '"
+              + normalized(before.handle())
+              + "' to '"
+              + normalized(after.handle())
+              + "': main ("
+              + before.main()
+              + ") must say which of this box's runs it took before any is re-stamped, and asking"
+              + " failed: "
+              + e.getMessage()
+              + ". Change the handle once main is reachable.",
+          e);
     }
   }
 

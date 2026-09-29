@@ -8,7 +8,6 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -20,12 +19,8 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.io.FilterOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.util.List;
-import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -137,32 +132,6 @@ class BoxRunsSyncTest {
   private static Actor agentOf(SyncBox box, String runId) {
     var run = runs(box).findById(runId).orElseThrow();
     return Actor.agentPrincipal(run.principal(), run.owner());
-  }
-
-  private static UnaryOperator<OutputStream> losingTheResults() {
-    return out ->
-        new FilterOutputStream(out) {
-          @Override
-          public void write(byte[] buffer, int offset, int length) throws IOException {
-            if (new String(buffer, offset, length, StandardCharsets.UTF_8)
-                .contains("\"op\": \"results\"")) {
-              throw new IOException("the answer is lost on the way back");
-            }
-            out.write(buffer, offset, length);
-          }
-        };
-  }
-
-  private void pushLosingTheAnswer(SyncBox node) throws IOException {
-    var link =
-        SyncBox.connect(main.server(node.session()), node, SyncWire.MAX_FRAME, losingTheResults());
-    Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
-    assertThrows(RuntimeException.class, () -> link.reconcile("run", node.replicas().get("run")));
-    try {
-      link.close();
-    } catch (RuntimeException alreadyCut) {
-      assertTrue(alreadyCut.getMessage() != null);
-    }
   }
 
   private static void assertNoDenials(List<SyncSession.TypeReport> round) {
@@ -317,7 +286,7 @@ class BoxRunsSyncTest {
     ownSpec(main, "ada", "mine");
     SyncBox.quiesce(main, ada);
     var live = reserve(ada, "ada", "mine", "build");
-    pushLosingTheAnswer(ada);
+    SyncBox.pushLosingTheAnswer(main, ada);
     assertTrue(runs(main).findById(live).isPresent(), "main took it");
     assertNull(runs(ada).baseRevOf(live), "but this box never heard");
     Acting.system(() -> runs(ada).recordSession(live, "sess-1", "claude", "/t"));
@@ -339,13 +308,35 @@ class BoxRunsSyncTest {
     SyncBox.quiesce(main, ada);
     var run = reserve(ada, "ada", "mine", "build");
     finish(ada, run);
-    pushLosingTheAnswer(ada);
+    SyncBox.pushLosingTheAnswer(main, ada);
 
     assertNoDenials(SyncBox.round(main, ada.syncsAs(UDAY)));
 
     assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
     SyncBox.quiesce(main, ada);
     SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void mainsChangeMergedWithTheBoxsOwnNeverRewritesARunStillLiveHere() {
+    ownSpec(main, "ada", "mine");
+    SyncBox.quiesce(main, ada);
+    var live = reserve(ada, "ada", "mine", "build");
+    SyncBox.quiesce(main, ada);
+    Acting.system(() -> runs(main).complete(live, "completed", 0));
+    Acting.system(() -> runs(ada).recordSession(live, "sess-1", "claude", "/t"));
+    var rev = runs(ada).latestRev(live);
+
+    assertNoDenials(SyncBox.round(main, ada));
+    assertEquals("running", runs(ada).findById(live).orElseThrow().status(), "not merged into it");
+    assertEquals(rev, runs(ada).latestRev(live));
+
+    finish(ada, live);
+    assertNoDenials(SyncBox.round(main, ada));
+    var parked = ada.conflicts.pendingFor("run", live).orElseThrow();
+    assertEquals(List.of("completed_at"), parked.fields(), "both completed it: the FDE decides");
+    assertEquals("completed", runs(ada).findById(live).orElseThrow().status());
+    assertEquals("sess-1", runs(ada).findById(live).orElseThrow().sessionId(), "nothing is lost");
   }
 
   @Test

@@ -18,6 +18,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -59,9 +60,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -81,7 +79,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -1479,43 +1476,6 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {
-    var toServer = new PipedOutputStream();
-    var serverIn = new PipedInputStream(toServer);
-    var serverOut = new PipedOutputStream();
-    var fromServer = new PipedInputStream(serverOut);
-    var error = new AtomicReference<Throwable>();
-    var thread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try (serverIn;
-                      serverOut) {
-                    server.serve(serverIn, serverOut);
-                  } catch (Throwable e) {
-                    error.set(e);
-                  }
-                });
-    return new SyncOperations.Channel() {
-      public InputStream reader() {
-        return fromServer;
-      }
-
-      public OutputStream writer() {
-        return toServer;
-      }
-
-      public void close() throws IOException {
-        try {
-          thread.join();
-          if (error.get() != null) throw new IOException("main failed", error.get());
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          throw new IOException(e);
-        } finally {
-          toServer.close();
-          fromServer.close();
-        }
-      }
-    };
+    return PipedSyncChannel.to(server);
   }
 }

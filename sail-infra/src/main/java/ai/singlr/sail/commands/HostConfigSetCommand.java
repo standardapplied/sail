@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
@@ -141,6 +142,7 @@ public final class HostConfigSetCommand implements Runnable {
             SailPaths.controlPlaneDb(),
             hostYaml.sync(),
             updated.sync(),
+            SshSyncChannel::open,
             () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
 
     if (json) {

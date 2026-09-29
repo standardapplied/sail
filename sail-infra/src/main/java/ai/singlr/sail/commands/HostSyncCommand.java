@@ -12,6 +12,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.SshSyncChannel;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
@@ -78,6 +79,7 @@ public final class HostSyncCommand implements Runnable {
         SailPaths.controlPlaneDb(),
         host.sync(),
         updated.sync(),
+        SshSyncChannel::open,
         () -> YamlUtil.dumpToFile(updated.toMap(), path));
     printRole(updated.sync());
   }

@@ -185,6 +185,26 @@ public final class SyncOperations {
     }
   }
 
+  /**
+   * Asks the main the node {@code config} syncs to, over one session opened through {@code
+   * channels}, which of this box's runs it took whose answer was lost, and acknowledges them
+   * ({@link NodeRound#acknowledgeHeld}). Nothing is offered, and whose handle main knows this box
+   * by is not checked: a handle change asks it before deciding which runs it may re-stamp.
+   */
+  public static void acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
+      throws Exception {
+    try (var channel = channels.open(config.main());
+        var session =
+            SyncSession.open(
+                channel.reader(),
+                channel.writer(),
+                SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
+                SyncOperations::notice,
+                db)) {
+      NodeRound.acknowledgeHeld(session, db);
+    }
+  }
+
   private static String requireBoxId(SyncConfig config) {
     if (Strings.isBlank(config.boxId())) {
       throw new IllegalStateException(

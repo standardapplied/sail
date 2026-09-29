@@ -12,6 +12,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.LinkedHashSet;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * What a node does first in every round, once main has welcomed it, before it offers or adopts
@@ -28,16 +29,26 @@ public final class NodeRound {
    * Begins a round over {@code session} for the node whose database is {@code db} and whose
    * configured sync handle is {@code handle}. It fails, before anything is offered or adopted,
    * unless main authenticated the session as that handle; a main that predates saying which handle
-   * it authenticated is not asked. Then every run main has never acknowledged is settled: one main
-   * holds — its answer lost on the way back — is adopted as acknowledged, keeping the run as it
-   * stands here, and every other is stamped as this box's ({@link RunStore#stamp}).
+   * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
+   * #acknowledgeHeld}), and every one main does not hold is stamped as this box's ({@link
+   * RunStore#stamp}).
    */
   public static void begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
+    new RunStore(db).stamp(handle, acknowledgeHeld(session, db));
+  }
+
+  /**
+   * Asks main which of the runs it has never acknowledged here it holds — its answer lost on the
+   * way back — and adopts each as acknowledged, keeping the run as it stands here. Nothing is
+   * offered, and nothing but main's acknowledgement is adopted. Returns the rest: the runs main
+   * does not hold, in the order they were written.
+   */
+  public static Set<String> acknowledgeHeld(SyncSession session, Sqlite db) {
     var runs = new RunStore(db);
     var unacknowledged = runs.unacknowledged();
     if (unacknowledged.isEmpty()) {
-      return;
+      return Set.of();
     }
     var unheld = new LinkedHashSet<>(unacknowledged);
     for (var entry : session.held(RUN, unacknowledged)) {
@@ -48,7 +59,7 @@ public final class NodeRound {
             () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
       }
     }
-    runs.stamp(handle, unheld);
+    return unheld;
   }
 
   /**

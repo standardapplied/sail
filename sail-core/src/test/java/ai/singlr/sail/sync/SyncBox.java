@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -19,12 +21,14 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.io.BufferedInputStream;
+import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -284,6 +288,35 @@ public final class SyncBox implements AutoCloseable {
         }
       }
     }
+  }
+
+  /**
+   * One round of {@code node}'s runs against {@code main} whose answer is lost on the way back:
+   * main takes them, and the node never hears it.
+   */
+  public static void pushLosingTheAnswer(SyncBox main, SyncBox node) throws IOException {
+    var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, losingTheResults());
+    Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
+    assertThrows(RuntimeException.class, () -> link.reconcile("run", node.replicas().get("run")));
+    try {
+      link.close();
+    } catch (RuntimeException alreadyCut) {
+      assertTrue(alreadyCut.getMessage() != null);
+    }
+  }
+
+  private static UnaryOperator<OutputStream> losingTheResults() {
+    return out ->
+        new FilterOutputStream(out) {
+          @Override
+          public void write(byte[] buffer, int offset, int length) throws IOException {
+            if (new String(buffer, offset, length, StandardCharsets.UTF_8)
+                .contains("\"op\": \"results\"")) {
+              throw new IOException("the answer is lost on the way back");
+            }
+            out.write(buffer, offset, length);
+          }
+        };
   }
 
   /** One type's round over {@code session} as a node runs it: adopting what main decided. */

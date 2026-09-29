@@ -16,9 +16,13 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -37,23 +41,31 @@ import org.junit.jupiter.api.io.TempDir;
 class HandleChangeTest {
 
   private static final SyncConfig STANDALONE = SyncConfig.unset();
+  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
+  private static final SyncOperations.Channels UNREACHABLE =
+      target -> {
+        throw new IOException("ssh: connect to host main: Connection refused");
+      };
 
   @TempDir Path dir;
   private Path dbPath;
   private Sqlite db;
   private RunStore runs;
+  private SyncBox main;
   private final AtomicBoolean written = new AtomicBoolean();
 
   @BeforeEach
   void setUp() {
-    dbPath = dir.resolve("sail.db");
+    dbPath = dir.resolve("box.db");
     db = Sqlite.open(dbPath);
     new SchemaManager(db).migrate();
     runs = new RunStore(db);
+    main = new SyncBox("main");
   }
 
   @AfterEach
   void tearDown() {
+    main.close();
     db.close();
   }
 
@@ -66,7 +78,12 @@ class HandleChangeTest {
   }
 
   private List<String> apply(SyncConfig before, SyncConfig after) throws Exception {
-    return HandleChange.apply(dbPath, before, after, () -> written.set(true));
+    return apply(before, after, target -> PipedSyncChannel.to(main.server(ADA)));
+  }
+
+  private List<String> apply(SyncConfig before, SyncConfig after, SyncOperations.Channels channels)
+      throws Exception {
+    return HandleChange.apply(dbPath, before, after, channels, () -> written.set(true));
   }
 
   private String run(String handle, String project) {
@@ -93,7 +110,7 @@ class HandleChangeTest {
     finish(finished);
     var live = run(null, "q");
 
-    assertEquals(List.of(finished, live), apply(STANDALONE, node("ada")));
+    assertEquals(List.of(finished, live), apply(STANDALONE, node("ada"), UNREACHABLE));
 
     assertTrue(written.get());
     for (var id : List.of(finished, live)) {
@@ -179,7 +196,47 @@ class HandleChangeTest {
     assertEquals(
         List.of(),
         HandleChange.apply(
-            dir.resolve("absent.db"), STANDALONE, node("ada"), () -> written.set(true)));
+            dir.resolve("absent.db"),
+            STANDALONE,
+            node("ada"),
+            UNREACHABLE,
+            () -> written.set(true)));
     assertTrue(written.get());
+  }
+
+  @Test
+  void aRunMainTookWhoseAnswerWasLostIsHeldUnderTheOldHandleAndNeverReStamped() throws Exception {
+    try (var ada = new SyncBox(dir, "box").syncsAs(ADA)) {
+      var live = run("ada", "p");
+      SyncBox.pushLosingTheAnswer(main, ada);
+      assertTrue(new RunStore(main.db).findById(live).isPresent(), "main took it");
+      assertEquals(null, runs.baseRevOf(live), "but this box never heard");
+
+      var refused =
+          assertThrows(IllegalStateException.class, () -> apply(node("ada"), node("uday")));
+      assertTrue(refused.getMessage().contains(live), refused.getMessage());
+      assertFalse(written.get(), "nothing is written");
+      assertEquals("ada", runs.findById(live).orElseThrow().node(), "nor re-stamped");
+
+      finish(live);
+      SyncBox.quiesce(main, ada);
+      assertEquals(List.of(), apply(node("ada"), node("uday")));
+      assertEquals("completed", new RunStore(main.db).findById(live).orElseThrow().status());
+      assertEquals("ada", runs.findById(live).orElseThrow().node());
+    }
+  }
+
+  @Test
+  void aNodeThatCannotAskMainWhichRunsItTookChangesNothing() throws Exception {
+    var unheld = run("ada", "p");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class, () -> apply(node("ada"), node("uday"), UNREACHABLE));
+
+    assertTrue(refused.getMessage().contains("from 'ada' to 'uday'"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("Connection refused"), refused.getMessage());
+    assertFalse(written.get(), "nothing is written");
+    assertEquals("ada", runs.findById(unheld).orElseThrow().node(), "nor re-stamped");
   }
 }
