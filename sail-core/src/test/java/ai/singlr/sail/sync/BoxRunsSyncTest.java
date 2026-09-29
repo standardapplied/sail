@@ -458,6 +458,24 @@ class BoxRunsSyncTest {
   }
 
   @Test
+  void aBoxThatWasMainNeverStampsARunANodePushedBeforeRevisionsNamedTheirPeer() {
+    try (var mady = new SyncBox("mady");
+        var newMain = new SyncBox("newmain")) {
+      var madys = reserve(mady, "mady", null, "adhoc");
+      finish(mady, madys);
+      SyncBox.quiesce(main, mady);
+      main.db.execute(
+          "UPDATE change_log SET peer = NULL WHERE entity_type = 'run' AND entity_id = ?", madys);
+
+      assertEquals(List.of(), runs(main).unacknowledged(), "a sync's origin says main took it");
+      SyncBox.quiesce(newMain, main.syncsAs(UDAY));
+
+      assertTrue(runs(newMain).findById(madys).isEmpty(), "never mady's run, as uday's");
+      SyncBox.assertEqualToMain(newMain, main);
+    }
+  }
+
+  @Test
   void anotherBoxsRunningReviewIsAdoptedAsMainHoldsIt() {
     try (var bob = new SyncBox("bob").syncsAs(BOB)) {
       ownSpec(main, "bob", "theirs");

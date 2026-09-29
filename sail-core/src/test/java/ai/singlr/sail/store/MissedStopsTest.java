@@ -45,14 +45,15 @@ class MissedStopsTest {
   private static MissedStops.Outcome assess(RunStore.RunRow session, boolean observed) {
     var coverage =
         observed
-            ? new MissedStops.StopCoverage(NOW.minus(GRACE).minusSeconds(1), true)
+            ? new MissedStops.StopCoverage(NOW.minus(GRACE).minusSeconds(1), 1, true)
             : MissedStops.StopCoverage.none();
     return MissedStops.assess(session, coverage, NOW, GRACE);
   }
 
   private static MissedStops.Outcome assessDropped(
       RunStore.RunRow session, java.time.Instant observedAt) {
-    return MissedStops.assess(session, new MissedStops.StopCoverage(observedAt, false), NOW, GRACE);
+    return MissedStops.assess(
+        session, new MissedStops.StopCoverage(observedAt, null, false), NOW, GRACE);
   }
 
   @Test
@@ -88,7 +89,8 @@ class MissedStopsTest {
   void aRunningSessionWhoseActedOnStopWasRecordedHasItsRowFinishedNeverItsStopReplayed() {
     var outcome = assess(session("running", null, "2026-07-06T11:00:00Z"), true);
 
-    assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+    var finish = assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+    assertEquals(1, finish.exitCode(), "finished as the recorded stop would have");
   }
 
   @Test
@@ -96,7 +98,7 @@ class MissedStopsTest {
     var outcome =
         MissedStops.assess(
             session("running", null, "2026-07-06T11:00:00Z"),
-            new MissedStops.StopCoverage(NOW.minusSeconds(30), true),
+            new MissedStops.StopCoverage(NOW.minusSeconds(30), 1, true),
             NOW,
             GRACE);
 

@@ -11,6 +11,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerManager;
+import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
@@ -19,8 +21,10 @@ import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -120,18 +124,30 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * Probes the run-scoped pid file first, then its systemd unit. The pid path also covers
    * foreground builds, which use the same run identity without creating a service. A run that reads
-   * as not running is reported gone only once its container answers at all: a container it cannot
-   * reach fails the probe, which every pass reads as alive.
+   * as not running is gone only when its container says so: a container that is stopped or no
+   * longer exists runs nothing, a running one must answer a command, and one incus cannot report
+   * fails the probe — which every pass reads as alive — so an incus outage never reads as every run
+   * in it gone.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
+    var containers = new ContainerManager(shell);
     return (project, runId, unit) -> {
       var info = agentSession.queryStatus(project, AgentUnit.recorded(runId, unit));
       if (info != null && info.running()) {
         return true;
       }
-      agentSession.requireReachable(project);
-      return false;
+      return switch (containers.queryState(project)) {
+        case ContainerState.Stopped stopped -> false;
+        case ContainerState.NotCreated gone -> false;
+        case ContainerState.Running running -> {
+          agentSession.requireReachable(project);
+          yield false;
+        }
+        case ContainerState.Error unknown ->
+            throw new IOException(
+                "Container '" + project + "' could not be read: " + unknown.message());
+      };
     };
   }
 
@@ -254,6 +270,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
       if (finish(
           run,
+          null,
           Strings.isBlank(run.specId())
               ? "session with no spec whose recorded process is gone"
               : "running with its recorded process gone")) {
@@ -264,10 +281,11 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Finishes {@code run}, whose recorded process is gone, as {@code stopped}: the same compare-and-
-   * set every finisher uses, logged as reconstructed. Returns whether this call finished it.
+   * Finishes {@code run}, whose recorded process is gone, as {@code stopped} with {@code exitCode}
+   * when a recorded stop carried one: the same compare-and-set every finisher uses, logged as
+   * reconstructed. Returns whether this call finished it.
    */
-  private boolean finish(RunStore.RunRow run, String why) {
+  private boolean finish(RunStore.RunRow run, Integer exitCode, String why) {
     System.err.println(
         "  [reconcile] finishing run "
             + run.id()
@@ -275,7 +293,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             + " ("
             + why
             + ")");
-    return sessionStore.transition(run.id(), "running", "stopped");
+    return sessionStore.transition(run.id(), "running", "stopped", exitCode);
   }
 
   /**
@@ -447,7 +465,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         yield true;
       }
       case MissedStops.Outcome.FinishRun unfinished ->
-          !agentProbablyAlive(session) && finish(session, unfinished.why());
+          !agentProbablyAlive(session) && finish(session, unfinished.exitCode(), unfinished.why());
       case MissedStops.Outcome.Skip ignored -> false;
     };
   }
@@ -481,16 +499,23 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   private MissedStops.StopCoverage stopCoverage(String specId, String startedAt) {
     var since = MissedStops.parseOr(startedAt, Instant.MIN);
-    var observedAt =
+    var newest =
         eventStore.forSpecAndType(specId, Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
             .filter(row -> carriesSource(row) && !timestampOf(row).isBefore(since))
-            .map(MissedStopReconciler::timestampOf)
-            .max(Instant::compareTo)
-            .orElse(null);
-    if (observedAt == null) {
+            .max(Comparator.comparing(MissedStopReconciler::timestampOf));
+    if (newest.isEmpty()) {
       return MissedStops.StopCoverage.none();
     }
-    return new MissedStops.StopCoverage(observedAt, actedOnSince(specId, since));
+    return new MissedStops.StopCoverage(
+        timestampOf(newest.get()), exitCodeOf(newest.get()), actedOnSince(specId, since));
+  }
+
+  private static Integer exitCodeOf(EventStore.EventRow row) {
+    try {
+      return RunTracker.exitCodeOf(YamlUtil.parseMap(row.data()));
+    } catch (Exception e) {
+      return null;
+    }
   }
 
   private static final List<String> ACTED_ON_EVIDENCE =

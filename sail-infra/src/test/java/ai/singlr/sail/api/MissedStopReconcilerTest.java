@@ -1150,6 +1150,95 @@ class MissedStopReconcilerTest {
         "the failed spec can be dispatched again");
   }
 
+  private static ShellExec incus(String listed, String execError) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command) {
+        return command.get(1).equals("list")
+            ? new Result(0, listed, "")
+            : new Result(1, "", execError);
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, Duration timeout) {
+        return exec(command);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
+  }
+
+  @Test
+  void aRunWhoseContainerWasStoppedIsFinishedAndItsStopClaimFinalized() {
+    var adhoc = session(null, "node-a", "adhoc");
+    var claim = session(null, "node-a", "adhoc");
+    Acting.system(() -> sessionStore.transition(claim, "running", "stopping"));
+    var stopped =
+        incus(
+            "[{\"name\": \"test-project\", \"status\": \"Stopped\"}]",
+            "Error: Instance is not running");
+
+    reconciler(MissedStopReconciler.systemdUnitProbe(stopped), PAST_GRACE).sweep();
+
+    assertEquals("stopped", sessionStore.findById(adhoc).orElseThrow().status());
+    assertEquals("stopped", sessionStore.findById(claim).orElseThrow().status());
+  }
+
+  @Test
+  void aRunWhoseContainerWasDestroyedIsFinished() {
+    var adhoc = session(null, "node-a", "adhoc");
+    var destroyed = incus("[]", "Error: Instance not found");
+
+    reconciler(MissedStopReconciler.systemdUnitProbe(destroyed), PAST_GRACE).sweep();
+
+    assertEquals("stopped", sessionStore.findById(adhoc).orElseThrow().status());
+  }
+
+  @Test
+  void aRunningContainerThatWillNotRunACommandReadsAsAlive() {
+    var adhoc = session(null, "node-a", "adhoc");
+    var flaky =
+        incus(
+            "[{\"name\": \"test-project\", \"status\": \"Running\"}]",
+            "Error: websocket: close 1006 (abnormal closure)");
+
+    assertEquals(0, reconciler(MissedStopReconciler.systemdUnitProbe(flaky), PAST_GRACE).sweep());
+
+    assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
+  }
+
+  @Test
+  void aFinishedRowsReplayedStopKeepsTheExitCodeItsRecordedStopCarried() throws Exception {
+    createInProgressSpec("auth");
+    var build = runningSession("auth");
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER,
+            Event.WellKnownData.RUN_ID,
+            build,
+            Event.WellKnownData.EXIT_CODE,
+            1));
+    var latch = new CountDownLatch(1);
+    var replayed = captureStops(latch);
+    var reconciler = reconciler(new CountingProbe(false), PAST_GRACE);
+
+    reconciler.sweep();
+    assertEquals(1, sessionStore.findById(build).orElseThrow().exitCode(), "finished with it");
+    reconciler.sweep();
+
+    BusTesting.awaitDelivery(latch);
+    assertEquals(
+        1,
+        replayed.poll().data().get(Event.WellKnownData.EXIT_CODE),
+        "the agent exited 1: its replayed stop never reads as a clean finish");
+  }
+
   @Test
   void aContainerTheProbeCannotReachReadsAsAliveNotAsEveryRunInItGone() {
     createInProgressSpec("auth");
@@ -1459,6 +1548,9 @@ class MissedStopReconcilerTest {
         }
         if (joined.endsWith(" true")) {
           return new Result(0, "", "");
+        }
+        if (joined.startsWith("incus list")) {
+          return new Result(0, "[{\"name\": \"acme\", \"status\": \"Running\"}]", "");
         }
         return new Result(1, "", "no such file");
       }

@@ -146,13 +146,6 @@ public final class AgentLogCommand implements Runnable {
     }
   }
 
-  private static Optional<RunStore.RunRow> latestBuildRun(RunStore runs, String project) {
-    return runs.listForProject(project).stream()
-        .filter(RunStore.RunRow::buildRole)
-        .filter(run -> run.ownedBy(NodeIdentity.handle()))
-        .findFirst();
-  }
-
   /** The latest local session run's run-scoped log path, or null when there is none. */
   static String logPathFrom(Optional<RunStore.RunRow> latestRun) {
     return latestRun.map(RunStore.RunRow::logPath).filter(Strings::isNotBlank).orElse(null);

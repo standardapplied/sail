@@ -60,10 +60,11 @@ public final class MissedStops {
     /**
      * An authoritative stop was recorded longer ago than the grace window, yet the session still
      * claims to be running: the stop reached nothing that finishes runs — a tracker that dropped it
-     * or failed. Probe the agent and, only if it is gone, finish the row; the stop itself was
-     * recorded already and is never replayed over a running row.
+     * or failed. Probe the agent and, only if it is gone, finish the row as that stop would have,
+     * with the {@code exitCode} it carried (nullable); the stop itself was recorded already and is
+     * never replayed over a running row.
      */
-    record FinishRun(String why) implements Outcome {}
+    record FinishRun(Integer exitCode, String why) implements Outcome {}
 
     /** Leave the session alone. */
     record Skip(String why) implements Outcome {}
@@ -74,12 +75,13 @@ public final class MissedStops {
   /**
    * How the latest session's authoritative stop was handled. {@code observedAt} is the timestamp of
    * the newest {@code source}-carrying stop recorded since the session started, or null when none
-   * exists. {@code actedOn} is true when the pipeline left evidence of consuming it since the
-   * session started: an {@code agent_failed} verdict or any review stage activity.
+   * exists, and {@code exitCode} the exit code that stop carried, null when it named none. {@code
+   * actedOn} is true when the pipeline left evidence of consuming it since the session started: an
+   * {@code agent_failed} verdict or any review stage activity.
    */
-  public record StopCoverage(Instant observedAt, boolean actedOn) {
+  public record StopCoverage(Instant observedAt, Integer exitCode, boolean actedOn) {
     public static StopCoverage none() {
-      return new StopCoverage(null, false);
+      return new StopCoverage(null, null, false);
     }
   }
 
@@ -101,6 +103,7 @@ public final class MissedStops {
         return inFlight
             ? new Outcome.Skip("an authoritative stop is still in flight")
             : new Outcome.FinishRun(
+                coverage.exitCode(),
                 "an authoritative stop was recorded but the session still runs");
       }
       if (coverage.actedOn()) {
