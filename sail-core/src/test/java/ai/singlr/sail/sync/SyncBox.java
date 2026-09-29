@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
@@ -85,6 +86,14 @@ public final class SyncBox implements AutoCloseable {
         "uday",
         List.of(),
         List.of());
+  }
+
+  /**
+   * Creates {@code row} as this box's FDE — the operator whose handle is the box's id — the only
+   * creator main takes a node's create from.
+   */
+  public void create(SpecStore.SpecRow row) {
+    Acting.as(id, () -> specs.create(row));
   }
 
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */

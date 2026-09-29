@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.Actor;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -391,6 +392,26 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                 YamlUtil.dumpJson(snapshot));
           }
         });
+  }
+
+  /**
+   * Withdraws every post by one of {@code authors} that main has not taken, with the replies under
+   * it: what a run main denied posted leaves this box with the run.
+   */
+  public void withdrawUnsynced(Collection<String> authors) {
+    if (authors.isEmpty()) {
+      return;
+    }
+    db.transaction(
+        () ->
+            db.query(
+                    """
+                    SELECT id FROM room_messages
+                    WHERE (base_rev IS NULL OR base_rev = '')
+                    AND author IN (SELECT value FROM json_each(?))""",
+                    row -> row.text(0),
+                    YamlUtil.dumpJson(List.copyOf(authors)))
+                .forEach(this::withdraw));
   }
 
   private void withdraw(String id) {

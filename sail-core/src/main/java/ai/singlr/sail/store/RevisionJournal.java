@@ -210,9 +210,10 @@ public final class RevisionJournal implements ConflictResolver {
    * Compare-and-set commit as main: mints a new authoritative rev only if {@code expectedRev} still
    * equals the entity's current rev (a brand-new entity expects {@code null}); otherwise returns
    * {@link PushOutcome.Stale} with main's present state, never overwriting a concurrent change. A
-   * null snapshot commits a deletion. Once the offer is current and its content held, {@code
-   * authority} decides it for the bound actor before anything is written, and a refusal is {@link
-   * PushOutcome.Denied} with main's present state. The check, the decision and the write share one
+   * null snapshot commits a deletion. Once the offer is current, {@code authority} decides it for
+   * the bound actor before anything is written, and a refusal is {@link PushOutcome.Denied} with
+   * main's present state; a read-only role's content is never uploaded, so it is decided before the
+   * content an accepted revision needs is required. The check, the decision and the write share one
    * transaction, so two nodes pushing the same row can never both win. Used by the sync engine on
    * the main side.
    */
@@ -226,7 +227,6 @@ public final class RevisionJournal implements ConflictResolver {
           if (snapshot == null && !schema.exists(id)) {
             return new PushOutcome.Accepted(latestRev(id));
           }
-          requireContent(snapshot);
           var refusal = authority.decide(Actor.current(), id, held(id), snapshot);
           if (refusal.isPresent()) {
             return new PushOutcome.Denied(
@@ -259,17 +259,6 @@ public final class RevisionJournal implements ConflictResolver {
         .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
         .map(head -> authored(schema.comparable(YamlUtil.parseMap(head.snapshot())), head.actor()))
         .orElse(null);
-  }
-
-  private void requireContent(Map<String, Object> snapshot) {
-    if (snapshot == null) {
-      return;
-    }
-    var blobs = new BlobStore(db);
-    schema.contentFields().stream()
-        .map(field -> Snapshots.text(snapshot, field))
-        .filter(Objects::nonNull)
-        .forEach(blobs::requireHeld);
   }
 
   /**

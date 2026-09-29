@@ -272,7 +272,7 @@ class ErasureSyncTest {
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
       assertEquals("refused", refused.kind());
-      assertTrue(refused.getMessage().contains("belongs to 'uday'"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("assigned to 'uday'"), refused.getMessage());
     }
 
     assertTrue(main.specs.findById("theirs").isPresent());
@@ -296,7 +296,7 @@ class ErasureSyncTest {
       var refused =
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
-      assertTrue(refused.getMessage().contains("belongs to 'uday'"), refused.getMessage());
+      assertTrue(refused.getMessage().contains("only uday or an admin"), refused.getMessage());
     }
     assertTrue(main.specs.findById("theirs").isPresent());
   }
@@ -313,7 +313,8 @@ class ErasureSyncTest {
           assertThrows(
               SyncTransportException.class, () -> link.reconcile("spec", replicas().get("spec")));
       assertTrue(
-          refused.getMessage().contains("a read-only role cannot prune"), refused.getMessage());
+          refused.getMessage().contains("Your role is read-only: it cannot prune."),
+          refused.getMessage());
     }
 
     assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));

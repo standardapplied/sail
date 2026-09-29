@@ -166,7 +166,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   @Override
   public Set<String> contentFields() {
-    return CONTENT_FIELDS;
+    return Set.of("content_hash");
   }
 
   @Override
@@ -358,14 +358,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   /** The file's store-specific half of the shared {@link RevisionJournal} sync protocol. */
-  private static final Set<String> CONTENT_FIELDS = Set.of("content_hash");
-
   private final class FileSchema implements EntitySchema {
-
-    @Override
-    public Set<String> contentFields() {
-      return CONTENT_FIELDS;
-    }
 
     @Override
     public String entityType() {

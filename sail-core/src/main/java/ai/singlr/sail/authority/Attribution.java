@@ -74,25 +74,24 @@ final class Attribution {
   }
 
   /**
-   * Whether {@code author} is a principal of a run {@code pusher} owns: a principal names its run,
-   * and a run main has never held is not decided but refused, so it is decided once it lands.
+   * Whether {@code author} is a principal of a run {@code pusher} owns: one whose current or past
+   * principals name it. A principal naming a run main has never held is not decided but refused, so
+   * it is decided once the run lands.
    */
   boolean principalOfOwnedRun(String pusher, String author) {
-    var runId = RunStore.runOf(author).orElse(null);
-    if (runId == null) {
-      return false;
+    var run = runs.byPrincipal(author);
+    if (run.isPresent()) {
+      return Objects.equals(run.get().owner(), pusher);
     }
-    if (runs.latestRev(runId) == null) {
+    var named = RunStore.runOf(author);
+    if (named.isPresent() && runs.latestRev(named.get()) == null) {
       throw new SyncedStore.Unheld(
           "main does not hold run '"
-              + runId
+              + named.get()
               + "', which '"
               + author
               + "' names, yet; runs sync first, so the next round settles this");
     }
-    return runs.findById(runId)
-        .filter(run -> Objects.equals(run.owner(), pusher))
-        .filter(run -> author.equals(run.principal()) || runs.principals(runId).contains(author))
-        .isPresent();
+    return false;
   }
 }

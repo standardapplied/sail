@@ -41,6 +41,10 @@ public final class MessageAuthority implements WriteAuthority {
       return Optional.empty();
     }
     var roomId = MessageStore.roomIdOf(next);
+    var posting = PostingRule.decide(actor, roomId, rooms.owners(roomId));
+    if (posting.isPresent()) {
+      return posting;
+    }
     var author = Snapshots.text(next, "author");
     if (!mayPostAs(actor, author, roomId)) {
       return Refusal.of(
@@ -48,7 +52,7 @@ public final class MessageAuthority implements WriteAuthority {
           "'" + actor.handle() + "' may not post as '" + author + "' in this room.",
           "Post as yourself.");
     }
-    return PostingRule.decide(actor, roomId, rooms.owners(roomId));
+    return Optional.empty();
   }
 
   private boolean mayPostAs(Actor actor, String author, String roomId) {

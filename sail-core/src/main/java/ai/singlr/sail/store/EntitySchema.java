@@ -6,7 +6,6 @@
 package ai.singlr.sail.store;
 
 import java.util.Map;
-import java.util.Set;
 
 /**
  * The store-specific half of a synced entity, supplied to {@link RevisionJournal}. The journal owns
@@ -41,14 +40,6 @@ public interface EntitySchema {
    * journal's transaction.
    */
   void apply(String id, Map<String, Object> snapshot);
-
-  /**
-   * Snapshot fields whose values name blobs, which main must hold before it commits a revision
-   * naming them. None by default.
-   */
-  default Set<String> contentFields() {
-    return Set.of();
-  }
 
   /**
    * Projects a full snapshot onto the subset that carries an FDE's actual work — the fields

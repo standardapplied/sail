@@ -248,6 +248,7 @@ class MessageSyncTest {
 
   @Test
   void authenticatedPeerCannotForgeAnotherFdeAuthor() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     new FdeStore(main.db).add("admin", null, null, "admin");
     var messageId = "00000000-0000-7000-8000-000000000001";
 
@@ -353,7 +354,30 @@ class MessageSyncTest {
   }
 
   @Test
+  void anAuthorNamingARunMainHasNeverHeldIsRefusedUntilItLands() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
+    var unheld = "codex/00000000-0000-7000-8000-0000000000ee";
+
+    var refused =
+        assertThrows(
+            SyncedStore.Unheld.class,
+            () ->
+                Actor.call(
+                    Actor.sync("node", Role.MEMBER),
+                    () ->
+                        main.messages.commitRevision(
+                            "00000000-0000-7000-8000-000000000004",
+                            snapshot(unheld, "room"),
+                            null,
+                            main.messages.authority())));
+
+    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
+    assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000004").isEmpty());
+  }
+
+  @Test
   void anAuthorMainCannotPlaceIsDenied() {
+    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var denied =
         assertInstanceOf(
             PushOutcome.Denied.class,
@@ -362,15 +386,15 @@ class MessageSyncTest {
                 () ->
                     main.messages.commitRevision(
                         "00000000-0000-7000-8000-000000000004",
-                        snapshot("codex/unknown-run", "room"),
+                        snapshot("codex-not-a-run", "room"),
                         null,
                         main.messages.authority())));
 
-    assertTrue(denied.reason().contains("may not post as 'codex/unknown-run'"), denied.reason());
+    assertTrue(denied.reason().contains("may not post as 'codex-not-a-run'"), denied.reason());
   }
 
   @Test
-  void authenticatedPeerMayPostAsItsRunPrincipalOnlyOnThatRunsSpec() {
+  void aPeerPostsAsItsRunsPrincipalWhereverItMayPost() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     main.db.execute(
         """
@@ -392,8 +416,20 @@ class MessageSyncTest {
 
     main.db.execute(
         """
-        INSERT INTO rooms (id, title, project, created_at, updated_at)
-        VALUES ('other-room', 'Other room', 'acme', 'now', 'now')""");
+        INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
+        VALUES ('mine', 'Mine', 'acme', 'node', 'now', 'now'),
+            ('other-room', 'Other room', 'acme', 'else', 'now', 'now')""");
+    assertInstanceOf(
+        PushOutcome.Accepted.class,
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
+            () ->
+                main.messages.commitRevision(
+                    "00000000-0000-7000-8000-000000000013",
+                    snapshot("codex/run-1", "mine"),
+                    null,
+                    main.messages.authority())),
+        "a run's principal posts beyond its own conversation, where its FDE may");
     assertInstanceOf(
         PushOutcome.Denied.class,
         Actor.call(

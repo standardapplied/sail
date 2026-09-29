@@ -946,13 +946,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
-   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
-   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
-   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
-   * it must be exactly as collision-proof as the run id itself.
-   */
-  /**
    * The run's replicated, append-only principal history: every identity a legitimate invocation of
    * this run has ever posted under. The runs row keeps only the current principal for honest live
    * attribution; message authorization on main checks membership here, so a room message authored
@@ -964,6 +957,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         "SELECT principal FROM run_principals WHERE run_id = ? ORDER BY principal",
         row -> row.text(0),
         id);
+  }
+
+  /** The run whose current or past principals name {@code principal}, if this box holds one. */
+  public Optional<RunRow> byPrincipal(String principal) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE principal = ?1 OR id IN"
+            + " (SELECT run_id FROM run_principals WHERE principal = ?1) LIMIT 1",
+        this::mapRow,
+        principal);
   }
 
   private void recordPrincipal(String id, String principal) {
@@ -1015,6 +1019,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   private static final List<String> PRINCIPAL_MARKERS =
       List.of(REVIEW_MARKER, FIX_MARKER, ROOM_MARKER);
 
+  /**
+   * The run's minted principal handle: the agent family (the yaml name up to its first dash) over
+   * the full run id, with review and fix invocations marked as such — {@code claude/<run-uuid>},
+   * {@code claude/review-<run-uuid>}, {@code claude/fix-<run-uuid>}. The whole UUID, never a
+   * truncation: the handle is a security identity compared in ownership checks and audit rows, so
+   * it must be exactly as collision-proof as the run id itself.
+   */
   private static String principalHandle(String agent, String role, String id) {
     var family = Objects.toString(agent, "");
     var dash = family.indexOf('-');
@@ -1403,6 +1414,24 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     journal.applyRevision(id, snapshot, rev);
+  }
+
+  /**
+   * Adopts main's run. Main holding none of it — no snapshot and no rev — is how a run main denied
+   * leaves this box, and the posts its principals made that main never took go with it: main holds
+   * no run to decide them by, so they could never land.
+   */
+  @Override
+  public void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
+    var orphaned = snapshot == null && rev == null ? principalsOf(id) : List.<String>of();
+    applyRevision(id, snapshot, rev);
+    new MessageStore(db).withdrawUnsynced(orphaned);
+  }
+
+  private List<String> principalsOf(String id) {
+    var principals = new LinkedHashSet<>(principals(id));
+    findById(id).map(RunRow::principal).ifPresent(principals::add);
+    return List.copyOf(principals);
   }
 
   /** Removes an erased run's row, with the box-local credential it was issued. */

@@ -824,8 +824,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         roomIdOf(s));
   }
 
-  private static final Set<String> CONTENT_FIELDS = Set.of("body_hash", "plan_hash");
-
   private static final Set<String> SYNC_FIELDS =
       Set.of(
           "project",
@@ -876,7 +874,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   @Override
   public Set<String> contentFields() {
-    return CONTENT_FIELDS;
+    return Set.of("body_hash", "plan_hash");
   }
 
   /** Who may write a spec on this box: the rule every door and main's commit decide by. */
@@ -1033,11 +1031,6 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       applySnapshot(id, withSync(id, snapshot));
-    }
-
-    @Override
-    public Set<String> contentFields() {
-      return CONTENT_FIELDS;
     }
 
     @Override
