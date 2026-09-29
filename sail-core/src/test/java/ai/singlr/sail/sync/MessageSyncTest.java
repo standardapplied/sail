@@ -398,16 +398,21 @@ class MessageSyncTest {
              principal, owner)
         VALUES
             ('00000000-0000-7000-8000-000000000010', 'acme', 'room', 'node', 'build',
-             'codex', 'agent/messages', 'task', 'running', 'now', 'codex/run-1', 'node')""");
+             'codex', 'agent/messages', 'task', 'running', 'now', 'codex/00000000-0000-7000-8000-000000000010', 'node')""");
     var acceptedId = "00000000-0000-7000-8000-000000000011";
 
     Actor.call(
         Actor.sync("node", Role.MEMBER),
         () ->
             main.messages.commitRevision(
-                acceptedId, snapshot("codex/run-1", "room"), null, main.messages.authority()));
+                acceptedId,
+                snapshot("codex/00000000-0000-7000-8000-000000000010", "room"),
+                null,
+                main.messages.authority()));
 
-    assertEquals("codex/run-1", main.messages.findById(acceptedId).orElseThrow().author());
+    assertEquals(
+        "codex/00000000-0000-7000-8000-000000000010",
+        main.messages.findById(acceptedId).orElseThrow().author());
 
     main.db.execute(
         """
@@ -421,7 +426,7 @@ class MessageSyncTest {
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000013",
-                    snapshot("codex/run-1", "mine"),
+                    snapshot("codex/00000000-0000-7000-8000-000000000010", "mine"),
                     null,
                     main.messages.authority())),
         "a run's principal posts beyond its own conversation, where its FDE may");
@@ -432,7 +437,7 @@ class MessageSyncTest {
             () ->
                 main.messages.commitRevision(
                     "00000000-0000-7000-8000-000000000012",
-                    snapshot("codex/run-1", "other-room"),
+                    snapshot("codex/00000000-0000-7000-8000-000000000010", "other-room"),
                     null,
                     main.messages.authority())));
   }
