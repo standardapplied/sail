@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -242,10 +243,10 @@ public final class ChangeLog {
   }
 
   /**
-   * Deletes every entry of an entity except its erasure rows, and points its head at the newest
-   * erasure left — or drops the head when none is. How an entity that belonged to an erased one
-   * leaves this box's history when its own erasure has not been recorded here. Names no actor: it
-   * rewrites history under erasure rather than recording a write.
+   * Deletes every entry of an entity except its erasure rows, and any offer of it in flight, and
+   * points its head at the newest erasure left — or drops the head when none is. How an entity that
+   * belonged to an erased one leaves this box's history when its own erasure has not been recorded
+   * here. Names no actor: it rewrites history under erasure rather than recording a write.
    */
   public void purge(String entityType, String entityId) {
     db.transaction(
@@ -254,6 +255,7 @@ public final class ChangeLog {
               "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ? AND kind <> 'erasure'",
               entityType,
               entityId);
+          settleOffer(entityType, entityId);
           db.execute(
               "DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?",
               entityType,
@@ -584,6 +586,42 @@ public final class ChangeLog {
         row -> row.text(0),
         entityType,
         entityId);
+  }
+
+  /**
+   * The state of an entity this box made an offer to main from, {@code from} ({@code null} for a
+   * deletion), kept from before main is asked until its answer is heard.
+   */
+  public record Offer(Map<String, Object> from) {}
+
+  /**
+   * Records, before main is asked, that this box offers it a change of {@code entityId} made from
+   * {@code from}, replacing any earlier offer of it: an answer main gives and the box never hears
+   * is recovered against exactly this state.
+   */
+  public void recordOffer(String entityType, String entityId, Map<String, Object> from) {
+    db.execute(
+        """
+        INSERT INTO sync_offers (entity_type, entity_id, offered_from) VALUES (?, ?, ?)
+        ON CONFLICT(entity_type, entity_id) DO UPDATE SET offered_from = excluded.offered_from""",
+        entityType,
+        entityId,
+        from == null ? null : YamlUtil.dumpJson(from));
+  }
+
+  /** The offer of {@code entityId} whose answer this box has not heard, if any. */
+  public Optional<Offer> offer(String entityType, String entityId) {
+    return db.queryOne(
+        "SELECT offered_from FROM sync_offers WHERE entity_type = ? AND entity_id = ?",
+        row -> new Offer(row.isNull(0) ? null : YamlUtil.parseMap(row.text(0))),
+        entityType,
+        entityId);
+  }
+
+  /** Forgets the offer of {@code entityId}: main's answer to it has been heard. */
+  public void settleOffer(String entityType, String entityId) {
+    db.execute(
+        "DELETE FROM sync_offers WHERE entity_type = ? AND entity_id = ?", entityType, entityId);
   }
 
   private static final String COLUMNS =

@@ -95,6 +95,49 @@ class LostAnswerSyncTest {
   }
 
   @Test
+  void aMergeWhoseAnswerIsLostKeepsMainsChangesTheMergeTookIn() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent(), "main took the merge");
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent());
+    assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void anEditAfterALostMergeReachesMainKeepingMainsChangesTheMergeTookIn() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/later")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent());
+    assertEquals("feat/later", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aSettledOfferLeavesNoRecordBehind() {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(new ChangeLog(ada.db).offer("spec", "s").isEmpty());
+  }
+
+  @Test
   void aFieldBothSidesChangedAfterALostAnswerParksForTheFde() throws IOException {
     Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
     SyncBox.pushLosingTheAnswer(main, ada, "spec");

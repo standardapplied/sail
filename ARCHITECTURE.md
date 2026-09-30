@@ -192,7 +192,7 @@ and the spec that closes it.
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
-| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers: `LostAnswerSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
+| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); open for a review whose findings the box holds: `sail-review-findings-sync` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
@@ -239,7 +239,9 @@ One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over
 store, so the same box acts as the node when it syncs up and as the authority when another
 node syncs to it. Every synced store keeps a `change_log` of full snapshots and, beside it, a
 `change_heads` row per entity naming its latest entry, so the reads the protocol makes are
-O(what it asks for), never O(history).
+O(what it asks for), never O(history). A node records the state each offer was made from in
+`sync_offers` before main is asked and drops it once the answer is heard, so an answer lost on
+the way back is recovered against exactly that state and main's edits the offer merged in stay.
 
 ### The wire: sync protocol 4
 

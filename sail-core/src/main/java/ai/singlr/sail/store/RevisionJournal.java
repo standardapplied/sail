@@ -279,45 +279,68 @@ public final class RevisionJournal implements ConflictResolver {
    * after the base held here — main took this box's offer and its answer never came back — as the
    * synced base. Main decides it is later than that base, in its own change log ({@link
    * ai.singlr.sail.sync.MainReplica#acceptedFrom}); a rev this box already holds as its base
-   * changes nothing. What {@code current} reads now is rebased from {@code offeredFrom}, the state
-   * the offer was made from, onto {@code accepted}, which may carry main's changes the offer merged
-   * in: the edits made here since are journaled on top as the change main has not taken yet,
-   * recorded under the author its latest entry already names, so the round reconciles it three-way
-   * against exactly what main took and the author main records is the one who wrote it. An edit
-   * since the offer that clashes with a change of main's leaves the base where it is, so the round
-   * parks the conflict. The base is adopted as the bound actor. Returns whether it moved.
+   * changes nothing. What {@code current} reads now is rebased from the state the offer was made
+   * from, recorded before main was asked ({@link ChangeLog#recordOffer}), onto {@code accepted},
+   * which may carry main's changes the offer merged in: the edits made here since are journaled on
+   * top as the change main has not taken yet, recorded under the author its latest entry already
+   * names, so the round reconciles it three-way against exactly what main took and the author main
+   * records is the one who wrote it. Main answers a deletion it took without its marks, so a
+   * deletion offered with marks is the one it took. An edit since the offer that clashes with a
+   * change of main's leaves the base where it is, so the round parks the conflict. An offer with no
+   * record here, made by a release that kept none, is acknowledged only when the row here is what
+   * main took, the one case where what main merged into it and what this box changed since need no
+   * telling apart; otherwise the base stays where it is, and the round reconciles against it as
+   * that release did. The offer is settled either way. The base is adopted as the bound actor.
+   * Returns whether it moved.
    */
   public boolean acknowledge(
       String id,
-      Map<String, Object> offeredFrom,
       Map<String, Object> accepted,
       String rev,
       Supplier<Map<String, Object>> current,
       Set<String> latestWins) {
     return db.transaction(
         () -> {
+          var offer = changeLog.offer(schema.entityType(), id);
+          changeLog.settleOffer(schema.entityType(), id);
           if (rev.equals(baseRevOf(id))) {
             return false;
           }
           var now = current.get();
+          if (offer.isEmpty() && !sameContent(now, accepted)) {
+            return false;
+          }
+          var offeredFrom = offer.isPresent() ? offer.get().from() : now;
+          var took = tookOf(offeredFrom, accepted);
           var rebase =
-              ConflictDetector.detect(live(offeredFrom), live(now), live(accepted), latestWins);
+              ConflictDetector.detect(live(offeredFrom), live(now), live(took), latestWins);
           if (rebase instanceof ConflictDetector.Conflict) {
             return false;
           }
           var mine =
               switch (rebase) {
                 case ConflictDetector.Merged merged -> merged.result();
-                case ConflictDetector.TakeRemote ignored -> accepted;
+                case ConflictDetector.TakeRemote ignored -> took;
                 default -> now;
               };
           var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor);
-          applyRevision(id, accepted, rev);
-          if (!sameContent(mine, accepted)) {
+          applyRevision(id, took, rev);
+          if (!sameContent(mine, took)) {
             Actor.run(Actor.main(author.orElse(null)), () -> write(id, mine, "local"));
           }
           return true;
         });
+  }
+
+  /**
+   * What main took of an offer made from {@code offeredFrom} when it answers {@code accepted}: a
+   * deletion offered with marks, when main answers a deletion, otherwise its answer.
+   */
+  private Map<String, Object> tookOf(
+      Map<String, Object> offeredFrom, Map<String, Object> accepted) {
+    return accepted == null && offeredFrom != null && schema.isDeletion(offeredFrom)
+        ? marksOf(offeredFrom)
+        : accepted;
   }
 
   /**

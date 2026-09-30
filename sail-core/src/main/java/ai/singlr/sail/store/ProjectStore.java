@@ -205,19 +205,12 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   /**
    * Adopts main's version of this box's own offer whose answer was lost; a deletion main took of an
-   * id whose tombstone here blocks resurrection is that blocking deletion, and a rename made here
-   * since the offer keeps its block.
+   * offered blocking deletion is that blocking deletion, and a rename made here since the offer
+   * keeps its block as a change main has not taken.
    */
   @Override
-  public boolean acknowledge(
-      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
-    return journal.acknowledge(
-        id,
-        offeredFrom,
-        accepted == null && blocksResurrection(id) ? BLOCKING : accepted,
-        rev,
-        () -> currentForSync(id),
-        latestWinsFields());
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(id, accepted, rev, () -> currentForSync(id), latestWinsFields());
   }
 
   @Override

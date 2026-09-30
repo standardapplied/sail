@@ -63,13 +63,22 @@ public interface LocalReplica {
   }
 
   /**
-   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
-   * after the base held here, as the row's merge base, keeping the edits made here since {@code
-   * offeredFrom}, the local row the offer was made from. Main decides it is newer ({@link
-   * MainReplica#acceptedFrom}). Returns whether the base moved. None by default.
+   * Records durably, before main is asked, {@code from}, the local state an offer of {@code id} is
+   * made from, so an answer main gives and this box never hears is recovered against exactly it
+   * ({@link #acknowledge}). Nothing by default.
    */
-  default boolean acknowledge(
-      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
+  default void offering(String id, Map<String, Object> from) {}
+
+  /** Forgets the offer of {@code id} once main's answer to it is heard. Nothing by default. */
+  default void settled(String id) {}
+
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
+   * after the base held here, as the row's merge base, keeping the edits made here since the local
+   * state the offer was made from ({@link #offering}), and settles the offer. Main decides it is
+   * newer ({@link MainReplica#acceptedFrom}). Returns whether the base moved. None by default.
+   */
+  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return false;
   }
 

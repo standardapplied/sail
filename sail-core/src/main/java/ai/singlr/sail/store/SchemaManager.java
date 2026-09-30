@@ -605,7 +605,14 @@ public final class SchemaManager {
           )""",
           "ALTER TABLE sync_conflicts ADD COLUMN remote_rev TEXT",
           "ALTER TABLE sync_conflicts ADD COLUMN remote_author TEXT",
-          MESSAGES_AUTHORED_BY_THEIR_POSTER);
+          MESSAGES_AUTHORED_BY_THEIR_POSTER,
+          """
+          CREATE TABLE sync_offers (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              offered_from TEXT,
+              PRIMARY KEY (entity_type, entity_id)
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

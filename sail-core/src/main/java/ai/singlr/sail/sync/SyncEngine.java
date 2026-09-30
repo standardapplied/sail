@@ -134,11 +134,16 @@ public final class SyncEngine {
       }
     }
 
-    /** Offers everything pending to main as one batch and settles each verdict in order. */
+    /**
+     * Offers everything pending to main as one batch and settles each verdict in order. What each
+     * offer was made from is recorded before main is asked and forgotten once its verdict is
+     * settled, so an answer lost on the way back leaves exactly that behind to recover against.
+     */
     private void commitPending() {
       var batch = List.copyOf(pending);
       pending.clear();
       pendingWeight = 0;
+      batch.forEach(p -> local.offering(p.id(), p.offeredFrom().snapshot()));
       var outcomes =
           main.commitAll(
               batch.stream()
@@ -150,6 +155,7 @@ public final class SyncEngine {
       }
       for (var i = 0; i < batch.size(); i++) {
         record(settle(batch.get(i), outcomes.get(i)));
+        local.settled(batch.get(i).id());
       }
     }
 
@@ -366,9 +372,7 @@ public final class SyncEngine {
       if (adopt(id, offer.offeredFrom().rev(), taken, accepted.rev(), accepted.author())) {
         return offer.onAccepted();
       }
-      Actor.run(
-          Actor.main(accepted.author()),
-          () -> local.acknowledge(id, offer.offeredFrom().snapshot(), taken, accepted.rev()));
+      Actor.run(Actor.main(accepted.author()), () -> local.acknowledge(id, taken, accepted.rev()));
       return offer.redetectsLeft() <= 0
           ? recordStaleConflict(id, main.current(id), main.currentRev(id))
           : reconcileEntity(id, main.current(id), main.currentRev(id), offer.redetectsLeft() - 1);

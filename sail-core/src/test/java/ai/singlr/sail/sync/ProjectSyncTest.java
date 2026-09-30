@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,6 +20,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -268,6 +270,33 @@ class ProjectSyncTest {
     sync(other);
     assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
 
+    assertConverged();
+  }
+
+  @Test
+  void aRenameAfterADeletionWhoseAnswerIsLostKeepsItsBlockSoAStaleCopyNeverResurrects()
+      throws IOException {
+    main.projects.upsert("p", "name: p\n");
+    sync(node);
+    Acting.as(node.id, () -> node.projects.delete("p"));
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node)) {
+      SyncBox.pushLosingTheAnswer(mainBox, nodeBox, "project");
+      assertFalse(main.projects.blocksResurrection("p"), "main took a plain deletion");
+      Acting.as(
+          node.id,
+          () -> {
+            node.projects.upsert("p", "name: p\n");
+            node.projects.rename("p", "q", "name: q\n");
+          });
+
+      SyncBox.quiesce(mainBox, nodeBox);
+    }
+
+    assertTrue(main.projects.blocksResurrection("p"), "the later rename's block reaches main");
+    other.projects.upsert("p", "name: p\n");
+    sync(other);
+    assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
     assertConverged();
   }
 

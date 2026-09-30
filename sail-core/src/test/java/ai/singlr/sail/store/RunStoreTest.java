@@ -57,6 +57,10 @@ class RunStoreTest {
     if (db != null) db.close();
   }
 
+  private void offer(String id, Map<String, Object> from) {
+    new ChangeLog(db).recordOffer(store.entityType(), id, from);
+  }
+
   private String newRun(String project, String specId) {
     var id = DateTimeUtils.newId().toString();
     return store.create(
@@ -160,15 +164,17 @@ class RunStoreTest {
   void acknowledgingARunMainTookRecordsMainsRevisionAndKeepsTheRunAsItStands() {
     var id = newRunOn("p", "s", "ada");
     var held = store.comparableSnapshot(id);
+    offer(id, held);
     store.recordSession(id, "sess-1", "claude", "/t");
 
-    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, held, "1-main")));
+    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "1-main")));
 
     assertEquals("1-main", store.baseRevOf(id));
     assertEquals("sess-1", store.findById(id).orElseThrow().sessionId());
     assertTrue(store.dirtyIds().contains(id), "its progress is still to be offered");
+    offer(id, held);
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, held, "1-main")),
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, held, "1-main")),
         "a run with a base is left alone");
     var unchanged = newRunOn("q", "s", "ada");
     assertTrue(
@@ -176,9 +182,38 @@ class RunStoreTest {
             Actor.main("ada"),
             () -> {
               var snapshot = store.comparableSnapshot(unchanged);
-              return store.acknowledge(unchanged, snapshot, snapshot, "1-main");
+              offer(unchanged, snapshot);
+              return store.acknowledge(unchanged, snapshot, "1-main");
             }));
     assertFalse(store.dirtyIds().contains(unchanged), "nothing is left to offer");
+  }
+
+  @Test
+  void anAnswerToAnOfferKeptNoRecordOfMovesTheBaseOnlyWhenTheRowIsWhatMainTook() {
+    var moved = newRunOn("p", "s", "ada");
+    var edited = newRunOn("q", "s", "ada");
+    var took = store.comparableSnapshot(edited);
+    store.recordSession(edited, "sess-1", "claude", "/t");
+
+    assertTrue(
+        Actor.call(
+            Actor.main("ada"),
+            () -> store.acknowledge(moved, store.comparableSnapshot(moved), "1-main")));
+    assertFalse(Actor.call(Actor.main("ada"), () -> store.acknowledge(edited, took, "1-main")));
+
+    assertEquals("1-main", store.baseRevOf(moved));
+    assertNull(store.baseRevOf(edited), "the round reconciles it against the base it had");
+  }
+
+  @Test
+  void anAcknowledgedOfferIsSettled() {
+    var id = newRunOn("p", "s", "ada");
+    var held = store.comparableSnapshot(id);
+    offer(id, held);
+
+    Actor.run(Actor.main("ada"), () -> store.acknowledge(id, held, "1-main"));
+
+    assertTrue(new ChangeLog(db).offer(store.entityType(), id).isEmpty());
   }
 
   @Test
@@ -187,11 +222,12 @@ class RunStoreTest {
     var first = store.comparableSnapshot(id);
     store.recordSession(id, "sess-2", "claude", "/t");
     var second = store.comparableSnapshot(id);
+    offer(id, second);
 
-    assertTrue(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, second, second, "5-main")));
+    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, second, "5-main")));
+    offer(id, first);
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, first, "5-main")),
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "5-main")),
         "the base held here already is it");
 
     assertEquals("5-main", store.baseRevOf(id));
