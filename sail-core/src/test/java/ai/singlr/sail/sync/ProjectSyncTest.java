@@ -252,6 +252,25 @@ class ProjectSyncTest {
     assertConverged();
   }
 
+  @Test
+  void aRenameDuringTheCommitOfAnEditKeepsItsBlockSoAStaleCopyNeverResurrects() {
+    main.projects.upsert("p", "name: p\n");
+    sync(node);
+    node.projects.upsert("p", "name: p\nedited: true\n");
+    var racing = new ScriptedMain(main.replica);
+    racing.onFirstCommit = () -> node.projects.rename("p", "q", "name: q\n");
+
+    engine.reconcile(node.replica, racing);
+
+    assertTrue(node.projects.blocksResurrection("p"), "the rename's block survives on the node");
+    assertTrue(main.projects.blocksResurrection("p"), "and reaches main");
+    other.projects.upsert("p", "name: p\n");
+    sync(other);
+    assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
+
+    assertConverged();
+  }
+
   private void assertConverged() {
     try (var mainBox = opened(main);
         var nodeBox = opened(node);

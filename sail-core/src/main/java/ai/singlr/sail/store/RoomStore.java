@@ -404,8 +404,10 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
-  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return journal.acknowledge(id, accepted, rev);
+  public boolean acknowledge(
+      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(
+        id, offeredFrom, accepted, rev, () -> currentForSync(id), latestWinsFields());
   }
 
   @Override

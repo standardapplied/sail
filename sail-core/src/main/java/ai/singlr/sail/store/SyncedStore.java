@@ -139,11 +139,13 @@ public interface SyncedStore {
   /**
    * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
    * box, as the row's merge base when it is newer than the base held here — main took the box's
-   * offer and its answer never came back — keeping the row as it stands here: whatever the box
-   * changed since stays a change main has not taken. Returns whether the base moved. A store whose
-   * rows are never edited after they are made recovers by converging instead, and moves nothing.
+   * offer and its answer never came back — keeping what the box changed since {@code offeredFrom},
+   * the {@link #currentForSync} its offer was made from, as a change main has not taken. Returns
+   * whether the base moved. A store whose rows are never edited after they are made recovers by
+   * converging instead, and moves nothing.
    */
-  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+  default boolean acknowledge(
+      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
     return false;
   }
 }

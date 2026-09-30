@@ -56,7 +56,7 @@ public final class NodeRound {
     for (var entry : answer.accepted()) {
       Actor.run(
           Actor.main(entry.author()),
-          () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
+          () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.snapshot(), entry.rev()));
     }
     var held = new LinkedHashSet<String>();
     answer.current().forEach(entry -> held.add(entry.id()));

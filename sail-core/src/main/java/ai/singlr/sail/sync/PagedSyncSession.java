@@ -470,7 +470,8 @@ public final class PagedSyncSession implements SyncSession {
           for (var entry : page.accepted()) {
             Actor.run(
                 Actor.main(entry.author()),
-                () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
+                () ->
+                    local.acknowledge(entry.id(), entry.snapshot(), entry.snapshot(), entry.rev()));
           }
         });
   }

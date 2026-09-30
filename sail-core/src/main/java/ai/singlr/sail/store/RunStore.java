@@ -848,8 +848,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
-  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return journal.acknowledge(id, accepted, rev);
+  public boolean acknowledge(
+      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(
+        id, offeredFrom, accepted, rev, () -> currentForSync(id), latestWinsFields());
   }
 
   /** Every run the box whose FDE handle is {@code handle} executed that is still live there. */

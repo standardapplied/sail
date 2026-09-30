@@ -102,8 +102,9 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
-  public boolean acknowledge(String entityId, Map<String, Object> accepted, String rev) {
-    return store.acknowledge(entityId, accepted, rev);
+  public boolean acknowledge(
+      String entityId, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
+    return store.acknowledge(entityId, offeredFrom, accepted, rev);
   }
 
   @Override

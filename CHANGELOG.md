@@ -9,7 +9,7 @@
   - A message is recorded under the author it names on every box. A post made while acting as someone else, such as the review pipeline's verdicts, used to be credited to the poster's FDE on its own box and to its author everywhere else. The upgrade corrects the history of existing messages.
   - A revision main recorded with no author is adopted with none, not credited to `main`.
   - A project renamed on main reaches nodes as the rename's blocking deletion, under the FDE who renamed it, where nodes used to hold a plain deletion credited to `main`.
-  - A change made on a node while its own earlier change is on the way to main is offered next, where it used to park a conflict with itself.
+  - A change made on a node while its own earlier change is on the way to main is offered next, where it used to park a conflict with itself. If that earlier change had merged in main's edits, they are kept rather than reverted. A project renamed in that window keeps its rename's block. A change that clashes with a field main edited parks a conflict.
   - Starting an agent no longer records a revision of its run for the process ids only the box running it keeps, which left that box on a revision main never held until the run next changed.
 
 - **A box's runs carry the handle main knows it by, and a live run is never rewritten.** Every run a box reserves — dispatch, build, restart, ad-hoc (`sail run`, `agent sweep`, the API), the review pipeline and its fix lane, and room wakes — carries the box's handle as both `node` and `owner`. Runs used to be stamped with a blank node, a stale handle, or the spec's or room's owner, and main then denied them, sometimes mid-run, and the node deleted them.

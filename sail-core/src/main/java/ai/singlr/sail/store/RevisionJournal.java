@@ -14,6 +14,7 @@ import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The sync protocol every mutable synced store shares, in one place. Given an {@link EntitySchema}
@@ -200,6 +201,11 @@ public final class RevisionJournal implements ConflictResolver {
     return rev;
   }
 
+  /** {@code snapshot} as the three-way merge reads it: a marked deletion is absence. */
+  private Map<String, Object> live(Map<String, Object> snapshot) {
+    return schema.isDeletion(snapshot) ? null : snapshot;
+  }
+
   private static Map<String, Object> marksOf(Map<String, Object> deletion) {
     var marks = new LinkedHashMap<String, Object>();
     if (deletion != null) {
@@ -273,19 +279,38 @@ public final class RevisionJournal implements ConflictResolver {
    * after the base held here — main took this box's offer and its answer never came back — as the
    * synced base. Main decides it is later than that base, in its own change log ({@link
    * ai.singlr.sail.sync.MainReplica#acceptedFrom}); a rev this box already holds as its base
-   * changes nothing. The row is kept as it stands here: when it has moved on since, its own state
-   * is journaled on top as the change main has not taken yet, recorded under the author its latest
-   * entry already names, so the round reconciles it three-way against exactly what main took and
-   * the author main records is the one who wrote it. The base is adopted as the bound actor.
-   * Returns whether it moved.
+   * changes nothing. What {@code current} reads now is rebased from {@code offeredFrom}, the state
+   * the offer was made from, onto {@code accepted}, which may carry main's changes the offer merged
+   * in: the edits made here since are journaled on top as the change main has not taken yet,
+   * recorded under the author its latest entry already names, so the round reconciles it three-way
+   * against exactly what main took and the author main records is the one who wrote it. An edit
+   * since the offer that clashes with a change of main's leaves the base where it is, so the round
+   * parks the conflict. The base is adopted as the bound actor. Returns whether it moved.
    */
-  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+  public boolean acknowledge(
+      String id,
+      Map<String, Object> offeredFrom,
+      Map<String, Object> accepted,
+      String rev,
+      Supplier<Map<String, Object>> current,
+      Set<String> latestWins) {
     return db.transaction(
         () -> {
           if (rev.equals(baseRevOf(id))) {
             return false;
           }
-          var mine = comparableSnapshot(id);
+          var now = current.get();
+          var rebase =
+              ConflictDetector.detect(live(offeredFrom), live(now), live(accepted), latestWins);
+          if (rebase instanceof ConflictDetector.Conflict) {
+            return false;
+          }
+          var mine =
+              switch (rebase) {
+                case ConflictDetector.Merged merged -> merged.result();
+                case ConflictDetector.TakeRemote ignored -> accepted;
+                default -> now;
+              };
           var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor);
           applyRevision(id, accepted, rev);
           if (!sameContent(mine, accepted)) {

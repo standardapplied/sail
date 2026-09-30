@@ -83,11 +83,14 @@ public final class SyncEngine {
     return new Round(local, main).run();
   }
 
-  /** An offer awaiting main's verdict, with everything needed to settle it. */
+  /**
+   * An offer awaiting main's verdict, with everything needed to settle it: {@code offeredFrom} is
+   * the local row the offer was made from, at the revision the round captured it.
+   */
   private record Pending(
       String id,
       Map<String, Object> snapshot,
-      String offeredLocalRev,
+      LocalReplica.Captured offeredFrom,
       String expectedRev,
       Outcome onAccepted,
       int redetectsLeft) {}
@@ -186,7 +189,7 @@ public final class SyncEngine {
               List.of(ConflictDetector.DELETED_FIELD));
           return Outcome.CONFLICT;
         }
-        return offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
+        return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
       }
       return switch (ConflictDetector.detect(
           base, localSnap, remoteSnap, local.latestWinsFields())) {
@@ -205,7 +208,7 @@ public final class SyncEngine {
             take(id, localRev, mains, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
         case ConflictDetector.KeepLocal ignored ->
             local.mayPush(id)
-                ? offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
+                ? offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft)
                 : take(
                     id, localRev, mains, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
         case ConflictDetector.Merged m -> {
@@ -213,7 +216,7 @@ public final class SyncEngine {
             yield Outcome.HELD;
           }
           yield local.mayPush(id)
-              ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
+              ? offer(id, m.result(), captured, remoteRev, Outcome.MERGED, redetectsLeft)
               : take(
                   id, localRev, mains, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
         }
@@ -305,12 +308,11 @@ public final class SyncEngine {
     private Outcome offer(
         String id,
         Map<String, Object> snapshot,
-        String offeredLocalRev,
+        LocalReplica.Captured offeredFrom,
         String expectedRev,
         Outcome onAccepted,
         int redetectsLeft) {
-      pending.add(
-          new Pending(id, snapshot, offeredLocalRev, expectedRev, onAccepted, redetectsLeft));
+      pending.add(new Pending(id, snapshot, offeredFrom, expectedRev, onAccepted, redetectsLeft));
       pendingWeight += main.weigh(new MainReplica.Offer(id, snapshot, expectedRev));
       return Outcome.OFFERED;
     }
@@ -332,7 +334,8 @@ public final class SyncEngine {
                     offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
         case CommitOutcome.Denied d ->
             !liveHere(offer.id())
-                    && adopt(offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev(), d.author())
+                    && adopt(
+                        offer.id(), offer.offeredFrom().rev(), d.snapshot(), d.rev(), d.author())
                 ? Outcome.PULLED
                 : Outcome.DENIED;
       };
@@ -352,17 +355,20 @@ public final class SyncEngine {
 
     /**
      * Settles main taking this box's offer: adopts the version main took, or, when a local write
-     * landed since the offer, records it as the row's merge base with the newer local row kept on
-     * top ({@link LocalReplica#acknowledge}) before the entity is reconciled again, so this box's
-     * own accepted change never reads as a competing edit of main's.
+     * landed since the offer, records it as the row's merge base with the edits made since the
+     * offer rebased on top ({@link LocalReplica#acknowledge}) before the entity is reconciled
+     * again, so this box's own accepted change never reads as a competing edit of main's, and
+     * main's changes the offer merged in never read as this box reverting them.
      */
     private Outcome settleAccepted(Pending offer, CommitOutcome.Accepted accepted) {
       var id = offer.id();
       var taken = Snapshots.withCreator(offer.snapshot(), accepted.creator());
-      if (adopt(id, offer.offeredLocalRev(), taken, accepted.rev(), accepted.author())) {
+      if (adopt(id, offer.offeredFrom().rev(), taken, accepted.rev(), accepted.author())) {
         return offer.onAccepted();
       }
-      Actor.run(Actor.main(accepted.author()), () -> local.acknowledge(id, taken, accepted.rev()));
+      Actor.run(
+          Actor.main(accepted.author()),
+          () -> local.acknowledge(id, offer.offeredFrom().snapshot(), taken, accepted.rev()));
       return offer.redetectsLeft() <= 0
           ? recordStaleConflict(id, main.current(id), main.currentRev(id))
           : reconcileEntity(id, main.current(id), main.currentRev(id), offer.redetectsLeft() - 1);

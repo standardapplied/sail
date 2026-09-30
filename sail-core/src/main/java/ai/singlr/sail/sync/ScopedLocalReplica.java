@@ -50,8 +50,9 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   }
 
   @Override
-  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return inner.acknowledge(id, accepted, rev);
+  public boolean acknowledge(
+      String id, Map<String, Object> offeredFrom, Map<String, Object> accepted, String rev) {
+    return inner.acknowledge(id, offeredFrom, accepted, rev);
   }
 
   @Override

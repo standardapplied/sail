@@ -12,12 +12,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.BlobStore;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,63 +34,6 @@ class ConcurrentReconcileTest {
   private SyncBox box;
   private ScriptedMain main;
   private Map<String, Object> base;
-
-  /**
-   * Main over a real box, each of whose commits may first lose the race to a scripted concurrent
-   * write that moves main to the next scripted snapshot; an empty script races nothing.
-   */
-  private static final class ScriptedMain implements MainReplica {
-    final Deque<Map<String, Object>> script = new ArrayDeque<>();
-    private final StoreReplica replica;
-    Runnable onFirstCommit;
-
-    ScriptedMain(StoreReplica replica) {
-      this.replica = replica;
-    }
-
-    @Override
-    public String id() {
-      return replica.id();
-    }
-
-    @Override
-    public Set<String> entityIds() {
-      return replica.entityIds();
-    }
-
-    @Override
-    public Map<String, Object> current(String id) {
-      return replica.current(id);
-    }
-
-    @Override
-    public String currentRev(String id) {
-      return replica.currentRev(id);
-    }
-
-    @Override
-    public State state(String id) {
-      return replica.state(id);
-    }
-
-    @Override
-    public long maxSeq() {
-      return replica.maxSeq();
-    }
-
-    @Override
-    public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-      if (onFirstCommit != null) {
-        var hook = onFirstCommit;
-        onFirstCommit = null;
-        hook.run();
-      }
-      if (!script.isEmpty()) {
-        replica.commit(id, script.poll(), replica.currentRev(id));
-      }
-      return replica.commit(id, snapshot, expectedRev);
-    }
-  }
 
   @BeforeEach
   void setUp() {
@@ -193,6 +133,43 @@ class ConcurrentReconcileTest {
     assertEquals("Title during round", node.specs.findById("auth").orElseThrow().title());
     assertEquals("Title during round", main.current("auth").get("title"));
 
+    assertConverged();
+  }
+
+  @Test
+  void aLocalWriteDuringTheCommitOfAMergeKeepsMainsChangesTheMergeTookIn() {
+    box.specs.update(SyncBox.spec("auth", "Auth", "in_progress"));
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit =
+        () -> node.specs.update(SyncBox.spec("auth", "Title during round", "pending"));
+
+    var report = engine.reconcile(node.replica, main);
+
+    assertEquals(0, report.conflicts());
+    assertEquals(
+        "in_progress", main.current("auth").get("status"), "main's status is never reverted");
+    assertEquals("Title during round", main.current("auth").get("title"));
+    var held = node.specs.findById("auth").orElseThrow();
+    assertEquals("in_progress", held.status().wire());
+    assertEquals("Title during round", held.title());
+
+    assertConverged();
+  }
+
+  @Test
+  void aLocalWriteDuringTheCommitOfAMergeClashingWithMainsChangeParksAConflict() {
+    box.specs.update(SyncBox.spec("auth", "Auth", "in_progress"));
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit = () -> node.specs.update(SyncBox.spec("auth", "Title from node", "review"));
+
+    var report = engine.reconcile(node.replica, main);
+
+    assertEquals(1, report.conflicts());
+    assertTrue(node.conflicts.pending().getFirst().fields().contains("status"));
+    assertEquals("review", node.specs.findById("auth").orElseThrow().status().wire());
+    assertEquals("in_progress", main.current("auth").get("status"));
+
+    settleKeepingMine();
     assertConverged();
   }
 
