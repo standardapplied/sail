@@ -176,7 +176,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     return changeLog
         .latestAt(store.entityType(), entityId, baseRev)
         .map(base -> taken.seq() > base.seq())
-        .orElse(false);
+        .orElseGet(() -> changeLog.amongNewest(store.entityType(), entityId, taken.seq()));
   }
 
   private Snapshots.Creator recordedCreator(String entityId) {

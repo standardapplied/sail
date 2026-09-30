@@ -163,7 +163,7 @@ public final class RevisionJournal implements ConflictResolver {
       map.put(TOMBSTONE_BASE, rawBaseRev(id));
     }
     var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
+    var rev = explicitRev != null ? explicitRev : Revisions.next(latestRev(id), snapshot);
     if (!deleted) {
       if (setBaseRev) {
         db.execute(
@@ -310,19 +310,26 @@ public final class RevisionJournal implements ConflictResolver {
         });
   }
 
+  /**
+   * Rebases {@code id} onto main's side of a conflict, {@code remote}, under a rev this box mints:
+   * the conflict never recorded main's. It is journaled as {@link ChangeLog#RESOLVED_BASE}, never
+   * as a version this box heard from main, so what main took from this box is still asked after the
+   * version it last really heard.
+   */
   private String adoptBase(String id, Map<String, Object> remote) {
     if (remote == null) {
       if (schema.exists(id)) {
-        var rev = recordRevision(id, null, null, "sync", true, false);
+        var rev = recordRevision(id, null, null, ChangeLog.RESOLVED_BASE, true, false);
         schema.deleteRow(id);
         return rev;
       }
-      var rev = Revisions.next(currentRev(id), EMPTY_SNAPSHOT);
-      changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
+      var rev = Revisions.next(latestRev(id), EMPTY_SNAPSHOT);
+      changeLog.append(schema.entityType(), id, rev, ChangeLog.RESOLVED_BASE, true, EMPTY_SNAPSHOT);
       return rev;
     }
     schema.apply(id, remote);
-    return recordRevision(id, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true);
+    return recordRevision(
+        id, null, Snapshots.text(remote, Snapshots.ACTOR), ChangeLog.RESOLVED_BASE, false, true);
   }
 
   /** Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it). */

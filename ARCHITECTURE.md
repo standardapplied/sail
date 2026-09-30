@@ -250,8 +250,11 @@ from any other until an admin runs `sail fde release-box`; removing an FDE relea
 node's answer to an offer main took can be lost on the way back. Main records the box each
 revision came from (its `peer`), so its answer to a `need` also names, per id, the latest version
 it took from the asking box after the version the node last heard of it (`accepted`), ordered in
-main's own change log against the latest entry carrying that rev — never by revs, whose counters
-restart when a row is made again — and names none when it no longer holds that version. Before
+main's own change log against the latest entry carrying that rev; when compaction has removed
+that version, main answers only a version among its newest retained history. A box mints each rev
+from the entity's latest entry, tombstones included, so a rev never recurs for one entity; the
+latest-entry match covers histories from before that. A base a box rebases a parked conflict onto
+is journaled as `resolved-base`, never as a version heard from main. Before
 each type, the node asks only that (`accepted_only`) for every row it changed, which almost always
 answers nothing, and adopts what comes back as the row's merge base, keeping its own row on top
 under the author who wrote it; the round then reconciles three-way against exactly what main took,

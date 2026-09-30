@@ -52,6 +52,12 @@ public final class ChangeLog {
   /** The newest entries every box keeps of each entity's history; a constant, never configured. */
   public static final int HISTORY_REVISIONS = 20;
 
+  /**
+   * The origin of a base a box rebased a parked conflict onto: main's side, under a rev the box
+   * minted. Neither a local change to offer nor a version heard from main.
+   */
+  public static final String RESOLVED_BASE = "resolved-base";
+
   private static final String EMPTY_SNAPSHOT = "{}";
 
   private final Sqlite db;
@@ -466,7 +472,10 @@ public final class ChangeLog {
     return db
         .query(
             SELECT_HEAD
-                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin <> 'sync'"
+                + " WHERE h.entity_type = ? AND l.kind = 'tombstone'"
+                + " AND l.origin NOT IN ('sync', '"
+                + RESOLVED_BASE
+                + "')"
                 + " ORDER BY l.seq",
             row -> row.text(2),
             entityType)
@@ -523,6 +532,21 @@ public final class ChangeLog {
         entityType,
         entityId,
         rev);
+  }
+
+  /**
+   * Whether the entry at {@code seq} is among the newest {@link #HISTORY_REVISIONS} of {@code
+   * entityId}: newer than anything compaction removes.
+   */
+  public boolean amongNewest(String entityType, String entityId, long seq) {
+    return db.queryOne(
+                "SELECT count(*) FROM change_log WHERE entity_type = ? AND entity_id = ? AND seq > ?",
+                row -> row.integer(0),
+                entityType,
+                entityId,
+                seq)
+            .orElse(0L)
+        < HISTORY_REVISIONS;
   }
 
   /** The rev of the latest version of {@code entityId} this box took from a sync, if any. */

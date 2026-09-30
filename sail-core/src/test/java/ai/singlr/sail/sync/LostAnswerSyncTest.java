@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FileStore;
@@ -194,6 +195,83 @@ class LostAnswerSyncTest {
     var id = FileStore.idOf("acme", "a.txt");
     assertTrue(ada.conflicts.pendingFor("file", id).isEmpty(), "ada heard main's delete");
     assertEquals(hashOn(ada), hashOn(main));
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aLostAnswerAfterAResolveKeepingMineNeverRevertsMainsLaterChange() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", null, "feat/main")));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.round(main, ada);
+    var conflict = ada.conflicts.pendingFor("spec", "s").orElseThrow();
+    var rev =
+        Acting.as(
+            "ada",
+            () ->
+                ada.specs.resolveConflict(
+                    "s",
+                    YamlUtil.parseMap(conflict.localSnapshot()),
+                    YamlUtil.parseMap(conflict.remoteSnapshot())));
+    ada.conflicts.resolve(conflict.id(), rev);
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch(), "main took ada's");
+    Acting.as("ada", () -> main.specs.update(spec("s", null, "feat/main")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("feat/main", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aLostAnswerThenMainMakingTheRowAgainAsItWasNeverRevertsIt() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/b")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    Acting.as("ada", () -> main.specs.delete("s"));
+    Acting.as("ada", () -> main.specs.create(spec("s", null, "feat/a")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("feat/a", main.specs.findById("s").orElseThrow().branch(), "main made it again");
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aLostAnswerThenMainPuttingTheFileBackAsItWasNeverRevertsIt() throws IOException {
+    put("v1");
+    SyncBox.quiesce(main, ada);
+    put("v2");
+    SyncBox.pushLosingTheAnswer(main, ada, "file");
+    Acting.as("ada", () -> new FileStore(main.db).delete("acme", "a.txt"));
+    putOn(main, "v1");
+    var putBack = hashOn(main);
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals(putBack, hashOn(main), "a rev never repeats, so main's put-back stands");
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aLostAnswerThenMainCompactingPastWhatTheNodeHeardNeverRevertsMain() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/b")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    for (var i = 0; i < ChangeLog.HISTORY_REVISIONS - 2; i++) {
+      var agent = "a" + i;
+      Acting.as("ada", () -> main.specs.update(spec("s", agent, "feat/b")));
+    }
+    Acting.as("ada", () -> main.specs.update(spec("s", "last", "feat/a")));
+    new ChangeLog(main.db).compact("spec", List.of("s"), main.specs::baseRevOf);
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("feat/a", main.specs.findById("s").orElseThrow().branch(), "main's set-back");
     SyncBox.assertEqualToMain(main, ada);
   }
 
