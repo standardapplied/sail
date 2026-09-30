@@ -249,13 +249,13 @@ syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and 
 from any other until an admin runs `sail fde release-box`; removing an FDE releases its box. A
 node's answer to an offer main took can be lost on the way back. Main records the box each
 revision came from (its `peer`), so its answer to a `need` also names, per id, the latest version
-it took from the asking box after the base the node names for it (`accepted`), ordered in main's
-own change log — never by revs, whose counters restart when a row is made again — and names none
-when it no longer holds that base. Before each type, the node asks it for every row it changed and
-adopts that version as the row's merge base, keeping its own row on top under the author who
-wrote it; the round then
-reconciles three-way against exactly what main took, so a change main made since is never reverted
-and one the box made since is never lost. Before its first type, the node asks the same of every
+it took from the asking box after the version the node last heard of it (`accepted`), ordered in
+main's own change log against the latest entry carrying that rev — never by revs, whose counters
+restart when a row is made again — and names none when it no longer holds that version. Before
+each type, the node asks only that (`accepted_only`) for every row it changed, which almost always
+answers nothing, and adopts what comes back as the row's merge base, keeping its own row on top
+under the author who wrote it; the round then reconciles three-way against exactly what main took,
+so a change main made since is never reverted and one the box made since is never lost. Before its first type, the node asks the same of every
 run it made (its oldest entry is its own write) that main never acknowledged — a box that was main
 holds every box's runs with no base, and another box's run is never its to stamp — and stamps with
 its handle every one main does not hold, and every run of its own that acts for no one, so main

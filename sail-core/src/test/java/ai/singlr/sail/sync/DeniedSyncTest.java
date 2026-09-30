@@ -170,7 +170,10 @@ class DeniedSyncTest {
     try (var link = SyncBox.connect(main.server(ADA_VIEWING), node)) {
       report = link.reconcile("spec", replica("spec"));
       assertEquals(1, link.count("push"));
-      assertEquals(2, link.count("need"), "main withholds a version larger than its answer's room");
+      assertEquals(
+          3,
+          link.count("need"),
+          "the round's first question, then main withholds a version larger than its answer's room");
     }
 
     assertNull(report.failure());

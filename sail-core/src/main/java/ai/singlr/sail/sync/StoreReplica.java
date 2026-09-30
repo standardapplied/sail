@@ -96,8 +96,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
-  public String baseRev(String entityId) {
-    return store.baseRevOf(entityId);
+  public String lastHeardRev(String entityId) {
+    return changeLog.latestHeard(store.entityType(), entityId).orElse(null);
   }
 
   @Override
@@ -174,7 +174,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       return true;
     }
     return changeLog
-        .at(store.entityType(), entityId, baseRev)
+        .latestAt(store.entityType(), entityId, baseRev)
         .map(base -> taken.seq() > base.seq())
         .orElse(false);
   }

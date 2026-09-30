@@ -52,8 +52,12 @@ public interface LocalReplica {
     return false;
   }
 
-  /** The rev of main's this row last synced from — its merge base; {@code null} if never. */
-  default String baseRev(String id) {
+  /**
+   * The rev of the latest version of {@code id} this box heard from main — adopted, or its own
+   * offer main answered — whether or not the row it now holds descends from it; {@code null} if
+   * none. What main took from this box after it is what this box never heard.
+   */
+  default String lastHeardRev(String id) {
     return null;
   }
 

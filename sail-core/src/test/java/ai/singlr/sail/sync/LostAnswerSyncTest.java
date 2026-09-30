@@ -164,6 +164,39 @@ class LostAnswerSyncTest {
     SyncBox.assertEqualToMain(main, ada);
   }
 
+  @Test
+  void anEditToAFileMainMadeAgainWithTheSameContentReachesMain() {
+    put("v1");
+    SyncBox.quiesce(main, ada);
+    put("v2");
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> new FileStore(main.db).delete("acme", "a.txt"));
+    putOn(main, "v1");
+    SyncBox.quiesce(main, ada);
+    put("v2");
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals(hashOn(ada), hashOn(main), "the rev v1 had before is not the one ada heard");
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aFileMadeAgainAfterMainDeletedItReachesMainWithNoConflict() {
+    put("v1");
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> new FileStore(main.db).delete("acme", "a.txt"));
+    SyncBox.quiesce(main, ada);
+    put("v3");
+
+    SyncBox.quiesce(main, ada);
+
+    var id = FileStore.idOf("acme", "a.txt");
+    assertTrue(ada.conflicts.pendingFor("file", id).isEmpty(), "ada heard main's delete");
+    assertEquals(hashOn(ada), hashOn(main));
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
   private void madeAgainOnMain() {
     Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
     SyncBox.quiesce(main, ada);
@@ -177,15 +210,23 @@ class LostAnswerSyncTest {
   }
 
   private void put(String text) {
+    putOn(ada, text);
+  }
+
+  private static void putOn(SyncBox box, String text) {
     Acting.as(
         "ada",
         () ->
-            new FileStore(ada.db)
+            new FileStore(box.db)
                 .put(
                     "acme",
                     "a.txt",
                     new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)),
                     0644));
+  }
+
+  private static String hashOn(SyncBox box) {
+    return new FileStore(box.db).find("acme", "a.txt").orElseThrow().contentHash();
   }
 
   private static RunStore runs(SyncBox box) {

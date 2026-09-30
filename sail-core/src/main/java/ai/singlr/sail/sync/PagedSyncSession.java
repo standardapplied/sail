@@ -18,7 +18,6 @@ import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -28,6 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
@@ -230,7 +230,7 @@ public final class PagedSyncSession implements SyncSession {
       throw new SyncTransportException(
           "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
     }
-    var asked = askAboutDirty(type, local);
+    acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
     var report = SyncEngine.Report.NONE;
     var pages = 0;
@@ -257,14 +257,8 @@ public final class PagedSyncSession implements SyncSession {
     }
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
-    var answered = dirty.stream().filter(asked::containsKey).toList();
-    if (!answered.isEmpty()) {
-      var known = answered.stream().map(asked::get).filter(Objects::nonNull).toList();
-      report = report.plus(reconcileAnswered(type, local, answered, known, since));
-    }
-    var unasked = dirty.stream().filter(id -> !asked.containsKey(id)).toList();
-    if (!unasked.isEmpty()) {
-      report = report.plus(reconcileDirty(type, local, unasked, since));
+    if (!dirty.isEmpty()) {
+      report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
     var late = askAfterPush(type);
     var reconciled = new LinkedHashSet<>(seen);
@@ -447,48 +441,38 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   /**
-   * Before anything of {@code type} is reconciled, asks main for its rows of every id the node
-   * changed, and which version of each it took from this box, adopting that as the row's merge base
-   * when it is newer than the base the node holds: main took the node's offer and its answer never
-   * came back. The pages and the push that follow then reconcile each row three-way against exactly
-   * what main took of it, so neither a change main made since nor one the node made since is lost
-   * or reverted unseen. Returns main's answer for each id it was asked about, null for one it has
-   * never seen, so the ids the pages did not settle are reconciled from it without asking again.
+   * Before anything of {@code type} is reconciled, asks main which version of each row the node
+   * changed it took from this box after the version the node last heard from main, and adopts it as
+   * the row's merge base: main took the node's offer and its answer never came back. Only those
+   * versions cross, almost always none. The pages and the push that follow then reconcile each row
+   * three-way against exactly what main took of it, so neither a change main made since nor one the
+   * node made since is lost or reverted unseen.
    */
-  private Map<String, SyncWire.Entry> askAboutDirty(String type, LocalReplica local) {
-    var answers = new LinkedHashMap<String, SyncWire.Entry>();
+  private void acknowledgeLostAnswers(String type, LocalReplica local) {
     var dirty = List.copyOf(local.dirtyIds());
     if (dirty.isEmpty()) {
-      return answers;
+      return;
     }
-    var bases = new LinkedHashMap<String, String>();
+    var heard = new LinkedHashMap<String, String>();
     dirty.forEach(
         id -> {
-          var base = local.baseRev(id);
-          if (base != null) {
-            bases.put(id, base);
+          var rev = local.lastHeardRev(id);
+          if (rev != null) {
+            heard.put(id, rev);
           }
         });
-    need(
+    needAccepted(
         type,
         dirty,
-        bases,
+        heard,
         (consumed, page) -> {
-          consumed.forEach(id -> answers.put(id, null));
-          page.entries().forEach(entry -> answers.put(entry.id(), entry));
-          fetchContent(type, page.entries());
           fetchContent(type, page.accepted());
-          var erased = new HashSet<String>();
-          page.entries().stream().filter(SyncWire.Entry::erased).forEach(e -> erased.add(e.id()));
           for (var entry : page.accepted()) {
-            if (!erased.contains(entry.id())) {
-              Actor.run(
-                  Actor.main(entry.author()),
-                  () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
-            }
+            Actor.run(
+                Actor.main(entry.author()),
+                () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
           }
         });
-    return answers;
   }
 
   /**
@@ -498,32 +482,48 @@ public final class PagedSyncSession implements SyncSession {
    */
   private void need(
       String type, List<String> ids, BiConsumer<List<String>, SyncWire.Page> onAnswer) {
-    need(type, ids, Map.of(), onAnswer);
+    paged(type, ids, SyncWire::encodedLength, asked -> new SyncWire.Need(type, asked), onAnswer);
   }
 
   /**
-   * As {@link #need(String, List, BiConsumer)}, naming for each id the base this node holds of it,
-   * {@code bases}, so main can say which version it took from this box after that base.
+   * Asks main, as {@link #need(String, List, BiConsumer)} does, only which version of each of
+   * {@code ids} it took from this box after the version this box last heard of it, {@code heard}.
    */
-  private void need(
+  private void needAccepted(
       String type,
       List<String> ids,
-      Map<String, String> bases,
+      Map<String, String> heard,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    paged(
+        type,
+        ids,
+        id ->
+            SyncWire.encodedLength(id)
+                + (heard.containsKey(id)
+                    ? SyncWire.encodedLength(id) + SyncWire.encodedLength(heard.get(id))
+                    : 0),
+        asked -> {
+          var named = new LinkedHashMap<String, String>();
+          asked.stream().filter(heard::containsKey).forEach(id -> named.put(id, heard.get(id)));
+          return SyncWire.Need.accepted(type, asked, named);
+        },
+        onAnswer);
+  }
+
+  /**
+   * Asks main about {@code ids} as many per request as the frame admits, each weighing {@code
+   * weight}, continuing from wherever main stopped consuming.
+   */
+  private void paged(
+      String type,
+      List<String> ids,
+      ToIntFunction<String> weight,
+      Function<List<String>, SyncWire.Need> request,
       BiConsumer<List<String>, SyncWire.Page> onAnswer) {
     var offset = 0;
     while (offset < ids.size()) {
-      var asked =
-          fitting(
-              ids,
-              offset,
-              id ->
-                  SyncWire.encodedLength(id)
-                      + (bases.containsKey(id)
-                          ? SyncWire.encodedLength(id) + SyncWire.encodedLength(bases.get(id))
-                          : 0));
-      var basesAsked = new LinkedHashMap<String, String>();
-      asked.stream().filter(bases::containsKey).forEach(id -> basesAsked.put(id, bases.get(id)));
-      var answer = page(new SyncWire.Need(type, asked, basesAsked), type);
+      var asked = fitting(ids, offset, weight);
+      var answer = page(request.apply(asked), type);
       if (answer.next() <= 0) {
         throw new SyncTransportException(
             "protocol", type + ": main consumed none of " + asked.size() + " needed ids", null);

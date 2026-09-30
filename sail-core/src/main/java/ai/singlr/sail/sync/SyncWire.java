@@ -80,6 +80,7 @@ public final class SyncWire {
   private static final String OFFERS = "commits";
   private static final String ENTRIES = "entries";
   private static final String BASES = "bases";
+  private static final String ACCEPTED_ONLY = "accepted_only";
   private static final String NEXT = "next";
   private static final String DONE = "done";
   private static final String MAX_SEQ = "maxSeq";
@@ -214,14 +215,23 @@ public final class SyncWire {
   public record Pull(String type, long since, int limit) implements Request {}
 
   /** Ask for main's current rows of the given ids — what the node changed locally. */
-  public record Need(String type, List<String> ids, Map<String, String> bases) implements Request {
+  public record Need(String type, List<String> ids, Map<String, String> bases, boolean acceptedOnly)
+      implements Request {
     public Need {
       bases = Map.copyOf(bases);
     }
 
-    /** A need naming no base the node holds: main's answer then names nothing it took. */
+    /** Main's current rows of {@code ids}. */
     public Need(String type, List<String> ids) {
-      this(type, ids, Map.of());
+      this(type, ids, Map.of(), false);
+    }
+
+    /**
+     * Only what main took from this box of each of {@code ids} after the version of it this box
+     * last heard from main, {@code heard}: the question a node asks first, before any page.
+     */
+    public static Need accepted(String type, List<String> ids, Map<String, String> heard) {
+      return new Need(type, ids, heard, true);
     }
   }
 
@@ -607,6 +617,9 @@ public final class SyncWire {
         if (!need.bases().isEmpty()) {
           map.put(BASES, new LinkedHashMap<String, Object>(need.bases()));
         }
+        if (need.acceptedOnly()) {
+          map.put(ACCEPTED_ONLY, true);
+        }
       }
       case Push push -> {
         map.put(OP, OP_PUSH);
@@ -681,7 +694,8 @@ public final class SyncWire {
               string(map, BOX));
       case OP_HEADS -> new Heads();
       case OP_PULL -> new Pull(string(map, TYPE), longValue(map, SINCE), intValue(map, LIMIT));
-      case OP_NEED -> new Need(string(map, TYPE), strings(map, IDS), bases(map));
+      case OP_NEED ->
+          new Need(string(map, TYPE), strings(map, IDS), bases(map), bool(map, ACCEPTED_ONLY));
       case OP_PUSH ->
           new Push(string(map, TYPE), maps(map, OFFERS).stream().map(SyncWire::offer).toList());
       case OP_FETCH_FDES -> new FetchFdes();

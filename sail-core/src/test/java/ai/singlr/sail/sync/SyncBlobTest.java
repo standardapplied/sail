@@ -686,7 +686,7 @@ class SyncBlobTest {
         var report =
             link.reconcile("spec", SyncedEntities.replicas(node.db, "node", "node").get("spec"));
         assertEquals(0, link.count("pull"));
-        assertEquals(1, link.count("need"));
+        assertEquals(2, link.count("need"), "what main took, then main's rows");
         assertEquals(1, report.report().conflicts());
         assertEquals("theirs from need", new BlobStore(node.db).text(remoteHash));
       }

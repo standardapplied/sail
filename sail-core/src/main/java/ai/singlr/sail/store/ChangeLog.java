@@ -511,6 +511,30 @@ public final class ChangeLog {
         Kind.TOMBSTONE.wire());
   }
 
+  /**
+   * The latest entry of {@code entityId} carrying {@code rev}. A rev can recur — its counter
+   * restarts when a row is deleted and made again with the same content — so the latest occurrence
+   * is the one a box that last heard {@code rev} can have heard.
+   */
+  public Optional<Entry> latestAt(String entityType, String entityId, String rev) {
+    return db.queryOne(
+        SELECT + " WHERE entity_type = ? AND entity_id = ? AND rev = ? ORDER BY seq DESC LIMIT 1",
+        ChangeLog::map,
+        entityType,
+        entityId,
+        rev);
+  }
+
+  /** The rev of the latest version of {@code entityId} this box took from a sync, if any. */
+  public Optional<String> latestHeard(String entityType, String entityId) {
+    return db.queryOne(
+        "SELECT rev FROM change_log WHERE entity_type = ? AND entity_id = ? AND origin = 'sync'"
+            + " ORDER BY seq DESC LIMIT 1",
+        row -> row.text(0),
+        entityType,
+        entityId);
+  }
+
   private static final String COLUMNS =
       "seq, entity_type, entity_id, rev, actor, recorded_at, origin, deleted, snapshot, peer, kind";
   private static final String SELECT = "SELECT " + COLUMNS + " FROM change_log";

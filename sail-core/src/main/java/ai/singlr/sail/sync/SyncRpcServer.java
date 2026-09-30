@@ -532,11 +532,16 @@ public final class SyncRpcServer {
         consumed++;
         continue;
       }
-      var entry = entryOf(main, id, 0);
+      var state = main.state(id);
+      var entry = need.acceptedOnly() ? null : entryOf(id, state, 0);
       var took =
-          main.acceptedFrom(id, principal.peer(), need.bases().get(id))
-              .map(state -> entryOf(id, state, 0));
-      var length = SyncWire.encodedLength(entry) + took.map(SyncWire::encodedLength).orElse(0);
+          state.kind() == ChangeLog.Kind.ERASURE
+              ? Optional.<SyncWire.Entry>empty()
+              : main.acceptedFrom(id, principal.peer(), need.bases().get(id))
+                  .map(version -> entryOf(id, version, 0));
+      var length =
+          (entry == null ? 0 : SyncWire.encodedLength(entry))
+              + took.map(SyncWire::encodedLength).orElse(0);
       if (!budget.canEverAdmit(length)) {
         return oversize(id, length, frame);
       }
@@ -544,7 +549,9 @@ public final class SyncRpcServer {
         break;
       }
       budget.add(length);
-      entries.add(entry);
+      if (entry != null) {
+        entries.add(entry);
+      }
       took.ifPresent(accepted::add);
       consumed++;
     }
