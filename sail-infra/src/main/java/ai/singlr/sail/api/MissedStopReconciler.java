@@ -267,17 +267,21 @@ public final class MissedStopReconciler implements AutoCloseable {
     for (var run : sessionStore.running()) {
       if (!run.ownedBy(node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
-          || reconciledBySpec(run, handledThisSweep)
-          || !gone(run)) {
+          || reconciledBySpec(run, handledThisSweep)) {
         continue;
       }
-      if (finish(
-          run,
-          Strings.isBlank(run.specId()) ? null : stopCoverage(run.specId(), run).exitCode(),
-          Strings.isBlank(run.specId())
-              ? "session with no spec whose recorded process is gone"
-              : "running with its recorded process gone")) {
-        released++;
+      try {
+        if (gone(run)
+            && finish(
+                run,
+                Strings.isBlank(run.specId()) ? null : stopCoverage(run.specId(), run).exitCode(),
+                Strings.isBlank(run.specId())
+                    ? "session with no spec whose recorded process is gone"
+                    : "running with its recorded process gone")) {
+          released++;
+        }
+      } catch (Exception e) {
+        System.err.println("  [reconcile] could not probe run " + run.id() + ": " + e.getMessage());
       }
     }
     return released;
@@ -322,18 +326,13 @@ public final class MissedStopReconciler implements AutoCloseable {
   /**
    * Whether the run's recorded process is gone: its identity probes not running. The probe reads
    * the run-scoped pid file before the systemd unit, so it covers foreground sessions (which launch
-   * no service) and background sessions that crashed before their pid was persisted alike. A probe
-   * that fails — incus unreachable, a command lost while incusd restarts — reads as running: the
-   * sweep prefers leaving a run in place over finishing, or replaying the stop of, one it could not
-   * observe. The one liveness question every pass asks.
+   * no service) and background sessions that crashed before their pid was persisted alike. The one
+   * liveness question every pass asks. A probe that fails — incus unreachable, a command lost while
+   * incusd restarts — propagates, and the pass logs it and leaves that run for the next sweep: a
+   * run the sweep could not observe is never finished, nor its stop replayed.
    */
-  private boolean gone(RunStore.RunRow run) {
-    try {
-      return !unitProbe.active(run.project(), run.id(), Objects.toString(run.unit(), ""));
-    } catch (Exception e) {
-      System.err.println("  [reconcile] could not probe run " + run.id() + ": " + e.getMessage());
-      return false;
-    }
+  private boolean gone(RunStore.RunRow run) throws Exception {
+    return !unitProbe.active(run.project(), run.id(), Objects.toString(run.unit(), ""));
   }
 
   /**
