@@ -23,12 +23,8 @@ import java.util.Set;
  * last-write-wins).
  *
  * <p>A {@code null} snapshot means the entity is deleted/absent on that side, so delete-vs-edit is
- * detected as a conflict rather than a silent resurrection or silent deletion. A {@code null} base
- * with both sides present means their common ancestor is unknown — main took the row and its answer
- * was lost, or both sides made it — so which side changed a field cannot be told: every work field
- * the two hold differently, a value against none included, is a conflict, and only a latest-wins
- * field merges. Stateless and side-effect-free: the engine (brick 3b) supplies the three snapshots
- * and acts on the result.
+ * detected as a conflict rather than a silent resurrection or silent deletion. Stateless and
+ * side-effect-free: the engine (brick 3b) supplies the three snapshots and acts on the result.
  */
 public final class ConflictDetector {
 
@@ -92,9 +88,9 @@ public final class ConflictDetector {
       return new Converged();
     }
 
-    var safeBase = Objects.requireNonNullElse(base, local);
-    var localChanged = changedFields(base == null ? remote : base, local);
-    var remoteChanged = base == null ? localChanged : changedFields(base, remote);
+    var safeBase = base == null ? Map.<String, Object>of() : base;
+    var localChanged = changedFields(safeBase, local);
+    var remoteChanged = changedFields(safeBase, remote);
 
     if (remoteChanged.isEmpty()) {
       return new KeepLocal();

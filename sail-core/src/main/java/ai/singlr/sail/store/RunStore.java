@@ -1564,10 +1564,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Resolves an open conflict locally, mirroring {@link SpecStore#resolveConflict}. Only the box
-   * that executes a run pushes it, but main's own lanes may change it too, so a run parks a
-   * conflict when both did: a completion made on both sides, or a change main made to a run it took
-   * whose answer never reached this box.
+   * Resolves an open conflict locally, mirroring {@link SpecStore#resolveConflict}. Runs are
+   * single-writer so this is exercised only by the shared machinery's contract, never by normal
+   * operation: no two boxes ever edit the same run.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {

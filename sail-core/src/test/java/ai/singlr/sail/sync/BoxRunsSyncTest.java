@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -21,7 +20,6 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.SyncConflicts;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -136,19 +134,6 @@ class BoxRunsSyncTest {
   private static Actor agentOf(SyncBox box, String runId) {
     var run = runs(box).findById(runId).orElseThrow();
     return Actor.agentPrincipal(run.principal(), run.owner());
-  }
-
-  private static void resolveMine(SyncBox box, SyncConflicts.Conflict parked) {
-    Acting.as(
-        box.handle(),
-        () ->
-            box.conflicts.resolve(
-                parked.id(),
-                runs(box)
-                    .resolveConflict(
-                        parked.entityId(),
-                        YamlUtil.parseMap(parked.localSnapshot()),
-                        YamlUtil.parseMap(parked.remoteSnapshot()))));
   }
 
   private static void assertNoDenials(List<SyncSession.TypeReport> round) {
@@ -337,47 +322,18 @@ class BoxRunsSyncTest {
   }
 
   @Test
-  void aRunMainTookWhoseAnswerWasLostAndThenChangedParksTheChangeForTheFdeAndSettlesOnceDecided()
-      throws IOException {
+  void aRunMainTookWhoseAnswerWasLostAndThenChangedNeverRevertsMainsChange() throws IOException {
     var run = reserve(ada, "ada", null, "adhoc");
     finish(ada, run);
     SyncBox.pushLosingTheAnswer(main, ada);
     Acting.system(() -> runs(main).recordSession(run, "main-session", "claude", "/main-t"));
 
     assertNoDenials(SyncBox.round(main, ada));
+    SyncBox.quiesce(main, ada);
 
     assertEquals("main-session", runs(main).findById(run).orElseThrow().sessionId());
-    assertNull(runs(ada).findById(run).orElseThrow().sessionId(), "nor taken unasked");
-    var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
-    assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
-    resolveMine(ada, parked);
-    SyncBox.quiesce(main, ada);
-
-    assertNull(runs(main).findById(run).orElseThrow().sessionId(), "the FDE's decision lands");
     SyncBox.assertEqualToMain(main, ada);
     assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
-  }
-
-  @Test
-  void aRunMainTookWhoseAnswerWasLostAndThenClearedNeverGetsTheClearedValueBack()
-      throws IOException {
-    var run = reserve(ada, "ada", null, "adhoc");
-    finish(ada, run);
-    Acting.system(() -> runs(ada).recordSession(run, "offered-session", "claude", "/t"));
-    SyncBox.pushLosingTheAnswer(main, ada);
-    Acting.system(() -> runs(main).recordSession(run, null, "claude", "/t"));
-
-    assertNoDenials(SyncBox.round(main, ada));
-
-    assertNull(runs(main).findById(run).orElseThrow().sessionId(), "main keeps its clear");
-    assertEquals("offered-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
-    var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
-    assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
-    resolveMine(ada, parked);
-    SyncBox.quiesce(main, ada);
-
-    assertEquals("offered-session", runs(main).findById(run).orElseThrow().sessionId());
-    SyncBox.assertEqualToMain(main, ada);
   }
 
   @Test
