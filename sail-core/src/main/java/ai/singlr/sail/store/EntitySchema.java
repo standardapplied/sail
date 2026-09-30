@@ -18,8 +18,8 @@ import java.util.Set;
  * ai.singlr.sail.identity.Actor}, never the row.
  *
  * <p>Implemented by the six mutable synced stores that ride the journal: specs, rooms, runs,
- * reviews, files and projects, whose rename's tombstone carries a resurrection-blocking mark.
- * Messages, which never change, keep their own commit and do not ride it.
+ * reviews, files and projects, whose rename's tombstone carries a resurrection-blocking mark
+ * ({@link #marks}). Messages, which never change, keep their own commit and do not ride it.
  */
 public interface EntitySchema {
 
@@ -70,15 +70,6 @@ public interface EntitySchema {
    */
   default Map<String, Object> marks(Map<String, Object> snapshot) {
     return Map.of();
-  }
-
-  /**
-   * Whether {@code snapshot}, a version a replica reports, stands for a deletion: null always does,
-   * and so do the marks of a tombstone, which cross the wire in place of it ({@link
-   * Snapshots#isDeletionMark}). The journal adopts one as a tombstone recording those marks.
-   */
-  default boolean isDeletion(Map<String, Object> snapshot) {
-    return snapshot == null || Snapshots.isDeletionMark(snapshot);
   }
 
   /**

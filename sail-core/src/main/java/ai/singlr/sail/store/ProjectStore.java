@@ -68,7 +68,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           writeRow(name, canonical, author());
-          journal.recordRevision(name, "local", false);
+          journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -79,7 +79,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           if (findByName(name).isEmpty()) {
             return false;
           }
-          journal.recordRevision(name, "local", true);
+          journal.recordRevision(name, ChangeLog.Entry.LOCAL, true);
           eraseRow(name);
           return true;
         });
@@ -103,10 +103,10 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           if (findByName(renamed).isPresent()) {
             throw new IllegalStateException("A project named '" + renamed + "' already exists.");
           }
-          journal.recordTombstone(old, "local", BLOCKING);
+          journal.recordTombstone(old, ChangeLog.Entry.LOCAL, BLOCKING);
           eraseRow(old);
           writeRow(renamed, canonical, author());
-          journal.recordRevision(renamed, "local", false);
+          journal.recordRevision(renamed, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -128,10 +128,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     return journal.comparableSnapshot(id);
   }
 
-  /**
-   * As {@link #comparableSnapshot}, but a deleted name whose tombstone blocks resurrection reports
-   * the block, under its deleter, rather than absence ({@link RevisionJournal#currentForSync}).
-   */
   @Override
   public Map<String, Object> currentForSync(String id) {
     return journal.currentForSync(id);
@@ -195,6 +191,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
   }
@@ -223,16 +224,6 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    */
   String recordRevision(String id, String origin, boolean deleted) {
     return journal.recordRevision(id, origin, deleted);
-  }
-
-  /**
-   * Whether this box holds a resurrection-blocking tombstone for {@code name}: a rename recorded
-   * its old identity's deletion so a stale peer still holding the name adopts the deletion rather
-   * than pushing its surviving copy back. Only a rename's tombstone blocks; a plain delete does
-   * not.
-   */
-  public boolean blocksResurrection(String name) {
-    return Snapshots.isDeletionMark(currentForSync(name));
   }
 
   private static String author() {

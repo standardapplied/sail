@@ -559,8 +559,7 @@ class ErasureSyncTest {
   }
 
   private void assertConverged(Actor as) {
-    SyncBox.quiesce(main, node.syncsAs(as));
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node.syncsAs(as));
   }
 
   private Map<String, StoreReplica> replicas() {

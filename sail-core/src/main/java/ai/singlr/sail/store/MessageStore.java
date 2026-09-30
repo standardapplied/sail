@@ -103,7 +103,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var snapshot = snapshot(row);
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
-          journal(row, rev, "local", snapshot);
+          journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);
           return findById(id).orElseThrow();
         });
   }
@@ -283,6 +283,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   public Optional<MessageRow> findById(String id) {
     return db.queryOne(
         "SELECT " + COLUMNS + " FROM room_messages WHERE id = ?", MessageStore::map, id);
+  }
+
+  @Override
+  public Set<String> latestWinsFields() {
+    return Set.of();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return comparableSnapshot(id);
   }
 
   @Override

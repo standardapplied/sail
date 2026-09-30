@@ -229,7 +229,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.id(),
               now);
           setHashes(spec.id(), "", "");
-          recordRevision(spec.id(), "local", false);
+          recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -328,7 +328,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               renamed,
               author(),
               old);
-          ids.forEach(id -> recordRevision(id, "local", false));
+          ids.forEach(id -> recordRevision(id, ChangeLog.Entry.LOCAL, false));
         });
   }
 
@@ -359,7 +359,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", spec.id());
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
-          recordRevision(spec.id(), "local", false);
+          recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -384,7 +384,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString(),
               author(),
               id);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -411,7 +411,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           if (db.changes() == 0) {
             return false;
           }
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;
         });
   }
@@ -440,7 +440,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               id);
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
           insertRepos(id, repos);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -448,7 +448,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           stampAuthor(id);
-          recordRevision(id, "local", true);
+          recordRevision(id, ChangeLog.Entry.LOCAL, true);
           db.execute("DELETE FROM specs WHERE id = ?", id);
         });
   }
@@ -470,7 +470,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               now);
           setHashes(specId, body, plan);
           stampAuthor(specId);
-          recordRevision(specId, "local", false);
+          recordRevision(specId, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -982,6 +982,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return journal.acknowledge(id, accepted, rev);
+  }
+
+  @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
   }
 
   @Override

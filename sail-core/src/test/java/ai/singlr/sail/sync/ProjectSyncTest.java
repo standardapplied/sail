@@ -17,6 +17,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
@@ -264,8 +265,10 @@ class ProjectSyncTest {
 
     engine.reconcile(node.replica, racing);
 
-    assertTrue(node.projects.blocksResurrection("p"), "the rename's block survives on the node");
-    assertTrue(main.projects.blocksResurrection("p"), "and reaches main");
+    assertTrue(
+        Snapshots.isDeletionMark(node.projects.currentForSync("p")),
+        "the rename's block survives on the node");
+    assertTrue(Snapshots.isDeletionMark(main.projects.currentForSync("p")), "and reaches main");
     other.projects.upsert("p", "name: p\n");
     sync(other);
     assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");
@@ -282,7 +285,9 @@ class ProjectSyncTest {
     try (var mainBox = opened(main);
         var nodeBox = opened(node)) {
       SyncBox.pushLosingTheAnswer(mainBox, nodeBox, "project");
-      assertFalse(main.projects.blocksResurrection("p"), "main took a plain deletion");
+      assertFalse(
+          Snapshots.isDeletionMark(main.projects.currentForSync("p")),
+          "main took a plain deletion");
       Acting.as(
           node.id,
           () -> {
@@ -293,7 +298,9 @@ class ProjectSyncTest {
       SyncBox.quiesce(mainBox, nodeBox);
     }
 
-    assertTrue(main.projects.blocksResurrection("p"), "the later rename's block reaches main");
+    assertTrue(
+        Snapshots.isDeletionMark(main.projects.currentForSync("p")),
+        "the later rename's block reaches main");
     other.projects.upsert("p", "name: p\n");
     sync(other);
     assertTrue(main.projects.findByName("p").isEmpty(), "a stale copy never resurrects p");

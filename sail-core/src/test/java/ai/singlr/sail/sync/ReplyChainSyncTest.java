@@ -69,8 +69,7 @@ class ReplyChainSyncTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(main, node.syncsAs(Actor.sync("node", Role.ADMIN)));
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node.syncsAs(Actor.sync("node", Role.ADMIN)));
   }
 
   private static void chain(MessageStore messages) {

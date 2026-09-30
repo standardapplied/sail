@@ -668,7 +668,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * Journals a fresh revision of the whole aggregate for a local mutation, within its transaction.
    */
   private void journal(String reviewId) {
-    revisions.recordRevision(reviewId, "local", false);
+    revisions.recordRevision(reviewId, ChangeLog.Entry.LOCAL, false);
   }
 
   /** Backfills a revision for the one-time legacy data migration; delegates to the journal. */
@@ -725,6 +725,16 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return revisions.acknowledge(id, accepted, rev);
+  }
+
+  @Override
+  public Set<String> latestWinsFields() {
+    return revisions.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return revisions.currentForSync(id);
   }
 
   @Override

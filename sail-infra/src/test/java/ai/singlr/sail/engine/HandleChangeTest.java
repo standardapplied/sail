@@ -240,8 +240,7 @@ class HandleChangeTest {
       assertEquals(List.of(), apply(node("ada"), node("uday")));
       assertEquals("completed", new RunStore(main.db).findById(live).orElseThrow().status());
       assertEquals("ada", runs.findById(live).orElseThrow().node());
-      SyncBox.quiesce(main, ada.syncsAs(UDAY));
-      SyncBox.assertEqualToMain(main, ada);
+      SyncBox.assertConverged(main, ada.syncsAs(UDAY));
     }
   }
 

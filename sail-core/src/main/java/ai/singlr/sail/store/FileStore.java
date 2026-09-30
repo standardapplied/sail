@@ -104,7 +104,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           writeRow(row);
-          journal.recordRevision(idOf(row.project(), row.path()), "local", false);
+          journal.recordRevision(idOf(row.project(), row.path()), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -116,7 +116,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
           if (row == null) {
             return false;
           }
-          journal.recordRevision(idOf(project, path), "local", true);
+          journal.recordRevision(idOf(project, path), ChangeLog.Entry.LOCAL, true);
           db.execute("DELETE FROM project_files WHERE id = ?", idOf(project, path));
           return true;
         });
@@ -282,6 +282,16 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return journal.acknowledge(id, accepted, rev);
+  }
+
+  @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
   }
 
   @Override

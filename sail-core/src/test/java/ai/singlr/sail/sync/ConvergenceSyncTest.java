@@ -26,9 +26,11 @@ import ai.singlr.sail.store.Revisions;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -206,7 +208,7 @@ class ConvergenceSyncTest {
 
     final String type;
     final String id;
-    final String table;
+    final String legacyTable;
     final String first;
     final String second;
     final String third;
@@ -214,7 +216,7 @@ class ConvergenceSyncTest {
     Kind(String type, String id, String first, String second, String third) {
       this.type = type;
       this.id = id;
-      this.table = type.equals("file") ? "project_files" : type + "s";
+      this.legacyTable = type.equals("file") ? "project_files" : type + "s";
       this.first = first;
       this.second = second;
       this.third = third;
@@ -612,9 +614,15 @@ class ConvergenceSyncTest {
     assertConverged();
   }
 
+  /**
+   * The state 0.46.2 left: its {@code --theirs} minted a revision of the node's own for main's
+   * side, under main's author. The upgrade's checkpoint reset ({@link
+   * SchemaManager#NODES_HEAR_EVERY_HEAD_AGAIN}, proven wired by {@code SchemaManagerTest}) is run
+   * by hand here.
+   */
   @ParameterizedTest
   @EnumSource(Kind.class)
-  void aResolveTakingMainsSideUnderAnEarlierReleaseConvergesOnceTheNodeHearsEveryHeadAgain(
+  void aResolveTakingMainsSideUnderAnEarlierReleaseConvergesOnceTheUpgradeResetsItsCheckpoint(
       Kind kind) {
     kind.make(main, "bob", kind.first);
     SyncBox.quiesce(main, ada, bob);
@@ -624,10 +632,9 @@ class ConvergenceSyncTest {
     SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.THEIRS);
     var head = new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow();
     var minted = Revisions.next(head.rev(), "minted by the node");
+    bob.db.execute("UPDATE change_log SET rev = ? WHERE seq = ?", minted, head.seq());
     bob.db.execute(
-        "UPDATE change_log SET rev = ?, actor = 'main' WHERE seq = ?", minted, head.seq());
-    bob.db.execute(
-        "UPDATE %s SET rev = ?, base_rev = ? WHERE rev = ?".formatted(kind.table),
+        "UPDATE %s SET rev = ?, base_rev = ? WHERE rev = ?".formatted(kind.legacyTable),
         minted,
         minted,
         head.rev());
@@ -666,12 +673,12 @@ class ConvergenceSyncTest {
             actor = 'main'
         WHERE entity_type = 'project' AND entity_id = 'p'""");
     SyncBox.round(main, bob);
-    assertFalse(new ProjectStore(bob.db).blocksResurrection("p"));
+    assertFalse(Snapshots.isDeletionMark(new ProjectStore(bob.db).currentForSync("p")));
 
     bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
 
     assertConverged();
-    assertTrue(new ProjectStore(bob.db).blocksResurrection("p"));
+    assertTrue(Snapshots.isDeletionMark(new ProjectStore(bob.db).currentForSync("p")));
   }
 
   @Test
@@ -725,6 +732,75 @@ class ConvergenceSyncTest {
     Acting.system(() -> new ProjectStore(ada.db).rename("p", "q", "name: q\n"));
 
     assertConverged();
+  }
+
+  @ParameterizedTest
+  @EnumSource(Kind.class)
+  void aDeleteRestoreAndDeleteOfflineOnANodeReachesMainAndIsNeverUndone(Kind kind) {
+    kind.make(main, "bob", kind.first);
+    SyncBox.quiesce(main, ada, bob);
+    kind.delete(bob, "bob");
+    kind.restore(bob, "bob", kind.first);
+    kind.delete(bob, "bob");
+
+    SyncBox.round(main, bob);
+
+    assertNull(kind.value(bob), "bob's delete was undone by a pull");
+    assertNull(kind.value(main), "bob's delete never reached main");
+    assertConverged();
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"name: p\n", "name: p\nback: true\n"})
+  void aReCreateAfterADeleteWhoseAnswerWasLostReachesMainWithNoConflict(String recreated)
+      throws IOException {
+    upsertProject(bob, "bob", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    Acting.as("bob", () -> new ProjectStore(bob.db).delete("p"));
+    SyncBox.pushLosingTheAnswer(main, bob, "project");
+    assertNull(definition(main, "p"), "main took the delete");
+    upsertProject(bob, "bob", "p", recreated);
+
+    SyncBox.round(main, bob);
+
+    assertEquals(List.of(), bob.conflicts.pending(), "bob conflicts with its own delete");
+    assertEquals(recreated, definition(bob, "p"), "bob's re-create was deleted");
+    assertConverged();
+    assertEquals(recreated, definition(main, "p"));
+  }
+
+  @Test
+  void aNodeCannotForgeTheAuthorOfARenamesTombstoneOnMain() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    ada.db.execute(
+        """
+        UPDATE change_log SET actor = 'root'
+        WHERE entity_type = 'project' AND entity_id = 'p' AND kind = 'tombstone'""");
+
+    var reports = SyncBox.round(main, ada);
+
+    assertEquals(1, reports.stream().mapToInt(r -> r.denials().size()).sum(), reports.toString());
+    var mains = new ChangeLog(main.db).head("project", "p").orElseThrow();
+    assertEquals(ChangeLog.Kind.REVISION, mains.kind(), "main took nothing of it");
+    assertEquals("ada", mains.actor());
+  }
+
+  @Test
+  void twoBoxesMintingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
+    upsertProject(bob, "bob", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    Acting.as("bob", () -> new ProjectStore(main.db).upsert("p", "name: p\nv: 2\n"));
+    upsertProject(bob, "bob", "p", "name: p\nv: 2\n");
+    assertEquals(
+        new ChangeLog(main.db).head("project", "p").orElseThrow().rev(),
+        new ChangeLog(bob.db).head("project", "p").orElseThrow().rev(),
+        "the same rev minted on both");
+
+    assertConverged();
+
+    assertTrue(new ProjectStore(bob.db).dirtyIds().isEmpty(), "bob still offers p");
   }
 
   @Test

@@ -295,7 +295,7 @@ class SchemaManagerTest {
   }
 
   @Test
-  void aNodeUpgradedFromARelaseThatKeptNoOffersHearsEveryHeadAgainAndKeepsNoOffer() {
+  void aNodeUpgradedFromAReleaseThatKeptNoOffersHearsEveryHeadAgainAndKeepsNoOffer() {
     stageAtBaseline();
     var prior = migrationIndex("CREATE TABLE sync_offers");
     db.execute("PRAGMA foreign_keys = OFF");

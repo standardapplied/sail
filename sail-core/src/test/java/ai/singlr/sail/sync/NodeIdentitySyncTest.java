@@ -135,8 +135,7 @@ class NodeIdentitySyncTest {
     assertTrue(ada.specs.findById("later").isEmpty(), "nothing is adopted");
     assertEquals(SpecStatus.PENDING, main.specs.findById("mine").orElseThrow().status());
 
-    SyncBox.quiesce(main, ada.syncsAs(ADA));
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada.syncsAs(ADA));
     assertTrue(new RunStore(main.db).findById(finished).isPresent(), "once they agree, it lands");
   }
 
@@ -167,8 +166,7 @@ class NodeIdentitySyncTest {
       assertTrue(failure.getMessage().contains("no sync handle"), failure.getMessage());
     }
     assertEquals(null, new RunStore(ada.db).findById(unstamped).orElseThrow().node());
-    SyncBox.quiesce(main, ada.syncsAs(ADA));
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada.syncsAs(ADA));
     assertEquals("ada", new RunStore(main.db).findById(unstamped).orElseThrow().owner());
   }
 
@@ -186,8 +184,7 @@ class NodeIdentitySyncTest {
     }
     assertEquals("ada", new RunStore(main.db).findById(unstamped).orElseThrow().owner());
     NodeRound.requireAgreed(Optional.empty(), "anyone");
-    SyncBox.quiesce(main, ada.syncsAs(ADA));
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada.syncsAs(ADA));
   }
 
   @Test

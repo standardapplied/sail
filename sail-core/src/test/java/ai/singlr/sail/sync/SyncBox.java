@@ -201,27 +201,27 @@ public final class SyncBox implements AutoCloseable {
    */
   public static void assertEqualToMainBut(
       SyncBox main, SyncBox node, String type, String id, String why) {
-    var mismatches = mismatches(main, node);
-    var known = type + " " + id;
-    if (!mismatches.containsKey(known)) {
-      fail(known + " now equals main's; drop the exception (" + why + ")");
-    }
-    mismatches.remove(known);
-    if (!mismatches.isEmpty()) {
-      fail(node.id + " differs from main:\n" + String.join("\n", mismatches.values()));
-    }
+    assertEqualToMainExcept(main, node, type + " " + id, why, true);
   }
 
   /**
    * As {@link #assertEqualToMainBut} for a scenario whose timing decides whether the one entity
-   * diverges for the reason {@code why} names: every other entity equals main's, and that one
-   * either does or differs for that reason alone. Only for a scenario that races a real writer; one
-   * that stages the race asserts which way it went.
+   * diverges for the reason {@code why} names: every other entity equals main's, and that one is
+   * not checked. Only for a scenario that races a real writer; one that stages the race asserts
+   * which way it went.
    */
   public static void assertEqualToMainUnless(
       SyncBox main, SyncBox node, String type, String id, String why) {
+    assertEqualToMainExcept(main, node, type + " " + id, why, false);
+  }
+
+  private static void assertEqualToMainExcept(
+      SyncBox main, SyncBox node, String known, String why, boolean mustDiverge) {
     var mismatches = mismatches(main, node);
-    mismatches.remove(type + " " + id);
+    if (mustDiverge && !mismatches.containsKey(known)) {
+      fail(known + " now equals main's; drop the exception (" + why + ")");
+    }
+    mismatches.remove(known);
     if (!mismatches.isEmpty()) {
       fail(
           node.id
@@ -307,6 +307,10 @@ public final class SyncBox implements AutoCloseable {
     MERGE
   }
 
+  /**
+   * Settles the conflict parked on {@code id} the way {@code sail conflicts resolve} does with
+   * {@code strategy}, mirroring {@code ConflictOperations.resolve} over the store directly.
+   */
   public static void resolve(SyncBox box, String type, String id, Resolve strategy) {
     var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
     var local = parse(conflict.localSnapshot());
@@ -427,14 +431,7 @@ public final class SyncBox implements AutoCloseable {
   /** Pushes {@code node}'s changes of {@code type}, main takes them, and its answer is lost. */
   public static void pushLosingTheAnswer(SyncBox main, SyncBox node, String type)
       throws IOException {
-    var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, losingTheResults());
-    Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
-    assertThrows(RuntimeException.class, () -> link.reconcile(type, node.replicas().get(type)));
-    try {
-      link.close();
-    } catch (RuntimeException alreadyCut) {
-      assertTrue(alreadyCut.getMessage() != null);
-    }
+    pushCutAt(main, node, type, cutting("results"), out -> out);
   }
 
   /**
@@ -443,8 +440,17 @@ public final class SyncBox implements AutoCloseable {
    */
   public static void pushNeverReachingMain(SyncBox main, SyncBox node, String type)
       throws IOException {
-    var link =
-        connect(main.server(node.session()), node, SyncWire.MAX_FRAME, out -> out, cutting("push"));
+    pushCutAt(main, node, type, out -> out, cutting("push"));
+  }
+
+  private static void pushCutAt(
+      SyncBox main,
+      SyncBox node,
+      String type,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
+    var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, serverOut, nodeOut);
     Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
     assertThrows(RuntimeException.class, () -> link.reconcile(type, node.replicas().get(type)));
     try {
@@ -485,23 +491,9 @@ public final class SyncBox implements AutoCloseable {
             var text = line.toString(StandardCharsets.UTF_8);
             line.reset();
             if (text.contains("\"op\": \"" + op + "\"")) {
-              throw new IOException("the " + op + " never reaches the other side");
+              throw new IOException("the " + op + " is lost on the way");
             }
             out.write(text.getBytes(StandardCharsets.UTF_8));
-          }
-        };
-  }
-
-  private static UnaryOperator<OutputStream> losingTheResults() {
-    return out ->
-        new FilterOutputStream(out) {
-          @Override
-          public void write(byte[] buffer, int offset, int length) throws IOException {
-            if (new String(buffer, offset, length, StandardCharsets.UTF_8)
-                .contains("\"op\": \"results\"")) {
-              throw new IOException("the answer is lost on the way back");
-            }
-            out.write(buffer, offset, length);
           }
         };
   }

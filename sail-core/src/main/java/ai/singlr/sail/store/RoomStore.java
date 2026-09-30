@@ -89,7 +89,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               now,
               now,
               author);
-          journal.recordRevision(room.id(), "local", false);
+          journal.recordRevision(room.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -106,7 +106,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString(),
               author(),
               id);
-          journal.recordRevision(id, "local", false);
+          journal.recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -120,7 +120,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString(),
               author(),
               id);
-          journal.recordRevision(id, "local", false);
+          journal.recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -132,7 +132,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
             return false;
           }
           stampAuthor(id);
-          journal.recordRevision(id, "local", true);
+          journal.recordRevision(id, ChangeLog.Entry.LOCAL, true);
           db.execute("DELETE FROM rooms WHERE id = ?", id);
           return true;
         });
@@ -187,7 +187,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
               room.createdAt(),
               room.updatedAt(),
               author());
-          journal.recordRevision(room.id(), "local", false);
+          journal.recordRevision(room.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -406,6 +406,16 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return journal.acknowledge(id, accepted, rev);
+  }
+
+  @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
   }
 
   @Override

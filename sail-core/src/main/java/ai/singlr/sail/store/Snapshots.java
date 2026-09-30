@@ -39,6 +39,15 @@ public final class Snapshots {
     return snapshot != null && snapshot.keySet().stream().allMatch(ConflictDetector::isMetadata);
   }
 
+  /**
+   * Whether {@code snapshot}, a version a replica reports, stands for a deletion: null always does,
+   * and so does a marked one ({@link #isDeletionMark}), which the journal adopts as a tombstone
+   * recording its marks.
+   */
+  public static boolean isDeletion(Map<String, Object> snapshot) {
+    return snapshot == null || isDeletionMark(snapshot);
+  }
+
   /** The string form of a present value, or null when the key is absent. */
   public static String text(Map<String, Object> map, String key) {
     var value = map.get(key);

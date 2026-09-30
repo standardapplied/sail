@@ -165,35 +165,20 @@ public final class SyncEngine {
     /**
      * Reconciles one entity three-way. A marked deletion ({@link Snapshots#isDeletionMark}) is a
      * deletion the detector reads as absence, except where the marks themselves are what has to
-     * cross: main's, when this box never heard it — a copy written since it heard it is a change of
-     * this box's and is offered, a copy that never heard it is stale and adopts the deletion — and
-     * this box's own, still to reach main. Equal revisions are converged only under one author and
-     * one head: a box that adopted a revision under another release's reading of it takes main's
-     * again. A box that minted main's revision itself, from the same content, never recorded it as
-     * its base; it acknowledges main's as the base of what it holds, and is done offering it.
+     * cross: main's, when this box never heard it ({@link #mainsMarksUnheard}), and this box's own,
+     * still to reach main.
      */
     private Outcome reconcileEntity(
         String id, Map<String, Object> remote, String remoteRev, int redetectsLeft) {
       var base = local.base(id);
       var captured = local.capture(id);
       var localSnap = captured.snapshot();
-      var localRev = captured.rev();
-      var remoteLive = remote;
-      if (Snapshots.isDeletionMark(remote)) {
-        if (base == null) {
-          if (Snapshots.isDeletionMark(localSnap) && Objects.equals(localRev, remoteRev)) {
-            return Outcome.CONVERGED;
-          }
-          if (localSnap != null
-              && !Snapshots.isDeletionMark(localSnap)
-              && Objects.equals(local.lastHeardRev(id), remoteRev)) {
-            return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
-          }
-          return take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
-        }
-        remoteLive = null;
+      if (Snapshots.isDeletionMark(remote) && base == null) {
+        return mainsMarksUnheard(id, captured, remote, remoteRev, redetectsLeft);
       }
-      if (Snapshots.isDeletionMark(localSnap) && Objects.equals(local.lastHeardRev(id), localRev)) {
+      var remoteLive = Snapshots.isDeletionMark(remote) ? null : remote;
+      if (Snapshots.isDeletionMark(localSnap)
+          && Objects.equals(local.lastHeardRev(id), captured.rev())) {
         localSnap = null;
       }
       if (Snapshots.isDeletionMark(localSnap) && base == null) {
@@ -208,23 +193,11 @@ public final class SyncEngine {
         }
         return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
       }
+      var localRev = captured.rev();
       return switch (ConflictDetector.detect(
           base, localSnap, remoteLive, local.latestWinsFields())) {
-        case ConflictDetector.Converged ignored -> {
-          if (remoteRev == null) {
-            yield Outcome.CONVERGED;
-          }
-          if (!Objects.equals(localRev, remoteRev)
-              || !Objects.equals(local.author(id), mainsAuthor(id, remote))) {
-            yield take(id, localRev, remote, remoteRev, Outcome.CONVERGED, redetectsLeft);
-          }
-          if (localSnap != null && base == null) {
-            Actor.run(
-                Actor.main(mainsAuthor(id, remote)),
-                () -> local.acknowledge(id, remote, remoteRev));
-          }
-          yield Outcome.CONVERGED;
-        }
+        case ConflictDetector.Converged ignored ->
+            converged(id, captured, localSnap, remote, remoteRev, redetectsLeft);
         case ConflictDetector.TakeRemote ignored ->
             take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
         case ConflictDetector.KeepLocal ignored ->
@@ -245,6 +218,57 @@ public final class SyncEngine {
           yield Outcome.CONFLICT;
         }
       };
+    }
+
+    /**
+     * Main holds a marked deletion of {@code id} and this box has no base for it: a copy written
+     * since the box heard that deletion is a change of this box's and is offered; a copy that never
+     * heard it is stale and adopts the deletion; the deletion itself, already held, is converged.
+     */
+    private Outcome mainsMarksUnheard(
+        String id,
+        LocalReplica.Captured captured,
+        Map<String, Object> remote,
+        String remoteRev,
+        int redetectsLeft) {
+      var localSnap = captured.snapshot();
+      if (Snapshots.isDeletionMark(localSnap) && Objects.equals(captured.rev(), remoteRev)) {
+        return Outcome.CONVERGED;
+      }
+      if (localSnap != null
+          && !Snapshots.isDeletionMark(localSnap)
+          && Objects.equals(local.lastHeardRev(id), remoteRev)) {
+        return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
+      }
+      return take(id, captured.rev(), remote, remoteRev, Outcome.PULLED, redetectsLeft);
+    }
+
+    /**
+     * Nothing changed on either side since the base. Equal revisions are converged only under one
+     * author and one head: a box that adopted a revision under another release's reading of it
+     * takes main's again. A box that minted main's revision itself, from the same content, never
+     * recorded it as its base; it acknowledges main's as the base of what it holds ({@link
+     * LocalReplica#acknowledge}, nothing when the base is already it), and is done offering it.
+     */
+    private Outcome converged(
+        String id,
+        LocalReplica.Captured captured,
+        Map<String, Object> localSnap,
+        Map<String, Object> remote,
+        String remoteRev,
+        int redetectsLeft) {
+      if (remoteRev == null) {
+        return Outcome.CONVERGED;
+      }
+      if (!Objects.equals(captured.rev(), remoteRev)
+          || !Objects.equals(local.author(id), mainsAuthor(id, remote))) {
+        return take(id, captured.rev(), remote, remoteRev, Outcome.CONVERGED, redetectsLeft);
+      }
+      if (localSnap != null) {
+        Actor.run(
+            Actor.main(mainsAuthor(id, remote)), () -> local.acknowledge(id, remote, remoteRev));
+      }
+      return Outcome.CONVERGED;
     }
 
     /**

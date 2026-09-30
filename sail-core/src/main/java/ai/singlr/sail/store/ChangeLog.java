@@ -99,6 +99,9 @@ public final class ChangeLog {
     /** The origin of every entry a box takes from a sync, main's version as main holds it. */
     public static final String SYNC = "sync";
 
+    /** The origin of a change this box made itself, which a round offers main. */
+    public static final String LOCAL = "local";
+
     /**
      * Whether this entry was heard from main rather than decided here: a tombstone heard from main
      * is main's deletion, its own merge base, never one this box has still to offer.

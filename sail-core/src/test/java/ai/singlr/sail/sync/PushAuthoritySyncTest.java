@@ -96,9 +96,7 @@ class PushAuthoritySyncTest {
   }
 
   private void assertEveryBoxConverged(Actor adaAs) {
-    SyncBox.quiesce(main, ada.syncsAs(adaAs), bob);
-    SyncBox.assertEqualToMain(main, ada);
-    SyncBox.assertEqualToMain(main, bob);
+    SyncBox.assertConverged(main, ada.syncsAs(adaAs), bob);
   }
 
   private void assertEveryBoxConvergedBut(Actor adaAs, String review) {

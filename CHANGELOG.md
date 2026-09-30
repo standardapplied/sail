@@ -17,7 +17,11 @@
   - A change made on a node after an earlier change never reached main is kept, where main's answer about the earlier change used to be taken for the later one and the row reset to it.
   - A conflict the node parks while its own change is on the way to main closes once the FDE sets the clashing field to main's value by hand, instead of staying open until resolved.
   - A node upgrading from 0.46.2 walks main's heads once more: a `--theirs` resolve made under 0.46.2, a revision main recorded with no author, and a rename's deletion adopted without its block all converge on main's version in that round.
-  - Two boxes that minted the same revision of an entity from the same content, such as the scrubbed form of a legacy project, no longer leave the node offering it on every round.
+  - Two boxes that minted the same revision of an entity from the same content, such as the scrubbed form of a legacy project or the same edit made on both, no longer leave the node offering it on every round.
+  - A local write landing during a round that leaves the row as the offer found it no longer parks a stale conflict; a write that changes it is offered next, and one that clashes with main's edit parks a conflict on that field.
+  - A node's delete, restore and delete again while offline reaches main as the delete it is, instead of being undone by the next pull.
+  - A re-create after a delete whose answer from main was lost reaches main, instead of being deleted again or parking a conflict with the node's own delete.
+  - Main records a rename's tombstone under the author it names only when the pusher may write as that author, as for any revision.
 
 - **A box's runs carry the handle main knows it by, and a live run is never rewritten.** Every run a box reserves — dispatch, build, restart, ad-hoc (`sail run`, `agent sweep`, the API), the review pipeline and its fix lane, and room wakes — carries the box's handle as both `node` and `owner`. Runs used to be stamped with a blank node, a stale handle, or the spec's or room's owner, and main then denied them, sometimes mid-run, and the node deleted them.
   - Main's `welcome` names the handle it authenticated the session as. A node whose configured sync handle is blank or another fails its round before offering or adopting anything, naming both handles and the fix.
