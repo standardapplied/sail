@@ -478,7 +478,6 @@ class ErasureSyncTest {
                 "proj",
                 "old",
                 "node",
-                "node",
                 "build",
                 "claude",
                 "b",
@@ -540,8 +539,7 @@ class ErasureSyncTest {
     messages.append(id, owner, "a reply to it", first.id());
     var runs = new RunStore(box.db);
     var run = DateTimeUtils.newId().toString();
-    runs.create(
-        run, "proj", id, "node", "node", "build", "claude", "b", "t", null, null, "/log", "u");
+    runs.create(run, "proj", id, "node", "build", "claude", "b", "t", null, null, "/log", "u");
     runs.complete(run, "completed", 0);
     var reviews = new ReviewStore(box.db);
     var review = reviews.createReview(id, 1);

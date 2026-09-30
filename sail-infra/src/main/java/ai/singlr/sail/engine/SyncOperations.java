@@ -20,6 +20,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -44,11 +45,13 @@ import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs the shared node-to-main round and its existing local projections. The round walks the entity
- * registry in its order — the dependency order, a spec before its runs, a room before its messages
- * — and one type's failure is recorded against that type while the rest of the round, post-steps
- * included, still runs; the first failure is thrown afterwards with the others suppressed, so a
- * broken type never silences the materialization of the ones that succeeded.
+ * Runs the shared node-to-main round and its existing local projections. The round begins by
+ * agreeing with main who this node is and stamping every run main has not taken ({@link
+ * NodeRound#begin}); a node main knows by another handle fails there, having done nothing. It then
+ * walks the entity registry in its order — the dependency order, a spec before its runs, a room
+ * before its messages — and one type's failure is recorded against that type while the rest of the
+ * round, post-steps included, still runs; the first failure is thrown afterwards with the others
+ * suppressed, so a broken type never silences the materialization of the ones that succeeded.
  */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
@@ -107,13 +110,30 @@ public final class SyncOperations {
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
-    var config = configuration.get();
-    var target = resolveMain(request.main(), config);
-    if (target.target() == null) {
-      return new SyncReport(SyncEngine.Report.NONE, target.message());
+    try (var rounds = holdRounds(db)) {
+      var config = configuration.get();
+      var target = resolveMain(request.main(), config);
+      if (target.target() == null) {
+        return new SyncReport(SyncEngine.Report.NONE, target.message());
+      }
+      var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
+      return new SyncReport(round.report(), null, round.types());
     }
-    var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
-    return new SyncReport(round.report(), null, round.types());
+  }
+
+  /**
+   * Holds off every other sync round of the box whose database is {@code db} until closed. Each
+   * round runs under it, from reading the box's identity to its last answer, and a handle change
+   * holds it from asking main which runs it took until they are re-stamped ({@link HandleChange}),
+   * so no run can be offered, or its answer lost, between the two. It is a lock file beside the
+   * database, so a round in the API server and a handle change in the CLI exclude each other; an
+   * in-memory database has no other process to exclude.
+   */
+  public static AutoCloseable holdRounds(Sqlite db) throws IOException {
+    var path = db.path();
+    return path == null
+        ? () -> {}
+        : FileMutex.acquire(path.resolveSibling(path.getFileName() + ".rounds.lock"));
   }
 
   private record Round(
@@ -124,59 +144,84 @@ public final class SyncOperations {
     var specs = new SpecStore(db);
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
-    try (var channel = channels.open(target)) {
-      var boxId = requireBoxId(config);
-      var replicas = SyncedEntities.replicas(db, boxId, Objects.toString(config.handle(), ""));
-      var hello = SyncWire.Hello.of(SailVersion.version(), boxId);
-      return reconcile(channel, hello, replicas, messages, specs, files, projects);
+    try (var channel = channels.open(target);
+        var session = open(channel, config, db)) {
+      var handle = Objects.toString(config.handle(), "");
+      var replicas = SyncedEntities.replicas(db, config.boxId(), handle);
+      return reconcile(session, handle, replicas, messages, specs, files, projects);
     }
   }
 
   private Round reconcile(
-      Channel channel,
-      SyncWire.Hello hello,
+      SyncSession session,
+      String handle,
       Map<String, StoreReplica> replicas,
       MessageStore messages,
       SpecStore specs,
       FileStore files,
       ProjectStore projects)
       throws Exception {
-    try (var session =
-        SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice, db)) {
-      var types = new ArrayList<SyncSession.TypeReport>();
-      var failures = new ArrayList<SyncTransportException>();
-      var knownMessages = messages.syncEntityIds();
-      for (var entity : SyncedEntities.all()) {
-        try {
-          types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
-        } catch (RuntimeException e) {
-          var failure = transportFailure(entity.type(), e);
-          failures.add(failure);
-          types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
-        }
-      }
-      var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
+    NodeRound.begin(session, db, handle);
+    var types = new ArrayList<SyncSession.TypeReport>();
+    var failures = new ArrayList<SyncTransportException>();
+    var knownMessages = messages.syncEntityIds();
+    for (var entity : SyncedEntities.all()) {
       try {
-        reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+        types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
       } catch (RuntimeException e) {
-        failures.add(transportFailure("fde", e));
+        var failure = transportFailure(entity.type(), e);
+        failures.add(failure);
+        types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
       }
-      materialize(files);
-      materializeProjects(projects);
-      reconcileLiveResources(projects, reportFor(types, "project"));
-      var summed =
-          types.stream()
-              .map(SyncSession.TypeReport::report)
-              .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
-      var round = new Round(summed, List.copyOf(types), pulledMessages);
-      notify(round);
-      if (!failures.isEmpty()) {
-        var first = failures.getFirst();
-        failures.stream().skip(1).forEach(first::addSuppressed);
-        throw first;
-      }
-      return round;
     }
+    var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
+    try {
+      reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+    } catch (RuntimeException e) {
+      failures.add(transportFailure("fde", e));
+    }
+    materialize(files);
+    materializeProjects(projects);
+    reconcileLiveResources(projects, reportFor(types, "project"));
+    var summed =
+        types.stream()
+            .map(SyncSession.TypeReport::report)
+            .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+    var round = new Round(summed, List.copyOf(types), pulledMessages);
+    notify(round);
+    if (!failures.isEmpty()) {
+      var first = failures.getFirst();
+      failures.stream().skip(1).forEach(first::addSuppressed);
+      throw first;
+    }
+    return round;
+  }
+
+  /**
+   * Asks the main the node {@code config} syncs to, over one session opened through {@code
+   * channels}, which of this box's runs it took whose answer was lost, and acknowledges them
+   * ({@link NodeRound#acknowledgeHeld}). Nothing is offered, and whose handle main knows this box
+   * by is not checked: a handle change asks it before deciding which runs it may re-stamp. Returns
+   * the runs main holds.
+   */
+  public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
+      throws Exception {
+    try (var channel = channels.open(config.main());
+        var session = open(channel, config, db)) {
+      return NodeRound.acknowledgeHeld(session, db);
+    }
+  }
+
+  /**
+   * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
+   */
+  private static SyncSession open(Channel channel, SyncConfig config, Sqlite db) {
+    return SyncSession.open(
+        channel.reader(),
+        channel.writer(),
+        SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
+        SyncOperations::notice,
+        db);
   }
 
   private static String requireBoxId(SyncConfig config) {

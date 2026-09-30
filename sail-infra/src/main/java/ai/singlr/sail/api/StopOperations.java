@@ -541,11 +541,10 @@ public final class StopOperations {
    * attempt between the check and the write can never lose its spec.
    */
   private boolean isCurrentAttempt(RunStore.RunRow run) {
-    return runStore.listForSpec(run.specId()).stream()
-        .filter(RunStore.RunRow::buildRole)
-        .findFirst()
-        .map(latest -> latest.id().equals(run.id()))
-        .orElse(false);
+    return runStore
+        .latestBuildAttempt(run.specId())
+        .filter(latest -> latest.id().equals(run.id()))
+        .isPresent();
   }
 
   /** The dry-run preview of the live paths' gated cancel: cancelable and still current. */

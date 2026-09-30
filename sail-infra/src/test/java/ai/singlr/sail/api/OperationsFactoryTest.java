@@ -89,7 +89,6 @@ class OperationsFactoryTest {
                   "proj",
                   "auth",
                   "node",
-                  "node",
                   "build",
                   "codex",
                   "agent/auth",

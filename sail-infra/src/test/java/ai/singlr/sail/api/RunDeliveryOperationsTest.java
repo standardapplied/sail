@@ -102,19 +102,7 @@ class RunDeliveryOperationsTest {
         () -> {
           var id = DateTimeUtils.newId().toString();
           return runStore.create(
-              id,
-              "acme",
-              specId,
-              "node-a",
-              "ada",
-              "build",
-              "claude-code",
-              "b",
-              "t",
-              null,
-              null,
-              "l",
-              "u");
+              id, "acme", specId, "ada", "build", "claude-code", "b", "t", null, null, "l", "u");
         });
   }
 
@@ -192,7 +180,6 @@ class RunDeliveryOperationsTest {
             DateTimeUtils.newId().toString(),
             "acme",
             "",
-            "node-a",
             "ada",
             "adhoc",
             "claude-code",

@@ -147,7 +147,6 @@ class PushAuthoritySyncTest {
                     "acme",
                     specId,
                     fde,
-                    fde,
                     "build",
                     "claude-code",
                     "b",

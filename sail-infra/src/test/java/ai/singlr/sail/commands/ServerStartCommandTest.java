@@ -49,7 +49,6 @@ class ServerStartCommandTest {
                   "acme",
                   "auth",
                   "node-a",
-                  "uday",
                   "claude-code",
                   "main",
                   "review it",

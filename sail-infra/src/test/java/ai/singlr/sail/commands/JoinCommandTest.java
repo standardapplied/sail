@@ -10,12 +10,18 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
+import ai.singlr.sail.engine.SyncOperations;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -25,6 +31,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class JoinCommandTest {
+
+  private static final SyncOperations.Channels NO_MAIN =
+      target -> {
+        throw new IOException("a unit test reaches no main");
+      };
 
   private static final String PUB =
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";
@@ -61,7 +72,14 @@ class JoinCommandTest {
 
     var plan =
         JoinCommand.plan(
-            hostConfig, identity(), "sail@maindevbox", "mady", "Mady M", "mady@example.com");
+            hostConfig,
+            dir.resolve("sail.db"),
+            identity(),
+            "sail@maindevbox",
+            "mady",
+            "Mady M",
+            "mady@example.com",
+            NO_MAIN);
 
     assertEquals("sail@maindevbox", plan.target());
     assertEquals("mady", plan.handle());
@@ -77,6 +95,56 @@ class JoinCommandTest {
     assertEquals("10.0.0.1", written.serverIp(), "unrelated host config is preserved");
   }
 
+  private String reservedOn(Sqlite db, String handle) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            new RunStore(db)
+                .reserveDispatch(
+                    id, "p", null, handle, "adhoc", List.of(), "claude-code", "b", "t", "/l", "u"));
+    return id;
+  }
+
+  @Test
+  void joiningStampsEveryRunTheStandaloneBoxMadeWithTheHandleItJoinsAs() throws Exception {
+    var hostConfig = writeHostConfig();
+    var dbPath = dir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      var run = reservedOn(db, null);
+
+      JoinCommand.plan(hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN);
+
+      assertEquals("mady", new RunStore(db).findById(run).orElseThrow().node());
+      assertEquals("mady", new RunStore(db).findById(run).orElseThrow().owner());
+    }
+  }
+
+  @Test
+  void joiningAsAnotherHandleIsRefusedWhileARunMainHoldsUnderTheOldOneIsLive() throws Exception {
+    var hostConfig = dir.resolve("host.yaml");
+    YamlUtil.dumpToFile(
+        BASE.withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box")).toMap(),
+        hostConfig);
+    var dbPath = dir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      var runs = new RunStore(db);
+      var held = reservedOn(db, "ada");
+      Acting.system(() -> runs.applyRevision(held, runs.comparableSnapshot(held), "9-main"));
+
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () ->
+                  JoinCommand.plan(
+                      hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN));
+
+      assertTrue(refused.getMessage().contains(held), refused.getMessage());
+      assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle());
+    }
+  }
+
   @Test
   void planRequiresAnInitializedHost() {
     var missing = dir.resolve("absent.yaml");
@@ -84,7 +152,16 @@ class JoinCommandTest {
     var error =
         assertThrows(
             IllegalStateException.class,
-            () -> JoinCommand.plan(missing, identity(), "sail@main", "mady", null, null));
+            () ->
+                JoinCommand.plan(
+                    missing,
+                    dir.resolve("sail.db"),
+                    identity(),
+                    "sail@main",
+                    "mady",
+                    null,
+                    null,
+                    NO_MAIN));
     assertTrue(error.getMessage().contains("host init"));
   }
 
@@ -94,7 +171,16 @@ class JoinCommandTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> JoinCommand.plan(hostConfig, identity(), "not a target!", "mady", null, null));
+        () ->
+            JoinCommand.plan(
+                hostConfig,
+                dir.resolve("sail.db"),
+                identity(),
+                "not a target!",
+                "mady",
+                null,
+                null,
+                NO_MAIN));
   }
 
   @Test

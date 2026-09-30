@@ -11,10 +11,12 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DaemonSecretInstaller;
+import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.NetworkDetector;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
@@ -135,18 +137,28 @@ public final class HostConfigSetCommand implements Runnable {
       return;
     }
 
-    YamlUtil.dumpToFile(updated.toMap(), hostYamlPath);
+    var stamped =
+        HandleChange.write(
+            hostYamlPath, SailPaths.controlPlaneDb(), hostYaml, updated, SshSyncChannel::open);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("key", key);
       map.put("value", value);
       map.put("status", "updated");
+      map.put("runs_stamped", stamped.size());
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
 
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + key + " = " + value));
+    if (!stamped.isEmpty()) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Stamped "
+                  + stamped.size()
+                  + " run(s) main has not taken with this box's handle.|@"));
+    }
     if (WEBAUTHN_KEYS.contains(key)) {
       System.out.println(
           Ansi.AUTO.string("  @|faint Restart to apply: sudo systemctl restart sail-api|@"));

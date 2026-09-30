@@ -92,7 +92,6 @@ class RoomRelayDeliveryIT {
                         runId,
                         "acme",
                         "room",
-                        "node-a",
                         "ada",
                         "build",
                         List.of(),

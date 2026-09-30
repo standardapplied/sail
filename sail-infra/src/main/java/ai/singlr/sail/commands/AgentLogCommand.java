@@ -25,7 +25,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -145,16 +144,6 @@ public final class AgentLogCommand implements Runnable {
     } catch (RuntimeException e) {
       return null;
     }
-  }
-
-  private static Optional<RunStore.RunRow> latestBuildRun(RunStore runs, String project) {
-    return runs.listForProject(project).stream()
-        .filter(RunStore.RunRow::buildRole)
-        .filter(
-            run ->
-                Objects.toString(run.node(), "")
-                    .equals(Objects.toString(NodeIdentity.handle(), "")))
-        .findFirst();
   }
 
   /** The latest local session run's run-scoped log path, or null when there is none. */

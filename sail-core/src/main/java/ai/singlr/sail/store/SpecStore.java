@@ -980,6 +980,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(id, accepted, rev);
+  }
+
+  @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
   }

@@ -398,8 +398,7 @@ class PersonalRoomErasureTest {
   private static String run(Sqlite db, String room, boolean finished) {
     var runs = new RunStore(db);
     var id = DateTimeUtils.newId().toString();
-    runs.create(
-        id, "acme", null, "main", "main", "build", "claude", "b", "t", null, null, "/l", "u");
+    runs.create(id, "acme", null, "main", "build", "claude", "b", "t", null, null, "/l", "u");
     db.execute("UPDATE runs SET room_id = ? WHERE id = ?", room, id);
     if (finished) {
       runs.complete(id, "completed", 0);

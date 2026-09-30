@@ -26,8 +26,8 @@ import java.util.stream.Stream;
  * RunStore#namesRun}), and its spec and room never change. On this box's lanes a revision is an
  * admin's or its owners' ({@link #owners}), the rule stop and log access admit by; a run's own
  * principal may report its own session, even on a read-only lane. On {@link Actor.Lane#SYNC} a run
- * is its executing box's: its {@code node} is the pusher before and after, it acts for the pusher
- * or for no one, and a deleted run is never brought back.
+ * is its executing box's: its {@code node} is the pusher before and after, it acts for the pusher,
+ * and a deleted run is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
@@ -146,14 +146,14 @@ public final class RunAuthority implements WriteAuthority {
               + "'.",
           null);
     }
-    var owner = next == null ? null : Snapshots.text(next, "owner");
-    if (Strings.isNotBlank(owner) && !owner.equals(pusher)) {
+    var owner = next == null ? pusher : Snapshots.text(next, "owner");
+    if (!pusher.equals(owner)) {
       return Refusal.of(
           Refusal.Kind.NOT_AUTHOR,
           "Run '"
               + id
               + "' acts for '"
-              + owner
+              + Objects.toString(owner, "")
               + "', but a box's runs act for its own FDE, '"
               + pusher
               + "'.",

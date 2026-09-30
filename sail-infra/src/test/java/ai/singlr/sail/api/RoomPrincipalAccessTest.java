@@ -84,7 +84,6 @@ class RoomPrincipalAccessTest {
                     "acme",
                     "auth",
                     HANDLE,
-                    HANDLE,
                     "room",
                     List.of(),
                     "claude-code",

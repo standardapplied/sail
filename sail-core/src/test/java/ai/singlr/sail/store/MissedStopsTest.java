@@ -45,14 +45,15 @@ class MissedStopsTest {
   private static MissedStops.Outcome assess(RunStore.RunRow session, boolean observed) {
     var coverage =
         observed
-            ? new MissedStops.StopCoverage(NOW.minus(GRACE).minusSeconds(1), true)
+            ? new MissedStops.StopCoverage(NOW.minus(GRACE).minusSeconds(1), 1, true)
             : MissedStops.StopCoverage.none();
     return MissedStops.assess(session, coverage, NOW, GRACE);
   }
 
   private static MissedStops.Outcome assessDropped(
       RunStore.RunRow session, java.time.Instant observedAt) {
-    return MissedStops.assess(session, new MissedStops.StopCoverage(observedAt, false), NOW, GRACE);
+    return MissedStops.assess(
+        session, new MissedStops.StopCoverage(observedAt, null, false), NOW, GRACE);
   }
 
   @Test
@@ -85,8 +86,21 @@ class MissedStopsTest {
   }
 
   @Test
-  void anAuthoritativeStopAlreadyRecordedSkipsARunningSession() {
+  void aRunningSessionWhoseActedOnStopWasRecordedHasItsRowFinishedNeverItsStopReplayed() {
     var outcome = assess(session("running", null, "2026-07-06T11:00:00Z"), true);
+
+    var finish = assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+    assertEquals(1, finish.exitCode(), "finished as the recorded stop would have");
+  }
+
+  @Test
+  void aRunningSessionWhoseStopIsStillInFlightIsLeftToItsFinisher() {
+    var outcome =
+        MissedStops.assess(
+            session("running", null, "2026-07-06T11:00:00Z"),
+            new MissedStops.StopCoverage(NOW.minusSeconds(30), 1, true),
+            NOW,
+            GRACE);
 
     assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }
@@ -121,10 +135,19 @@ class MissedStopsTest {
   }
 
   @Test
-  void anObservedUnactedStopOnANonTerminalSessionIsNeverReplayed() {
+  void anObservedUnactedStopOnARunningSessionFinishesTheRowAndIsNeverReplayedOverIt() {
     var outcome =
         assessDropped(
             session("running", null, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
+
+    assertInstanceOf(MissedStops.Outcome.FinishRun.class, outcome);
+  }
+
+  @Test
+  void anObservedUnactedStopOnAStoppingSessionIsLeftToItsStop() {
+    var outcome =
+        assessDropped(
+            session("stopping", null, "2026-07-06T11:00:00Z"), NOW.minus(GRACE).minusSeconds(1));
 
     assertInstanceOf(MissedStops.Outcome.Skip.class, outcome);
   }

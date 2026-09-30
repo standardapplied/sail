@@ -89,7 +89,7 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void complete(Event event, String status) {
-    var exitCode = extractInt(event.data().get(Event.WellKnownData.EXIT_CODE));
+    var exitCode = Event.WellKnownData.exitCode(event.data());
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
     if (Strings.isBlank(runId)) {
       return;
@@ -114,19 +114,5 @@ public final class RunTracker implements EventSubscriber {
       runStore.recordExitCode(run.id(), exitCode);
       syncScheduler.afterWrite();
     }
-  }
-
-  private static Integer extractInt(Object value) {
-    if (value instanceof Number n) {
-      return n.intValue();
-    }
-    if (value instanceof String s) {
-      try {
-        return Integer.parseInt(s);
-      } catch (NumberFormatException e) {
-        return null;
-      }
-    }
-    return null;
   }
 }

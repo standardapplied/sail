@@ -12,7 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
 import com.sun.net.httpserver.HttpExchange;
@@ -142,6 +146,40 @@ class AgentLogStreamerTest {
 
     assertEquals(404, out.status);
     assertTrue(out.body().contains("run_not_found"), out.body());
+  }
+
+  @Test
+  void aRunStampedBeforeTheBoxHadAHandleServesItsLogOnceTheHandleChangeStampsIt() throws Exception {
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      var runs = new RunStore(db);
+      var id = DateTimeUtils.newId().toString();
+      Acting.system(
+          () ->
+              runs.create(
+                  id,
+                  "acme",
+                  "auth",
+                  null,
+                  "build",
+                  "claude-code",
+                  "b",
+                  "t",
+                  1,
+                  null,
+                  "",
+                  "sail-agent-" + id));
+      var before = new CapturingExchange("/v1/runs/" + id + "/stream").as("ops", "admin");
+      streamer(runs::findById, "node-a").handle(before);
+      assertEquals(409, before.status, "no box's run yet");
+
+      runs.stamp("node-a", runs.unacknowledged());
+      var after = new CapturingExchange("/v1/runs/" + id + "/stream").as("ops", "admin");
+      streamer(runs::findById, "node-a").handle(after);
+
+      assertEquals(404, after.status, after.body());
+      assertTrue(after.body().contains("This run has no log file."), after.body());
+    }
   }
 
   @Test

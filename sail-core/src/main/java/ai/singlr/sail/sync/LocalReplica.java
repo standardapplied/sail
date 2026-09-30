@@ -44,10 +44,30 @@ public interface LocalReplica {
   }
 
   /**
-   * Whether {@code id} is work still under way on this box, which main's denial never rewrites or
-   * removes. None by default; see {@link ai.singlr.sail.store.SyncedStore#live}.
+   * Whether {@code id} is work this box executes that is still under way, which main's version, by
+   * denial or by pull, never rewrites or removes. None by default; see {@link
+   * ai.singlr.sail.store.SyncedStore#live}.
    */
   default boolean live(String id) {
+    return false;
+  }
+
+  /**
+   * The rev of the latest version of {@code id} this box heard from main — adopted, or its own
+   * offer main answered — whether or not the row it now holds descends from it; {@code null} if
+   * none. What main took from this box after it is what this box never heard.
+   */
+  default String lastHeardRev(String id) {
+    return null;
+  }
+
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
+   * after the base held here, as the row's merge base, keeping the row as it stands. Main decides
+   * it is newer ({@link MainReplica#acceptedFrom}). Returns whether the base moved. None by
+   * default.
+   */
+  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return false;
   }
 

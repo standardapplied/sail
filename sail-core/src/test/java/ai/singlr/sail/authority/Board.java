@@ -64,7 +64,7 @@ final class Board implements AutoCloseable {
 
   private static void run(RunStore runs, String id, String fde) {
     runs.create(
-        id, "acme", "auth", fde, fde, "build", "claude-code", "b", "t", null, null, "/log", "unit");
+        id, "acme", "auth", fde, "build", "claude-code", "b", "t", null, null, "/log", "unit");
   }
 
   @Override

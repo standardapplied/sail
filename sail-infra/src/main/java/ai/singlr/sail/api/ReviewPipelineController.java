@@ -275,7 +275,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     if (!isAuthoritative(event)) return;
 
-    var exitCode = exitCodeOf(event);
+    var exitCode = Event.WellKnownData.exitCode(event.data());
     if (exitCode != null && exitCode != 0) {
       publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, "exit " + exitCode);
       return;
@@ -927,18 +927,12 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
       return credential;
     }
     var unit = AgentUnit.forReview(reviewId);
-    var box = localHandle.get();
-    var owner =
-        Strings.isNotBlank(box)
-            ? box
-            : specStore.findById(specId).map(SpecStore.SpecRow::owner).orElse(null);
     var credential =
         runStore.createReview(
             reviewId,
             project,
             specId,
             localHandle.get(),
-            owner,
             agent,
             branch,
             task,
@@ -1055,12 +1049,6 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
     return runId != null
         && !runId.isBlank()
         && runStore.findById(runId).map(row -> !row.triggersReview()).orElse(false);
-  }
-
-  private static Integer exitCodeOf(Event event) {
-    return event.data().get(Event.WellKnownData.EXIT_CODE) instanceof Number n
-        ? n.intValue()
-        : null;
   }
 
   private static String hostname() {

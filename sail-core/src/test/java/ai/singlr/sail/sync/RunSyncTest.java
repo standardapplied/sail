@@ -55,13 +55,7 @@ class RunSyncTest {
       this.runs = new RunStore(db);
       this.conflicts = new SyncConflicts(db);
       this.replica =
-          new StoreReplica(
-              id,
-              runs,
-              new ChangeLog(db),
-              conflicts,
-              new SyncState(db),
-              runId -> runs.pushableFrom(runId, id));
+          new StoreReplica(id, runs, new ChangeLog(db), conflicts, new SyncState(db), id);
     }
 
     @Override
@@ -95,7 +89,6 @@ class RunSyncTest {
         "backend",
         "auth",
         node,
-        node,
         "build",
         "claude-code",
         "feat/auth",
@@ -126,7 +119,6 @@ class RunSyncTest {
         id,
         "backend",
         "auth",
-        "node",
         "node",
         "codex",
         "feat/auth",
@@ -199,9 +191,9 @@ class RunSyncTest {
 
     assertTrue(node.replica.mayPush(mine), "a node may push a run it executed");
     assertFalse(node.replica.mayPush(foreign), "a node must not push a run another node executed");
-    assertTrue(
+    assertFalse(
         node.replica.mayPush(stampless),
-        "a stampless pre-upgrade run is left to main's ownership guard, not denied here");
+        "a stampless run is no box's until the round stamps it with this box's handle");
   }
 
   @Test

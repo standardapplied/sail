@@ -301,6 +301,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     public boolean ownedBy(String localHandle) {
       return Strings.isBlank(localHandle) ? Strings.isBlank(node) : localHandle.equals(node);
     }
+
+    /**
+     * Whether this run is work still under way on the box whose FDE handle is {@code localHandle}:
+     * that box executed it ({@link #ownedBy}) and it has not finished.
+     */
+    public boolean liveOn(String localHandle) {
+      return ownedBy(localHandle) && !RunStatus.isTerminal(status);
+    }
   }
 
   /** The {@code role IN (...)} clause over every session role, live and retired. */
@@ -318,18 +326,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
    * replicates. The id is minted by the launcher (a UUIDv7) so the run-scoped log directory is
-   * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch;
-   * {@code owner} is the FDE the run's agent principal acts for. The principal handle and the run's
-   * credential are minted inside the same transaction as the row, so a run and its identity are
-   * atomic. Fails if an exclusive container lease (see {@link #acquireContainerLease}) is held — a
-   * run must never start into a container about to be rolled back. Returns the id.
+   * addressable before the agent starts. It is stamped as every run this box executes is ({@link
+   * #stamp}), for {@code boxHandle}: that box's FDE executes it and its agent acts for them. The
+   * principal handle and the run's credential are minted inside the same transaction as the row, so
+   * a run and its identity are atomic. Fails if an exclusive container lease (see {@link
+   * #acquireContainerLease}) is held — a run must never start into a container about to be rolled
+   * back. Returns the id.
    */
   public String create(
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       String agent,
       String branch,
@@ -339,19 +347,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit) {
     createReturningCredential(
-        id,
-        project,
-        specId,
-        node,
-        owner,
-        role,
-        agent,
-        branch,
-        task,
-        pid,
-        watcherPid,
-        logPath,
-        unit);
+        id, project, specId, boxHandle, role, agent, branch, task, pid, watcherPid, logPath, unit);
     return id;
   }
 
@@ -359,8 +355,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       String agent,
       String branch,
@@ -369,6 +364,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Integer watcherPid,
       String logPath,
       String unit) {
+    var node = stamp(boxHandle);
     return db.transaction(
         () -> {
           var lease = activeLease(project, node);
@@ -401,7 +397,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               logPath,
               unit,
               principalHandle(agent, role, id),
-              owner);
+              node);
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
@@ -414,21 +410,19 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
    * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
    * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
-   * of any run row is honest even though reviews execute as blocking foreground work. {@code owner}
-   * is the FDE the review principal acts for: the box's own FDE, whose box runs and pushes it, or
-   * the spec's owner on a box that names no FDE. Fails if an exclusive container lease (see {@link
-   * #acquireContainerLease}) is held — a review must never launch into a container mid-restore; the
-   * pipeline surfaces the error and the reconciler's rescue replay retries the kickoff after the
-   * lease is released. Returns the run's plaintext credential, surfaced exactly once so the
-   * launched review agent can actually act as the principal this row records; only the hash is at
-   * rest.
+   * of any run row is honest even though reviews execute as blocking foreground work. It is stamped
+   * as every run this box executes is ({@link #stamp}), for {@code boxHandle}. Fails if an
+   * exclusive container lease (see {@link #acquireContainerLease}) is held — a review must never
+   * launch into a container mid-restore; the pipeline surfaces the error and the reconciler's
+   * rescue replay retries the kickoff after the lease is released. Returns the run's plaintext
+   * credential, surfaced exactly once so the launched review agent can actually act as the
+   * principal this row records; only the hash is at rest.
    */
   public String createReview(
       String reviewId,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String agent,
       String branch,
       String task,
@@ -438,8 +432,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         reviewId,
         project,
         specId,
-        node,
-        owner,
+        boxHandle,
         Lane.REVIEW.wire(),
         agent,
         branch,
@@ -660,7 +653,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * never start into a container about to be rolled back. Returns the blocking conflict, the held
    * lease, or the reserved run's credential. A run mid-stop ({@code stopping}) still occupies its
    * repos — its agent is not verified dead until the claim is finalized — so it conflicts exactly
-   * like a running one. Any database failure propagates — a dispatch must never launch without the
+   * like a running one. The run is stamped as every run this box executes is ({@link #stamp}), for
+   * {@code boxHandle}. Any database failure propagates — a dispatch must never launch without the
    * row every later overlap check depends on. {@code maxDuration} is the run's configured hard stop
    * ({@code guardrails.max_duration}): the credential expires that long plus {@link
    * #CREDENTIAL_GRACE} after minting, and a null means no hard stop, so the credential lives until
@@ -670,8 +664,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agent,
@@ -680,15 +673,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit) {
     return reserveDispatch(
-        id, project, specId, node, owner, role, repos, agent, branch, task, logPath, unit, null);
+        id, project, specId, boxHandle, role, repos, agent, branch, task, logPath, unit, null);
   }
 
   public Reservation reserveDispatch(
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agent,
@@ -702,8 +694,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         project,
         specId,
         null,
-        node,
-        owner,
+        boxHandle,
         role,
         repos,
         agent,
@@ -724,8 +715,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String project,
       String specId,
       String roomId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agent,
@@ -735,6 +725,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String unit,
       Duration maxDuration) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
+    var node = stamp(boxHandle);
     return db.transaction(
         () -> {
           var lease = activeLease(project, node);
@@ -766,12 +757,124 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               unit,
               YamlUtil.dumpJson(reserved),
               principalHandle(agent, role, id),
-              owner);
+              node);
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, maxDuration);
           recordRevision(id, "local", false);
           return new Reservation.Reserved(credential);
         });
+  }
+
+  /**
+   * What every run a box executes carries as both its {@code node} and its {@code owner}: the box's
+   * FDE handle, or null on a box that has none. The one stamp — every reservation, and every
+   * re-stamp of a run main has not taken, takes it from here — so a box's runs are its own ({@link
+   * RunRow#ownedBy}) and act for its FDE, the run main accepts only from that box.
+   */
+  private static String stamp(String boxHandle) {
+    return Strings.isBlank(boxHandle) ? null : boxHandle;
+  }
+
+  /**
+   * Every run this box made that main has never acknowledged — it began here ({@link
+   * ChangeLog#begunHere}) and has no synced base, so main never took it, or took it and the answer
+   * was lost — in the order it was written. A run synced from another box is never among them, even
+   * on a box that was main, which records no base for what it holds.
+   */
+  public List<String> unacknowledged() {
+    return madeHere("SELECT id FROM runs WHERE base_rev IS NULL OR base_rev = '' ORDER BY rowid");
+  }
+
+  /**
+   * Stamps each of {@code ids} as a run the box whose FDE handle is {@code boxHandle} executes
+   * ({@link #stamp}), each stamp a revision journaled by {@link Actor#system()}, so the next push
+   * carries it. A run already carrying the stamp, or gone, is untouched. Returns the ids stamped.
+   */
+  public List<String> stamp(String boxHandle, Collection<String> ids) {
+    var stamp = stamp(boxHandle);
+    return Actor.call(
+        Actor.system(),
+        () ->
+            ids.stream()
+                .filter(
+                    id ->
+                        db.transaction(
+                            () -> {
+                              var run = findById(id);
+                              if (run.isEmpty()
+                                  || (Objects.equals(stamp(run.get().node()), stamp)
+                                      && Objects.equals(stamp(run.get().owner()), stamp))) {
+                                return false;
+                              }
+                              db.execute(
+                                  "UPDATE runs SET node = ?, owner = ? WHERE id = ?",
+                                  stamp,
+                                  stamp,
+                                  id);
+                              recordRevision(id, "local", false);
+                              return true;
+                            }))
+                .toList());
+  }
+
+  /**
+   * Stamps every run this box made ({@link ChangeLog#begunHere}) that carries no node as the box's,
+   * now that it is main and its FDE handle is {@code boxHandle}: main's own runs are acknowledged
+   * as it makes them, so only an unstamped one is not yet its own. Returns the ids stamped.
+   */
+  public List<String> stampUnstamped(String boxHandle) {
+    return stamp(
+        boxHandle, madeHere("SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid"));
+  }
+
+  /**
+   * Every run this box executes, by its {@code node} {@code boxHandle}, that acts for no one: an
+   * older release reserved some with no owner, and main takes a run only acting for its box's FDE.
+   */
+  public List<String> ownerless(String boxHandle) {
+    if (Strings.isBlank(boxHandle)) {
+      return List.of();
+    }
+    return db.query(
+        "SELECT id FROM runs WHERE node = ? AND (owner IS NULL OR owner = '') ORDER BY rowid",
+        row -> row.text(0),
+        boxHandle);
+  }
+
+  private List<String> madeHere(String selectIds) {
+    return db.query(selectIds, row -> row.text(0)).stream()
+        .filter(id -> changeLog.begunHere(ENTITY, id))
+        .toList();
+  }
+
+  @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(id, accepted, rev);
+  }
+
+  /** Every run the box whose FDE handle is {@code handle} executed that is still live there. */
+  public List<RunRow> liveUnder(String handle) {
+    return allRuns().stream().filter(run -> run.liveOn(handle)).toList();
+  }
+
+  /**
+   * The runs main holds under {@code handle} — acknowledged, or among {@code held}, the ones main
+   * said it took though this box never heard — that are still live here or carry a change main has
+   * not taken: what a change of this node's handle away from {@code handle} would strand, since
+   * they would stop being this box's to finish and push.
+   */
+  public List<RunRow> heldUnder(String handle, Set<String> held) {
+    var unacknowledged = Set.copyOf(unacknowledged());
+    var untaken = dirtyIds();
+    return allRuns().stream()
+        .filter(run -> run.ownedBy(handle))
+        .filter(run -> !unacknowledged.contains(run.id()) || held.contains(run.id()))
+        .filter(run -> run.liveOn(handle) || untaken.contains(run.id()))
+        .toList();
+  }
+
+  private List<RunRow> allRuns() {
+    return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY rowid", this::mapRow);
   }
 
   /**
@@ -1171,6 +1274,21 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         specId);
   }
 
+  /**
+   * The newest build attempt of {@code specId} — the one run whose stop moves the spec, which a
+   * stop, a reconciler replay and a review rescue act on — or empty when it has none. Ties on
+   * {@code started_at} break on the UUIDv7 id, which orders by mint time.
+   */
+  public Optional<RunRow> latestBuildAttempt(String specId) {
+    return db.queryOne(
+        "SELECT "
+            + COLUMNS
+            + " FROM runs WHERE spec_id = ? AND role = ? ORDER BY started_at DESC, id DESC LIMIT 1",
+        this::mapRow,
+        specId,
+        Lane.BUILD.wire());
+  }
+
   /** Runs for a spec, optionally scoped to a project — the read behind {@code GET /v1/runs}. */
   public List<RunRow> list(String project, String specId) {
     if (project != null && specId != null) {
@@ -1271,13 +1389,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
     return db.transaction(
         () -> {
-          var latest =
-              db.queryOne(
-                  "SELECT id FROM runs WHERE spec_id = ? AND role = 'build'"
-                      + " ORDER BY started_at DESC, id DESC LIMIT 1",
-                  row -> row.text(0),
-                  specId);
-          if (latest.isEmpty() || !latest.get().equals(id)) {
+          if (latestBuildAttempt(specId).filter(latest -> latest.id().equals(id)).isEmpty()) {
             return false;
           }
           work.run();
@@ -1364,27 +1476,24 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Whether a box whose FDE handle is {@code handle} may push its own change to run {@code id} up
-   * to main. Runs are single-writer: only the executing node pushes its runs. A box with no handle,
-   * or a run whose node is unknown, defers to main's own ownership guard rather than being denied
-   * here.
+   * Whether the box whose FDE handle is {@code handle} may push its own change to run {@code id} up
+   * to main: runs are single-writer, so only a run that box executed ({@link RunRow#ownedBy}). A
+   * run this box no longer holds defers to main's own rule.
    */
-  public boolean pushableFrom(String id, String handle) {
-    if (handle == null || handle.isBlank()) {
-      return true;
-    }
-    return findById(id)
-        .map(run -> run.node() == null || run.node().isBlank() || handle.equals(run.node()))
-        .orElse(true);
+  @Override
+  public boolean mayPush(String id, String handle) {
+    return findById(id).map(run -> run.ownedBy(handle)).orElse(true);
   }
 
   /**
-   * A run that has not finished is live here: its row, credential and room guard are what the agent
-   * and its watcher act through, so main's denial never rewrites or removes them.
+   * A run the box whose FDE handle is {@code handle} executed ({@link RunRow#ownedBy}) that has not
+   * finished is live there: its row, credential and room guard are what the agent and its watcher
+   * act through, so main's version never rewrites or removes them. Another box's run is never live
+   * here, so it is adopted as main holds it.
    */
   @Override
-  public boolean live(String id) {
-    return findById(id).map(run -> !RunStatus.isTerminal(run.status())).orElse(false);
+  public boolean live(String id, String handle) {
+    return findById(id).filter(run -> run.liveOn(handle)).isPresent();
   }
 
   public Map<String, Object> comparableSnapshot(String id) {

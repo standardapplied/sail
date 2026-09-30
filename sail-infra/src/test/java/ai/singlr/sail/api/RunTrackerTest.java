@@ -71,7 +71,6 @@ class RunTrackerTest {
               project,
               specId,
               "node-a",
-              "node-a",
               "build",
               "claude-code",
               "feat/x",
@@ -91,7 +90,6 @@ class RunTrackerTest {
               id,
               project,
               specId,
-              node,
               node,
               "build",
               "claude-code",
@@ -148,6 +146,18 @@ class RunTrackerTest {
     assertEquals("stopped", run.status());
     assertEquals(137, run.exitCode());
     assertNotNull(run.completedAt());
+  }
+
+  @Test
+  void theWatchersStopFinishesARunStampedBeforeTheBoxHadAHandleOnceTheHandleChangeStampsIt() {
+    var id = runningRunOn("backend", "auth", null);
+    tracker.onEvent(stopped("backend", id, Map.of()));
+    assertEquals("running", runStore.findById(id).orElseThrow().status(), "no box's run yet");
+
+    runStore.stamp("node-a", runStore.unacknowledged());
+    tracker.onEvent(stopped("backend", id, Map.of(Event.WellKnownData.EXIT_CODE, 0)));
+
+    assertEquals("stopped", runStore.findById(id).orElseThrow().status());
   }
 
   @Test
@@ -385,7 +395,6 @@ class RunTrackerTest {
                         id,
                         "backend",
                         "auth",
-                        "node-a",
                         "node-a",
                         "build",
                         java.util.List.of(),

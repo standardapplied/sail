@@ -52,6 +52,12 @@ public final class ChangeLog {
   /** The newest entries every box keeps of each entity's history; a constant, never configured. */
   public static final int HISTORY_REVISIONS = 20;
 
+  /**
+   * The origin of a base a box rebased a parked conflict onto: main's side, under a rev the box
+   * minted. Neither a local change to offer nor a version heard from main.
+   */
+  public static final String RESOLVED_BASE = "resolved-base";
+
   private static final String EMPTY_SNAPSHOT = "{}";
 
   private final Sqlite db;
@@ -414,6 +420,23 @@ public final class ChangeLog {
         entityId);
   }
 
+  /**
+   * Whether an entity began on this box: the oldest entry its log keeps is a write this box made
+   * itself, not one synced from another box — it names no peer ({@link Actor#peer}), and its origin
+   * is not a sync, which alone says so for entries written before revisions named their peer. False
+   * for an entity it never logged.
+   */
+  public boolean begunHere(String entityType, String entityId) {
+    return db.queryOne(
+            """
+            SELECT peer IS NULL AND origin <> 'sync' FROM change_log
+            WHERE entity_type = ? AND entity_id = ? ORDER BY seq LIMIT 1""",
+            row -> row.integer(0) == 1,
+            entityType,
+            entityId)
+        .orElse(false);
+  }
+
   /** The latest entry of an entity — its current revision or tombstone — read through its head. */
   public Optional<Entry> head(String entityType, String entityId) {
     return db.queryOne(
@@ -449,7 +472,10 @@ public final class ChangeLog {
     return db
         .query(
             SELECT_HEAD
-                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin <> 'sync'"
+                + " WHERE h.entity_type = ? AND l.kind = 'tombstone'"
+                + " AND l.origin NOT IN ('sync', '"
+                + RESOLVED_BASE
+                + "')"
                 + " ORDER BY l.seq",
             row -> row.text(2),
             entityType)
@@ -474,6 +500,63 @@ public final class ChangeLog {
         entityType,
         entityId,
         rev);
+  }
+
+  /**
+   * The latest revision or tombstone of {@code entityId} that {@code peer}'s push put here: what
+   * main took from that box, as main recorded it. Empty when that box never pushed one, or history
+   * has been compacted past it.
+   */
+  public Optional<Entry> latestFrom(String entityType, String entityId, String peer) {
+    return db.queryOne(
+        SELECT
+            + " WHERE entity_type = ? AND entity_id = ? AND peer = ? AND kind IN (?, ?)"
+            + " ORDER BY seq DESC LIMIT 1",
+        ChangeLog::map,
+        entityType,
+        entityId,
+        peer,
+        Kind.REVISION.wire(),
+        Kind.TOMBSTONE.wire());
+  }
+
+  /**
+   * The latest entry of {@code entityId} carrying {@code rev}. A rev can recur — its counter
+   * restarts when a row is deleted and made again with the same content — so the latest occurrence
+   * is the one a box that last heard {@code rev} can have heard.
+   */
+  public Optional<Entry> latestAt(String entityType, String entityId, String rev) {
+    return db.queryOne(
+        SELECT + " WHERE entity_type = ? AND entity_id = ? AND rev = ? ORDER BY seq DESC LIMIT 1",
+        ChangeLog::map,
+        entityType,
+        entityId,
+        rev);
+  }
+
+  /**
+   * Whether the entry at {@code seq} is among the newest {@link #HISTORY_REVISIONS} of {@code
+   * entityId}: newer than anything compaction removes.
+   */
+  public boolean amongNewest(String entityType, String entityId, long seq) {
+    return db.queryOne(
+                "SELECT count(*) FROM change_log WHERE entity_type = ? AND entity_id = ? AND seq > ?",
+                row -> row.integer(0),
+                entityType,
+                entityId,
+                seq)
+            .orElse(0L)
+        < HISTORY_REVISIONS;
+  }
+
+  /** The rev of the latest version of {@code entityId} this box took from a sync, if any. */
+  public Optional<String> latestHeard(String entityType, String entityId) {
+    return db.queryOne(
+        "SELECT rev FROM change_log WHERE entity_type = ? AND entity_id = ? AND origin = 'sync'"
+            + " ORDER BY seq DESC LIMIT 1",
+        row -> row.text(0),
+        entityType,
+        entityId);
   }
 
   private static final String COLUMNS =

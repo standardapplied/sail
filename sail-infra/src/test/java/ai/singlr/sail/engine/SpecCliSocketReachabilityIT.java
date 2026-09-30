@@ -63,7 +63,6 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                           CONTAINER,
                           SPEC_ID,
                           "it",
-                          "it",
                           "build",
                           List.of(),
                           "claude-code",

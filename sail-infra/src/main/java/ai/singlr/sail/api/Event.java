@@ -210,6 +210,23 @@ public record Event(
     /** The agent process's exit code, carried on an authoritative stop. */
     public static final String EXIT_CODE = "exit_code";
 
+    /**
+     * The {@link #EXIT_CODE} a stop's {@code data} carries, or null when it names none it can read.
+     */
+    public static Integer exitCode(Map<String, Object> data) {
+      return switch (data.get(EXIT_CODE)) {
+        case Number number -> number.intValue();
+        case String text -> {
+          try {
+            yield Integer.parseInt(text);
+          } catch (NumberFormatException e) {
+            yield null;
+          }
+        }
+        case null, default -> null;
+      };
+    }
+
     /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
     public static final String WATCHER_PID = "watcher_pid";
 

@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The line protocol of one sync session over a Door-2 SSH channel, protocol 4: the node and main
@@ -53,7 +54,7 @@ public final class SyncWire {
    * Bump again only when a change makes older peers unsafe, never for a routine release; patch
    * releases above the floor are wire-compatible with each other.
    */
-  public static final String UPGRADE_FLOOR = "0.46.2";
+  public static final String UPGRADE_FLOOR = "0.46.3";
 
   /** The byte ceiling for a JSON announcing line, including a whole blob manifest. */
   public static final int MAX_FRAME = 16 * 1024 * 1024;
@@ -78,6 +79,8 @@ public final class SyncWire {
   private static final String EXPECTED = "expectedRev";
   private static final String OFFERS = "commits";
   private static final String ENTRIES = "entries";
+  private static final String BASES = "bases";
+  private static final String ACCEPTED_ONLY = "accepted_only";
   private static final String NEXT = "next";
   private static final String DONE = "done";
   private static final String MAX_SEQ = "maxSeq";
@@ -92,6 +95,7 @@ public final class SyncWire {
   private static final String FLOOR = "floor";
   private static final String BOX = "box";
   private static final String MAIN_ID = "mainId";
+  private static final String HANDLE = "handle";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -211,7 +215,25 @@ public final class SyncWire {
   public record Pull(String type, long since, int limit) implements Request {}
 
   /** Ask for main's current rows of the given ids — what the node changed locally. */
-  public record Need(String type, List<String> ids) implements Request {}
+  public record Need(String type, List<String> ids, Map<String, String> bases, boolean acceptedOnly)
+      implements Request {
+    public Need {
+      bases = Map.copyOf(bases);
+    }
+
+    /** Main's current rows of {@code ids}. */
+    public Need(String type, List<String> ids) {
+      this(type, ids, Map.of(), false);
+    }
+
+    /**
+     * Only what main took from this box of each of {@code ids} after the version of it this box
+     * last heard from main, {@code heard}: the question a node asks first, before any page.
+     */
+    public static Need accepted(String type, List<String> ids, Map<String, String> heard) {
+      return new Need(type, ids, heard, true);
+    }
+  }
 
   /** Push a batch of compare-and-set offers of one type; main answers one result each. */
   public record Push(String type, List<MainReplica.Offer> offers) implements Request {}
@@ -329,8 +351,18 @@ public final class SyncWire {
     };
   }
 
-  /** Main accepted the hello: its protocol, build, and the box id the node checkpoints against. */
-  public record Welcome(int protocol, String version, String mainId) implements Response {}
+  /**
+   * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
+   * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
+   * null from an older main, which never says.
+   */
+  public record Welcome(int protocol, String version, String mainId, String handle)
+      implements Response {
+    /** A welcome that names no handle, as a main that predates saying so sends it. */
+    public Welcome(int protocol, String version, String mainId) {
+      this(protocol, version, mainId, null);
+    }
+  }
 
   /** Main refused the session before serving anything, naming the remedy. */
   public record Refuse(String reason) implements Response {}
@@ -387,10 +419,25 @@ public final class SyncWire {
   /**
    * One page of changes. {@code next} is the highest seq included (for a pull) or the count of
    * requested ids consumed (for a need); {@code done} says whether another page follows; {@code
-   * maxSeq} is main's high-water for the type.
+   * maxSeq} is main's high-water for the type. A need's page also names, in {@code accepted}, the
+   * latest revision main took from the asking box of each id it answers — the node's own offer as
+   * main recorded it — so a node whose answer to that offer was lost knows exactly which of its
+   * states main holds. Optional: an older main sends none, and a pull's page never does.
    */
-  public record Page(List<Entry> entries, long next, boolean done, long maxSeq)
-      implements Response {}
+  public record Page(
+      List<Entry> entries, long next, boolean done, long maxSeq, List<Entry> accepted)
+      implements Response {
+    public Page {
+      accepted = List.copyOf(accepted);
+    }
+
+    /**
+     * A page naming nothing main took from the asking box: every pull, and an older main's need.
+     */
+    public Page(List<Entry> entries, long next, boolean done, long maxSeq) {
+      this(entries, next, done, maxSeq, List.of());
+    }
+  }
 
   /** Main's verdict on one pushed offer. */
   public sealed interface Result permits Accepted, Stale, Refused, Denied {
@@ -567,6 +614,12 @@ public final class SyncWire {
         map.put(OP, OP_NEED);
         map.put(TYPE, need.type());
         map.put(IDS, need.ids());
+        if (!need.bases().isEmpty()) {
+          map.put(BASES, new LinkedHashMap<String, Object>(need.bases()));
+        }
+        if (need.acceptedOnly()) {
+          map.put(ACCEPTED_ONLY, true);
+        }
       }
       case Push push -> {
         map.put(OP, OP_PUSH);
@@ -589,6 +642,9 @@ public final class SyncWire {
         map.put(PROTOCOL_KEY, welcome.protocol());
         map.put(VERSION, welcome.version());
         map.put(MAIN_ID, welcome.mainId());
+        if (welcome.handle() != null) {
+          map.put(HANDLE, welcome.handle());
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -604,6 +660,9 @@ public final class SyncWire {
         map.put(NEXT, page.next());
         map.put(DONE, page.done());
         map.put(MAX_SEQ, page.maxSeq());
+        if (!page.accepted().isEmpty()) {
+          map.put(ACCEPTED, page.accepted().stream().map(SyncWire::entryMap).toList());
+        }
       }
       case Results results -> {
         map.put(OP, OP_RESULTS);
@@ -635,7 +694,8 @@ public final class SyncWire {
               string(map, BOX));
       case OP_HEADS -> new Heads();
       case OP_PULL -> new Pull(string(map, TYPE), longValue(map, SINCE), intValue(map, LIMIT));
-      case OP_NEED -> new Need(string(map, TYPE), strings(map, IDS));
+      case OP_NEED ->
+          new Need(string(map, TYPE), strings(map, IDS), bases(map), bool(map, ACCEPTED_ONLY));
       case OP_PUSH ->
           new Push(string(map, TYPE), maps(map, OFFERS).stream().map(SyncWire::offer).toList());
       case OP_FETCH_FDES -> new FetchFdes();
@@ -668,7 +728,11 @@ public final class SyncWire {
     var op = string(map, OP);
     return switch (op) {
       case OP_WELCOME ->
-          new Welcome(intValue(map, PROTOCOL_KEY), string(map, VERSION), string(map, MAIN_ID));
+          new Welcome(
+              intValue(map, PROTOCOL_KEY),
+              string(map, VERSION),
+              string(map, MAIN_ID),
+              string(map, HANDLE));
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->
@@ -676,7 +740,8 @@ public final class SyncWire {
               maps(map, ENTRIES).stream().map(SyncWire::entry).toList(),
               longValue(map, NEXT),
               bool(map, DONE),
-              longValue(map, MAX_SEQ));
+              longValue(map, MAX_SEQ),
+              maps(map, ACCEPTED).stream().map(SyncWire::entry).toList());
       case OP_RESULTS ->
           new Results(
               maps(map, RESULTS).stream().map(SyncWire::result).toList(), longValue(map, MAX_SEQ));
@@ -789,6 +854,16 @@ public final class SyncWire {
       return new Refused(id, string(refused, REASON));
     }
     throw new IllegalArgumentException("Result for " + id + " carries no verdict");
+  }
+
+  private static Map<String, String> bases(Map<String, Object> map) {
+    var bases = new LinkedHashMap<String, String>();
+    var raw = snapshot(map, BASES);
+    if (raw != null) {
+      raw.forEach((id, rev) -> bases.put(id, rev instanceof String text ? text : null));
+    }
+    bases.values().removeIf(Objects::isNull);
+    return bases;
   }
 
   private static Map<String, Long> tips(Map<String, Object> map) {

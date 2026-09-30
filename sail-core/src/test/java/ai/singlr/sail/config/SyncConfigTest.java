@@ -33,6 +33,14 @@ class SyncConfigTest {
   }
 
   @Test
+  void aHandleIsStrippedOfSurroundingSpaceSoTheBoxStampsAndComparesOneValue() {
+    var sync = new SyncConfig("node", "sail@main", " ada ", "box");
+
+    assertEquals("ada", sync.handle());
+    assertEquals("ada", SyncConfig.fromMap(sync.toMap()).handle());
+  }
+
+  @Test
   void mainRoleIsRecognized() {
     assertTrue(new SyncConfig(SyncConfig.ROLE_MAIN, null, "uday").isMain());
     assertFalse(new SyncConfig(SyncConfig.ROLE_NODE, "sail@host", "mady").isMain());

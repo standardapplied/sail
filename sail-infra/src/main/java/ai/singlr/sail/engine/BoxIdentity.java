@@ -45,6 +45,18 @@ public final class BoxIdentity {
               + ". Fix the file so every peer sees this box under one id.",
           e);
     }
+    return resolved(config, hostname);
+  }
+
+  /**
+   * {@code config} with its box id resolved as every round resolves it: the one persisted, or until
+   * then this box's hostname.
+   */
+  public static SyncConfig resolved(SyncConfig config) {
+    return resolved(config, HostInfo.hostname());
+  }
+
+  private static SyncConfig resolved(SyncConfig config, String hostname) {
     return config.boxId() != null ? config : config.withBoxId(hostname);
   }
 }

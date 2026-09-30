@@ -65,7 +65,6 @@ class RunPresenceEmitterTest {
               "backend",
               "auth",
               node,
-              node,
               role,
               "claude-code",
               "feat/x",
@@ -167,6 +166,17 @@ class RunPresenceEmitterTest {
         emitter.sweep(),
         "a synced stamp is only as fresh as the last sync — narrating quiet from it would be"
             + " noise");
+  }
+
+  @Test
+  void aRunStampedBeforeTheBoxHadAHandleIsReportedOnceTheHandleChangeStampsIt() {
+    var id = runningRunOn(null);
+    stampAt(id, now().minus(RunPresence.THRESHOLD).minusSeconds(60));
+    assertEquals(0, emitter.sweep(), "no box's run yet");
+
+    runStore.stamp("node-a", runStore.unacknowledged());
+
+    assertEquals(1, emitter.sweep(), "the box's own run narrates its quiet crossing");
   }
 
   @Test

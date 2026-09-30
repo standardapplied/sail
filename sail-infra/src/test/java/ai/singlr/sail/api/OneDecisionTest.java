@@ -279,6 +279,7 @@ class OneDecisionTest {
         SyncRpcServer.over(
             db,
             "main",
+            null,
             Actor.sync("ada", Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
@@ -340,7 +341,6 @@ class OneDecisionTest {
                         "acme",
                         specId,
                         roomId,
-                        "ada",
                         "ada",
                         role,
                         List.of(),

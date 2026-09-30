@@ -89,7 +89,6 @@ class EventEmissionDeliveryIT {
                         runId,
                         "acme",
                         "auth",
-                        "node-a",
                         "ada",
                         "build",
                         List.of(),

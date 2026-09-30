@@ -387,7 +387,6 @@ class AdhocDispatchTest {
         "acme",
         "auth",
         HANDLE,
-        HANDLE,
         "build",
         List.of("app"),
         "claude-code",

@@ -149,8 +149,7 @@ class MessageStoreTest {
   @Test
   void listUndeliveredExcludesLedgeredAndOwnMessagesByExactIdentity() {
     var runs = new RunStore(db);
-    var runId =
-        runs.create("r1", "acme", "room", "n", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
+    var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
     var seen = messages.append("room", "ada", "seen", null);
     var fresh = messages.append("room", "ada", "fresh", null);
     var own = messages.append("room", "claude/r1", "my own note", null);
@@ -212,8 +211,7 @@ class MessageStoreTest {
   @Test
   void aLateSyncedMessageWithAnOlderIdIsStillUndelivered() {
     var runs = new RunStore(db);
-    var runId =
-        runs.create("r1", "acme", "room", "n", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
+    var runId = runs.create("r1", "acme", "room", "ada", "build", "a", "b", "t", 1, 1, "l", "u");
     var lateId = DateTimeUtils.newId().toString();
     var newer = messages.append("room", "ada", "delivered first", null);
     runs.markDelivered(runId, List.of(newer.id()));

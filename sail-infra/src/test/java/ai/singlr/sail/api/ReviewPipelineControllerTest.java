@@ -341,7 +341,6 @@ class ReviewPipelineControllerTest {
                 "test-project",
                 "auth",
                 "node-a",
-                "node-a",
                 "room",
                 "claude-code",
                 null,

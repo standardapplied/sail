@@ -12,9 +12,19 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.WebauthnConfig;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
+import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class HostSyncCommandTest {
 
@@ -76,6 +86,55 @@ class HostSyncCommandTest {
     assertEquals("devbox", redeclared.sync().boxId(), "peers checkpoint against the hostname");
     var asNode = HostSyncCommand.configure(redeclared, false, "sail@maindevbox", "elsewhere");
     assertEquals("devbox", asNode.sync().boxId(), "an id, once held, is kept");
+  }
+
+  @Test
+  void aBoxTakingTheMainRoleStampsTheRunsItMadeWithNoNode(@TempDir Path dir) throws Exception {
+    var hostYaml = dir.resolve("host.yaml");
+    var dbPath = dir.resolve("sail.db");
+    var named = HostConfigSetCommand.applyChange(BASE, "sync-handle", "ada");
+    YamlUtil.dumpToFile(named.toMap(), hostYaml);
+    String run;
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      run = DateTimeUtils.newId().toString();
+      var id = run;
+      Acting.system(
+          () ->
+              new RunStore(db)
+                  .reserveDispatch(
+                      id,
+                      "acme",
+                      null,
+                      null,
+                      "adhoc",
+                      List.of(),
+                      "claude-code",
+                      "b",
+                      "t",
+                      "/l",
+                      "u"));
+    }
+
+    var role =
+        HostSyncCommand.takeRole(
+            hostYaml,
+            dbPath,
+            named,
+            true,
+            null,
+            "devbox",
+            target -> {
+              throw new IOException("a box becoming main asks no one");
+            });
+
+    assertTrue(role.isMain());
+    assertTrue(HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync().isMain());
+    try (var db = Sqlite.open(dbPath)) {
+      var stamped = new RunStore(db).findById(run).orElseThrow();
+      assertEquals("ada", stamped.node());
+      assertEquals("ada", stamped.owner());
+    }
   }
 
   @Test

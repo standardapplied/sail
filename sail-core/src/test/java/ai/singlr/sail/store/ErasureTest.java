@@ -432,8 +432,7 @@ class ErasureTest {
 
   private String run(String project, String specId, String roomId) {
     var id = DateTimeUtils.newId().toString();
-    runs.create(
-        id, project, specId, "node", "node", "build", "claude", "b", "t", null, null, "/l", "u");
+    runs.create(id, project, specId, "node", "build", "claude", "b", "t", null, null, "/l", "u");
     if (roomId != null) {
       db.execute("UPDATE runs SET room_id = ? WHERE id = ?", roomId, id);
     }

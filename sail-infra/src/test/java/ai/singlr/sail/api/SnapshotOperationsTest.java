@@ -142,18 +142,7 @@ class SnapshotOperationsTest {
   void restoreRefusesWhileASpecRunIsLiveAndNamesWhatItWouldDiscard() throws Exception {
     var runs = runStore();
     runs.reserveDispatch(
-        "r-7",
-        "acme",
-        "auth",
-        "uday",
-        "uday",
-        "build",
-        List.of(),
-        "claude-code",
-        null,
-        "t",
-        "l",
-        "u");
+        "r-7", "acme", "auth", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
     var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
 
     var error =
@@ -170,7 +159,7 @@ class SnapshotOperationsTest {
   void restoreRefusesWhileAnInviteOccupiesTheContainer() throws Exception {
     var runs = runStore();
     runs.reserveDispatch(
-        "r-9", "acme", "", "uday", "uday", "invite", List.of(), "claude-code", null, "t", "l", "u");
+        "r-9", "acme", "", "uday", "invite", List.of(), "claude-code", null, "t", "l", "u");
     var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
 
     var error =
@@ -184,18 +173,7 @@ class SnapshotOperationsTest {
   void aForeignNodesRunNeverBlocksARestoreHere() throws Exception {
     var runs = runStore();
     runs.reserveDispatch(
-        "r-8",
-        "acme",
-        "auth",
-        "other",
-        "uday",
-        "build",
-        List.of(),
-        "claude-code",
-        null,
-        "t",
-        "l",
-        "u");
+        "r-8", "acme", "auth", "other", "build", List.of(), "claude-code", null, "t", "l", "u");
     var ops = ops(shell(RUNNING_JSON), runs, new DirectExecutorService());
 
     var response = ops.restore("acme", "my-checkpoint", "uday");
@@ -324,7 +302,7 @@ class SnapshotOperationsTest {
 
   private static RunStore.Reservation reserve(RunStore runs, String id) {
     return runs.reserveDispatch(
-        id, "acme", "auth", "uday", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
+        id, "acme", "auth", "uday", "build", List.of(), "claude-code", null, "t", "l", "u");
   }
 
   @Test

@@ -135,7 +135,7 @@ class RunLauncherTest {
     Acting.system(
         () -> {
           runStore.create(
-              RUN_ID, "proj", "spec", "node", "node", "build", "codex", "b", "t", null, null, "log",
+              RUN_ID, "proj", "spec", "node", "build", "codex", "b", "t", null, null, "log",
               "unit");
         });
   }

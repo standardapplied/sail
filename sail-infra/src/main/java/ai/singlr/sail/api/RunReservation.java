@@ -57,8 +57,9 @@ public final class RunReservation {
   }
 
   /**
-   * Atomically reserves the launch as a {@code running} run stamped with {@code owner} and the
-   * target repo set: {@link RunStore#reserveDispatch} checks every running local run for a repo
+   * Atomically reserves the launch as a {@code running} run of this box, whose FDE handle is {@code
+   * boxHandle} — stamped as every run a box executes is, its handle as both node and owner — with
+   * the target repo set: {@link RunStore#reserveDispatch} checks every running local run for a repo
    * overlap and inserts the row in one transaction, so two concurrent launches can never both claim
    * the same repo. A conflict or a store failure aborts before any launch — the row is what every
    * later overlap check and provenance guard depends on. Also prunes the container's oldest run-log
@@ -68,8 +69,7 @@ public final class RunReservation {
       String runId,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agentType,
@@ -78,7 +78,7 @@ public final class RunReservation {
       AgentUnit unit,
       SailYaml config) {
     return reserve(
-        runId, project, specId, null, node, owner, role, repos, agentType, branch, task, unit,
+        runId, project, specId, null, boxHandle, role, repos, agentType, branch, task, unit,
         config);
   }
 
@@ -88,8 +88,7 @@ public final class RunReservation {
       String project,
       String specId,
       String roomId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agentType,
@@ -101,8 +100,8 @@ public final class RunReservation {
     try (var hold = sessionYield.lock(project)) {
       credential =
           claim(
-              runId, project, specId, roomId, node, owner, role, repos, agentType, branch, task,
-              unit, config);
+              runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
+              config);
       yieldDisplacedSessions(runId, project, specId, role, repos);
     } catch (IOException e) {
       throw new ApiException(
@@ -117,8 +116,7 @@ public final class RunReservation {
       String project,
       String specId,
       String roomId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       List<String> repos,
       String agentType,
@@ -134,8 +132,7 @@ public final class RunReservation {
               project,
               specId,
               roomId,
-              node,
-              owner,
+              boxHandle,
               role,
               repos,
               agentType,

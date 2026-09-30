@@ -103,7 +103,6 @@ class EraseRequestTest {
                         "acme",
                         "busy",
                         "mady",
-                        "mady",
                         "build",
                         "claude-code",
                         "b",

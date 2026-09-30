@@ -122,7 +122,6 @@ class SyncedEntitiesTest {
             "proj",
             "spec",
             "node",
-            "node",
             "build",
             "codex",
             "agent/spec",

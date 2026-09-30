@@ -17,7 +17,8 @@ import java.util.Map;
  *
  * <p>{@code handle} is this box's FDE — who it acts as. It is the {@code assignee} that FDE-aware
  * dispatch matches a spec against ("me" = "on this box"), set by {@code sail join} and settable via
- * {@code sail host config set sync-handle}. Null until the box is bound to an FDE.
+ * {@code sail host config set sync-handle}. Null until the box is bound to an FDE, and stripped of
+ * surrounding space, so the handle a box stamps its runs with is the one it compares them against.
  */
 public record SyncConfig(String role, String main, String handle, String boxId) {
 
@@ -27,7 +28,7 @@ public record SyncConfig(String role, String main, String handle, String boxId) 
   public SyncConfig {
     role = Strings.isBlank(role) ? null : role;
     main = Strings.isBlank(main) ? null : main;
-    handle = Strings.isBlank(handle) ? null : handle;
+    handle = Strings.isBlank(handle) ? null : handle.strip();
     boxId = Strings.isBlank(boxId) ? null : boxId;
   }
 

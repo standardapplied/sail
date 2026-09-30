@@ -16,10 +16,10 @@ import java.util.Set;
  * projects, files, messages), which collapses the six near-identical hand-written replicas into one
  * generic adapter.
  *
- * <p>The three {@code default} hooks cover the two stores that diverge: {@link #currentForSync} and
- * {@link #adoptForSync} let a store weave a resurrection-blocking tombstone into the sync view
- * (only {@code ProjectStore} does), and {@code mayPush} — a per-node runtime decision — is supplied
- * to the replica as a policy rather than living here.
+ * <p>The {@code default} hooks cover the stores that diverge: {@link #currentForSync} and {@link
+ * #adoptForSync} let a store weave a resurrection-blocking tombstone into the sync view (only
+ * {@code ProjectStore} does), and {@link #mayPush} and {@link #live} let a single-writer store
+ * answer for the box whose handle is asking (runs and reviews do).
  */
 public interface SyncedStore {
 
@@ -119,11 +119,31 @@ public interface SyncedStore {
   }
 
   /**
-   * Whether {@code id} is work still under way on this box, which main's denial never rewrites or
-   * removes: its next change is offered again, and once the work has finished a denial settles it
-   * like any other. None by default.
+   * Whether the box whose FDE handle is {@code handle} may push its own change to {@code id} up to
+   * main, rather than only pull main's version. Every box may by default.
    */
-  default boolean live(String id) {
+  default boolean mayPush(String id, String handle) {
+    return true;
+  }
+
+  /**
+   * Whether {@code id} is work still under way on the box whose FDE handle is {@code handle}, which
+   * main's version, by denial or by pull, never rewrites or removes: the local row stays as it is,
+   * its next change is offered again, and once the work has finished main's version settles it like
+   * any other's. Another box's work is never live here. None by default.
+   */
+  default boolean live(String id, String handle) {
+    return false;
+  }
+
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
+   * box, as the row's merge base when it is newer than the base held here — main took the box's
+   * offer and its answer never came back — keeping the row as it stands here: whatever the box
+   * changed since stays a change main has not taken. Returns whether the base moved. A store whose
+   * rows are never edited after they are made recovers by converging instead, and moves nothing.
+   */
+  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return false;
   }
 }

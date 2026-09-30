@@ -216,6 +216,9 @@ public final class FdeStore {
    * because {@code api_tokens.fde_id} predates the cascade constraints. Spec attribution ({@code
    * created_by}/{@code updated_by}) stores the handle as historical text and is untouched.
    *
+   * <p>The box the FDE synced from ({@link FdeBoxes}) is released, so an FDE later added under the
+   * same handle syncs from whichever box it next connects from.
+   *
    * <p>Refuses to remove the last active admin. The guard runs inside the delete transaction so two
    * concurrent removals cannot both pass it and leave the host with no administrator.
    */
@@ -233,6 +236,7 @@ public final class FdeStore {
                     + " sail fde add <handle> --role admin");
           }
           db.execute("DELETE FROM api_tokens WHERE fde_id = ?", fdeId);
+          new FdeBoxes(db).release(fde.handle());
           db.execute("DELETE FROM fdes WHERE id = ?", fdeId);
         });
   }

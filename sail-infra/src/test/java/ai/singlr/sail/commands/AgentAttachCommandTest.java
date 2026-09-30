@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
@@ -303,7 +304,7 @@ class AgentAttachCommandTest {
                       done.countDown();
                     }
                   });
-      SessionDispatchLockTest.awaitParked(attach);
+      FileMutexTest.awaitParked(attach);
       claim.run();
       assertEquals(0, host.sessionCount(), "the claim's yield scan finds nothing live");
       dispatchClaiming.close();
@@ -323,7 +324,7 @@ class AgentAttachCommandTest {
     Acting.system(
         () -> {
           runs.reserveDispatch(
-              id, "acme", "spec-" + id, "it", "it", role, repos, "codex", null, "t", "l", "u");
+              id, "acme", "spec-" + id, "it", role, repos, "codex", null, "t", "l", "u");
         });
   }
 
@@ -391,18 +392,15 @@ class AgentAttachCommandTest {
       Acting.system(
           () ->
               runs.create(
-                  "r1", "acme", "spec-x", "it", "it", "build", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r1", "acme", "spec-x", "it", "build", "codex", null, "t", null, null, "l", "u"));
       Acting.system(
           () ->
               runs.create(
-                  "r2", "acme", "legacy", "it", "it", "build", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r2", "acme", "legacy", "it", "build", "codex", null, "t", null, null, "l", "u"));
       Acting.system(
           () ->
               runs.create(
-                  "r3", "acme", null, "it", "it", "adhoc", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r3", "acme", null, "it", "adhoc", "codex", null, "t", null, null, "l", "u"));
       assertEquals(
           "spec-x", AgentAttachCommand.knownRoom(rooms, runs.findById("r1").orElseThrow()));
       assertEquals(

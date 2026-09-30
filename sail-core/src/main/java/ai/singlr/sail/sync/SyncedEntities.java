@@ -23,7 +23,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.function.Predicate;
 
 /** The dependency-ordered registry of every replicated entity and its store-specific policies. */
 public final class SyncedEntities {
@@ -37,25 +36,19 @@ public final class SyncedEntities {
   }
 
   @FunctionalInterface
-  public interface PushPolicy {
-    Predicate<String> forStore(SyncedStore store, String handle);
-  }
-
-  @FunctionalInterface
   public interface TransitionDetector {
     List<SyncTransition> detect(String id, Map<String, Object> before, Map<String, Object> after);
   }
 
   /**
-   * One replicated type: its store, which declares who may write it ({@link
-   * SyncedStore#authority}), how it resolves a parked conflict, which of its changes a node pushes
-   * ({@code pushPolicy}), and which of its revisions are transitions worth narrating.
+   * One replicated type: its store, which declares who may write it ({@link SyncedStore#authority})
+   * and which of its changes a node pushes ({@link SyncedStore#mayPush}), how it resolves a parked
+   * conflict, and which of its revisions are transitions worth narrating.
    */
   public record Entity(
       String type,
       Function<Sqlite, SyncedStore> factory,
       Function<Sqlite, ConflictResolver> resolverFactory,
-      PushPolicy pushPolicy,
       TransitionDetector transitions,
       Map<String, TransitionKind> transitionKinds) {
     public SyncedStore store(Sqlite db) {
@@ -68,7 +61,6 @@ public final class SyncedEntities {
     }
   }
 
-  private static final PushPolicy ALL = (store, handle) -> id -> true;
   private static final TransitionDetector NONE = (id, before, after) -> List.of();
   private static final List<Entity> ENTITIES =
       List.of(
@@ -76,24 +68,21 @@ public final class SyncedEntities {
               "spec",
               SpecStore::new,
               SpecStore::new,
-              ALL,
               (id, before, after) -> SyncTransitions.statusChange("spec", id, before, after),
               Map.of("spec", TransitionKind.SPEC_STATUS)),
-          new Entity("room", RoomStore::new, RoomStore::new, ALL, NONE, Map.of()),
-          new Entity("file", FileStore::new, FileStore::new, ALL, NONE, Map.of()),
-          new Entity("project", ProjectStore::new, ProjectStore::new, ALL, NONE, Map.of()),
+          new Entity("room", RoomStore::new, RoomStore::new, NONE, Map.of()),
+          new Entity("file", FileStore::new, FileStore::new, NONE, Map.of()),
+          new Entity("project", ProjectStore::new, ProjectStore::new, NONE, Map.of()),
           new Entity(
               "run",
               RunStore::new,
               RunStore::new,
-              (store, handle) -> id -> ((RunStore) store).pushableFrom(id, handle),
               (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
               Map.of("run", TransitionKind.RUN_STATUS)),
           new Entity(
               "review",
               ReviewStore::new,
               ReviewStore::new,
-              ALL,
               SyncTransitions::reviewChanges,
               Map.of(
                   "review",
@@ -104,7 +93,6 @@ public final class SyncedEntities {
               "message",
               MessageStore::new,
               MessageStore::new,
-              ALL,
               (id, before, after) ->
                   before == null
                       ? List.of(new SyncTransition("message", id, null, "posted", after))
@@ -133,7 +121,10 @@ public final class SyncedEntities {
         .orElseThrow(() -> new IllegalStateException("Unknown conflict entity type: " + type));
   }
 
-  /** One replica per registered type over {@code db}, identified as {@code boxId}. */
+  /**
+   * One replica per registered type over {@code db}, identified as {@code boxId}, for the box whose
+   * FDE handle is {@code handle}.
+   */
   public static Map<String, StoreReplica> replicas(Sqlite db, String boxId, String handle) {
     var changes = new ChangeLog(db);
     var conflicts = new SyncConflicts(db);
@@ -142,14 +133,7 @@ public final class SyncedEntities {
     for (var entity : ENTITIES) {
       var store = entity.store(db);
       replicas.put(
-          entity.type(),
-          new StoreReplica(
-              boxId,
-              store,
-              changes,
-              conflicts,
-              state,
-              entity.pushPolicy().forStore(store, handle)));
+          entity.type(), new StoreReplica(boxId, store, changes, conflicts, state, handle));
     }
     return Collections.unmodifiableMap(replicas);
   }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -173,6 +174,27 @@ class AgentSessionTest {
     var info = session.queryStatus("acme-health", RUN_UNIT);
 
     assertNull(info);
+  }
+
+  @Test
+  void aContainerThatRunsACommandIsReachable() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk(" true", "");
+
+    assertDoesNotThrow(() -> new AgentSession(shell).requireReachable("acme-health"));
+  }
+
+  @Test
+  void aContainerThatCannotRunACommandIsNotReachable() {
+    var shell =
+        new ScriptedShellExecutor()
+            .onFail(" true", "Error: websocket: close 1006 (abnormal closure)");
+
+    var unreachable =
+        assertThrows(
+            IOException.class, () -> new AgentSession(shell).requireReachable("acme-health"));
+
+    assertTrue(unreachable.getMessage().contains("acme-health"), unreachable.getMessage());
+    assertTrue(unreachable.getMessage().contains("close 1006"), unreachable.getMessage());
   }
 
   @Test

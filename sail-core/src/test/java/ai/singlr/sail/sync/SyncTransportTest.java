@@ -170,7 +170,6 @@ class SyncTransportTest {
         "project",
         "auth",
         "owner",
-        "owner",
         "build",
         "codex",
         "original",
@@ -428,7 +427,7 @@ class SyncTransportTest {
       assertEquals(1, first.report().pushed());
       assertEquals(0, first.pages());
       assertEquals(
-          List.of("hello", "heads", "need", "announce", "manifest", "done", "done", "push"),
+          List.of("hello", "heads", "need", "need", "announce", "manifest", "done", "done", "push"),
           link.ops());
     }
     assertEquals(0L, nodeA.syncState.checkpoint("main", "spec"), "an own push is not a seen entry");
@@ -529,20 +528,21 @@ class SyncTransportTest {
       assertEquals(1, round.report().pulled());
       assertEquals(1, round.report().pushed());
       assertEquals(1, round.entries(), "the page carried only main's edit");
-      assertEquals(List.of("hello", "heads", "pull", "need", "announce", "push"), link.ops());
+      assertEquals(
+          List.of("hello", "heads", "need", "pull", "need", "announce", "push"), link.ops());
     }
     assertEquals("Y from A", main.specs.findById("y").orElseThrow().title());
     assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
   }
 
-  private UnaryOperator<OutputStream> afterTheFirstPage(Runnable action) {
-    var done = new AtomicInteger();
+  private UnaryOperator<OutputStream> beforeThePullsPage(Runnable action) {
+    var pages = new AtomicInteger();
     return out ->
         new java.io.FilterOutputStream(out) {
           @Override
           public void write(byte[] buffer, int offset, int length) throws IOException {
             if (new String(buffer, offset, length).contains("\"op\": \"page\"")
-                && done.getAndIncrement() == 0) {
+                && pages.incrementAndGet() == 2) {
               action.run();
             }
             out.write(buffer, offset, length);
@@ -574,11 +574,14 @@ class SyncTransportTest {
           engine.reconcile(nodeB.replica, main.replica);
         };
     try (var link =
-        connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(Actor.carrying(bLandsFirst)))) {
+        connect(nodeA, SyncWire.MAX_FRAME, beforeThePullsPage(Actor.carrying(bLandsFirst)))) {
       var round = link.reconcile("spec", nodeA.replica);
       assertEquals(1, round.report().merged());
       assertEquals(2, link.count("push"), "the stale push is rejected and the merge pushed again");
-      assertEquals(1, link.count("need"), "main's version arrives through the bounded need path");
+      assertEquals(
+          2,
+          link.count("need"),
+          "the round's first question, and main's version of the rejected offer, both through need");
     }
     var merged = main.specs.findById("auth").orElseThrow();
     assertEquals("Title from A", merged.title());
@@ -601,7 +604,7 @@ class SyncTransportTest {
           engine.reconcile(nodeB.replica, main.replica);
         };
     try (var link =
-        connect(nodeA, SyncWire.MAX_FRAME, afterTheFirstPage(Actor.carrying(bLandsFirst)))) {
+        connect(nodeA, SyncWire.MAX_FRAME, beforeThePullsPage(Actor.carrying(bLandsFirst)))) {
       assertEquals(1, link.reconcile("spec", nodeA.replica).report().conflicts());
     }
     assertEquals("Title from B", main.specs.findById("auth").orElseThrow().title());
@@ -626,7 +629,7 @@ class SyncTransportTest {
                   SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("file"))
               .report()
               .pushed());
-      assertEquals(3, link.count("need"));
+      assertEquals(6, link.count("need"), "three frames asking what main took, three its rows");
     }
   }
 
@@ -640,7 +643,7 @@ class SyncTransportTest {
       var round = SyncBox.reconcile(paged, "spec", nodeA.replica);
       assertEquals(4, round.report().pushed());
       assertEquals(4, link.count("push"));
-      assertEquals(1, link.count("need"));
+      assertEquals(2, link.count("need"), "what main took, then main's rows");
     }
     assertEquals(4, main.replica.entityIds().size());
   }
@@ -698,6 +701,7 @@ class SyncTransportTest {
         SyncRpcServer.over(
             main.db,
             "main",
+            null,
             Actor.sync("A", Role.MEMBER),
             () -> roster,
             SyncTransitionSink.NONE,

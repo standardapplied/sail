@@ -171,8 +171,7 @@ class RoomCommitGuardTest {
   @Test
   void captureRecordsHeadAndFingerprintWhenGitReadsCleanly() {
     runStore.create(
-        "run-1", "acme", "auth", "node", "node", "room", "codex", "b", "t", null, null, "log",
-        "unit");
+        "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     var guard = guard(runStore, shell(command -> new ShellExec.Result(0, "deadbeef\n", "")));
 
     guard.captureRoomBaseline("acme", CONFIG, "run-1");
@@ -209,11 +208,9 @@ class RoomCommitGuardTest {
   @Test
   void guardAttributesNothingWhenAConcurrentRunHoldsNoReservedRepos() {
     runStore.create(
-        "run-1", "acme", "auth", "node", "node", "room", "codex", "b", "t", null, null, "log",
-        "unit");
+        "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     runStore.create(
-        "cand", "acme", "auth2", "node", "node", "build", "codex", "b", "t", null, null, "log2",
-        "unit2");
+        "cand", "acme", "auth2", "node", "build", "codex", "b", "t", null, null, "log2", "unit2");
     runStore.saveRoomGuardBaseline("run-1", "{\"app\": {\"head\": \"X\"}}");
     var guard = guard(runStore, throwingShell());
 
@@ -233,8 +230,7 @@ class RoomCommitGuardTest {
         "name: acme\nssh:\n  user: dev\nrepos:\n  - url: https://example.com/app.git\n    path:"
             + " app\n");
     runStore.create(
-        "run-1", "acme", "auth", "node", "node", "room", "codex", "b", "t", null, null, "log",
-        "unit");
+        "run-1", "acme", "auth", "node", "room", "codex", "b", "t", null, null, "log", "unit");
     runStore.saveRoomGuardBaseline(
         "run-1",
         "{\"repoA\": \"not-a-map\","

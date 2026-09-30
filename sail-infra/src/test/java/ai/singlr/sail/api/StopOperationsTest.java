@@ -436,19 +436,7 @@ class StopOperationsTest {
     var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     runStore.create(
-        R1,
-        "acme",
-        "auth",
-        null,
-        null,
-        "build",
-        "codex",
-        "feat/auth",
-        "do it",
-        123,
-        null,
-        RUN_LOG,
-        UNIT);
+        R1, "acme", "auth", null, "build", "codex", "feat/auth", "do it", 123, null, RUN_LOG, UNIT);
 
     var refusal =
         assertThrows(
@@ -458,6 +446,35 @@ class StopOperationsTest {
                     ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
 
     assertEquals(ErrorCode.RUN_ON_OTHER_NODE, refusal.failure().errorCode());
+  }
+
+  @Test
+  void aRunStampedBeforeTheBoxHadAHandleStopsOnceTheHandleChangeStampsIt() throws Exception {
+    var shell = liveAgentShell();
+    var ops = stopOps(shell, (project, unit) -> agentDies(shell), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    Acting.system(
+        () ->
+            runStore.create(
+                R1,
+                "acme",
+                "auth",
+                null,
+                "build",
+                "codex",
+                "feat/auth",
+                "do it",
+                123,
+                null,
+                RUN_LOG,
+                UNIT));
+    runStore.stamp(LOCAL_HANDLE, runStore.unacknowledged());
+
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
   }
 
   @Test
@@ -577,7 +594,6 @@ class StopOperationsTest {
         R1,
         "acme",
         null,
-        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1454,7 +1470,6 @@ class StopOperationsTest {
               "acme",
               "",
               LOCAL_HANDLE,
-              LOCAL_HANDLE,
               "adhoc",
               List.of(),
               "codex",
@@ -1476,7 +1491,6 @@ class StopOperationsTest {
               "acme",
               "auth",
               LOCAL_HANDLE,
-              LOCAL_HANDLE,
               "build",
               "codex",
               "feat/auth",
@@ -1494,7 +1508,6 @@ class StopOperationsTest {
         "acme",
         "auth",
         LOCAL_HANDLE,
-        LOCAL_HANDLE,
         "codex",
         "feat/auth",
         "review",
@@ -1507,7 +1520,6 @@ class StopOperationsTest {
         R2,
         "acme",
         "auth",
-        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1600,7 +1612,6 @@ class StopOperationsTest {
                       R1,
                       "acme",
                       "auth",
-                      LOCAL_HANDLE,
                       LOCAL_HANDLE,
                       "build",
                       List.of(),

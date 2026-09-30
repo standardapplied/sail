@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtySessionHost;
 import java.io.IOException;
@@ -45,7 +46,7 @@ final class PtyHostYield implements SessionYield {
 
   @Override
   public Hold lock(String project) throws IOException {
-    return SessionDispatchLock.acquire(lockDir, project);
+    return FileMutex.acquire(lockDir.resolve(project + ".lock"))::close;
   }
 
   @Override

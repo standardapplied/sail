@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
@@ -33,7 +34,10 @@ import java.util.function.Supplier;
  * is never claimed, no branch is checked out, no snapshot is taken; a chat owns no working tree,
  * and the launch is harness-restricted, never full-permission unless a human engaged the agent in
  * full mode. When the spec's latest run on this node recorded a resumable session for the chosen
- * agent, the launch resumes that conversation with the wake prompt as its next turn.
+ * agent, the launch resumes that conversation with the wake prompt as its next turn. The run acts
+ * for this box's FDE like every run the box executes, so a wake whose spec or room this box no
+ * longer owns when it launches — it moved after the reactor's check — is refused before anything is
+ * reserved.
  */
 public final class RoomWakeLauncher {
 
@@ -86,6 +90,9 @@ public final class RoomWakeLauncher {
     if (spec == null) {
       return wakeSpecless(project, specId, config, localHandle);
     }
+    if (!spec.ownedBy(localHandle)) {
+      throw notThisBoxs("Spec '" + specId + "'", spec.owner(), localHandle);
+    }
     var engagement = MembershipService.stateOf(roomStore.get(), spec).standing();
     var agentType =
         engagement != null
@@ -129,7 +136,6 @@ public final class RoomWakeLauncher {
             project,
             specId,
             localHandle,
-            spec.owner(),
             role,
             repoPaths,
             agentType,
@@ -178,6 +184,22 @@ public final class RoomWakeLauncher {
   }
 
   /**
+   * The refusal of a wake whose target moved off this box between the reactor's check and the
+   * launch: a run acts for its box's FDE, and main takes a run's work only for what that FDE owns.
+   */
+  private static ApiException notThisBoxs(String target, String owner, String localHandle) {
+    return new ApiException(
+        ErrorCode.NOT_YOUR_SPEC,
+        target
+            + " belongs to '"
+            + Objects.toString(owner, "")
+            + "', not this box's FDE '"
+            + Objects.toString(localHandle, "")
+            + "', so no room run was reserved.",
+        "Post in the room from the box of the FDE who owns it.");
+  }
+
+  /**
    * Wakes a room with no attached spec — the collaborator lane. Only a seated member wakes (the
    * reactor guarantees it; this refuses defensively), the prompt carries no spec framing, the run
    * reserves with a null spec and the room id as its serialization scope, and full mode claims the
@@ -188,6 +210,10 @@ public final class RoomWakeLauncher {
     var room = rooms == null ? null : rooms.findById(roomId).orElse(null);
     if (room == null) {
       throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+    }
+    var owner = rooms.ownerOf(roomId);
+    if (!Ownership.owns(localHandle, owner)) {
+      throw notThisBoxs("Room '" + roomId + "'", owner, localHandle);
     }
     var member = Roster.fromJson(room.roster()).standing();
     if (member == null) {
@@ -216,7 +242,6 @@ public final class RoomWakeLauncher {
     var role = full ? DispatchGate.ROOM_FULL_ROLE : DispatchGate.ROOM_ROLE;
     var targetRepos = full ? config.repos() : List.<SailYaml.Repo>of();
     var repoPaths = targetRepos.stream().map(SailYaml.Repo::path).toList();
-    var owner = rooms.ownerOf(roomId);
     var credential =
         runReservation.reserve(
             runId,
@@ -224,7 +249,6 @@ public final class RoomWakeLauncher {
             null,
             roomId,
             localHandle,
-            owner,
             role,
             repoPaths,
             agentType,

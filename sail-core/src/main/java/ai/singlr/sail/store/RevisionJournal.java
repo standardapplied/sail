@@ -163,7 +163,7 @@ public final class RevisionJournal implements ConflictResolver {
       map.put(TOMBSTONE_BASE, rawBaseRev(id));
     }
     var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
+    var rev = explicitRev != null ? explicitRev : Revisions.next(latestRev(id), snapshot);
     if (!deleted) {
       if (setBaseRev) {
         db.execute(
@@ -203,6 +203,33 @@ public final class RevisionJournal implements ConflictResolver {
             recordRevision(id, rev, Snapshots.text(snapshot, Snapshots.ACTOR), "sync", false, true);
           }
           return null;
+        });
+  }
+
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
+   * after the base held here — main took this box's offer and its answer never came back — as the
+   * synced base. Main decides it is later than that base, in its own change log ({@link
+   * ai.singlr.sail.sync.MainReplica#acceptedFrom}); a rev this box already holds as its base
+   * changes nothing. The row is kept as it stands here: when it has moved on since, its own state
+   * is journaled on top as the change main has not taken yet, recorded under the author its latest
+   * entry already names, so the round reconciles it three-way against exactly what main took and
+   * the author main records is the one who wrote it. The base is adopted as the bound actor.
+   * Returns whether it moved.
+   */
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return db.transaction(
+        () -> {
+          if (rev.equals(baseRevOf(id))) {
+            return false;
+          }
+          var mine = comparableSnapshot(id);
+          var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor);
+          applyRevision(id, accepted, rev);
+          if (!sameContent(mine, accepted)) {
+            Actor.run(Actor.main(author.orElse(null)), () -> write(id, mine, "local"));
+          }
+          return true;
         });
   }
 
@@ -279,36 +306,44 @@ public final class RevisionJournal implements ConflictResolver {
           if (sameContent(chosen, remote)) {
             return baseRev;
           }
-          return writeChosen(id, chosen);
+          return write(id, chosen, "resolve");
         });
   }
 
+  /**
+   * Rebases {@code id} onto main's side of a conflict, {@code remote}, under a rev this box mints:
+   * the conflict never recorded main's. It is journaled as {@link ChangeLog#RESOLVED_BASE}, never
+   * as a version this box heard from main, so what main took from this box is still asked after the
+   * version it last really heard.
+   */
   private String adoptBase(String id, Map<String, Object> remote) {
     if (remote == null) {
       if (schema.exists(id)) {
-        var rev = recordRevision(id, null, null, "sync", true, false);
+        var rev = recordRevision(id, null, null, ChangeLog.RESOLVED_BASE, true, false);
         schema.deleteRow(id);
         return rev;
       }
-      var rev = Revisions.next(currentRev(id), EMPTY_SNAPSHOT);
-      changeLog.append(schema.entityType(), id, rev, "sync", true, EMPTY_SNAPSHOT);
+      var rev = Revisions.next(latestRev(id), EMPTY_SNAPSHOT);
+      changeLog.append(schema.entityType(), id, rev, ChangeLog.RESOLVED_BASE, true, EMPTY_SNAPSHOT);
       return rev;
     }
     schema.apply(id, remote);
-    return recordRevision(id, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true);
+    return recordRevision(
+        id, null, Snapshots.text(remote, Snapshots.ACTOR), ChangeLog.RESOLVED_BASE, false, true);
   }
 
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
+  /** Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it). */
+  private String write(String id, Map<String, Object> state, String origin) {
+    if (state == null) {
       if (!schema.exists(id)) {
         return latestRev(id);
       }
-      var rev = recordRevision(id, null, null, "resolve", true, false);
+      var rev = recordRevision(id, null, null, origin, true, false);
       schema.deleteRow(id);
       return rev;
     }
-    schema.apply(id, chosen);
-    return recordRevision(id, null, null, "resolve", false, false);
+    schema.apply(id, state);
+    return recordRevision(id, null, null, origin, false, false);
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

@@ -123,6 +123,30 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    */
   TypeReport reconcile(String type, LocalReplica local);
 
+  /**
+   * The handle main authenticated this session as, blank for a session that names no FDE; empty
+   * against a main that predates saying so.
+   */
+  Optional<String> handle();
+
+  /**
+   * What main holds of each of {@code ids} of {@code type}: its current version — a revision, a
+   * tombstone or an erasure — and the latest version it took from this box, each in request order;
+   * an id main never held is omitted from both. Reads only.
+   */
+  Held held(String type, List<String> ids);
+
+  /**
+   * Main's answer about ids a node asked after: {@code current} is main's version of each it holds,
+   * {@code accepted} the latest version of each it took from this box, as main recorded it.
+   */
+  record Held(List<SyncWire.Entry> current, List<SyncWire.Entry> accepted) {
+    public Held {
+      current = List.copyOf(current);
+      accepted = List.copyOf(accepted);
+    }
+  }
+
   /** Pulls main's FDE roster; the node mirrors it main-authoritatively. */
   List<Map<String, Object>> fetchFdes();
 

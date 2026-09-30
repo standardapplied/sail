@@ -23,9 +23,11 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.function.ToIntFunction;
 
@@ -82,6 +84,7 @@ public final class PagedSyncSession implements SyncSession {
   private List<SyncSession.Denial> denials = new ArrayList<>();
   private Consumer<String> notice = ignored -> {};
   private String broken;
+  private String handle;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
@@ -111,6 +114,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.asked = asked;
     copy.contentFields = contentFields;
     copy.notice = notice;
+    copy.handle = handle;
     return copy;
   }
 
@@ -147,6 +151,7 @@ public final class PagedSyncSession implements SyncSession {
     }
     var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
+    session.handle = welcome.handle();
     return session;
   }
 
@@ -225,6 +230,7 @@ public final class PagedSyncSession implements SyncSession {
       throw new SyncTransportException(
           "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
     }
+    acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
     var report = SyncEngine.Report.NONE;
     var pages = 0;
@@ -408,16 +414,65 @@ public final class PagedSyncSession implements SyncSession {
     need(
         type,
         ids,
-        (consumed, entries) -> {
-          fetchContent(type, entries);
-          var remaining = adoptErasures(type, entries);
-          var erasedNow = ids(entries);
-          erasedNow.removeAll(ids(remaining));
-          var scope = new LinkedHashSet<>(consumed);
-          scope.removeAll(erasedNow);
-          reports.add(reconcile(local, scope, new PageView(type, remaining, checkpoint)));
+        (consumed, page) -> {
+          fetchContent(type, page.entries());
+          reports.add(reconcileAnswered(type, local, consumed, page.entries(), checkpoint));
         });
     return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+  }
+
+  /**
+   * Reconciles {@code ids} against main's answer for them, {@code entries}: an erasure among them
+   * is applied first, and an id main omitted is one it has never seen, which the engine pushes as
+   * new.
+   */
+  private SyncEngine.Report reconcileAnswered(
+      String type,
+      LocalReplica local,
+      List<String> ids,
+      List<SyncWire.Entry> entries,
+      long checkpoint) {
+    var remaining = adoptErasures(type, entries);
+    var erasedNow = ids(entries);
+    erasedNow.removeAll(ids(remaining));
+    var scope = new LinkedHashSet<>(ids);
+    scope.removeAll(erasedNow);
+    return reconcile(local, scope, new PageView(type, remaining, checkpoint));
+  }
+
+  /**
+   * Before anything of {@code type} is reconciled, asks main which version of each row the node
+   * changed it took from this box after the version the node last heard from main, and adopts it as
+   * the row's merge base: main took the node's offer and its answer never came back. Only those
+   * versions cross, almost always none. The pages and the push that follow then reconcile each row
+   * three-way against exactly what main took of it, so neither a change main made since nor one the
+   * node made since is lost or reverted unseen.
+   */
+  private void acknowledgeLostAnswers(String type, LocalReplica local) {
+    var dirty = List.copyOf(local.dirtyIds());
+    if (dirty.isEmpty()) {
+      return;
+    }
+    var heard = new LinkedHashMap<String, String>();
+    dirty.forEach(
+        id -> {
+          var rev = local.lastHeardRev(id);
+          if (rev != null) {
+            heard.put(id, rev);
+          }
+        });
+    needAccepted(
+        type,
+        dirty,
+        heard,
+        (consumed, page) -> {
+          fetchContent(type, page.accepted());
+          for (var entry : page.accepted()) {
+            Actor.run(
+                Actor.main(entry.author()),
+                () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
+          }
+        });
   }
 
   /**
@@ -426,17 +481,55 @@ public final class PagedSyncSession implements SyncSession {
    * omitted from its answer is one it has never seen.
    */
   private void need(
-      String type, List<String> ids, BiConsumer<List<String>, List<SyncWire.Entry>> onAnswer) {
+      String type, List<String> ids, BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    paged(type, ids, SyncWire::encodedLength, asked -> new SyncWire.Need(type, asked), onAnswer);
+  }
+
+  /**
+   * Asks main, as {@link #need(String, List, BiConsumer)} does, only which version of each of
+   * {@code ids} it took from this box after the version this box last heard of it, {@code heard}.
+   */
+  private void needAccepted(
+      String type,
+      List<String> ids,
+      Map<String, String> heard,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    paged(
+        type,
+        ids,
+        id ->
+            SyncWire.encodedLength(id)
+                + (heard.containsKey(id)
+                    ? SyncWire.encodedLength(id) + SyncWire.encodedLength(heard.get(id))
+                    : 0),
+        asked -> {
+          var named = new LinkedHashMap<String, String>();
+          asked.stream().filter(heard::containsKey).forEach(id -> named.put(id, heard.get(id)));
+          return SyncWire.Need.accepted(type, asked, named);
+        },
+        onAnswer);
+  }
+
+  /**
+   * Asks main about {@code ids} as many per request as the frame admits, each weighing {@code
+   * weight}, continuing from wherever main stopped consuming.
+   */
+  private void paged(
+      String type,
+      List<String> ids,
+      ToIntFunction<String> weight,
+      Function<List<String>, SyncWire.Need> request,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
     var offset = 0;
     while (offset < ids.size()) {
-      var asked = askable(ids, offset);
-      var answer = page(new SyncWire.Need(type, asked), type);
+      var asked = fitting(ids, offset, weight);
+      var answer = page(request.apply(asked), type);
       if (answer.next() <= 0) {
         throw new SyncTransportException(
             "protocol", type + ": main consumed none of " + asked.size() + " needed ids", null);
       }
       var consumed = asked.subList(0, (int) Math.min(answer.next(), asked.size()));
-      onAnswer.accept(consumed, answer.entries());
+      onAnswer.accept(consumed, answer);
       offset += consumed.size();
     }
   }
@@ -606,6 +699,28 @@ public final class PagedSyncSession implements SyncSession {
       return new SyncTransportException("refused", context + ": " + refuse.reason(), null);
     }
     return new SyncTransportException(context + ": Expected a " + expected + ", got: " + response);
+  }
+
+  @Override
+  public Optional<String> handle() {
+    return Optional.ofNullable(handle);
+  }
+
+  @Override
+  public Held held(String type, List<String> ids) {
+    return onLiveChannel(
+        () -> {
+          var current = new ArrayList<SyncWire.Entry>();
+          var accepted = new ArrayList<SyncWire.Entry>();
+          need(
+              type,
+              ids,
+              (consumed, page) -> {
+                current.addAll(page.entries());
+                accepted.addAll(page.accepted());
+              });
+          return new Held(current, accepted);
+        });
   }
 
   @Override
@@ -800,7 +915,8 @@ public final class PagedSyncSession implements SyncSession {
       need(
           type,
           ids,
-          (consumed, fetched) -> {
+          (consumed, page) -> {
+            var fetched = page.entries();
             fetchContent(type, fetched);
             adoptErasures(type, fetched);
             consumed.forEach(entries::remove);

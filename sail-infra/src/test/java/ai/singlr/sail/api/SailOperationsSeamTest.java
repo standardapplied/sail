@@ -18,6 +18,7 @@ import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -46,6 +47,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.sync.ConflictMerge;
+import ai.singlr.sail.sync.FdeRoster;
 import ai.singlr.sail.sync.MainReplica;
 import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
@@ -58,9 +60,6 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.io.PipedInputStream;
-import java.io.PipedOutputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -80,7 +79,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -219,7 +217,7 @@ class SailOperationsSeamTest {
                   target -> {
                     attempts.incrementAndGet();
                     if (offline.get()) throw new IOException("main port blocked");
-                    return channel(main);
+                    return channel(main, "owner");
                   }));
       Consumer<Duration> advance =
           duration -> {
@@ -430,8 +428,8 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               runs.create(
-                  run, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
-                  "/log", "unit"));
+                  run, "proj", "auth", "node", "build", "codex", "branch", "task", 1, null, "/log",
+                  "unit"));
       var review = Acting.system(() -> new ReviewStore(box.db).createReview("auth", 1));
       Acting.system(
           () ->
@@ -957,6 +955,79 @@ class SailOperationsSeamTest {
     }
   }
 
+  private SyncOperations syncingAs(SyncBox main, SyncBox node, String configured, Actor session) {
+    return new SyncOperations(
+        node.db,
+        "node",
+        tempDir,
+        () -> new SyncConfig("node", "main-target", configured, node.id),
+        target ->
+            channel(
+                SyncRpcServer.over(
+                    main.db,
+                    "main",
+                    null,
+                    session,
+                    FdeRoster.EMPTY,
+                    SyncTransitionSink.NONE,
+                    SyncWire.UPGRADE_FLOOR)));
+  }
+
+  private static String finishedRunStampedFor(SyncBox box, String handle) {
+    var id = DateTimeUtils.newId().toString();
+    var runs = new RunStore(box.db);
+    Acting.system(
+        () -> {
+          runs.reserveDispatch(
+              id, "acme", null, handle, "adhoc", List.of(), "claude-code", "b", "t", "/l", "u");
+          runs.complete(id, "completed", 0);
+        });
+    return id;
+  }
+
+  @Test
+  void aRoundStampsTheRunsTheBoxMadeBeforeItHadAHandleAndMainTakesThem() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      operations.useControlPlane(
+          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("node", Role.MEMBER)));
+      operations.schema().prepareSync();
+      var run = finishedRunStampedFor(node, null);
+
+      operations.sync(new SyncRequest(null));
+
+      assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
+      assertEquals("node", new RunStore(node.db).findById(run).orElseThrow().node());
+      SyncBox.quiesce(main, node);
+      SyncBox.assertEqualToMain(main, node);
+    }
+  }
+
+  @Test
+  void aRoundMainKnowsByAnotherHandleFailsHavingDoneNothing() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node");
+        var operations = operations(node.db)) {
+      var run = finishedRunStampedFor(node, "node");
+      Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
+      operations.useControlPlane(
+          node.db, tempDir, syncingAs(main, node, "node", Actor.sync("uday", Role.MEMBER)));
+      operations.schema().prepareSync();
+
+      var failure =
+          assertThrows(SyncTransportException.class, () -> operations.sync(new SyncRequest(null)));
+
+      assertTrue(failure.getMessage().contains("'uday'"), failure.getMessage());
+      assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing is offered");
+      assertTrue(node.specs.findById("auth").isEmpty(), "nothing is adopted");
+      assertTrue(new RunStore(node.db).findById(run).isPresent(), "nothing is removed");
+      SyncBox.quiesce(main, node);
+      SyncBox.assertEqualToMain(main, node);
+      assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
+    }
+  }
+
   @Test
   void aRoundDisablesAnFdeMainsRosterNoLongerLists() throws Exception {
     try (var main = new SyncBox("main");
@@ -978,6 +1049,7 @@ class SailOperationsSeamTest {
                       SyncRpcServer.over(
                           main.db,
                           "main",
+                          null,
                           Actor.sync("node", Role.MEMBER),
                           () ->
                               List.of(
@@ -1345,8 +1417,8 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               runs.create(
-                  id, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
-                  "/log", "unit"));
+                  id, "proj", "auth", "node", "build", "codex", "branch", "task", 1, null, "/log",
+                  "unit"));
       assertEquals(id, operations.dispatching().latestRun("proj", "node").orElseThrow().id());
       assertEquals(id, operations.dispatching().activeRun("proj", "node").orElseThrow().id());
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
@@ -1384,11 +1456,17 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncBox main) throws IOException {
+    return channel(main, "node");
+  }
+
+  /** A session to {@code main} authenticated as {@code handle}, the node's own FDE. */
+  private static SyncOperations.Channel channel(SyncBox main, String handle) throws IOException {
     return channel(
         SyncRpcServer.over(
             main.db,
             "main",
-            Actor.sync("node", Role.MEMBER),
+            null,
+            Actor.sync(handle, Role.MEMBER),
             () -> rosterOf(main),
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR));
@@ -1406,43 +1484,6 @@ class SailOperationsSeamTest {
   }
 
   private static SyncOperations.Channel channel(SyncRpcServer server) throws IOException {
-    var toServer = new PipedOutputStream();
-    var serverIn = new PipedInputStream(toServer);
-    var serverOut = new PipedOutputStream();
-    var fromServer = new PipedInputStream(serverOut);
-    var error = new AtomicReference<Throwable>();
-    var thread =
-        Thread.ofVirtual()
-            .start(
-                () -> {
-                  try (serverIn;
-                      serverOut) {
-                    server.serve(serverIn, serverOut);
-                  } catch (Throwable e) {
-                    error.set(e);
-                  }
-                });
-    return new SyncOperations.Channel() {
-      public InputStream reader() {
-        return fromServer;
-      }
-
-      public OutputStream writer() {
-        return toServer;
-      }
-
-      public void close() throws IOException {
-        try {
-          thread.join();
-          if (error.get() != null) throw new IOException("main failed", error.get());
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          throw new IOException(e);
-        } finally {
-          toServer.close();
-          fromServer.close();
-        }
-      }
-    };
+    return PipedSyncChannel.to(server);
   }
 }

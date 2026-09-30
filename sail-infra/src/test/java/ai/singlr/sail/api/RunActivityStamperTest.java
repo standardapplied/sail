@@ -53,7 +53,6 @@ class RunActivityStamperTest {
               "backend",
               "auth",
               "node-a",
-              "node-a",
               "build",
               "claude-code",
               "feat/x",

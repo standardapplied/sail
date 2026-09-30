@@ -86,9 +86,10 @@ public final class SchemaManager {
    * catch a mid-list insertion, because it never replays the earlier version→SQL mapping. The
    * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
    * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
-   * guard's launch baseline, kept host-side so the guarded agent can never reach it), and {@code
-   * container_leases} (a box's own exclusive-container-operation claims) are local-only as well —
-   * none of the four ever joins a sync snapshot.
+   * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
+   * container_leases} (a box's own exclusive-container-operation claims) and {@code fde_boxes}
+   * (main's record of the one box each FDE syncs from) are local-only as well — none of the five
+   * ever joins a sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
@@ -583,7 +584,13 @@ public final class SchemaManager {
           "CREATE INDEX idx_runs_room ON runs(room_id)",
           "CREATE INDEX idx_rooms_project ON rooms(project)",
           "CREATE INDEX idx_specs_room ON specs(room_id)",
-          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)");
+          "CREATE INDEX idx_run_delivered_message ON run_delivered_messages(message_id)",
+          """
+          CREATE TABLE fde_boxes (
+              handle TEXT PRIMARY KEY,
+              box_id TEXT NOT NULL,
+              claimed_at TEXT NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
