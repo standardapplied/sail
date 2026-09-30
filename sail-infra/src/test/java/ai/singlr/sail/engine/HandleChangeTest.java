@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -16,7 +17,6 @@ import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -246,7 +246,7 @@ class HandleChangeTest {
   }
 
   @Test
-  void aRunMainTookAndMovedOnWhoseAnswerWasLostStillHoldsTheOldHandle() throws Exception {
+  void aRunMainTookAndMovedOnWhoseAnswerWasLostIsAcknowledgedAndKeepsItsHandle() throws Exception {
     try (var ada = new SyncBox(dir, "box").syncsAs(ADA)) {
       var held = run("ada", "p");
       finish(held);
@@ -254,29 +254,13 @@ class HandleChangeTest {
       Acting.system(
           () -> new RunStore(main.db).recordSession(held, "main-session", "claude", "/t"));
 
-      var refused =
-          assertThrows(IllegalStateException.class, () -> apply(node("ada"), node("uday")));
+      assertEquals(List.of(), apply(node("ada"), node("uday")), "main took it: nothing re-stamped");
 
-      assertTrue(refused.getMessage().contains(held), refused.getMessage());
-      assertFalse(written.get(), "nothing is written");
-      assertEquals(null, runs.baseRevOf(held), "main moved on: not acknowledged over it");
-      assertEquals("ada", runs.findById(held).orElseThrow().node(), "nor re-stamped");
-
-      SyncBox.round(main, ada);
-      var parked = ada.conflicts.pendingFor("run", held).orElseThrow();
-      Acting.as(
-          "ada",
-          () ->
-              ada.conflicts.resolve(
-                  parked.id(),
-                  runs.resolveConflict(
-                      held,
-                      YamlUtil.parseMap(parked.localSnapshot()),
-                      YamlUtil.parseMap(parked.remoteSnapshot()))));
-      SyncBox.round(main, ada);
-      assertEquals(List.of(), apply(node("ada"), node("uday")), "settled, the change is taken");
+      assertTrue(written.get());
+      assertNotNull(runs.baseRevOf(held), "acknowledged at the version main took");
       assertEquals("ada", runs.findById(held).orElseThrow().node(), "main holds it as 'ada''s");
       SyncBox.quiesce(main, ada.syncsAs(UDAY));
+      assertEquals("main-session", runs.findById(held).orElseThrow().sessionId(), "main's change");
       SyncBox.assertEqualToMain(main, ada);
     }
   }

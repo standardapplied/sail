@@ -144,10 +144,10 @@ public final class SyncOperations {
     var specs = new SpecStore(db);
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
-    var handle = Objects.toString(config.handle(), "");
-    var replicas = SyncedEntities.replicas(db, requireBoxId(config), handle);
     try (var channel = channels.open(target);
         var session = open(channel, config, db)) {
+      var handle = Objects.toString(config.handle(), "");
+      var replicas = SyncedEntities.replicas(db, config.boxId(), handle);
       return reconcile(session, handle, replicas, messages, specs, files, projects);
     }
   }
