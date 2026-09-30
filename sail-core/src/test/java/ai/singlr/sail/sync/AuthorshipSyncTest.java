@@ -138,8 +138,6 @@ class AuthorshipSyncTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(main, alice, bob);
-    SyncBox.assertEqualToMain(main, alice);
-    SyncBox.assertEqualToMain(main, bob);
+    SyncBox.assertConverged(main, alice, bob);
   }
 }

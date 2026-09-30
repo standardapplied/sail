@@ -6,6 +6,8 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -23,15 +25,14 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Revisions;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.function.UnaryOperator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,6 +40,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /**
  * C1, T1 and T2 over real sessions, main plus two nodes: once every box has had a round with no new
@@ -204,6 +206,7 @@ class ConvergenceSyncTest {
 
     final String type;
     final String id;
+    final String table;
     final String first;
     final String second;
     final String third;
@@ -211,6 +214,7 @@ class ConvergenceSyncTest {
     Kind(String type, String id, String first, String second, String third) {
       this.type = type;
       this.id = id;
+      this.table = type.equals("file") ? "project_files" : type + "s";
       this.first = first;
       this.second = second;
       this.third = third;
@@ -327,7 +331,7 @@ class ConvergenceSyncTest {
     var mains = new ChangeLog(main.db).head(kind.type, kind.id).orElseThrow();
     assertParkedAgainst(mains, bob.conflicts.pendingFor(kind.type, kind.id).orElseThrow());
 
-    resolve(bob, kind.type, kind.id, Resolve.THEIRS);
+    SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.THEIRS);
 
     var bobs = new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow();
     assertEquals(mains.rev(), bobs.rev());
@@ -347,7 +351,7 @@ class ConvergenceSyncTest {
     var mains = new ChangeLog(main.db).head(kind.type, kind.id).orElseThrow();
     assertParkedAgainst(mains, bob.conflicts.pendingFor(kind.type, kind.id).orElseThrow());
 
-    resolve(bob, kind.type, kind.id, Resolve.THEIRS);
+    SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.THEIRS);
 
     var bobs = new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow();
     assertEquals(ChangeLog.Kind.TOMBSTONE, bobs.kind());
@@ -366,7 +370,7 @@ class ConvergenceSyncTest {
     kind.change(bob, "bob", kind.third);
     SyncBox.round(main, bob);
 
-    resolve(bob, kind.type, kind.id, Resolve.MINE);
+    SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.MINE);
 
     assertConverged();
     assertEveryBoxHolds(kind, kind.third);
@@ -446,7 +450,7 @@ class ConvergenceSyncTest {
     Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "mention"));
     SyncBox.round(main, ada);
 
-    resolve(ada, "room", "den", Resolve.MINE);
+    SyncBox.resolve(ada, "room", "den", SyncBox.Resolve.MINE);
 
     assertConverged();
     assertEquals("mention", new RoomStore(main.db).findById("den").orElseThrow().wake());
@@ -474,7 +478,7 @@ class ConvergenceSyncTest {
     retitle(ada, "ada", "s", "By ada");
     SyncBox.round(main, ada);
 
-    resolve(ada, "spec", "s", Resolve.MINE);
+    SyncBox.resolve(ada, "spec", "s", SyncBox.Resolve.MINE);
 
     assertConverged();
     assertEquals("By ada", main.specs.findById("s").orElseThrow().title());
@@ -488,7 +492,7 @@ class ConvergenceSyncTest {
     retitle(ada, "ada", "s", "By ada");
     SyncBox.round(main, ada);
 
-    resolve(ada, "spec", "s", Resolve.MERGE);
+    SyncBox.resolve(ada, "spec", "s", SyncBox.Resolve.MERGE);
 
     assertConverged();
   }
@@ -502,7 +506,7 @@ class ConvergenceSyncTest {
     Acting.as("ada", () -> ada.specs.delete("s"));
     SyncBox.round(main, ada);
 
-    resolve(ada, "spec", "s", Resolve.MINE);
+    SyncBox.resolve(ada, "spec", "s", SyncBox.Resolve.MINE);
 
     assertConverged();
     assertTrue(main.specs.findById("s").isEmpty());
@@ -555,6 +559,175 @@ class ConvergenceSyncTest {
   }
 
   @Test
+  void aDeniedDeleteOfAnotherMembersSpecConverges() {
+    ownSpec(main, "bob", "s", "bob");
+    SyncBox.round(main, ada);
+    SyncBox.round(main, bob);
+    Acting.as("ada", () -> ada.specs.delete("s"));
+
+    var denied = SyncBox.round(main, ada);
+
+    assertEquals(1, denied.getFirst().denials().size(), "announced once");
+    assertConverged();
+    assertEquals("Spec s", ada.specs.findById("s").orElseThrow().title());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"bob", "root"})
+  void aSpecBornInARoomReCreatedOverATombstoneWaitsForItsRoomAndIsNeverDenied(String deleter) {
+    Acting.as("bob", () -> new RoomStore(bob.db).create(room("den", "bob")));
+    SyncBox.quiesce(main, ada, bob);
+    var deleting = deleter.equals("bob") ? bob : main;
+    Acting.as(deleter, () -> new RoomStore(deleting.db).delete("den"));
+    SyncBox.quiesce(main, ada, bob);
+    Acting.as("bob", () -> new RoomStore(bob.db).create(room("den", "bob")));
+    Acting.as("bob", () -> bob.specs.create(bornIn(spec("s", "bob"), "den")));
+
+    var reports = SyncBox.round(main, bob);
+
+    assertNoDenials(reports);
+    assertTrue(bob.specs.findById("s").isPresent(), "bob's spec was removed");
+    assertConverged();
+    assertTrue(main.specs.findById("s").isPresent());
+  }
+
+  @Test
+  void aRoomReCreatedOfflineTakesMainsCreatedAtAndMainsNextEditIsAPullNotAReoffer() {
+    Acting.as("bob", () -> new RoomStore(bob.db).create(room("den", "bob")));
+    SyncBox.round(main, bob);
+    Acting.as("bob", () -> new RoomStore(bob.db).delete("den"));
+    Acting.as("bob", () -> new RoomStore(bob.db).create(room("den", "bob")));
+    assertConverged();
+
+    Acting.as("root", () -> new RoomStore(main.db).updateWake("den", "off"));
+    var mains = new ChangeLog(main.db).head("room", "den").orElseThrow();
+    var report =
+        SyncBox.round(main, bob).stream()
+            .filter(r -> r.type().equals("room"))
+            .findFirst()
+            .orElseThrow();
+
+    assertEquals(new SyncEngine.Report(1, 0, 0, 0), report.report(), "a pull, nothing offered");
+    assertEquals(mains, new ChangeLog(main.db).head("room", "den").orElseThrow());
+    assertConverged();
+  }
+
+  @ParameterizedTest
+  @EnumSource(Kind.class)
+  void aResolveTakingMainsSideUnderAnEarlierReleaseConvergesOnceTheNodeHearsEveryHeadAgain(
+      Kind kind) {
+    kind.make(main, "bob", kind.first);
+    SyncBox.quiesce(main, ada, bob);
+    kind.change(main, "root", kind.second);
+    kind.change(bob, "bob", kind.third);
+    SyncBox.round(main, bob);
+    SyncBox.resolve(bob, kind.type, kind.id, SyncBox.Resolve.THEIRS);
+    var head = new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow();
+    var minted = Revisions.next(head.rev(), "minted by the node");
+    bob.db.execute(
+        "UPDATE change_log SET rev = ?, actor = 'main' WHERE seq = ?", minted, head.seq());
+    bob.db.execute(
+        "UPDATE %s SET rev = ?, base_rev = ? WHERE rev = ?".formatted(kind.table),
+        minted,
+        minted,
+        head.rev());
+    SyncBox.round(main, bob);
+    assertEquals(minted, new ChangeLog(bob.db).head(kind.type, kind.id).orElseThrow().rev());
+
+    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
+
+    assertConverged();
+  }
+
+  @Test
+  void aRevisionMainRecordedWithNoAuthorAdoptedAsMainUnderAnEarlierReleaseConverges() {
+    Acting.as(null, () -> main.specs.create(spec("m", "bob")));
+    SyncBox.quiesce(main, ada, bob);
+    bob.db.execute(
+        "UPDATE change_log SET actor = 'main' WHERE entity_type = 'spec' AND entity_id = 'm'");
+    SyncBox.round(main, bob);
+    assertEquals("main", new ChangeLog(bob.db).head("spec", "m").orElseThrow().actor());
+
+    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
+
+    assertConverged();
+    assertNull(new ChangeLog(bob.db).head("spec", "m").orElseThrow().actor());
+  }
+
+  @Test
+  void aRenameAdoptedWithoutItsBlockUnderAnEarlierReleaseConverges() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.quiesce(main, ada, bob);
+    bob.db.execute(
+        """
+        UPDATE change_log SET snapshot = json_remove(snapshot, '$._blocks_resurrection'),
+            actor = 'main'
+        WHERE entity_type = 'project' AND entity_id = 'p'""");
+    SyncBox.round(main, bob);
+    assertFalse(new ProjectStore(bob.db).blocksResurrection("p"));
+
+    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
+
+    assertConverged();
+    assertTrue(new ProjectStore(bob.db).blocksResurrection("p"));
+  }
+
+  @Test
+  void aProjectRenamedAndRenamedBackAfterASyncComesBackOnEveryBox() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "q", "p");
+
+    assertConverged();
+
+    assertEquals("name: p\n", definition(main, "p"), "p is back on main");
+    assertEquals("name: p\n", definition(bob, "p"));
+  }
+
+  @Test
+  void aProjectMadeUnderARenamedAwayNameOnANodeThatHeardTheRenameSurvives() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.quiesce(main, ada, bob);
+    upsertProject(bob, "bob", "p", "name: p\nnew: true\n");
+
+    assertConverged();
+
+    assertEquals("name: p\nnew: true\n", definition(main, "p"), "bob's new project reaches main");
+  }
+
+  @Test
+  void keepingMineAgainstARenameKeepsTheProject() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    upsertProject(bob, "bob", "p", "name: p\nedited: true\n");
+    SyncBox.round(main, ada);
+    SyncBox.round(main, bob);
+    assertTrue(bob.conflicts.pendingFor("project", "p").isPresent());
+
+    SyncBox.resolve(bob, "project", "p", SyncBox.Resolve.MINE);
+
+    assertConverged();
+    assertEquals("name: p\nedited: true\n", definition(main, "p"), "keeping mine keeps it");
+  }
+
+  @Test
+  void aRenameRecordedUnderThisBoxsMachineryIsAuthoredTheSameOnEveryBox() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.system(() -> new ProjectStore(ada.db).rename("p", "q", "name: q\n"));
+
+    assertConverged();
+  }
+
+  @Test
   void aSpecReassignedAwayWhileTheNodeEditedConverges() {
     ownSpec(main, "ada", "s", "ada");
     SyncBox.round(main, ada);
@@ -604,7 +777,7 @@ class ConvergenceSyncTest {
     putFile(ada, "ada", "a.txt", "ada");
     SyncBox.round(main, ada);
 
-    resolve(ada, "file", "acme/a.txt", Resolve.MINE);
+    SyncBox.resolve(ada, "file", "acme/a.txt", SyncBox.Resolve.MINE);
 
     assertConverged();
     assertEquals("ada", Kind.FILE.value(main));
@@ -647,9 +820,7 @@ class ConvergenceSyncTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(main, ada, bob);
-    SyncBox.assertEqualToMain(main, ada);
-    SyncBox.assertEqualToMain(main, bob);
+    SyncBox.assertConverged(main, ada, bob);
   }
 
   private static void assertParkedAgainst(ChangeLog.Entry mains, SyncConflicts.Conflict parked) {
@@ -678,47 +849,40 @@ class ConvergenceSyncTest {
     SyncBox.round(main, ada);
   }
 
-  /** How a parked conflict is settled, as {@code sail conflicts resolve} offers it. */
-  private enum Resolve {
-    MINE,
-    THEIRS,
-    MERGE
+  private static SpecStore.SpecRow bornIn(SpecStore.SpecRow row, String room) {
+    return new SpecStore.SpecRow(
+        row.id(),
+        row.project(),
+        row.title(),
+        row.status(),
+        row.assignee(),
+        row.agent(),
+        row.model(),
+        row.reasoningEffort(),
+        row.branch(),
+        row.priority(),
+        row.createdBy(),
+        row.createdAt(),
+        row.updatedAt(),
+        row.updatedBy(),
+        row.dependsOn(),
+        row.repos(),
+        room);
   }
 
-  private static void resolve(SyncBox box, String type, String id, Resolve strategy) {
-    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
-    var local = parse(conflict.localSnapshot());
-    var theirs = conflict.theirs();
-    var chosen =
-        switch (strategy) {
-          case MINE -> local;
-          case THEIRS -> theirs.snapshot();
-          case MERGE -> merged(conflict.baseSnapshot(), local, theirs.snapshot(), conflict);
-        };
-    var rev =
-        Acting.as(
-            box.id,
-            () ->
-                SyncedEntities.require(type).resolver(box.db).resolveConflict(id, chosen, theirs));
-    box.conflicts.resolve(conflict.id(), rev);
+  private static void upsertProject(SyncBox box, String as, String name, String definition) {
+    Acting.as(as, () -> new ProjectStore(box.db).upsert(name, definition));
   }
 
-  private static Map<String, Object> merged(
-      String base,
-      Map<String, Object> local,
-      Map<String, Object> remote,
-      SyncConflicts.Conflict conflict) {
-    var merged =
-        new LinkedHashMap<>(
-            ConflictMerge.parseTemplate(
-                ConflictMerge.mergeTemplate(
-                    parse(base), local, remote, conflict.fields(), "sha256:x")));
-    merged.remove(ConflictMerge.CONFLICT);
-    return merged;
+  private static void renameProject(SyncBox box, String as, String from, String to) {
+    Acting.as(as, () -> new ProjectStore(box.db).rename(from, to, "name: " + to + "\n"));
   }
 
-  private static Map<String, Object> parse(String json) {
-    return json == null || json.isBlank() ? null : YamlUtil.parseMap(json);
+  private static String definition(SyncBox box, String name) {
+    return new ProjectStore(box.db)
+        .findByName(name)
+        .map(ProjectStore.ProjectRow::definition)
+        .orElse(null);
   }
 
   private static SpecStore.SpecRow spec(String id, String assignee) {

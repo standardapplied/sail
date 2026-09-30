@@ -102,8 +102,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
-  public void offering(String entityId, Map<String, Object> from) {
-    changeLog.recordOffer(store.entityType(), entityId, from);
+  public void offering(String entityId, Map<String, Object> offered, Map<String, Object> from) {
+    changeLog.recordOffer(store.entityType(), entityId, offered, from);
   }
 
   @Override
@@ -111,9 +111,17 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     changeLog.settleOffer(store.entityType(), entityId);
   }
 
+  /**
+   * A base that moved settles a conflict parked on the entity, as adopting main's version does: the
+   * round re-parks it if what the row holds now still clashes with main.
+   */
   @Override
   public boolean acknowledge(String entityId, Map<String, Object> accepted, String rev) {
-    return store.acknowledge(entityId, accepted, rev);
+    var moved = store.acknowledge(entityId, accepted, rev);
+    if (moved) {
+      conflicts.settle(store.entityType(), entityId, rev);
+    }
+    return moved;
   }
 
   @Override
@@ -158,7 +166,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
                 .orElseGet(
                     () ->
                         new MainReplica.State(
-                            current(entityId), currentRev(entityId), recordedAuthor(entityId))));
+                            current(entityId), currentRev(entityId), author(entityId))));
   }
 
   @Override
@@ -197,7 +205,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
         : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
   }
 
-  private String recordedAuthor(String entityId) {
+  @Override
+  public String author(String entityId) {
     return changeLog.head(store.entityType(), entityId).map(ChangeLog.Entry::actor).orElse(null);
   }
 
@@ -206,10 +215,15 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     return changeLog.read(work);
   }
 
+  /**
+   * Adopting main's version settles both a conflict parked on the entity and an offer of it whose
+   * answer was never heard: main's version is the answer.
+   */
   @Override
   public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
     store.adoptForSync(entityId, snapshot, rev);
     conflicts.settle(store.entityType(), entityId, rev);
+    changeLog.settleOffer(store.entityType(), entityId);
   }
 
   /**
@@ -230,13 +244,12 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
             case PushOutcome.Accepted a ->
-                new CommitOutcome.Accepted(
-                    a.rev(), recordedAuthor(entityId), recordedCreator(entityId));
+                new CommitOutcome.Accepted(a.rev(), author(entityId), recordedCreator(entityId));
             case PushOutcome.Stale s ->
                 new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
             case PushOutcome.Denied d ->
                 new CommitOutcome.Denied(
-                    d.reason(), d.currentRev(), d.currentSnapshot(), recordedAuthor(entityId));
+                    d.reason(), d.currentRev(), d.currentSnapshot(), author(entityId));
           };
         });
   }

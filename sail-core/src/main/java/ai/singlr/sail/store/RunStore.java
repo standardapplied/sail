@@ -849,7 +849,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return journal.acknowledge(id, accepted, rev, () -> currentForSync(id), latestWinsFields());
+    return journal.acknowledge(id, accepted, rev);
   }
 
   /** Every run the box whose FDE handle is {@code handle} executed that is still live there. */
@@ -1724,6 +1724,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
   private final class RunSchema implements EntitySchema {
+
+    @Override
+    public Set<String> latestWinsFields() {
+      return LATEST_WINS_FIELDS;
+    }
 
     @Override
     public String entityType() {

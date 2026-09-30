@@ -87,7 +87,8 @@ class PushAuthoritySyncTest {
     assertEquals(0, next.report().total(), next.toString());
   }
 
-  private void assertConverged(String type, String id) {
+  /** Right after a denial, before the round goes on: the node holds main's version of the one. */
+  private void assertMainsAgain(String type, String id) {
     var mains = SyncedEntities.replicas(main.db, "main", "main").get(type);
     var nodes = SyncedEntities.replicas(ada.db, "ada", "ada").get(type);
     assertEquals(mains.current(id), nodes.current(id), type + " " + id + " is main's again");
@@ -234,18 +235,18 @@ class PushAuthoritySyncTest {
 
     retitle(ada, "ada", "theirs", "Taken over");
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertCleanRound(ada, ADA, "spec");
 
     Acting.as("ada", () -> ada.specs.delete("theirs"));
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertEquals("Spec theirs", ada.specs.findById("theirs").orElseThrow().title());
 
     ada.db.execute("UPDATE specs SET room_id = 'lobby' WHERE id = 'theirs'");
     Acting.as("ada", () -> ada.specs.updateStatus("theirs", SpecStatus.PENDING));
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertEquals("theirs", ada.specs.findById("theirs").orElseThrow().roomId());
     assertCleanRound(ada, ADA, "spec");
     assertEquals("Spec theirs", main.specs.findById("theirs").orElseThrow().title());
@@ -300,7 +301,7 @@ class PushAuthoritySyncTest {
 
     assertNull(report.failure());
     assertEquals(List.of("mine"), denied(report));
-    assertConverged("spec", "mine");
+    assertMainsAgain("spec", "mine");
     assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
     assertTrue(
         ada.specs.history("mine").stream()
@@ -319,7 +320,7 @@ class PushAuthoritySyncTest {
 
     Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
     assertEquals(List.of("den"), denied(push(ada, ADA, "room")));
-    assertConverged("room", "den");
+    assertMainsAgain("room", "den");
 
     var reviews = new ReviewStore(ada.db);
     var finding =
@@ -432,7 +433,7 @@ class PushAuthoritySyncTest {
     for (var as : List.of(ADA, ADA_ADMIN)) {
       retitle(ada, "bob", "mine", "As bob");
       assertEquals(List.of("mine"), denied(push(ada, as, "spec")), as.toString());
-      assertConverged("spec", "mine");
+      assertMainsAgain("spec", "mine");
 
       Acting.as("bob", () -> ada.specs.create(spec("for-bob", null)));
       assertEquals(List.of("for-bob"), denied(push(ada, as, "spec")), as.toString());

@@ -383,7 +383,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           requireReplyTarget(row);
           write(row, rev, rev);
           if (!Objects.equals(existing.map(MessageRow::rev).orElse(null), rev)) {
-            journal(row, rev, "sync", snapshot);
+            journal(row, rev, ChangeLog.Entry.SYNC, snapshot);
           }
         });
   }
@@ -462,7 +462,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var json = YamlUtil.dumpJson(snapshot);
           var rev = Revisions.next(null, json);
           write(row, rev, null);
-          journal(row, rev, "sync", snapshot);
+          journal(row, rev, ChangeLog.Entry.SYNC, snapshot);
           return new PushOutcome.Accepted(rev);
         });
   }
@@ -523,7 +523,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           var row = fromSnapshot(id, remote);
           requireReplyTarget(row);
           replace(row, rev);
-          journal(row, rev, "sync", remote);
+          journal(row, rev, ChangeLog.Entry.SYNC, remote);
           return null;
         });
   }

@@ -199,12 +199,14 @@ and the spec that closes it.
 | C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | open: `sail-sync-liveness`, `sail-review-findings-sync`, `sail-files-materialized-version` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; open for a prune racing a born-in spec: `sail-sync-liveness` |
 
-Every sync test ends each scenario by quiescing every box and asserting each replica equals
-main, so a divergence cannot pass unseen: `SyncBox.quiesce` and `SyncBox.assertEqualToMain`. A
-scenario that cannot converge on one entity for a reason another spec owns says so with
-`SyncBox.assertEqualToMainBut`, which names the reason, holds every other entity to main's, and
-fails the moment that entity converges. The fleet lane (`NativeFleetIT`) asserts after its final
-round that every box's change-log heads (id, rev, kind, author) equal main's for every type.
+Every test in the `sync` package that drives a round between boxes ends each scenario by
+quiescing every box and asserting each replica equals main — fields, author, revision, head kind
+and the merge base it descends from — so a divergence cannot pass unseen: `SyncBox.quiesce` and
+`SyncBox.assertEqualToMain`, together `SyncBox.assertConverged`. A scenario that cannot converge
+on one entity for a reason another spec owns says so with `SyncBox.assertEqualToMainBut`, which
+names the reason, holds every other entity to main's, and fails the moment that entity
+converges. The fleet lane (`NativeFleetIT`) asserts after every scenario's final round that
+every box's change-log heads (id, rev, kind, author) equal main's for every type.
 
 ### What syncs, and how
 
@@ -239,9 +241,12 @@ One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over
 store, so the same box acts as the node when it syncs up and as the authority when another
 node syncs to it. Every synced store keeps a `change_log` of full snapshots and, beside it, a
 `change_heads` row per entity naming its latest entry, so the reads the protocol makes are
-O(what it asks for), never O(history). A node records the state each offer was made from in
-`sync_offers` before main is asked and drops it once the answer is heard, so an answer lost on
-the way back is recovered against exactly that state and main's edits the offer merged in stay.
+O(what it asks for), never O(history). A node records each offer it makes, and the state it was
+made from, in `sync_offers` before main is asked and drops it once the answer is heard — or once
+main's version is adopted, which is the answer — so an answer lost on the way back is recovered
+against exactly that state and main's edits the offer merged in stay. The record is used only
+when main's answer is to that offer: main answers the latest version it took from the box, which
+is an earlier offer's when the recorded one never reached it.
 
 ### The wire: sync protocol 4
 
@@ -378,9 +383,15 @@ the entity's revision counter and descends from the base that tombstone records.
 rename's deletion crosses as its resurrection block and is adopted with it. A room adopts every
 synced field main holds, its creator and creation time included; both are otherwise written once.
 What main recorded with no author is adopted with none, and a message is journaled under the
-author it names on every box, whoever posted it there. When a local write lands while the box's own offer is in
-flight, the version main took becomes the row's merge base with the newer row kept on top, and the
-round offers it, so the box never conflicts with itself. A denied message leaves the room with the
+author it names on every box, whoever posted it there. Equal revisions are converged only under
+one author and one head: a box that adopted a revision under an earlier release's reading of it
+takes main's again, and a box that minted main's revision itself from the same content
+acknowledges it as its base. Every node walks main's heads once more after upgrading to this
+release, so what an earlier release left different heals in one round. When a local write lands
+while the box's own offer is in flight, the version main took becomes the row's merge base with
+the newer row kept on top, and the round offers it, so the box never conflicts with itself. A
+conflict parked on an entity whose base then moves this way is settled, and re-parked only if
+the row still clashes. A denied message leaves the room with the
 replies this box posted under it. Work still under way here is the exception, whether main's
 version arrives by denial, by pull or inside a merge with this box's own change: a run this box executes that has not finished (it carries
 this box's handle) keeps its row, credential and room guard, is offered again, and settles once it

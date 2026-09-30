@@ -754,8 +754,7 @@ class SyncBlobTest {
   }
 
   private static void assertConverged(SyncBox main, SyncBox node) {
-    SyncBox.quiesce(main, node);
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node);
   }
 
   private static void resolveKeepingMine(SyncBox box, String type, String id) {

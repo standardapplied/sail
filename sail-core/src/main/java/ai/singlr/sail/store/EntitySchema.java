@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The store-specific half of a synced entity, supplied to {@link RevisionJournal}. The journal owns
@@ -63,11 +64,28 @@ public interface EntitySchema {
   void deleteRow(String id);
 
   /**
-   * Whether {@code snapshot}, a version main sent, stands for a deletion: null always does, and a
-   * store whose tombstones carry marks sends a marked tombstone as those marks — a project rename's
-   * resurrection block. The journal adopts one as a tombstone recording them.
+   * The reserved marks a tombstone of this entity carries, found in {@code snapshot}, whether the
+   * tombstone as this box journaled it or the marks as they cross the wire; none for most entities.
+   * A project rename's tombstone carries a resurrection block. Never the author.
+   */
+  default Map<String, Object> marks(Map<String, Object> snapshot) {
+    return Map.of();
+  }
+
+  /**
+   * Whether {@code snapshot}, a version a replica reports, stands for a deletion: null always does,
+   * and so do the marks of a tombstone, which cross the wire in place of it ({@link
+   * Snapshots#isDeletionMark}). The journal adopts one as a tombstone recording those marks.
    */
   default boolean isDeletion(Map<String, Object> snapshot) {
-    return snapshot == null;
+    return snapshot == null || Snapshots.isDeletionMark(snapshot);
+  }
+
+  /**
+   * Instant-valued fields that only ever move forward and so can never be a conflict: when both
+   * sides moved one, the later instant wins. None by default.
+   */
+  default Set<String> latestWinsFields() {
+    return Set.of();
   }
 }

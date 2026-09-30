@@ -307,9 +307,7 @@ class RunSyncTest {
     try (var mainBox = opened(main);
         var nodeBox = opened(node);
         var otherBox = opened(other)) {
-      SyncBox.quiesce(mainBox, nodeBox, otherBox);
-      SyncBox.assertEqualToMain(mainBox, nodeBox);
-      SyncBox.assertEqualToMain(mainBox, otherBox);
+      SyncBox.assertConverged(mainBox, nodeBox, otherBox);
     }
   }
 

@@ -58,7 +58,7 @@ class RunStoreTest {
   }
 
   private void offer(String id, Map<String, Object> from) {
-    new ChangeLog(db).recordOffer(store.entityType(), id, from);
+    new ChangeLog(db).recordOffer(store.entityType(), id, from, from);
   }
 
   private String newRun(String project, String specId) {

@@ -110,8 +110,7 @@ class SyncRpcServerTest {
 
   private static void assertANodeConverges(SyncBox main, Actor as) {
     try (var node = new SyncBox("node-box").syncsAs(as)) {
-      SyncBox.quiesce(main, node);
-      SyncBox.assertEqualToMain(main, node);
+      SyncBox.assertConverged(main, node);
     }
   }
 

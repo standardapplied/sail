@@ -35,57 +35,50 @@ public interface LocalReplica {
 
   /**
    * Whether this node may push its own change to {@code id} up to main, or may only pull main's
-   * version. Multi-writer entities (specs, files, projects) always may — the default. A
-   * single-writer entity like a run overrides this so a reader box never pushes a run it did not
-   * author: when its local copy of a foreign run diverges, the engine adopts main's authoritative
-   * version instead of offering an un-owned push that main would only reject.
+   * version. Multi-writer entities (specs, files, projects) always may. A single-writer entity like
+   * a run answers so that a reader box never pushes a run it did not author: when its local copy of
+   * a foreign run diverges, the engine adopts main's authoritative version instead of offering an
+   * un-owned push that main would only reject.
    */
-  default boolean mayPush(String id) {
-    return true;
-  }
+  boolean mayPush(String id);
 
   /**
    * Whether {@code id} is work this box executes that is still under way, which main's version, by
-   * denial or by pull, never rewrites or removes. None by default; see {@link
+   * denial or by pull, never rewrites or removes; see {@link
    * ai.singlr.sail.store.SyncedStore#live}.
    */
-  default boolean live(String id) {
-    return false;
-  }
+  boolean live(String id);
 
   /**
    * The rev of the latest version of {@code id} this box heard from main — adopted, or its own
    * offer main answered — whether or not the row it now holds descends from it; {@code null} if
    * none. What main took from this box after it is what this box never heard.
    */
-  default String lastHeardRev(String id) {
-    return null;
-  }
+  String lastHeardRev(String id);
+
+  /** The author this box records for its latest version of {@code id}; null when it names none. */
+  String author(String id);
 
   /**
-   * Records durably, before main is asked, {@code from}, the local state an offer of {@code id} is
-   * made from, so an answer main gives and this box never hears is recovered against exactly it
-   * ({@link #acknowledge}). Nothing by default.
+   * Records durably, before main is asked, that this box offers main {@code offered} of {@code id},
+   * made from the local state {@code from}, so an answer main gives and this box never hears is
+   * recovered against exactly it ({@link #acknowledge}).
    */
-  default void offering(String id, Map<String, Object> from) {}
+  void offering(String id, Map<String, Object> offered, Map<String, Object> from);
 
-  /** Forgets the offer of {@code id} once main's answer to it is heard. Nothing by default. */
-  default void settled(String id) {}
+  /** Forgets the offer of {@code id} once main's answer to it is heard. */
+  void settled(String id);
 
   /**
    * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
    * after the base held here, as the row's merge base, keeping the edits made here since the local
    * state the offer was made from ({@link #offering}), and settles the offer. Main decides it is
-   * newer ({@link MainReplica#acceptedFrom}). Returns whether the base moved. None by default.
+   * newer ({@link MainReplica#acceptedFrom}). Returns whether the base moved.
    */
-  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return false;
-  }
+  boolean acknowledge(String id, Map<String, Object> accepted, String rev);
 
   /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#latestWinsFields}. */
-  default Set<String> latestWinsFields() {
-    return Set.of();
-  }
+  Set<String> latestWinsFields();
 
   /** A comparable snapshot paired with the exact revision it was read at. */
   record Captured(Map<String, Object> snapshot, String rev) {}

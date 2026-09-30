@@ -61,9 +61,7 @@ class SyncTransportTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(main, nodeA, nodeB);
-    SyncBox.assertEqualToMain(main, nodeA);
-    SyncBox.assertEqualToMain(main, nodeB);
+    SyncBox.assertConverged(main, nodeA, nodeB);
   }
 
   private static void resolveTakingMain(SyncBox box, String type, String id) {
@@ -235,8 +233,9 @@ class SyncTransportTest {
         new EditingReplica(
             SyncedEntities.replicas(nodeA.db, nodeA.id, nodeA.id).get("spec"),
             () -> {
-              assertTrue(writes.incrementAndGet() <= 10, "adoption retries must be bounded");
-              Acting.system(() -> nodeA.specs.update(spec("auth", "Auth", "in_progress")));
+              var write = writes.incrementAndGet();
+              assertTrue(write <= 10, "adoption retries must be bounded");
+              Acting.system(() -> nodeA.specs.update(spec("auth", "Auth " + write, "in_progress")));
             });
 
     try (var link = connect(nodeA)) {
@@ -244,8 +243,11 @@ class SyncTransportTest {
           1, link.reconcile("spec", racing.scopedTo(racing.entityIds())).report().conflicts());
     }
     assertEquals(
-        List.of("<stale>"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
-    assertEquals("Auth", nodeA.specs.findById("auth").orElseThrow().title());
+        List.of("title"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
+    assertEquals(
+        "Auth " + writes.get(),
+        nodeA.specs.findById("auth").orElseThrow().title(),
+        "the last local edit stands");
     assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
     resolveTakingMain(nodeA, "spec", "auth");
     assertConverged();
@@ -261,6 +263,46 @@ class SyncTransportTest {
     @Override
     public Set<String> dirtyIds() {
       return inner.dirtyIds();
+    }
+
+    @Override
+    public boolean mayPush(String id) {
+      return inner.mayPush(id);
+    }
+
+    @Override
+    public boolean live(String id) {
+      return inner.live(id);
+    }
+
+    @Override
+    public String lastHeardRev(String id) {
+      return inner.lastHeardRev(id);
+    }
+
+    @Override
+    public String author(String id) {
+      return inner.author(id);
+    }
+
+    @Override
+    public void offering(String id, Map<String, Object> offered, Map<String, Object> from) {
+      inner.offering(id, offered, from);
+    }
+
+    @Override
+    public void settled(String id) {
+      inner.settled(id);
+    }
+
+    @Override
+    public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+      return inner.acknowledge(id, accepted, rev);
+    }
+
+    @Override
+    public Set<String> latestWinsFields() {
+      return inner.latestWinsFields();
     }
 
     @Override

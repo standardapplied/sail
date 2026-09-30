@@ -111,8 +111,7 @@ class NodeIdentitySyncTest {
     try (var link = SyncBox.connect(main.server(UDAY), ada)) {
       assertEquals("uday", link.session().handle().orElseThrow());
     }
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
   }
 
   @Test
@@ -153,8 +152,7 @@ class NodeIdentitySyncTest {
       assertTrue(failure.getMessage().contains("sync handle is 'ada'"), failure.getMessage());
       assertTrue(failure.getMessage().contains("FDE 'ada' on main"), failure.getMessage());
     }
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
   }
 
   @Test
@@ -207,8 +205,7 @@ class NodeIdentitySyncTest {
       assertTrue(laptop.specs.findById("mine").isEmpty(), "nothing is exchanged");
 
       assertTrue(new FdeBoxes(main.db).release("ada"));
-      SyncBox.quiesce(main, laptop);
-      SyncBox.assertEqualToMain(main, laptop);
+      SyncBox.assertConverged(main, laptop);
       assertTrue(laptop.specs.findById("mine").isPresent());
     }
     assertThrows(SyncTransportException.class, () -> SyncBox.round(main, ada));
@@ -233,8 +230,7 @@ class NodeIdentitySyncTest {
     assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());
     assertFalse(refused.getMessage().contains("release-box"), "releasing does nothing for it");
     assertTrue(new FdeBoxes(main.db).boxOf("ada").isEmpty(), "main's FDE records no other box");
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
   }
 
   @Test
@@ -246,8 +242,7 @@ class NodeIdentitySyncTest {
         var link = SyncBox.connect(main.server(Actor.sync(null, Role.VIEWER)), other)) {
       assertInstanceOf(SyncSession.class, link.session());
     }
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
   }
 
   @Test

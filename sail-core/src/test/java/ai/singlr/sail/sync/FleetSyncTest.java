@@ -232,8 +232,7 @@ class FleetSyncTest {
   private void assertConverged() {
     try (var mainBox = opened(main);
         var nodeBox = opened(node)) {
-      SyncBox.quiesce(mainBox, nodeBox);
-      SyncBox.assertEqualToMain(mainBox, nodeBox);
+      SyncBox.assertConverged(mainBox, nodeBox);
     }
   }
 

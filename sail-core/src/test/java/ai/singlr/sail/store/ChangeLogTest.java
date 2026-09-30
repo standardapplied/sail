@@ -42,13 +42,17 @@ class ChangeLogTest {
   }
 
   @Test
-  void anOfferIsKeptUntilSettledAndADeletionIsOfferedFromNothing() {
-    log.recordOffer("spec", "a", Map.of("title", "A"));
-    log.recordOffer("spec", "a", Map.of("title", "B"));
-    log.recordOffer("spec", "gone", null);
+  void anOfferIsKeptUntilSettledAndADeletionIsOfferedAsNothing() {
+    log.recordOffer("spec", "a", Map.of("title", "A"), null);
+    log.recordOffer("spec", "a", Map.of("title", "B"), Map.of("title", "A"));
+    log.recordOffer("spec", "gone", null, Map.of("title", "G"));
 
-    assertEquals(Map.of("title", "B"), log.offer("spec", "a").orElseThrow().from());
-    assertNull(log.offer("spec", "gone").orElseThrow().from());
+    var offer = log.offer("spec", "a").orElseThrow();
+    assertEquals(Map.of("title", "B"), offer.offered());
+    assertEquals(Map.of("title", "A"), offer.from());
+    var deletion = log.offer("spec", "gone").orElseThrow();
+    assertNull(deletion.offered());
+    assertEquals(Map.of("title", "G"), deletion.from());
     log.settleOffer("spec", "a");
     assertTrue(log.offer("spec", "a").isEmpty());
   }
@@ -56,7 +60,7 @@ class ChangeLogTest {
   @Test
   void erasingAnEntityForgetsItsOfferInFlight() {
     log.append("spec", "a", "1-x", "local", false, "{}");
-    log.recordOffer("spec", "a", Map.of("title", "private"));
+    log.recordOffer("spec", "a", Map.of("title", "private"), null);
 
     log.erase("spec", "a", "2-x", "local");
 

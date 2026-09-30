@@ -50,8 +50,13 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   }
 
   @Override
-  public void offering(String id, Map<String, Object> from) {
-    inner.offering(id, from);
+  public String author(String id) {
+    return inner.author(id);
+  }
+
+  @Override
+  public void offering(String id, Map<String, Object> offered, Map<String, Object> from) {
+    inner.offering(id, offered, from);
   }
 
   @Override

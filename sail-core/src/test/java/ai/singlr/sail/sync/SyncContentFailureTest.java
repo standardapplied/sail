@@ -72,8 +72,7 @@ class SyncContentFailureTest {
   }
 
   private static void assertConverged(SyncBox main, SyncBox node) {
-    SyncBox.quiesce(main, node);
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node);
   }
 
   enum AnswerFault {

@@ -98,15 +98,17 @@ public final class ConflictOperations {
     return db.transaction(
         () -> {
           var conflict = requireOpen(entityType, entityId);
+          requireMainsRevision(conflict);
           requireCurrent(
               conflict,
               resolution.strategy() == Resolution.Strategy.MERGE
                   ? "start the merge again"
                   : "resolve");
+          var theirs = conflict.theirs();
           var chosen =
               switch (resolution.strategy()) {
                 case MINE -> parse(conflict.localSnapshot());
-                case THEIRS -> parse(conflict.remoteSnapshot());
+                case THEIRS -> theirs.snapshot();
                 case MERGE -> {
                   requireMergeable(conflict);
                   var merged =
@@ -124,11 +126,10 @@ public final class ConflictOperations {
                   yield merged;
                 }
               };
-          requireMainsRevision(conflict);
           var rev =
               SyncedEntities.require(conflict.entityType())
                   .resolver(db)
-                  .resolveConflict(conflict.entityId(), chosen, conflict.theirs());
+                  .resolveConflict(conflict.entityId(), chosen, theirs);
           conflicts.resolve(conflict.id(), rev);
           return display(conflict.resolvedAt(rev));
         });

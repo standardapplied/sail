@@ -295,6 +295,30 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aNodeUpgradedFromARelaseThatKeptNoOffersHearsEveryHeadAgainAndKeepsNoOffer() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE sync_offers");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    new SyncState(db).advance("main", "spec", 41);
+    new SyncState(db).advance("main", "room", 7);
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(0, new SyncState(db).checkpoint("main", "spec"), "walks main's heads again");
+    assertEquals(0, new SyncState(db).checkpoint("main", "room"));
+    assertTrue(new ChangeLog(db).offer("spec", "s").isEmpty());
+    new ChangeLog(db).recordOffer("spec", "s", Map.of("title", "t"), null);
+    assertEquals(
+        Map.of("title", "t"), new ChangeLog(db).offer("spec", "s").orElseThrow().offered());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void aMessageJournaledUnderWhoeverWasActingIsAttributedToItsPoster() {
     new SchemaManager(db).migrate();
     db.execute(

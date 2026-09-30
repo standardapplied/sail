@@ -263,8 +263,7 @@ class BoxRunsSyncTest {
     }
     assertTrue(runs(ada).findById(ownerless).isPresent(), "a live run stays as it is");
 
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
     assertEquals("ada", runs(main).findById(ownerless).orElseThrow().owner(), "stamped, it lands");
   }
 
@@ -339,8 +338,7 @@ class BoxRunsSyncTest {
     assertNoDenials(SyncBox.round(main, ada.syncsAs(UDAY)));
 
     assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
-    SyncBox.quiesce(main, ada);
-    SyncBox.assertEqualToMain(main, ada);
+    SyncBox.assertConverged(main, ada);
   }
 
   @Test
@@ -508,6 +506,7 @@ class BoxRunsSyncTest {
           new ReviewStore(ada.db).stagesForReview(review).size(),
           "a review bob's box runs is never live here");
       SyncBox.assertEqualToMain(main, ada);
+      SyncBox.assertEqualToMain(main, bob);
     }
   }
 

@@ -60,8 +60,7 @@ class ConcurrentReconcileTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(box, node);
-    SyncBox.assertEqualToMain(box, node);
+    SyncBox.assertConverged(box, node);
   }
 
   private Map<String, Object> baseWith(String field, Object value) {

@@ -13,8 +13,8 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
-import java.util.function.Supplier;
 
 /**
  * The sync protocol every mutable synced store shares, in one place. Given an {@link EntitySchema}
@@ -31,7 +31,7 @@ import java.util.function.Supplier;
 public final class RevisionJournal implements ConflictResolver {
 
   private static final String TOMBSTONE_BASE = "_base_rev";
-  private static final String SYNC = "sync";
+  private static final String SYNC = ChangeLog.Entry.SYNC;
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -69,14 +69,16 @@ public final class RevisionJournal implements ConflictResolver {
   /**
    * Comparable snapshot recorded at a given revision (the merge base), or null if not recorded or
    * recorded as a deletion: a tombstone's merge base is the entity's absence. Like {@link
-   * #comparableSnapshot} it carries that revision's author.
+   * #comparableSnapshot} it carries that revision's author. The latest entry at the rev, because a
+   * box adopts its own accepted offer at main's rev before it hears what main made of it, and the
+   * base is what it last heard.
    */
   public Map<String, Object> comparableAtRev(String id, String rev) {
     if (Strings.isBlank(rev)) {
       return null;
     }
     return changeLog
-        .at(schema.entityType(), id, rev)
+        .latestAt(schema.entityType(), id, rev)
         .filter(e -> !e.deleted())
         .map(e -> authored(schema.comparable(YamlUtil.parseMap(e.snapshot())), e.actor()))
         .orElse(null);
@@ -123,16 +125,40 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * The revision this row last synced from main. For a live row it is the {@code base_rev} column;
-   * for a deleted entity the row is gone, so it is recovered from the {@code _base_rev} embedded in
-   * the tombstone — the base a local delete was made from, without which it could not be told apart
-   * from a delete-vs-edit conflict, or, for a deletion adopted from main, the tombstone itself.
+   * The revision this row last synced from main. For a live row main has acknowledged it is the
+   * {@code base_rev} column. Otherwise it is recovered from the entity's latest tombstone: the base
+   * a local delete was made from, embedded in it as {@code _base_rev}, without which it could not
+   * be told apart from a delete-vs-edit conflict, or, for a deletion adopted from main, the
+   * tombstone itself. A live row written over that tombstone, re-created or restored and not yet
+   * acknowledged, descends from the same base, so it is offered as the change it is rather than
+   * conflict with what it was written over; its {@code base_rev} stays empty until main takes it,
+   * which is how every store tells a row main holds from one it does not.
    */
   public String baseRevOf(String id) {
-    if (schema.exists(id)) {
-      return rawBaseRev(id);
+    var base = rawBaseRev(id);
+    return base != null ? base : tombstoneBase(id);
+  }
+
+  /**
+   * What this box holds of {@code id} as a replica reports it: its comparable snapshot, or, for a
+   * deleted entity whose tombstone carries marks, those marks under the tombstone's author, so a
+   * peer still holding the entity adopts the marked deletion instead of pushing its copy back and a
+   * node adopting it holds the same marked deletion by the same author. Null for a plain deletion.
+   */
+  public Map<String, Object> currentForSync(String id) {
+    var live = comparableSnapshot(id);
+    if (live != null) {
+      return live;
     }
-    return tombstoneBase(id);
+    return changeLog
+        .head(schema.entityType(), id)
+        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .flatMap(
+            head ->
+                Optional.of(schema.marks(YamlUtil.parseMap(head.snapshot())))
+                    .filter(marks -> !marks.isEmpty())
+                    .map(marks -> authored(marks, head.actor())))
+        .orElse(null);
   }
 
   /** Appends a revision for the current state of {@code id}, minting a rev from the counter. */
@@ -158,7 +184,8 @@ public final class RevisionJournal implements ConflictResolver {
    * main's authoritative rev). {@code offeredAuthor} is the {@code _actor} a synced revision
    * carries. {@code adopted} records that this revision is the new synced ancestor — set only when
    * adopting from main, never on a local edit. A row written over a tombstone, re-created or
-   * restored, descends from the base that tombstone records, like any revision after it.
+   * restored, descends from the base that tombstone records ({@link #baseRevOf}), like any revision
+   * after it, and keeps the counter going.
    */
   private String recordLive(
       String id, String explicitRev, String offeredAuthor, String origin, boolean adopted) {
@@ -168,7 +195,7 @@ public final class RevisionJournal implements ConflictResolver {
     }
     var snapshot = YamlUtil.dumpJson(map);
     var rev = explicitRev != null ? explicitRev : Revisions.next(latestRev(id), snapshot);
-    var base = adopted ? rev : heldBase(id);
+    var base = adopted ? rev : rawBaseRev(id);
     db.execute(
         "UPDATE %s SET rev = ?, base_rev = ? WHERE %s = ?".formatted(schema.table(), schema.key()),
         rev,
@@ -206,41 +233,25 @@ public final class RevisionJournal implements ConflictResolver {
     return schema.isDeletion(snapshot) ? null : snapshot;
   }
 
-  private static Map<String, Object> marksOf(Map<String, Object> deletion) {
-    var marks = new LinkedHashMap<String, Object>();
-    if (deletion != null) {
-      deletion.forEach(
-          (key, value) -> {
-            if (!Snapshots.ACTOR.equals(key)) {
-              marks.put(key, value);
-            }
-          });
-    }
-    return marks;
+  private Map<String, Object> marksOf(Map<String, Object> deletion) {
+    return deletion == null ? Map.of() : schema.marks(deletion);
   }
 
   private static String authorOf(Map<String, Object> version) {
     return version == null ? null : Snapshots.text(version, Snapshots.ACTOR);
   }
 
-  /** The base the live row of {@code id} descends from, or the tombstone it was written over. */
-  private String heldBase(String id) {
-    var base = rawBaseRev(id);
-    return base != null ? base : tombstoneBase(id);
-  }
-
   /**
-   * The base a tombstone at the head of {@code id} records: a deletion adopted from main is its own
-   * merge base — this box holds main's deletion, not one of its own to offer — and a deletion this
-   * box decided keeps the base it was made from. Null when the head is no tombstone.
+   * The base the entity's latest tombstone records: a deletion adopted from main is its own merge
+   * base — this box holds main's deletion, not one of its own to offer — and a deletion this box
+   * decided keeps the base it was made from. Null when the entity has none, or was erased since.
    */
   private String tombstoneBase(String id) {
     return changeLog
-        .head(schema.entityType(), id)
-        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .latestTombstone(schema.entityType(), id)
         .map(
             tombstone ->
-                SYNC.equals(tombstone.origin())
+                tombstone.heardFromMain()
                     ? tombstone.rev()
                     : Snapshots.text(YamlUtil.parseMap(tombstone.snapshot()), TOMBSTONE_BASE))
         .orElse(null);
@@ -279,57 +290,53 @@ public final class RevisionJournal implements ConflictResolver {
    * after the base held here — main took this box's offer and its answer never came back — as the
    * synced base. Main decides it is later than that base, in its own change log ({@link
    * ai.singlr.sail.sync.MainReplica#acceptedFrom}); a rev this box already holds as its base
-   * changes nothing. What {@code current} reads now is rebased from the state the offer was made
-   * from, recorded before main was asked ({@link ChangeLog#recordOffer}), onto {@code accepted},
-   * which may carry main's changes the offer merged in: the edits made here since are journaled on
-   * top as the change main has not taken yet, recorded under the author its latest entry already
-   * names, so the round reconciles it three-way against exactly what main took and the author main
-   * records is the one who wrote it. Main answers a deletion it took without its marks, so a
-   * deletion offered with marks is the one it took. An edit since the offer that clashes with a
-   * change of main's leaves the base where it is, so the round parks the conflict. An offer with no
-   * record here, made by a release that kept none, is acknowledged only when the row here is what
-   * main took, the one case where what main merged into it and what this box changed since need no
-   * telling apart; otherwise the base stays where it is, and the round reconciles against it as
-   * that release did. The offer is settled either way. The base is adopted as the bound actor.
-   * Returns whether it moved.
+   * changes nothing. What this box holds now is rebased from the state the offer was made from,
+   * recorded before main was asked ({@link ChangeLog#recordOffer}), onto {@code accepted}, which
+   * may carry main's changes the offer merged in: the edits made here since are journaled on top as
+   * the change main has not taken yet, under the author its latest entry already names, so the
+   * round reconciles it three-way against exactly what main took and the author main records is the
+   * one who wrote it. An edit since the offer that clashes with a change of main's leaves the base
+   * where it is, so the round parks the conflict. The offer is settled either way, and the base is
+   * adopted as the bound actor. Returns whether it moved.
+   *
+   * <p>The record is trusted only when {@code accepted} is the version it offered: main answers the
+   * latest version it took from this box, which is an earlier offer's when the recorded one never
+   * reached it. Without a record of the offer main answers — the box kept none of it, or a release
+   * before this kept none — the row is acknowledged only when it is what main took, the one case
+   * where what main merged into it and what this box changed since need no telling apart; otherwise
+   * the base stays where it is, and the round reconciles against it.
    */
-  public boolean acknowledge(
-      String id,
-      Map<String, Object> accepted,
-      String rev,
-      Supplier<Map<String, Object>> current,
-      Set<String> latestWins) {
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return db.transaction(
         () -> {
-          var offer = changeLog.offer(schema.entityType(), id);
+          var offer = changeLog.offer(schema.entityType(), id).filter(o -> answers(o, accepted));
           changeLog.settleOffer(schema.entityType(), id);
           if (rev.equals(baseRevOf(id))) {
             return false;
           }
-          var now = current.get();
+          var now = currentForSync(id);
           if (offer.isEmpty() && !sameContent(now, accepted)) {
             return false;
           }
-          var offeredFrom = offer.isPresent() ? offer.get().from() : now;
-          var took = tookOf(offeredFrom, accepted);
-          var rebase =
-              ConflictDetector.detect(live(offeredFrom), live(now), live(took), latestWins);
-          if (rebase instanceof ConflictDetector.Conflict) {
+          var took = offer.map(o -> tookOf(o.from(), accepted)).orElse(accepted);
+          var mine = rebased(offer.map(ChangeLog.Offer::from).orElse(now), now, took);
+          if (mine.isEmpty()) {
             return false;
           }
-          var mine =
-              switch (rebase) {
-                case ConflictDetector.Merged merged -> merged.result();
-                case ConflictDetector.TakeRemote ignored -> took;
-                default -> now;
-              };
           var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor);
           applyRevision(id, took, rev);
-          if (!sameContent(mine, took)) {
-            Actor.run(Actor.main(author.orElse(null)), () -> write(id, mine, "local"));
+          if (!sameContent(mine.get(), took)) {
+            Actor.run(Actor.main(author.orElse(null)), () -> write(id, mine.get(), "local"));
           }
           return true;
         });
+  }
+
+  /** Whether {@code accepted}, the version main answers it took, is what {@code offer} offered. */
+  private boolean answers(ChangeLog.Offer offer, Map<String, Object> accepted) {
+    return schema.isDeletion(offer.offered())
+        ? accepted == null
+        : sameContent(offer.offered(), accepted);
   }
 
   /**
@@ -344,48 +351,55 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * Compare-and-set commit as main: mints a new authoritative rev only if {@code expectedRev} still
-   * equals the entity's current rev (a brand-new entity expects {@code null}); otherwise returns
-   * {@link PushOutcome.Stale} with main's present state, never overwriting a concurrent change. A
-   * null snapshot commits a deletion. Once the offer is current, {@code authority} decides it for
-   * the bound actor before anything is written, and a refusal is {@link PushOutcome.Denied} with
-   * main's present state; a read-only role's content is never uploaded, so it is decided before the
-   * content an accepted revision needs is required. The check, the decision and the write share one
-   * transaction, so two nodes pushing the same row can never both win. Used by the sync engine on
-   * the main side.
+   * {@code now}, what this box holds, rebased from {@code offeredFrom} onto {@code took}, what main
+   * took of the offer: the edits made since the offer on top of main's version. Empty when an edit
+   * clashes with a change of main's, which the round parks as a conflict.
    */
-  public PushOutcome commitRevision(
-      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
-    return commitRevision(id, snapshot, expectedRev, authority, Map.of());
+  private Optional<Map<String, Object>> rebased(
+      Map<String, Object> offeredFrom, Map<String, Object> now, Map<String, Object> took) {
+    return switch (ConflictDetector.detect(
+        live(offeredFrom), live(now), live(took), schema.latestWinsFields())) {
+      case ConflictDetector.Conflict ignored -> Optional.empty();
+      case ConflictDetector.Merged merged -> Optional.of(merged.result());
+      case ConflictDetector.TakeRemote ignored -> Optional.ofNullable(took);
+      case ConflictDetector.KeepLocal ignored -> Optional.ofNullable(now);
+      case ConflictDetector.Converged ignored -> Optional.ofNullable(now);
+    };
   }
 
   /**
-   * As {@link #commitRevision(String, Map, String, WriteAuthority)}, a deletion's tombstone
-   * recording {@code marks} beside its base. A marked deletion is recorded even of an entity main
-   * holds no row of, so the marks reach every box; an unmarked one of such an entity changes
-   * nothing.
+   * Compare-and-set commit as main: mints a new authoritative rev only if {@code expectedRev} still
+   * equals the entity's current rev (a brand-new entity expects {@code null}); otherwise returns
+   * {@link PushOutcome.Stale} with main's present state, never overwriting a concurrent change. A
+   * snapshot that stands for a deletion ({@link EntitySchema#isDeletion}) commits it, its tombstone
+   * recording the marks it carries under the author it names, as a live revision is; a marked
+   * deletion is recorded even of an entity main holds no row of, so the marks reach every box, and
+   * an unmarked one of such an entity changes nothing. Once the offer is current, {@code authority}
+   * decides it for the bound actor before anything is written, and a refusal is {@link
+   * PushOutcome.Denied} with main's present state; a read-only role's content is never uploaded, so
+   * it is decided before the content an accepted revision needs is required. The check, the
+   * decision and the write share one transaction, so two nodes pushing the same row can never both
+   * win. Used by the sync engine on the main side.
    */
   public PushOutcome commitRevision(
-      String id,
-      Map<String, Object> snapshot,
-      String expectedRev,
-      WriteAuthority authority,
-      Map<String, Object> marks) {
+      String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
     return db.transaction(
         () -> {
           if (!Objects.equals(latestRev(id), expectedRev)) {
-            return new PushOutcome.Stale(latestRev(id), comparableSnapshot(id));
+            return new PushOutcome.Stale(latestRev(id), currentForSync(id));
           }
-          if (snapshot == null && marks.isEmpty() && !schema.exists(id)) {
+          var deletion = schema.isDeletion(snapshot);
+          var marks = marksOf(snapshot);
+          if (deletion && marks.isEmpty() && !schema.exists(id)) {
             return new PushOutcome.Accepted(latestRev(id));
           }
-          var refusal = authority.decide(Actor.current(), id, held(id), snapshot);
+          var refusal = authority.decide(Actor.current(), id, held(id), live(snapshot));
           if (refusal.isPresent()) {
             return new PushOutcome.Denied(
-                refusal.get().message(), latestRev(id), comparableSnapshot(id));
+                refusal.get().message(), latestRev(id), currentForSync(id));
           }
-          if (snapshot == null) {
-            var rev = appendTombstone(id, null, SYNC, rawBaseRev(id), marks, null);
+          if (deletion) {
+            var rev = appendTombstone(id, null, SYNC, rawBaseRev(id), marks, authorOf(snapshot));
             eraseRow(id);
             return new PushOutcome.Accepted(rev);
           }
@@ -457,7 +471,7 @@ public final class RevisionJournal implements ConflictResolver {
     keys.addAll(a.keySet());
     keys.addAll(b.keySet());
     return keys.stream()
-        .filter(key -> !key.startsWith("_"))
+        .filter(key -> !ConflictDetector.isMetadata(key))
         .allMatch(key -> Objects.equals(a.get(key), b.get(key)));
   }
 

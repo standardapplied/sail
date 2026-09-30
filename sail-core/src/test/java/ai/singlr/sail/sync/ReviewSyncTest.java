@@ -198,7 +198,14 @@ class ReviewSyncTest {
             + " rebuilds the aggregate and deletes the non-replicated finding rows");
 
     keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(reviewId);
-    assertConverged();
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMainUnless(
+          mainBox, nodeBox, "review", reviewId, SyncBox.BOX_LOCAL_FINDINGS);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
   }
 
   private void keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(String reviewId) {
@@ -296,9 +303,7 @@ class ReviewSyncTest {
     try (var mainBox = opened(main);
         var nodeBox = opened(node);
         var otherBox = opened(other)) {
-      SyncBox.quiesce(mainBox, nodeBox, otherBox);
-      SyncBox.assertEqualToMain(mainBox, nodeBox);
-      SyncBox.assertEqualToMain(mainBox, otherBox);
+      SyncBox.assertConverged(mainBox, nodeBox, otherBox);
     }
   }
 

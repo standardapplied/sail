@@ -9,7 +9,6 @@ import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.PersonalFields;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -38,13 +37,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   private static final Map<String, Object> BLOCKING = Map.of(BLOCKS_RESURRECTION, true);
 
   private final Sqlite db;
-  private final ChangeLog changeLog;
   private final RevisionJournal journal;
 
   public ProjectStore(Sqlite db) {
     this.db = db;
-    this.changeLog = new ChangeLog(db);
-    this.journal = new RevisionJournal(db, changeLog, new ProjectSchema());
+    this.journal = new RevisionJournal(db, new ChangeLog(db), new ProjectSchema());
   }
 
   public record ProjectRow(
@@ -132,23 +129,12 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * As {@link #comparableSnapshot}, but a deleted id this box holds a rename resurrection-block for
-   * reports the blocking marker, under its deleter, rather than absence, so a stale peer still
-   * holding the old name adopts the deletion instead of pushing its surviving copy back, and a node
-   * adopting it holds the same blocking deletion by the same author.
+   * As {@link #comparableSnapshot}, but a deleted name whose tombstone blocks resurrection reports
+   * the block, under its deleter, rather than absence ({@link RevisionJournal#currentForSync}).
    */
   @Override
   public Map<String, Object> currentForSync(String id) {
-    var current = comparableSnapshot(id);
-    if (current != null || !blocksResurrection(id)) {
-      return current;
-    }
-    var marker = new LinkedHashMap<>(BLOCKING);
-    changeLog
-        .head(ENTITY, id)
-        .map(ChangeLog.Entry::actor)
-        .ifPresent(author -> marker.put(Snapshots.ACTOR, author));
-    return marker;
+    return journal.currentForSync(id);
   }
 
   @Override
@@ -203,14 +189,9 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     journal.applyRevision(id, snapshot, rev);
   }
 
-  /**
-   * Adopts main's version of this box's own offer whose answer was lost; a deletion main took of an
-   * offered blocking deletion is that blocking deletion, and a rename made here since the offer
-   * keeps its block as a change main has not taken.
-   */
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return journal.acknowledge(id, accepted, rev, () -> currentForSync(id), latestWinsFields());
+    return journal.acknowledge(id, accepted, rev);
   }
 
   @Override
@@ -224,29 +205,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     return new WriterAuthority(db, "projects");
   }
 
-  /**
-   * Compare-and-set commit as main through the shared {@link RevisionJournal#commitRevision}. A
-   * blocks-resurrection marker commits the deletion with its blocking mark, and a stale or denied
-   * offer of an id whose tombstone blocks is answered with the marker, so the node adopts that
-   * deletion.
-   */
+  /** Compare-and-set commit as main through the shared {@link RevisionJournal#commitRevision}. */
   @Override
   public PushOutcome commitRevision(
       String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
-    return db.transaction(
-        () -> {
-          var outcome =
-              isBlocksResurrectionMarker(snapshot)
-                  ? journal.commitRevision(id, null, expectedRev, authority, BLOCKING)
-                  : journal.commitRevision(id, snapshot, expectedRev, authority);
-          return switch (outcome) {
-            case PushOutcome.Stale stale when stale.currentSnapshot() == null ->
-                new PushOutcome.Stale(stale.currentRev(), currentForSync(id));
-            case PushOutcome.Denied denied when denied.currentSnapshot() == null ->
-                new PushOutcome.Denied(denied.reason(), denied.currentRev(), currentForSync(id));
-            default -> outcome;
-          };
-        });
+    return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
   /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
@@ -263,27 +226,13 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Whether this box holds a resurrection-blocking tombstone for {@code id}: a rename recorded its
-   * old identity's deletion so a stale peer still holding the name adopts the deletion rather than
-   * pushing its surviving copy back. Only a rename's tombstone blocks; a plain delete does not.
+   * Whether this box holds a resurrection-blocking tombstone for {@code name}: a rename recorded
+   * its old identity's deletion so a stale peer still holding the name adopts the deletion rather
+   * than pushing its surviving copy back. Only a rename's tombstone blocks; a plain delete does
+   * not.
    */
-  public boolean blocksResurrection(String id) {
-    return changeLog
-        .head(ENTITY, id)
-        .filter(ChangeLog.Entry::deleted)
-        .map(
-            head ->
-                Boolean.TRUE.equals(YamlUtil.parseMap(head.snapshot()).get(BLOCKS_RESURRECTION)))
-        .orElse(false);
-  }
-
-  /** The snapshot the sync engine reads as "this identity is authoritatively, blockingly gone". */
-  public static Map<String, Object> blocksResurrectionMarker() {
-    return BLOCKING;
-  }
-
-  public static boolean isBlocksResurrectionMarker(Map<String, Object> snapshot) {
-    return snapshot != null && Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION));
+  public boolean blocksResurrection(String name) {
+    return Snapshots.isDeletionMark(currentForSync(name));
   }
 
   private static String author() {
@@ -360,9 +309,10 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       db.execute("DELETE FROM projects WHERE name = ?", id);
     }
 
+    /** A rename's tombstone carries its resurrection block; a plain deletion carries nothing. */
     @Override
-    public boolean isDeletion(Map<String, Object> snapshot) {
-      return snapshot == null || isBlocksResurrectionMarker(snapshot);
+    public Map<String, Object> marks(Map<String, Object> snapshot) {
+      return Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION)) ? BLOCKING : Map.of();
     }
 
     private static Map<String, Object> comparable(String definition) {

@@ -369,8 +369,7 @@ class HandleChangeTest {
     assertEquals(1, opened.get());
     assertEquals("uday", new RunStore(main.db).findById(unheld).orElseThrow().node());
     try (var box = new SyncBox(dir, "box").syncsAs(UDAY)) {
-      SyncBox.quiesce(main, box);
-      SyncBox.assertEqualToMain(main, box);
+      SyncBox.assertConverged(main, box);
     }
   }
 

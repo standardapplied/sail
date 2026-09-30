@@ -724,7 +724,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   @Override
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
-    return revisions.acknowledge(id, accepted, rev, () -> currentForSync(id), latestWinsFields());
+    return revisions.acknowledge(id, accepted, rev);
   }
 
   @Override

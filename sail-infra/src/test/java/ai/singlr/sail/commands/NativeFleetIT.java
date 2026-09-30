@@ -167,6 +167,7 @@ class NativeFleetIT {
 
       assertEquals("6", main.query("SELECT count(*) FROM specs WHERE project = 'demo'").strip());
       fleet.assertConverged(mady);
+      fleet.assertHeadsAgree(mady);
     }
   }
 
@@ -248,6 +249,7 @@ class NativeFleetIT {
               >= 3,
           "the node holds main's erasure rows");
       fleet.assertConverged(mady);
+      fleet.assertHeadsAgree(mady);
     }
   }
 

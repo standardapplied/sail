@@ -83,8 +83,7 @@ class SyncEngineBatchingTest {
   }
 
   private static void assertConverged(SyncBox main, SyncBox node) {
-    SyncBox.quiesce(main, node);
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node);
   }
 
   /** Main over a real box, weighing every offer and recording how the engine batched them. */

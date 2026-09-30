@@ -913,7 +913,7 @@ class SailOperationsSeamTest {
                   "auth",
                   new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged))));
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
-      box.conflicts.record("file", "auth", null, null, null, null, null, List.of("content"));
+      box.conflicts.record("file", "auth", null, null, null, "1-main", "main", List.of("content"));
       assertThrows(
           IllegalArgumentException.class,
           () ->
@@ -1015,8 +1015,7 @@ class SailOperationsSeamTest {
 
       assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
       assertEquals("node", new RunStore(node.db).findById(run).orElseThrow().node());
-      SyncBox.quiesce(main, node);
-      SyncBox.assertEqualToMain(main, node);
+      SyncBox.assertConverged(main, node);
     }
   }
 
@@ -1038,8 +1037,7 @@ class SailOperationsSeamTest {
       assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing is offered");
       assertTrue(node.specs.findById("auth").isEmpty(), "nothing is adopted");
       assertTrue(new RunStore(node.db).findById(run).isPresent(), "nothing is removed");
-      SyncBox.quiesce(main, node);
-      SyncBox.assertEqualToMain(main, node);
+      SyncBox.assertConverged(main, node);
       assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
     }
   }

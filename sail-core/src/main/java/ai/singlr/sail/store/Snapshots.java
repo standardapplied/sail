@@ -29,6 +29,16 @@ public final class Snapshots {
 
   private Snapshots() {}
 
+  /**
+   * Whether {@code snapshot}, a version a replica reports, stands for a marked deletion: it carries
+   * nothing but reserved keys, the marks a tombstone crossed with and the author it names, where a
+   * live version always carries the entity's own fields. Null is a plain deletion, not a marked
+   * one.
+   */
+  public static boolean isDeletionMark(Map<String, Object> snapshot) {
+    return snapshot != null && snapshot.keySet().stream().allMatch(ConflictDetector::isMetadata);
+  }
+
   /** The string form of a present value, or null when the key is absent. */
   public static String text(Map<String, Object> map, String key) {
     var value = map.get(key);

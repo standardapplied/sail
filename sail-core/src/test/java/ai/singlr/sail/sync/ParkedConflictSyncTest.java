@@ -64,8 +64,7 @@ class ParkedConflictSyncTest {
   }
 
   private void assertConverged() {
-    SyncBox.quiesce(main, node);
-    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertConverged(main, node);
   }
 
   @Test
