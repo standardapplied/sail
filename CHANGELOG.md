@@ -22,6 +22,7 @@
   - A node's delete, restore and delete again while offline reaches main as the delete it is, instead of being undone by the next pull.
   - A re-create after a delete whose answer from main was lost reaches main, instead of being deleted again or parking a conflict with the node's own delete.
   - Main records a rename's tombstone under the author it names only when the pusher may write as that author, as for any revision.
+  - A project made on a node under a name main has renamed away, after the node heard any earlier deletion of that name, reaches main instead of being deleted as a stale copy; a copy that never heard one still adopts the deletion.
 
 - **A box's runs carry the handle main knows it by, and a live run is never rewritten.** Every run a box reserves — dispatch, build, restart, ad-hoc (`sail run`, `agent sweep`, the API), the review pipeline and its fix lane, and room wakes — carries the box's handle as both `node` and `owner`. Runs used to be stamped with a blank node, a stale handle, or the spec's or room's owner, and main then denied them, sometimes mid-run, and the node deleted them.
   - Main's `welcome` names the handle it authenticated the session as. A node whose configured sync handle is blank or another fails its round before offering or adopting anything, naming both handles and the fix.

@@ -222,8 +222,9 @@ public final class SyncEngine {
 
     /**
      * Main holds a marked deletion of {@code id} and this box has no base for it: a copy written
-     * since the box heard that deletion is a change of this box's and is offered; a copy that never
-     * heard it is stale and adopts the deletion; the deletion itself, already held, is converged.
+     * over a deletion the box heard is a creation of this box's and is offered, main deciding it
+     * against the deletion it holds; a copy that never heard one is stale and adopts the deletion;
+     * the deletion itself, already held under the author main names, is converged.
      */
     private Outcome mainsMarksUnheard(
         String id,
@@ -232,12 +233,14 @@ public final class SyncEngine {
         String remoteRev,
         int redetectsLeft) {
       var localSnap = captured.snapshot();
-      if (Snapshots.isDeletionMark(localSnap) && Objects.equals(captured.rev(), remoteRev)) {
+      if (Snapshots.isDeletionMark(localSnap)
+          && Objects.equals(captured.rev(), remoteRev)
+          && Objects.equals(local.author(id), mainsAuthor(id, remote))) {
         return Outcome.CONVERGED;
       }
       if (localSnap != null
           && !Snapshots.isDeletionMark(localSnap)
-          && Objects.equals(local.lastHeardRev(id), remoteRev)) {
+          && local.lastHeardRev(id) != null) {
         return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
       }
       return take(id, captured.rev(), remote, remoteRev, Outcome.PULLED, redetectsLeft);

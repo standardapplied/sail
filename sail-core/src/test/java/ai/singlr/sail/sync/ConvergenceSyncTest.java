@@ -804,6 +804,41 @@ class ConvergenceSyncTest {
   }
 
   @Test
+  void aProjectMadeUnderANameMainRenamedAwayTwiceOnANodeThatHeardTheFirstRenameSurvives() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.quiesce(main, ada, bob);
+    upsertProject(ada, "ada", "p", "name: p\nsecond: true\n");
+    SyncBox.round(main, ada);
+    renameProject(ada, "ada", "p", "r");
+    SyncBox.round(main, ada);
+    upsertProject(bob, "bob", "p", "name: p\nbobs: true\n");
+
+    assertConverged();
+
+    assertEquals(List.of(), bob.conflicts.pending());
+    assertEquals("name: p\nbobs: true\n", definition(main, "p"), "bob's project reaches main");
+  }
+
+  @Test
+  void aRenamesTombstoneAdoptedUnderAnotherAuthorUnderAnEarlierReleaseConverges() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.quiesce(main, ada, bob);
+    bob.db.execute(
+        """
+        UPDATE change_log SET actor = 'main'
+        WHERE entity_type = 'project' AND entity_id = 'p' AND kind = 'tombstone'""");
+
+    bob.db.execute(SchemaManager.NODES_HEAR_EVERY_HEAD_AGAIN);
+
+    assertConverged();
+    assertEquals("ada", new ChangeLog(bob.db).head("project", "p").orElseThrow().actor());
+  }
+
+  @Test
   void aSpecReassignedAwayWhileTheNodeEditedConverges() {
     ownSpec(main, "ada", "s", "ada");
     SyncBox.round(main, ada);

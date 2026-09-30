@@ -42,12 +42,12 @@ public final class RevisionJournal implements ConflictResolver {
     this.schema = Objects.requireNonNull(schema, "schema");
   }
 
-  /** Every entity id this replica knows of, including those present only as a tombstone. */
   /** The schema's {@link EntitySchema#latestWinsFields}, the one place a store's are declared. */
   public Set<String> latestWinsFields() {
     return schema.latestWinsFields();
   }
 
+  /** Every entity id this replica knows of, including those present only as a tombstone. */
   public Set<String> entityIds() {
     return new LinkedHashSet<>(
         db.query(
@@ -299,17 +299,18 @@ public final class RevisionJournal implements ConflictResolver {
    * top of it as the change main has not taken yet, under the author the latest entry already
    * names, so the round reconciles three-way against exactly what main took ({@link #rebased}); an
    * edit that clashes with a change of main's leaves the base where it is, and the round parks the
-   * conflict. The offer is settled either way, and the base is adopted as the bound actor. Returns
-   * whether it moved.
+   * conflict. The offer is settled either way, and the base is adopted as the bound actor. A rev
+   * this box already holds as its base changes nothing, and touches no offer: the row is done with
+   * it. Returns whether it moved.
    */
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return db.transaction(
         () -> {
-          var offer = offerAnswered(id, accepted);
-          changeLog.settleOffer(schema.entityType(), id);
           if (rev.equals(baseRevOf(id))) {
             return false;
           }
+          var offer = offerAnswered(id, accepted);
+          changeLog.settleOffer(schema.entityType(), id);
           var now = currentForSync(id);
           if (offer.isEmpty() && !sameContent(now, accepted)) {
             return false;
