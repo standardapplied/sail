@@ -533,7 +533,9 @@ public final class SyncRpcServer {
         continue;
       }
       var entry = entryOf(main, id, 0);
-      var took = main.acceptedFrom(id, principal.peer()).map(state -> entryOf(id, state, 0));
+      var took =
+          main.acceptedFrom(id, principal.peer(), need.bases().get(id))
+              .map(state -> entryOf(id, state, 0));
       var length = SyncWire.encodedLength(entry) + took.map(SyncWire::encodedLength).orElse(0);
       if (!budget.canEverAdmit(length)) {
         return oversize(id, length, frame);

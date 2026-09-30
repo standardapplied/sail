@@ -96,6 +96,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public String baseRev(String entityId) {
+    return store.baseRevOf(entityId);
+  }
+
+  @Override
   public boolean acknowledge(String entityId, Map<String, Object> accepted, String rev) {
     return store.acknowledge(entityId, accepted, rev);
   }
@@ -146,7 +151,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
-  public Optional<MainReplica.State> acceptedFrom(String entityId, String peer) {
+  public Optional<MainReplica.State> acceptedFrom(String entityId, String peer, String baseRev) {
     if (Strings.isBlank(peer)) {
       return Optional.empty();
     }
@@ -154,6 +159,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
         () ->
             changeLog
                 .latestFrom(store.entityType(), entityId, peer)
+                .filter(entry -> tookAfter(entityId, entry, baseRev))
                 .map(
                     entry ->
                         new MainReplica.State(
@@ -161,6 +167,16 @@ public final class StoreReplica implements LocalReplica, MainReplica {
                             entry.rev(),
                             entry.kind(),
                             entry.actor())));
+  }
+
+  private boolean tookAfter(String entityId, ChangeLog.Entry taken, String baseRev) {
+    if (Strings.isBlank(baseRev)) {
+      return true;
+    }
+    return changeLog
+        .at(store.entityType(), entityId, baseRev)
+        .map(base -> taken.seq() > base.seq())
+        .orElse(false);
   }
 
   private Snapshots.Creator recordedCreator(String entityId) {

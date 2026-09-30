@@ -89,11 +89,13 @@ public interface MainReplica {
 
   /**
    * The latest version of {@code id} main took from the box whose peer handle is {@code peer} — its
-   * own offer, as main recorded it — so a box whose answer to that offer was lost knows exactly
-   * which of its states main holds. Empty when that box never pushed one that main still holds in
-   * its history.
+   * own offer, as main recorded it — when main took it after {@code baseRev}, the base that box
+   * holds, so a box whose answer to that offer was lost knows exactly which of its states main
+   * holds. Main orders the two in its own change log, never by their revs, whose counters restart
+   * when a row is deleted and made again. Empty when main took nothing from that box after its
+   * base, or cannot tell because it no longer holds that base in its history.
    */
-  default Optional<State> acceptedFrom(String id, String peer) {
+  default Optional<State> acceptedFrom(String id, String peer, String baseRev) {
     return Optional.empty();
   }
 

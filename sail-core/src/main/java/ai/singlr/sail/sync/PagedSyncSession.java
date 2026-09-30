@@ -461,9 +461,18 @@ public final class PagedSyncSession implements SyncSession {
     if (dirty.isEmpty()) {
       return answers;
     }
+    var bases = new LinkedHashMap<String, String>();
+    dirty.forEach(
+        id -> {
+          var base = local.baseRev(id);
+          if (base != null) {
+            bases.put(id, base);
+          }
+        });
     need(
         type,
         dirty,
+        bases,
         (consumed, page) -> {
           consumed.forEach(id -> answers.put(id, null));
           page.entries().forEach(entry -> answers.put(entry.id(), entry));
@@ -489,10 +498,32 @@ public final class PagedSyncSession implements SyncSession {
    */
   private void need(
       String type, List<String> ids, BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    need(type, ids, Map.of(), onAnswer);
+  }
+
+  /**
+   * As {@link #need(String, List, BiConsumer)}, naming for each id the base this node holds of it,
+   * {@code bases}, so main can say which version it took from this box after that base.
+   */
+  private void need(
+      String type,
+      List<String> ids,
+      Map<String, String> bases,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
     var offset = 0;
     while (offset < ids.size()) {
-      var asked = askable(ids, offset);
-      var answer = page(new SyncWire.Need(type, asked), type);
+      var asked =
+          fitting(
+              ids,
+              offset,
+              id ->
+                  SyncWire.encodedLength(id)
+                      + (bases.containsKey(id)
+                          ? SyncWire.encodedLength(id) + SyncWire.encodedLength(bases.get(id))
+                          : 0));
+      var basesAsked = new LinkedHashMap<String, String>();
+      asked.stream().filter(bases::containsKey).forEach(id -> basesAsked.put(id, bases.get(id)));
+      var answer = page(new SyncWire.Need(type, asked, basesAsked), type);
       if (answer.next() <= 0) {
         throw new SyncTransportException(
             "protocol", type + ": main consumed none of " + asked.size() + " needed ids", null);

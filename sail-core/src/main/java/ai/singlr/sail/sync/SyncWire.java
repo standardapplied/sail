@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * The line protocol of one sync session over a Door-2 SSH channel, protocol 4: the node and main
@@ -78,6 +79,7 @@ public final class SyncWire {
   private static final String EXPECTED = "expectedRev";
   private static final String OFFERS = "commits";
   private static final String ENTRIES = "entries";
+  private static final String BASES = "bases";
   private static final String NEXT = "next";
   private static final String DONE = "done";
   private static final String MAX_SEQ = "maxSeq";
@@ -212,7 +214,16 @@ public final class SyncWire {
   public record Pull(String type, long since, int limit) implements Request {}
 
   /** Ask for main's current rows of the given ids — what the node changed locally. */
-  public record Need(String type, List<String> ids) implements Request {}
+  public record Need(String type, List<String> ids, Map<String, String> bases) implements Request {
+    public Need {
+      bases = Map.copyOf(bases);
+    }
+
+    /** A need naming no base the node holds: main's answer then names nothing it took. */
+    public Need(String type, List<String> ids) {
+      this(type, ids, Map.of());
+    }
+  }
 
   /** Push a batch of compare-and-set offers of one type; main answers one result each. */
   public record Push(String type, List<MainReplica.Offer> offers) implements Request {}
@@ -593,6 +604,9 @@ public final class SyncWire {
         map.put(OP, OP_NEED);
         map.put(TYPE, need.type());
         map.put(IDS, need.ids());
+        if (!need.bases().isEmpty()) {
+          map.put(BASES, new LinkedHashMap<String, Object>(need.bases()));
+        }
       }
       case Push push -> {
         map.put(OP, OP_PUSH);
@@ -667,7 +681,7 @@ public final class SyncWire {
               string(map, BOX));
       case OP_HEADS -> new Heads();
       case OP_PULL -> new Pull(string(map, TYPE), longValue(map, SINCE), intValue(map, LIMIT));
-      case OP_NEED -> new Need(string(map, TYPE), strings(map, IDS));
+      case OP_NEED -> new Need(string(map, TYPE), strings(map, IDS), bases(map));
       case OP_PUSH ->
           new Push(string(map, TYPE), maps(map, OFFERS).stream().map(SyncWire::offer).toList());
       case OP_FETCH_FDES -> new FetchFdes();
@@ -826,6 +840,16 @@ public final class SyncWire {
       return new Refused(id, string(refused, REASON));
     }
     throw new IllegalArgumentException("Result for " + id + " carries no verdict");
+  }
+
+  private static Map<String, String> bases(Map<String, Object> map) {
+    var bases = new LinkedHashMap<String, String>();
+    var raw = snapshot(map, BASES);
+    if (raw != null) {
+      raw.forEach((id, rev) -> bases.put(id, rev instanceof String text ? text : null));
+    }
+    bases.values().removeIf(Objects::isNull);
+    return bases;
   }
 
   private static Map<String, Long> tips(Map<String, Object> map) {

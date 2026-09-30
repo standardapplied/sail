@@ -179,22 +179,17 @@ class RunStoreTest {
   }
 
   @Test
-  void onlyAVersionMainTookAfterTheBaseHeldHereMovesIt() {
+  void aVersionMainTookMovesTheBaseOnceAndTheBaseItAlreadyIsChangesNothing() {
     var id = newRunOn("p", "s", "ada");
     var first = store.comparableSnapshot(id);
-    Actor.run(Actor.main("ada"), () -> store.acknowledge(id, first, "2-main"));
     store.recordSession(id, "sess-2", "claude", "/t");
     var second = store.comparableSnapshot(id);
 
-    assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "1-main")),
-        "an older version main took is not the latest it holds of this box's work");
-    assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "2-main")),
-        "the base held here already is it");
-    assertEquals("2-main", store.baseRevOf(id));
-
     assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, second, "5-main")));
+    assertFalse(
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "5-main")),
+        "the base held here already is it");
+
     assertEquals("5-main", store.baseRevOf(id));
     assertFalse(store.dirtyIds().contains(id), "main took exactly what this box holds");
   }

@@ -11,13 +11,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /**
  * A node whose answer to an offer main took was lost learns, from main, exactly which of its states
@@ -26,13 +32,14 @@ import org.junit.jupiter.api.Test;
  */
 class LostAnswerSyncTest {
 
+  @TempDir Path dir;
   private SyncBox main;
   private SyncBox ada;
 
   @BeforeEach
   void setUp() {
-    main = new SyncBox("main");
-    ada = new SyncBox("ada");
+    main = new SyncBox(dir, "main");
+    ada = new SyncBox(dir, "ada");
   }
 
   @AfterEach
@@ -98,6 +105,87 @@ class LostAnswerSyncTest {
     assertEquals(List.of("branch"), ada.conflicts.pendingFor("spec", "s").orElseThrow().fields());
     assertEquals("feat/main", main.specs.findById("s").orElseThrow().branch());
     assertEquals("feat/ada", ada.specs.findById("s").orElseThrow().branch(), "nothing is lost");
+  }
+
+  @Test
+  void anEditAfterMainMadeTheRowAgainReachesMainWithNoConflict() {
+    madeAgainOnMain();
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/c")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("feat/c", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aFieldSetBackAfterMainMadeTheRowAgainIsNeverReverted() {
+    madeAgainOnMain();
+    Acting.as("ada", () -> ada.specs.update(spec("s", "codex", "feat/c")));
+
+    SyncBox.quiesce(main, ada);
+
+    var held = main.specs.findById("s").orElseThrow();
+    assertEquals("codex", held.agent());
+    assertEquals("feat/c", held.branch(), "an older version ada once offered is not the base");
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void anEditAfterMainMadeWhatAdaDeletedAgainParksNoConflict() {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/b")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.delete("s"));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/d")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("feat/d", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aChangeMadeAfterALostAnswerIsRecordedAsItsWritersOnEveryBox() throws IOException {
+    put("v1");
+    SyncBox.pushLosingTheAnswer(main, ada, "file");
+    put("v2");
+
+    SyncBox.quiesce(main, ada);
+
+    var id = FileStore.idOf("acme", "a.txt");
+    assertEquals("ada", new ChangeLog(main.db).head("file", id).orElseThrow().actor());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  private void madeAgainOnMain() {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/b")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/c")));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.delete("s"));
+    Acting.as("ada", () -> main.specs.create(spec("s", null, "feat/a")));
+    SyncBox.quiesce(main, ada);
+  }
+
+  private void put(String text) {
+    Acting.as(
+        "ada",
+        () ->
+            new FileStore(ada.db)
+                .put(
+                    "acme",
+                    "a.txt",
+                    new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8)),
+                    0644));
   }
 
   private static RunStore runs(SyncBox box) {

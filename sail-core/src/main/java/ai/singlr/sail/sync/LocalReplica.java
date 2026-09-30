@@ -52,10 +52,16 @@ public interface LocalReplica {
     return false;
   }
 
+  /** The rev of main's this row last synced from — its merge base; {@code null} if never. */
+  default String baseRev(String id) {
+    return null;
+  }
+
   /**
-   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
-   * box, as the row's merge base when it is newer than the base held here, keeping the row as it
-   * stands. Returns whether the base moved. None by default.
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
+   * after the base held here, as the row's merge base, keeping the row as it stands. Main decides
+   * it is newer ({@link MainReplica#acceptedFrom}). Returns whether the base moved. None by
+   * default.
    */
   default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return false;

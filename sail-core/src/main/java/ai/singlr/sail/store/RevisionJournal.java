@@ -207,25 +207,27 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
-   * box, as the synced base when {@code rev} is newer than the base held here: main took this box's
-   * offer and its answer never came back. Main mints every rev of an entity from one counter, so
-   * the newer of two of main's revs is the one with the higher counter. The row is kept as it
-   * stands here: when it has moved on since, its own state is journaled on top by {@link
-   * Actor#system()}, a change main has not taken yet, so the round reconciles it three-way against
-   * exactly what main took. The base is adopted as the bound actor. Returns whether it moved.
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this box
+   * after the base held here — main took this box's offer and its answer never came back — as the
+   * synced base. Main decides it is later than that base, in its own change log ({@link
+   * ai.singlr.sail.sync.MainReplica#acceptedFrom}); a rev this box already holds as its base
+   * changes nothing. The row is kept as it stands here: when it has moved on since, its own state
+   * is journaled on top as the change main has not taken yet, recorded under the author its latest
+   * entry already names, so the round reconciles it three-way against exactly what main took and
+   * the author main records is the one who wrote it. The base is adopted as the bound actor.
+   * Returns whether it moved.
    */
   public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return db.transaction(
         () -> {
-          var base = baseRevOf(id);
-          if (base != null && Revisions.counterOf(rev) <= Revisions.counterOf(base)) {
+          if (rev.equals(baseRevOf(id))) {
             return false;
           }
           var mine = comparableSnapshot(id);
+          var author = changeLog.head(schema.entityType(), id).map(ChangeLog.Entry::actor);
           applyRevision(id, accepted, rev);
           if (!sameContent(mine, accepted)) {
-            Actor.run(Actor.system(), () -> write(id, mine, "local"));
+            Actor.run(Actor.main(author.orElse(null)), () -> write(id, mine, "local"));
           }
           return true;
         });
