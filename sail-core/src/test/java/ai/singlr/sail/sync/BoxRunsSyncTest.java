@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -20,6 +21,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.SyncConflicts;
 import java.io.IOException;
 import java.util.List;
 import java.util.Set;
@@ -189,7 +191,6 @@ class BoxRunsSyncTest {
                     ownerless,
                     "acme",
                     "mine",
-                    "ada",
                     null,
                     "build",
                     "claude-code",
@@ -211,6 +212,27 @@ class BoxRunsSyncTest {
   }
 
   @Test
+  void aRunMainAlreadyHoldsActingForNoOneIsStampedAndFinishesOnEveryBox() {
+    var legacy = reserve(ada, "ada", null, "adhoc");
+    SyncBox.quiesce(main, ada);
+    for (var box : List.of(main, ada)) {
+      box.db.execute("UPDATE runs SET owner = NULL WHERE id = ?", legacy);
+      box.db.execute(
+          """
+          UPDATE change_log SET snapshot = json_set(snapshot, '$.owner', NULL)
+          WHERE entity_type = 'run' AND entity_id = ?""",
+          legacy);
+    }
+    finish(ada, legacy);
+
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("completed", runs(main).findById(legacy).orElseThrow().status());
+    assertEquals("ada", runs(main).findById(legacy).orElseThrow().owner());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
   void mainDeniesARunThatActsForNoOne() throws IOException {
     ownSpec(main, "ada", "mine");
     SyncBox.quiesce(main, ada);
@@ -223,7 +245,6 @@ class BoxRunsSyncTest {
                     "acme",
                     "mine",
                     "ada",
-                    null,
                     "build",
                     "claude-code",
                     "b",
@@ -232,6 +253,7 @@ class BoxRunsSyncTest {
                     null,
                     "/l",
                     "u"));
+    ada.db.execute("UPDATE runs SET owner = NULL WHERE id = ?", ownerless);
 
     try (var link = SyncBox.connect(main.server(ada.session()), ada)) {
       var report = link.reconcile("run", ada.replicas().get("run"));
@@ -336,6 +358,19 @@ class BoxRunsSyncTest {
     assertEquals("ada", runs(ada).findById(run).orElseThrow().node(), "never re-stamped");
   }
 
+  private static void resolveMine(SyncBox box, SyncConflicts.Conflict parked) {
+    Acting.as(
+        box.handle(),
+        () ->
+            box.conflicts.resolve(
+                parked.id(),
+                runs(box)
+                    .resolveConflict(
+                        parked.entityId(),
+                        YamlUtil.parseMap(parked.localSnapshot()),
+                        YamlUtil.parseMap(parked.remoteSnapshot()))));
+  }
+
   @Test
   void aRunMainTookWhoseAnswerWasLostAndThenSetBackToAnEarlierStateNeverRevertsMainsChange()
       throws IOException {
@@ -347,15 +382,14 @@ class BoxRunsSyncTest {
     Acting.system(() -> runs(main).recordSession(run, "old-session", "claude", "/t"));
 
     assertNoDenials(SyncBox.round(main, ada));
-
-    assertEquals("old-session", runs(main).findById(run).orElseThrow().sessionId());
-    assertEquals("offered-session", runs(ada).findById(run).orElseThrow().sessionId(), "nor lost");
-    var parked = ada.conflicts.pendingFor("run", run).orElseThrow();
-    assertTrue(parked.fields().contains("session_id"), parked.fields().toString());
-    resolveMine(ada, parked);
     SyncBox.quiesce(main, ada);
 
-    assertEquals("offered-session", runs(main).findById(run).orElseThrow().sessionId());
+    assertEquals("old-session", runs(main).findById(run).orElseThrow().sessionId());
+    assertEquals(
+        "old-session",
+        runs(ada).findById(run).orElseThrow().sessionId(),
+        "main took ada's offer and moved on: its change stands on every box");
+    assertTrue(ada.conflicts.pendingFor("run", run).isEmpty(), "nothing both sides changed");
     SyncBox.assertEqualToMain(main, ada);
   }
 
@@ -429,6 +463,26 @@ class BoxRunsSyncTest {
       assertTrue(runs(newMain).findById(madys).isEmpty(), "never mady's run, as uday's");
       SyncBox.assertEqualToMain(newMain, main);
     }
+  }
+
+  @Test
+  void aReviewAwaitingApprovalWhoseRunFinishedTakesMainsApproval() {
+    ownSpec(main, "ada", "mine");
+    SyncBox.quiesce(main, ada);
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("mine", 1));
+    Acting.system(
+        () -> runs(ada).createReview(review, "acme", "mine", "ada", "codex", "b", "t", "/l", "u"));
+    Acting.system(() -> reviews.updateReviewStatus(review, "running"));
+    Acting.system(() -> reviews.createStage(review, "sign-off", "human"));
+    finish(ada, review);
+    SyncBox.quiesce(main, ada);
+
+    Acting.as("ada", () -> new ReviewStore(main.db).updateReviewStatus(review, "passed"));
+    SyncBox.quiesce(main, ada);
+
+    assertEquals("passed", reviews.findReview(review).orElseThrow().status());
+    SyncBox.assertEqualToMain(main, ada);
   }
 
   @Test

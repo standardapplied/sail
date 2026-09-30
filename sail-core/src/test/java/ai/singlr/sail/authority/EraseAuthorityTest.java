@@ -128,7 +128,6 @@ class EraseAuthorityTest {
                     "acme",
                     "solo",
                     OWNER,
-                    OWNER,
                     "build",
                     "claude-code",
                     "b",

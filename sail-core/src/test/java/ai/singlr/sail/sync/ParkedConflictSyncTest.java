@@ -70,7 +70,6 @@ class ParkedConflictSyncTest {
         "backend",
         "auth",
         node.id,
-        node.id,
         "build",
         "claude-code",
         "feat/auth",

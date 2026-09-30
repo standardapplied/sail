@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -90,7 +89,7 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void complete(Event event, String status) {
-    var exitCode = exitCodeOf(event.data());
+    var exitCode = Event.WellKnownData.exitCode(event.data());
     var runId = Objects.toString(event.data().get(Event.WellKnownData.RUN_ID), null);
     if (Strings.isBlank(runId)) {
       return;
@@ -115,24 +114,5 @@ public final class RunTracker implements EventSubscriber {
       runStore.recordExitCode(run.id(), exitCode);
       syncScheduler.afterWrite();
     }
-  }
-
-  /** The exit code a stop's {@code data} carries, or null when it names none it can read. */
-  static Integer exitCodeOf(Map<String, Object> data) {
-    return extractInt(data.get(Event.WellKnownData.EXIT_CODE));
-  }
-
-  private static Integer extractInt(Object value) {
-    if (value instanceof Number n) {
-      return n.intValue();
-    }
-    if (value instanceof String s) {
-      try {
-        return Integer.parseInt(s);
-      } catch (NumberFormatException e) {
-        return null;
-      }
-    }
-    return null;
   }
 }

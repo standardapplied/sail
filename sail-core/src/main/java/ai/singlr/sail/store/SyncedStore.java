@@ -135,4 +135,15 @@ public interface SyncedStore {
   default boolean live(String id, String handle) {
     return false;
   }
+
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
+   * box, as the row's merge base when it is newer than the base held here — main took the box's
+   * offer and its answer never came back — keeping the row as it stands here: whatever the box
+   * changed since stays a change main has not taken. Returns whether the base moved. A store whose
+   * rows are never edited after they are made recovers by converging instead, and moves nothing.
+   */
+  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return false;
+  }
 }

@@ -65,7 +65,6 @@ class RunPresenceEmitterTest {
               "backend",
               "auth",
               node,
-              node,
               role,
               "claude-code",
               "feat/x",

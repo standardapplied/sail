@@ -582,8 +582,7 @@ class SpecPruneTest {
 
   private String run(RunStore runs, String status, String completedAt, String specId) {
     var id = DateTimeUtils.newId().toString();
-    runs.create(
-        id, "proj", specId, "node", "node", "build", "claude", "b", "t", null, null, "/l", "u");
+    runs.create(id, "proj", specId, "node", "build", "claude", "b", "t", null, null, "/l", "u");
     db.execute(
         "UPDATE runs SET status = ?, completed_at = ? WHERE id = ?", status, completedAt, id);
     return id;

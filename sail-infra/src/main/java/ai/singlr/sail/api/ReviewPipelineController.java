@@ -275,7 +275,7 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
 
     if (!isAuthoritative(event)) return;
 
-    var exitCode = RunTracker.exitCodeOf(event.data());
+    var exitCode = Event.WellKnownData.exitCode(event.data());
     if (exitCode != null && exitCode != 0) {
       publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, "exit " + exitCode);
       return;

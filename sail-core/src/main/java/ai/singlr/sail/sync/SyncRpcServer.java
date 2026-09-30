@@ -522,9 +522,10 @@ public final class SyncRpcServer {
     return main.snapshot(() -> currentOf(main, need, frame));
   }
 
-  private static SyncWire.Response currentOf(MainReplica main, SyncWire.Need need, int frame) {
+  private SyncWire.Response currentOf(MainReplica main, SyncWire.Need need, int frame) {
     var budget = new SyncWire.Frame(frame);
     var entries = new ArrayList<SyncWire.Entry>();
+    var accepted = new ArrayList<SyncWire.Entry>();
     var consumed = 0;
     for (var id : need.ids()) {
       if (main.currentRev(id) == null) {
@@ -532,7 +533,8 @@ public final class SyncRpcServer {
         continue;
       }
       var entry = entryOf(main, id, 0);
-      var length = SyncWire.encodedLength(entry);
+      var took = main.acceptedFrom(id, principal.peer()).map(state -> entryOf(id, state, 0));
+      var length = SyncWire.encodedLength(entry) + took.map(SyncWire::encodedLength).orElse(0);
       if (!budget.canEverAdmit(length)) {
         return oversize(id, length, frame);
       }
@@ -541,13 +543,18 @@ public final class SyncRpcServer {
       }
       budget.add(length);
       entries.add(entry);
+      took.ifPresent(accepted::add);
       consumed++;
     }
-    return new SyncWire.Page(entries, consumed, consumed == need.ids().size(), main.maxSeq());
+    return new SyncWire.Page(
+        entries, consumed, consumed == need.ids().size(), main.maxSeq(), accepted);
   }
 
   private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
-    var state = main.state(id);
+    return entryOf(id, main.state(id), seq);
+  }
+
+  private static SyncWire.Entry entryOf(String id, MainReplica.State state, long seq) {
     return new SyncWire.Entry(
         seq,
         id,

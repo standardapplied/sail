@@ -392,18 +392,15 @@ class AgentAttachCommandTest {
       Acting.system(
           () ->
               runs.create(
-                  "r1", "acme", "spec-x", "it", "it", "build", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r1", "acme", "spec-x", "it", "build", "codex", null, "t", null, null, "l", "u"));
       Acting.system(
           () ->
               runs.create(
-                  "r2", "acme", "legacy", "it", "it", "build", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r2", "acme", "legacy", "it", "build", "codex", null, "t", null, null, "l", "u"));
       Acting.system(
           () ->
               runs.create(
-                  "r3", "acme", null, "it", "it", "adhoc", "codex", null, "t", null, null, "l",
-                  "u"));
+                  "r3", "acme", null, "it", "adhoc", "codex", null, "t", null, null, "l", "u"));
       assertEquals(
           "spec-x", AgentAttachCommand.knownRoom(rooms, runs.findById("r1").orElseThrow()));
       assertEquals(

@@ -17,6 +17,7 @@ import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -30,6 +31,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 class JoinCommandTest {
+
+  private static final SyncOperations.Channels NO_MAIN =
+      target -> {
+        throw new IOException("a unit test reaches no main");
+      };
 
   private static final String PUB =
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";
@@ -72,7 +78,8 @@ class JoinCommandTest {
             "sail@maindevbox",
             "mady",
             "Mady M",
-            "mady@example.com");
+            "mady@example.com",
+            NO_MAIN);
 
     assertEquals("sail@maindevbox", plan.target());
     assertEquals("mady", plan.handle());
@@ -106,7 +113,7 @@ class JoinCommandTest {
       new SchemaManager(db).migrate();
       var run = reservedOn(db, null);
 
-      JoinCommand.plan(hostConfig, dbPath, identity(), "sail@main", "mady", null, null);
+      JoinCommand.plan(hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN);
 
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().node());
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().owner());
@@ -131,7 +138,7 @@ class JoinCommandTest {
               IllegalStateException.class,
               () ->
                   JoinCommand.plan(
-                      hostConfig, dbPath, identity(), "sail@main", "mady", null, null));
+                      hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN));
 
       assertTrue(refused.getMessage().contains(held), refused.getMessage());
       assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle());
@@ -147,7 +154,14 @@ class JoinCommandTest {
             IllegalStateException.class,
             () ->
                 JoinCommand.plan(
-                    missing, dir.resolve("sail.db"), identity(), "sail@main", "mady", null, null));
+                    missing,
+                    dir.resolve("sail.db"),
+                    identity(),
+                    "sail@main",
+                    "mady",
+                    null,
+                    null,
+                    NO_MAIN));
     assertTrue(error.getMessage().contains("host init"));
   }
 
@@ -165,7 +179,8 @@ class JoinCommandTest {
                 "not a target!",
                 "mady",
                 null,
-                null));
+                null,
+                NO_MAIN));
   }
 
   @Test

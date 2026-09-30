@@ -52,6 +52,15 @@ public interface LocalReplica {
     return false;
   }
 
+  /**
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
+   * box, as the row's merge base when it is newer than the base held here, keeping the row as it
+   * stands. Returns whether the base moved. None by default.
+   */
+  default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return false;
+  }
+
   /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#latestWinsFields}. */
   default Set<String> latestWinsFields() {
     return Set.of();

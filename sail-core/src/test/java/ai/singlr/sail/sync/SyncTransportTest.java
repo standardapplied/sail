@@ -170,7 +170,6 @@ class SyncTransportTest {
         "project",
         "auth",
         "owner",
-        "owner",
         "build",
         "codex",
         "original",

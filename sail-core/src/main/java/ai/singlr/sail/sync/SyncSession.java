@@ -130,10 +130,22 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
   Optional<String> handle();
 
   /**
-   * Main's current version of each of {@code ids} of {@code type} it holds — a revision, a
-   * tombstone or an erasure — in request order; an id main never held is omitted. Reads only.
+   * What main holds of each of {@code ids} of {@code type}: its current version — a revision, a
+   * tombstone or an erasure — and the latest version it took from this box, each in request order;
+   * an id main never held is omitted from both. Reads only.
    */
-  List<SyncWire.Entry> held(String type, List<String> ids);
+  Held held(String type, List<String> ids);
+
+  /**
+   * Main's answer about ids a node asked after: {@code current} is main's version of each it holds,
+   * {@code accepted} the latest version of each it took from this box, as main recorded it.
+   */
+  record Held(List<SyncWire.Entry> current, List<SyncWire.Entry> accepted) {
+    public Held {
+      current = List.copyOf(current);
+      accepted = List.copyOf(accepted);
+    }
+  }
 
   /** Pulls main's FDE roster; the node mirrors it main-authoritatively. */
   List<Map<String, Object>> fetchFdes();

@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Collections;
@@ -23,8 +22,6 @@ import java.util.Set;
  */
 public final class NodeRound {
 
-  private static final String RUN = "run";
-
   private NodeRound() {}
 
   /**
@@ -32,19 +29,22 @@ public final class NodeRound {
    * configured sync handle is {@code handle}. It fails, before anything is offered or adopted,
    * unless main authenticated the session as that handle; a main that predates saying which handle
    * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
-   * #acknowledgeHeld}), and every one main does not hold is stamped as this box's ({@link
-   * #stampUnheld}).
+   * #acknowledgeHeld}), every one main does not hold is stamped as this box's ({@link
+   * #stampUnheld}), and so is every run of this box's that acts for no one, which an older release
+   * reserved and main would never take.
    */
   public static void begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
     stampUnheld(db, handle, acknowledgeHeld(session, db));
+    var runs = new RunStore(db);
+    runs.stamp(handle, runs.ownerless(handle));
   }
 
   /**
    * Asks main which of the runs this box made that it never heard acknowledged main holds — its
-   * answer lost on the way back — and adopts each as acknowledged where main still holds the
-   * revision it took ({@link RunStore#acknowledge}), keeping the run as it stands here. Nothing is
-   * offered, and nothing but main's acknowledgement is adopted. Returns the ids main holds.
+   * answer lost on the way back — and adopts the version main took from this box as each one's base
+   * ({@link RunStore#acknowledge}), keeping the run as it stands here. Nothing is offered, and
+   * nothing but main's acknowledgement is adopted. Returns the ids main holds.
    */
   public static Set<String> acknowledgeHeld(SyncSession session, Sqlite db) {
     var runs = new RunStore(db);
@@ -52,15 +52,14 @@ public final class NodeRound {
     if (unacknowledged.isEmpty()) {
       return Set.of();
     }
-    var held = new LinkedHashSet<String>();
-    for (var entry : session.held(RUN, unacknowledged)) {
-      held.add(entry.id());
-      if (entry.kind() == ChangeLog.Kind.REVISION) {
-        Actor.run(
-            Actor.main(entry.author()),
-            () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
-      }
+    var answer = session.held(runs.entityType(), unacknowledged);
+    for (var entry : answer.accepted()) {
+      Actor.run(
+          Actor.main(entry.author()),
+          () -> runs.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
     }
+    var held = new LinkedHashSet<String>();
+    answer.current().forEach(entry -> held.add(entry.id()));
     return Collections.unmodifiableSet(held);
   }
 

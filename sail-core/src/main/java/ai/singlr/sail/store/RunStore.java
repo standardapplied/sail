@@ -326,18 +326,18 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
    * replicates. The id is minted by the launcher (a UUIDv7) so the run-scoped log directory is
-   * addressable before the agent starts; {@code node} is the executing box's FDE handle at launch;
-   * {@code owner} is the FDE the run's agent principal acts for. The principal handle and the run's
-   * credential are minted inside the same transaction as the row, so a run and its identity are
-   * atomic. Fails if an exclusive container lease (see {@link #acquireContainerLease}) is held — a
-   * run must never start into a container about to be rolled back. Returns the id.
+   * addressable before the agent starts. It is stamped as every run this box executes is ({@link
+   * #stamp}), for {@code boxHandle}: that box's FDE executes it and its agent acts for them. The
+   * principal handle and the run's credential are minted inside the same transaction as the row, so
+   * a run and its identity are atomic. Fails if an exclusive container lease (see {@link
+   * #acquireContainerLease}) is held — a run must never start into a container about to be rolled
+   * back. Returns the id.
    */
   public String create(
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       String agent,
       String branch,
@@ -347,19 +347,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit) {
     createReturningCredential(
-        id,
-        project,
-        specId,
-        node,
-        owner,
-        role,
-        agent,
-        branch,
-        task,
-        pid,
-        watcherPid,
-        logPath,
-        unit);
+        id, project, specId, boxHandle, role, agent, branch, task, pid, watcherPid, logPath, unit);
     return id;
   }
 
@@ -367,8 +355,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String id,
       String project,
       String specId,
-      String node,
-      String owner,
+      String boxHandle,
       String role,
       String agent,
       String branch,
@@ -377,6 +364,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Integer watcherPid,
       String logPath,
       String unit) {
+    var node = stamp(boxHandle);
     return db.transaction(
         () -> {
           var lease = activeLease(project, node);
@@ -409,7 +397,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               logPath,
               unit,
               principalHandle(agent, role, id),
-              owner);
+              node);
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, null);
           recordRevision(id, "local", false);
@@ -444,8 +432,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         reviewId,
         project,
         specId,
-        stamp(boxHandle),
-        stamp(boxHandle),
+        boxHandle,
         Lane.REVIEW.wire(),
         agent,
         branch,
@@ -840,19 +827,29 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         boxHandle, madeHere("SELECT id FROM runs WHERE node IS NULL OR node = '' ORDER BY rowid"));
   }
 
+  /**
+   * Every run this box executes, by its {@code node} {@code boxHandle}, that acts for no one: an
+   * older release reserved some with no owner, and main takes a run only acting for its box's FDE.
+   */
+  public List<String> ownerless(String boxHandle) {
+    if (Strings.isBlank(boxHandle)) {
+      return List.of();
+    }
+    return db.query(
+        "SELECT id FROM runs WHERE node = ? AND (owner IS NULL OR owner = '') ORDER BY rowid",
+        row -> row.text(0),
+        boxHandle);
+  }
+
   private List<String> madeHere(String selectIds) {
     return db.query(selectIds, row -> row.text(0)).stream()
         .filter(id -> changeLog.begunHere(ENTITY, id))
         .toList();
   }
 
-  /**
-   * Records main's revision {@code rev} of run {@code id}, holding {@code held}, as the synced base
-   * of a run main took whose answer this box never heard, keeping the run as it stands here — see
-   * {@link RevisionJournal#acknowledge}. Adopted as the bound actor; returns whether it was.
-   */
-  public boolean acknowledge(String id, Map<String, Object> held, String rev) {
-    return journal.acknowledge(id, held, rev);
+  @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(id, accepted, rev);
   }
 
   /** Every run the box whose FDE handle is {@code handle} executed that is still live there. */

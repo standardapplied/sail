@@ -285,7 +285,6 @@ class SyncServerCommandTest {
                   "proj",
                   "auth",
                   node,
-                  node,
                   "build",
                   "claude-code",
                   "feat/x",

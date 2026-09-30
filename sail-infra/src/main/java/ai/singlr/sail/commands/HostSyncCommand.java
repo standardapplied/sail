@@ -102,12 +102,7 @@ public final class HostSyncCommand implements Runnable {
       SyncOperations.Channels channels)
       throws Exception {
     var updated = configure(host, asMain, mainTarget, hostname);
-    HandleChange.apply(
-        db,
-        host.sync(),
-        updated.sync(),
-        channels,
-        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+    HandleChange.write(hostYamlPath, db, host, updated, channels);
     return updated.sync();
   }
 

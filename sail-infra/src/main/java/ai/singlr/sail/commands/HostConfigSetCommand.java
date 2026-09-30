@@ -17,7 +17,6 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
-import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
@@ -139,7 +138,8 @@ public final class HostConfigSetCommand implements Runnable {
     }
 
     var stamped =
-        write(hostYamlPath, SailPaths.controlPlaneDb(), hostYaml, updated, SshSyncChannel::open);
+        HandleChange.write(
+            hostYamlPath, SailPaths.controlPlaneDb(), hostYaml, updated, SshSyncChannel::open);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -163,28 +163,6 @@ public final class HostConfigSetCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string("  @|faint Restart to apply: sudo systemctl restart sail-api|@"));
     }
-  }
-
-  /**
-   * Writes {@code updated} over {@code current} at {@code hostYamlPath} as a change of this box's
-   * identity ({@link HandleChange}) in its database {@code db}: refused while a run main holds
-   * under the old handle would be stranded, asking main over {@code channels} which runs it took,
-   * and once written every run main has not taken is stamped for the new identity. Returns the runs
-   * stamped.
-   */
-  static List<String> write(
-      Path hostYamlPath,
-      Path db,
-      HostYaml current,
-      HostYaml updated,
-      SyncOperations.Channels channels)
-      throws Exception {
-    return HandleChange.apply(
-        db,
-        current.sync(),
-        updated.sync(),
-        channels,
-        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
   }
 
   /**

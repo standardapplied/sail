@@ -431,7 +431,6 @@ class MissedStopReconcilerTest {
               "test-project",
               specId,
               node,
-              node,
               role,
               "claude-code",
               "feat/test",
@@ -568,7 +567,6 @@ class MissedStopReconcilerTest {
               id,
               "test-project",
               specId,
-              "node-a",
               "node-a",
               "build",
               "claude-code",
@@ -886,12 +884,12 @@ class MissedStopReconcilerTest {
 
     assertEquals(
         0,
-        Acting.system(() -> rec.releaseStrandedReservations(Set.of("auth"))),
+        Acting.system(() -> rec.finishDeadSessions(Set.of("auth"))),
         "a run whose stop was replayed earlier this sweep is not also released as a stranded"
             + " reservation, even once its spec has left in_progress");
     assertEquals(
         1,
-        Acting.system(() -> rec.releaseStrandedReservations(Set.of())),
+        Acting.system(() -> rec.finishDeadSessions(Set.of())),
         "the same run IS released as stranded when nothing handled it this sweep");
   }
 
@@ -1198,6 +1196,44 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aCommandLostWhileIncusdRestartsNeverReadsALiveAgentAsGone() {
+    var adhoc = session(null, "node-a", "adhoc");
+    var probes = new AtomicInteger();
+    var restarting =
+        new ShellExec() {
+          @Override
+          public Result exec(List<String> command) {
+            if (command.get(1).equals("list")) {
+              return new Result(0, "[{\"name\": \"test-project\", \"status\": \"Running\"}]", "");
+            }
+            if (command.contains("cat")) {
+              return new Result(0, "4242\n", "");
+            }
+            if (command.contains("kill") && probes.getAndIncrement() == 0) {
+              return new Result(1, "", "Error: websocket: close 1006 (abnormal closure)");
+            }
+            return new Result(0, "", "");
+          }
+
+          @Override
+          public Result exec(List<String> command, Path workDir, Duration timeout) {
+            return exec(command);
+          }
+
+          @Override
+          public boolean isDryRun() {
+            return false;
+          }
+        };
+
+    assertEquals(
+        0, reconciler(MissedStopReconciler.systemdUnitProbe(restarting), PAST_GRACE).sweep());
+
+    assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
+    assertEquals(2, probes.get(), "read again once the container answered");
+  }
+
+  @Test
   void aRunningContainerThatWillNotRunACommandReadsAsAlive() {
     var adhoc = session(null, "node-a", "adhoc");
     var flaky =
@@ -1237,6 +1273,32 @@ class MissedStopReconcilerTest {
         1,
         replayed.poll().data().get(Event.WellKnownData.EXIT_CODE),
         "the agent exited 1: its replayed stop never reads as a clean finish");
+  }
+
+  @Test
+  void aReviewSpecsDeadBuildRunKeepsTheExitCodeItsRecordedStopCarried() throws Exception {
+    createReviewSpec("auth");
+    var build = runningSession("auth");
+    recordStopEvent(
+        "auth",
+        Instant.now().plusSeconds(1).toString(),
+        Map.of(
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_WATCHER,
+            Event.WellKnownData.RUN_ID,
+            build,
+            Event.WellKnownData.EXIT_CODE,
+            1));
+    var reconciler = reconciler(new CountingProbe(false), PAST_GRACE);
+
+    reconciler.sweep();
+    reconciler.sweep();
+
+    assertEquals("stopped", sessionStore.findById(build).orElseThrow().status());
+    assertEquals(
+        1,
+        sessionStore.findById(build).orElseThrow().exitCode(),
+        "a failed agent's work is never rescued into review as a clean finish");
   }
 
   @Test

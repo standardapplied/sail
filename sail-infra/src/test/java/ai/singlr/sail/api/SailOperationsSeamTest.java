@@ -428,8 +428,8 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               runs.create(
-                  run, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
-                  "/log", "unit"));
+                  run, "proj", "auth", "node", "build", "codex", "branch", "task", 1, null, "/log",
+                  "unit"));
       var review = Acting.system(() -> new ReviewStore(box.db).createReview("auth", 1));
       Acting.system(
           () ->
@@ -1417,8 +1417,8 @@ class SailOperationsSeamTest {
       Acting.system(
           () ->
               runs.create(
-                  id, "proj", "auth", "node", "node", "build", "codex", "branch", "task", 1, null,
-                  "/log", "unit"));
+                  id, "proj", "auth", "node", "build", "codex", "branch", "task", 1, null, "/log",
+                  "unit"));
       assertEquals(id, operations.dispatching().latestRun("proj", "node").orElseThrow().id());
       assertEquals(id, operations.dispatching().activeRun("proj", "node").orElseThrow().id());
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());

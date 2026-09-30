@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SyncIdentity;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
 import java.net.InetSocketAddress;
@@ -98,7 +99,8 @@ public final class JoinCommand implements Runnable {
             normalized,
             resolvedHandle,
             resolvedName,
-            resolvedEmail);
+            resolvedEmail,
+            SshSyncChannel::open);
     probeReachability(normalized);
     print(plan);
   }
@@ -117,7 +119,8 @@ public final class JoinCommand implements Runnable {
       String target,
       String handle,
       String name,
-      String email)
+      String email,
+      SyncOperations.Channels channels)
       throws Exception {
     if (!Files.exists(hostConfig)) {
       throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
@@ -131,12 +134,7 @@ public final class JoinCommand implements Runnable {
             "sync-handle",
             handle);
     requireWritable(hostConfig, target);
-    HandleChange.apply(
-        db,
-        host.sync(),
-        updated.sync(),
-        SshSyncChannel::open,
-        () -> YamlUtil.dumpToFile(updated.toMap(), hostConfig));
+    HandleChange.write(hostConfig, db, host, updated, channels);
     return new Plan(target, handle, name, email, publicKey);
   }
 

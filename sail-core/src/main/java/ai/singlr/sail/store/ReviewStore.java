@@ -98,14 +98,21 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   /**
    * A running review this box executes is live here: the pipeline writes its stages and findings
    * through its row, so main's version never rewrites or removes it mid-run. This box executes it
-   * while the run of the same id is live on the box whose FDE handle is {@code handle}, or — before
-   * that run is recorded — when its first revision began here. Another box's review is never live
-   * here. Once it finishes, main's version settles it like any other.
+   * while the run of the same id is live on the box whose FDE handle is {@code handle}, or — only
+   * before that run is recorded — when its first revision began here. A review whose run has
+   * finished is not live, even while it waits for a person's approval, so main's approval reaches
+   * it. Another box's review is never live here. Once it finishes, main's version settles it like
+   * any other.
    */
   @Override
   public boolean live(String id, String handle) {
-    return findReview(id).filter(review -> "running".equals(review.status())).isPresent()
-        && (new RunStore(db).live(id, handle) || changeLog.begunHere(ENTITY, id));
+    if (findReview(id).filter(review -> "running".equals(review.status())).isEmpty()) {
+      return false;
+    }
+    return new RunStore(db)
+        .findById(id)
+        .map(run -> run.liveOn(handle))
+        .orElseGet(() -> changeLog.begunHere(ENTITY, id));
   }
 
   /** Who may write a review on this box: the rule every door and main's commit decide by. */
@@ -713,6 +720,11 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     revisions.applyRevision(id, snapshot, rev);
+  }
+
+  @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return revisions.acknowledge(id, accepted, rev);
   }
 
   @Override

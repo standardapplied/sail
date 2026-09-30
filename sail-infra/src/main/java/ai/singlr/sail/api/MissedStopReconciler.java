@@ -125,16 +125,17 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Probes the run-scoped pid file first, then its systemd unit. The pid path also covers
    * foreground builds, which use the same run identity without creating a service. A run that reads
    * as not running is gone only when its container says so: a container that is stopped or no
-   * longer exists runs nothing, a running one must answer a command, and one incus cannot report
-   * fails the probe — which every pass reads as alive — so an incus outage never reads as every run
-   * in it gone.
+   * longer exists runs nothing; a running one must answer a command and then read the run as not
+   * running a second time, so a command lost while incusd restarted, before the container answered
+   * again, never reads a working agent as gone; and one incus cannot report fails the probe — which
+   * every pass reads as alive — so an incus outage never reads as every run in it gone.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var containers = new ContainerManager(shell);
     return (project, runId, unit) -> {
-      var info = agentSession.queryStatus(project, AgentUnit.recorded(runId, unit));
-      if (info != null && info.running()) {
+      var recorded = AgentUnit.recorded(runId, unit);
+      if (running(agentSession.queryStatus(project, recorded))) {
         return true;
       }
       return switch (containers.queryState(project)) {
@@ -142,13 +143,17 @@ public final class MissedStopReconciler implements AutoCloseable {
         case ContainerState.NotCreated gone -> false;
         case ContainerState.Running running -> {
           agentSession.requireReachable(project);
-          yield false;
+          yield running(agentSession.queryStatus(project, recorded));
         }
         case ContainerState.Error unknown ->
             throw new IOException(
                 "Container '" + project + "' could not be read: " + unknown.message());
       };
     };
+  }
+
+  private static boolean running(AgentSession.SessionInfo info) {
+    return info != null && info.running();
   }
 
   /** Starts the periodic sweep at the default cadence. */
@@ -199,7 +204,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         }
       }
       replayed += rescueStrandedReviews(handledThisSweep);
-      replayed += releaseStrandedReservations(handledThisSweep);
+      replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
@@ -249,15 +254,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * the in-progress pass's: it replays that spec's stop, or finishes a row whose recorded stop
    * reached no finisher, and a spec stop is never replayed for any other run. Only a run older than
    * {@link #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never
-   * disturbed, and a run whose recorded identity still probes <em>live</em> is always left alone —
-   * a reservation must never be freed under a working agent. The probe reads the run-scoped pid
-   * file before the systemd unit, so it covers foreground sessions (which launch no service) and
-   * background sessions that crashed before their pid was persisted alike; an unprobeable run reads
-   * as alive. The finish is the same {@code running → stopped} compare-and-set every finisher uses,
-   * so racing the watcher's own completion can never overwrite a recorded exit, and it is logged as
-   * reconstructed. Foreign runs are left to their executing box and never probed.
+   * disturbed, and a run is finished only once it is {@linkplain #gone gone} — a reservation must
+   * never be freed under a working agent. A spec's run is finished with the exit code the recorded
+   * stop naming it carried. The finish is the same {@code running → stopped} compare-and-set every
+   * finisher uses, so racing the watcher's own completion can never overwrite a recorded exit, and
+   * it is logged as reconstructed. Foreign runs are left to their executing box and never probed.
    */
-  int releaseStrandedReservations(Set<String> handledThisSweep) {
+  int finishDeadSessions(Set<String> handledThisSweep) {
     var node = localHandle.get();
     var deadline = clock.get().minus(LAUNCH_GRACE);
     var released = 0;
@@ -265,12 +268,12 @@ public final class MissedStopReconciler implements AutoCloseable {
       if (!run.ownedBy(node)
           || !MissedStops.parseOr(run.startedAt(), Instant.MAX).isBefore(deadline)
           || reconciledBySpec(run, handledThisSweep)
-          || agentProbablyAlive(run)) {
+          || !gone(run)) {
         continue;
       }
       if (finish(
           run,
-          null,
+          Strings.isBlank(run.specId()) ? null : stopCoverage(run.specId(), run).exitCode(),
           Strings.isBlank(run.specId())
               ? "session with no spec whose recorded process is gone"
               : "running with its recorded process gone")) {
@@ -317,17 +320,19 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Whether the run's recorded identity still probes live — or cannot be probed at all: a probe
-   * failure reads as alive, because the sweep must prefer leaving a reservation in place over
-   * freeing one under an agent it could not observe. A foreground run's blank unit still probes
-   * through its run-scoped pid file.
+   * Whether the run's recorded process is gone: its identity probes not running. The probe reads
+   * the run-scoped pid file before the systemd unit, so it covers foreground sessions (which launch
+   * no service) and background sessions that crashed before their pid was persisted alike. A probe
+   * that fails — incus unreachable, a command lost while incusd restarts — reads as running: the
+   * sweep prefers leaving a run in place over finishing, or replaying the stop of, one it could not
+   * observe. The one liveness question every pass asks.
    */
-  private boolean agentProbablyAlive(RunStore.RunRow run) {
+  private boolean gone(RunStore.RunRow run) {
     try {
-      return unitProbe.active(run.project(), run.id(), Objects.toString(run.unit(), ""));
+      return !unitProbe.active(run.project(), run.id(), Objects.toString(run.unit(), ""));
     } catch (Exception e) {
       System.err.println("  [reconcile] could not probe run " + run.id() + ": " + e.getMessage());
-      return true;
+      return false;
     }
   }
 
@@ -405,7 +410,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             .latestBuildAttempt(spec.id())
             .filter(run -> run.ownedBy(node))
             .filter(run -> RunStatus.isTerminal(run.status()));
-    if (latest.isEmpty() || unitStillActive(spec, latest.get())) {
+    if (latest.isEmpty() || !gone(latest.get())) {
       return false;
     }
     reviewRescueAttempted.add(rescue.key());
@@ -451,40 +456,23 @@ public final class MissedStopReconciler implements AutoCloseable {
     var outcome = MissedStops.assess(session, coverage, clock.get(), LAUNCH_GRACE);
     return switch (outcome) {
       case MissedStops.Outcome.ReplayStop replay -> {
-        if (unitStillActive(spec, session)) {
+        if (!gone(session)) {
           yield false;
         }
         publishStop(spec, session, replay.exitCode(), replay.why());
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (Strings.isBlank(session.unit()) || unitStillActive(spec, session)) {
+        if (Strings.isBlank(session.unit()) || !gone(session)) {
           yield false;
         }
         publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
         yield true;
       }
       case MissedStops.Outcome.FinishRun unfinished ->
-          !agentProbablyAlive(session) && finish(session, unfinished.exitCode(), unfinished.why());
+          gone(session) && finish(session, unfinished.exitCode(), unfinished.why());
       case MissedStops.Outcome.Skip ignored -> false;
     };
-  }
-
-  /**
-   * Whether the run's recorded process identity is still alive — the veto that keeps a lying
-   * terminal row from forging a stop. A hook turn-end completes the run row as a watcher-dead
-   * backstop, but a turn-end is not a process exit: in the field a gate-allowed mid-run stop marked
-   * the row terminal while the agent kept working, and the next sweep replayed the "finished" run —
-   * the review then judged half-done work and the fix agent raced the live agent in one clone. An
-   * active identity means the run's own watcher owns the real stop and the sweep must wait. A row
-   * with no recorded unit cannot be probed and keeps the replay behavior for terminal rows. A probe
-   * failure propagates to the per-spec catch — logged, skipped, retried next sweep — so the sweep
-   * never forges a stop on data it cannot interpret.
-   */
-  private boolean unitStillActive(SpecStore.SpecRow spec, RunStore.RunRow session)
-      throws Exception {
-    return !Strings.isBlank(session.unit())
-        && unitProbe.active(spec.project(), session.id(), session.unit());
   }
 
   /**
@@ -529,7 +517,7 @@ public final class MissedStopReconciler implements AutoCloseable {
             timestampOf(row),
             data.get(Event.WellKnownData.SOURCE) != null,
             runId,
-            runId == null ? null : RunTracker.exitCodeOf(data));
+            runId == null ? null : Event.WellKnownData.exitCode(data));
       } catch (Exception e) {
         return new RecordedStop(timestampOf(row), true, null, null);
       }

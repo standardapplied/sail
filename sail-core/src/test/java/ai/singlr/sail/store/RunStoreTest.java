@@ -64,7 +64,6 @@ class RunStoreTest {
         project,
         specId,
         "node-a",
-        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -180,21 +179,24 @@ class RunStoreTest {
   }
 
   @Test
-  void aRunMainMovedOnSinceItTookItIsNeverAcknowledgedOverMainsChange() {
+  void onlyAVersionMainTookAfterTheBaseHeldHereMovesIt() {
     var id = newRunOn("p", "s", "ada");
-    var moved = new LinkedHashMap<>(store.comparableSnapshot(id));
-    moved.put("session_id", "main-session");
-    var wroteHereBefore = store.comparableSnapshot(id);
+    var first = store.comparableSnapshot(id);
+    Actor.run(Actor.main("ada"), () -> store.acknowledge(id, first, "2-main"));
+    store.recordSession(id, "sess-2", "claude", "/t");
+    var second = store.comparableSnapshot(id);
 
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, moved, "2-main")),
-        "main holds a state this box never wrote");
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "1-main")),
+        "an older version main took is not the latest it holds of this box's work");
     assertFalse(
-        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, wroteHereBefore, "3-main")),
-        "a later revision on main that holds a state this box once wrote is not what main took");
+        Actor.call(Actor.main("ada"), () -> store.acknowledge(id, first, "2-main")),
+        "the base held here already is it");
+    assertEquals("2-main", store.baseRevOf(id));
 
-    assertNull(store.baseRevOf(id));
-    assertNull(store.findById(id).orElseThrow().sessionId());
+    assertTrue(Actor.call(Actor.main("ada"), () -> store.acknowledge(id, second, "5-main")));
+    assertEquals("5-main", store.baseRevOf(id));
+    assertFalse(store.dirtyIds().contains(id), "main took exactly what this box holds");
   }
 
   private static RunStore.RunRow runOnNode(String node) {
@@ -482,7 +484,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "node-a",
         "build",
         "claude-code",
         "feat/x",
@@ -508,7 +509,6 @@ class RunStoreTest {
         id,
         "backend",
         null,
-        "node-a",
         "node-a",
         "build",
         "codex",
@@ -595,7 +595,6 @@ class RunStoreTest {
         id,
         project,
         specId,
-        node,
         node,
         "build",
         "claude-code",
@@ -1149,7 +1148,6 @@ class RunStoreTest {
         "backend",
         "auth",
         "node-a",
-        "node-a",
         "invite-full",
         "codex",
         null,
@@ -1220,7 +1218,6 @@ class RunStoreTest {
         id,
         "backend",
         null,
-        "node-a",
         "node-a",
         "build",
         "codex",

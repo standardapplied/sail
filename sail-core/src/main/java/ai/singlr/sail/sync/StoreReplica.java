@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.PushOutcome;
@@ -95,6 +96,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public boolean acknowledge(String entityId, Map<String, Object> accepted, String rev) {
+    return store.acknowledge(entityId, accepted, rev);
+  }
+
+  @Override
   public Set<String> latestWinsFields() {
     return store.latestWinsFields();
   }
@@ -137,6 +143,24 @@ public final class StoreReplica implements LocalReplica, MainReplica {
                     () ->
                         new MainReplica.State(
                             current(entityId), currentRev(entityId), recordedAuthor(entityId))));
+  }
+
+  @Override
+  public Optional<MainReplica.State> acceptedFrom(String entityId, String peer) {
+    if (Strings.isBlank(peer)) {
+      return Optional.empty();
+    }
+    return snapshot(
+        () ->
+            changeLog
+                .latestFrom(store.entityType(), entityId, peer)
+                .map(
+                    entry ->
+                        new MainReplica.State(
+                            entry.deleted() ? null : store.comparableAtRev(entityId, entry.rev()),
+                            entry.rev(),
+                            entry.kind(),
+                            entry.actor())));
   }
 
   private Snapshots.Creator recordedCreator(String entityId) {

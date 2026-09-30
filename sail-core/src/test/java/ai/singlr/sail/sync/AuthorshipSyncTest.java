@@ -64,7 +64,6 @@ class AuthorshipSyncTest {
                 "backend",
                 "auth",
                 "alice",
-                "alice",
                 "review",
                 "claude-code",
                 "feat/auth",

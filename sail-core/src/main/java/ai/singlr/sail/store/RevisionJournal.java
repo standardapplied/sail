@@ -207,33 +207,25 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * Records main's revision {@code rev} of {@code id}, holding {@code held}, as the synced base of
-   * a row main took whose answer never reached this box, keeping the row as it stands here: the
-   * base is adopted as the bound actor, and when the row has moved on since, its state is journaled
-   * on top, by {@link Actor#system()}, as a change main has not taken yet. Only main's first
-   * revision is taken as that base: a row with no base was born here, so main's first revision of
-   * it is the one it took from this box, whatever its content. Content alone never identifies it: a
-   * later revision on main may hold a state this box wrote before. When main has moved the row on
-   * since, which of this box's changes it took is unknown, and journaling the row on top would
-   * revert main's changes unseen, so nothing is recorded and the round reconciles the row with no
-   * base — any field the two sides hold differently parks a conflict for the FDE. A row that
-   * already has a base, or none at all, is left alone too. Returns whether the base was recorded.
+   * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
+   * box, as the synced base when {@code rev} is newer than the base held here: main took this box's
+   * offer and its answer never came back. Main mints every rev of an entity from one counter, so
+   * the newer of two of main's revs is the one with the higher counter. The row is kept as it
+   * stands here: when it has moved on since, its own state is journaled on top by {@link
+   * Actor#system()}, a change main has not taken yet, so the round reconciles it three-way against
+   * exactly what main took. The base is adopted as the bound actor. Returns whether it moved.
    */
-  public boolean acknowledge(String id, Map<String, Object> held, String rev) {
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return db.transaction(
         () -> {
-          if (!schema.exists(id) || rawBaseRev(id) != null || Revisions.counterOf(rev) != 1) {
+          var base = baseRevOf(id);
+          if (base != null && Revisions.counterOf(rev) <= Revisions.counterOf(base)) {
             return false;
           }
           var mine = comparableSnapshot(id);
-          applyRevision(id, held, rev);
-          if (!sameContent(mine, held)) {
-            Actor.run(
-                Actor.system(),
-                () -> {
-                  schema.apply(id, mine);
-                  recordRevision(id, "local", false);
-                });
+          applyRevision(id, accepted, rev);
+          if (!sameContent(mine, accepted)) {
+            Actor.run(Actor.system(), () -> write(id, mine, "local"));
           }
           return true;
         });
@@ -312,7 +304,7 @@ public final class RevisionJournal implements ConflictResolver {
           if (sameContent(chosen, remote)) {
             return baseRev;
           }
-          return writeChosen(id, chosen);
+          return write(id, chosen, "resolve");
         });
   }
 
@@ -331,17 +323,18 @@ public final class RevisionJournal implements ConflictResolver {
     return recordRevision(id, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true);
   }
 
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
+  /** Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it). */
+  private String write(String id, Map<String, Object> state, String origin) {
+    if (state == null) {
       if (!schema.exists(id)) {
         return latestRev(id);
       }
-      var rev = recordRevision(id, null, null, "resolve", true, false);
+      var rev = recordRevision(id, null, null, origin, true, false);
       schema.deleteRow(id);
       return rev;
     }
-    schema.apply(id, chosen);
-    return recordRevision(id, null, null, "resolve", false, false);
+    schema.apply(id, state);
+    return recordRevision(id, null, null, origin, false, false);
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

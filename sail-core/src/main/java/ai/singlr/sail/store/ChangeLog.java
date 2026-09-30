@@ -493,6 +493,24 @@ public final class ChangeLog {
         rev);
   }
 
+  /**
+   * The latest revision or tombstone of {@code entityId} that {@code peer}'s push put here: what
+   * main took from that box, as main recorded it. Empty when that box never pushed one, or history
+   * has been compacted past it.
+   */
+  public Optional<Entry> latestFrom(String entityType, String entityId, String peer) {
+    return db.queryOne(
+        SELECT
+            + " WHERE entity_type = ? AND entity_id = ? AND peer = ? AND kind IN (?, ?)"
+            + " ORDER BY seq DESC LIMIT 1",
+        ChangeLog::map,
+        entityType,
+        entityId,
+        peer,
+        Kind.REVISION.wire(),
+        Kind.TOMBSTONE.wire());
+  }
+
   private static final String COLUMNS =
       "seq, entity_type, entity_id, rev, actor, recorded_at, origin, deleted, snapshot, peer, kind";
   private static final String SELECT = "SELECT " + COLUMNS + " FROM change_log";

@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.store.ChangeLog;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 
@@ -85,6 +86,16 @@ public interface MainReplica {
    * cached view answers from the one entry it holds.
    */
   State state(String id);
+
+  /**
+   * The latest version of {@code id} main took from the box whose peer handle is {@code peer} — its
+   * own offer, as main recorded it — so a box whose answer to that offer was lost knows exactly
+   * which of its states main holds. Empty when that box never pushed one that main still holds in
+   * its history.
+   */
+  default Optional<State> acceptedFrom(String id, String peer) {
+    return Optional.empty();
+  }
 
   /**
    * Compare-and-set push of an authoritative state ({@code null} = delete). Accepts and mints a new

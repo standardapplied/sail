@@ -303,9 +303,15 @@ public final class SyncBox implements AutoCloseable {
    * main takes them, and the node never hears it.
    */
   public static void pushLosingTheAnswer(SyncBox main, SyncBox node) throws IOException {
+    pushLosingTheAnswer(main, node, "run");
+  }
+
+  /** Pushes {@code node}'s changes of {@code type}, main takes them, and its answer is lost. */
+  public static void pushLosingTheAnswer(SyncBox main, SyncBox node, String type)
+      throws IOException {
     var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, losingTheResults());
     Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
-    assertThrows(RuntimeException.class, () -> link.reconcile("run", node.replicas().get("run")));
+    assertThrows(RuntimeException.class, () -> link.reconcile(type, node.replicas().get(type)));
     try {
       link.close();
     } catch (RuntimeException alreadyCut) {

@@ -15,6 +15,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -297,7 +298,7 @@ class HostConfigSetCommandTest {
     var named = HostConfigSetCommand.applyChange(standalone, "sync-handle", "ada");
 
     assertEquals(
-        List.of(run), HostConfigSetCommand.write(hostYaml, dbPath, standalone, named, unreachable));
+        List.of(run), HandleChange.write(hostYaml, dbPath, standalone, named, unreachable));
 
     var asNode =
         HostConfigSetCommand.applyChange(
@@ -309,7 +310,7 @@ class HostConfigSetCommandTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> HostConfigSetCommand.write(hostYaml, dbPath, asNode, renamed, unreachable));
+            () -> HandleChange.write(hostYaml, dbPath, asNode, renamed, unreachable));
 
     assertTrue(refused.getMessage().contains("Connection refused"), refused.getMessage());
     assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync().handle());

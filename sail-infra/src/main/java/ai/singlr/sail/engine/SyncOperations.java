@@ -144,18 +144,16 @@ public final class SyncOperations {
     var specs = new SpecStore(db);
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
-    try (var channel = channels.open(target)) {
-      var boxId = requireBoxId(config);
-      var handle = Objects.toString(config.handle(), "");
-      var replicas = SyncedEntities.replicas(db, boxId, handle);
-      var hello = SyncWire.Hello.of(SailVersion.version(), boxId);
-      return reconcile(channel, hello, handle, replicas, messages, specs, files, projects);
+    var handle = Objects.toString(config.handle(), "");
+    var replicas = SyncedEntities.replicas(db, requireBoxId(config), handle);
+    try (var channel = channels.open(target);
+        var session = open(channel, config, db)) {
+      return reconcile(session, handle, replicas, messages, specs, files, projects);
     }
   }
 
   private Round reconcile(
-      Channel channel,
-      SyncWire.Hello hello,
+      SyncSession session,
       String handle,
       Map<String, StoreReplica> replicas,
       MessageStore messages,
@@ -163,43 +161,40 @@ public final class SyncOperations {
       FileStore files,
       ProjectStore projects)
       throws Exception {
-    try (var session =
-        SyncSession.open(channel.reader(), channel.writer(), hello, SyncOperations::notice, db)) {
-      NodeRound.begin(session, db, handle);
-      var types = new ArrayList<SyncSession.TypeReport>();
-      var failures = new ArrayList<SyncTransportException>();
-      var knownMessages = messages.syncEntityIds();
-      for (var entity : SyncedEntities.all()) {
-        try {
-          types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
-        } catch (RuntimeException e) {
-          var failure = transportFailure(entity.type(), e);
-          failures.add(failure);
-          types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
-        }
-      }
-      var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
+    NodeRound.begin(session, db, handle);
+    var types = new ArrayList<SyncSession.TypeReport>();
+    var failures = new ArrayList<SyncTransportException>();
+    var knownMessages = messages.syncEntityIds();
+    for (var entity : SyncedEntities.all()) {
       try {
-        reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+        types.add(session.reconcile(entity.type(), replicas.get(entity.type())));
       } catch (RuntimeException e) {
-        failures.add(transportFailure("fde", e));
+        var failure = transportFailure(entity.type(), e);
+        failures.add(failure);
+        types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
       }
-      materialize(files);
-      materializeProjects(projects);
-      reconcileLiveResources(projects, reportFor(types, "project"));
-      var summed =
-          types.stream()
-              .map(SyncSession.TypeReport::report)
-              .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
-      var round = new Round(summed, List.copyOf(types), pulledMessages);
-      notify(round);
-      if (!failures.isEmpty()) {
-        var first = failures.getFirst();
-        failures.stream().skip(1).forEach(first::addSuppressed);
-        throw first;
-      }
-      return round;
     }
+    var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
+    try {
+      reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+    } catch (RuntimeException e) {
+      failures.add(transportFailure("fde", e));
+    }
+    materialize(files);
+    materializeProjects(projects);
+    reconcileLiveResources(projects, reportFor(types, "project"));
+    var summed =
+        types.stream()
+            .map(SyncSession.TypeReport::report)
+            .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
+    var round = new Round(summed, List.copyOf(types), pulledMessages);
+    notify(round);
+    if (!failures.isEmpty()) {
+      var first = failures.getFirst();
+      failures.stream().skip(1).forEach(first::addSuppressed);
+      throw first;
+    }
+    return round;
   }
 
   /**
@@ -212,15 +207,21 @@ public final class SyncOperations {
   public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
       throws Exception {
     try (var channel = channels.open(config.main());
-        var session =
-            SyncSession.open(
-                channel.reader(),
-                channel.writer(),
-                SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
-                SyncOperations::notice,
-                db)) {
+        var session = open(channel, config, db)) {
       return NodeRound.acknowledgeHeld(session, db);
     }
+  }
+
+  /**
+   * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
+   */
+  private static SyncSession open(Channel channel, SyncConfig config, Sqlite db) {
+    return SyncSession.open(
+        channel.reader(),
+        channel.writer(),
+        SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
+        SyncOperations::notice,
+        db);
   }
 
   private static String requireBoxId(SyncConfig config) {

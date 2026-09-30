@@ -89,7 +89,6 @@ class RunSyncTest {
         "backend",
         "auth",
         node,
-        node,
         "build",
         "claude-code",
         "feat/auth",

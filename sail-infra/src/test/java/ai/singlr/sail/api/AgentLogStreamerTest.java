@@ -161,7 +161,6 @@ class AgentLogStreamerTest {
                   "acme",
                   "auth",
                   null,
-                  null,
                   "build",
                   "claude-code",
                   "b",

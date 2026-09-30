@@ -191,8 +191,8 @@ and the spec that closes it.
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
-| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest` |
-| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | open (holds on main today): `sail-sync-liveness` |
+| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
+| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers: `LostAnswerSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
@@ -246,14 +246,19 @@ A session opens with `hello` (protocol, build, fleet floor, box id) and is `welc
 session as, and a node whose configured sync handle is blank or another does nothing that round
 (`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
-from any other until an admin runs `sail fde release-box`. Before its first type, the node asks
-`need` for every run it made (its oldest entry is its own write) that main has never acknowledged —
-a box that was main holds every box's runs with no base, and another box's run is never its to stamp: one main holds at its first revision, the one it
-took from this box, is adopted as acknowledged at it, with the box's later changes on top; one main
-has revised since, even back to a state this box once wrote, is left without a base, so the round parks any field the two hold differently for the FDE rather
-than revert main's change; neither is re-stamped. Every other is stamped with the node's handle, so
-main takes it. A handle change asks the same before re-stamping anything, and holds every round of
-the box off from the ask until its stamps are written (`SyncOperations.holdRounds`, a lock file
+from any other until an admin runs `sail fde release-box`; removing an FDE releases its box. A
+node's answer to an offer main took can be lost on the way back. Main records the box each
+revision came from (its `peer`), so its answer to a `need` also names, per id, the latest version
+it took from the asking box (`accepted`). Before each type, the node asks it for every row it
+changed and adopts that version as the row's merge base when it is newer than the one it holds
+(main mints one entity's revs from one counter), keeping its own row on top; the round then
+reconciles three-way against exactly what main took, so a change main made since is never reverted
+and one the box made since is never lost. Before its first type, the node asks the same of every
+run it made (its oldest entry is its own write) that main never acknowledged — a box that was main
+holds every box's runs with no base, and another box's run is never its to stamp — and stamps with
+its handle every one main does not hold, and every run of its own that acts for no one, so main
+takes it. A handle change asks the same before re-stamping anything, and holds every round of the
+box off from the ask until its stamps are written (`SyncOperations.holdRounds`, a lock file
 beside the database), so no run is offered, and its answer lost, in between. The box id names the node in main's log; who the
 node is stays the authenticated SSH principal, bound as the `SYNC` actor around
 every commit and erase: it is each revision's `peer`, and its author unless the revision

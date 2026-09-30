@@ -436,19 +436,7 @@ class StopOperationsTest {
     var ops = stopOps(shell(), failingHalter(), StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
     runStore.create(
-        R1,
-        "acme",
-        "auth",
-        null,
-        null,
-        "build",
-        "codex",
-        "feat/auth",
-        "do it",
-        123,
-        null,
-        RUN_LOG,
-        UNIT);
+        R1, "acme", "auth", null, "build", "codex", "feat/auth", "do it", 123, null, RUN_LOG, UNIT);
 
     var refusal =
         assertThrows(
@@ -471,7 +459,6 @@ class StopOperationsTest {
                 R1,
                 "acme",
                 "auth",
-                null,
                 null,
                 "build",
                 "codex",
@@ -607,7 +594,6 @@ class StopOperationsTest {
         R1,
         "acme",
         null,
-        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",
@@ -1505,7 +1491,6 @@ class StopOperationsTest {
               "acme",
               "auth",
               LOCAL_HANDLE,
-              LOCAL_HANDLE,
               "build",
               "codex",
               "feat/auth",
@@ -1535,7 +1520,6 @@ class StopOperationsTest {
         R2,
         "acme",
         "auth",
-        LOCAL_HANDLE,
         LOCAL_HANDLE,
         "build",
         "codex",

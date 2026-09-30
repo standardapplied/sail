@@ -54,6 +54,18 @@ class FdeStoreTest {
   }
 
   @Test
+  void removingAnFdeReleasesTheBoxItSyncedFrom() {
+    var fde = store.add("ghost", null, null, "member");
+    var boxes = new FdeBoxes(db);
+    boxes.claim("ghost", "old-box");
+
+    store.remove(fde.id());
+    store.add("ghost", null, null, "member");
+
+    assertTrue(boxes.boxOf("ghost").isEmpty(), "a new FDE under the handle is tied to no box");
+  }
+
+  @Test
   void removeLeavesOtherFdesCredentialsAlone() {
     var ghost = store.add("ghost", null, null, "member");
     var keeper = store.add("keeper", null, null, "member");

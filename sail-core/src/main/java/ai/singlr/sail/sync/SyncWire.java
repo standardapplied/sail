@@ -398,10 +398,25 @@ public final class SyncWire {
   /**
    * One page of changes. {@code next} is the highest seq included (for a pull) or the count of
    * requested ids consumed (for a need); {@code done} says whether another page follows; {@code
-   * maxSeq} is main's high-water for the type.
+   * maxSeq} is main's high-water for the type. A need's page also names, in {@code accepted}, the
+   * latest revision main took from the asking box of each id it answers — the node's own offer as
+   * main recorded it — so a node whose answer to that offer was lost knows exactly which of its
+   * states main holds. Optional: an older main sends none, and a pull's page never does.
    */
-  public record Page(List<Entry> entries, long next, boolean done, long maxSeq)
-      implements Response {}
+  public record Page(
+      List<Entry> entries, long next, boolean done, long maxSeq, List<Entry> accepted)
+      implements Response {
+    public Page {
+      accepted = List.copyOf(accepted);
+    }
+
+    /**
+     * A page naming nothing main took from the asking box: every pull, and an older main's need.
+     */
+    public Page(List<Entry> entries, long next, boolean done, long maxSeq) {
+      this(entries, next, done, maxSeq, List.of());
+    }
+  }
 
   /** Main's verdict on one pushed offer. */
   public sealed interface Result permits Accepted, Stale, Refused, Denied {
@@ -618,6 +633,9 @@ public final class SyncWire {
         map.put(NEXT, page.next());
         map.put(DONE, page.done());
         map.put(MAX_SEQ, page.maxSeq());
+        if (!page.accepted().isEmpty()) {
+          map.put(ACCEPTED, page.accepted().stream().map(SyncWire::entryMap).toList());
+        }
       }
       case Results results -> {
         map.put(OP, OP_RESULTS);
@@ -694,7 +712,8 @@ public final class SyncWire {
               maps(map, ENTRIES).stream().map(SyncWire::entry).toList(),
               longValue(map, NEXT),
               bool(map, DONE),
-              longValue(map, MAX_SEQ));
+              longValue(map, MAX_SEQ),
+              maps(map, ACCEPTED).stream().map(SyncWire::entry).toList());
       case OP_RESULTS ->
           new Results(
               maps(map, RESULTS).stream().map(SyncWire::result).toList(), longValue(map, MAX_SEQ));

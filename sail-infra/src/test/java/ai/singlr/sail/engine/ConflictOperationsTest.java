@@ -484,7 +484,6 @@ class ConflictOperationsTest {
         "backend",
         "auth",
         node.id,
-        node.id,
         "build",
         "claude-code",
         "feat/auth",

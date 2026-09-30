@@ -6,7 +6,9 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.NodeRound;
@@ -35,6 +37,26 @@ public final class HandleChange {
   }
 
   private HandleChange() {}
+
+  /**
+   * Writes {@code updated} over {@code current} at {@code hostYamlPath} as a change of this box's
+   * identity in its database at {@code dbPath} ({@link #apply}). Returns the runs stamped for the
+   * new identity.
+   */
+  public static List<String> write(
+      Path hostYamlPath,
+      Path dbPath,
+      HostYaml current,
+      HostYaml updated,
+      SyncOperations.Channels channels)
+      throws Exception {
+    return apply(
+        dbPath,
+        current.sync(),
+        updated.sync(),
+        channels,
+        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+  }
 
   /**
    * Moves this box, whose database is {@code dbPath}, from {@code before} to {@code after} through
@@ -91,7 +113,7 @@ public final class HandleChange {
       return Set.of();
     }
     try {
-      return SyncOperations.acknowledgeHeld(db, before, channels);
+      return SyncOperations.acknowledgeHeld(db, BoxIdentity.resolved(before), channels);
     } catch (Exception e) {
       throw new IllegalStateException(
           "Cannot change this box's sync handle from '"
