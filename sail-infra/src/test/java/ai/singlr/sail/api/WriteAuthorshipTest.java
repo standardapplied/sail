@@ -156,6 +156,8 @@ class WriteAuthorshipTest {
               null,
               YamlUtil.dumpJson(local),
               YamlUtil.dumpJson(remote),
+              "9-main",
+              "main",
               List.of("title"));
       var fdes = new FdeStore(db);
       fdes.add("mady", null, null, "viewer");

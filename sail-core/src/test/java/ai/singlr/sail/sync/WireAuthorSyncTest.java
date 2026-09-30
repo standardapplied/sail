@@ -60,6 +60,8 @@ class WireAuthorSyncTest {
     assertEquals("alice", authorOf(main, "auth"), "main");
     assertEquals("alice", authorOf(alice, "auth"), "the pushing node");
     assertEquals("alice", authorOf(bob, "auth"), "a pulling node");
+
+    assertConverged();
   }
 
   @Test
@@ -72,6 +74,8 @@ class WireAuthorSyncTest {
 
     assertEquals(ChangeLog.Kind.TOMBSTONE, head(bob, "auth").kind());
     assertEquals("carol", authorOf(bob, "auth"));
+
+    assertConverged();
   }
 
   @Test
@@ -89,6 +93,8 @@ class WireAuthorSyncTest {
 
     assertEquals(ChangeLog.Kind.ERASURE, head(bob, "auth").kind());
     assertEquals("carol", authorOf(bob, "auth"));
+
+    assertConverged();
   }
 
   @Test
@@ -103,6 +109,8 @@ class WireAuthorSyncTest {
     assertTrue(bob.specs.findById("auth").isEmpty(), "the node holds main's tombstone");
     assertEquals(ChangeLog.Kind.TOMBSTONE, head(bob, "auth").kind());
     assertEquals("carol", authorOf(bob, "auth"));
+
+    assertConverged();
   }
 
   private SyncSession.TypeReport round(SyncBox box, Role role) throws IOException {
@@ -117,5 +125,9 @@ class WireAuthorSyncTest {
 
   private static String authorOf(SyncBox box, String id) {
     return head(box, id).actor();
+  }
+
+  private void assertConverged() {
+    SyncBox.assertConverged(main, alice, bob);
   }
 }

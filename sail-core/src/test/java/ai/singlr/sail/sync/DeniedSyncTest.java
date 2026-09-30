@@ -87,6 +87,10 @@ class DeniedSyncTest {
     }
   }
 
+  private void assertConverged(Actor as) {
+    SyncBox.assertConverged(main, node.syncsAs(as));
+  }
+
   private void sharedRoom() {
     for (var box : List.of(main, node)) {
       box.db.execute(
@@ -157,6 +161,7 @@ class DeniedSyncTest {
     assertTrue(node.conflicts.pendingIds("spec").isEmpty(), "no conflict is parked");
     assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+    assertConverged(ADA_VIEWING);
   }
 
   @Test
@@ -182,6 +187,7 @@ class DeniedSyncTest {
     assertEquals(title, node.specs.findById("big").orElseThrow().title());
     assertEquals(main.specs.latestRev("big"), node.specs.latestRev("big"));
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+    assertConverged(ADA_VIEWING);
   }
 
   @Test
@@ -223,6 +229,7 @@ class DeniedSyncTest {
     assertTrue(longest.get() <= frame, "main's longest reply took " + longest.get() + " bytes");
     ids.forEach(id -> assertEquals("Shared " + id, node.specs.findById(id).orElseThrow().title()));
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+    assertConverged(ADA_VIEWING);
   }
 
   private static OutputStream measured(OutputStream out, AtomicInteger longest) {
@@ -252,6 +259,7 @@ class DeniedSyncTest {
         history("spec", "born").stream().anyMatch(snapshot -> snapshot.contains("Offline idea")));
     assertTrue(node.conflicts.pendingIds("spec").isEmpty());
     assertNextRoundIsClean(ADA_VIEWING, "spec", replica("spec"));
+    assertConverged(ADA_VIEWING);
   }
 
   @Test
@@ -281,6 +289,7 @@ class DeniedSyncTest {
     assertTrue(messages.findById(reply.id()).isEmpty(), "and takes this box's reply with it");
     assertFalse(history("message", forged.id()).isEmpty(), "its revision stays in the change log");
     assertNextRoundIsClean(ADA, "message", replica("message"));
+    assertConverged(ADA);
   }
 
   @Test
@@ -304,6 +313,7 @@ class DeniedSyncTest {
     assertEquals(List.of(), landed.denials());
     assertTrue(new MessageStore(main.db).findById(reply.id()).isPresent());
     assertNextRoundIsClean(ADA, "message", replica("message"));
+    assertConverged(ADA);
   }
 
   @Test
@@ -318,6 +328,7 @@ class DeniedSyncTest {
 
     assertEquals(1, round(ADA, "message").report().pushed());
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertConverged(ADA);
   }
 
   @Test
@@ -365,6 +376,7 @@ class DeniedSyncTest {
       assertTrue(mains.findById(posted.id()).isPresent(), posted.body());
     }
     assertNextRoundIsClean(ADA, "message", replica("message"));
+    assertConverged(ADA);
   }
 
   @Test
@@ -401,6 +413,7 @@ class DeniedSyncTest {
 
     assertEquals(1, round(ADA, "message").report().pushed());
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertConverged(ADA);
   }
 
   @Test
@@ -416,6 +429,7 @@ class DeniedSyncTest {
     assertEquals(
         1, round(ADA, "message").report().pushed(), "main already holds a run to decide by");
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertConverged(ADA);
   }
 
   @Test
@@ -437,6 +451,7 @@ class DeniedSyncTest {
     assertEquals(1, round.report().pushed(), "a human's post never waits on a run");
     assertTrue(new MessageStore(main.db).findById(human.id()).isPresent());
     assertTrue(messages.findById(stuck.id()).isPresent(), "the run's own post waits with it");
+    assertConverged(ADA);
   }
 
   @Test
@@ -455,6 +470,7 @@ class DeniedSyncTest {
 
     assertEquals(1, round(ADA, "message").report().pushed());
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertConverged(ADA);
   }
 
   @Test
@@ -478,6 +494,7 @@ class DeniedSyncTest {
     assertNull(message.failure());
     assertEquals(List.of(), message.denials());
     assertNextRoundIsClean(ADA, "message", replica("message"));
+    assertConverged(ADA);
   }
 
   @Test
@@ -500,6 +517,7 @@ class DeniedSyncTest {
     round(ADA, "room");
     assertEquals(1, round(ADA, "message").report().pushed());
     assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
+    assertConverged(ADA);
   }
 
   @Test
@@ -523,6 +541,7 @@ class DeniedSyncTest {
         List.of(posted.id()), report.denials().stream().map(SyncSession.Denial::id).toList());
     assertTrue(messages.findById(posted.id()).isEmpty(), "main held the room, so it decides");
     assertNextRoundIsClean(ADA, "message", replica("message"));
+    assertConverged(ADA);
   }
 
   @Test
@@ -548,6 +567,7 @@ class DeniedSyncTest {
     assertTrue(runs.findById(id).isEmpty(), "once finished, main holding none removes it");
     assertFalse(history("run", id).isEmpty());
     assertNextRoundIsClean(ADA_VIEWING, "run", replica("run"));
+    assertConverged(ADA_VIEWING);
   }
 
   @Test
@@ -581,5 +601,6 @@ class DeniedSyncTest {
     assertEquals(new RunStore(main.db).latestRev(id), runs.latestRev(id));
     assertEquals("running", new RunStore(main.db).findById(id).orElseThrow().status());
     assertNextRoundIsClean(ADA, "run", believesItOwnsIt);
+    assertConverged(ADA);
   }
 }

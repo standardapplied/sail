@@ -27,6 +27,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -85,7 +86,7 @@ class ConflictsCommandTest {
 
   @Test
   void renderListJsonCarriesEntityAndFields() {
-    conflicts.record("spec", "auth", "{}", "{}", "{}", List.of("title"));
+    conflicts.record("spec", "auth", "{}", "{}", "{}", null, null, List.of("title"));
     var out = ConflictsCommand.renderList(conflicts.pending(), true);
     assertTrue(out.contains("\"entity\": \"auth\""));
     assertTrue(out.contains("\"title\""));
@@ -93,7 +94,7 @@ class ConflictsCommandTest {
 
   @Test
   void renderListHumanNamesTheConflictingEntity() {
-    conflicts.record("spec", "auth", "{}", "{}", "{}", List.of("title"));
+    conflicts.record("spec", "auth", "{}", "{}", "{}", null, null, List.of("title"));
     var out = ConflictsCommand.renderList(conflicts.pending(), false);
     assertTrue(out.contains("auth"));
     assertTrue(out.contains("title"));
@@ -118,6 +119,8 @@ class ConflictsCommandTest {
             json(Map.of("title", "Base", "status", "pending")),
             json(Map.of("title", "Mine", "status", "pending")),
             json(Map.of("title", "Theirs", "status", "in_progress")),
+            null,
+            null,
             List.of("title"),
             "now",
             "pending",
@@ -136,7 +139,7 @@ class ConflictsCommandTest {
 
   @Test
   void renderListJsonCarriesEntityType() {
-    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", List.of("content"));
+    conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", null, null, List.of("content"));
     var out = ConflictsCommand.renderList(conflicts.pending(), true);
     assertTrue(out.contains("\"type\": \"file\""));
   }
@@ -163,6 +166,8 @@ class ConflictsCommandTest {
             json(Map.of("content", b64("base"))),
             json(Map.of("content", b64("mine"))),
             json(Map.of("content", b64("theirs"))),
+            null,
+            null,
             List.of("content"),
             "now",
             "pending",
@@ -254,7 +259,8 @@ class ConflictsCommandTest {
     var local = replica.current("auth");
     var remote = new LinkedHashMap<>(local);
     remote.put(field, theirs);
-    replica.recordConflict("auth", local, local, remote, List.of(field));
+    replica.recordConflict(
+        "auth", local, local, new MainVersion(remote, "9-main", "main"), List.of(field));
   }
 
   private SyncConflicts.Conflict parkedSpec() {

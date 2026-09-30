@@ -634,7 +634,7 @@ public final class SyncRpcServer {
                     if (busy.isPresent()) {
                       return new SyncWire.Refused(offer.id(), busy.get());
                     }
-                    erasure.erase(plan, "sync");
+                    erasure.erase(plan, ChangeLog.Entry.SYNC);
                     erasedInSession = true;
                   }
                   var erased = changeLog.erasure(type, offer.id()).orElseThrow();

@@ -400,7 +400,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               node);
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, null);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return credential;
         });
   }
@@ -479,7 +479,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           recordPrincipal(id, principalHandle(agent, lane, id));
           revokeCredential(id);
           var credential = mintCredential(id, null);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return credential;
         });
   }
@@ -760,7 +760,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               node);
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, maxDuration);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return new Reservation.Reserved(credential);
         });
   }
@@ -811,7 +811,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                                   stamp,
                                   stamp,
                                   id);
-                              recordRevision(id, "local", false);
+                              recordRevision(id, ChangeLog.Entry.LOCAL, false);
                               return true;
                             }))
                 .toList());
@@ -954,7 +954,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               sessionSource,
               transcriptPath,
               id);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -1369,7 +1369,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             revokeCredential(id);
           }
           alongside.run();
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;
         });
   }
@@ -1408,7 +1408,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               exitCode != null ? exitCode.longValue() : null,
               id);
           revokeCredential(id);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -1417,8 +1417,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * run row is created before launch (so terminal hook events can find it), then updated here with
    * what the launch resolved. {@code pidTicks} is the agent process's {@code /proc} start-time
    * fingerprint — pids are reused by the kernel, so the pid alone can later name an unrelated
-   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches.
-   * Journals a revision so the identity replicates.
+   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches. The
+   * process identity is this box's own bookkeeping ({@code LOCAL_FIELDS}), never synced, so it
+   * journals no revision: one would name a version of the run main never holds.
    *
    * <p>Commits only while the run is still {@code running} and returns whether it did. A stop that
    * lands during launch preparation records its terminal intent on the row; the launcher discovers
@@ -1436,11 +1437,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               pidTicks,
               watcherPid != null ? watcherPid.longValue() : null,
               id);
-          if (db.changes() == 0) {
-            return false;
-          }
-          recordRevision(id, "local", false);
-          return true;
+          return db.changes() > 0;
         });
   }
 
@@ -1455,7 +1452,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               "UPDATE runs SET exit_code = ? WHERE id = ?",
               exitCode != null ? exitCode.longValue() : null,
               id);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -1464,15 +1461,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return ENTITY;
   }
 
-  /**
-   * The heartbeat is stamped without a revision ({@link #stampActivity}), so the live row runs
-   * ahead of what main last heard, and a round main acknowledged but this box never recorded leaves
-   * both sides holding different stamps over one base. Two readings of a clock are not a decision:
-   * the later one wins.
-   */
   @Override
   public Set<String> latestWinsFields() {
-    return LATEST_WINS_FIELDS;
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
   }
 
   /**
@@ -1560,14 +1556,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open conflict locally, mirroring {@link SpecStore#resolveConflict}. Runs are
-   * single-writer so this is exercised only by the shared machinery's contract, never by normal
-   * operation: no two boxes ever edit the same run.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   String recordRevision(String id, String origin, boolean deleted) {
@@ -1731,6 +1723,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
   private final class RunSchema implements EntitySchema {
+
+    /**
+     * The heartbeat is stamped without a revision ({@link #stampActivity}), so the live row runs
+     * ahead of what main last heard, and a round main acknowledged but this box never recorded
+     * leaves both sides holding different stamps over one base. Two readings of a clock are not a
+     * decision: the later one wins.
+     */
+    @Override
+    public Set<String> latestWinsFields() {
+      return LATEST_WINS_FIELDS;
+    }
 
     @Override
     public String entityType() {

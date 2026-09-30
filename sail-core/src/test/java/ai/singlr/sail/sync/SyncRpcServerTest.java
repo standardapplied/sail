@@ -108,6 +108,12 @@ class SyncRpcServerTest {
     return results.getFirst();
   }
 
+  private static void assertANodeConverges(SyncBox main, Actor as) {
+    try (var node = new SyncBox("node-box").syncsAs(as)) {
+      SyncBox.assertConverged(main, node);
+    }
+  }
+
   @Test
   void anUploadInventoryThatCannotFitAFrameIsRefusedBeforeStoringChunks() throws Exception {
     try (var main = new SyncBox("main")) {
@@ -132,6 +138,7 @@ class SyncRpcServerTest {
       assertTrue(failure.message().contains("announce fewer blobs"));
       assertEquals(
           0L, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
     }
   }
 
@@ -164,6 +171,7 @@ class SyncRpcServerTest {
       assertEquals("unreachable", failure.kind());
       assertEquals(
           0L, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
     }
   }
 
@@ -186,6 +194,7 @@ class SyncRpcServerTest {
           "blob " + hash + " not held",
           assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason());
       assertTrue(new FileStore(main.db).list("project").isEmpty());
+      assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
     }
   }
 
@@ -218,6 +227,7 @@ class SyncRpcServerTest {
         assertEquals(
             0,
             main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+        assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
       }
     }
   }
@@ -356,6 +366,7 @@ class SyncRpcServerTest {
           List.copyOf(tips.tips().keySet()));
       assertEquals(main.replica.maxSeq(), tips.tips().get("spec"));
       assertEquals(0L, tips.tips().get("file"));
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -377,6 +388,7 @@ class SyncRpcServerTest {
       assertTrue(page.done());
       assertEquals(main.replica.maxSeq(), page.next());
       assertTrue(SyncWire.encode(page).length() <= SyncWire.MAX_FRAME);
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -412,6 +424,7 @@ class SyncRpcServerTest {
       assertEquals(List.of("b"), second.entries().stream().map(SyncWire.Entry::id).toList());
       assertTrue(second.done());
       assertEquals(second.maxSeq(), second.next());
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -432,6 +445,7 @@ class SyncRpcServerTest {
         assertTrue(failed.message().startsWith("spec: huge:"), failed.message());
         assertTrue(failed.message().contains("bytes"), failed.message());
       }
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -449,6 +463,7 @@ class SyncRpcServerTest {
       assertTrue(page.done());
       assertEquals(high, page.next());
       assertEquals(high, page.maxSeq());
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -469,6 +484,7 @@ class SyncRpcServerTest {
       assertNull(tombstone.snapshot());
       assertEquals(main.replica.currentRev("gone"), tombstone.rev());
       assertEquals("Kept", page.entries().get(1).snapshot().get("title"));
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -500,6 +516,7 @@ class SyncRpcServerTest {
       assertEquals(List.of("a"), cut.entries().stream().map(SyncWire.Entry::id).toList());
       assertEquals(2, cut.next());
       assertFalse(cut.done());
+      assertANodeConverges(main, Actor.sync("n", Role.MEMBER));
     }
   }
 
@@ -560,6 +577,7 @@ class SyncRpcServerTest {
           "a viewer's run is decided on authority before it is checked for a handle");
       assertEquals("Auth", main.specs.findById("auth").orElseThrow().title());
       assertTrue(main.specs.findById("born").isEmpty());
+      assertANodeConverges(main, Actor.sync("viewer", Role.VIEWER));
     }
   }
 

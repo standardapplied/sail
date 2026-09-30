@@ -20,8 +20,10 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
@@ -495,7 +497,10 @@ class ConflictOperationsTest {
     var recorded = replicas.get("run").current(id);
     var remote = new LinkedHashMap<>(recorded);
     remote.put("branch", "feat/elsewhere");
-    replicas.get("run").recordConflict(id, null, recorded, remote, List.of("branch"));
+    replicas
+        .get("run")
+        .recordConflict(
+            id, null, recorded, new MainVersion(remote, "9-main", "main"), List.of("branch"));
     assertTrue(runs.stampActivity(id, Duration.ZERO));
 
     operations.resolve("run", id, mine());
@@ -504,7 +509,12 @@ class ConflictOperationsTest {
 
     replicas
         .get("run")
-        .recordConflict(id, null, replicas.get("run").current(id), remote, List.of("branch"));
+        .recordConflict(
+            id,
+            null,
+            replicas.get("run").current(id),
+            new MainVersion(remote, "10-main", "main"),
+            List.of("branch"));
     runs.complete(id, "completed", 0);
 
     var refused = assertThrows(ApiException.class, () -> operations.resolve("run", id, mine()));
@@ -526,6 +536,8 @@ class ConflictOperationsTest {
         null,
         YamlUtil.dumpJson(local),
         YamlUtil.dumpJson(remote),
+        "9-main",
+        "main",
         List.of("content"));
 
     operations.resolve(null, "acme/x.txt", theirs());
@@ -533,6 +545,47 @@ class ConflictOperationsTest {
     assertEquals(List.of(), operations.list());
     assertEquals(
         b64("theirs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "x.txt"));
+  }
+
+  @ParameterizedTest
+  @EnumSource(Resolution.Strategy.class)
+  void aConflictParkedBeforeItKeptMainsRevisionResolvesOnlyOnceARoundReRecordsIt(
+      Resolution.Strategy strategy) throws IOException {
+    parkTitle();
+    node.db.execute("UPDATE sync_conflicts SET remote_rev = NULL, remote_author = NULL");
+    var rev = node.specs.revOf("auth");
+
+    var refused =
+        assertThrows(
+            ApiException.class, () -> operations.resolve("spec", "auth", resolution(strategy)));
+
+    assertEquals(409, refused.status());
+    assertEquals(
+        """
+        'auth' was recorded before conflicts kept main's revision, so main's side cannot be \
+        adopted as main made it.
+        Run 'sail sync' to re-record it, then resolve.""",
+        refused.getMessage());
+    assertEquals(rev, node.specs.revOf("auth"));
+    round();
+    var reRecorded = node.conflicts.pendingFor("spec", "auth").orElseThrow();
+    assertEquals(main.specs.revOf("auth"), reRecorded.remoteRev());
+    operations.resolve("spec", "auth", resolution(strategy));
+    assertEquals(List.of(), operations.list());
+  }
+
+  @Test
+  void takingTheirsHoldsMainsRevisionUnderMainsAuthor() throws IOException {
+    parkTitle();
+
+    operations.resolve("spec", "auth", theirs());
+
+    var mains = new ChangeLog(main.db).head("spec", "auth").orElseThrow();
+    var nodes = new ChangeLog(node.db).head("spec", "auth").orElseThrow();
+    assertEquals(mains.rev(), nodes.rev());
+    assertEquals(mains.actor(), nodes.actor());
+    assertEquals(Actor.MAIN_HANDLE, nodes.peer());
+    assertEquals("main title", titleOf(node));
   }
 
   @Test

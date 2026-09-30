@@ -83,6 +83,7 @@ class NativeFleetIT {
       assertEquals(
           main.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"),
           mady.query("SELECT content_hash, size, mode, kind FROM project_files ORDER BY id"));
+      fleet.assertHeadsAgree(mady);
     }
   }
 
@@ -135,6 +136,7 @@ class NativeFleetIT {
           "488", rejesh.query("SELECT mode FROM project_files WHERE path = 'large.bin'").strip());
       fleet.assertConverged(rejesh);
       assertEquals(0, NativeFleet.json(rejesh.sailOk("sync", "--json")).get("pulled"));
+      fleet.assertHeadsAgree(rejesh);
     }
   }
 
@@ -165,6 +167,7 @@ class NativeFleetIT {
 
       assertEquals("6", main.query("SELECT count(*) FROM specs WHERE project = 'demo'").strip());
       fleet.assertConverged(mady);
+      fleet.assertHeadsAgree(mady);
     }
   }
 
@@ -246,6 +249,7 @@ class NativeFleetIT {
               >= 3,
           "the node holds main's erasure rows");
       fleet.assertConverged(mady);
+      fleet.assertHeadsAgree(mady);
     }
   }
 

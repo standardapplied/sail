@@ -102,6 +102,8 @@ class ErasureSyncTest {
             IllegalArgumentException.class,
             () -> node.specs.restore("old", erasure(node.db, erased.entities().getFirst()).rev()));
     assertTrue(refused.getMessage().contains("was pruned"), refused.getMessage());
+
+    assertConverged();
   }
 
   @Test
@@ -120,6 +122,8 @@ class ErasureSyncTest {
         "one erasure row per erased entity, plus the kept spec, and nothing else");
     assertTrue(node.specs.findById("kept").isPresent());
     assertTrue(reports.stream().allMatch(report -> report.report().conflicts() == 0));
+
+    assertConverged();
   }
 
   @Test
@@ -165,6 +169,8 @@ class ErasureSyncTest {
         node.syncState.checkpoint("main", "spec"),
         "the resumed round reaches main's tip");
     assertEquals(0, count(node.db, "SELECT count(*) FROM specs"));
+
+    assertConverged();
   }
 
   @Test
@@ -190,6 +196,8 @@ class ErasureSyncTest {
         erasure(node.db, onMain.target()).actor(),
         "the node records the author main's answer names");
     assertTrue(reports.getFirst().freedBytes() > 0, "the node reports what the collection freed");
+
+    assertConverged();
   }
 
   @Test
@@ -210,6 +218,8 @@ class ErasureSyncTest {
       assertEquals(
           0, count(box.db, "SELECT count(*) FROM change_log WHERE kind <> 'erasure'"), box.id);
     }
+
+    assertConverged(admin);
   }
 
   @Test
@@ -226,6 +236,8 @@ class ErasureSyncTest {
     assertTrue(node.specs.findById("late").isEmpty());
     assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
     assertEquals("node", erasure(main.db, new Erasure.Target(Erasure.SPEC, "late")).actor());
+
+    assertConverged();
   }
 
   @Test
@@ -244,6 +256,8 @@ class ErasureSyncTest {
             .orElseThrow()
             .report()
             .pulled());
+
+    assertConverged();
   }
 
   @Test
@@ -259,6 +273,8 @@ class ErasureSyncTest {
           0, count(box.db, "SELECT count(*) FROM change_log WHERE entity_id = 'draft'"), box.id);
       assertEquals(0, count(box.db, "SELECT count(*) FROM room_messages"), box.id);
     }
+
+    assertConverged();
   }
 
   @Test
@@ -278,6 +294,8 @@ class ErasureSyncTest {
     assertTrue(main.specs.findById("theirs").isPresent());
     assertTrue(node.specs.findById("theirs").isPresent());
     assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
+
+    assertConverged();
   }
 
   @Test
@@ -299,6 +317,8 @@ class ErasureSyncTest {
       assertTrue(refused.getMessage().contains("only uday or an admin"), refused.getMessage());
     }
     assertTrue(main.specs.findById("theirs").isPresent());
+
+    assertConverged();
   }
 
   @Test
@@ -322,6 +342,8 @@ class ErasureSyncTest {
     try (var link = SyncBox.connect(main.server(viewer), node)) {
       assertEquals(0, link.reconcile("spec", replicas().get("spec")).report().total());
     }
+
+    assertConverged(viewer);
   }
 
   @Test
@@ -335,6 +357,8 @@ class ErasureSyncTest {
 
     assertTrue(main.specs.findById("theirs").isEmpty());
     assertTrue(node.specs.findById("theirs").isEmpty());
+
+    assertConverged(admin);
   }
 
   @Test
@@ -368,6 +392,8 @@ class ErasureSyncTest {
     assertTrue(node.specs.findById("old").isEmpty(), "the node adopted the erasure");
     assertTrue(main.specs.findById("old").isEmpty(), "the stale push did not resurrect it");
     assertEquals(0, count(node.db, "SELECT count(*) FROM sync_conflicts"));
+
+    assertConverged();
   }
 
   @Test
@@ -392,6 +418,8 @@ class ErasureSyncTest {
               box.db,
               "SELECT count(*) FROM change_log WHERE entity_id = 'reborn' AND kind <> 'erasure'"));
     }
+
+    assertConverged();
   }
 
   @Test
@@ -422,6 +450,8 @@ class ErasureSyncTest {
       assertTrue(new RoomStore(box.db).findById("lobby").isPresent(), box.id + " lost the room");
       assertEquals(1, count(box.db, "SELECT count(*) FROM room_messages WHERE room_id = 'lobby'"));
     }
+
+    assertConverged();
   }
 
   @Test
@@ -437,6 +467,8 @@ class ErasureSyncTest {
     assertEquals(List.of(), new EraseRequests(node.db).pending(Erasure.SPEC));
     assertNothingOf(node.db, onMain.entities());
     assertEquals("uday", erasure(main.db, new Erasure.Target(Erasure.SPEC, "mine")).actor());
+
+    assertConverged();
   }
 
   @Test
@@ -465,6 +497,8 @@ class ErasureSyncTest {
     }
     assertEquals(2, erasures(node.db, Erasure.MESSAGE), "main's two erasure rows, adopted");
     assertTrue(new MessageStore(node.db).findById(unpushed.id()).isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -505,6 +539,8 @@ class ErasureSyncTest {
       assertEquals(0, count(box.db, "SELECT count(*) FROM runs"), box.id);
     }
     assertEquals(0, count(node.db, "SELECT count(*) FROM change_log WHERE entity_id = ?", late));
+
+    assertConverged();
   }
 
   private List<SyncSession.TypeReport> round(Actor as) throws IOException {
@@ -516,6 +552,14 @@ class ErasureSyncTest {
       }
     }
     return reports;
+  }
+
+  private void assertConverged() {
+    assertConverged(NODE);
+  }
+
+  private void assertConverged(Actor as) {
+    SyncBox.assertConverged(main, node.syncsAs(as));
   }
 
   private Map<String, StoreReplica> replicas() {

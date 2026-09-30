@@ -16,10 +16,12 @@ import java.util.Set;
  * projects, files, messages), which collapses the six near-identical hand-written replicas into one
  * generic adapter.
  *
- * <p>The {@code default} hooks cover the stores that diverge: {@link #currentForSync} and {@link
- * #adoptForSync} let a store weave a resurrection-blocking tombstone into the sync view (only
- * {@code ProjectStore} does), and {@link #mayPush} and {@link #live} let a single-writer store
- * answer for the box whose handle is asking (runs and reviews do).
+ * <p>A store that rides the {@link RevisionJournal} answers {@link #currentForSync}, {@link
+ * #latestWinsFields} and {@link #acknowledge} through it, so each rule is declared once, in its
+ * {@link EntitySchema}. The {@code default} hooks cover the stores that diverge: {@link
+ * #adoptForSync} lets a store settle what goes with a row main holds none of (only {@code RunStore}
+ * does), and {@link #mayPush} and {@link #live} let a single-writer store answer for the box whose
+ * handle is asking (runs and reviews do).
  */
 public interface SyncedStore {
 
@@ -40,11 +42,9 @@ public interface SyncedStore {
 
   /**
    * Instant-valued fields that only ever move forward and so can never be a conflict: when both
-   * sides moved one, the later instant wins. None by default.
+   * sides moved one, the later instant wins ({@link EntitySchema#latestWinsFields}).
    */
-  default Set<String> latestWinsFields() {
-    return Set.of();
-  }
+  Set<String> latestWinsFields();
 
   /** The content hashes this store's live rows reference; empty unless it has content fields. */
   default Set<String> liveContentHashes() {
@@ -102,17 +102,15 @@ public interface SyncedStore {
       String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority);
 
   /**
-   * The state the replica reports as "current" to the sync engine — {@link #comparableSnapshot} for
-   * every store except one that surfaces a blocking tombstone marker for a deleted-but-blocked id.
+   * The state the replica reports as "current" to the sync engine: {@link #comparableSnapshot}, or
+   * for a deleted entity whose tombstone carries marks, those marks under its deleter ({@link
+   * RevisionJournal#currentForSync}).
    */
-  default Map<String, Object> currentForSync(String id) {
-    return comparableSnapshot(id);
-  }
+  Map<String, Object> currentForSync(String id);
 
   /**
-   * Adopts an authoritative state, unwrapping any sync-only marker the store's {@link
-   * #currentForSync} produced — {@link #applyRevision} for every store except the one that reads a
-   * blocking-tombstone marker back as a deletion.
+   * Adopts an authoritative state as the sync engine settles it — {@link #applyRevision} for every
+   * store except one that removes, with a row main holds none of, what could only land with it.
    */
   default void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
     applyRevision(id, snapshot, rev);
@@ -139,9 +137,10 @@ public interface SyncedStore {
   /**
    * Adopts {@code accepted}, main's version of {@code id} at {@code rev} that it took from this
    * box, as the row's merge base when it is newer than the base held here — main took the box's
-   * offer and its answer never came back — keeping the row as it stands here: whatever the box
-   * changed since stays a change main has not taken. Returns whether the base moved. A store whose
-   * rows are never edited after they are made recovers by converging instead, and moves nothing.
+   * offer and its answer never came back — keeping what the box changed since the {@link
+   * #currentForSync} its offer was made from ({@link ChangeLog#recordOffer}) as a change main has
+   * not taken. Returns whether the base moved. A store whose rows are never edited after they are
+   * made recovers by converging instead, and moves nothing.
    */
   default boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
     return false;

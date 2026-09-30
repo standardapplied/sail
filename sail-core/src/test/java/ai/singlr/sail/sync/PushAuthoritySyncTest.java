@@ -87,11 +87,22 @@ class PushAuthoritySyncTest {
     assertEquals(0, next.report().total(), next.toString());
   }
 
-  private void assertConverged(String type, String id) {
+  /** Right after a denial, before the round goes on: the node holds main's version of the one. */
+  private void assertMainsAgain(String type, String id) {
     var mains = SyncedEntities.replicas(main.db, "main", "main").get(type);
     var nodes = SyncedEntities.replicas(ada.db, "ada", "ada").get(type);
     assertEquals(mains.current(id), nodes.current(id), type + " " + id + " is main's again");
     assertEquals(mains.currentRev(id), nodes.currentRev(id));
+  }
+
+  private void assertEveryBoxConverged(Actor adaAs) {
+    SyncBox.assertConverged(main, ada.syncsAs(adaAs), bob);
+  }
+
+  private void assertEveryBoxConvergedBut(Actor adaAs, String review) {
+    SyncBox.quiesce(main, ada.syncsAs(adaAs), bob);
+    SyncBox.assertEqualToMainBut(main, ada, "review", review, SyncBox.BOX_LOCAL_FINDINGS);
+    SyncBox.assertEqualToMain(main, bob);
   }
 
   private static SpecStore.SpecRow spec(String id, String assignee) {
@@ -222,21 +233,22 @@ class PushAuthoritySyncTest {
 
     retitle(ada, "ada", "theirs", "Taken over");
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertCleanRound(ada, ADA, "spec");
 
     Acting.as("ada", () -> ada.specs.delete("theirs"));
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertEquals("Spec theirs", ada.specs.findById("theirs").orElseThrow().title());
 
     ada.db.execute("UPDATE specs SET room_id = 'lobby' WHERE id = 'theirs'");
     Acting.as("ada", () -> ada.specs.updateStatus("theirs", SpecStatus.PENDING));
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
-    assertConverged("spec", "theirs");
+    assertMainsAgain("spec", "theirs");
     assertEquals("theirs", ada.specs.findById("theirs").orElseThrow().roomId());
     assertCleanRound(ada, ADA, "spec");
     assertEquals("Spec theirs", main.specs.findById("theirs").orElseThrow().title());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -272,6 +284,7 @@ class PushAuthoritySyncTest {
       assertEquals(1, new MessageStore(box.db).list("theirs", null, 10).size(), box.id);
       assertTrue(new RunStore(box.db).findById(bobsRun).isPresent(), box.id);
     }
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -286,13 +299,14 @@ class PushAuthoritySyncTest {
 
     assertNull(report.failure());
     assertEquals(List.of("mine"), denied(report));
-    assertConverged("spec", "mine");
+    assertMainsAgain("spec", "mine");
     assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
     assertTrue(
         ada.specs.history("mine").stream()
             .anyMatch(entry -> entry.snapshot().contains("Offline edit")),
         "the node's edit stays in its history");
     assertCleanRound(ada, ADA, "spec");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -304,7 +318,7 @@ class PushAuthoritySyncTest {
 
     Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
     assertEquals(List.of("den"), denied(push(ada, ADA, "room")));
-    assertConverged("room", "den");
+    assertMainsAgain("room", "den");
 
     var reviews = new ReviewStore(ada.db);
     var finding =
@@ -326,6 +340,7 @@ class PushAuthoritySyncTest {
         "adopting main's review never deletes the findings this box holds");
     assertEquals("pending", new ReviewStore(main.db).findReview(review).orElseThrow().status());
     assertEquals(List.of(), new ReviewStore(main.db).findingsForReview(review));
+    assertEveryBoxConvergedBut(ADA, review);
   }
 
   @Test
@@ -356,6 +371,7 @@ class PushAuthoritySyncTest {
     assertTrue(new MessageStore(main.db).findById(forged.id()).isEmpty());
     assertCleanRound(ada, ADA, "run");
     assertCleanRound(ada, ADA, "message");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -377,6 +393,7 @@ class PushAuthoritySyncTest {
     assertEquals(agent, new MessageStore(main.db).findById(allowed.id()).orElseThrow().author());
     assertTrue(new MessageStore(main.db).findById(refused.id()).isEmpty());
     assertCleanRound(ada, ADA, "message");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -403,6 +420,7 @@ class PushAuthoritySyncTest {
     assertEquals("ada", main.specs.findById("born").orElseThrow().createdBy());
     assertEquals(agent.handle(), main.specs.findById("born").orElseThrow().updatedBy());
     assertTrue(new MessageStore(main.db).findById(post.id()).isPresent());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -413,7 +431,7 @@ class PushAuthoritySyncTest {
     for (var as : List.of(ADA, ADA_ADMIN)) {
       retitle(ada, "bob", "mine", "As bob");
       assertEquals(List.of("mine"), denied(push(ada, as, "spec")), as.toString());
-      assertConverged("spec", "mine");
+      assertMainsAgain("spec", "mine");
 
       Acting.as("bob", () -> ada.specs.create(spec("for-bob", null)));
       assertEquals(List.of("for-bob"), denied(push(ada, as, "spec")), as.toString());
@@ -424,6 +442,7 @@ class PushAuthoritySyncTest {
           new ChangeLog(ada.db).history("spec", "for-bob").getFirst().actor(),
           "the denied create stays in the node's history");
     }
+    assertEveryBoxConverged(ADA_ADMIN);
   }
 
   @Test
@@ -447,6 +466,7 @@ class PushAuthoritySyncTest {
     assertEquals("ada", main.specs.findById("theirs").orElseThrow().assignee());
     assertEquals("off", new RoomStore(main.db).findById("den").orElseThrow().wake());
     assertEquals("passed", new ReviewStore(main.db).findReview(review).orElseThrow().status());
+    assertEveryBoxConverged(ADA_ADMIN);
   }
 
   @Test
@@ -491,6 +511,7 @@ class PushAuthoritySyncTest {
         reviews.findingsForReview(review).stream().map(Finding::id).toList(),
         "the old box keeps its findings");
     assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
+    assertEveryBoxConvergedBut(ADA, review);
   }
 
   @Test
@@ -507,6 +528,7 @@ class PushAuthoritySyncTest {
     Acting.as("ada", () -> new RoomStore(ada.db).updateWake("den", "off"));
     assertEquals(List.of("den"), denied(push(ada, ADA, "room")));
     assertEquals(den, new RoomStore(main.db).findById("den").orElseThrow());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -518,6 +540,7 @@ class PushAuthoritySyncTest {
 
     assertEquals("ada", main.specs.findById("mine").orElseThrow().assignee());
     assertEquals(List.of("ada"), new RoomStore(main.db).owners("mine"));
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -547,6 +570,7 @@ class PushAuthoritySyncTest {
     assertEquals(1, reviews.findingsForReview(theirs).size());
     assertEquals(List.of(), reviews.findingsForReview(ours));
     assertEquals(theirsRev, replica.currentRev(theirs));
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -563,6 +587,7 @@ class PushAuthoritySyncTest {
 
     assertInstanceOf(CommitOutcome.Denied.class, outcome);
     assertTrue(main.specs.findById("orphan").isEmpty());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -583,6 +608,7 @@ class PushAuthoritySyncTest {
     var restored = main.specs.findById("orphan").orElseThrow();
     assertEquals("bob", restored.createdBy());
     assertEquals("bob", restored.assignee());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -602,6 +628,7 @@ class PushAuthoritySyncTest {
     assertTrue(main.specs.findById("den").isEmpty());
     assertEquals(List.of("bob"), new RoomStore(main.db).owners("den"));
     assertCleanRound(ada, ADA, "spec");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -616,6 +643,7 @@ class PushAuthoritySyncTest {
     assertEquals(List.of("den"), denied(push(ada, ADA, "spec")));
     assertTrue(main.specs.findById("den").isEmpty());
     assertEquals("bob", new RoomStore(main.db).ownerOf("den", new RoomStore(main.db).held("den")));
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -637,6 +665,7 @@ class PushAuthoritySyncTest {
 
     assertInstanceOf(CommitOutcome.Accepted.class, outcome);
     assertEquals("ada", new RoomStore(main.db).findById("nook").orElseThrow().createdBy());
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -654,6 +683,7 @@ class PushAuthoritySyncTest {
 
     assertEquals("lab", main.specs.findById("child").orElseThrow().roomIdOrIdentity());
     assertCleanRound(ada, ADA, "spec");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -681,6 +711,7 @@ class PushAuthoritySyncTest {
 
     assertEquals("ada", new RoomStore(main.db).findById("nook").orElseThrow().createdBy());
     assertEquals("ada", rooms.findById("nook").orElseThrow().createdBy(), "the node adopts it");
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -711,6 +742,7 @@ class PushAuthoritySyncTest {
     assertEquals(List.of(review), denied(push(ada, ADA, "review")));
     assertTrue(reviews.findReview(review).isEmpty(), "a finished review settles like any other");
     assertCleanRound(ada, ADA, "review");
+    assertEveryBoxConverged(ADA);
   }
 
   private static Finding finding() {

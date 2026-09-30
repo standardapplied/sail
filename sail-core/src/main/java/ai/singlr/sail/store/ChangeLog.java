@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -52,12 +53,6 @@ public final class ChangeLog {
   /** The newest entries every box keeps of each entity's history; a constant, never configured. */
   public static final int HISTORY_REVISIONS = 20;
 
-  /**
-   * The origin of a base a box rebased a parked conflict onto: main's side, under a rev the box
-   * minted. Neither a local change to offer nor a version heard from main.
-   */
-  public static final String RESOLVED_BASE = "resolved-base";
-
   private static final String EMPTY_SNAPSHOT = "{}";
 
   private final Sqlite db;
@@ -99,7 +94,22 @@ public final class ChangeLog {
       boolean deleted,
       String snapshot,
       String peer,
-      Kind kind) {}
+      Kind kind) {
+
+    /** The origin of every entry a box takes from a sync, main's version as main holds it. */
+    public static final String SYNC = "sync";
+
+    /** The origin of a change this box made itself, which a round offers main. */
+    public static final String LOCAL = "local";
+
+    /**
+     * Whether this entry was heard from main rather than decided here: a tombstone heard from main
+     * is main's deletion, its own merge base, never one this box has still to offer.
+     */
+    public boolean heardFromMain() {
+      return SYNC.equals(origin);
+    }
+  }
 
   /** One entity's latest change: the seq of its head entry and its id. */
   public record Head(long seq, String entityId) {}
@@ -162,6 +172,42 @@ public final class ChangeLog {
       boolean deleted,
       String snapshot) {
     var actor = Actor.current();
+    appendAs(
+        entityType,
+        entityId,
+        rev,
+        actor.authorOf(offeredAuthor),
+        actor.peer(),
+        origin,
+        deleted,
+        snapshot);
+  }
+
+  /**
+   * As {@link #append(String, String, String, String, boolean, String)} for a revision whose
+   * content names its own author, as a message names who posted it: every box records {@code
+   * author} for it, whoever writes it here, because its type's rule decided who may post as whom
+   * before it was written.
+   */
+  public void appendAuthored(
+      String entityType,
+      String entityId,
+      String rev,
+      String author,
+      String origin,
+      String snapshot) {
+    appendAs(entityType, entityId, rev, author, Actor.current().peer(), origin, false, snapshot);
+  }
+
+  private void appendAs(
+      String entityType,
+      String entityId,
+      String rev,
+      String author,
+      String peer,
+      String origin,
+      boolean deleted,
+      String snapshot) {
     db.transaction(
         () -> {
           if (isErased(entityType, entityId)) {
@@ -178,8 +224,8 @@ public final class ChangeLog {
               entityType,
               entityId,
               rev,
-              actor.authorOf(offeredAuthor),
-              actor.peer(),
+              author,
+              peer,
               origin,
               deleted,
               snapshot,
@@ -212,10 +258,10 @@ public final class ChangeLog {
   }
 
   /**
-   * Deletes every entry of an entity except its erasure rows, and points its head at the newest
-   * erasure left — or drops the head when none is. How an entity that belonged to an erased one
-   * leaves this box's history when its own erasure has not been recorded here. Names no actor: it
-   * rewrites history under erasure rather than recording a write.
+   * Deletes every entry of an entity except its erasure rows, and any offer of it in flight, and
+   * points its head at the newest erasure left — or drops the head when none is. How an entity that
+   * belonged to an erased one leaves this box's history when its own erasure has not been recorded
+   * here. Names no actor: it rewrites history under erasure rather than recording a write.
    */
   public void purge(String entityType, String entityId) {
     db.transaction(
@@ -224,6 +270,7 @@ public final class ChangeLog {
               "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ? AND kind <> 'erasure'",
               entityType,
               entityId);
+          settleOffer(entityType, entityId);
           db.execute(
               "DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?",
               entityType,
@@ -429,9 +476,10 @@ public final class ChangeLog {
   public boolean begunHere(String entityType, String entityId) {
     return db.queryOne(
             """
-            SELECT peer IS NULL AND origin <> 'sync' FROM change_log
+            SELECT peer IS NULL AND origin <> ? FROM change_log
             WHERE entity_type = ? AND entity_id = ? ORDER BY seq LIMIT 1""",
             row -> row.integer(0) == 1,
+            Entry.SYNC,
             entityType,
             entityId)
         .orElse(false);
@@ -472,13 +520,11 @@ public final class ChangeLog {
     return db
         .query(
             SELECT_HEAD
-                + " WHERE h.entity_type = ? AND l.kind = 'tombstone'"
-                + " AND l.origin NOT IN ('sync', '"
-                + RESOLVED_BASE
-                + "')"
+                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin <> ?"
                 + " ORDER BY l.seq",
             row -> row.text(2),
-            entityType)
+            entityType,
+            Entry.SYNC)
         .stream()
         .collect(Collectors.toCollection(LinkedHashSet::new));
   }
@@ -549,14 +595,82 @@ public final class ChangeLog {
         < HISTORY_REVISIONS;
   }
 
+  /**
+   * The latest tombstone of {@code entityId} that no erasure has followed: the deletion a live row
+   * written since was written over, or the entity's current state when nothing was. Compaction
+   * never removes a tombstone, so it is found however many revisions were written over it.
+   */
+  public Optional<Entry> latestTombstone(String entityType, String entityId) {
+    return db.queryOne(
+            SELECT
+                + " WHERE entity_type = ? AND entity_id = ? AND kind IN (?, ?)"
+                + " ORDER BY seq DESC LIMIT 1",
+            ChangeLog::map,
+            entityType,
+            entityId,
+            Kind.TOMBSTONE.wire(),
+            Kind.ERASURE.wire())
+        .filter(entry -> entry.kind() == Kind.TOMBSTONE);
+  }
+
   /** The rev of the latest version of {@code entityId} this box took from a sync, if any. */
   public Optional<String> latestHeard(String entityType, String entityId) {
     return db.queryOne(
-        "SELECT rev FROM change_log WHERE entity_type = ? AND entity_id = ? AND origin = 'sync'"
+        "SELECT rev FROM change_log WHERE entity_type = ? AND entity_id = ? AND origin = ?"
             + " ORDER BY seq DESC LIMIT 1",
         row -> row.text(0),
         entityType,
+        entityId,
+        Entry.SYNC);
+  }
+
+  /**
+   * An offer this box made to main whose answer it has not heard: {@code offered}, the version it
+   * offered, and {@code from}, the state of the entity it was made from ({@code null} for a
+   * deletion), kept from before main is asked until its answer is heard.
+   */
+  public record Offer(Map<String, Object> offered, Map<String, Object> from) {}
+
+  /**
+   * Records, before main is asked, that this box offers it {@code offered} of {@code entityId},
+   * made from {@code from}, replacing any earlier offer of it: an answer main gives and the box
+   * never hears is recovered against exactly this state, once the answer is known to be to this
+   * offer and not to an earlier one main took.
+   */
+  public void recordOffer(
+      String entityType, String entityId, Map<String, Object> offered, Map<String, Object> from) {
+    db.execute(
+        """
+        INSERT INTO sync_offers (entity_type, entity_id, offered, offered_from) VALUES (?, ?, ?, ?)
+        ON CONFLICT(entity_type, entity_id) DO UPDATE SET offered = excluded.offered,
+            offered_from = excluded.offered_from""",
+        entityType,
+        entityId,
+        json(offered),
+        json(from));
+  }
+
+  /** The offer of {@code entityId} whose answer this box has not heard, if any. */
+  public Optional<Offer> offer(String entityType, String entityId) {
+    return db.queryOne(
+        "SELECT offered, offered_from FROM sync_offers WHERE entity_type = ? AND entity_id = ?",
+        row -> new Offer(parse(row, 0), parse(row, 1)),
+        entityType,
         entityId);
+  }
+
+  private static String json(Map<String, Object> snapshot) {
+    return snapshot == null ? null : YamlUtil.dumpJson(snapshot);
+  }
+
+  private static Map<String, Object> parse(Sqlite.Row row, int column) {
+    return row.isNull(column) ? null : YamlUtil.parseMap(row.text(column));
+  }
+
+  /** Forgets the offer of {@code entityId}: main's answer to it has been heard. */
+  public void settleOffer(String entityType, String entityId) {
+    db.execute(
+        "DELETE FROM sync_offers WHERE entity_type = ? AND entity_id = ?", entityType, entityId);
   }
 
   private static final String COLUMNS =

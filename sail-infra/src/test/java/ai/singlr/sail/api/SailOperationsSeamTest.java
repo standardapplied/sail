@@ -452,6 +452,8 @@ class SailOperationsSeamTest {
             null,
             YamlUtil.dumpJson(local),
             YamlUtil.dumpJson(remote),
+            "9-main",
+            "main",
             List.of(field));
         TestAuth.asOperator(
             operations,
@@ -493,7 +495,8 @@ class SailOperationsSeamTest {
       var token = new BoxCredentialStore(box.db).replace(handle);
       Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
-      box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
+      box.conflicts.record(
+          "spec", "auth", null, snapshot, snapshot, "9-main", "main", List.of("title"));
       var response =
           new LocalApiRouter(bus, operations)
               .handle(
@@ -528,7 +531,8 @@ class SailOperationsSeamTest {
               }));
       Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
-      box.conflicts.record("spec", "auth", null, snapshot, snapshot, List.of("title"));
+      box.conflicts.record(
+          "spec", "auth", null, snapshot, snapshot, "9-main", "main", List.of("title"));
       var lane =
           new TestOperations() {
             @Override
@@ -583,6 +587,8 @@ class SailOperationsSeamTest {
             null,
             YamlUtil.dumpJson(local),
             YamlUtil.dumpJson(remote),
+            "9-main",
+            "main",
             List.of("title"));
         var token = credential(box.db, handle, role, lane);
         var result =
@@ -660,6 +666,8 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
+          "9-main",
+          "main",
           List.of("title"));
       var theirs =
           new LinkedHashMap<>(
@@ -730,6 +738,8 @@ class SailOperationsSeamTest {
             null,
             YamlUtil.dumpJson(local),
             YamlUtil.dumpJson(remote),
+            "9-main",
+            "main",
             List.of("content"));
       }
       var admin = credential(box.db, "admin", "admin", "token");
@@ -840,6 +850,8 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(base),
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
+          "9-main",
+          "main",
           List.of("title"));
       assertEquals(1, operations.conflicts().size());
       assertEquals("auth", operations.conflict(null, "auth").entityId());
@@ -871,6 +883,8 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(base),
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
+          "9-main",
+          "main",
           List.of("title"));
       TestAuth.asOperator(
           operations,
@@ -884,6 +898,8 @@ class SailOperationsSeamTest {
           YamlUtil.dumpJson(base),
           YamlUtil.dumpJson(local),
           YamlUtil.dumpJson(remote),
+          "9-main",
+          "main",
           List.of("title"));
       var merged =
           new LinkedHashMap<>(
@@ -897,7 +913,7 @@ class SailOperationsSeamTest {
                   "auth",
                   new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpJson(merged))));
       assertEquals("merged", box.specs.findById("auth").orElseThrow().title());
-      box.conflicts.record("file", "auth", null, null, null, List.of("content"));
+      box.conflicts.record("file", "auth", null, null, null, "1-main", "main", List.of("content"));
       assertThrows(
           IllegalArgumentException.class,
           () ->
@@ -908,7 +924,7 @@ class SailOperationsSeamTest {
                           "file",
                           "auth",
                           new Resolution(Resolution.Strategy.MERGE, "title: edited"))));
-      box.conflicts.record("spec", "auth", null, null, null, List.of("title"));
+      box.conflicts.record("spec", "auth", null, null, null, null, null, List.of("title"));
       var ambiguous = assertThrows(ApiException.class, () -> operations.conflict(null, "auth"));
       assertEquals(
           "'auth' has open conflicts as file and spec: pass --type", ambiguous.getMessage());
@@ -999,8 +1015,7 @@ class SailOperationsSeamTest {
 
       assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
       assertEquals("node", new RunStore(node.db).findById(run).orElseThrow().node());
-      SyncBox.quiesce(main, node);
-      SyncBox.assertEqualToMain(main, node);
+      SyncBox.assertConverged(main, node);
     }
   }
 
@@ -1022,8 +1037,7 @@ class SailOperationsSeamTest {
       assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing is offered");
       assertTrue(node.specs.findById("auth").isEmpty(), "nothing is adopted");
       assertTrue(new RunStore(node.db).findById(run).isPresent(), "nothing is removed");
-      SyncBox.quiesce(main, node);
-      SyncBox.assertEqualToMain(main, node);
+      SyncBox.assertConverged(main, node);
       assertEquals("node", new RunStore(main.db).findById(run).orElseThrow().owner());
     }
   }

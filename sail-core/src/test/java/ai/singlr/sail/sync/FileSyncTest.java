@@ -9,8 +9,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -81,65 +83,65 @@ class FileSyncTest {
 
   @Test
   void aFileCreatedOnOneBoxPropagatesToTheOther() {
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "scripts/deploy.sh", "ZGVwbG95");
+    ContentFixtures.put(node.files, "acme", "scripts/deploy.sh", "ZGVwbG95");
 
     sync(node);
-    assertEquals(
-        "ZGVwbG95",
-        ai.singlr.sail.store.ContentFixtures.text(main.files, "acme", "scripts/deploy.sh"));
+    assertEquals("ZGVwbG95", ContentFixtures.text(main.files, "acme", "scripts/deploy.sh"));
 
     sync(other);
-    assertEquals(
-        "ZGVwbG95",
-        ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "scripts/deploy.sh"));
+    assertEquals("ZGVwbG95", ContentFixtures.text(other.files, "acme", "scripts/deploy.sh"));
+
+    assertConverged();
   }
 
   @Test
   void editsToDifferentFilesAutoConvergeWithoutConflict() {
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "a.txt", "AAA");
+    ContentFixtures.put(node.files, "acme", "a.txt", "AAA");
     sync(node);
     sync(other);
 
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "a.txt", "AAA2");
-    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "b.txt", "BBB");
+    ContentFixtures.put(node.files, "acme", "a.txt", "AAA2");
+    ContentFixtures.put(other.files, "acme", "b.txt", "BBB");
 
     sync(node);
     sync(other);
     sync(node);
 
-    assertEquals("AAA2", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "a.txt"));
-    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "b.txt"));
-    assertEquals("BBB", ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "b.txt"));
+    assertEquals("AAA2", ContentFixtures.text(node.files, "acme", "a.txt"));
+    assertEquals("BBB", ContentFixtures.text(node.files, "acme", "b.txt"));
+    assertEquals("BBB", ContentFixtures.text(other.files, "acme", "b.txt"));
     assertTrue(node.conflicts.pending().isEmpty());
     assertTrue(other.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
   void editsToTheSameFileConflictAndLeaveTheLocalCopyUntouched() {
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "v1");
+    ContentFixtures.put(node.files, "acme", "shared.conf", "v1");
     sync(node);
     sync(other);
 
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
-    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
+    ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
+    ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
 
     sync(node);
     var report = sync2(other);
 
     assertEquals(1, report.conflicts());
-    assertEquals(
-        "from-node", ai.singlr.sail.store.ContentFixtures.text(main.files, "acme", "shared.conf"));
+    assertEquals("from-node", ContentFixtures.text(main.files, "acme", "shared.conf"));
     var pending = other.conflicts.pendingFor("file", FileStore.idOf("acme", "shared.conf"));
     assertEquals(List.of("content_hash"), pending.orElseThrow().fields());
-    assertEquals(
-        "from-other",
-        ai.singlr.sail.store.ContentFixtures.text(other.files, "acme", "shared.conf"));
+    assertEquals("from-other", ContentFixtures.text(other.files, "acme", "shared.conf"));
+
+    resolveTakingMains(other, "file", FileStore.idOf("acme", "shared.conf"));
+    assertConverged();
   }
 
   @Test
   void twoBoxesCreatingTheSameFilePathConflictWithNoCommonBase() {
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
-    ai.singlr.sail.store.ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
+    ContentFixtures.put(node.files, "acme", "shared.conf", "from-node");
+    ContentFixtures.put(other.files, "acme", "shared.conf", "from-other");
 
     sync(node);
     var report = sync2(other);
@@ -152,11 +154,14 @@ class FileSyncTest {
             .pendingFor("file", FileStore.idOf("acme", "shared.conf"))
             .orElseThrow()
             .fields());
+
+    resolveTakingMains(other, "file", FileStore.idOf("acme", "shared.conf"));
+    assertConverged();
   }
 
   @Test
   void aDeleteOnOneBoxPropagates() {
-    ai.singlr.sail.store.ContentFixtures.put(node.files, "acme", "old.txt", "x");
+    ContentFixtures.put(node.files, "acme", "old.txt", "x");
     sync(node);
     sync(other);
 
@@ -166,23 +171,50 @@ class FileSyncTest {
 
     sync(other);
     assertTrue(other.files.find("acme", "old.txt").isEmpty());
+
+    assertConverged();
   }
 
   @Test
   void aStaleCommitOnTheFileReplicaIsRejected() {
     var id = FileStore.idOf("acme", "a.txt");
-    node.files.applyRevision(
-        id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "AAA"), "1-base");
+    ContentFixtures.put(main.files, "acme", "a.txt", "AAA");
+    sync(node);
 
-    var outcome =
-        node.replica.commit(
-            id, ai.singlr.sail.store.ContentFixtures.snapshot(node.files, "BBB"), "9-stale");
+    var outcome = node.replica.commit(id, ContentFixtures.snapshot(node.files, "BBB"), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
-    assertEquals("AAA", ai.singlr.sail.store.ContentFixtures.text(node.files, "acme", "a.txt"));
+    assertEquals("AAA", ContentFixtures.text(node.files, "acme", "a.txt"));
+
+    assertConverged();
   }
 
   private SyncEngine.Report sync2(Box box) {
     return SyncBox.round(main.db, box.db, box.id, "file");
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.assertConverged(mainBox, nodeBox, otherBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
+  }
+
+  private static void resolveTakingMains(Box box, String type, String id) {
+    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
+    var theirs = conflict.theirs();
+    var rev =
+        Acting.as(
+            box.id,
+            () ->
+                SyncedEntities.require(type)
+                    .resolver(box.db)
+                    .resolveConflict(id, theirs.snapshot(), theirs));
+    box.conflicts.resolve(conflict.id(), rev);
   }
 }

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
@@ -18,6 +19,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -85,16 +87,49 @@ class RevisionJournalTest {
   }
 
   @Test
-  void applyRevisionWithNullDeletesAndRecoversBaseFromTheTombstone() {
+  void applyRevisionWithNullDeletesAndMakesMainsTombstoneTheBase() {
     journal.applyRevision("w3", snapshot("v", "bob"), "3-aaa");
 
     journal.applyRevision("w3", null, "4-bbb");
 
     assertFalse(new WidgetSchema(db).exists("w3"));
     assertEquals("4-bbb", journal.latestRev("w3"));
-    assertEquals("3-aaa", journal.baseRevOf("w3"));
+    assertEquals("4-bbb", journal.baseRevOf("w3"));
+    assertNull(journal.comparableAtRev("w3", "4-bbb"), "the base is the entity's absence");
     assertNull(journal.comparableSnapshot("w3"));
     assertTrue(journal.entityIds().contains("w3"));
+    assertTrue(journal.dirtyIds().isEmpty(), "main's deletion is nothing to offer");
+  }
+
+  @Test
+  void aLocalDeleteKeepsTheBaseItWasMadeFrom() {
+    journal.applyRevision("w13", snapshot("v", "bob"), "3-aaa");
+
+    db.transaction(
+        () -> {
+          journal.recordRevision("w13", "local", true);
+          new WidgetSchema(db).deleteRow("w13");
+          return null;
+        });
+
+    assertEquals("3-aaa", journal.baseRevOf("w13"));
+    assertEquals(Set.of("w13"), journal.dirtyIds());
+  }
+
+  @Test
+  void aRowWrittenOverATombstoneContinuesTheCounterFromTheTombstonesBase() {
+    journal.applyRevision("w14", snapshot("v", "bob"), "3-aaa");
+    db.transaction(
+        () -> {
+          journal.recordRevision("w14", "local", true);
+          new WidgetSchema(db).deleteRow("w14");
+          return null;
+        });
+
+    createWidget("w14", "again", "uday");
+
+    assertEquals(5, Revisions.counterOf(journal.latestRev("w14")));
+    assertEquals("3-aaa", journal.baseRevOf("w14"));
   }
 
   @Test
@@ -139,15 +174,44 @@ class RevisionJournalTest {
   }
 
   @Test
-  void resolveConflictTakingRemoteAdoptsTheBaseAndKeepsNoForwardEdit() {
+  void resolveConflictTakingRemoteAdoptsMainsRevisionAndAuthorAndKeepsNoForwardEdit() {
     createWidget("w7", "mine", "uday");
     var remote = snapshot("theirs", "bob");
 
-    var rev = journal.resolveConflict("w7", remote, remote);
+    var rev = journal.resolveConflict("w7", remote, new MainVersion(remote, "4-main", "bob"));
 
+    assertEquals("4-main", rev);
     assertEquals("theirs", journal.comparableSnapshot("w7").get("value"));
     assertEquals(rev, journal.baseRevOf("w7"));
     assertEquals(rev, journal.latestRev("w7"));
+    var head = new ChangeLog(db).head("widget", "w7").orElseThrow();
+    assertEquals("bob", head.actor());
+    assertEquals("sync", head.origin());
+  }
+
+  @Test
+  void resolveConflictTakingMainsDeletionRecordsTheDeleterAtMainsRevision() {
+    createWidget("w11", "mine", "uday");
+
+    var rev = journal.resolveConflict("w11", null, new MainVersion(null, "5-main", "bob"));
+
+    assertEquals("5-main", rev);
+    var head = new ChangeLog(db).head("widget", "w11").orElseThrow();
+    assertEquals(ChangeLog.Kind.TOMBSTONE, head.kind());
+    assertEquals("bob", head.actor());
+    assertEquals("5-main", journal.baseRevOf("w11"), "main's deletion is the merge base");
+    assertTrue(journal.dirtyIds().isEmpty(), "main's deletion is nothing to offer");
+  }
+
+  @Test
+  void resolveConflictWithNoRecordedMainRevisionIsRefused() {
+    createWidget("w12", "mine", "uday");
+    var remote = snapshot("theirs", "bob");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> journal.resolveConflict("w12", remote, new MainVersion(remote, null, null)));
+    assertEquals("mine", journal.comparableSnapshot("w12").get("value"));
   }
 
   @Test
@@ -156,18 +220,19 @@ class RevisionJournalTest {
     var remote = snapshot("theirs", "bob");
     var chosen = snapshot("mine-wins", "uday");
 
-    var rev = journal.resolveConflict("w8", chosen, remote);
+    var rev = journal.resolveConflict("w8", chosen, new MainVersion(remote, "3-main", "bob"));
 
     assertEquals("mine-wins", journal.comparableSnapshot("w8").get("value"));
     assertEquals(rev, journal.latestRev("w8"));
-    assertNotEquals(rev, journal.baseRevOf("w8"));
+    assertEquals("3-main", journal.baseRevOf("w8"));
+    assertEquals(4, Revisions.counterOf(rev), "mine is written over main's revision");
   }
 
   @Test
   void resolveConflictWithBothSidesDeletedTombstonesTheRow() {
     createWidget("w9", "doomed", "uday");
 
-    journal.resolveConflict("w9", null, null);
+    journal.resolveConflict("w9", null, new MainVersion(null, "2-main", "bob"));
 
     assertFalse(new WidgetSchema(db).exists("w9"));
     assertNull(journal.comparableSnapshot("w9"));

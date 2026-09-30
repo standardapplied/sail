@@ -103,7 +103,7 @@ class CompactionTest {
     specs.create(spec("parked"));
     var base = specs.latestRev("parked");
     db.execute("UPDATE specs SET base_rev = ? WHERE id = 'parked'", base);
-    new SyncConflicts(db).record("spec", "parked", "{}", "{}", "{}", List.of("title"));
+    new SyncConflicts(db).record("spec", "parked", "{}", "{}", "{}", null, null, List.of("title"));
     for (var i = 1; i <= 25; i++) {
       specs.update(titled("parked", "mine " + i));
     }

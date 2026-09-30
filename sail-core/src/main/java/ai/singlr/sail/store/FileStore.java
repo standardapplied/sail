@@ -104,7 +104,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           writeRow(row);
-          journal.recordRevision(idOf(row.project(), row.path()), "local", false);
+          journal.recordRevision(idOf(row.project(), row.path()), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -116,7 +116,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
           if (row == null) {
             return false;
           }
-          journal.recordRevision(idOf(project, path), "local", true);
+          journal.recordRevision(idOf(project, path), ChangeLog.Entry.LOCAL, true);
           db.execute("DELETE FROM project_files WHERE id = ?", idOf(project, path));
           return true;
         });
@@ -285,6 +285,16 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
+  }
+
+  @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
   }
@@ -301,17 +311,10 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open file conflict locally: rebases the row onto main's conflicting content {@code
-   * remote} as the new merge base — so the next sync can never re-raise the same conflict — then
-   * writes {@code chosen} as the resolved state. Take-theirs ({@code chosen} equals {@code remote})
-   * simply adopts main's value; keep-mine writes a forward local edit the next sync pushes. A
-   * {@code null} side is a deletion. Every state stays in the {@link ChangeLog}, so no choice loses
-   * work.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   private void writeRow(FileRow row) {

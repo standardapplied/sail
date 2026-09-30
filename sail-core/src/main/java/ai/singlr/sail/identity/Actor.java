@@ -6,7 +6,6 @@
 package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
-import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -94,16 +93,16 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
 
   /** Main, as a node adopts what it decided. */
   public static Actor main() {
-    return main(null);
+    return main(MAIN_HANDLE);
   }
 
   /**
    * Main, as a node adopts a version main recorded as made by {@code author}: the node records the
    * same author, even for a tombstone or an erasure, which carries no snapshot to name one. A null
-   * author is plain {@link #main()}.
+   * author is a version main recorded with none, and the node records none either.
    */
   public static Actor main(String author) {
-    return new Actor(Objects.requireNonNullElse(author, MAIN_HANDLE), Role.ADMIN, Lane.MAIN);
+    return new Actor(author, Role.ADMIN, Lane.MAIN);
   }
 
   /** This box's own machinery: reactors, sweepers, reconcilers, migrations. */

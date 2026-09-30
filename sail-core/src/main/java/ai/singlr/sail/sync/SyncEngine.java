@@ -7,7 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ConflictDetector;
-import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.Snapshots;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -82,11 +82,14 @@ public final class SyncEngine {
     return new Round(local, main).run();
   }
 
-  /** An offer awaiting main's verdict, with everything needed to settle it. */
+  /**
+   * An offer awaiting main's verdict, with everything needed to settle it: {@code offeredFrom} is
+   * the local row the offer was made from, at the revision the round captured it.
+   */
   private record Pending(
       String id,
       Map<String, Object> snapshot,
-      String offeredLocalRev,
+      LocalReplica.Captured offeredFrom,
       String expectedRev,
       Outcome onAccepted,
       int redetectsLeft) {}
@@ -130,11 +133,16 @@ public final class SyncEngine {
       }
     }
 
-    /** Offers everything pending to main as one batch and settles each verdict in order. */
+    /**
+     * Offers everything pending to main as one batch and settles each verdict in order. What each
+     * offer was made from is recorded before main is asked and forgotten once its verdict is
+     * settled, so an answer lost on the way back leaves exactly that behind to recover against.
+     */
     private void commitPending() {
       var batch = List.copyOf(pending);
       pending.clear();
       pendingWeight = 0;
+      batch.forEach(p -> local.offering(p.id(), p.snapshot(), p.offeredFrom().snapshot()));
       var outcomes =
           main.commitAll(
               batch.stream()
@@ -146,6 +154,7 @@ public final class SyncEngine {
       }
       for (var i = 0; i < batch.size(); i++) {
         record(settle(batch.get(i), outcomes.get(i)));
+        local.settled(batch.get(i).id());
       }
     }
 
@@ -153,102 +162,138 @@ public final class SyncEngine {
       return tally.getOrDefault(outcome, 0);
     }
 
+    /**
+     * Reconciles one entity three-way. A marked deletion ({@link Snapshots#isDeletionMark}) is a
+     * deletion the detector reads as absence, except where the marks themselves are what has to
+     * cross: main's, when this box never heard it ({@link #mainsMarksUnheard}), and this box's own,
+     * still to reach main.
+     */
     private Outcome reconcileEntity(
-        String id, Map<String, Object> remoteSnap, String remoteRev, int redetectsLeft) {
+        String id, Map<String, Object> remote, String remoteRev, int redetectsLeft) {
       var base = local.base(id);
       var captured = local.capture(id);
       var localSnap = captured.snapshot();
-      var localRev = captured.rev();
-      if (ProjectStore.isBlocksResurrectionMarker(remoteSnap)) {
-        if (base == null) {
-          if (localSnap == null && Objects.equals(localRev, remoteRev)) {
-            return Outcome.CONVERGED;
-          }
-          return take(
-              id, localRev, null, remoteRev, main.author(id), Outcome.PULLED, redetectsLeft);
-        }
-        remoteSnap = null;
+      if (Snapshots.isDeletionMark(remote) && base == null) {
+        return mainsMarksUnheard(id, captured, remote, remoteRev, redetectsLeft);
       }
-      if (ProjectStore.isBlocksResurrectionMarker(localSnap) && base == null) {
-        if (remoteSnap != null) {
+      var remoteLive = Snapshots.isDeletionMark(remote) ? null : remote;
+      if (Snapshots.isDeletionMark(localSnap)
+          && Objects.equals(local.lastHeardRev(id), captured.rev())) {
+        localSnap = null;
+      }
+      if (Snapshots.isDeletionMark(localSnap) && base == null) {
+        if (remoteLive != null) {
           local.recordConflict(
-              id, null, localSnap, remoteSnap, List.of(ConflictDetector.DELETED_FIELD));
+              id,
+              null,
+              localSnap,
+              mainsVersion(id, remote, remoteRev),
+              List.of(ConflictDetector.DELETED_FIELD));
           return Outcome.CONFLICT;
         }
-        return offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft);
+        return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
       }
+      var localRev = captured.rev();
       return switch (ConflictDetector.detect(
-          base, localSnap, remoteSnap, local.latestWinsFields())) {
+          base, localSnap, remoteLive, local.latestWinsFields())) {
         case ConflictDetector.Converged ignored ->
-            remoteRev == null || Objects.equals(localRev, remoteRev)
-                ? Outcome.CONVERGED
-                : take(
-                    id,
-                    localRev,
-                    remoteSnap,
-                    remoteRev,
-                    main.author(id),
-                    Outcome.CONVERGED,
-                    redetectsLeft);
+            converged(id, captured, localSnap, remote, remoteRev, redetectsLeft);
         case ConflictDetector.TakeRemote ignored ->
-            take(
-                id,
-                localRev,
-                remoteSnap,
-                remoteRev,
-                main.author(id),
-                Outcome.PULLED,
-                redetectsLeft);
+            take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
         case ConflictDetector.KeepLocal ignored ->
             local.mayPush(id)
-                ? offer(id, localSnap, localRev, remoteRev, Outcome.PUSHED, redetectsLeft)
-                : take(
-                    id,
-                    localRev,
-                    remoteSnap,
-                    remoteRev,
-                    main.author(id),
-                    Outcome.PULLED,
-                    redetectsLeft);
+                ? offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft)
+                : take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
         case ConflictDetector.Merged m -> {
           if (rewritesLive(id, localSnap, m.result())) {
             yield Outcome.HELD;
           }
           yield local.mayPush(id)
-              ? offer(id, m.result(), localRev, remoteRev, Outcome.MERGED, redetectsLeft)
-              : take(
-                  id,
-                  localRev,
-                  remoteSnap,
-                  remoteRev,
-                  main.author(id),
-                  Outcome.PULLED,
-                  redetectsLeft);
+              ? offer(id, m.result(), captured, remoteRev, Outcome.MERGED, redetectsLeft)
+              : take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
         }
         case ConflictDetector.Conflict c -> {
-          local.recordConflict(id, base, localSnap, remoteSnap, c.fields());
+          local.recordConflict(
+              id, base, localSnap, mainsVersion(id, remote, remoteRev), c.fields());
           yield Outcome.CONFLICT;
         }
       };
     }
 
     /**
-     * Adopts main's version as {@link #adoptOrRedetect} does, unless {@code id} is work still live
-     * here ({@link #liveHere}): then the local row stays as it is, and it is offered once it has
-     * finished. Every path of the walk that takes main's version comes through here.
+     * Main holds a marked deletion of {@code id} and this box has no base for it: a copy written
+     * over a deletion the box heard is a creation of this box's and is offered, main deciding it
+     * against the deletion it holds; a copy that never heard one is stale and adopts the deletion;
+     * the deletion itself, already held under the author main names, is converged.
+     */
+    private Outcome mainsMarksUnheard(
+        String id,
+        LocalReplica.Captured captured,
+        Map<String, Object> remote,
+        String remoteRev,
+        int redetectsLeft) {
+      var localSnap = captured.snapshot();
+      if (Snapshots.isDeletionMark(localSnap)
+          && Objects.equals(captured.rev(), remoteRev)
+          && Objects.equals(local.author(id), mainsAuthor(id, remote))) {
+        return Outcome.CONVERGED;
+      }
+      if (localSnap != null
+          && !Snapshots.isDeletionMark(localSnap)
+          && local.lastHeardRev(id) != null) {
+        return offer(id, localSnap, captured, remoteRev, Outcome.PUSHED, redetectsLeft);
+      }
+      return take(id, captured.rev(), remote, remoteRev, Outcome.PULLED, redetectsLeft);
+    }
+
+    /**
+     * Nothing changed on either side since the base. Equal revisions are converged only under one
+     * author and one head: a box that adopted a revision under another release's reading of it
+     * takes main's again. A box that minted main's revision itself, from the same content, never
+     * recorded it as its base; it acknowledges main's as the base of what it holds ({@link
+     * LocalReplica#acknowledge}, nothing when the base is already it), and is done offering it.
+     */
+    private Outcome converged(
+        String id,
+        LocalReplica.Captured captured,
+        Map<String, Object> localSnap,
+        Map<String, Object> remote,
+        String remoteRev,
+        int redetectsLeft) {
+      if (remoteRev == null) {
+        return Outcome.CONVERGED;
+      }
+      if (!Objects.equals(captured.rev(), remoteRev)
+          || !Objects.equals(local.author(id), mainsAuthor(id, remote))) {
+        return take(id, captured.rev(), remote, remoteRev, Outcome.CONVERGED, redetectsLeft);
+      }
+      if (localSnap != null) {
+        Actor.run(
+            Actor.main(mainsAuthor(id, remote)), () -> local.acknowledge(id, remote, remoteRev));
+      }
+      return Outcome.CONVERGED;
+    }
+
+    /**
+     * Adopts main's version under the author main recorded, or {@linkplain #redetect re-reconciles}
+     * when the local row moved, unless {@code id} is work still live here ({@link #liveHere}): then
+     * the local row stays as it is, and it is offered once it has finished. Every path of the walk
+     * that takes main's version comes through here.
      */
     private Outcome take(
         String id,
         String expectedLocalRev,
         Map<String, Object> snapshot,
         String rev,
-        String author,
         Outcome onAdopted,
         int redetectsLeft) {
       if (liveHere(id)) {
         return Outcome.HELD;
       }
-      return adoptOrRedetect(id, expectedLocalRev, snapshot, rev, author, onAdopted, redetectsLeft);
+      if (adopt(id, expectedLocalRev, snapshot, rev, main.author(id))) {
+        return onAdopted;
+      }
+      return redetect(id, redetectsLeft);
     }
 
     /**
@@ -270,28 +315,22 @@ public final class SyncEngine {
     }
 
     /**
-     * Adopts an authoritative state, but only if the local row still sits at the revision the
-     * round's snapshot was captured from — check and adoption are one atomic replica operation. A
-     * local write landing anywhere in the round makes the adoption stale; adopting anyway would
-     * overwrite (and, for aggregates, delete the non-replicated children of) the newer local state.
-     * Instead the entity is re-reconciled against main's fresh state, so the newer local work
-     * pushes, merges, or parks as a conflict — never silently vanishes. The retry is bounded; past
-     * the budget the entity parks as a stale conflict with the local row untouched.
+     * The local row moved since the round captured it: a local write landing anywhere in the round
+     * makes an adoption stale, and adopting anyway would overwrite (and, for aggregates, delete the
+     * non-replicated children of) the newer local state. Instead the entity is re-reconciled
+     * against main's fresh state, so the newer local work pushes, merges, or parks as a conflict —
+     * never silently vanishes. The retry is bounded; past the budget the entity parks as a stale
+     * conflict with the local row untouched.
      */
-    private Outcome adoptOrRedetect(
-        String id,
-        String expectedLocalRev,
-        Map<String, Object> snapshot,
-        String rev,
-        String author,
-        Outcome onAdopted,
-        int redetectsLeft) {
-      if (adopt(id, expectedLocalRev, snapshot, rev, author)) {
-        return onAdopted;
-      }
+    private Outcome redetect(
+        String id, Map<String, Object> remote, String remoteRev, int redetectsLeft) {
       return redetectsLeft <= 0
-          ? recordStaleConflict(id, main.current(id))
-          : reconcileEntity(id, main.current(id), main.currentRev(id), redetectsLeft - 1);
+          ? recordStaleConflict(id, remote, remoteRev)
+          : reconcileEntity(id, remote, remoteRev, redetectsLeft - 1);
+    }
+
+    private Outcome redetect(String id, int redetectsLeft) {
+      return redetect(id, main.current(id), main.currentRev(id), redetectsLeft);
     }
 
     /**
@@ -313,12 +352,11 @@ public final class SyncEngine {
     private Outcome offer(
         String id,
         Map<String, Object> snapshot,
-        String offeredLocalRev,
+        LocalReplica.Captured offeredFrom,
         String expectedRev,
         Outcome onAccepted,
         int redetectsLeft) {
-      pending.add(
-          new Pending(id, snapshot, offeredLocalRev, expectedRev, onAccepted, redetectsLeft));
+      pending.add(new Pending(id, snapshot, offeredFrom, expectedRev, onAccepted, redetectsLeft));
       pendingWeight += main.weigh(new MainReplica.Offer(id, snapshot, expectedRev));
       return Outcome.OFFERED;
     }
@@ -332,33 +370,61 @@ public final class SyncEngine {
      */
     private Outcome settle(Pending offer, CommitOutcome outcome) {
       return switch (outcome) {
-        case CommitOutcome.Accepted a ->
-            adoptOrRedetect(
-                offer.id(),
-                offer.offeredLocalRev(),
-                Snapshots.withCreator(offer.snapshot(), a.creator()),
-                a.rev(),
-                a.author(),
-                offer.onAccepted(),
-                offer.redetectsLeft());
+        case CommitOutcome.Accepted a -> settleAccepted(offer, a);
         case CommitOutcome.Rejected r ->
-            offer.redetectsLeft() <= 0
-                ? recordStaleConflict(offer.id(), r.currentSnapshot())
-                : reconcileEntity(
-                    offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft() - 1);
+            redetect(offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft());
         case CommitOutcome.Denied d ->
             !liveHere(offer.id())
-                    && adopt(offer.id(), offer.offeredLocalRev(), d.snapshot(), d.rev(), d.author())
+                    && adopt(
+                        offer.id(), offer.offeredFrom().rev(), d.snapshot(), d.rev(), d.author())
                 ? Outcome.PULLED
                 : Outcome.DENIED;
       };
     }
 
     /**
-     * Main kept moving under our retries: park the entity as a conflict against its latest state so
-     * the user decides, naming the clashing fields when there are any.
+     * Main's side of a conflict on {@code id}: {@code snapshot} at {@code rev}, under the author
+     * main names beside it or, for a live revision, in it.
      */
-    private Outcome recordStaleConflict(String id, Map<String, Object> remoteSnap) {
+    private MainVersion mainsVersion(String id, Map<String, Object> snapshot, String rev) {
+      return new MainVersion(snapshot, rev, mainsAuthor(id, snapshot));
+    }
+
+    /**
+     * The author main records for its version of {@code id}: named beside it or, for a live
+     * revision, in {@code snapshot}.
+     */
+    private String mainsAuthor(String id, Map<String, Object> snapshot) {
+      var author = main.author(id);
+      return author != null || snapshot == null
+          ? author
+          : Snapshots.text(snapshot, Snapshots.ACTOR);
+    }
+
+    /**
+     * Settles main taking this box's offer: adopts the version main took, or, when a local write
+     * landed since the offer, records it as the row's merge base with the edits made since the
+     * offer rebased on top ({@link LocalReplica#acknowledge}) before the entity is reconciled
+     * again, so this box's own accepted change never reads as a competing edit of main's, and
+     * main's changes the offer merged in never read as this box reverting them.
+     */
+    private Outcome settleAccepted(Pending offer, CommitOutcome.Accepted accepted) {
+      var id = offer.id();
+      var taken = Snapshots.withCreator(offer.snapshot(), accepted.creator());
+      if (adopt(id, offer.offeredFrom().rev(), taken, accepted.rev(), accepted.author())) {
+        return offer.onAccepted();
+      }
+      Actor.run(Actor.main(accepted.author()), () -> local.acknowledge(id, taken, accepted.rev()));
+      return redetect(id, offer.redetectsLeft());
+    }
+
+    /**
+     * Main kept moving under our retries: park the entity as a conflict against its latest state,
+     * {@code remoteSnap} at {@code remoteRev}, so the user decides, naming the clashing fields when
+     * there are any.
+     */
+    private Outcome recordStaleConflict(
+        String id, Map<String, Object> remoteSnap, String remoteRev) {
       var base = local.base(id);
       var localSnap = local.current(id);
       var fields =
@@ -366,7 +432,7 @@ public final class SyncEngine {
                   instanceof ConflictDetector.Conflict c
               ? c.fields()
               : List.of(STALE_FIELD);
-      local.recordConflict(id, base, localSnap, remoteSnap, fields);
+      local.recordConflict(id, base, localSnap, mainsVersion(id, remoteSnap, remoteRev), fields);
       return Outcome.CONFLICT;
     }
   }

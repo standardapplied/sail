@@ -229,7 +229,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               spec.id(),
               now);
           setHashes(spec.id(), "", "");
-          recordRevision(spec.id(), "local", false);
+          recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -328,7 +328,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               renamed,
               author(),
               old);
-          ids.forEach(id -> recordRevision(id, "local", false));
+          ids.forEach(id -> recordRevision(id, ChangeLog.Entry.LOCAL, false));
         });
   }
 
@@ -359,7 +359,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", spec.id());
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
-          recordRevision(spec.id(), "local", false);
+          recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -384,7 +384,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString(),
               author(),
               id);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -411,7 +411,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           if (db.changes() == 0) {
             return false;
           }
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
           return true;
         });
   }
@@ -440,7 +440,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               id);
           db.execute("DELETE FROM spec_repos WHERE spec_id = ?", id);
           insertRepos(id, repos);
-          recordRevision(id, "local", false);
+          recordRevision(id, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -448,7 +448,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           stampAuthor(id);
-          recordRevision(id, "local", true);
+          recordRevision(id, ChangeLog.Entry.LOCAL, true);
           db.execute("DELETE FROM specs WHERE id = ?", id);
         });
   }
@@ -470,7 +470,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               now);
           setHashes(specId, body, plan);
           stampAuthor(specId);
-          recordRevision(specId, "local", false);
+          recordRevision(specId, ChangeLog.Entry.LOCAL, false);
         });
   }
 
@@ -985,6 +985,16 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Set<String> latestWinsFields() {
+    return journal.latestWinsFields();
+  }
+
+  @Override
+  public Map<String, Object> currentForSync(String id) {
+    return journal.currentForSync(id);
+  }
+
+  @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
   }
@@ -1001,18 +1011,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open conflict locally by rebasing the row onto main's conflicting content {@code
-   * remote} — recorded as the new merge base, so the next sync can never re-raise the same conflict
-   * (base now equals remote) — and then writing {@code chosen} as the resolved state. When {@code
-   * chosen} differs from {@code remote} (keep-mine or a merge) the row becomes a forward local edit
-   * the next sync pushes; when they match (take-theirs) the row simply adopts main's value, and the
-   * earlier local version is still in the {@link ChangeLog}. A {@code null} side is a deletion.
-   * Returns the rev the row now carries. No work is ever lost: every state is journaled.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   private static Map<String, Object> withSync(String id, Map<String, Object> snapshot) {

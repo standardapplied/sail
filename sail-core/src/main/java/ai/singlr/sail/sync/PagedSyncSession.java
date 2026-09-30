@@ -443,10 +443,11 @@ public final class PagedSyncSession implements SyncSession {
   /**
    * Before anything of {@code type} is reconciled, asks main which version of each row the node
    * changed it took from this box after the version the node last heard from main, and adopts it as
-   * the row's merge base: main took the node's offer and its answer never came back. Only those
-   * versions cross, almost always none. The pages and the push that follow then reconcile each row
-   * three-way against exactly what main took of it, so neither a change main made since nor one the
-   * node made since is lost or reverted unseen.
+   * the row's merge base, rebasing what the node changed since the state the offer was made from
+   * onto it: main took the node's offer and its answer never came back. Only those versions cross,
+   * almost always none. The pages and the push that follow then reconcile each row three-way
+   * against exactly what main took of it, so neither a change main made since, merged into the
+   * offer or not, nor one the node made since is lost or reverted unseen.
    */
   private void acknowledgeLostAnswers(String type, LocalReplica local) {
     var dirty = List.copyOf(local.dirtyIds());

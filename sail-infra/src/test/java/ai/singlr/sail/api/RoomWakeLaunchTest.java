@@ -504,8 +504,7 @@ class RoomWakeLaunchTest {
       assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
       try (var box =
           SyncBox.opening(db.path(), "uday-box").syncsAs(Actor.sync(HANDLE, Role.MEMBER))) {
-        SyncBox.quiesce(main, box);
-        SyncBox.assertEqualToMain(main, box);
+        SyncBox.assertConverged(main, box);
       }
     }
   }

@@ -98,15 +98,17 @@ public final class ConflictOperations {
     return db.transaction(
         () -> {
           var conflict = requireOpen(entityType, entityId);
+          requireMainsRevision(conflict);
           requireCurrent(
               conflict,
               resolution.strategy() == Resolution.Strategy.MERGE
                   ? "start the merge again"
                   : "resolve");
+          var theirs = conflict.theirs();
           var chosen =
               switch (resolution.strategy()) {
                 case MINE -> parse(conflict.localSnapshot());
-                case THEIRS -> parse(conflict.remoteSnapshot());
+                case THEIRS -> theirs.snapshot();
                 case MERGE -> {
                   requireMergeable(conflict);
                   var merged =
@@ -127,21 +129,26 @@ public final class ConflictOperations {
           var rev =
               SyncedEntities.require(conflict.entityType())
                   .resolver(db)
-                  .resolveConflict(conflict.entityId(), chosen, parse(conflict.remoteSnapshot()));
+                  .resolveConflict(conflict.entityId(), chosen, theirs);
           conflicts.resolve(conflict.id(), rev);
-          return display(
-              new SyncConflicts.Conflict(
-                  conflict.id(),
-                  conflict.entityType(),
-                  conflict.entityId(),
-                  conflict.baseSnapshot(),
-                  conflict.localSnapshot(),
-                  conflict.remoteSnapshot(),
-                  conflict.fields(),
-                  conflict.detectedAt(),
-                  "resolved",
-                  rev));
+          return display(conflict.resolvedAt(rev));
         });
+  }
+
+  /**
+   * A resolve adopts main's side at the revision main minted it, which a conflict parked before
+   * conflicts kept it does not name. The next round re-records every parked conflict with it.
+   */
+  private static void requireMainsRevision(SyncConflicts.Conflict conflict) {
+    if (Strings.isBlank(conflict.remoteRev())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          """
+          '%s' was recorded before conflicts kept main's revision, so main's side cannot be \
+          adopted as main made it.
+          Run 'sail sync' to re-record it, then resolve."""
+              .formatted(conflict.entityId()));
+    }
   }
 
   private SyncConflicts.Conflict requireOpen(String entityType, String entityId) {
@@ -235,6 +242,8 @@ public final class ConflictOperations {
         displaySnapshot(conflict.baseSnapshot(), fields),
         displaySnapshot(conflict.localSnapshot(), fields),
         displaySnapshot(conflict.remoteSnapshot(), fields),
+        conflict.remoteRev(),
+        conflict.remoteAuthor(),
         conflict.fields().stream().map(ConflictOperations::displayField).toList(),
         conflict.detectedAt(),
         conflict.status(),

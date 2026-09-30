@@ -184,7 +184,7 @@ public final class Erasure {
           for (var target : closure(List.of(root), true)) {
             remove(target);
             if (target.equals(root)) {
-              changeLog.erase(type, id, rev, "sync");
+              changeLog.erase(type, id, rev, ChangeLog.Entry.SYNC);
             } else {
               changeLog.purge(target.type(), target.id());
             }

@@ -185,24 +185,28 @@ and the spec that closes it.
 | A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
 | A3 | An event, hook or reactor never makes the machinery do what its sender could not. | socket: `LocalApiRouterTest`; open for HTTP: `sail-events-door-authority` |
 | A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest`, `EraseRequestTest`, `SpecPruneTest`; purge case open: `sail-journal-authority` |
-| T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest`; open for resolves: `sail-sync-convergence` |
-| T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores) |
+| T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest` (a revision main recorded with no author), `WireAuthorSyncTest`, `ConvergenceSyncTest` (a resolve holds main's revision under main's author, a deletion's included), `ConflictOperationsTest`, `MessageSyncTest` and `ReplyChainSyncTest` (a message under its poster), `ProjectSyncTest` (a rename's deletion under its deleter), `NativeFleetIT` (change-log heads) |
+| T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores), `ConvergenceSyncTest` (restored and re-created on another box), every sync test through `SyncBox.assertEqualToMain` |
 | L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
-| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers: `LostAnswerSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
-| C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | open: `sail-sync-convergence` |
+| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
+| C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); open for a review whose findings the box holds: `sail-review-findings-sync` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
 | C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | open: `sail-sync-liveness`, `sail-review-findings-sync`, `sail-files-materialized-version` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; open for a prune racing a born-in spec: `sail-sync-liveness` |
 
-Every sync test ends each scenario by quiescing every box and asserting each replica equals
-main, so a divergence cannot pass unseen: `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, added
-by `sail-runs-follow-the-box` and adopted across the sync tests by `sail-sync-convergence`, which
-also has the fleet lane (`NativeFleetIT`) assert the same across real boxes.
+Every test in the `sync` package that drives a round between boxes ends each scenario by
+quiescing every box and asserting each replica equals main — fields, author, revision, head kind
+and the merge base it descends from — so a divergence cannot pass unseen: `SyncBox.quiesce` and
+`SyncBox.assertEqualToMain`, together `SyncBox.assertConverged`. A scenario that cannot converge
+on one entity for a reason another spec owns says so with `SyncBox.assertEqualToMainBut`, which
+names the reason, holds every other entity to main's, and fails the moment that entity
+converges. The fleet lane (`NativeFleetIT`) asserts after every scenario's final round that
+every box's change-log heads (id, rev, kind, author) equal main's for every type.
 
 ### What syncs, and how
 
@@ -237,7 +241,12 @@ One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over
 store, so the same box acts as the node when it syncs up and as the authority when another
 node syncs to it. Every synced store keeps a `change_log` of full snapshots and, beside it, a
 `change_heads` row per entity naming its latest entry, so the reads the protocol makes are
-O(what it asks for), never O(history).
+O(what it asks for), never O(history). A node records each offer it makes, and the state it was
+made from, in `sync_offers` before main is asked and drops it once the answer is heard — or once
+main's version is adopted, which is the answer — so an answer lost on the way back is recovered
+against exactly that state and main's edits the offer merged in stay. The record is used only
+when main's answer is to that offer: main answers the latest version it took from the box, which
+is an earlier offer's when the recorded one never reached it.
 
 ### The wire: sync protocol 4
 
@@ -253,8 +262,9 @@ it took from the asking box after the version the node last heard of it (`accept
 main's own change log against the latest entry carrying that rev; when compaction has removed
 that version, main answers only a version among its newest retained history. A box mints each rev
 from the entity's latest entry, tombstones included, so a rev never recurs for one entity; the
-latest-entry match covers histories from before that. A base a box rebases a parked conflict onto
-is journaled as `resolved-base`, never as a version heard from main. Before
+latest-entry match covers histories from before that. A resolve adopts main's side of a parked
+conflict at main's rev and author, exactly as a pull would, so it is a version heard from main.
+Before
 each type, the node asks only that (`accepted_only`) for every row it changed, which almost always
 answers nothing, and adopts what comes back as the row's merge base, keeping its own row on top
 under the author who wrote it; the round then reconciles three-way against exactly what main took,
@@ -334,9 +344,14 @@ attribution propagates without ever causing a false conflict.
 Parked conflicts live in the `sync_conflicts` table, one open conflict per entity, and are
 resolved with `sail conflicts`. It takes `--mine` or `--theirs`, and `--merge` for specs. A
 file's content and a project's definition are single opaque blobs, so they take mine or
-theirs only. Resolving rebases the row onto main's version and writes the choice, so a
-follow-up sync converges and the conflict cannot re-raise. Every version stays in the change
-log, so no choice loses work.
+theirs only. A conflict keeps main's side with the rev main holds it at and the author main
+recorded (`remote_rev`, `remote_author`). Resolving adopts that version exactly as a pull would
+(`RevisionJournal.resolveConflict`, one path for every journal store), so `--theirs` holds main's
+revision under main's author, a deletion's deleter included, and `--mine` or `--merge` writes the
+choice over it as this box's own revision for the next round to offer. The conflict cannot
+re-raise, and every version stays in the change log, so no choice loses work. A conflict parked
+before conflicts kept main's revision names none, and every strategy on it is refused until
+`sail sync` re-records it.
 
 Main answers each offer on its own: `accepted` with the rev it minted, `stale` when it moved
 since the node fetched, `refused` on integrity grounds (content it does not hold, a pruned id, a
@@ -360,7 +375,23 @@ answer past that room is withheld; the node fetches it with `need`, as it does f
 A push from a node of this release therefore never gets results larger than the frame it fit.
 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
-main's rev, or removes its row when main holds none. A denied message leaves the room with the
+main's rev, or removes its row when main holds none. Adopting a deletion makes main's tombstone the
+row's merge base: the box holds main's deletion, never one of its own to offer, so a restore or a
+re-add main or another box makes later is pulled, never undone, and parks no conflict however old
+the revision it restores. A row written over its own tombstone, restored or re-created, continues
+the entity's revision counter and descends from the base that tombstone records. A project
+rename's deletion crosses as its resurrection block and is adopted with it. A room adopts every
+synced field main holds, its creator and creation time included; both are otherwise written once.
+What main recorded with no author is adopted with none, and a message is journaled under the
+author it names on every box, whoever posted it there. Equal revisions are converged only under
+one author and one head: a box that adopted a revision under an earlier release's reading of it
+takes main's again, and a box that minted main's revision itself from the same content
+acknowledges it as its base. Every node walks main's heads once more after upgrading to this
+release, so what an earlier release left different heals in one round. When a local write lands
+while the box's own offer is in flight, the version main took becomes the row's merge base with
+the newer row kept on top, and the round offers it, so the box never conflicts with itself. A
+conflict parked on an entity whose base then moves this way is settled, and re-parked only if
+the row still clashes. A denied message leaves the room with the
 replies this box posted under it. Work still under way here is the exception, whether main's
 version arrives by denial, by pull or inside a merge with this box's own change: a run this box executes that has not finished (it carries
 this box's handle) keeps its row, credential and room guard, is offered again, and settles once it

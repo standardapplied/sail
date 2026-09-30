@@ -112,6 +112,27 @@ public final class SchemaManager {
               AND sp.status = 'done')""";
 
   /**
+   * Every box records a message revision under the author the message names ({@code
+   * ChangeLog.appendAuthored}); a box that posted a message before that recorded whoever was acting
+   * instead, so main and the nodes named different authors for the same revision. Named so the
+   * migration test runs this exact statement.
+   */
+  static final String MESSAGES_AUTHORED_BY_THEIR_POSTER =
+      """
+      UPDATE change_log SET actor = json_extract(snapshot, '$.author')
+          WHERE entity_type = 'message' AND kind = 'revision'
+          AND actor IS NOT json_extract(snapshot, '$.author')""";
+
+  /**
+   * A node that resolved a conflict taking main's side under an earlier release sits on a revision
+   * it minted itself, and one that adopted a revision main recorded with no author, or a rename's
+   * tombstone without its block, holds main's revision under other content; none is dirty, and
+   * main's head sits behind the node's checkpoint, so no round would look at it again. Every node
+   * walks main's heads once more, and takes main's version wherever its own differs.
+   */
+  public static final String NODES_HEAR_EVERY_HEAD_AGAIN = "UPDATE sync_state SET checkpoint = 0";
+
+  /**
    * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
    * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
    * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
@@ -590,7 +611,19 @@ public final class SchemaManager {
               handle TEXT PRIMARY KEY,
               box_id TEXT NOT NULL,
               claimed_at TEXT NOT NULL
-          )""");
+          )""",
+          "ALTER TABLE sync_conflicts ADD COLUMN remote_rev TEXT",
+          "ALTER TABLE sync_conflicts ADD COLUMN remote_author TEXT",
+          MESSAGES_AUTHORED_BY_THEIR_POSTER,
+          """
+          CREATE TABLE sync_offers (
+              entity_type TEXT NOT NULL,
+              entity_id TEXT NOT NULL,
+              offered TEXT,
+              offered_from TEXT,
+              PRIMARY KEY (entity_type, entity_id)
+          )""",
+          NODES_HEAR_EVERY_HEAD_AGAIN);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

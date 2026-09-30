@@ -43,8 +43,8 @@ public final class NodeRound {
   /**
    * Asks main which of the runs this box made that it never heard acknowledged main holds — its
    * answer lost on the way back — and adopts the version main took from this box as each one's base
-   * ({@link RunStore#acknowledge}), keeping the run as it stands here. Nothing is offered, and
-   * nothing but main's acknowledgement is adopted. Returns the ids main holds.
+   * ({@link RunStore#acknowledge}), keeping what changed here since the offer on top. Nothing is
+   * offered, and nothing but main's acknowledgement is adopted. Returns the ids main holds.
    */
   public static Set<String> acknowledgeHeld(SyncSession session, Sqlite db) {
     var runs = new RunStore(db);

@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -38,6 +39,32 @@ class ChangeLogTest {
   @AfterEach
   void tearDown() {
     if (db != null) db.close();
+  }
+
+  @Test
+  void anOfferIsKeptUntilSettledAndADeletionIsOfferedAsNothing() {
+    log.recordOffer("spec", "a", Map.of("title", "A"), null);
+    log.recordOffer("spec", "a", Map.of("title", "B"), Map.of("title", "A"));
+    log.recordOffer("spec", "gone", null, Map.of("title", "G"));
+
+    var offer = log.offer("spec", "a").orElseThrow();
+    assertEquals(Map.of("title", "B"), offer.offered());
+    assertEquals(Map.of("title", "A"), offer.from());
+    var deletion = log.offer("spec", "gone").orElseThrow();
+    assertNull(deletion.offered());
+    assertEquals(Map.of("title", "G"), deletion.from());
+    log.settleOffer("spec", "a");
+    assertTrue(log.offer("spec", "a").isEmpty());
+  }
+
+  @Test
+  void erasingAnEntityForgetsItsOfferInFlight() {
+    log.append("spec", "a", "1-x", "local", false, "{}");
+    log.recordOffer("spec", "a", Map.of("title", "private"), null);
+
+    log.erase("spec", "a", "2-x", "local");
+
+    assertTrue(log.offer("spec", "a").isEmpty(), "an erasure leaves nothing of the entity");
   }
 
   @Test

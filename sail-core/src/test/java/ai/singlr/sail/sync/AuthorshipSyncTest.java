@@ -74,6 +74,8 @@ class AuthorshipSyncTest {
                 "sail-agent-" + id));
 
     assertAuthoredEverywhere("run", id);
+
+    assertConverged();
   }
 
   @Test
@@ -86,6 +88,8 @@ class AuthorshipSyncTest {
     var id = Actor.call(MACHINERY, () -> reviews.createReview("auth", 1));
 
     assertAuthoredEverywhere("review", id);
+
+    assertConverged();
   }
 
   @Test
@@ -102,6 +106,8 @@ class AuthorshipSyncTest {
     var id = fileId(alice);
 
     assertAuthoredEverywhere("file", id);
+
+    assertConverged();
   }
 
   private void assertAuthoredEverywhere(String type, String id) throws IOException {
@@ -129,5 +135,9 @@ class AuthorshipSyncTest {
     return box.db
         .queryOne("SELECT entity_id FROM change_log WHERE entity_type = 'file'", row -> row.text(0))
         .orElseThrow();
+  }
+
+  private void assertConverged() {
+    SyncBox.assertConverged(main, alice, bob);
   }
 }

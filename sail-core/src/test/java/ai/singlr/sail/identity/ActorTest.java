@@ -158,6 +158,9 @@ class ActorTest {
 
     assertEquals("main", Actor.main().peer());
     assertEquals("uday", Actor.main().authorOf("uday"));
+    assertEquals("uday", Actor.main("uday").authorOf(null), "a tombstone keeps main's author");
+    assertNull(Actor.main(null).authorOf(null), "main recorded none, so the node records none");
+    assertEquals("main", Actor.main(null).peer());
 
     var operator = Actor.cliOperator("mady");
     assertNull(operator.peer());

@@ -177,6 +177,8 @@ class ApiRouterTest {
         YamlUtil.dumpJson(local),
         YamlUtil.dumpJson(local),
         YamlUtil.dumpJson(remote),
+        "9-main",
+        "main",
         List.of(field));
   }
 
@@ -447,7 +449,18 @@ class ApiRouterTest {
     private final Map<String, byte[]> files = new LinkedHashMap<>();
     private final SyncConflicts.Conflict conflict =
         new SyncConflicts.Conflict(
-            1, "file", "acme/config", null, "{}", "{}", List.of("content"), "now", "pending", null);
+            1,
+            "file",
+            "acme/config",
+            null,
+            "{}",
+            "{}",
+            null,
+            null,
+            List.of("content"),
+            "now",
+            "pending",
+            null);
 
     @Override
     public SyncStatus syncStatus() {

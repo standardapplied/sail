@@ -50,7 +50,7 @@ class ProjectStoreTest {
 
     assertTrue(store.findByName("old").isEmpty(), "the old name is gone from the catalog");
     assertTrue(
-        store.blocksResurrection("old"),
+        Snapshots.isDeletionMark(store.currentForSync("old")),
         "the old identity keeps a resurrection-blocking tombstone so a stale peer cannot revive it");
     var row = store.findByName("renamed").orElseThrow();
     assertTrue(row.definition().contains("name: renamed"));
@@ -76,7 +76,9 @@ class ProjectStoreTest {
     assertThrows(IllegalStateException.class, () -> store.rename("old", "taken", "name: taken\n"));
 
     assertTrue(store.findByName("old").isPresent(), "the failed rename left the old name intact");
-    assertFalse(store.blocksResurrection("old"), "a rejected rename records no tombstone");
+    assertFalse(
+        Snapshots.isDeletionMark(store.currentForSync("old")),
+        "a rejected rename records no tombstone");
   }
 
   @Test
@@ -87,7 +89,7 @@ class ProjectStoreTest {
 
     assertTrue(store.findByName("p").isEmpty(), "the plain delete removed the catalog row");
     assertFalse(
-        store.blocksResurrection("p"),
+        Snapshots.isDeletionMark(store.currentForSync("p")),
         "only a rename tombstone is authoritative over a stale create; a plain delete is not");
   }
 

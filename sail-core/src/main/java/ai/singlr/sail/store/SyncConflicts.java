@@ -6,6 +6,8 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.YamlUtil;
 import java.util.List;
 import java.util.Optional;
 
@@ -13,8 +15,9 @@ import java.util.Optional;
  * Pending sync conflicts awaiting a human decision. When {@link ConflictDetector} reports a true
  * {@code Conflict}, the engine records the three snapshots (base / local / remote) and the
  * conflicting field names here; the local row keeps its current value untouched, so the FDE's work
- * is never overwritten while the conflict is open. Resolving a conflict marks it {@code resolved}
- * with the revision the user chose, leaving an auditable trail.
+ * is never overwritten while the conflict is open. Main's side is kept with the rev main holds it
+ * at and the author main recorded, so a resolve adopts main's revision exactly. Resolving a
+ * conflict marks it {@code resolved} with the revision the user chose, leaving an auditable trail.
  */
 public final class SyncConflicts {
 
@@ -27,6 +30,11 @@ public final class SyncConflicts {
     this.db = db;
   }
 
+  /**
+   * One parked conflict. {@code remoteRev} and {@code remoteAuthor} name main's side as main minted
+   * it; both are null on a conflict parked before a conflict kept them, until a round re-records
+   * it.
+   */
   public record Conflict(
       long id,
       String entityType,
@@ -34,18 +42,51 @@ public final class SyncConflicts {
       String baseSnapshot,
       String localSnapshot,
       String remoteSnapshot,
+      String remoteRev,
+      String remoteAuthor,
       List<String> fields,
       String detectedAt,
       String status,
-      String resolvedRev) {}
+      String resolvedRev) {
 
-  /** Records a pending conflict and returns its id. One open conflict per entity at a time. */
+    /** Main's side of this conflict, as it was recorded. */
+    public MainVersion theirs() {
+      return new MainVersion(
+          Strings.isBlank(remoteSnapshot) ? null : YamlUtil.parseMap(remoteSnapshot),
+          remoteRev,
+          remoteAuthor);
+    }
+
+    /** This conflict as settled at {@code rev}. */
+    public Conflict resolvedAt(String rev) {
+      return new Conflict(
+          id,
+          entityType,
+          entityId,
+          baseSnapshot,
+          localSnapshot,
+          remoteSnapshot,
+          remoteRev,
+          remoteAuthor,
+          fields,
+          detectedAt,
+          RESOLVED,
+          rev);
+    }
+  }
+
+  /**
+   * Records a pending conflict and returns its id: main's side is {@code remoteSnapshot}, at {@code
+   * remoteRev} by {@code remoteAuthor}. One open conflict per entity at a time.
+   */
   public long record(
       String entityType,
       String entityId,
       String baseSnapshot,
       String localSnapshot,
       String remoteSnapshot,
+      String remoteRev,
+      String remoteAuthor,
       List<String> fields) {
     return db.transaction(
         () -> {
@@ -55,13 +96,17 @@ public final class SyncConflicts {
               entityId,
               PENDING);
           db.execute(
-              "INSERT INTO sync_conflicts (entity_type, entity_id, base_snapshot, local_snapshot,"
-                  + " remote_snapshot, fields, detected_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+              """
+              INSERT INTO sync_conflicts (entity_type, entity_id, base_snapshot, local_snapshot,
+                  remote_snapshot, remote_rev, remote_author, fields, detected_at, status)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
               entityType,
               entityId,
               baseSnapshot,
               localSnapshot,
               remoteSnapshot,
+              remoteRev,
+              remoteAuthor,
               encodeFields(fields),
               DateTimeUtils.now().toString(),
               PENDING);
@@ -135,11 +180,12 @@ public final class SyncConflicts {
   }
 
   private static final String SELECT =
-      "SELECT id, entity_type, entity_id, base_snapshot, local_snapshot, remote_snapshot, fields,"
-          + " detected_at, status, resolved_rev FROM sync_conflicts";
+      """
+      SELECT id, entity_type, entity_id, base_snapshot, local_snapshot, remote_snapshot,
+          remote_rev, remote_author, fields, detected_at, status, resolved_rev
+      FROM sync_conflicts""";
 
   private static Conflict map(Sqlite.Row row) {
-    var fields = row.text(6);
     return new Conflict(
         row.integer(0),
         row.text(1),
@@ -147,9 +193,11 @@ public final class SyncConflicts {
         row.text(3),
         row.text(4),
         row.text(5),
-        decodeFields(fields),
+        row.text(6),
         row.text(7),
-        row.text(8),
-        row.text(9));
+        decodeFields(row.text(8)),
+        row.text(9),
+        row.text(10),
+        row.text(11));
   }
 }

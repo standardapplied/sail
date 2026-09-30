@@ -286,6 +286,8 @@ class ContentMigrationTest {
             YamlUtil.dumpJson(Map.of("body", "base", "plan", "")),
             YamlUtil.dumpJson(snapshot),
             YamlUtil.dumpJson(Map.of("body", "remote", "plan", "")),
+            null,
+            null,
             List.of("body"));
   }
 }

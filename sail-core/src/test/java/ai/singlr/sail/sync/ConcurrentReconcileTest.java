@@ -8,15 +8,13 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.BlobStore;
 import java.nio.file.Path;
-import java.util.ArrayDeque;
-import java.util.Deque;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -33,70 +31,16 @@ class ConcurrentReconcileTest {
   @TempDir Path tempDir;
   private final SyncEngine engine = new SyncEngine();
   private SyncBox node;
+  private SyncBox box;
   private ScriptedMain main;
   private Map<String, Object> base;
-
-  /** A main whose commit verdicts are scripted; an empty script auto-accepts. */
-  private static final class ScriptedMain implements MainReplica {
-    final Map<String, Map<String, Object>> snapshots = new LinkedHashMap<>();
-    final Map<String, String> revs = new LinkedHashMap<>();
-    final Deque<CommitOutcome> script = new ArrayDeque<>();
-    Runnable onFirstCommit;
-    int minted = 1;
-
-    @Override
-    public String id() {
-      return "main";
-    }
-
-    @Override
-    public Set<String> entityIds() {
-      return new LinkedHashSet<>(snapshots.keySet());
-    }
-
-    @Override
-    public Map<String, Object> current(String id) {
-      return snapshots.get(id);
-    }
-
-    @Override
-    public String currentRev(String id) {
-      return revs.get(id);
-    }
-
-    @Override
-    public State state(String id) {
-      return new State(current(id), currentRev(id), null);
-    }
-
-    @Override
-    public long maxSeq() {
-      return minted;
-    }
-
-    @Override
-    public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-      if (onFirstCommit != null) {
-        var hook = onFirstCommit;
-        onFirstCommit = null;
-        hook.run();
-      }
-      var outcome =
-          script.isEmpty()
-              ? new CommitOutcome.Accepted("m-" + minted++, null, null)
-              : script.poll();
-      if (outcome instanceof CommitOutcome.Accepted accepted) {
-        snapshots.put(id, snapshot);
-        revs.put(id, accepted.rev());
-      }
-      return outcome;
-    }
-  }
 
   @BeforeEach
   void setUp() {
     node = new SyncBox(tempDir, "node");
-    main = new ScriptedMain();
+    box = new SyncBox(tempDir, "main");
+    new BlobStore(box.db).putText("");
+    main = new ScriptedMain(box.replica);
     node.specs.create(SyncBox.spec("auth", "Auth", "pending"));
     engine.reconcile(node.replica, main);
     base = node.specs.comparableSnapshot("auth");
@@ -104,7 +48,19 @@ class ConcurrentReconcileTest {
 
   @AfterEach
   void tearDown() {
+    box.close();
     node.close();
+  }
+
+  private void settleKeepingMine() {
+    var conflict = node.conflicts.pendingFor("spec", "auth").orElseThrow();
+    var mine = YamlUtil.parseMap(conflict.localSnapshot());
+    node.conflicts.resolve(
+        conflict.id(), node.specs.resolveConflict("auth", mine, conflict.theirs()));
+  }
+
+  private void assertConverged() {
+    SyncBox.assertConverged(box, node);
   }
 
   private Map<String, Object> baseWith(String field, Object value) {
@@ -116,7 +72,7 @@ class ConcurrentReconcileTest {
   @Test
   void aDisjointConcurrentEditIsReMergedAndLands() {
     node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
-    main.script.add(new CommitOutcome.Rejected("m-2", baseWith("status", "in_progress")));
+    main.script.add(baseWith("status", "in_progress"));
 
     var report = engine.reconcile(node.replica, main);
 
@@ -125,13 +81,15 @@ class ConcurrentReconcileTest {
     assertEquals("Title from node", merged.title());
     assertEquals("in_progress", merged.status().wire());
     assertTrue(node.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
   void mainChurningPastEveryRetryParksAConflictAndKeepsLocalWork() {
     node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
     for (var i = 0; i < 6; i++) {
-      main.script.add(new CommitOutcome.Rejected("m-stale", base));
+      main.script.add(base);
     }
 
     var report = engine.reconcile(node.replica, main);
@@ -139,6 +97,8 @@ class ConcurrentReconcileTest {
     assertEquals(1, report.conflicts());
     assertEquals(List.of("<stale>"), node.conflicts.pending().getFirst().fields());
     assertEquals("Title from node", node.specs.findById("auth").orElseThrow().title());
+
+    assertConverged();
   }
 
   @Test
@@ -154,33 +114,78 @@ class ConcurrentReconcileTest {
         node.specs.findById("auth").orElseThrow().status().wire(),
         "a write landing while the push was in flight must not be overwritten by the"
             + " accepted-but-stale snapshot");
-    assertEquals("in_progress", main.snapshots.get("auth").get("status"));
+    assertEquals("in_progress", main.current("auth").get("status"));
     assertTrue(node.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
-  void anOverlappingLocalWriteDuringTheCommitRoundParksAConflictAndKeepsLocalWork() {
+  void anOverlappingLocalWriteDuringTheCommitRoundIsOfferedOverTheAcceptedOneWithoutAConflict() {
     node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
     main.onFirstCommit =
         () -> node.specs.update(SyncBox.spec("auth", "Title during round", "pending"));
 
     var report = engine.reconcile(node.replica, main);
 
-    assertEquals(1, report.conflicts());
+    assertEquals(0, report.conflicts(), "the box's own accepted title is its base, not main's");
     assertEquals("Title during round", node.specs.findById("auth").orElseThrow().title());
+    assertEquals("Title during round", main.current("auth").get("title"));
+
+    assertConverged();
+  }
+
+  @Test
+  void aLocalWriteDuringTheCommitOfAMergeKeepsMainsChangesTheMergeTookIn() {
+    box.specs.update(SyncBox.spec("auth", "Auth", "in_progress"));
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit =
+        () -> node.specs.update(SyncBox.spec("auth", "Title during round", "pending"));
+
+    var report = engine.reconcile(node.replica, main);
+
+    assertEquals(0, report.conflicts());
+    assertEquals(
+        "in_progress", main.current("auth").get("status"), "main's status is never reverted");
+    assertEquals("Title during round", main.current("auth").get("title"));
+    var held = node.specs.findById("auth").orElseThrow();
+    assertEquals("in_progress", held.status().wire());
+    assertEquals("Title during round", held.title());
+
+    assertConverged();
+  }
+
+  @Test
+  void aLocalWriteDuringTheCommitOfAMergeClashingWithMainsChangeParksAConflict() {
+    box.specs.update(SyncBox.spec("auth", "Auth", "in_progress"));
+    node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
+    main.onFirstCommit = () -> node.specs.update(SyncBox.spec("auth", "Title from node", "review"));
+
+    var report = engine.reconcile(node.replica, main);
+
+    assertEquals(1, report.conflicts());
+    assertTrue(node.conflicts.pending().getFirst().fields().contains("status"));
+    assertEquals("review", node.specs.findById("auth").orElseThrow().status().wire());
+    assertEquals("in_progress", main.current("auth").get("status"));
+
+    settleKeepingMine();
+    assertConverged();
   }
 
   @Test
   void whenMainSettlesOnAClashingValuePastEveryRetryTheFieldsAreNamed() {
     node.specs.update(SyncBox.spec("auth", "Title from node", "pending"));
-    main.script.add(new CommitOutcome.Rejected("m-2", base));
-    main.script.add(new CommitOutcome.Rejected("m-3", base));
-    main.script.add(new CommitOutcome.Rejected("m-4", base));
-    main.script.add(new CommitOutcome.Rejected("m-5", baseWith("title", "Title from main")));
+    main.script.add(base);
+    main.script.add(base);
+    main.script.add(base);
+    main.script.add(baseWith("title", "Title from main"));
 
     var report = engine.reconcile(node.replica, main);
 
     assertEquals(1, report.conflicts());
     assertEquals(List.of("title"), node.conflicts.pending().getFirst().fields());
+
+    settleKeepingMine();
+    assertConverged();
   }
 }

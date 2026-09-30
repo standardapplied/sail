@@ -12,6 +12,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.MessageStore;
@@ -51,8 +52,6 @@ final class SpecPruner {
 
   /** The origin retention's erasures carry, so every box can tell them from a prune. */
   static final String RETENTION = "retention";
-
-  private static final String LOCAL = "local";
 
   private static final int BATCH = 200;
 
@@ -156,14 +155,14 @@ final class SpecPruner {
     return db.rehearse(
         () -> {
           var before = blobs.collectable();
-          var result = eraseAll(select, LOCAL, idle, new LinkedHashSet<>());
+          var result = eraseAll(select, ChangeLog.Entry.LOCAL, idle, new LinkedHashSet<>());
           return PruneReport.of(result, blobs.collectable() - before, true, false);
         });
   }
 
   private PruneReport apply(IntFunction<List<Erasure.Target>> select, String handle, boolean idle) {
     var projects = new LinkedHashSet<String>();
-    var result = eraseAll(select, LOCAL, idle, projects);
+    var result = eraseAll(select, ChangeLog.Entry.LOCAL, idle, projects);
     var freed = result.entities().isEmpty() ? 0L : collect();
     projects.forEach(project -> publishBoardUpdated(project, handle));
     return PruneReport.of(result, freed, false, false);

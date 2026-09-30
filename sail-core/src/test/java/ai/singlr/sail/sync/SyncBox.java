@@ -21,6 +21,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.FilterOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -171,14 +172,76 @@ public final class SyncBox implements AutoCloseable {
     return unsettled;
   }
 
+  /** {@link #quiesce} then {@link #assertEqualToMain} for every node: the standard ending. */
+  public static void assertConverged(SyncBox main, SyncBox... nodes) {
+    quiesce(main, nodes);
+    for (var node : nodes) {
+      assertEqualToMain(main, node);
+    }
+  }
+
   /**
    * Asserts that {@code node} holds exactly main's version of every synced entity either box has in
-   * its change log: its comparable snapshot, authorship included, its current rev, and its head's
-   * kind and author. An id main never held has no live row on the node, though the history the node
-   * withdrew stays. Every mismatch is reported at once.
+   * its change log: its comparable snapshot, authorship included, its current rev, its head's kind
+   * and author, and, for anything not erased, main's rev as the merge base it descends from. An id
+   * main never held has no live row on the node, though the history the node withdrew stays. Every
+   * mismatch is reported at once.
    */
   public static void assertEqualToMain(SyncBox main, SyncBox node) {
-    var mismatches = new ArrayList<String>();
+    var mismatches = mismatches(main, node);
+    if (!mismatches.isEmpty()) {
+      fail(node.id + " differs from main:\n" + String.join("\n", mismatches.values()));
+    }
+  }
+
+  /**
+   * As {@link #assertEqualToMain}, for a scenario that cannot converge on one entity for a reason
+   * another change owns, named by {@code why}: every other entity equals main's, and that one still
+   * differs, so the scenario fails the moment the divergence is fixed and the exception can go.
+   */
+  public static void assertEqualToMainBut(
+      SyncBox main, SyncBox node, String type, String id, String why) {
+    assertEqualToMainExcept(main, node, type + " " + id, why, true);
+  }
+
+  /**
+   * As {@link #assertEqualToMainBut} for a scenario whose timing decides whether the one entity
+   * diverges for the reason {@code why} names: every other entity equals main's, and that one is
+   * not checked. Only for a scenario that races a real writer; one that stages the race asserts
+   * which way it went.
+   */
+  public static void assertEqualToMainUnless(
+      SyncBox main, SyncBox node, String type, String id, String why) {
+    assertEqualToMainExcept(main, node, type + " " + id, why, false);
+  }
+
+  private static void assertEqualToMainExcept(
+      SyncBox main, SyncBox node, String known, String why, boolean mustDiverge) {
+    var mismatches = mismatches(main, node);
+    if (mustDiverge && !mismatches.containsKey(known)) {
+      fail(known + " now equals main's; drop the exception (" + why + ")");
+    }
+    mismatches.remove(known);
+    if (!mismatches.isEmpty()) {
+      fail(
+          node.id
+              + " differs from main beyond "
+              + why
+              + ":\n"
+              + String.join("\n", mismatches.values()));
+    }
+  }
+
+  /**
+   * Why a box that holds a review's findings cannot equal main on that review yet: its findings are
+   * box-local, and its aggregate counts its own rows at main's revision.
+   */
+  public static final String BOX_LOCAL_FINDINGS =
+      "a review's findings are box-local until sail-review-findings-sync, so the box holding them"
+          + " counts its own finding rows at main's revision";
+
+  private static Map<String, String> mismatches(SyncBox main, SyncBox node) {
+    var mismatches = new LinkedHashMap<String, String>();
     var mains = main.replicas();
     var nodes = node.replicas();
     for (var entity : SyncedEntities.all()) {
@@ -186,21 +249,22 @@ public final class SyncBox implements AutoCloseable {
       var ids = new LinkedHashSet<>(loggedIds(main, type));
       ids.addAll(loggedIds(node, type));
       for (var id : ids) {
-        var expected = version(main, mains.get(type), type, id);
-        var actual = version(node, nodes.get(type), type, id);
+        var expected = version(main, mains.get(type), type, id, true);
+        var actual = version(node, nodes.get(type), type, id, false);
         if (expected == null) {
           if (nodes.get(type).current(id) != null) {
-            mismatches.add(type + " " + id + ": main holds none, " + node.id + " holds " + actual);
+            mismatches.put(
+                type + " " + id,
+                type + " " + id + ": main holds none, " + node.id + " holds " + actual);
           }
         } else if (!expected.equals(actual)) {
-          mismatches.add(
+          mismatches.put(
+              type + " " + id,
               type + " " + id + "\n   main: " + expected + "\n   " + node.id + ": " + actual);
         }
       }
     }
-    if (!mismatches.isEmpty()) {
-      fail(node.id + " differs from main:\n" + String.join("\n", mismatches));
-    }
+    return mismatches;
   }
 
   private static List<String> loggedIds(SyncBox box, String type) {
@@ -210,9 +274,13 @@ public final class SyncBox implements AutoCloseable {
         type);
   }
 
-  /** What {@code box} holds of one entity, as convergence compares it; null when it logs none. */
+  /**
+   * What {@code box} holds of one entity, as convergence compares it; null when it logs none. Main
+   * is the base every node descends from, so its base is its own rev, and a node's is what it
+   * records ({@link SyncedStore#baseRevOf}); an erasure has none.
+   */
   private static Map<String, Object> version(
-      SyncBox box, StoreReplica replica, String type, String id) {
+      SyncBox box, StoreReplica replica, String type, String id, boolean isMain) {
     var head = new ChangeLog(box.db).head(type, id).orElse(null);
     if (head == null) {
       return null;
@@ -222,7 +290,61 @@ public final class SyncBox implements AutoCloseable {
     version.put("rev", replica.currentRev(id));
     version.put("kind", head.kind());
     version.put("author", head.actor());
+    if (head.kind() != ChangeLog.Kind.ERASURE) {
+      version.put(
+          "base",
+          isMain
+              ? replica.currentRev(id)
+              : SyncedEntities.require(type).store(box.db).baseRevOf(id));
+    }
     return version;
+  }
+
+  /** How a parked conflict is settled, as {@code sail conflicts resolve} offers it. */
+  public enum Resolve {
+    MINE,
+    THEIRS,
+    MERGE
+  }
+
+  /**
+   * Settles the conflict parked on {@code id} the way {@code sail conflicts resolve} does with
+   * {@code strategy}, mirroring {@code ConflictOperations.resolve} over the store directly.
+   */
+  public static void resolve(SyncBox box, String type, String id, Resolve strategy) {
+    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
+    var local = parse(conflict.localSnapshot());
+    var theirs = conflict.theirs();
+    var chosen =
+        switch (strategy) {
+          case MINE -> local;
+          case THEIRS -> theirs.snapshot();
+          case MERGE -> merged(conflict.baseSnapshot(), local, theirs.snapshot(), conflict);
+        };
+    var rev =
+        Acting.as(
+            box.id,
+            () ->
+                SyncedEntities.require(type).resolver(box.db).resolveConflict(id, chosen, theirs));
+    box.conflicts.resolve(conflict.id(), rev);
+  }
+
+  private static Map<String, Object> merged(
+      String base,
+      Map<String, Object> local,
+      Map<String, Object> remote,
+      SyncConflicts.Conflict conflict) {
+    var merged =
+        new LinkedHashMap<>(
+            ConflictMerge.parseTemplate(
+                ConflictMerge.mergeTemplate(
+                    parse(base), local, remote, conflict.fields(), "sha256:x")));
+    merged.remove(ConflictMerge.CONFLICT);
+    return merged;
+  }
+
+  private static Map<String, Object> parse(String json) {
+    return json == null || json.isBlank() ? null : YamlUtil.parseMap(json);
   }
 
   public static SpecStore.SpecRow spec(String id, String title, String status) {
@@ -309,7 +431,26 @@ public final class SyncBox implements AutoCloseable {
   /** Pushes {@code node}'s changes of {@code type}, main takes them, and its answer is lost. */
   public static void pushLosingTheAnswer(SyncBox main, SyncBox node, String type)
       throws IOException {
-    var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, losingTheResults());
+    pushCutAt(main, node, type, cutting("results"), out -> out);
+  }
+
+  /**
+   * Starts {@code node}'s round for {@code type} and cuts the channel at its push, so main never
+   * hears the offer: the node has recorded what it offered, and main holds what it held.
+   */
+  public static void pushNeverReachingMain(SyncBox main, SyncBox node, String type)
+      throws IOException {
+    pushCutAt(main, node, type, out -> out, cutting("push"));
+  }
+
+  private static void pushCutAt(
+      SyncBox main,
+      SyncBox node,
+      String type,
+      UnaryOperator<OutputStream> serverOut,
+      UnaryOperator<OutputStream> nodeOut)
+      throws IOException {
+    var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, serverOut, nodeOut);
     Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
     assertThrows(RuntimeException.class, () -> link.reconcile(type, node.replicas().get(type)));
     try {
@@ -319,16 +460,40 @@ public final class SyncBox implements AutoCloseable {
     }
   }
 
-  private static UnaryOperator<OutputStream> losingTheResults() {
+  /** Cuts the channel at the first line carrying the wire operation {@code op}. */
+  private static UnaryOperator<OutputStream> cutting(String op) {
     return out ->
         new FilterOutputStream(out) {
+          private final ByteArrayOutputStream line = new ByteArrayOutputStream();
+
+          @Override
+          public void write(int value) throws IOException {
+            line.write(value);
+            if (value == '\n') {
+              drain();
+            }
+          }
+
           @Override
           public void write(byte[] buffer, int offset, int length) throws IOException {
-            if (new String(buffer, offset, length, StandardCharsets.UTF_8)
-                .contains("\"op\": \"results\"")) {
-              throw new IOException("the answer is lost on the way back");
+            for (var i = offset; i < offset + length; i++) {
+              write(buffer[i]);
             }
-            out.write(buffer, offset, length);
+          }
+
+          @Override
+          public void flush() throws IOException {
+            drain();
+            out.flush();
+          }
+
+          private void drain() throws IOException {
+            var text = line.toString(StandardCharsets.UTF_8);
+            line.reset();
+            if (text.contains("\"op\": \"" + op + "\"")) {
+              throw new IOException("the " + op + " is lost on the way");
+            }
+            out.write(text.getBytes(StandardCharsets.UTF_8));
           }
         };
   }

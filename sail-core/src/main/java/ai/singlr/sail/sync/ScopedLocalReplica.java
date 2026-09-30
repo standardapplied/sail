@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.MainVersion;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,6 +45,31 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   }
 
   @Override
+  public String lastHeardRev(String id) {
+    return inner.lastHeardRev(id);
+  }
+
+  @Override
+  public String author(String id) {
+    return inner.author(id);
+  }
+
+  @Override
+  public void offering(String id, Map<String, Object> offered, Map<String, Object> from) {
+    inner.offering(id, offered, from);
+  }
+
+  @Override
+  public void settled(String id) {
+    inner.settled(id);
+  }
+
+  @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return inner.acknowledge(id, accepted, rev);
+  }
+
+  @Override
   public Set<String> latestWinsFields() {
     return inner.latestWinsFields();
   }
@@ -78,7 +104,7 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
       String id,
       Map<String, Object> base,
       Map<String, Object> local,
-      Map<String, Object> remote,
+      MainVersion remote,
       List<String> fields) {
     inner.recordConflict(id, base, local, remote, fields);
   }

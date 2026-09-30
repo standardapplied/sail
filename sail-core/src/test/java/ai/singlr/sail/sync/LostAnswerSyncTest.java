@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -14,6 +15,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.ByteArrayInputStream;
@@ -95,6 +97,130 @@ class LostAnswerSyncTest {
   }
 
   @Test
+  void aMergeWhoseAnswerIsLostKeepsMainsChangesTheMergeTookIn() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent(), "main took the merge");
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent());
+    assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void anEditAfterALostMergeReachesMainKeepingMainsChangesTheMergeTookIn() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/later")));
+
+    SyncBox.quiesce(main, ada);
+
+    assertTrue(ada.conflicts.pendingFor("spec", "s").isEmpty(), "main changed nothing since");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent());
+    assertEquals("feat/later", main.specs.findById("s").orElseThrow().branch());
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  @Test
+  void aSettledOfferLeavesNoRecordBehind() {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+
+    SyncBox.assertConverged(main, ada);
+
+    assertTrue(new ChangeLog(ada.db).offer("spec", "s").isEmpty());
+  }
+
+  @Test
+  void anOfferThatNeverReachedMainAndIsNeverMadeAgainLeavesNoRecordBehind() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushNeverReachingMain(main, ada, "spec");
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, null)));
+
+    SyncBox.assertConverged(main, ada);
+
+    assertTrue(new ChangeLog(ada.db).offer("spec", "s").isEmpty(), "adopting main's settles it");
+  }
+
+  @Test
+  void aMessageWhoseAnswerIsLostLeavesNoRecordBehind() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    var posted = Acting.as("ada", () -> new MessageStore(ada.db).append("s", "ada", "hi", null));
+    SyncBox.pushLosingTheAnswer(main, ada, "message");
+
+    SyncBox.assertConverged(main, ada);
+
+    assertTrue(new ChangeLog(ada.db).offer("message", posted.id()).isEmpty());
+  }
+
+  @Test
+  void aPushThatNeverReachesMainAfterAnOfferNoRecordWasKeptOfKeepsTheEditsMadeSince()
+      throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    ada.db.execute("DELETE FROM sync_offers");
+    Acting.as("ada", () -> ada.specs.update(spec("s", "claude", "feat/ada")));
+
+    SyncBox.pushNeverReachingMain(main, ada, "spec");
+    assertNull(main.specs.findById("s").orElseThrow().agent(), "main never saw the push");
+
+    SyncBox.assertConverged(main, ada);
+
+    assertEquals("claude", ada.specs.findById("s").orElseThrow().agent(), "the edit survives");
+    assertEquals("claude", main.specs.findById("s").orElseThrow().agent(), "and reaches main");
+  }
+
+  @Test
+  void aPushThatNeverReachesMainAfterAnUnacknowledgedLostMergeKeepsTheEditsMadeSince()
+      throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    assertEquals("codex", main.specs.findById("s").orElseThrow().agent(), "main took the merge");
+    Acting.as("ada", () -> ada.specs.update(titled("s", "Edited", "claude", "feat/ada")));
+    Acting.as("ada", () -> main.specs.update(spec("s", "claude", "feat/ada")));
+
+    SyncBox.pushNeverReachingMain(main, ada, "spec");
+    assertEquals("Spec s", main.specs.findById("s").orElseThrow().title(), "main never saw it");
+    assertTrue(ada.conflicts.pending().isEmpty());
+
+    SyncBox.assertConverged(main, ada);
+
+    assertEquals("Edited", ada.specs.findById("s").orElseThrow().title(), "the edit survives");
+    assertEquals("Edited", main.specs.findById("s").orElseThrow().title(), "and reaches main");
+  }
+
+  @Test
+  void aConflictParkedAfterALostMergeClosesOnceTheFdeTakesMainsValueByHand() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("s", null, null)));
+    SyncBox.quiesce(main, ada);
+    Acting.as("ada", () -> main.specs.update(spec("s", "codex", null)));
+    Acting.as("ada", () -> ada.specs.update(spec("s", null, "feat/ada")));
+    SyncBox.pushLosingTheAnswer(main, ada, "spec");
+    Acting.as("ada", () -> ada.specs.update(spec("s", "claude", "feat/ada")));
+    SyncBox.round(main, ada);
+    assertEquals(List.of("agent"), ada.conflicts.pendingFor("spec", "s").orElseThrow().fields());
+    Acting.as("ada", () -> ada.specs.update(spec("s", "codex", "feat/ada")));
+
+    SyncBox.assertConverged(main, ada);
+  }
+
+  @Test
   void aFieldBothSidesChangedAfterALostAnswerParksForTheFde() throws IOException {
     Acting.as("ada", () -> ada.specs.create(spec("s", null, "feat/a")));
     SyncBox.pushLosingTheAnswer(main, ada, "spec");
@@ -106,6 +232,9 @@ class LostAnswerSyncTest {
     assertEquals(List.of("branch"), ada.conflicts.pendingFor("spec", "s").orElseThrow().fields());
     assertEquals("feat/main", main.specs.findById("s").orElseThrow().branch());
     assertEquals("feat/ada", ada.specs.findById("s").orElseThrow().branch(), "nothing is lost");
+    SyncBox.resolve(ada, "spec", "s", SyncBox.Resolve.MINE);
+    SyncBox.assertConverged(main, ada);
+    assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch());
   }
 
   @Test
@@ -211,9 +340,7 @@ class LostAnswerSyncTest {
             "ada",
             () ->
                 ada.specs.resolveConflict(
-                    "s",
-                    YamlUtil.parseMap(conflict.localSnapshot()),
-                    YamlUtil.parseMap(conflict.remoteSnapshot())));
+                    "s", YamlUtil.parseMap(conflict.localSnapshot()), conflict.theirs()));
     ada.conflicts.resolve(conflict.id(), rev);
     SyncBox.pushLosingTheAnswer(main, ada, "spec");
     assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch(), "main took ada's");
@@ -334,10 +461,14 @@ class LostAnswerSyncTest {
   }
 
   private static SpecStore.SpecRow spec(String id, String agent, String branch) {
+    return titled(id, "Spec " + id, agent, branch);
+  }
+
+  private static SpecStore.SpecRow titled(String id, String title, String agent, String branch) {
     return new SpecStore.SpecRow(
         id,
         "acme",
-        "Spec " + id,
+        title,
         SpecStatus.PENDING,
         "ada",
         agent,

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -68,7 +69,7 @@ class ParkedConflictFleetIT {
             runId,
             nodeReplica.base(runId),
             nodeReplica.current(runId),
-            pushedButNeverAcknowledged,
+            new MainVersion(pushedButNeverAcknowledged, mainReplica.currentRev(runId), "mady"),
             List.of("last_activity_at"));
         var mainPeer =
             nodeDb

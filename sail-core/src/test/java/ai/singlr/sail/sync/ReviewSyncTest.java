@@ -42,12 +42,14 @@ class ReviewSyncTest {
   private Box other;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final ReviewStore reviews;
     final SyncConflicts conflicts;
     final StoreReplica replica;
 
     Box(String id) {
+      this.id = id;
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.reviews = new ReviewStore(db);
@@ -117,6 +119,8 @@ class ReviewSyncTest {
     sync(other);
     var otherStage = other.reviews.stagesForReview(reviewId).getFirst();
     assertEquals(2, other.reviews.findingCountsForStage(otherStage.id()).get("HIGH"));
+
+    assertConverged();
   }
 
   @Test
@@ -136,6 +140,8 @@ class ReviewSyncTest {
         "adopting main's identical aggregate after a push must link the revision without"
             + " rebuilding — the rebuild deletes the finding rows that carry-forward and"
             + " dispute resolution read");
+
+    assertConverged();
   }
 
   @Test
@@ -154,6 +160,15 @@ class ReviewSyncTest {
         node.reviews.findingsForStage(stageId).size(),
         "adopting a snapshot accepted while a local write landed must never rebuild the"
             + " aggregate — the rebuild deletes the non-replicated finding rows");
+
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMainBut(
+          mainBox, nodeBox, "review", reviewId, SyncBox.BOX_LOCAL_FINDINGS);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
   }
 
   @Test
@@ -181,6 +196,27 @@ class ReviewSyncTest {
         "snapshot capture and adoption must be atomic against concurrent local writes — a torn"
             + " snapshot/revision pair or a write between the revision check and adoption"
             + " rebuilds the aggregate and deletes the non-replicated finding rows");
+
+    keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(reviewId);
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMainUnless(
+          mainBox, nodeBox, "review", reviewId, SyncBox.BOX_LOCAL_FINDINGS);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
+  }
+
+  private void keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(String reviewId) {
+    node.conflicts
+        .pendingFor("review", reviewId)
+        .ifPresent(
+            parked -> {
+              var mine = node.reviews.comparableSnapshot(reviewId);
+              var rev = node.reviews.resolveConflict(reviewId, mine, parked.theirs());
+              assertTrue(node.conflicts.resolve(parked.id(), rev), SyncBox.BOX_LOCAL_FINDINGS);
+            });
   }
 
   private MainReplica racingMain(Runnable onFirstCommit) {
@@ -242,6 +278,8 @@ class ReviewSyncTest {
 
     sync(other);
     assertEquals("passed", other.reviews.findReview(reviewId).orElseThrow().status());
+
+    assertConverged();
   }
 
   @Test
@@ -257,5 +295,19 @@ class ReviewSyncTest {
     assertEquals(0, report.conflicts());
     assertEquals(mainRevAfterPull, main.reviews.latestRev(reviewId));
     assertTrue(other.conflicts.pending().isEmpty());
+
+    assertConverged();
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.assertConverged(mainBox, nodeBox, otherBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
   }
 }

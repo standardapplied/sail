@@ -68,6 +68,10 @@ class ReplyChainSyncTest {
     return SyncBox.connect(main.server(Actor.sync("node", Role.ADMIN)), node);
   }
 
+  private void assertConverged() {
+    SyncBox.assertConverged(main, node.syncsAs(Actor.sync("node", Role.ADMIN)));
+  }
+
   private static void chain(MessageStore messages) {
     String parent = null;
     for (var i = 0; i < CHAIN; i++) {
@@ -84,6 +88,8 @@ class ReplyChainSyncTest {
     }
     assertEquals(CHAIN, nodeMessages.list("room", null, CHAIN + 1).size());
     assertEquals(new ChangeLog(main.db).maxSeq("message"), nodeReplica.checkpoint("main"));
+
+    assertConverged();
   }
 
   @Test
@@ -94,5 +100,7 @@ class ReplyChainSyncTest {
       assertEquals(CHAIN, report.report().pushed());
     }
     assertEquals(CHAIN, mainMessages.list("room", null, CHAIN + 1).size());
+
+    assertConverged();
   }
 }

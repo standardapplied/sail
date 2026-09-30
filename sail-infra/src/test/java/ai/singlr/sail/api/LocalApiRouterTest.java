@@ -209,7 +209,14 @@ class LocalApiRouterTest {
     remote.put("title", theirs);
     var recorded = YamlUtil.dumpJson(local);
     box.conflicts.record(
-        "spec", "auth", recorded, recorded, YamlUtil.dumpJson(remote), List.of("title"));
+        "spec",
+        "auth",
+        recorded,
+        recorded,
+        YamlUtil.dumpJson(remote),
+        "9-main",
+        "main",
+        List.of("title"));
   }
 
   private static LocalApiRequest merge(String template) {

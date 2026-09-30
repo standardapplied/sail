@@ -95,9 +95,7 @@ public final class LegacyDataMigration implements DataMigration {
       changed++;
     }
     for (var id : unjournaled(db, "projects", "name", "project")) {
-      var definition = projects.findByName(id).orElseThrow().definition();
-      db.transaction(
-          () -> projects.recordRevision(id, definition, null, "migration", false, false));
+      db.transaction(() -> projects.recordRevision(id, "migration", false));
       changed++;
     }
     for (var id : unjournaled(db, "reviews", "id", "review")) {
