@@ -822,6 +822,38 @@ class ConvergenceSyncTest {
   }
 
   @Test
+  void aProjectMadeUnderANameANodeNeverHeardDeletedLosesToTheRenamesBlock() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.round(main, ada);
+    upsertProject(bob, "bob", "p", "name: p\nbobs: true\n");
+    renameProject(ada, "ada", "p", "q");
+    SyncBox.round(main, ada);
+
+    assertConverged();
+
+    assertNull(definition(main, "p"));
+    assertNull(definition(bob, "p"));
+  }
+
+  @Test
+  void aCopyOfAReCreatedProjectStillAdoptsTheRenamesBlockAfterAnOlderHeardDeletion() {
+    upsertProject(ada, "ada", "p", "name: p\n");
+    SyncBox.quiesce(main, ada, bob);
+    Acting.as("ada", () -> new ProjectStore(ada.db).delete("p"));
+    SyncBox.quiesce(main, ada, bob);
+    upsertProject(ada, "ada", "p", "name: p\nsecond: true\n");
+    SyncBox.quiesce(main, ada, bob);
+    assertEquals("name: p\nsecond: true\n", definition(bob, "p"), "bob holds main's copy");
+    renameProject(ada, "ada", "p", "r");
+    SyncBox.round(main, ada);
+
+    assertConverged();
+
+    assertNull(definition(main, "p"), "bob's copy adopted the block");
+    assertNull(definition(bob, "p"));
+  }
+
+  @Test
   void aRenamesTombstoneAdoptedUnderAnotherAuthorUnderAnEarlierReleaseConverges() {
     upsertProject(ada, "ada", "p", "name: p\n");
     SyncBox.quiesce(main, ada, bob);

@@ -89,9 +89,10 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    * Renames a project by tombstoning the old identity and creating the new one, each an ordinary
    * revision that peers reconcile through the normal sync engine — so both halves propagate and the
    * old name cannot be resurrected by a stale peer that still holds it. The old identity's
-   * tombstone carries a resurrection block: it defeats an unbased create of the same name rather
-   * than losing to it (a plain delete does not). Idempotent — a no-op once {@code old} is gone;
-   * rejects a rename onto a name that is still live here.
+   * tombstone carries a resurrection block: it defeats a copy, or an unbased create, of the same
+   * name on a box that never heard the name deleted, rather than losing to it (a plain delete does
+   * not); a creation over a deletion a box heard is that box's own and is offered. Idempotent — a
+   * no-op once {@code old} is gone; rejects a rename onto a name that is still live here.
    */
   public void rename(String old, String renamed, String newDefinition) {
     var canonical = PersonalFields.redact(newDefinition);
