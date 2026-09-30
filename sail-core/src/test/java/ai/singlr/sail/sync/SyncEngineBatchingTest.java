@@ -6,9 +6,9 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.BlobStore;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,31 +27,37 @@ class SyncEngineBatchingTest {
 
   @Test
   void pendingOffersAreCommittedOnceTheyWeighTheBudgetAndTheRestAtTheEnd() throws Exception {
-    try (var node = new SyncBox("node")) {
+    try (var node = new SyncBox("node");
+        var box = mainHoldingEveryBody()) {
       for (var i = 1; i <= 5; i++) {
         node.specs.create(SyncBox.spec("spec-" + i, "Spec " + i, "pending"));
       }
-      var main = new WeighingMain();
+      var main = new WeighingMain(box.replica);
 
       var report = new SyncEngine().reconcile(node.replica, main);
 
       assertEquals(List.of(3, 2), main.batches, "flushed at the budget, then the remainder");
       assertEquals(5, report.pushed());
       for (var i = 1; i <= 5; i++) {
-        assertTrue(node.specs.latestRev("spec-" + i).startsWith("rev-"), "adopted main's rev");
+        assertEquals(
+            box.specs.latestRev("spec-" + i),
+            node.specs.latestRev("spec-" + i),
+            "adopted main's rev");
       }
       assertEquals(5, main.accepted.size());
+      assertConverged(box, node);
     }
   }
 
   @Test
   void anUnweighedAuthorityStillTakesTheWholeWalkAsOneBatch() throws Exception {
-    try (var node = new SyncBox("node")) {
+    try (var node = new SyncBox("node");
+        var box = mainHoldingEveryBody()) {
       for (var i = 1; i <= 5; i++) {
         node.specs.create(SyncBox.spec("spec-" + i, "Spec " + i, "pending"));
       }
       var main =
-          new WeighingMain() {
+          new WeighingMain(box.replica) {
             @Override
             public long weigh(Offer offer) {
               return 0;
@@ -66,43 +72,63 @@ class SyncEngineBatchingTest {
       new SyncEngine().reconcile(node.replica, main);
 
       assertEquals(List.of(5), main.batches);
+      assertConverged(box, node);
     }
   }
 
-  /** An empty authority that accepts every offer and records how the engine batched them. */
+  private static SyncBox mainHoldingEveryBody() {
+    var main = new SyncBox("main");
+    new BlobStore(main.db).putText("");
+    return main;
+  }
+
+  private static void assertConverged(SyncBox main, SyncBox node) {
+    SyncBox.quiesce(main, node);
+    SyncBox.assertEqualToMain(main, node);
+  }
+
+  /** Main over a real box, weighing every offer and recording how the engine batched them. */
   private static class WeighingMain implements MainReplica {
     final List<Integer> batches = new ArrayList<>();
     final List<String> accepted = new ArrayList<>();
+    private final StoreReplica replica;
+
+    WeighingMain(StoreReplica replica) {
+      this.replica = replica;
+    }
 
     @Override
     public String id() {
-      return "main";
+      return replica.id();
     }
 
     @Override
     public Set<String> entityIds() {
-      return Set.of();
+      return replica.entityIds();
     }
 
     @Override
     public Map<String, Object> current(String id) {
-      return null;
+      return replica.current(id);
     }
 
     @Override
     public String currentRev(String id) {
-      return null;
+      return replica.currentRev(id);
     }
 
     @Override
     public State state(String id) {
-      return new State(null, null, null);
+      return replica.state(id);
     }
 
     @Override
     public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-      accepted.add(id);
-      return new CommitOutcome.Accepted("rev-" + accepted.size(), null, null);
+      var outcome = replica.commit(id, snapshot, expectedRev);
+      if (outcome instanceof CommitOutcome.Accepted) {
+        accepted.add(id);
+      }
+      return outcome;
     }
 
     @Override
@@ -123,7 +149,7 @@ class SyncEngineBatchingTest {
 
     @Override
     public long maxSeq() {
-      return 0;
+      return replica.maxSeq();
     }
   }
 }

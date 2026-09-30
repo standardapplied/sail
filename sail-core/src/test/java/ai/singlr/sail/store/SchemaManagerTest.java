@@ -269,6 +269,53 @@ class SchemaManagerTest {
   }
 
   @Test
+  void aConflictParkedBeforeConflictsKeptMainsRevisionMigratesNamingNone() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE sync_conflicts ADD COLUMN remote_rev");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        """
+        INSERT INTO sync_conflicts (entity_type, entity_id, base_snapshot, local_snapshot,
+            remote_snapshot, fields, detected_at, status)
+        VALUES ('spec', 'auth', '{}', '{"title": "mine"}', '{"title": "theirs"}', 'title', 't0',
+            'pending')""");
+
+    new SchemaManager(db).migrate();
+
+    var parked = new SyncConflicts(db).pendingFor("spec", "auth").orElseThrow();
+    assertEquals(Map.of("title", "theirs"), parked.theirs().snapshot());
+    assertNull(parked.theirs().rev());
+    assertNull(parked.theirs().author());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
+  void aMessageJournaledUnderWhoeverWasActingIsAttributedToItsPoster() {
+    new SchemaManager(db).migrate();
+    db.execute(
+        """
+        INSERT INTO change_log (entity_type, entity_id, rev, actor, recorded_at, origin, deleted,
+            snapshot, kind)
+        VALUES ('message', 'm1', '1-a', 'uday', 't0', 'local', 0,
+                '{"room_id": "r", "author": "sail", "body": "passed"}', 'revision'),
+            ('message', 'm2', '1-b', 'mady', 't0', 'local', 0,
+                '{"room_id": "r", "author": "mady", "body": "hi"}', 'revision'),
+            ('spec', 's1', '1-c', 'uday', 't0', 'local', 0, '{"author": "sail"}', 'revision')""");
+
+    db.execute(SchemaManager.MESSAGES_AUTHORED_BY_THEIR_POSTER);
+
+    var changeLog = new ChangeLog(db);
+    assertEquals("sail", changeLog.history("message", "m1").getFirst().actor());
+    assertEquals("mady", changeLog.history("message", "m2").getFirst().actor());
+    assertEquals("uday", changeLog.history("spec", "s1").getFirst().actor(), "only messages");
+  }
+
+  @Test
   void backfillClosesOnlyTheResidueOfADoneSpecsPassedReview() {
     new SchemaManager(db).migrate();
     var specs = new SpecStore(db);

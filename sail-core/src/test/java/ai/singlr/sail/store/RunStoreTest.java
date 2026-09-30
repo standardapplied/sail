@@ -245,9 +245,11 @@ class RunStoreTest {
   @Test
   void updateProcessPersistsThePidFingerprintAndItStaysOnTheExecutingBox() {
     var id = newRun("backend", "auth");
+    var rev = store.latestRev(id);
 
     assertTrue(store.updateProcess(id, 4321, 987654321L, 8765));
 
+    assertEquals(rev, store.latestRev(id), "box-local bookkeeping mints no revision");
     var run = store.findById(id).orElseThrow();
     assertEquals(4321, run.pid());
     assertEquals(987654321L, run.pidTicks());
@@ -948,7 +950,10 @@ class RunStoreTest {
     var other = freshStore("resolve.db");
     other.applyRevision("00000000-0000-7000-8000-000000000001", base(), "rev-base");
 
-    other.resolveConflict("00000000-0000-7000-8000-000000000001", theirs(), theirs());
+    other.resolveConflict(
+        "00000000-0000-7000-8000-000000000001",
+        theirs(),
+        new MainVersion(theirs(), "9-main", "mady"));
 
     assertEquals(
         "completed", other.findById("00000000-0000-7000-8000-000000000001").orElseThrow().status());

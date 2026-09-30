@@ -46,11 +46,13 @@ class MessageSyncTest {
   private Box other;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final MessageStore messages;
     final StoreReplica replica;
 
     Box(String id) {
+      this.id = id;
       db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       db.execute(
@@ -99,6 +101,8 @@ class MessageSyncTest {
     assertEquals(2, main.messages.list("room", null, 10).size());
     assertTrue(node.messages.findById(fromOther.id()).isPresent());
     assertTrue(other.messages.findById(fromNode.id()).isPresent());
+
+    assertConverged();
   }
 
   @Test
@@ -121,6 +125,8 @@ class MessageSyncTest {
     Actor.call(Actor.sync("node", Role.MEMBER), () -> engine.reconcile(node.replica, main.replica));
     assertEquals(Map.of(), main.messages.openQuestions());
     assertEquals(Map.of(), node.messages.openQuestions());
+
+    assertConverged();
   }
 
   @Test
@@ -141,6 +147,8 @@ class MessageSyncTest {
         () ->
             main.messages.commitRevision(
                 row.id(), null, main.messages.latestRev(row.id()), main.messages.authority()));
+
+    assertConverged();
   }
 
   @Test
@@ -166,6 +174,8 @@ class MessageSyncTest {
         accepted instanceof PushOutcome.Accepted,
         "a reviewer-authored message that synchronizes after the fix lane rotated the run's"
             + " principal authenticates against the replicated history, never wedging sync");
+
+    assertConverged();
   }
 
   @Test
@@ -188,6 +198,8 @@ class MessageSyncTest {
     assertTrue(
         accepted instanceof PushOutcome.Accepted,
         "a spec's ownership fields are authoritative for policy before its room row exists");
+
+    assertConverged();
   }
 
   @Test
@@ -219,6 +231,8 @@ class MessageSyncTest {
         accepted instanceof PushOutcome.Accepted,
         "the review pipeline narrates verdicts as 'sail' on the box that ran the review;"
             + " refusing those rows wedges that box's sync forever");
+
+    assertConverged();
   }
 
   @Test
@@ -238,6 +252,8 @@ class MessageSyncTest {
                         main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'sail'"), denied.reason());
+
+    assertConverged();
   }
 
   @Test
@@ -259,6 +275,8 @@ class MessageSyncTest {
     assertNull(denied.currentRev(), "main holds no version of a message it never took");
     assertNull(denied.currentSnapshot());
     assertTrue(main.messages.findById(messageId).isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -308,6 +326,8 @@ class MessageSyncTest {
         }
       }
     }
+
+    assertConverged();
   }
 
   @Test
@@ -326,6 +346,8 @@ class MessageSyncTest {
                     main.messages.authority())));
 
     assertTrue(main.messages.list("room", null, 10).isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -345,6 +367,8 @@ class MessageSyncTest {
 
     assertTrue(refused.getMessage().contains("room 'missing'"), refused.getMessage());
     assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000003").isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -367,6 +391,8 @@ class MessageSyncTest {
 
     assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
     assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000004").isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -385,6 +411,8 @@ class MessageSyncTest {
                         main.messages.authority())));
 
     assertTrue(denied.reason().contains("may not post as 'codex-not-a-run'"), denied.reason());
+
+    assertConverged();
   }
 
   @Test
@@ -439,6 +467,8 @@ class MessageSyncTest {
                     snapshot("codex/00000000-0000-7000-8000-000000000010", "other-room"),
                     null,
                     main.messages.authority())));
+
+    assertConverged();
   }
 
   private static Map<String, Object> snapshot(String author, String specId) {
@@ -451,5 +481,19 @@ class MessageSyncTest {
         "sync message",
         "created_at",
         "2026-07-28T00:00:00Z");
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMain(mainBox, nodeBox);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
   }
 }

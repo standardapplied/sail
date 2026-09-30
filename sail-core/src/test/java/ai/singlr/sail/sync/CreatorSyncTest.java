@@ -59,6 +59,8 @@ class CreatorSyncTest {
     assertEquals("alice", creatorOf(main, "draft"), "main");
     assertEquals("alice", creatorOf(alice, "draft"), "the originating node");
     assertEquals("alice", creatorOf(bob, "draft"), "a pulling node");
+
+    assertConverged();
   }
 
   @Test
@@ -73,6 +75,8 @@ class CreatorSyncTest {
     assertTrue(
         alice.specs.history("draft").stream().anyMatch(entry -> entry.snapshot().contains("carol")),
         "the denied create stays in the node's history");
+
+    assertConverged();
   }
 
   @Test
@@ -86,6 +90,8 @@ class CreatorSyncTest {
     assertEquals("alice", creatorOf(main, "legacy"));
     assertEquals("alice", creatorOf(alice, "legacy"), "the pusher adopts the creator main records");
     assertEquals("alice", creatorOf(bob, "legacy"));
+
+    assertConverged();
   }
 
   @Test
@@ -102,6 +108,8 @@ class CreatorSyncTest {
     assertEquals("alice", creatorOf(main, "draft"));
     assertEquals("alice", creatorOf(alice, "draft"), "the pusher adopts main's creator");
     assertEquals("alice", creatorOf(bob, "draft"));
+
+    assertConverged();
   }
 
   @Test
@@ -118,6 +126,8 @@ class CreatorSyncTest {
     assertEquals("alice", creatorOf(main, "draft"));
     assertEquals("alice", creatorOf(alice, "draft"), "the pusher adopts main's creator");
     assertEquals("alice", creatorOf(bob, "draft"));
+
+    assertConverged();
   }
 
   @Test
@@ -131,6 +141,8 @@ class CreatorSyncTest {
     round(bob);
 
     assertEquals("alice", creatorOf(bob, "draft"));
+
+    assertConverged();
   }
 
   @Test
@@ -142,6 +154,8 @@ class CreatorSyncTest {
 
     assertNull(creatorOf(alice, "twin"), "adopting main's version adopts its creator, none");
     assertNull(creatorOf(main, "twin"));
+
+    assertConverged();
   }
 
   @Test
@@ -165,6 +179,8 @@ class CreatorSyncTest {
     assertEquals("alice", creatorOf(alice, "legacy"));
     assertEquals("alice", creatorOf(bob, "legacy"));
     assertEquals(main.replica.currentRev("legacy"), alice.replica.currentRev("legacy"));
+
+    assertConverged();
   }
 
   @Test
@@ -180,6 +196,8 @@ class CreatorSyncTest {
     var posted = new MessageStore(main.db).list("draft", null, 10);
     assertEquals(1, posted.size(), "only the creator's post stands");
     assertEquals("alice", posted.getFirst().author());
+
+    assertConverged();
   }
 
   private SyncSession.TypeReport round(SyncBox box) throws IOException {
@@ -228,5 +246,11 @@ class CreatorSyncTest {
 
   private static String creatorOf(SyncBox box, String id) {
     return box.specs.findById(id).orElseThrow().createdBy();
+  }
+
+  private void assertConverged() {
+    SyncBox.quiesce(main, alice, bob);
+    SyncBox.assertEqualToMain(main, alice);
+    SyncBox.assertEqualToMain(main, bob);
   }
 }

@@ -52,12 +52,6 @@ public final class ChangeLog {
   /** The newest entries every box keeps of each entity's history; a constant, never configured. */
   public static final int HISTORY_REVISIONS = 20;
 
-  /**
-   * The origin of a base a box rebased a parked conflict onto: main's side, under a rev the box
-   * minted. Neither a local change to offer nor a version heard from main.
-   */
-  public static final String RESOLVED_BASE = "resolved-base";
-
   private static final String EMPTY_SNAPSHOT = "{}";
 
   private final Sqlite db;
@@ -162,6 +156,42 @@ public final class ChangeLog {
       boolean deleted,
       String snapshot) {
     var actor = Actor.current();
+    appendAs(
+        entityType,
+        entityId,
+        rev,
+        actor.authorOf(offeredAuthor),
+        actor.peer(),
+        origin,
+        deleted,
+        snapshot);
+  }
+
+  /**
+   * As {@link #append(String, String, String, String, boolean, String)} for a revision whose
+   * content names its own author, as a message names who posted it: every box records {@code
+   * author} for it, whoever writes it here, because its type's rule decided who may post as whom
+   * before it was written.
+   */
+  public void appendAuthored(
+      String entityType,
+      String entityId,
+      String rev,
+      String author,
+      String origin,
+      String snapshot) {
+    appendAs(entityType, entityId, rev, author, Actor.current().peer(), origin, false, snapshot);
+  }
+
+  private void appendAs(
+      String entityType,
+      String entityId,
+      String rev,
+      String author,
+      String peer,
+      String origin,
+      boolean deleted,
+      String snapshot) {
     db.transaction(
         () -> {
           if (isErased(entityType, entityId)) {
@@ -178,8 +208,8 @@ public final class ChangeLog {
               entityType,
               entityId,
               rev,
-              actor.authorOf(offeredAuthor),
-              actor.peer(),
+              author,
+              peer,
               origin,
               deleted,
               snapshot,
@@ -472,10 +502,7 @@ public final class ChangeLog {
     return db
         .query(
             SELECT_HEAD
-                + " WHERE h.entity_type = ? AND l.kind = 'tombstone'"
-                + " AND l.origin NOT IN ('sync', '"
-                + RESOLVED_BASE
-                + "')"
+                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin <> 'sync'"
                 + " ORDER BY l.seq",
             row -> row.text(2),
             entityType)

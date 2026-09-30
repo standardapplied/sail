@@ -739,8 +739,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return revisions.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return revisions.resolveConflict(id, chosen, theirs);
   }
 
   /**

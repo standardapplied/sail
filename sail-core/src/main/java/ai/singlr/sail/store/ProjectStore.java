@@ -8,15 +8,12 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 
@@ -27,23 +24,27 @@ import java.util.Set;
  * whole and hands it to the provisioner.
  *
  * <p>Every mutation journals the project's full post-state into the shared {@link ChangeLog} under
- * entity type {@code project} within one transaction — the same revision/CAS/conflict machinery
- * {@link SpecStore} and {@link FileStore} use — so a project created on main replicates to every
- * box, with history and bidirectional conflict resolution. Only the {@code definition} is
- * comparable; attribution and timestamps never cause a false conflict. Containers and run state are
- * local and live elsewhere; this table is only the definition every box agrees on.
+ * entity type {@code project} within one transaction, through the {@link RevisionJournal} every
+ * mutable synced store shares — the same revision/CAS/conflict machinery {@link SpecStore} and
+ * {@link FileStore} use — so a project created on main replicates to every box, with history and
+ * bidirectional conflict resolution. Only the {@code definition} is comparable; attribution and
+ * timestamps never cause a false conflict. Containers and run state are local and live elsewhere;
+ * this table is only the definition every box agrees on.
  */
 public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "project";
   private static final String BLOCKS_RESURRECTION = "_blocks_resurrection";
+  private static final Map<String, Object> BLOCKING = Map.of(BLOCKS_RESURRECTION, true);
 
   private final Sqlite db;
   private final ChangeLog changeLog;
+  private final RevisionJournal journal;
 
   public ProjectStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
+    this.journal = new RevisionJournal(db, changeLog, new ProjectSchema());
   }
 
   public record ProjectRow(
@@ -70,7 +71,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     db.transaction(
         () -> {
           writeRow(name, canonical, author());
-          recordRevision(name, canonical, null, "local", false, false);
+          journal.recordRevision(name, "local", false);
         });
   }
 
@@ -78,12 +79,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   public boolean delete(String name) {
     return db.transaction(
         () -> {
-          var existing = findByName(name).orElse(null);
-          if (existing == null) {
+          if (findByName(name).isEmpty()) {
             return false;
           }
-          recordRevision(name, existing.definition(), null, "local", true, false);
-          db.execute("DELETE FROM projects WHERE name = ?", name);
+          journal.recordRevision(name, "local", true);
+          eraseRow(name);
           return true;
         });
   }
@@ -100,17 +100,16 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var canonical = PersonalFields.redact(newDefinition);
     db.transaction(
         () -> {
-          var existing = findByName(old).orElse(null);
-          if (existing == null) {
+          if (findByName(old).isEmpty()) {
             return;
           }
           if (findByName(renamed).isPresent()) {
             throw new IllegalStateException("A project named '" + renamed + "' already exists.");
           }
-          recordRevision(old, existing.definition(), null, null, "local", true, false, true);
-          db.execute("DELETE FROM projects WHERE name = ?", old);
+          journal.recordTombstone(old, "local", BLOCKING);
+          eraseRow(old);
           writeRow(renamed, canonical, author());
-          recordRevision(renamed, canonical, null, "local", false, false);
+          journal.recordRevision(renamed, "local", false);
         });
   }
 
@@ -122,78 +121,59 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     return db.query(SELECT + " ORDER BY name", ProjectStore::map);
   }
 
-  // ── Sync roles (mirrors FileStore): the database is the replicated source of truth ──
-
   @Override
   public String entityType() {
     return ENTITY;
   }
 
+  @Override
   public Map<String, Object> comparableSnapshot(String id) {
-    return findByName(id).map(row -> comparable(row.definition(), row.updatedBy())).orElse(null);
+    return journal.comparableSnapshot(id);
   }
 
   /**
    * As {@link #comparableSnapshot}, but a deleted id this box holds a rename resurrection-block for
-   * reports the blocking marker rather than absence, so a stale peer still holding the old name
-   * adopts the deletion instead of pushing its surviving copy back.
+   * reports the blocking marker, under its deleter, rather than absence, so a stale peer still
+   * holding the old name adopts the deletion instead of pushing its surviving copy back, and a node
+   * adopting it holds the same blocking deletion by the same author.
    */
   @Override
   public Map<String, Object> currentForSync(String id) {
     var current = comparableSnapshot(id);
-    return current != null || !blocksResurrection(id) ? current : blocksResurrectionMarker();
-  }
-
-  /** Reads the resurrection-block marker back as a deletion; otherwise a normal adopt. */
-  @Override
-  public void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
-    applyRevision(id, isBlocksResurrectionMarker(snapshot) ? null : snapshot, rev);
-  }
-
-  public Map<String, Object> comparableAtRev(String id, String rev) {
-    if (Strings.isBlank(rev)) {
-      return null;
+    if (current != null || !blocksResurrection(id)) {
+      return current;
     }
-    return changeLog
-        .at(ENTITY, id, rev)
-        .map(e -> comparable((String) YamlUtil.parseMap(e.snapshot()).get("definition")))
-        .orElse(null);
-  }
-
-  public String latestRev(String id) {
-    return changeLog.head(ENTITY, id).map(ChangeLog.Entry::rev).orElse(null);
-  }
-
-  public String baseRevOf(String id) {
-    if (findByName(id).isPresent()) {
-      return rawBaseRev(id);
-    }
-    return changeLog
+    var marker = new LinkedHashMap<>(BLOCKING);
+    changeLog
         .head(ENTITY, id)
-        .map(tombstone -> YamlUtil.parseMap(tombstone.snapshot()).get("_base_rev"))
-        .map(Object::toString)
-        .orElse(null);
+        .map(ChangeLog.Entry::actor)
+        .ifPresent(author -> marker.put(Snapshots.ACTOR, author));
+    return marker;
   }
 
+  @Override
+  public Map<String, Object> comparableAtRev(String id, String rev) {
+    return journal.comparableAtRev(id, rev);
+  }
+
+  @Override
+  public String latestRev(String id) {
+    return journal.latestRev(id);
+  }
+
+  @Override
+  public String baseRevOf(String id) {
+    return journal.baseRevOf(id);
+  }
+
+  @Override
   public Set<String> dirtyIds() {
-    var dirty =
-        new LinkedHashSet<>(
-            db.query(
-                """
-                SELECT name FROM projects
-                WHERE rev IS NULL OR base_rev IS NULL OR base_rev = '' OR rev <> base_rev
-                ORDER BY rowid""",
-                row -> row.text(0)));
-    dirty.addAll(changeLog.localTombstones(ENTITY));
-    return dirty;
+    return journal.dirtyIds();
   }
 
+  @Override
   public Set<String> syncEntityIds() {
-    return new LinkedHashSet<>(
-        db.query(
-            "SELECT DISTINCT entity_id FROM change_log WHERE entity_type = ?",
-            row -> row.text(0),
-            ENTITY));
+    return journal.entityIds();
   }
 
   /**
@@ -218,30 +198,24 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   /**
    * Adopts main's authoritative state at its exact rev (no minting), as the new synced ancestor.
    */
+  @Override
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
-    db.transaction(
-        () -> {
-          if (snapshot == null) {
-            adoptDeletion(id, rev);
-          } else {
-            var definition = definitionOf(snapshot);
-            writeRow(id, definition, Snapshots.actor(snapshot));
-            recordRevision(
-                id,
-                definition,
-                rev,
-                Snapshots.text(snapshot, Snapshots.ACTOR),
-                "sync",
-                false,
-                true,
-                false);
-          }
-        });
+    journal.applyRevision(id, snapshot, rev);
+  }
+
+  /**
+   * Adopts main's version of this box's own offer whose answer was lost; a deletion main took of an
+   * id whose tombstone here blocks resurrection is that blocking deletion.
+   */
+  @Override
+  public boolean acknowledge(String id, Map<String, Object> accepted, String rev) {
+    return journal.acknowledge(
+        id, accepted == null && blocksResurrection(id) ? BLOCKING : accepted, rev);
   }
 
   @Override
   public void eraseRow(String id) {
-    db.execute("DELETE FROM projects WHERE name = ?", id);
+    journal.eraseRow(id);
   }
 
   /** Who may write projects on this box: any writer, as its doors and main's commit decide. */
@@ -251,142 +225,41 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Compare-and-set commit as main: accepts only if {@code expectedRev} still matches. A
-   * blocks-resurrection marker is a tombstone to {@code authority}, which decides the offer before
-   * anything is written.
+   * Compare-and-set commit as main through the shared {@link RevisionJournal#commitRevision}. A
+   * blocks-resurrection marker commits the deletion with its blocking mark, and a stale or denied
+   * offer of an id whose tombstone blocks is answered with the marker, so the node adopts that
+   * deletion.
    */
   @Override
   public PushOutcome commitRevision(
       String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
     return db.transaction(
         () -> {
-          if (!Objects.equals(latestRev(id), expectedRev)) {
-            var current = comparableSnapshot(id);
-            if (current == null && blocksResurrection(id)) {
-              current = blocksResurrectionMarker();
-            }
-            return new PushOutcome.Stale(latestRev(id), current);
-          }
-          var blocks = isBlocksResurrectionMarker(snapshot);
-          var tombstone = snapshot == null || blocks;
-          var present = findByName(id).orElse(null);
-          if (tombstone && present == null && !blocks) {
-            return new PushOutcome.Accepted(latestRev(id));
-          }
-          var definition = tombstone ? null : definitionOf(snapshot);
-          var refusal =
-              authority.decide(
-                  Actor.current(), id, comparableSnapshot(id), tombstone ? null : snapshot);
-          if (refusal.isPresent()) {
-            return new PushOutcome.Denied(
-                refusal.get().message(), latestRev(id), comparableSnapshot(id));
-          }
-          if (tombstone) {
-            var rev =
-                recordRevision(
-                    id,
-                    present == null ? null : present.definition(),
-                    null,
-                    null,
-                    "sync",
-                    true,
-                    false,
-                    blocks);
-            if (present != null) {
-              db.execute("DELETE FROM projects WHERE name = ?", id);
-            }
-            return new PushOutcome.Accepted(rev);
-          }
-          writeRow(id, definition, Snapshots.actor(snapshot));
-          return new PushOutcome.Accepted(
-              recordRevision(
-                  id,
-                  definition,
-                  null,
-                  Snapshots.text(snapshot, Snapshots.ACTOR),
-                  "sync",
-                  false,
-                  false,
-                  false));
+          var outcome =
+              isBlocksResurrectionMarker(snapshot)
+                  ? journal.commitRevision(id, null, expectedRev, authority, BLOCKING)
+                  : journal.commitRevision(id, snapshot, expectedRev, authority);
+          return switch (outcome) {
+            case PushOutcome.Stale stale when stale.currentSnapshot() == null ->
+                new PushOutcome.Stale(stale.currentRev(), currentForSync(id));
+            case PushOutcome.Denied denied when denied.currentSnapshot() == null ->
+                new PushOutcome.Denied(denied.reason(), denied.currentRev(), currentForSync(id));
+            default -> outcome;
+          };
         });
+  }
+
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
+  @Override
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   /**
-   * Resolves an open project conflict locally: rebases the row onto main's conflicting definition
-   * {@code remote} as the new merge base — so the next sync can never re-raise the same conflict —
-   * then writes {@code chosen} as the resolved state. Take-theirs simply adopts main's value;
-   * keep-mine writes a forward local edit the next sync pushes. A {@code null} side is a deletion.
-   * Every state stays in the {@link ChangeLog}, so no choice loses work. The base is main's
-   * revision, adopted as {@link Actor#main()} so it keeps the author main recorded; only {@code
-   * chosen} is the resolver's.
+   * Journals the current state of {@code id}, a deletion when {@code deleted}, as {@code origin}.
    */
-  @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return db.transaction(
-        () -> {
-          var baseRev = Actor.call(Actor.main(), () -> adoptBase(id, remote));
-          if (Objects.equals(definitionOf(chosen), definitionOf(remote))) {
-            return baseRev;
-          }
-          return writeChosen(id, chosen);
-        });
-  }
-
-  private String adoptBase(String id, Map<String, Object> remote) {
-    if (remote == null) {
-      return adoptBaseDeletion(id);
-    }
-    var definition = definitionOf(remote);
-    writeRow(id, definition, Snapshots.actor(remote));
-    return recordRevision(
-        id, definition, null, Snapshots.text(remote, Snapshots.ACTOR), "sync", false, true, false);
-  }
-
-  private String adoptBaseDeletion(String id) {
-    var present = findByName(id).orElse(null);
-    if (present == null) {
-      var rev = Revisions.next(currentRev(id), "{}");
-      changeLog.append(ENTITY, id, rev, "sync", true, "{}");
-      return rev;
-    }
-    var rev = recordRevision(id, present.definition(), null, "sync", true, false);
-    db.execute("DELETE FROM projects WHERE name = ?", id);
-    return rev;
-  }
-
-  private String writeChosen(String id, Map<String, Object> chosen) {
-    if (chosen == null) {
-      var present = findByName(id).orElse(null);
-      if (present == null) {
-        return latestRev(id);
-      }
-      var rev = recordRevision(id, present.definition(), null, "resolve", true, false);
-      db.execute("DELETE FROM projects WHERE name = ?", id);
-      return rev;
-    }
-    var definition = definitionOf(chosen);
-    writeRow(id, definition, author());
-    return recordRevision(id, definition, null, "resolve", false, false);
-  }
-
-  private void adoptDeletion(String id, String rev) {
-    var present = findByName(id).orElse(null);
-    if (present == null) {
-      changeLog.append(ENTITY, id, rev, "sync", true, "{}");
-      return;
-    }
-    recordRevision(id, present.definition(), rev, "sync", true, false);
-    db.execute("DELETE FROM projects WHERE name = ?", id);
-  }
-
-  String recordRevision(
-      String id,
-      String definition,
-      String explicitRev,
-      String origin,
-      boolean deleted,
-      boolean setBaseRev) {
-    return recordRevision(id, definition, explicitRev, null, origin, deleted, setBaseRev, false);
+  String recordRevision(String id, String origin, boolean deleted) {
+    return journal.recordRevision(id, origin, deleted);
   }
 
   /**
@@ -406,41 +279,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   /** The snapshot the sync engine reads as "this identity is authoritatively, blockingly gone". */
   public static Map<String, Object> blocksResurrectionMarker() {
-    return Map.of(BLOCKS_RESURRECTION, true);
+    return BLOCKING;
   }
 
   public static boolean isBlocksResurrectionMarker(Map<String, Object> snapshot) {
     return snapshot != null && Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION));
-  }
-
-  private String recordRevision(
-      String id,
-      String definition,
-      String explicitRev,
-      String offeredAuthor,
-      String origin,
-      boolean deleted,
-      boolean setBaseRev,
-      boolean blocksResurrection) {
-    var map = new LinkedHashMap<String, Object>();
-    map.put("definition", definition);
-    if (deleted) {
-      map.put("_base_rev", rawBaseRev(id));
-      if (blocksResurrection) {
-        map.put(BLOCKS_RESURRECTION, true);
-      }
-    }
-    var snapshot = YamlUtil.dumpJson(map);
-    var rev = explicitRev != null ? explicitRev : Revisions.next(currentRev(id), snapshot);
-    if (!deleted) {
-      if (setBaseRev) {
-        db.execute("UPDATE projects SET rev = ?, base_rev = ? WHERE name = ?", rev, rev, id);
-      } else {
-        db.execute("UPDATE projects SET rev = ? WHERE name = ?", rev, id);
-      }
-    }
-    changeLog.appendSynced(ENTITY, id, rev, offeredAuthor, origin, deleted, snapshot);
-    return rev;
   }
 
   private static String author() {
@@ -470,50 +313,63 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     return definition == null ? null : definition.toString();
   }
 
-  /**
-   * The author carried in a synced snapshot. The {@code sync} default remains because the retained
-   * versioned 0.14 migration can journal a project row that predates attribution. Read on the
-   * receiving side so a current snapshot is attributed to the engineer who actually edited it.
-   */
-  private String rawBaseRev(String id) {
-    var value =
-        db.queryOne(
-                "SELECT COALESCE(base_rev, '') FROM projects WHERE name = ?",
-                row -> row.text(0),
-                id)
-            .orElse("");
-    return value.isBlank() ? null : value;
-  }
+  /** The project's store-specific half of the shared {@link RevisionJournal} sync protocol. */
+  private final class ProjectSchema implements EntitySchema {
 
-  private String currentRev(String id) {
-    return db.queryOne(
-            "SELECT COALESCE(rev, '') FROM projects WHERE name = ?", row -> row.text(0), id)
-        .orElse("");
-  }
-
-  /**
-   * The base/historical comparable carries only the work field. {@link ConflictDetector} ignores
-   * reserved {@code _}-prefixed keys, and the merge base's author is never needed, so the stored
-   * snapshot — and therefore the content-addressed revision — stays {@code {definition}} and two
-   * boxes still mint the same rev for the same definition.
-   */
-  private static Map<String, Object> comparable(String definition) {
-    var map = new LinkedHashMap<String, Object>();
-    map.put("definition", definition);
-    return map;
-  }
-
-  /**
-   * The transmitted comparable additionally carries {@code _actor} so the receiving box can
-   * attribute the synced row to its real author. It rides outside the work fields, so it never
-   * counts toward a conflict and never enters the revision hash.
-   */
-  private static Map<String, Object> comparable(String definition, String actor) {
-    var map = comparable(definition);
-    if (actor != null) {
-      map.put(Snapshots.ACTOR, actor);
+    @Override
+    public String entityType() {
+      return ENTITY;
     }
-    return map;
+
+    @Override
+    public String table() {
+      return "projects";
+    }
+
+    @Override
+    public String key() {
+      return "name";
+    }
+
+    @Override
+    public boolean exists(String id) {
+      return findByName(id).isPresent();
+    }
+
+    /**
+     * Only the definition, the one work field: the author rides as the journal head's, so two boxes
+     * mint the same rev for the same definition.
+     */
+    @Override
+    public Map<String, Object> snapshotMap(String id) {
+      return findByName(id).map(row -> comparable(row.definition())).orElse(null);
+    }
+
+    @Override
+    public void apply(String id, Map<String, Object> snapshot) {
+      writeRow(id, definitionOf(snapshot), Snapshots.actor(snapshot));
+    }
+
+    @Override
+    public Map<String, Object> comparable(Map<String, Object> full) {
+      return comparable(definitionOf(full));
+    }
+
+    @Override
+    public void deleteRow(String id) {
+      db.execute("DELETE FROM projects WHERE name = ?", id);
+    }
+
+    @Override
+    public boolean isDeletion(Map<String, Object> snapshot) {
+      return snapshot == null || isBlocksResurrectionMarker(snapshot);
+    }
+
+    private static Map<String, Object> comparable(String definition) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("definition", definition);
+      return map;
+    }
   }
 
   private static final String SELECT =

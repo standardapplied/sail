@@ -192,6 +192,25 @@ public final class NativeFleet implements AutoCloseable {
     }
   }
 
+  /**
+   * Asserts that every node's change-log heads — each entity's id, rev, kind and author, for every
+   * synced type — equal main's: after a fleet's final round, no box holds a revision main never
+   * minted or records another author for one.
+   */
+  public void assertHeadsAgree(Box... nodes) throws Exception {
+    var expected = main.query(HEADS);
+    for (var node : nodes) {
+      assertEquals(
+          expected, node.query(HEADS), () -> node.name + "'s change-log heads differ from main's");
+    }
+  }
+
+  private static final String HEADS =
+      """
+      SELECT l.entity_type, l.entity_id, l.rev, l.kind, l.actor
+      FROM change_heads h JOIN change_log l ON l.seq = h.seq
+      ORDER BY l.entity_type, l.entity_id""";
+
   public static boolean belowFloor(String version) {
     return SemVer.parse(version).compareTo(SemVer.parse(SyncWire.UPGRADE_FLOOR)) < 0;
   }

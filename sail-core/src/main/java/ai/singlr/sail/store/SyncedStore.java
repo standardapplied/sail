@@ -16,10 +16,11 @@ import java.util.Set;
  * projects, files, messages), which collapses the six near-identical hand-written replicas into one
  * generic adapter.
  *
- * <p>The {@code default} hooks cover the stores that diverge: {@link #currentForSync} and {@link
- * #adoptForSync} let a store weave a resurrection-blocking tombstone into the sync view (only
- * {@code ProjectStore} does), and {@link #mayPush} and {@link #live} let a single-writer store
- * answer for the box whose handle is asking (runs and reviews do).
+ * <p>The {@code default} hooks cover the stores that diverge: {@link #currentForSync} lets a store
+ * report a resurrection-blocking tombstone as its marker (only {@code ProjectStore} does), {@link
+ * #adoptForSync} lets a store settle what goes with a row main holds none of (only {@code RunStore}
+ * does), and {@link #mayPush} and {@link #live} let a single-writer store answer for the box whose
+ * handle is asking (runs and reviews do).
  */
 public interface SyncedStore {
 
@@ -110,9 +111,8 @@ public interface SyncedStore {
   }
 
   /**
-   * Adopts an authoritative state, unwrapping any sync-only marker the store's {@link
-   * #currentForSync} produced — {@link #applyRevision} for every store except the one that reads a
-   * blocking-tombstone marker back as a deletion.
+   * Adopts an authoritative state as the sync engine settles it — {@link #applyRevision} for every
+   * store except one that removes, with a row main holds none of, what could only land with it.
    */
   default void adoptForSync(String id, Map<String, Object> snapshot, String rev) {
     applyRevision(id, snapshot, rev);

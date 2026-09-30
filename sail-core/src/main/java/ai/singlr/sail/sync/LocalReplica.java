@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.MainVersion;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -125,12 +126,15 @@ public interface LocalReplica {
   /** Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). */
   void adopt(String id, Map<String, Object> snapshot, String rev);
 
-  /** Parks a conflict for human resolution; the local row is left untouched. */
+  /**
+   * Parks a conflict for human resolution against {@code remote}, main's side at its rev and
+   * author; the local row is left untouched.
+   */
   void recordConflict(
       String id,
       Map<String, Object> base,
       Map<String, Object> local,
-      Map<String, Object> remote,
+      MainVersion remote,
       List<String> fields);
 
   /** The highest of {@code peerId}'s sequences this node has applied for this type; 0 if none. */

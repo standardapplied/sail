@@ -67,7 +67,13 @@ class SyncContentFailureTest {
       assertEquals(
           0L, node.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
       assertEquals(0L, node.syncState.checkpoint("main", "file"));
+      assertConverged(main, node);
     }
+  }
+
+  private static void assertConverged(SyncBox main, SyncBox node) {
+    SyncBox.quiesce(main, node);
+    SyncBox.assertEqualToMain(main, node);
   }
 
   enum AnswerFault {
@@ -108,6 +114,7 @@ class SyncContentFailureTest {
       assertEquals(revision, files.latestRev("project/file"));
       assertTrue(files.dirtyIds().contains("project/file"));
       assertEquals(0, node.syncState.checkpoint("main", "file"));
+      assertConverged(main, node);
     }
   }
 
@@ -196,6 +203,7 @@ class SyncContentFailureTest {
             assertEquals(row.text(0), BlobStore.hash(row.bytes(1)));
             return row.text(0);
           });
+      assertConverged(main, node);
     }
   }
 
@@ -232,6 +240,7 @@ class SyncContentFailureTest {
             assertEquals(row.text(0), BlobStore.hash(row.bytes(1)));
             return row.text(0);
           });
+      assertConverged(main, node);
     }
   }
 

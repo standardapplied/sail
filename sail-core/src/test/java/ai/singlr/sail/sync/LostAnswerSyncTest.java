@@ -211,9 +211,7 @@ class LostAnswerSyncTest {
             "ada",
             () ->
                 ada.specs.resolveConflict(
-                    "s",
-                    YamlUtil.parseMap(conflict.localSnapshot()),
-                    YamlUtil.parseMap(conflict.remoteSnapshot())));
+                    "s", YamlUtil.parseMap(conflict.localSnapshot()), conflict.theirs()));
     ada.conflicts.resolve(conflict.id(), rev);
     SyncBox.pushLosingTheAnswer(main, ada, "spec");
     assertEquals("feat/ada", main.specs.findById("s").orElseThrow().branch(), "main took ada's");

@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SyncConflicts;
@@ -240,9 +241,17 @@ public final class StoreReplica implements LocalReplica, MainReplica {
       String entityId,
       Map<String, Object> base,
       Map<String, Object> local,
-      Map<String, Object> remote,
+      MainVersion remote,
       List<String> fields) {
-    conflicts.record(store.entityType(), entityId, json(base), json(local), json(remote), fields);
+    conflicts.record(
+        store.entityType(),
+        entityId,
+        json(base),
+        json(local),
+        json(remote.snapshot()),
+        remote.rev(),
+        remote.author(),
+        fields);
   }
 
   @Override

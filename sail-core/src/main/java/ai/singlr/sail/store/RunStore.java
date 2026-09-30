@@ -1417,8 +1417,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * run row is created before launch (so terminal hook events can find it), then updated here with
    * what the launch resolved. {@code pidTicks} is the agent process's {@code /proc} start-time
    * fingerprint — pids are reused by the kernel, so the pid alone can later name an unrelated
-   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches.
-   * Journals a revision so the identity replicates.
+   * process, and the stop lane refuses to signal a pid whose fingerprint no longer matches. The
+   * process identity is this box's own bookkeeping ({@code LOCAL_FIELDS}), never synced, so it
+   * journals no revision: one would name a version of the run main never holds.
    *
    * <p>Commits only while the run is still {@code running} and returns whether it did. A stop that
    * lands during launch preparation records its terminal intent on the row; the launcher discovers
@@ -1436,11 +1437,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               pidTicks,
               watcherPid != null ? watcherPid.longValue() : null,
               id);
-          if (db.changes() == 0) {
-            return false;
-          }
-          recordRevision(id, "local", false);
-          return true;
+          return db.changes() > 0;
         });
   }
 
@@ -1560,14 +1557,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open conflict locally, mirroring {@link SpecStore#resolveConflict}. Runs are
-   * single-writer so this is exercised only by the shared machinery's contract, never by normal
-   * operation: no two boxes ever edit the same run.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   String recordRevision(String id, String origin, boolean deleted) {

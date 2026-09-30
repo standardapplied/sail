@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -55,8 +56,27 @@ class SyncTransportTest {
   @BeforeEach
   void setUp() {
     main = new SyncBox(tempDir, "main");
-    nodeA = new SyncBox(tempDir, "A");
-    nodeB = new SyncBox(tempDir, "B");
+    nodeA = new SyncBox(tempDir, "A").syncsAs(Actor.sync("A", Role.ADMIN));
+    nodeB = new SyncBox(tempDir, "B").syncsAs(Actor.sync("B", Role.ADMIN));
+  }
+
+  private void assertConverged() {
+    SyncBox.quiesce(main, nodeA, nodeB);
+    SyncBox.assertEqualToMain(main, nodeA);
+    SyncBox.assertEqualToMain(main, nodeB);
+  }
+
+  private static void resolveTakingMain(SyncBox box, String type, String id) {
+    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
+    var theirs = conflict.theirs();
+    var rev =
+        Acting.as(
+            box.id,
+            () ->
+                SyncedEntities.require(type)
+                    .resolver(box.db)
+                    .resolveConflict(id, theirs.snapshot(), theirs));
+    box.conflicts.resolve(conflict.id(), rev);
   }
 
   @AfterEach
@@ -91,12 +111,12 @@ class SyncTransportTest {
   }
 
   private SyncBox.Link connect(SyncBox node) throws IOException {
-    return SyncBox.connect(main.server(Actor.sync(node.id, Role.ADMIN)), node);
+    return SyncBox.connect(main.server(node.session()), node);
   }
 
   private SyncBox.Link connect(SyncBox node, int frame, UnaryOperator<OutputStream> serverOut)
       throws IOException {
-    return SyncBox.connect(main.server(Actor.sync(node.id, Role.ADMIN)), node, frame, serverOut);
+    return SyncBox.connect(main.server(node.session()), node, frame, serverOut);
   }
 
   private SyncSession.TypeReport syncToMain(SyncBox node) throws IOException {
@@ -137,6 +157,7 @@ class SyncTransportTest {
     }
     assertEquals(before, new ChangeLog(nodeA.db).maxSeq("project"));
     assertTrue(new ProjectStore(nodeA.db).findByName("old").isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -159,6 +180,8 @@ class SyncTransportTest {
         nodeA.conflicts.pendingFor("project", "old").orElseThrow().fields());
     assertTrue(new ProjectStore(main.db).findByName("old").isPresent());
     assertTrue(projects.findByName("old").isEmpty());
+    resolveTakingMain(nodeA, "project", "old");
+    assertConverged();
   }
 
   @Test
@@ -198,6 +221,7 @@ class SyncTransportTest {
     var adopted = new RunStore(nodeA.db).findById(id).orElseThrow();
     assertEquals("from-main", adopted.branch());
     assertEquals("running", adopted.status());
+    assertConverged();
   }
 
   @Test
@@ -223,6 +247,8 @@ class SyncTransportTest {
         List.of("<stale>"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
     assertEquals("Auth", nodeA.specs.findById("auth").orElseThrow().title());
     assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
+    resolveTakingMain(nodeA, "spec", "auth");
+    assertConverged();
   }
 
   private record EditingReplica(LocalReplica inner, Runnable afterTransaction)
@@ -269,7 +295,7 @@ class SyncTransportTest {
         String id,
         Map<String, Object> base,
         Map<String, Object> local,
-        Map<String, Object> remote,
+        MainVersion remote,
         List<String> fields) {
       inner.recordConflict(id, base, local, remote, fields);
     }
@@ -295,6 +321,7 @@ class SyncTransportTest {
     assertEquals(1, pulled.report().pulled());
     assertEquals(1, pulled.entries());
     assertEquals("Auth", nodeB.specs.findById("auth").orElseThrow().title());
+    assertConverged();
   }
 
   @Test
@@ -315,6 +342,7 @@ class SyncTransportTest {
     var adopted = nodeA.specs.history("auth").getLast();
     assertEquals("B", adopted.actor(), "a node adopts the author main recorded");
     assertEquals("main", adopted.peer());
+    assertConverged();
   }
 
   @Test
@@ -326,6 +354,7 @@ class SyncTransportTest {
     var committed = main.specs.history("auth").getLast();
     assertEquals("A", committed.actor());
     assertEquals("A", main.specs.findById("auth").orElseThrow().updatedBy());
+    assertConverged();
   }
 
   @Test
@@ -334,6 +363,7 @@ class SyncTransportTest {
     nodeA.specs.delete("local");
     assertEquals(0, syncToMain(nodeA).report().total());
     assertTrue(main.specs.findById("local").isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -351,6 +381,7 @@ class SyncTransportTest {
     assertEquals("node B body", nodeA.specs.getContent("auth").orElseThrow().body());
     assertTrue(nodeA.conflicts.pending().isEmpty());
     assertTrue(nodeB.conflicts.pending().isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -366,6 +397,8 @@ class SyncTransportTest {
     assertEquals("Title from A", main.specs.findById("auth").orElseThrow().title());
     assertEquals(List.of("title"), nodeB.conflicts.pending().getFirst().fields());
     assertEquals("Title from B", nodeB.specs.findById("auth").orElseThrow().title());
+    resolveTakingMain(nodeB, "spec", "auth");
+    assertConverged();
   }
 
   @Test
@@ -378,6 +411,7 @@ class SyncTransportTest {
     assertTrue(main.specs.findById("auth").isEmpty());
     syncToMain(nodeB);
     assertTrue(nodeB.specs.findById("auth").isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -392,6 +426,8 @@ class SyncTransportTest {
     assertEquals(1, report.report().conflicts());
     assertTrue(main.specs.findById("auth").isEmpty());
     assertEquals(List.of("<deleted>"), nodeB.conflicts.pending().getFirst().fields());
+    resolveTakingMain(nodeB, "spec", "auth");
+    assertConverged();
   }
 
   @Test
@@ -416,6 +452,7 @@ class SyncTransportTest {
     }
     assertEquals("Spec b, edited", nodeA.specs.findById("b").orElseThrow().title());
     assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+    assertConverged();
   }
 
   @Test
@@ -450,6 +487,7 @@ class SyncTransportTest {
       assertEquals(0, link.count("need"));
     }
     assertEquals(1, syncRows(nodeA));
+    assertConverged();
   }
 
   @Test
@@ -514,6 +552,7 @@ class SyncTransportTest {
     assertEquals(6, nodeA.replica.entityIds().size());
     assertEquals(6, syncRows(nodeA), "no entry was adopted twice");
     assertEquals(main.replica.maxSeq(), nodeA.syncState.checkpoint("main", "spec"));
+    assertConverged();
   }
 
   @Test
@@ -533,6 +572,7 @@ class SyncTransportTest {
     }
     assertEquals("Y from A", main.specs.findById("y").orElseThrow().title());
     assertEquals("X from main", nodeA.specs.findById("x").orElseThrow().title());
+    assertConverged();
   }
 
   private UnaryOperator<OutputStream> beforeThePullsPage(Runnable action) {
@@ -588,6 +628,7 @@ class SyncTransportTest {
     assertEquals("in_progress", merged.status().wire());
     assertEquals("in_progress", nodeA.specs.findById("auth").orElseThrow().status().wire());
     assertTrue(nodeA.conflicts.pending().isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -611,6 +652,8 @@ class SyncTransportTest {
     assertEquals(
         List.of("title"), nodeA.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
     assertEquals("Title from A", nodeA.specs.findById("auth").orElseThrow().title());
+    resolveTakingMain(nodeA, "spec", "auth");
+    assertConverged();
   }
 
   @Test
@@ -631,6 +674,7 @@ class SyncTransportTest {
               .pushed());
       assertEquals(6, link.count("need"), "three frames asking what main took, three its rows");
     }
+    assertConverged();
   }
 
   @Test
@@ -646,6 +690,7 @@ class SyncTransportTest {
       assertEquals(2, link.count("need"), "what main took, then main's rows");
     }
     assertEquals(4, main.replica.entityIds().size());
+    assertConverged();
   }
 
   @Test
@@ -668,6 +713,7 @@ class SyncTransportTest {
       assertTrue(failure.getMessage().startsWith("spec mine:"), failure.getMessage());
     }
     assertTrue(main.specs.findById("mine").isEmpty());
+    assertConverged();
   }
 
   @Test
@@ -685,6 +731,9 @@ class SyncTransportTest {
       assertEquals("mine", report.denials().getFirst().id());
     }
     assertTrue(main.specs.findById("mine").isEmpty(), "the read-only push never reached main");
+    nodeA.specs.delete("mine");
+    nodeA.syncsAs(Actor.sync("A", Role.VIEWER));
+    assertConverged();
   }
 
   @Test
@@ -717,5 +766,7 @@ class SyncTransportTest {
         "ZGVwbG95",
         ai.singlr.sail.store.ContentFixtures.text(mainFiles, "acme", "scripts/deploy.sh"));
     assertEquals(0L, new SyncState(nodeA.db).checkpoint("main", "file"));
+    nodeA.syncsAs(Actor.sync("A", Role.MEMBER));
+    assertConverged();
   }
 }

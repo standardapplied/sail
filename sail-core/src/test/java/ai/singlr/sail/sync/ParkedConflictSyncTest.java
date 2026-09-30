@@ -13,6 +13,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -62,6 +63,11 @@ class ParkedConflictSyncTest {
     }
   }
 
+  private void assertConverged() {
+    SyncBox.quiesce(main, node);
+    SyncBox.assertEqualToMain(main, node);
+  }
+
   @Test
   void aRunParkedOverItsHeartbeatIsReexaminedAndHealsThoughNeitherSideHasNews() throws Exception {
     var id = DateTimeUtils.newId().toString();
@@ -90,7 +96,7 @@ class ParkedConflictSyncTest {
         id,
         nodeReplica.base(id),
         nodeReplica.current(id),
-        pushedButNeverAcknowledged,
+        new MainVersion(pushedButNeverAcknowledged, mainReplica.currentRev(id), main.id),
         List.of("last_activity_at"));
     nodeReplica.advanceCheckpoint(main.id, mainReplica.maxSeq());
 
@@ -101,5 +107,7 @@ class ParkedConflictSyncTest {
     assertEquals(
         nodeRuns.findById(id).orElseThrow().lastActivityAt(),
         mainRuns.findById(id).orElseThrow().lastActivityAt());
+
+    assertConverged();
   }
 }

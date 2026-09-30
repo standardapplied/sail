@@ -151,7 +151,8 @@ class SyncCommandTest {
           "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
           SyncCommand.renderStatus(stale));
 
-      new SyncConflicts(db).record("spec", "auth", "base", "mine", "theirs", List.of("title"));
+      new SyncConflicts(db)
+          .record("spec", "auth", "base", "mine", "theirs", null, null, List.of("title"));
       var conflicted = nonNull(capture(() -> new CommandLine(status.get()).execute("--json")));
       assertEquals(1, conflicted.get("pending_conflicts"));
     }

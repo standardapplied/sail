@@ -8,12 +8,16 @@ package ai.singlr.sail.store;
 import java.util.Map;
 
 /**
- * Rebases an entity onto main's conflicting state and writes the chosen resolution, returning the
- * rev the row now carries. Implemented by every store whose rows sync ({@link SpecStore}, {@link
- * ProjectStore}, {@link FileStore}, {@link RunStore}, and {@link ReviewStore}) so conflict
- * resolution can dispatch on entity type without knowing the concrete store.
+ * Adopts main's side of a parked conflict at main's rev and author and writes the chosen resolution
+ * over it, returning the rev the row now carries. Implemented by every synced store so conflict
+ * resolution can dispatch on entity type without knowing the concrete store; every store that rides
+ * the {@link RevisionJournal} delegates to it.
  */
 public interface ConflictResolver {
 
-  String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote);
+  /**
+   * Resolves the conflict on {@code id} to {@code chosen}, adopting {@code theirs}, main's side as
+   * the conflict recorded it, first.
+   */
+  String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs);
 }

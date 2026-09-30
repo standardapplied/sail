@@ -368,7 +368,7 @@ class BoxRunsSyncTest {
                     .resolveConflict(
                         parked.entityId(),
                         YamlUtil.parseMap(parked.localSnapshot()),
-                        YamlUtil.parseMap(parked.remoteSnapshot()))));
+                        parked.theirs())));
   }
 
   @Test

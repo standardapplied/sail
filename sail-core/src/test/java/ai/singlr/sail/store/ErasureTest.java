@@ -372,7 +372,7 @@ class ErasureTest {
   @Test
   void anErasureRemovesTheEntitysConflictsAndThisBoxsRequestToEraseIt() {
     spec("old", null);
-    new SyncConflicts(db).record("spec", "old", "{}", "{}", "{}", List.of("title"));
+    new SyncConflicts(db).record("spec", "old", "{}", "{}", "{}", null, null, List.of("title"));
     new EraseRequests(db).request("spec", "old", "uday");
 
     erasure.adopt("spec", "old", "5-x");

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -44,12 +45,14 @@ class ProjectSyncTest {
   private Box other;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final ProjectStore projects;
     final SyncConflicts conflicts;
     final StoreReplica replica;
 
     Box(String id) {
+      this.id = id;
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.projects = new ProjectStore(db);
@@ -101,6 +104,8 @@ class ProjectSyncTest {
     assertInstanceOf(CommitOutcome.Denied.class, deleted);
     assertEquals("A1", definitionOn(main, "acme"));
     assertEquals(rev, main.replica.currentRev("acme"));
+
+    assertConverged();
   }
 
   @Test
@@ -112,6 +117,8 @@ class ProjectSyncTest {
 
     sync(other);
     assertEquals("name: acme\nimage: ubuntu/24.04\n", definitionOn(other, "acme"));
+
+    assertConverged();
   }
 
   @Test
@@ -123,6 +130,8 @@ class ProjectSyncTest {
 
     sync(other);
     assertEquals("from-node", definitionOn(other, "acme"));
+
+    assertConverged();
   }
 
   @Test
@@ -143,6 +152,8 @@ class ProjectSyncTest {
     assertEquals("B1", definitionOn(other, "beta"));
     assertTrue(node.conflicts.pending().isEmpty());
     assertTrue(other.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -162,6 +173,10 @@ class ProjectSyncTest {
     var pending = other.conflicts.pendingFor("project", "acme");
     assertEquals(List.of("definition"), pending.orElseThrow().fields());
     assertEquals("from-other", definitionOn(other, "acme"), "local copy is left untouched");
+
+    resolveTakingMains(other, "project", "acme");
+
+    assertConverged();
   }
 
   @Test
@@ -176,16 +191,21 @@ class ProjectSyncTest {
 
     sync(other);
     assertTrue(other.projects.findByName("acme").isEmpty());
+
+    assertConverged();
   }
 
   @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
-    node.projects.applyRevision("acme", Map.of("definition", "AAA"), "1-base");
+    main.projects.upsert("acme", "AAA");
+    sync(node);
 
     var outcome = node.replica.commit("acme", Map.of("definition", "BBB"), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
     assertEquals("AAA", definitionOn(node, "acme"));
+
+    assertConverged();
   }
 
   @Test
@@ -200,6 +220,8 @@ class ProjectSyncTest {
         node.projects.findByName("p").isEmpty(), "the stale unbased copy adopts main's deletion");
     assertEquals("name: q\n", definitionOn(node, "q"), "the new name propagates");
     assertTrue(main.projects.findByName("p").isEmpty(), "the node never resurrected p on main");
+
+    assertConverged();
   }
 
   @Test
@@ -213,6 +235,8 @@ class ProjectSyncTest {
     assertTrue(node.projects.findByName("p").isEmpty());
     assertEquals("name: q\n", definitionOn(node, "q"));
     assertTrue(node.conflicts.pending().isEmpty(), "a clean rename is a pull, not a conflict");
+
+    assertConverged();
   }
 
   @Test
@@ -224,5 +248,34 @@ class ProjectSyncTest {
 
     assertTrue(main.projects.findByName("p").isEmpty(), "main receives the deletion");
     assertEquals("name: q\n", definitionOn(main, "q"), "main receives the new name");
+
+    assertConverged();
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMain(mainBox, nodeBox);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
+  }
+
+  private static void resolveTakingMains(Box box, String type, String id) {
+    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
+    var theirs = conflict.theirs();
+    var rev =
+        Acting.as(
+            box.id,
+            () ->
+                SyncedEntities.require(type)
+                    .resolver(box.db)
+                    .resolveConflict(id, theirs.snapshot(), theirs));
+    box.conflicts.resolve(conflict.id(), rev);
   }
 }

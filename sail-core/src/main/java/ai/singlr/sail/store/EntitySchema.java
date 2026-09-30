@@ -12,21 +12,28 @@ import java.util.Map;
  * the sync <em>protocol</em> — rev minting, {@code base_rev}/tombstone bookkeeping, the
  * compare-and-set commit, and three-way conflict resolution — identically for every mutable synced
  * store; this strategy supplies the handful of things that genuinely differ: the entity's name, its
- * table (which must carry {@code id}, {@code rev}, and {@code base_rev} columns), and how a row
+ * table (which must carry its key, {@code rev}, and {@code base_rev} columns), and how a row
  * projects to and from a snapshot. Who a revision is attributed to is the bound {@link
  * ai.singlr.sail.identity.Actor}, never the row.
  *
- * <p>Implemented by the five mutable synced stores that ride the journal: specs, rooms, runs,
- * reviews and files. Projects, which weave a resurrection-blocking marker into their revisions, and
- * messages, which never change, keep their own commit and do not ride it.
+ * <p>Implemented by the six mutable synced stores that ride the journal: specs, rooms, runs,
+ * reviews, files and projects, whose rename's tombstone carries a resurrection-blocking mark.
+ * Messages, which never change, keep their own commit and do not ride it.
  */
 public interface EntitySchema {
 
   /** The {@code change_log.entity_type} discriminator for this entity, e.g. {@code "spec"}. */
   String entityType();
 
-  /** The row table, which must have {@code id}, {@code rev}, and {@code base_rev} columns. */
+  /** The row table, which must have its {@link #key}, {@code rev}, and {@code base_rev} columns. */
   String table();
+
+  /**
+   * The column of {@link #table} naming an entity's id: {@code id} unless a store names another.
+   */
+  default String key() {
+    return "id";
+  }
 
   /** Whether a live row exists for {@code id} (a tombstone is not a live row). */
   boolean exists(String id);
@@ -54,4 +61,13 @@ public interface EntitySchema {
    * transaction.
    */
   void deleteRow(String id);
+
+  /**
+   * Whether {@code snapshot}, a version main sent, stands for a deletion: null always does, and a
+   * store whose tombstones carry marks sends a marked tombstone as those marks — a project rename's
+   * resurrection block. The journal adopts one as a tombstone recording them.
+   */
+  default boolean isDeletion(Map<String, Object> snapshot) {
+    return snapshot == null;
+  }
 }

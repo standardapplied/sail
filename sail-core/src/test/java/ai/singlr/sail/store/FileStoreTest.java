@@ -289,7 +289,7 @@ class FileStoreTest {
         files.resolveConflict(
             id("a.txt"),
             ContentFixtures.snapshot(files, "theirs"),
-            ContentFixtures.snapshot(files, "theirs"));
+            new MainVersion(ContentFixtures.snapshot(files, "theirs"), "9-main", "mady"));
 
     assertEquals("theirs", ContentFixtures.text(files, "acme", "a.txt"));
     assertEquals(rev, files.baseRevOf(id("a.txt")), "base now equals theirs, so no re-raise");
@@ -302,7 +302,7 @@ class FileStoreTest {
     files.resolveConflict(
         id("a.txt"),
         ContentFixtures.snapshot(files, "mine"),
-        ContentFixtures.snapshot(files, "theirs"));
+        new MainVersion(ContentFixtures.snapshot(files, "theirs"), "9-main", "mady"));
 
     assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
     assertTrue(
@@ -317,7 +317,7 @@ class FileStoreTest {
   void resolveTakeTheirsWhereTheirsIsADeleteRemovesTheRow() {
     ContentFixtures.put(files, "acme", "a.txt", "mine");
 
-    files.resolveConflict(id("a.txt"), null, null);
+    files.resolveConflict(id("a.txt"), null, new MainVersion(null, "9-main", "mady"));
 
     assertTrue(files.find("acme", "a.txt").isEmpty());
   }
@@ -327,7 +327,10 @@ class FileStoreTest {
     files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "base"), "1-base");
     ContentFixtures.put(files, "acme", "a.txt", "mine");
 
-    files.resolveConflict(id("a.txt"), ContentFixtures.snapshot(files, "mine"), null);
+    files.resolveConflict(
+        id("a.txt"),
+        ContentFixtures.snapshot(files, "mine"),
+        new MainVersion(null, "9-main", "mady"));
 
     assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
   }
@@ -336,7 +339,10 @@ class FileStoreTest {
   void resolveDeleteMineWhereTheirsEditsTombstonesTheRow() {
     files.applyRevision(id("a.txt"), ContentFixtures.snapshot(files, "base"), "1-base");
 
-    files.resolveConflict(id("a.txt"), null, ContentFixtures.snapshot(files, "theirs"));
+    files.resolveConflict(
+        id("a.txt"),
+        null,
+        new MainVersion(ContentFixtures.snapshot(files, "theirs"), "9-main", "mady"));
 
     assertTrue(files.find("acme", "a.txt").isEmpty());
   }

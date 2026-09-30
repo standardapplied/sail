@@ -2,6 +2,16 @@
 
 ## 0.46.3
 
+- **Every box holds exactly what main holds once it has synced.** After a round per box with no new writes, each node's copy of every synced entity equals main's: its fields, author, creator, revision, and deletion.
+  - **A restore is never undone.** A node that adopted main's deletion of a spec, room, file or project used to keep treating it as its own pending delete. When main or another box restored or re-added the entity, that node pushed the delete again and main took it; with a restore to an older revision it parked a delete-versus-edit conflict instead, and a node that did not own the entity was told main denied a delete it never made. A deletion a node adopts is now main's, and a later restore or re-add is pulled everywhere, with no conflict and no denial.
+  - **`sail conflicts resolve --theirs` takes main's version as main made it**, at main's revision and under main's author, a deletion's deleter included. It used to mint a revision of the node's own, credited to `main`, that main never held. `--mine` and `--merge` still write the choice over main's version as the node's own change. A conflict parked before this release does not name main's revision, so resolving it is refused, naming the fix, until `sail sync` re-records it.
+  - **A room adopts every field main holds**, its creation time included, so a node that was offline while a room was deleted and re-created takes main's. A room deleted and re-created on one box before it syncs continues its revision counter and parks no conflict.
+  - A message is recorded under the author it names on every box. A post made while acting as someone else, such as the review pipeline's verdicts, used to be credited to the poster's FDE on its own box and to its author everywhere else. The upgrade corrects the history of existing messages.
+  - A revision main recorded with no author is adopted with none, not credited to `main`.
+  - A project renamed on main reaches nodes as the rename's blocking deletion, under the FDE who renamed it, where nodes used to hold a plain deletion credited to `main`.
+  - A change made on a node while its own earlier change is on the way to main is offered next, where it used to park a conflict with itself.
+  - Starting an agent no longer records a revision of its run for the process ids only the box running it keeps, which left that box on a revision main never held until the run next changed.
+
 - **A box's runs carry the handle main knows it by, and a live run is never rewritten.** Every run a box reserves — dispatch, build, restart, ad-hoc (`sail run`, `agent sweep`, the API), the review pipeline and its fix lane, and room wakes — carries the box's handle as both `node` and `owner`. Runs used to be stamped with a blank node, a stale handle, or the spec's or room's owner, and main then denied them, sometimes mid-run, and the node deleted them.
   - Main's `welcome` names the handle it authenticated the session as. A node whose configured sync handle is blank or another fails its round before offering or adopting anything, naming both handles and the fix.
   - One box syncs as each FDE. Main records the first box that syncs as an FDE and refuses any other, naming both boxes; an admin runs `sail fde release-box <handle>` on main after retiring the old box. Main's own FDE syncs from no box but main.

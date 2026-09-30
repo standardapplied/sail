@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,14 @@ class SyncConflictsTest {
   void recordThenReadPending() {
     var id =
         conflicts.record(
-            "spec", "auth", "{base}", "{local}", "{remote}", List.of("title", "status"));
+            "spec",
+            "auth",
+            "{base}",
+            "{local}",
+            "{remote}",
+            "4-main",
+            "mady",
+            List.of("title", "status"));
 
     var pending = conflicts.pending();
     assertEquals(1, pending.size());
@@ -46,14 +54,30 @@ class SyncConflictsTest {
     assertEquals(id, c.id());
     assertEquals("auth", c.entityId());
     assertEquals("{local}", c.localSnapshot());
+    assertEquals("4-main", c.remoteRev());
+    assertEquals("mady", c.remoteAuthor());
     assertEquals(List.of("title", "status"), c.fields());
     assertEquals("pending", c.status());
   }
 
   @Test
+  void theirsIsMainsSideAtItsRevisionAndAuthor() {
+    conflicts.record(
+        "spec", "auth", null, null, "{\"title\": \"theirs\"}", "4-main", "mady", List.of("title"));
+    conflicts.record("spec", "gone", null, "{}", null, "5-main", "mady", List.of("<deleted>"));
+
+    assertEquals(
+        new MainVersion(Map.of("title", "theirs"), "4-main", "mady"),
+        conflicts.pendingFor("spec", "auth").orElseThrow().theirs());
+    assertEquals(
+        new MainVersion(null, "5-main", "mady"),
+        conflicts.pendingFor("spec", "gone").orElseThrow().theirs());
+  }
+
+  @Test
   void recordingAgainReplacesTheOpenConflictForThatEntity() {
-    conflicts.record("spec", "auth", "b1", "l1", "r1", List.of("title"));
-    conflicts.record("spec", "auth", "b2", "l2", "r2", List.of("status"));
+    conflicts.record("spec", "auth", "b1", "l1", "r1", null, null, List.of("title"));
+    conflicts.record("spec", "auth", "b2", "l2", "r2", null, null, List.of("status"));
 
     var pending = conflicts.pending();
     assertEquals(1, pending.size());
@@ -62,14 +86,14 @@ class SyncConflictsTest {
 
   @Test
   void pendingForFindsByEntity() {
-    conflicts.record("spec", "auth", "b", "l", "r", List.of("title"));
+    conflicts.record("spec", "auth", "b", "l", "r", null, null, List.of("title"));
     assertTrue(conflicts.pendingFor("spec", "auth").isPresent());
     assertTrue(conflicts.pendingFor("spec", "other").isEmpty());
   }
 
   @Test
   void resolveMarksResolvedAndRemovesFromPending() {
-    var id = conflicts.record("spec", "auth", "b", "l", "r", List.of("title"));
+    var id = conflicts.record("spec", "auth", "b", "l", "r", null, null, List.of("title"));
 
     assertTrue(conflicts.resolve(id, "5-merged"));
     assertTrue(conflicts.pending().isEmpty());
@@ -78,14 +102,14 @@ class SyncConflictsTest {
 
   @Test
   void emptyFieldListRoundTrips() {
-    conflicts.record("spec", "auth", "b", "l", "r", List.of());
+    conflicts.record("spec", "auth", "b", "l", "r", null, null, List.of());
     assertEquals(List.of(), conflicts.pending().getFirst().fields());
   }
 
   @Test
   void conflictsAreScopedAndOrderedById() {
-    conflicts.record("spec", "a", "b", "l", "r", List.of("x"));
-    conflicts.record("spec", "b", "b", "l", "r", List.of("y"));
+    conflicts.record("spec", "a", "b", "l", "r", null, null, List.of("x"));
+    conflicts.record("spec", "b", "b", "l", "r", null, null, List.of("y"));
 
     var pending = conflicts.pending();
     assertEquals(2, pending.size());

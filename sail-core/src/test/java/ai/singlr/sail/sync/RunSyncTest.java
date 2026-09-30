@@ -44,12 +44,14 @@ class RunSyncTest {
   private Box other;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final RunStore runs;
     final SyncConflicts conflicts;
     final StoreReplica replica;
 
     Box(String id) {
+      this.id = id;
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.runs = new RunStore(db);
@@ -110,6 +112,8 @@ class RunSyncTest {
     sync(other);
     assertEquals("node", other.runs.findById(id).orElseThrow().node());
     assertEquals("running", other.runs.findById(id).orElseThrow().status());
+
+    assertConverged();
   }
 
   @Test
@@ -134,6 +138,8 @@ class RunSyncTest {
     assertEquals("node", replicated.node());
     assertEquals("running", replicated.status());
     assertFalse(other.replica.mayPush(id));
+
+    assertConverged();
   }
 
   @Test
@@ -149,6 +155,8 @@ class RunSyncTest {
     sync(other);
     assertEquals("completed", other.runs.findById(id).orElseThrow().status());
     assertEquals(0, other.runs.findById(id).orElseThrow().exitCode());
+
+    assertConverged();
   }
 
   @Test
@@ -166,6 +174,8 @@ class RunSyncTest {
     assertEquals(List.of(), node.conflicts.pending(), "a heartbeat is never a decision");
     assertEquals(latest, main.runs.findById(id).orElseThrow().lastActivityAt());
     assertEquals(latest, node.runs.findById(id).orElseThrow().lastActivityAt());
+
+    assertConverged();
   }
 
   @Test
@@ -173,7 +183,7 @@ class RunSyncTest {
     var id = startRun(node, "node");
     sync(node);
     node.runs.stampActivity(id, Duration.ZERO);
-    node.conflicts.record("run", id, "{}", "{}", "{}", List.of("last_activity_at"));
+    node.conflicts.record("run", id, "{}", "{}", "{}", null, null, List.of("last_activity_at"));
 
     sync(node);
 
@@ -181,6 +191,8 @@ class RunSyncTest {
     assertEquals(
         node.runs.findById(id).orElseThrow().lastActivityAt(),
         main.runs.findById(id).orElseThrow().lastActivityAt());
+
+    assertConverged();
   }
 
   @Test
@@ -194,6 +206,8 @@ class RunSyncTest {
     assertFalse(
         node.replica.mayPush(stampless),
         "a stampless run is no box's until the round stamps it with this box's handle");
+
+    assertConverged();
   }
 
   @Test
@@ -214,6 +228,8 @@ class RunSyncTest {
         "running",
         other.runs.findById(id).orElseThrow().status(),
         "the reader discards its illegitimate change and adopts main's authoritative version");
+
+    assertConverged();
   }
 
   @Test
@@ -230,6 +246,8 @@ class RunSyncTest {
     assertEquals("other", node.runs.findById(fromOther).orElseThrow().node());
     assertTrue(node.conflicts.pending().isEmpty());
     assertTrue(other.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -245,6 +263,8 @@ class RunSyncTest {
     assertEquals(0, report.conflicts());
     assertEquals(
         mainRevAfterPull, main.runs.latestRev(id), "main's row is untouched by the reader's round");
+
+    assertConverged();
   }
 
   @Test
@@ -260,6 +280,8 @@ class RunSyncTest {
     assertEquals(99L, owned.pidTicks());
     assertEquals("/home/dev/.sail/runs/" + id + "/agent.log", owned.logPath());
     assertEquals("running", main.runs.findById(id).orElseThrow().status());
+
+    assertConverged();
   }
 
   @Test
@@ -277,5 +299,21 @@ class RunSyncTest {
     assertNull(other.runs.findById(id).orElseThrow().pidTicks());
     assertNull(other.runs.findById(id).orElseThrow().logPath());
     assertEquals("running", other.runs.findById(id).orElseThrow().status());
+
+    assertConverged();
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node);
+        var otherBox = opened(other)) {
+      SyncBox.quiesce(mainBox, nodeBox, otherBox);
+      SyncBox.assertEqualToMain(mainBox, nodeBox);
+      SyncBox.assertEqualToMain(mainBox, otherBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
   }
 }

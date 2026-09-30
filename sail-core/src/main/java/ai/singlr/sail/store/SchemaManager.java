@@ -112,6 +112,18 @@ public final class SchemaManager {
               AND sp.status = 'done')""";
 
   /**
+   * Every box records a message revision under the author the message names ({@code
+   * ChangeLog.appendAuthored}); a box that posted a message before that recorded whoever was acting
+   * instead, so main and the nodes named different authors for the same revision. Named so the
+   * migration test runs this exact statement.
+   */
+  static final String MESSAGES_AUTHORED_BY_THEIR_POSTER =
+      """
+      UPDATE change_log SET actor = json_extract(snapshot, '$.author')
+          WHERE entity_type = 'message' AND kind = 'revision'
+          AND actor IS NOT json_extract(snapshot, '$.author')""";
+
+  /**
    * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
    * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
    * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
@@ -590,7 +602,10 @@ public final class SchemaManager {
               handle TEXT PRIMARY KEY,
               box_id TEXT NOT NULL,
               claimed_at TEXT NOT NULL
-          )""");
+          )""",
+          "ALTER TABLE sync_conflicts ADD COLUMN remote_rev TEXT",
+          "ALTER TABLE sync_conflicts ADD COLUMN remote_author TEXT",
+          MESSAGES_AUTHORED_BY_THEIR_POSTER);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

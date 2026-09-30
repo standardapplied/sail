@@ -420,14 +420,10 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open room conflict locally: rebases onto main's conflicting content as the new
-   * merge base, then writes {@code chosen} as the resolved state. Every state stays in the {@link
-   * ChangeLog}, so no choice loses work.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   private static RoomRow mapRoom(Sqlite.Row row) {
@@ -482,10 +478,15 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       return findById(id).map(RoomStore.this::snapshotMap).orElse(null);
     }
 
+    /**
+     * Writes every synced field of {@code snapshot}. The creator and creation time are written
+     * once: an update keeps the row's, except that a node adopting main's revision takes main's.
+     */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var now = DateTimeUtils.now().toString();
       var createdAt = Snapshots.text(snapshot, "created_at");
+      var adopting = Actor.current().lane() == Actor.Lane.MAIN;
       db.execute(
           """
           INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,
@@ -494,6 +495,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           ON CONFLICT(id) DO UPDATE SET project = excluded.project, title = excluded.title,
               assignee = excluded.assignee, wake = excluded.wake, roster = excluded.roster,
               created_by = CASE WHEN ? = 1 THEN excluded.created_by ELSE rooms.created_by END,
+              created_at = CASE WHEN ? = 1 THEN excluded.created_at ELSE rooms.created_at END,
               updated_at = excluded.updated_at, updated_by = excluded.updated_by""",
           id,
           Snapshots.text(snapshot, "project"),
@@ -505,7 +507,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Strings.isBlank(createdAt) ? now : createdAt,
           now,
           Snapshots.actor(snapshot),
-          Actor.current().lane() == Actor.Lane.MAIN ? 1 : 0);
+          adopting ? 1 : 0,
+          adopting && Strings.isNotBlank(createdAt) ? 1 : 0);
     }
 
     /**

@@ -178,7 +178,40 @@ public final class SyncBox implements AutoCloseable {
    * withdrew stays. Every mismatch is reported at once.
    */
   public static void assertEqualToMain(SyncBox main, SyncBox node) {
-    var mismatches = new ArrayList<String>();
+    var mismatches = mismatches(main, node);
+    if (!mismatches.isEmpty()) {
+      fail(node.id + " differs from main:\n" + String.join("\n", mismatches.values()));
+    }
+  }
+
+  /**
+   * As {@link #assertEqualToMain}, for a scenario that cannot converge on one entity for a reason
+   * another change owns, named by {@code why}: every other entity equals main's, and that one still
+   * differs, so the scenario fails the moment the divergence is fixed and the exception can go.
+   */
+  public static void assertEqualToMainBut(
+      SyncBox main, SyncBox node, String type, String id, String why) {
+    var mismatches = mismatches(main, node);
+    var known = type + " " + id;
+    if (!mismatches.containsKey(known)) {
+      fail(known + " now equals main's; drop the exception (" + why + ")");
+    }
+    mismatches.remove(known);
+    if (!mismatches.isEmpty()) {
+      fail(node.id + " differs from main:\n" + String.join("\n", mismatches.values()));
+    }
+  }
+
+  /**
+   * Why a box that holds a review's findings cannot equal main on that review yet: its findings are
+   * box-local, and its aggregate counts its own rows at main's revision.
+   */
+  public static final String BOX_LOCAL_FINDINGS =
+      "a review's findings are box-local until sail-review-findings-sync, so the box holding them"
+          + " counts its own finding rows at main's revision";
+
+  private static Map<String, String> mismatches(SyncBox main, SyncBox node) {
+    var mismatches = new LinkedHashMap<String, String>();
     var mains = main.replicas();
     var nodes = node.replicas();
     for (var entity : SyncedEntities.all()) {
@@ -190,17 +223,18 @@ public final class SyncBox implements AutoCloseable {
         var actual = version(node, nodes.get(type), type, id);
         if (expected == null) {
           if (nodes.get(type).current(id) != null) {
-            mismatches.add(type + " " + id + ": main holds none, " + node.id + " holds " + actual);
+            mismatches.put(
+                type + " " + id,
+                type + " " + id + ": main holds none, " + node.id + " holds " + actual);
           }
         } else if (!expected.equals(actual)) {
-          mismatches.add(
+          mismatches.put(
+              type + " " + id,
               type + " " + id + "\n   main: " + expected + "\n   " + node.id + ": " + actual);
         }
       }
     }
-    if (!mismatches.isEmpty()) {
-      fail(node.id + " differs from main:\n" + String.join("\n", mismatches));
-    }
+    return mismatches;
   }
 
   private static List<String> loggedIds(SyncBox box, String type) {

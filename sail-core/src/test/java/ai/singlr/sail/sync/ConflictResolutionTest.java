@@ -29,9 +29,9 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The end-to-end property of {@link SpecStore#resolveConflict}: after a conflict is parked, the
  * user's choice (mine / theirs / merge) is applied, and a follow-up sync converges main and node on
- * that choice <em>without re-raising the conflict</em> — because resolving rebases the row onto
- * main's content, so detection can never see the same divergence twice. Covers field-level and
- * delete-vs-edit conflicts in both directions.
+ * that choice <em>without re-raising the conflict</em> — because resolving adopts main's side at
+ * main's revision first, so detection can never see the same divergence twice. Covers field-level
+ * and delete-vs-edit conflicts in both directions.
  */
 @ActingAs
 class ConflictResolutionTest {
@@ -67,6 +67,15 @@ class ConflictResolutionTest {
     }
   }
 
+  private void assertConverged() {
+    SyncBox.quiesce(
+        main,
+        node.syncsAs(Actor.sync(node.id, Role.ADMIN)),
+        other.syncsAs(Actor.sync(other.id, Role.ADMIN)));
+    SyncBox.assertEqualToMain(main, node);
+    SyncBox.assertEqualToMain(main, other);
+  }
+
   private SyncConflicts.Conflict raiseTitleConflict() {
     node.create(SyncBox.spec("auth", "Auth", "pending"));
     sync(node);
@@ -91,7 +100,7 @@ class ConflictResolutionTest {
 
     var mine = snapshot(conflict.localSnapshot());
     var theirs = snapshot(conflict.remoteSnapshot());
-    var rev = node.specs.resolveConflict("auth", mine, theirs);
+    var rev = node.specs.resolveConflict("auth", mine, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     sync(node);
@@ -101,6 +110,8 @@ class ConflictResolutionTest {
     assertEquals("Title from node", other.specs.findById("auth").orElseThrow().title());
     assertEquals("Title from node", node.specs.findById("auth").orElseThrow().title());
     assertTrue(node.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -108,7 +119,7 @@ class ConflictResolutionTest {
     var conflict = raiseTitleConflict();
 
     var theirs = snapshot(conflict.remoteSnapshot());
-    var rev = node.specs.resolveConflict("auth", theirs, theirs);
+    var rev = node.specs.resolveConflict("auth", theirs, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     assertEquals("Title from other", node.specs.findById("auth").orElseThrow().title());
@@ -119,13 +130,17 @@ class ConflictResolutionTest {
     assertTrue(
         node.specs.history("auth").stream().anyMatch(e -> e.snapshot().contains("Title from node")),
         "the local version is retained in the change log");
+
+    assertConverged();
   }
 
   @Test
   void takeTheirsKeepsMainsAuthorOnTheResolvingNode() {
-    var theirs = snapshot(raiseTitleConflictBetween("other", "node").remoteSnapshot());
+    var conflict = raiseTitleConflictBetween("other", "node");
+    var theirs = snapshot(conflict.remoteSnapshot());
 
-    Acting.as("node", () -> node.specs.resolveConflict("auth", theirs, theirs));
+    var rev =
+        Acting.as("node", () -> node.specs.resolveConflict("auth", theirs, conflict.theirs()));
 
     assertEquals("other", main.specs.findById("auth").orElseThrow().updatedBy());
     assertEquals(
@@ -135,6 +150,9 @@ class ConflictResolutionTest {
     var head = node.specs.history("auth").getLast();
     assertEquals("other", head.actor());
     assertEquals(Actor.MAIN_HANDLE, head.peer());
+
+    node.conflicts.resolve(conflict.id(), rev);
+    assertConverged();
   }
 
   @Test
@@ -143,12 +161,14 @@ class ConflictResolutionTest {
     var mine = snapshot(conflict.localSnapshot());
     var theirs = snapshot(conflict.remoteSnapshot());
 
-    Acting.as("node", () -> node.specs.resolveConflict("auth", mine, theirs));
+    Acting.as("node", () -> node.specs.resolveConflict("auth", mine, conflict.theirs()));
 
     var history = node.specs.history("auth");
     assertEquals("other", history.get(history.size() - 2).actor(), "the adopted base is main's");
     assertEquals("node", history.getLast().actor());
     assertEquals("node", node.specs.findById("auth").orElseThrow().updatedBy());
+
+    assertConverged();
   }
 
   private SyncConflicts.Conflict raiseTitleConflictBetween(String onOther, String onNode) {
@@ -170,7 +190,7 @@ class ConflictResolutionTest {
     var theirs = snapshot(conflict.remoteSnapshot());
     var merged = new LinkedHashMap<>(snapshot(conflict.localSnapshot()));
     merged.put("title", "Merged title");
-    var rev = node.specs.resolveConflict("auth", merged, theirs);
+    var rev = node.specs.resolveConflict("auth", merged, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     sync(node);
@@ -179,6 +199,8 @@ class ConflictResolutionTest {
     assertEquals("Merged title", main.specs.findById("auth").orElseThrow().title());
     assertEquals("Merged title", other.specs.findById("auth").orElseThrow().title());
     assertTrue(node.conflicts.pending().isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -196,12 +218,14 @@ class ConflictResolutionTest {
     assertEquals(List.of("<deleted>"), conflict.fields());
 
     var theirs = snapshot(conflict.remoteSnapshot());
-    var rev = node.specs.resolveConflict("auth", theirs, theirs);
+    var rev = node.specs.resolveConflict("auth", theirs, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     assertEquals("Edited by other", node.specs.findById("auth").orElseThrow().title());
     var second = sync(node);
     assertEquals(0, second.conflicts());
+
+    assertConverged();
   }
 
   @Test
@@ -217,7 +241,7 @@ class ConflictResolutionTest {
 
     var conflict = node.conflicts.pendingFor("spec", "auth").orElseThrow();
     var theirs = snapshot(conflict.remoteSnapshot());
-    var rev = node.specs.resolveConflict("auth", null, theirs);
+    var rev = node.specs.resolveConflict("auth", null, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     assertTrue(node.specs.findById("auth").isEmpty());
@@ -225,6 +249,8 @@ class ConflictResolutionTest {
     sync(other);
     assertTrue(main.specs.findById("auth").isEmpty());
     assertTrue(other.specs.findById("auth").isEmpty());
+
+    assertConverged();
   }
 
   @Test
@@ -242,7 +268,7 @@ class ConflictResolutionTest {
     assertEquals(List.of("<deleted>"), conflict.fields());
 
     var mine = snapshot(conflict.localSnapshot());
-    var rev = node.specs.resolveConflict("auth", mine, null);
+    var rev = node.specs.resolveConflict("auth", mine, conflict.theirs());
     node.conflicts.resolve(conflict.id(), rev);
 
     assertEquals("Kept by node", node.specs.findById("auth").orElseThrow().title());
@@ -250,5 +276,7 @@ class ConflictResolutionTest {
     sync(other);
     assertEquals("Kept by node", main.specs.findById("auth").orElseThrow().title());
     assertEquals("Kept by node", other.specs.findById("auth").orElseThrow().title());
+
+    assertConverged();
   }
 }

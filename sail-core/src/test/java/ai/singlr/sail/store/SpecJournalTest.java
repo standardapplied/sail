@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.List;
@@ -86,8 +87,7 @@ class SpecJournalTest {
     assertEquals(
         "the body",
         new BlobStore(db)
-            .text(
-                (String) store.comparableAtRev("auth", history.getLast().rev()).get("body_hash")));
+            .text((String) YamlUtil.parseMap(history.getLast().snapshot()).get("body_hash")));
     assertTrue(history.getLast().snapshot().contains("in_progress"));
   }
 
@@ -105,8 +105,7 @@ class SpecJournalTest {
     assertEquals(
         "important work",
         new BlobStore(db)
-            .text(
-                (String) store.comparableAtRev("auth", history.getLast().rev()).get("body_hash")));
+            .text((String) YamlUtil.parseMap(history.getLast().snapshot()).get("body_hash")));
   }
 
   @Test

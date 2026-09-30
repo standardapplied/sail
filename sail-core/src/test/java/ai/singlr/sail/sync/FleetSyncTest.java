@@ -47,6 +47,7 @@ class FleetSyncTest {
   private Box node;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final SpecStore specs;
     final FileStore files;
@@ -57,6 +58,7 @@ class FleetSyncTest {
     final StoreReplica projectReplica;
 
     Box(String id) {
+      this.id = id;
       this.db = Sqlite.open(dir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       var changeLog = new ChangeLog(db);
@@ -158,6 +160,8 @@ class FleetSyncTest {
     assertEquals(
         2, node.fdes.list().size(), "the roster pulled — the step the aborts used to skip");
     assertEquals("Mady M", node.fdes.byHandle("mady").orElseThrow().displayName());
+
+    assertConverged();
   }
 
   @Test
@@ -176,6 +180,8 @@ class FleetSyncTest {
     assertFalse(onNode.contains("Alex Morgan"));
     assertFalse(onNode.contains("uday@example.com"));
     assertFalse(onNode.contains("UDAYKEY"), "main's SSH key never lands on the node");
+
+    assertConverged();
   }
 
   @Test
@@ -192,6 +198,8 @@ class FleetSyncTest {
     assertEquals(0, report.conflicts(), "identical redacted content converges, never conflicts");
     assertTrue(
         node.projects.findByName("outline").orElseThrow().definition().contains("${GIT_NAME}"));
+
+    assertConverged();
   }
 
   private static void insertLegacyProject(Box box, String name, String definition) {
@@ -213,9 +221,23 @@ class FleetSyncTest {
         "uday",
         node.projects.findByName("acme").orElseThrow().updatedBy(),
         "the synced row keeps its real author, not the literal 'sync'");
+
+    assertConverged();
   }
 
   private String decode(FileStore.FileRow row) {
     return node.files.blobs().text(row.contentHash());
+  }
+
+  private void assertConverged() {
+    try (var mainBox = opened(main);
+        var nodeBox = opened(node)) {
+      SyncBox.quiesce(mainBox, nodeBox);
+      SyncBox.assertEqualToMain(mainBox, nodeBox);
+    }
+  }
+
+  private SyncBox opened(Box box) {
+    return SyncBox.opening(dir.resolve(box.id + ".db"), box.id);
   }
 }

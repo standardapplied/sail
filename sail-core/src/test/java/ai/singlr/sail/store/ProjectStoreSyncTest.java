@@ -71,7 +71,7 @@ class ProjectStoreSyncTest {
 
     assertNotEquals(rev1, store.latestRev("acme"));
     assertEquals(def("v2", "uday"), store.comparableSnapshot("acme"));
-    assertEquals(def("v1"), store.comparableAtRev("acme", rev1));
+    assertEquals(def("v1", "uday"), store.comparableAtRev("acme", rev1));
   }
 
   @Test
@@ -139,7 +139,8 @@ class ProjectStoreSyncTest {
   void resolveConflictTakeTheirsAdoptsMainsDefinitionUnderMainsAuthor() {
     store.upsert("acme", "mine");
 
-    store.resolveConflict("acme", def("theirs", "mady"), def("theirs", "mady"));
+    store.resolveConflict(
+        "acme", def("theirs", "mady"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
     assertEquals(def("theirs", "mady"), store.comparableSnapshot("acme"));
     var head = new ChangeLog(db).head("project", "acme").orElseThrow();
@@ -151,7 +152,8 @@ class ProjectStoreSyncTest {
   void resolveConflictKeepMineWritesAForwardEditThatPushes() {
     store.applyRevision("acme", def("theirs"), "rev-theirs");
 
-    store.resolveConflict("acme", def("mine"), def("theirs", "mady"));
+    store.resolveConflict(
+        "acme", def("mine"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
     assertEquals(def("mine", "uday"), store.comparableSnapshot("acme"));
     var history = new ChangeLog(db).history("project", "acme");

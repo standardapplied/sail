@@ -176,6 +176,8 @@ class SyncCliTest {
             "idx_run_delivered_message")) db.execute("DROP INDEX " + index);
     db.execute("DROP TABLE erase_requests");
     db.execute("DROP TABLE fde_boxes");
+    for (var column : List.of("remote_rev", "remote_author"))
+      db.execute("ALTER TABLE sync_conflicts DROP COLUMN " + column);
     db.execute("DROP TRIGGER specs_status_since_insert");
     db.execute("DROP TRIGGER specs_status_since_update");
     for (var column : List.of("archived_at", "cancelled_at"))

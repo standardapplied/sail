@@ -31,10 +31,11 @@ import picocli.CommandLine.Parameters;
  * Lists and resolves the sync conflicts parked on this box, across every synced entity type — specs
  * and shared project files alike. A conflict is opened only when a remote change clashes with a
  * local edit on the same field (or a delete races an edit); the local row is never touched while it
- * is open. {@code resolve} rebases the row onto main's version and writes the chosen value, so a
- * follow-up {@code sail sync} converges and the conflict cannot re-raise — and every version stays
- * in the change log, so no choice is destructive. File content is an opaque blob, so a file
- * conflict offers only {@code --mine}/{@code --theirs}, never a field-level {@code --merge}.
+ * is open. {@code resolve} adopts main's side at main's revision and author, as a pull would, and
+ * writes the chosen value over it, so a follow-up {@code sail sync} converges and the conflict
+ * cannot re-raise — and every version stays in the change log, so no choice is destructive. File
+ * content is an opaque blob, so a file conflict offers only {@code --mine}/{@code --theirs}, never
+ * a field-level {@code --merge}.
  */
 @Command(
     name = "conflicts",

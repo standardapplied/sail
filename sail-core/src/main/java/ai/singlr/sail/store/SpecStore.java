@@ -1001,18 +1001,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return journal.commitRevision(id, snapshot, expectedRev, authority);
   }
 
-  /**
-   * Resolves an open conflict locally by rebasing the row onto main's conflicting content {@code
-   * remote} — recorded as the new merge base, so the next sync can never re-raise the same conflict
-   * (base now equals remote) — and then writing {@code chosen} as the resolved state. When {@code
-   * chosen} differs from {@code remote} (keep-mine or a merge) the row becomes a forward local edit
-   * the next sync pushes; when they match (take-theirs) the row simply adopts main's value, and the
-   * earlier local version is still in the {@link ChangeLog}. A {@code null} side is a deletion.
-   * Returns the rev the row now carries. No work is ever lost: every state is journaled.
-   */
+  /** Resolves an open conflict through the shared {@link RevisionJournal#resolveConflict}. */
   @Override
-  public String resolveConflict(String id, Map<String, Object> chosen, Map<String, Object> remote) {
-    return journal.resolveConflict(id, chosen, remote);
+  public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
+    return journal.resolveConflict(id, chosen, theirs);
   }
 
   private static Map<String, Object> withSync(String id, Map<String, Object> snapshot) {

@@ -113,6 +113,7 @@ class SyncBlobTest {
       } finally {
         disconnect.countDown();
       }
+      assertConverged(main, node);
     }
   }
 
@@ -178,6 +179,7 @@ class SyncBlobTest {
         viewer.destroyForcibly();
         viewer.waitFor();
       }
+      assertConverged(main, node);
     }
   }
 
@@ -223,6 +225,7 @@ class SyncBlobTest {
       assertFalse(blobs.has(orphan));
       assertEquals(
           mainFiles.latestRev("project/file"), new FileStore(node.db).latestRev("project/file"));
+      assertConverged(main, node);
     }
   }
 
@@ -271,6 +274,7 @@ class SyncBlobTest {
       }
       var destination = new FileStore((upload ? main : node).db);
       assertEquals(files.list("project"), destination.list("project"));
+      assertConverged(main, node);
     }
   }
 
@@ -342,6 +346,7 @@ class SyncBlobTest {
         assertEquals(files.blobs().chunk(changed.iterator().next()).length, report.fetchedBytes());
         assertEquals(1, requestedChunks(link));
       }
+      assertConverged(main, node);
     }
   }
 
@@ -387,6 +392,7 @@ class SyncBlobTest {
         assertEquals(all.size() - held.size(), requestedChunks(link));
       }
       assertEquals(hash, new FileStore(node.db).find("proj", "binary").orElseThrow().contentHash());
+      assertConverged(main, node);
     }
   }
 
@@ -426,6 +432,11 @@ class SyncBlobTest {
         assertTrue(node.specs.findById("auth").isEmpty(), "no other type's page was adopted");
         assertThrows(SyncTransportException.class, () -> link.session().fetchFdes());
       }
+      try (var nodeBox =
+          SyncBox.opening(dir.resolve("node.db"), "node-box")
+              .syncsAs(Actor.sync("node", Role.MEMBER))) {
+        assertConverged(main, nodeBox);
+      }
     }
   }
 
@@ -456,6 +467,7 @@ class SyncBlobTest {
         assertEquals(1, link.reconcile("spec", replicas.get("spec")).report().pulled());
       }
       assertEquals("Auth", node.specs.findById("auth").orElseThrow().title());
+      assertConverged(main, node);
     }
   }
 
@@ -506,6 +518,7 @@ class SyncBlobTest {
         assertEquals(1, link.count("chunk"));
         assertEquals(files.blobs().chunk(changed.iterator().next()).length, report.sentBytes());
       }
+      assertConverged(main, node);
     }
   }
 
@@ -551,6 +564,7 @@ class SyncBlobTest {
         assertEquals(chunks.size() - held.size(), link.count("chunk"));
       }
       assertTrue(new BlobStore(main.db).has(hash));
+      assertConverged(main, node);
     }
   }
 
@@ -572,6 +586,7 @@ class SyncBlobTest {
           0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
       assertEquals(
           0, main.db.queryOne("SELECT COUNT(*) FROM blobs", row -> row.integer(0)).orElseThrow());
+      assertConverged(main, node.syncsAs(Actor.sync("node", Role.VIEWER)));
     }
   }
 
@@ -639,6 +654,7 @@ class SyncBlobTest {
       assertTrue(failed.message().contains(hash));
       assertEquals(
           0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
+      assertConverged(main, node);
     }
   }
 
@@ -668,6 +684,7 @@ class SyncBlobTest {
       assertEquals(
           0, main.db.queryOne("SELECT COUNT(*) FROM chunks", row -> row.integer(0)).orElseThrow());
       assertTrue(new FileStore(main.db).list("proj").isEmpty());
+      assertConverged(main, node);
     }
   }
 
@@ -691,6 +708,9 @@ class SyncBlobTest {
         assertEquals("theirs from need", new BlobStore(node.db).text(remoteHash));
       }
       assertEquals("mine", node.specs.getContent("a").orElseThrow().body());
+      resolveKeepingMine(node, "spec", "a");
+      assertConverged(main, node);
+      assertEquals("mine", main.specs.getContent("a").orElseThrow().body());
     }
   }
 
@@ -729,7 +749,26 @@ class SyncBlobTest {
             new BlobStore(node.db)
                 .has(main.specs.comparableSnapshot("a").get("body_hash").toString()));
       }
+      assertConverged(main, node);
     }
+  }
+
+  private static void assertConverged(SyncBox main, SyncBox node) {
+    SyncBox.quiesce(main, node);
+    SyncBox.assertEqualToMain(main, node);
+  }
+
+  private static void resolveKeepingMine(SyncBox box, String type, String id) {
+    var conflict = box.conflicts.pendingFor(type, id).orElseThrow();
+    var mine = YamlUtil.parseMap(conflict.localSnapshot());
+    var rev =
+        Acting.as(
+            box.id,
+            () ->
+                SyncedEntities.require(type)
+                    .resolver(box.db)
+                    .resolveConflict(id, mine, conflict.theirs()));
+    box.conflicts.resolve(conflict.id(), rev);
   }
 
   private static InputStream closeRefusing(InputStream input) {

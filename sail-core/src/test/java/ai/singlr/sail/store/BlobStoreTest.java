@@ -148,6 +148,8 @@ class BlobStoreTest {
               ai.singlr.sail.config.YamlUtil.dumpJson(java.util.Map.of("body_hash", sides.get(0))),
               ai.singlr.sail.config.YamlUtil.dumpJson(java.util.Map.of("body_hash", sides.get(1))),
               ai.singlr.sail.config.YamlUtil.dumpJson(java.util.Map.of("body_hash", sides.get(2))),
+              null,
+              null,
               List.of("body_hash"));
       assertEquals(6, blobs.gc(BlobStore.Compaction.NONE, true).freed());
       sides.forEach(hash -> assertTrue(blobs.has(hash)));
