@@ -469,17 +469,25 @@ public final class SyncBox implements AutoCloseable {
   }
 
   public static SyncEngine.Report round(Sqlite main, Sqlite node, String type) {
+    return round(main, node, "node", type);
+  }
+
+  /**
+   * One {@code type} round of the box whose database is {@code node}, syncing as the FDE {@code
+   * handle}: every box syncs as its own, one box per FDE.
+   */
+  public static SyncEngine.Report round(Sqlite main, Sqlite node, String handle, String type) {
     var server =
         SyncRpcServer.over(
             main,
             "main",
             null,
-            Actor.sync("node", Role.MEMBER),
+            Actor.sync(handle, Role.MEMBER),
             FdeRoster.EMPTY,
             SyncTransitionSink.NONE,
             SyncWire.UPGRADE_FLOOR);
-    try (var link = connect(server, node, "node", SyncWire.MAX_FRAME, out -> out)) {
-      return link.reconcile(type, SyncedEntities.replicas(node, "node", "node").get(type)).report();
+    try (var link = connect(server, node, handle, SyncWire.MAX_FRAME, out -> out)) {
+      return link.reconcile(type, SyncedEntities.replicas(node, handle, handle).get(type)).report();
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }

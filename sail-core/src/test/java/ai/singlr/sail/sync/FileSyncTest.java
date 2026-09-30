@@ -40,12 +40,14 @@ class FileSyncTest {
   private Box other;
 
   private final class Box implements AutoCloseable {
+    final String id;
     final Sqlite db;
     final FileStore files;
     final SyncConflicts conflicts;
     final StoreReplica replica;
 
     Box(String id) {
+      this.id = id;
       this.db = Sqlite.open(tempDir.resolve(id + ".db"));
       new SchemaManager(db).migrate();
       this.files = new FileStore(db);
@@ -74,7 +76,7 @@ class FileSyncTest {
   }
 
   private void sync(Box box) {
-    SyncBox.round(main.db, box.db, "file");
+    SyncBox.round(main.db, box.db, box.id, "file");
   }
 
   @Test
@@ -181,6 +183,6 @@ class FileSyncTest {
   }
 
   private SyncEngine.Report sync2(Box box) {
-    return SyncBox.round(main.db, box.db, "file");
+    return SyncBox.round(main.db, box.db, box.id, "file");
   }
 }

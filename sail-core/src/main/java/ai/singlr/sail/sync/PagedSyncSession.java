@@ -230,7 +230,7 @@ public final class PagedSyncSession implements SyncSession {
       throw new SyncTransportException(
           "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
     }
-    acknowledgeLostAnswers(type, local);
+    var asked = askAboutDirty(type, local);
     var since = local.checkpoint(mainId);
     var report = SyncEngine.Report.NONE;
     var pages = 0;
@@ -257,8 +257,14 @@ public final class PagedSyncSession implements SyncSession {
     }
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
-    if (!dirty.isEmpty()) {
-      report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
+    var answered = dirty.stream().filter(asked::containsKey).toList();
+    if (!answered.isEmpty()) {
+      var known = answered.stream().map(asked::get).filter(Objects::nonNull).toList();
+      report = report.plus(reconcileAnswered(type, local, answered, known, since));
+    }
+    var unasked = dirty.stream().filter(id -> !asked.containsKey(id)).toList();
+    if (!unasked.isEmpty()) {
+      report = report.plus(reconcileDirty(type, local, unasked, since));
     }
     var late = askAfterPush(type);
     var reconciled = new LinkedHashSet<>(seen);
@@ -415,46 +421,65 @@ public final class PagedSyncSession implements SyncSession {
         type,
         ids,
         (consumed, page) -> {
-          var entries = page.entries();
-          fetchContent(type, entries);
-          var remaining = adoptErasures(type, entries);
-          var erasedNow = ids(entries);
-          erasedNow.removeAll(ids(remaining));
-          var scope = new LinkedHashSet<>(consumed);
-          scope.removeAll(erasedNow);
-          reports.add(reconcile(local, scope, new PageView(type, remaining, checkpoint)));
+          fetchContent(type, page.entries());
+          reports.add(reconcileAnswered(type, local, consumed, page.entries(), checkpoint));
         });
     return reports.stream().reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
   }
 
   /**
-   * Before anything of {@code type} is reconciled, asks main which version of each row the node
-   * changed it took from this box, and adopts it as the row's merge base when it is newer than the
-   * base the node holds: main took the node's offer and its answer never came back. The pages and
-   * the push that follow then reconcile each row three-way against exactly what main took of it, so
-   * neither a change main made since nor one the node made since is lost or reverted unseen.
+   * Reconciles {@code ids} against main's answer for them, {@code entries}: an erasure among them
+   * is applied first, and an id main omitted is one it has never seen, which the engine pushes as
+   * new.
    */
-  private void acknowledgeLostAnswers(String type, LocalReplica local) {
+  private SyncEngine.Report reconcileAnswered(
+      String type,
+      LocalReplica local,
+      List<String> ids,
+      List<SyncWire.Entry> entries,
+      long checkpoint) {
+    var remaining = adoptErasures(type, entries);
+    var erasedNow = ids(entries);
+    erasedNow.removeAll(ids(remaining));
+    var scope = new LinkedHashSet<>(ids);
+    scope.removeAll(erasedNow);
+    return reconcile(local, scope, new PageView(type, remaining, checkpoint));
+  }
+
+  /**
+   * Before anything of {@code type} is reconciled, asks main for its rows of every id the node
+   * changed, and which version of each it took from this box, adopting that as the row's merge base
+   * when it is newer than the base the node holds: main took the node's offer and its answer never
+   * came back. The pages and the push that follow then reconcile each row three-way against exactly
+   * what main took of it, so neither a change main made since nor one the node made since is lost
+   * or reverted unseen. Returns main's answer for each id it was asked about, null for one it has
+   * never seen, so the ids the pages did not settle are reconciled from it without asking again.
+   */
+  private Map<String, SyncWire.Entry> askAboutDirty(String type, LocalReplica local) {
+    var answers = new LinkedHashMap<String, SyncWire.Entry>();
     var dirty = List.copyOf(local.dirtyIds());
     if (dirty.isEmpty()) {
-      return;
+      return answers;
     }
     need(
         type,
         dirty,
         (consumed, page) -> {
+          consumed.forEach(id -> answers.put(id, null));
+          page.entries().forEach(entry -> answers.put(entry.id(), entry));
+          fetchContent(type, page.entries());
+          fetchContent(type, page.accepted());
           var erased = new HashSet<String>();
           page.entries().stream().filter(SyncWire.Entry::erased).forEach(e -> erased.add(e.id()));
-          fetchContent(type, page.accepted());
           for (var entry : page.accepted()) {
-            if (erased.contains(entry.id())) {
-              continue;
+            if (!erased.contains(entry.id())) {
+              Actor.run(
+                  Actor.main(entry.author()),
+                  () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
             }
-            Actor.run(
-                Actor.main(entry.author()),
-                () -> local.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
           }
         });
+    return answers;
   }
 
   /**

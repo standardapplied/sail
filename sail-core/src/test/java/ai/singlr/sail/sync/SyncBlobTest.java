@@ -703,14 +703,14 @@ class SyncBlobTest {
       SyncBox.round(main.db, node.db, "spec");
       node.specs.update(SyncBox.spec("a", "local title", "pending"));
       main.specs.update(SyncBox.spec("a", "A", "pending"));
-      var changed = new java.util.concurrent.atomic.AtomicBoolean();
+      var pages = new java.util.concurrent.atomic.AtomicInteger();
       UnaryOperator<OutputStream> race =
           output ->
               new FilterOutputStream(output) {
                 @Override
                 public void write(byte[] bytes, int offset, int length) throws IOException {
                   var line = new String(bytes, offset, length, StandardCharsets.UTF_8);
-                  if (line.contains("\"op\": \"page\"") && changed.compareAndSet(false, true))
+                  if (line.contains("\"op\": \"page\"") && pages.incrementAndGet() == 2)
                     Acting.system(() -> main.specs.setContent("a", "body landed after page", ""));
                   out.write(bytes, offset, length);
                 }
@@ -721,7 +721,7 @@ class SyncBlobTest {
         var report =
             link.reconcile("spec", SyncedEntities.replicas(node.db, "node", "node").get("spec"));
         assertEquals(2, link.count("push"));
-        assertEquals(1, link.count("need"));
+        assertEquals(2, link.count("need"), "the round's first question, then the refresh");
         assertEquals(1, report.report().merged());
         assertEquals("body landed after page", node.specs.getContent("a").orElseThrow().body());
         assertEquals("local title", main.specs.findById("a").orElseThrow().title());
