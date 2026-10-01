@@ -5,12 +5,16 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
+import static ai.singlr.sail.sync.SyncFixtures.principal;
+import static ai.singlr.sail.sync.SyncFixtures.room;
+import static ai.singlr.sail.sync.SyncFixtures.run;
+import static ai.singlr.sail.sync.SyncFixtures.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
@@ -1050,40 +1054,8 @@ class ConvergenceSyncTest {
         .orElse(null);
   }
 
-  private static SpecStore.SpecRow spec(String id, String assignee) {
-    return new SpecStore.SpecRow(
-        id,
-        "acme",
-        "Spec " + id,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        "",
-        "",
-        null,
-        List.of(),
-        List.of());
-  }
-
   private static RoomStore.RoomRow room(String id, String assignee) {
     return new RoomStore.RoomRow(id, "acme", id, assignee, null, null, null, null, null, null);
-  }
-
-  private static void ownSpec(SyncBox box, String as, String id, String assignee) {
-    Acting.as(
-        as,
-        () -> {
-          box.specs.create(spec(id, assignee));
-          new RoomStore(box.db)
-              .create(
-                  new RoomStore.RoomRow(
-                      id, "acme", "Spec " + id, assignee, null, null, null, null, null, null));
-        });
   }
 
   private static void retitle(SyncBox box, String as, String id, String title) {
@@ -1132,27 +1104,5 @@ class ConvergenceSyncTest {
 
   private static InputStream content(String text) {
     return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
-  }
-
-  private static String run(SyncBox box, String fde, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    Acting.as(
-        fde,
-        () ->
-            new RunStore(box.db)
-                .create(
-                    id,
-                    "acme",
-                    specId,
-                    fde,
-                    "build",
-                    "claude-code",
-                    "b",
-                    "t",
-                    null,
-                    null,
-                    "/log",
-                    "unit"));
-    return id;
   }
 }

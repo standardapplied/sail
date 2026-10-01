@@ -110,7 +110,8 @@ public final class ChangeLog {
     /**
      * The origin of a withdrawal: a tombstone this box wrote over work main holds nothing of, on
      * main's denial or because what the work depended on can never arrive. Main never held the
-     * entity, so the tombstone is not one heard from main, yet it is settled: nothing to offer.
+     * entity, so the tombstone is not one heard from main and records no merge base, yet it is
+     * settled: nothing to offer.
      */
     public static final String DENIED = "denied";
 
@@ -120,14 +121,6 @@ public final class ChangeLog {
      */
     public boolean heardFromMain() {
       return SYNC.equals(origin);
-    }
-
-    /**
-     * Whether main has settled this entry — heard from main, or withdrawn because main holds
-     * nothing of it — so it is its own merge base and never offered again.
-     */
-    public boolean settledByMain() {
-      return heardFromMain() || DENIED.equals(origin);
     }
 
     /** Whether this entry is a withdrawal ({@link #DENIED}): main holds nothing of the entity. */

@@ -75,8 +75,8 @@ public final class Decidability {
     if (!Erasure.SPEC.equals(type) || snapshot == null) {
       return false;
     }
-    var others = project(type, snapshot).worse(actorRun(type, id, snapshot));
-    return !(others instanceof Standing.Gone) && bornIn(id, snapshot) instanceof Standing.Gone;
+    return !(others(type, id, snapshot) instanceof Standing.Gone)
+        && bornIn(id, snapshot) instanceof Standing.Gone;
   }
 
   private Standing standing(
@@ -84,13 +84,18 @@ public final class Decidability {
     if (snapshot == null) {
       return Standing.HELD;
     }
-    var standing = project(type, snapshot).worse(actorRun(type, id, snapshot));
+    var standing = others(type, id, snapshot);
     return switch (type) {
       case Erasure.SPEC -> standing.worse(bornIn(id, snapshot));
       case Erasure.REVIEW -> standing.worse(specOf(id, snapshot));
       case Erasure.MESSAGE -> standing.worse(message(snapshot, handle, visited));
       default -> standing;
     };
+  }
+
+  /** What every type depends on: its project, and the run its {@code _actor} names. */
+  private Standing others(String type, String id, Map<String, Object> snapshot) {
+    return project(type, snapshot).worse(actorRun(type, id, snapshot));
   }
 
   private Standing project(String type, Map<String, Object> snapshot) {
@@ -118,7 +123,7 @@ public final class Decidability {
     if (Strings.isBlank(room) || room.equals(id)) {
       return Standing.HELD;
     }
-    return holdings.bornInRoom(room, id, holdings.holdsDependent(Erasure.SPEC, id));
+    return holdings.bornInRoom(room, id);
   }
 
   private Standing specOf(String id, Map<String, Object> snapshot) {
@@ -126,7 +131,7 @@ public final class Decidability {
     if (Strings.isBlank(spec)) {
       return Standing.HELD;
     }
-    return holdings.specOf(spec, id, holdings.holdsDependent(Erasure.REVIEW, id));
+    return holdings.specOf(spec, id);
   }
 
   /**

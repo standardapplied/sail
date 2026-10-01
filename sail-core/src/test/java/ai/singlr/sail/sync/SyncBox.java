@@ -127,12 +127,22 @@ public final class SyncBox implements AutoCloseable {
     return roundSettling(main, node).types();
   }
 
-  /** What one full round settled before it began, and how every type fared. */
+  /** One full round of {@code node} against {@code server}, as {@link #round}. */
+  public static List<SyncSession.TypeReport> round(SyncRpcServer server, SyncBox node) {
+    return roundSettling(server, node).types();
+  }
+
+  /** What one full round settled, at its start and its end, and how every type fared. */
   public record Round(List<Settlement.Settled> settled, List<SyncSession.TypeReport> types) {}
 
-  /** As {@link #round}, keeping what the round settled at its start. */
+  /** As {@link #round}, keeping what the round settled. */
   public static Round roundSettling(SyncBox main, SyncBox node) {
-    try (var link = connect(main.server(node.session()), node)) {
+    return roundSettling(main.server(node.session()), node);
+  }
+
+  /** As {@link #roundSettling(SyncBox, SyncBox)}, against {@code server}. */
+  public static Round roundSettling(SyncRpcServer server, SyncBox node) {
+    try (var link = connect(server, node)) {
       var settled =
           new ArrayList<>(
               Actor.call(
@@ -462,22 +472,6 @@ public final class SyncBox implements AutoCloseable {
             SyncWire.UPGRADE_FLOOR)
         .content(db, limits)
         .boxes(new SyncRpcServer.MainBox(null, this.id));
-  }
-
-  /** One full round of {@code node} against {@code server}, as {@link #round}. */
-  public static List<SyncSession.TypeReport> round(SyncRpcServer server, SyncBox node) {
-    try (var link = connect(server, node)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
-      var replicas = node.replicas();
-      var types =
-          SyncedEntities.all().stream()
-              .map(entity -> reconcileOrFail(link, entity.type(), replicas.get(entity.type())))
-              .toList();
-      Actor.run(Actor.main(), () -> NodeRound.end(node.db, node.handle()));
-      return types;
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
   }
 
   /** A protocol-4 session over a pipe to {@code server}, plus the wire log and the notices. */

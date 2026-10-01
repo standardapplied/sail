@@ -21,25 +21,12 @@ public sealed interface Standing {
   /** The dependency can never arrive; {@code reason} says what is gone. */
   record Gone(String reason) implements Standing {}
 
+  /** The one held standing: nothing blocks. */
   Standing HELD = new Held();
 
   /** The worse of this standing and {@code other}: gone over pending over held. */
   default Standing worse(Standing other) {
     return rank(other) > rank(this) ? other : this;
-  }
-
-  /** Whether this standing blocks the offer. */
-  default boolean blocks() {
-    return !(this instanceof Held);
-  }
-
-  /** The reason a blocking standing carries; null when held. */
-  default String reason() {
-    return switch (this) {
-      case Held ignored -> null;
-      case Pending pending -> pending.reason();
-      case Gone gone -> gone.reason();
-    };
   }
 
   private static int rank(Standing standing) {

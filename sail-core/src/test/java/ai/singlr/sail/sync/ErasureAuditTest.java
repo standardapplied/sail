@@ -98,7 +98,9 @@ class ErasureAuditTest {
     Acting.as(
         "ada",
         () ->
-            erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))), "local"));
+            erasure.erase(
+                erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))),
+                ChangeLog.Entry.LOCAL));
   }
 
   /** E1: an admin node's child of a pruned room is re-homed and lands; the room stays erased. */
@@ -164,6 +166,6 @@ class ErasureAuditTest {
     assertTrue(
         reports.stream().anyMatch(report -> !report.denials().isEmpty()), "the edit is denied");
     assertFalse(new BlobStore(main.db).has(hash), "main stored the denied offer's content");
-    SyncBox.assertConverged(main, bob.syncsAs(BOB));
+    SyncBox.assertConvergedWithin(1, main, bob.syncsAs(BOB));
   }
 }

@@ -17,7 +17,7 @@ public record SyncReport(
     List<SyncSession.TypeReport> types,
     List<Settlement.Settled> settled) {
 
-  /** A report with nothing settled before the round. */
+  /** A report of a round that settled nothing. */
   public SyncReport(SyncEngine.Report report, String message, List<SyncSession.TypeReport> types) {
     this(report, message, types, List.of());
   }

@@ -31,13 +31,6 @@ public sealed interface Holdings {
     return new OnNode(new Entries(db));
   }
 
-  /**
-   * Whether main holds the entity the offer is of, so the offer is an update main decides on
-   * authority alone: a deleted dependency is then a fact main knows, not a reason to wait or give
-   * up.
-   */
-  boolean holdsDependent(String type, String id);
-
   /** The project an entity belongs to: gone once erased, held otherwise. */
   Standing project(String project);
 
@@ -50,11 +43,17 @@ public sealed interface Holdings {
    */
   Standing authorRun(String run, String author);
 
-  /** The room a spec is born in; {@code specHeld} is {@link #holdsDependent} of the spec. */
-  Standing bornInRoom(String room, String specId, boolean specHeld);
+  /**
+   * The room spec {@code specId} is born in. A deleted room main did hold is a fact main knows: a
+   * spec main holds stays decidable in it, while a spec main has not taken has nowhere to land and
+   * is gone.
+   */
+  Standing bornInRoom(String room, String specId);
 
-  /** The spec a review is for; {@code reviewHeld} is {@link #holdsDependent} of the review. */
-  Standing specOf(String spec, String reviewId, boolean reviewHeld);
+  /**
+   * The spec review {@code reviewId} is for; a review main holds stays decidable for a spec gone.
+   */
+  Standing specOf(String spec, String reviewId);
 
   /** The conversation a message is posted in: a room, or the spec living in it. */
   Standing conversation(String room);
@@ -152,11 +151,6 @@ public sealed interface Holdings {
     }
 
     @Override
-    public boolean holdsDependent(String type, String id) {
-      return entries.knows(type, id);
-    }
-
-    @Override
     public Standing project(String project) {
       return entries.erased(Erasure.PROJECT, project)
           ? new Standing.Gone(Reasons.projectPruned(project))
@@ -174,12 +168,12 @@ public sealed interface Holdings {
     }
 
     @Override
-    public Standing bornInRoom(String room, String specId, boolean specHeld) {
+    public Standing bornInRoom(String room, String specId) {
       if (entries.erased(Erasure.ROOM, room)) {
         return new Standing.Gone(Reasons.roomPruned(room, specId));
       }
       var live = entries.store(Erasure.ROOM).liveBase(room).isPresent() || anchored(room, specId);
-      if (!specHeld && !live && entries.tombstoned(Erasure.ROOM, room)) {
+      if (!live && !entries.knows(Erasure.SPEC, specId) && entries.tombstoned(Erasure.ROOM, room)) {
         return new Standing.Gone(Reasons.roomDeleted(room, specId));
       }
       return live || entries.head(Erasure.ROOM, room).isPresent()
@@ -188,7 +182,7 @@ public sealed interface Holdings {
     }
 
     @Override
-    public Standing specOf(String spec, String reviewId, boolean reviewHeld) {
+    public Standing specOf(String spec, String reviewId) {
       return known(
           Erasure.SPEC,
           spec,
@@ -198,11 +192,11 @@ public sealed interface Holdings {
 
     @Override
     public Standing conversation(String room) {
-      if (entries.erased(Erasure.ROOM, room)) {
-        return new Standing.Gone(Reasons.roomPruned(room));
+      if (entries.rooms().holdsConversation(room)) {
+        return Standing.HELD;
       }
-      return entries.rooms().holdsConversation(room)
-          ? Standing.HELD
+      return entries.erased(Erasure.ROOM, room)
+          ? new Standing.Gone(Reasons.roomPruned(room))
           : new Standing.Pending(Reasons.conversationPending(room));
     }
 
@@ -254,11 +248,6 @@ public sealed interface Holdings {
     }
 
     @Override
-    public boolean holdsDependent(String type, String id) {
-      return Strings.isNotBlank(entries.store(type).baseRevOf(id));
-    }
-
-    @Override
     public Standing project(String project) {
       return entries.erased(Erasure.PROJECT, project)
           ? new Standing.Gone(Reasons.projectPruned(project))
@@ -283,7 +272,7 @@ public sealed interface Holdings {
     }
 
     @Override
-    public Standing bornInRoom(String room, String specId, boolean specHeld) {
+    public Standing bornInRoom(String room, String specId) {
       if (entries.erased(Erasure.ROOM, room)) {
         return new Standing.Gone(Reasons.roomPruned(room, specId));
       }
@@ -296,11 +285,13 @@ public sealed interface Holdings {
       if (anchored(room, specId) || entries.head(Erasure.ROOM, room).isEmpty()) {
         return Standing.HELD;
       }
-      return specHeld ? Standing.HELD : new Standing.Gone(Reasons.roomDeleted(room, specId));
+      return takenByMain(Erasure.SPEC, specId)
+          ? Standing.HELD
+          : new Standing.Gone(Reasons.roomDeleted(room, specId));
     }
 
     @Override
-    public Standing specOf(String spec, String reviewId, boolean reviewHeld) {
+    public Standing specOf(String spec, String reviewId) {
       if (entries.erased(Erasure.SPEC, spec)) {
         return new Standing.Gone(Reasons.specPruned(spec, reviewId));
       }
@@ -310,9 +301,17 @@ public sealed interface Holdings {
             ? Standing.HELD
             : new Standing.Pending(Reasons.specPending(spec, reviewId));
       }
-      return reviewHeld || entries.mainHeld(Erasure.SPEC, spec)
+      return takenByMain(Erasure.REVIEW, reviewId) || entries.mainHeld(Erasure.SPEC, spec)
           ? Standing.HELD
           : new Standing.Gone(Reasons.specPruned(spec, reviewId));
+    }
+
+    /**
+     * Whether main has taken {@code id}, so an offer of it is an update main decides on authority
+     * alone: a deleted dependency is then a fact main knows, not a reason to give the work up.
+     */
+    private boolean takenByMain(String type, String id) {
+      return Strings.isNotBlank(entries.store(type).baseRevOf(id));
     }
 
     @Override

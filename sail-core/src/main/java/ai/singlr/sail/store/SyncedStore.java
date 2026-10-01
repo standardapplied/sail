@@ -26,18 +26,6 @@ import java.util.Set;
  */
 public interface SyncedStore {
 
-  /**
-   * A pushed change main cannot decide yet, because it names something main does not hold, such as
-   * the run that posted a message. Refused rather than denied, so the node keeps the change and
-   * offers it again once what it names has arrived. Thrown inside the commit's transaction, so
-   * nothing of the change lands.
-   */
-  final class Unheld extends IllegalStateException {
-    public Unheld(String message) {
-      super(message);
-    }
-  }
-
   /** The {@code change_log.entity_type} discriminator, e.g. {@code "spec"}. */
   String entityType();
 

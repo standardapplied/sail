@@ -75,6 +75,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       reason = Objects.requireNonNullElse(reason, "");
     }
 
+    /** The refusal as {@code sail sync --json} and the API report it. */
     public Map<String, Object> toMap() {
       var map = new LinkedHashMap<String, Object>();
       map.put("type", type);

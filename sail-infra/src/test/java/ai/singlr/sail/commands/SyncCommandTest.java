@@ -338,7 +338,9 @@ class SyncCommandTest {
                     List.of(),
                     List.of(
                         new SyncSession.Refusal("spec", "born", "main does not hold run 'r'")))),
-            List.of(new Settlement.Settled("message", "m1", "withdrawn, its room being gone")));
+            List.of(
+                new Settlement.Settled(
+                    "message", "m1", new Settlement.How.Withdrawn(), "room 'lab' is gone here")));
 
     var text = SyncCommand.render(round, false);
     var json = YamlUtil.parseMap(SyncCommand.render(round, true));
@@ -346,12 +348,24 @@ class SyncCommandTest {
     assertFalse(text.contains("Already in sync"), text);
     assertTrue(
         text.contains("spec born: main did not take this yet — main does not hold run 'r'"), text);
-    assertTrue(text.contains("message m1: withdrawn, its room being gone"), text);
+    assertTrue(
+        text.contains(
+            "message m1: withdrawn; yours stays in this box's change log — room 'lab' is gone here"),
+        text);
     assertEquals(
         List.of(Map.of("type", "spec", "id", "born", "reason", "main does not hold run 'r'")),
         json.get("refusals"));
     assertEquals(
-        List.of(Map.of("type", "message", "id", "m1", "how", "withdrawn, its room being gone")),
+        List.of(
+            Map.of(
+                "type",
+                "message",
+                "id",
+                "m1",
+                "how",
+                "withdrawn; yours stays in this box's change log",
+                "why",
+                "room 'lab' is gone here")),
         json.get("settled"));
   }
 

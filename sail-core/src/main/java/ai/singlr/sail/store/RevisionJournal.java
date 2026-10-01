@@ -251,17 +251,17 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * The base the entity's latest tombstone records: a deletion adopted from main, or a withdrawal
-   * of what main never held, is its own merge base — this box holds main's word, not a deletion of
-   * its own to offer — and a deletion this box decided keeps the base it was made from. Null when
-   * the entity has none, or was erased since.
+   * The base the entity's latest tombstone records: a deletion adopted from main is its own merge
+   * base — this box holds main's deletion, not one of its own to offer — a deletion this box
+   * decided keeps the base it was made from, and a withdrawal of what main never held records none,
+   * since main holds nothing to descend from. Null when the entity has none, or was erased since.
    */
   private String tombstoneBase(String id) {
     return changeLog
         .latestTombstone(schema.entityType(), id)
         .map(
             tombstone ->
-                tombstone.settledByMain()
+                tombstone.heardFromMain()
                     ? tombstone.rev()
                     : Snapshots.text(YamlUtil.parseMap(tombstone.snapshot()), TOMBSTONE_BASE))
         .orElse(null);

@@ -46,7 +46,8 @@ public final class SyncViews {
     var map = new LinkedHashMap<String, Object>();
     map.put("type", settled.type());
     map.put("id", settled.id());
-    map.put("how", settled.how());
+    map.put("how", settled.how().describe());
+    map.put("why", settled.why());
     return map;
   }
 

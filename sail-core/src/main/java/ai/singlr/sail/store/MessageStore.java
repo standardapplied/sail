@@ -403,9 +403,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Compare-and-set commit as main of a message a node posted. A message never changes, so only a
-   * new one commits. One in a conversation main has never held is refused ({@link Unheld}), and one
-   * replying to a message main does not hold is denied; {@code authority} then decides who may post
-   * it, and as whom, before anything is written.
+   * new one commits. Whether main holds its conversation and the message it replies to is decided
+   * before the commit ({@link Decidability}); one replying to a message in another room is denied;
+   * {@code authority} then decides who may post it, and as whom, before anything is written.
    */
   @Override
   public PushOutcome commitRevision(

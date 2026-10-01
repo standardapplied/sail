@@ -5,11 +5,16 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
+import static ai.singlr.sail.sync.SyncFixtures.principal;
+import static ai.singlr.sail.sync.SyncFixtures.room;
+import static ai.singlr.sail.sync.SyncFixtures.run;
+import static ai.singlr.sail.sync.SyncFixtures.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
@@ -23,7 +28,6 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
 import java.io.ByteArrayInputStream;
@@ -84,73 +88,6 @@ class LivenessAuditTest {
     }
   }
 
-  private static SpecStore.SpecRow spec(String id, String assignee) {
-    return new SpecStore.SpecRow(
-        id,
-        "acme",
-        "Spec " + id,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        "",
-        "",
-        null,
-        List.of(),
-        List.of());
-  }
-
-  private static void ownSpec(SyncBox box, String as, String id, String assignee) {
-    Acting.as(
-        as,
-        () -> {
-          box.specs.create(spec(id, assignee));
-          new RoomStore(box.db)
-              .create(
-                  new RoomStore.RoomRow(
-                      id, "acme", "Spec " + id, assignee, null, null, null, null, null, null));
-        });
-  }
-
-  private static void room(SyncBox box, String as, String id) {
-    Acting.as(
-        as,
-        () ->
-            new RoomStore(box.db)
-                .create(
-                    new RoomStore.RoomRow(id, "acme", id, as, null, null, null, null, null, null)));
-  }
-
-  private static String run(SyncBox box, String fde, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    Acting.as(
-        fde,
-        () ->
-            new RunStore(box.db)
-                .create(
-                    id,
-                    "acme",
-                    specId,
-                    fde,
-                    "build",
-                    "claude-code",
-                    "b",
-                    "t",
-                    null,
-                    null,
-                    "/log",
-                    "unit"));
-    return id;
-  }
-
-  private static String principal(SyncBox box, String runId) {
-    return new RunStore(box.db).findById(runId).orElseThrow().principal();
-  }
-
   /** L1/L2: a post in a room this box created and deleted before its first sync. */
   @Test
   void aPostInARoomDeletedBeforeItsFirstSyncSettles() throws IOException {
@@ -176,7 +113,9 @@ class LivenessAuditTest {
     assertConvergedWithin(3, ada, ADA);
   }
 
-  /** L1/L2: a member demoted to viewer while offline: its new room is denied, its post is not. */
+  /**
+   * L1/L2: a member demoted to viewer while offline: its new room is denied, its post withdrawn.
+   */
   @Test
   void aPostInANewRoomOfAMemberDemotedWhileOfflineSettles() throws IOException {
     room(ada, "ada", "lab");
@@ -318,9 +257,12 @@ class LivenessAuditTest {
     assertConvergedWithin(2, ada, ADA);
   }
 
-  /** L1: a spec born in the room of a spec deleted, with that room, before either synced. */
+  /**
+   * L1: a spec born in the room of a spec deleted, with that room, before either synced is re-homed
+   * into its own room and lands there.
+   */
   @Test
-  void aSpecBornInTheRoomOfASpecDeletedBeforeItsFirstSyncSettles() throws IOException {
+  void aSpecBornInTheRoomOfASpecDeletedBeforeItsFirstSyncSettles() {
     ownSpec(ada, "ada", "parent", "ada");
     Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("parent")));
     Acting.as(
@@ -331,9 +273,11 @@ class LivenessAuditTest {
         });
 
     assertConvergedWithin(3, ada, ADA);
+
+    assertEquals("child", main.specs.findById("child").orElseThrow().roomId(), "re-homed");
   }
 
-  /** L2/L3: a finished review of a spec held back for its new room is denied, not held back. */
+  /** L2/L3: a finished review of a spec held back for its new room waits with it, then lands. */
   @Test
   void aReviewOfASpecWaitingForItsRoomWaitsWithItAndLands() throws IOException {
     room(ada, "ada", "lab");
@@ -709,8 +653,7 @@ class LivenessAuditTest {
 
   /**
    * A post in a room this box deleted after it synced is main's to decide, never withdrawn here:
-   * main, holding the room's deletion, denies it and says so, where the node used to drop it
-   * silently.
+   * main, holding the room's deletion, denies it and says so.
    */
   @Test
   void aPostInARoomThisBoxDeletedAfterSyncIsMainsToDecide() {
@@ -742,7 +685,7 @@ class LivenessAuditTest {
     var first = SyncBox.roundSettling(main, ada.syncsAs(ADA));
 
     assertEquals(1, first.settled().size(), "re-homed in the round that heard gone: " + first);
-    assertTrue(first.settled().getFirst().describe().contains("re-homed"));
+    assertInstanceOf(Settlement.How.ReHomed.class, first.settled().getFirst().how());
     assertConvergedWithin(2, ada, ADA);
     assertEquals("born", main.specs.findById("born").orElseThrow().roomId(), "re-homed");
     assertTrue(new RoomStore(main.db).findById("lab").isEmpty(), "the room stays deleted");
@@ -814,8 +757,79 @@ class LivenessAuditTest {
     var round = SyncBox.roundSettling(main, ada.syncsAs(ADA));
 
     assertEquals(1, round.settled().size(), round.settled().toString());
-    assertTrue(round.settled().getFirst().describe().contains("withdrawn"));
+    assertInstanceOf(Settlement.How.Withdrawn.class, round.settled().getFirst().how());
+    assertTrue(round.settled().getFirst().why().contains("room 'lab'"), round.settled().toString());
     assertConvergedWithin(1, ada, ADA);
+  }
+
+  /**
+   * A spec re-created over its own withdrawal starts over: the withdrawal recorded no base, so a
+   * re-creation born in a room gone here is re-homed, never read as an update main holds and
+   * offered for a room main will never hold.
+   */
+  @Test
+  void aSpecReCreatedOverItsWithdrawalBornInARoomDeletedHereIsReHomed() {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
+    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    assertConvergedWithin(3, ada, ADA);
+    assertTrue(new ChangeLog(ada.db).head("spec", "born").orElseThrow().withdrawn());
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> ada.specs.create(spec("born", "ada").withRoomId("lab")));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+
+    assertConvergedWithin(3, ada, ADA);
+
+    assertEquals("born", main.specs.findById("born").orElseThrow().roomId(), "re-homed");
+  }
+
+  /** A spec re-created over its withdrawal by a second denied run is withdrawn with its posts. */
+  @Test
+  void aSpecReCreatedOverItsWithdrawalWhoseRunIsDeniedIsWithdrawnWithItsPosts() {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    var first = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", first);
+    var agent = Actor.agentPrincipal(principal(ada, first), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    Acting.system(() -> new RunStore(ada.db).complete(first, "stopped", null));
+    assertConvergedWithin(3, ada, ADA);
+    var second = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", second);
+    var again = Actor.agentPrincipal(principal(ada, second), "ada");
+    Acting.by(again, () -> ada.specs.create(spec("born", null)));
+    var post = Acting.as("ada", () -> new MessageStore(ada.db).append("born", "ada", "hi", null));
+    Acting.system(() -> new RunStore(ada.db).complete(second, "stopped", null));
+
+    assertConvergedWithin(3, ada, ADA);
+
+    assertTrue(ada.specs.findById("born").isEmpty(), "withdrawn again");
+    assertTrue(new MessageStore(ada.db).findById(post.id()).isEmpty(), "its post with it");
+    assertTrue(main.specs.findById("born").isEmpty());
+  }
+
+  /** A review of a spec main does not hold is refused and awaited by main, never denied. */
+  @Test
+  void aReviewOfASpecMainDoesNotHoldIsRefusedByMainNeverDenied() {
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("unknown", 1));
+    Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
+    var snapshot = reviews.currentForSync(review);
+
+    var outcome =
+        Actor.call(
+            ADA,
+            () ->
+                SyncedEntities.replicas(main.db, main.id, null)
+                    .get("review")
+                    .commit(review, snapshot, null));
+
+    assertInstanceOf(CommitOutcome.Refused.class, outcome, outcome.toString());
+    assertTrue(new ReviewStore(main.db).findReview(review).isEmpty());
   }
 
   private void eraseProject() {
@@ -824,6 +838,7 @@ class LivenessAuditTest {
         "root",
         () ->
             erasure.erase(
-                erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))), "local"));
+                erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "acme"))),
+                ChangeLog.Entry.LOCAL));
   }
 }
