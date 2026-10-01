@@ -769,6 +769,29 @@ class LivenessAuditTest {
     assertTrue(files.dirtyIds().isEmpty(), "acknowledged, not offered again");
   }
 
+  /**
+   * L1: an oversized edit of a file main holds, its upload cut, is reverted to main's version even
+   * though main's answer about the file names the older version it took.
+   */
+  @Test
+  void anOversizedEditWhoseUploadWasCutRevertsToTheVersionMainHolds() throws IOException {
+    var files = new FileStore(ada.db);
+    main.limits(new FileLimits(16));
+    Acting.as(
+        "ada", () -> files.put("acme", "a.txt", new ByteArrayInputStream("hi".getBytes()), 0644));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    SyncBox.uploadNeverReachingMain(main, ada.syncsAs(ADA), "file");
+    main.limits(new FileLimits(4));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "reverted to main's");
+    assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
+  }
+
   /** Settlement waits for an offer whose answer may merely be lost, which the round recovers. */
   @Test
   void aLostAcceptanceOfABornInSpecIsRecoveredBeforeItIsSettled() throws IOException {
