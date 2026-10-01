@@ -65,6 +65,9 @@ public final class PagedSyncSession implements SyncSession {
   /** Entries asked for per pull; the frame bound, not this, is what caps a page's size. */
   static final int PAGE_LIMIT = 2000;
 
+  /** The bytes a {@code bases} entry costs beyond its id and rev: {@code ": "} and {@code ", "}. */
+  private static final int BASE_PUNCTUATION = 4;
+
   private final InputStream in;
   private final OutputStream out;
   private final String mainId;
@@ -518,7 +521,9 @@ public final class PagedSyncSession implements SyncSession {
 
   /**
    * One paged ask naming, beside each id, the version this box last heard of it, so main answers
-   * only what it took after that; {@code acceptedOnly} leaves main's current versions out.
+   * only what it took after that; {@code acceptedOnly} leaves main's current versions out. An id
+   * with a heard version weighs its bytes in {@code ids} plus its entry in {@code bases}, the
+   * quoting and separators of the latter beyond what one id's separator covers.
    */
   private void needWith(
       String type,
@@ -532,7 +537,9 @@ public final class PagedSyncSession implements SyncSession {
         id ->
             SyncWire.encodedLength(id)
                 + (heard.containsKey(id)
-                    ? SyncWire.encodedLength(id) + SyncWire.encodedLength(heard.get(id))
+                    ? SyncWire.encodedLength(id)
+                        + SyncWire.encodedLength(heard.get(id))
+                        + BASE_PUNCTUATION
                     : 0),
         asked -> {
           var named = new LinkedHashMap<String, String>();
