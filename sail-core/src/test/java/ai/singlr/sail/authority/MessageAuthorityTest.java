@@ -26,10 +26,12 @@ import static ai.singlr.sail.authority.Actors.VIEWER;
 import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
 import static ai.singlr.sail.authority.Actors.projection;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.Standing;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -147,11 +149,10 @@ class MessageAuthorityTest {
   void aPostAsARunMainDoesNotHoldYetIsRefusedNotDenied() {
     var unheld = "claude/019fee00-0000-7000-8000-0000000000ff";
 
-    assertEquals(
-        Decidability.Status.PENDING,
-        new Decidability(board.db)
-            .forMain("message", MESSAGE, post("lobby", unheld), OWNER_SYNC.handle())
-            .status());
+    assertInstanceOf(
+        Standing.Pending.class,
+        Decidability.onMain(board.db)
+            .standing("message", MESSAGE, post("lobby", unheld), OWNER_SYNC.handle()));
   }
 
   @Test

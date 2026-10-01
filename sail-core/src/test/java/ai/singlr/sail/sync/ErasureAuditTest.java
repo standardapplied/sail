@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -19,7 +20,6 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,16 +50,15 @@ class ErasureAuditTest {
     main.close();
   }
 
-  private List<SyncSession.TypeReport> sync(SyncBox box, Actor as) throws IOException {
-    var reports = new ArrayList<SyncSession.TypeReport>();
-    try (var link = SyncBox.connect(main.server(as), box)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), box.db, box.id));
-      var replicas = SyncedEntities.replicas(box.db, box.id, box.id);
-      for (var entity : SyncedEntities.all()) {
-        reports.add(link.reconcile(entity.type(), replicas.get(entity.type())));
-      }
-    }
-    return reports;
+  private List<SyncSession.TypeReport> sync(SyncBox box, Actor as) {
+    return SyncBox.round(main, box.syncsAs(as));
+  }
+
+  private void assertReHomedAndLanded(SyncBox box, Actor as) {
+    SyncBox.assertConvergedWithin(3, main, box.syncsAs(as));
+    assertEquals("child", main.specs.findById("child").orElseThrow().roomIdOrIdentity());
+    assertTrue(new ChangeLog(main.db).isErased(Erasure.ROOM, "old"), "the room stays erased");
+    assertTrue(new ChangeLog(box.db).isErased(Erasure.ROOM, "old"));
   }
 
   private static SpecStore.SpecRow spec(String id, SpecStatus status, String owner) {
@@ -82,7 +81,7 @@ class ErasureAuditTest {
         List.of());
   }
 
-  private void seedArchivedSpecWithRoom() throws IOException {
+  private void seedArchivedSpecWithRoom() {
     Acting.as(
         "ada",
         () -> {
@@ -102,61 +101,52 @@ class ErasureAuditTest {
             erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))), "local"));
   }
 
-  private void assertNoSpecLivesInAnErasedRoom(SyncBox box) {
-    var inOld = box.specs.findById("child").filter(c -> c.roomIdOrIdentity().equals("old"));
-    var roomErased = new ChangeLog(box.db).isErased(Erasure.ROOM, "old");
-    assertFalse(
-        inOld.isPresent() && roomErased,
-        box.id + ": spec 'child' lives in room 'old', which is erased");
-  }
-
+  /** E1: an admin node's child of a pruned room is re-homed and lands; the room stays erased. */
   @Test
-  void aRoomIsNotErasedUnderASpecANodeBornInItBeforeThePrune() throws IOException {
+  void aRoomIsNotErasedUnderASpecANodeBornInItBeforeThePrune() {
     seedArchivedSpecWithRoom();
     sync(ada, ADA_ADMIN);
     Acting.as(
         "ada", () -> ada.specs.create(spec("child", SpecStatus.PENDING, "ada").withRoomId("old")));
-
     pruneOnMain("old");
-    sync(ada, ADA_ADMIN);
-    sync(ada, ADA_ADMIN);
 
-    assertNoSpecLivesInAnErasedRoom(main);
-    assertNoSpecLivesInAnErasedRoom(ada);
+    assertReHomedAndLanded(ada, ADA_ADMIN);
   }
 
+  /** E1: a member node's child of a pruned room is re-homed and lands, never removed. */
   @Test
-  void aMembersSpecBornInTheRoomBeforeThePruneIsNotLost() throws IOException {
+  void aMembersSpecBornInTheRoomBeforeThePruneIsNotLost() {
     seedArchivedSpecWithRoom();
     sync(ada, ADA);
     Acting.as(
         "ada", () -> ada.specs.create(spec("child", SpecStatus.PENDING, "ada").withRoomId("old")));
-
     pruneOnMain("old");
-    var reports = sync(ada, ADA);
 
-    var denials =
-        reports.stream()
-            .flatMap(report -> report.denials().stream())
-            .map(Object::toString)
-            .toList();
-    assertTrue(
-        main.specs.findById("child").isPresent() || ada.specs.findById("child").isPresent(),
-        "ada's new spec was removed from every box; denials: " + denials);
+    var first = sync(ada, ADA);
+
+    var denials = first.stream().flatMap(r -> r.denials().stream()).toList();
+    assertEquals(1, denials.size(), "main says the room is gone: " + denials);
+    assertTrue(ada.specs.findById("child").isPresent(), "the node keeps the child to re-home it");
+    assertReHomedAndLanded(ada, ADA);
   }
 
+  /** E1: once the child is re-homed, its conversation takes posts on every box. */
   @Test
-  void aPostInTheBornInSpecsConversationIsPossibleAfterTheMinterIsPruned() throws IOException {
+  void aPostInTheBornInSpecsConversationIsPossibleAfterTheMinterIsPruned() {
     seedArchivedSpecWithRoom();
     sync(ada, ADA_ADMIN);
     Acting.as(
         "ada", () -> ada.specs.create(spec("child", SpecStatus.PENDING, "ada").withRoomId("old")));
     pruneOnMain("old");
-    sync(ada, ADA_ADMIN);
+    assertReHomedAndLanded(ada, ADA_ADMIN);
 
-    if (main.specs.findById("child").isPresent()) {
-      Acting.as("ada", () -> new MessageStore(main.db).append("old", "ada", "still here", null));
-    }
+    var post =
+        Acting.as(
+            "ada", () -> new MessageStore(main.db).append("child", "ada", "still here", null));
+
+    SyncBox.assertConvergedWithin(2, main, ada.syncsAs(ADA_ADMIN));
+    assertTrue(
+        new MessageStore(ada.db).findById(post.id()).isPresent(), "the post reaches the node");
   }
 
   @Test
@@ -174,5 +164,6 @@ class ErasureAuditTest {
     assertTrue(
         reports.stream().anyMatch(report -> !report.denials().isEmpty()), "the edit is denied");
     assertFalse(new BlobStore(main.db).has(hash), "main stored the denied offer's content");
+    SyncBox.assertConverged(main, bob.syncsAs(BOB));
   }
 }

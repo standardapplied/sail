@@ -13,6 +13,7 @@ import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.Snapshots;
+import ai.singlr.sail.store.Standing;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import ai.singlr.sail.store.SyncedStore;
@@ -46,7 +47,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private final SyncConflicts conflicts;
   private final SyncState syncState;
   private final String handle;
-  private final Decidability decidability;
+  private final Decidability asMain;
+  private final Decidability asNode;
 
   public StoreReplica(
       String id,
@@ -70,7 +72,8 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
     this.handle = handle;
-    this.decidability = new Decidability(changeLog.db());
+    this.asMain = Decidability.onMain(changeLog.db());
+    this.asNode = Decidability.onNode(changeLog.db());
   }
 
   @Override
@@ -87,7 +90,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   public Set<String> dirtyIds() {
     var dirty = new LinkedHashSet<>(store.dirtyIds());
     dirty.addAll(conflicts.pendingIds(store.entityType()));
-    dirty.removeAll(decidability.pending(store.entityType(), dirty, handle));
+    dirty.removeAll(asNode.withheld(store.entityType(), dirty, store, handle));
     return dirty;
   }
 
@@ -247,25 +250,27 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
           }
-          var decidable =
-              decidability.forMain(
-                  store.entityType(), entityId, snapshot, Actor.current().handle());
-          if (decidable.status() == Decidability.Status.GONE) {
-            return new CommitOutcome.Denied(decidable.reason(), null, null, author(entityId), true);
-          }
-          if (decidable.status() == Decidability.Status.PENDING) {
-            return new CommitOutcome.Refused(decidable.reason());
-          }
-          return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
-            case PushOutcome.Accepted a ->
-                new CommitOutcome.Accepted(a.rev(), author(entityId), recordedCreator(entityId));
-            case PushOutcome.Stale s ->
-                new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
-            case PushOutcome.Denied d ->
-                new CommitOutcome.Denied(
-                    d.reason(), d.currentRev(), d.currentSnapshot(), author(entityId));
+          var standing =
+              asMain.standing(store.entityType(), entityId, snapshot, Actor.current().handle());
+          return switch (standing) {
+            case Standing.Gone gone ->
+                new CommitOutcome.Denied(gone.reason(), null, null, author(entityId), true);
+            case Standing.Pending pending -> new CommitOutcome.Refused(pending.reason());
+            case Standing.Held ignored -> commitHeld(entityId, snapshot, expectedRev);
           };
         });
+  }
+
+  private CommitOutcome commitHeld(
+      String entityId, Map<String, Object> snapshot, String expectedRev) {
+    return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
+      case PushOutcome.Accepted a ->
+          new CommitOutcome.Accepted(a.rev(), author(entityId), recordedCreator(entityId));
+      case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
+      case PushOutcome.Denied d ->
+          new CommitOutcome.Denied(
+              d.reason(), d.currentRev(), d.currentSnapshot(), author(entityId));
+    };
   }
 
   @Override

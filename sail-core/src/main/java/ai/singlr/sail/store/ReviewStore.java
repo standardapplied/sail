@@ -738,6 +738,11 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Optional<String> liveBase(String id) {
+    return revisions.liveBase(id);
+  }
+
+  @Override
   public void eraseRow(String id) {
     revisions.eraseRow(id);
   }

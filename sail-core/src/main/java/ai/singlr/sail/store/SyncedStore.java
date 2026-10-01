@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.WriteAuthority;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -67,6 +68,13 @@ public interface SyncedStore {
 
   /** The revision this row last synced from main; {@code null} if never. */
   String baseRevOf(String id);
+
+  /**
+   * The {@code base_rev} of the live row of {@code id} as written, blank while main has not taken
+   * the row; empty when there is no live row. How a node tells a row main holds from one it does
+   * not, without the merge base a re-created row derives from its tombstone.
+   */
+  Optional<String> liveBase(String id);
 
   /** Latest revision, including a tombstone; {@code null} if unknown. */
   String latestRev(String id);

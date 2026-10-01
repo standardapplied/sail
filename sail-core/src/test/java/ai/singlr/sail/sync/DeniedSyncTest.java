@@ -277,9 +277,12 @@ class DeniedSyncTest {
     assertNull(report.failure(), "a forged author is a decision, never a failed push");
     assertEquals(2, report.report().pushed());
     assertEquals(
-        List.of(forged.id(), reply.id()),
-        report.denials().stream().map(SyncSession.Denial::id).toList());
+        List.of(forged.id()), report.denials().stream().map(SyncSession.Denial::id).toList());
     assertTrue(report.denials().getFirst().reason().contains("may not post as 'grace'"));
+    assertEquals(
+        List.of(reply.id()),
+        report.refusals().stream().map(SyncSession.Refusal::id).toList(),
+        "the reply waits for its parent, which main did not take");
     var mains = new MessageStore(main.db);
     assertTrue(mains.findById(own.id()).isPresent());
     assertTrue(mains.findById(after.id()).isPresent());

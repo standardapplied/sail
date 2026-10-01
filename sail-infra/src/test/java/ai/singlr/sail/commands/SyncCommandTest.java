@@ -30,6 +30,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncHealth;
+import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.io.ByteArrayOutputStream;
@@ -284,7 +285,8 @@ class SyncCommandTest {
                 0,
                 0,
                 0,
-                List.of(new SyncSession.Denial("spec", "auth", "your role is read-only"))),
+                List.of(new SyncSession.Denial("spec", "auth", "your role is read-only")),
+                List.of()),
             new SyncSession.TypeReport(
                 "message",
                 SyncEngine.Report.NONE,
@@ -295,8 +297,8 @@ class SyncCommandTest {
                 0,
                 0,
                 0,
-                List.of(
-                    new SyncSession.Denial("message", "m1", "'ada' may not post as 'grace'")))));
+                List.of(new SyncSession.Denial("message", "m1", "'ada' may not post as 'grace'")),
+                List.of())));
   }
 
   @Test
@@ -314,6 +316,43 @@ class SyncCommandTest {
             Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),
             Map.of("type", "message", "id", "m1", "reason", "'ada' may not post as 'grace'")),
         report.get("denials"));
+  }
+
+  @Test
+  void rendersRefusalsAndSettlementsInTextAndJson() {
+    var round =
+        new SyncReport(
+            SyncEngine.Report.NONE,
+            null,
+            List.of(
+                new SyncSession.TypeReport(
+                    "spec",
+                    SyncEngine.Report.NONE,
+                    0,
+                    0,
+                    false,
+                    null,
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    List.of(
+                        new SyncSession.Refusal("spec", "born", "main does not hold run 'r'")))),
+            List.of(new Settlement.Settled("message", "m1", "withdrawn, its room being gone")));
+
+    var text = SyncCommand.render(round, false);
+    var json = YamlUtil.parseMap(SyncCommand.render(round, true));
+
+    assertFalse(text.contains("Already in sync"), text);
+    assertTrue(
+        text.contains("spec born: main did not take this yet — main does not hold run 'r'"), text);
+    assertTrue(text.contains("message m1: withdrawn, its room being gone"), text);
+    assertEquals(
+        List.of(Map.of("type", "spec", "id", "born", "reason", "main does not hold run 'r'")),
+        json.get("refusals"));
+    assertEquals(
+        List.of(Map.of("type", "message", "id", "m1", "how", "withdrawn, its room being gone")),
+        json.get("settled"));
   }
 
   @Test

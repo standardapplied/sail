@@ -776,6 +776,80 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * A run in conversation {@code ?2}: in the room itself, on the spec living in it, or on a spec
+   * born in it, which posts there while its runs name only the spec.
+   */
+  private static final String IN_CONVERSATION =
+      "(r.room_id = ?2 OR r.spec_id = ?2 OR r.spec_id IN (SELECT id FROM specs WHERE room_id = ?2))";
+
+  /**
+   * A run main holds as this box holds it: taken, with no revision of this box's still to reach it,
+   * since main decides what a run's principals wrote by the principals the run names there.
+   */
+  private static final String HELD_BY_MAIN =
+      "(coalesce(r.base_rev, '') <> '' AND coalesce(r.rev, '') = coalesce(r.base_rev, ''))";
+
+  /**
+   * A run main holds in a conversation: {@link #HELD_BY_MAIN}, with the spec it belongs to, since
+   * main places a run in a spec's conversation through its own copy of that spec, so a run whose
+   * spec main has not taken is not yet in any conversation there.
+   */
+  private static final String HELD_BY_MAIN_IN_CONVERSATION =
+      "("
+          + HELD_BY_MAIN
+          + " AND NOT EXISTS (SELECT 1 FROM specs s"
+          + " WHERE s.id = r.spec_id AND coalesce(s.base_rev, '') = ''))";
+
+  /** Whether any run of {@code owner} ran in conversation {@code roomId}, on this box. */
+  public boolean ranInConversation(String owner, String roomId) {
+    return db.queryOne(
+            "SELECT 1 FROM runs r WHERE r.owner = ?1 AND " + IN_CONVERSATION + " LIMIT 1",
+            row -> true,
+            owner,
+            roomId)
+        .orElse(false);
+  }
+
+  /**
+   * Whether a run of {@code owner} in conversation {@code roomId} is one main holds ({@code
+   * onMain}), or one main has not taken yet: how a node reads what supports a platform post there.
+   */
+  public boolean ranInConversation(String owner, String roomId, boolean onMain) {
+    return db.queryOne(
+            "SELECT 1 FROM runs r WHERE r.owner = ?1 AND "
+                + IN_CONVERSATION
+                + " AND "
+                + (onMain ? "" : "NOT ")
+                + HELD_BY_MAIN_IN_CONVERSATION
+                + " LIMIT 1",
+            row -> true,
+            owner,
+            roomId)
+        .orElse(false);
+  }
+
+  /** Whether main holds run {@code id} as this box holds it, as this node reads it. */
+  public boolean heldByMain(String id) {
+    return db.queryOne(
+            "SELECT 1 FROM runs r WHERE r.id = ?1 AND " + HELD_BY_MAIN + " LIMIT 1",
+            row -> true,
+            id)
+        .orElse(false);
+  }
+
+  /**
+   * Whether main holds run {@code id} in the conversation it runs in, with its spec, as this node
+   * reads it: what a post by one of its principals rests on.
+   */
+  public boolean heldByMainInConversation(String id) {
+    return db.queryOne(
+            "SELECT 1 FROM runs r WHERE r.id = ?1 AND " + HELD_BY_MAIN_IN_CONVERSATION + " LIMIT 1",
+            row -> true,
+            id)
+        .orElse(false);
+  }
+
+  /**
    * Every run this box made that main has never acknowledged — it began here ({@link
    * ChangeLog#begunHere}) and has no synced base, so main never took it, or took it and the answer
    * was lost — in the order it was written. A run synced from another box is never among them, even
@@ -1469,6 +1543,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   @Override
   public Map<String, Object> currentForSync(String id) {
     return journal.currentForSync(id);
+  }
+
+  @Override
+  public Optional<String> liveBase(String id) {
+    return journal.liveBase(id);
   }
 
   /**

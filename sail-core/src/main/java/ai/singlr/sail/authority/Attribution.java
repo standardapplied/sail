@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
@@ -20,8 +21,7 @@ import java.util.Optional;
  * its author the pusher, this box's machinery ({@link Actor#SYSTEM_HANDLE}), or a principal of a
  * run the pusher owns; absent, main records the pusher. A create may name only the pusher as its
  * creator; absent, the creator is the pusher. A principal naming a run main does not hold yet is
- * refused by {@link ai.singlr.sail.store.Decidability}, never denied, so the next round decides it
- * once the run lands.
+ * refused by {@link Decidability}, never denied, so the next round decides it once the run lands.
  */
 final class Attribution {
 
@@ -75,9 +75,9 @@ final class Attribution {
   /**
    * Whether {@code author} is a principal of a run {@code pusher} owns: a principal names its run
    * in the shape {@link RunStore#principalHandle} mints, so the run is read from the name itself.
-   * Whether main holds the run at all is not decided here but by {@link
-   * ai.singlr.sail.store.Decidability}, which refuses the offer until the run lands and denies it
-   * once the run is gone; this only weighs ownership of a run main holds.
+   * Whether main holds the run at all is not decided here but by {@link Decidability}, which
+   * refuses the offer until the run lands and denies it once the run is gone; this only weighs
+   * ownership of a run main holds.
    */
   boolean principalOfOwnedRun(String pusher, String author) {
     return RunStore.runOf(author)

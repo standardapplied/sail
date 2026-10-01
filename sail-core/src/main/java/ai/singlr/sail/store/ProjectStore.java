@@ -135,6 +135,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Optional<String> liveBase(String id) {
+    return journal.liveBase(id);
+  }
+
+  @Override
   public Map<String, Object> comparableAtRev(String id, String rev) {
     return journal.comparableAtRev(id, rev);
   }

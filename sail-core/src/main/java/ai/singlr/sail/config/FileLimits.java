@@ -16,7 +16,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** The host's guard against accidentally replicating an enormous shared file. */
-public record FileLimits(long fileMax) {
+public record FileLimits(long fileMax, long mainFileMax) {
   public static final long DEFAULT_MAX = 1024L * 1024 * 1024;
 
   public FileLimits {
@@ -24,6 +24,14 @@ public record FileLimits(long fileMax) {
       throw new IllegalArgumentException(
           "limits.file_max must be between 1 byte and 8 GiB: a blob manifest must fit one sync frame");
     }
+    if (mainFileMax >= fileMax) {
+      mainFileMax = 0;
+    }
+  }
+
+  /** This box's own limit, with no cap of main's. */
+  public FileLimits(long fileMax) {
+    this(fileMax, 0);
   }
 
   public static FileLimits defaults() {
@@ -31,12 +39,17 @@ public record FileLimits(long fileMax) {
   }
 
   /**
-   * This limit lowered to {@code otherMax} when that is a tighter positive cap — main's {@code
-   * file_max} as a node learned it — so an ingest enforces the lower of its own and main's; a 0
-   * ({@code otherMax} not yet known) or a looser cap leaves this one.
+   * This limit capped at {@code otherMax} when that is a tighter positive cap — main's {@code
+   * file_max} as a node learned it — so an ingest enforces the lower of its own and main's and a
+   * refusal names both; a 0 ({@code otherMax} not yet known) or a looser cap leaves this one.
    */
   public FileLimits cappedAt(long otherMax) {
-    return otherMax > 0 && otherMax < fileMax ? new FileLimits(otherMax) : this;
+    return otherMax > 0 && otherMax < fileMax ? new FileLimits(fileMax, otherMax) : this;
+  }
+
+  /** The cap an ingest enforces: main's when it is the tighter, else this box's own. */
+  public long effectiveMax() {
+    return mainFileMax > 0 ? mainFileMax : fileMax;
   }
 
   public static FileLimits fromMap(Map<String, Object> map) {
@@ -69,14 +82,25 @@ public record FileLimits(long fileMax) {
   /** Why a file of {@code size} bytes cannot be shared under this cap, naming where to raise it. */
   public Optional<String> problem(long size) {
     if (size < 0) return Optional.of("A declared file length is required");
-    if (size > fileMax)
-      return Optional.of(
-          "File of "
-              + size
-              + " bytes exceeds limits.file_max ("
-              + fileMax
-              + " bytes); raise limits.file_max in host.yaml to share it");
+    if (size > effectiveMax()) return Optional.of(exceeds(size));
     return Optional.empty();
+  }
+
+  private String exceeds(long size) {
+    if (mainFileMax > 0) {
+      return "File of "
+          + size
+          + " bytes exceeds main's limits.file_max ("
+          + mainFileMax
+          + " bytes; this box allows "
+          + fileMax
+          + "); raise limits.file_max in main's host.yaml to share it";
+    }
+    return "File of "
+        + size
+        + " bytes exceeds limits.file_max ("
+        + fileMax
+        + " bytes); raise limits.file_max in host.yaml to share it";
   }
 
   public InputStream bounded(InputStream input, long declaredSize) {
@@ -87,8 +111,8 @@ public record FileLimits(long fileMax) {
       @Override
       public int read() throws IOException {
         var value = in.read();
-        if (value != -1 && ++read > fileMax)
-          throw new IOException("File exceeds limits.file_max (" + fileMax + " bytes)");
+        if (value != -1 && ++read > effectiveMax())
+          throw new IOException("File exceeds limits.file_max (" + effectiveMax() + " bytes)");
         return value;
       }
 
@@ -96,8 +120,8 @@ public record FileLimits(long fileMax) {
       public int read(byte[] bytes, int offset, int length) throws IOException {
         Objects.checkFromIndexSize(offset, length, bytes.length);
         if (length == 0) return 0;
-        if (read == fileMax) return read();
-        var count = in.read(bytes, offset, (int) Math.min(length, fileMax - read));
+        if (read == effectiveMax()) return read();
+        var count = in.read(bytes, offset, (int) Math.min(length, effectiveMax() - read));
         if (count > 0) read += count;
         return count;
       }

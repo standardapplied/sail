@@ -6,8 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -26,17 +25,15 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncLimits;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,56 +60,20 @@ class LivenessAuditTest {
     main.close();
   }
 
-  /** One session running every type in registry order, as SyncOperations does: type -> failure. */
-  private Map<String, String> round(SyncBox box, SyncRpcServer server) throws IOException {
-    var failures = new LinkedHashMap<String, String>();
-    var replicas = SyncedEntities.replicas(box.db, box.id, box.id);
-    try (var link = SyncBox.connect(server, box)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), box.db, box.id));
-      for (var entity : SyncedEntities.all()) {
-        try {
-          link.reconcile(entity.type(), replicas.get(entity.type()));
-        } catch (RuntimeException e) {
-          failures.put(entity.type(), e.getMessage());
-        }
-      }
-    }
-    return failures;
+  /** One full round of {@code box} as {@code as}: the types' reports, with every failure. */
+  private List<SyncSession.TypeReport> round(SyncBox box, Actor as) {
+    return SyncBox.round(main, box.syncsAs(as));
   }
 
-  private Map<String, String> round(SyncBox box, Actor as) throws IOException {
-    return round(box, main.server(as));
+  private static void assertNothingFails(List<SyncSession.TypeReport> reports, String why) {
+    for (var report : reports) {
+      assertNull(report.failure(), why + ": " + report);
+    }
   }
 
-  private void assertSettlesWithin(int rounds, SyncBox box, Actor as) throws IOException {
-    var history = new ArrayList<Map<String, String>>();
-    for (var i = 0; i < rounds; i++) {
-      var failures = round(box, as);
-      history.add(failures);
-      if (failures.isEmpty() && settled(box)) {
-        return;
-      }
-    }
-    throw new AssertionError("no settled round within " + rounds + " rounds: " + history);
-  }
-
-  /**
-   * Whether {@code box} holds nothing back, has nothing left to settle and parks no conflict —
-   * nothing left waiting.
-   */
-  private static boolean settled(SyncBox box) {
-    var rule = new Decidability(box.db);
-    for (var entity : SyncedEntities.all()) {
-      if (!box.conflicts.pendingIds(entity.type()).isEmpty()) {
-        return false;
-      }
-      for (var id : entity.store(box.db).dirtyIds()) {
-        if (rule.forNode(entity.type(), id, box.id) != Decidability.Status.HELD) {
-          return false;
-        }
-      }
-    }
-    return true;
+  /** The scenario settles within {@code rounds}: a clean round, every box equal to main. */
+  private void assertConvergedWithin(int rounds, SyncBox box, Actor as) {
+    SyncBox.assertConvergedWithin(rounds, main, box.syncsAs(as));
   }
 
   private SyncSession.TypeReport only(SyncBox box, Actor as, String type) throws IOException {
@@ -197,7 +158,7 @@ class LivenessAuditTest {
     Acting.as("ada", () -> new MessageStore(ada.db).append("lab", "ada", "hello", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
   }
 
   /** L1/L2: a comment on a spec this box created and deleted (with its room) before syncing. */
@@ -212,7 +173,7 @@ class LivenessAuditTest {
           new RoomStore(ada.db).delete("oops");
         });
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
   }
 
   /** L1/L2: a member demoted to viewer while offline: its new room is denied, its post is not. */
@@ -221,18 +182,57 @@ class LivenessAuditTest {
     room(ada, "ada", "lab");
     Acting.as("ada", () -> new MessageStore(ada.db).append("lab", "ada", "hello", null));
 
-    assertSettlesWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
   }
 
-  /** L3: an agent's spec revision is offered before its run reaches main and fails the round. */
+  /**
+   * L3: an agent's spec, room, review and file revisions land in the round its run does, since runs
+   * sync first; none is offered before its run and none fails the round.
+   */
   @Test
-  void anAgentsSpecIsHeldBackUntilItsRunIsOnMainRatherThanFailingTheRound() throws IOException {
+  void anAgentsRevisionsOfEveryTypeLandInTheRoundItsRunDoes() {
     ownSpec(main, "ada", "mine", "ada");
     round(ada, ADA);
-    var agent = Actor.agentPrincipal(principal(ada, run(ada, "ada", "mine")), "ada");
+    var runId = run(ada, "ada", "mine");
+    var agent = Actor.agentPrincipal(principal(ada, runId), "ada");
     Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    Acting.by(
+        agent,
+        () ->
+            new RoomStore(ada.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "den", "acme", "den", "ada", null, null, null, null, null, null)));
+    Acting.by(
+        agent,
+        () ->
+            new FileStore(ada.db)
+                .put("acme", "notes.txt", new ByteArrayInputStream("notes".getBytes()), 0644));
+    var review = Acting.by(agent, () -> new ReviewStore(ada.db).createReview("mine", 1));
 
-    assertEquals(Map.of(), round(ada, ADA), "L3: nothing fails; the spec waits for its run");
+    var reports = round(ada, ADA);
+
+    assertNothingFails(reports, "L3: nothing fails; everything waits for its run");
+    assertTrue(main.specs.findById("born").isPresent(), "the spec lands with its run");
+    assertTrue(new RoomStore(main.db).findById("den").isPresent(), "the room too");
+    assertTrue(new FileStore(main.db).find("acme", "notes.txt").isPresent(), "the file too");
+    assertTrue(new ReviewStore(main.db).findReview(review).isPresent(), "the review too");
+    assertConvergedWithin(1, ada, ADA);
+  }
+
+  /** L3: a spec born in a room main has not taken is withheld, not offered and refused. */
+  @Test
+  void aSpecBornInAnUnsyncedRoomIsWithheldUntilItsRoomIsOnMain() throws IOException {
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("lab")));
+
+    var specs = only(ada, ADA, "spec");
+
+    assertEquals(0, specs.report().pushed(), "withheld, not pushed");
+    assertEquals(List.of(), specs.refusals(), "and never refused");
+    assertTrue(ada.specs.findById("child").isPresent());
+    assertConvergedWithin(3, ada, ADA);
+    assertEquals("lab", main.specs.findById("child").orElseThrow().roomId());
   }
 
   /**
@@ -260,7 +260,7 @@ class LivenessAuditTest {
     assertEquals(1, changes.history("message", kept.id()).size(), "no second revision on main");
     assertEquals(List.of(), ada.conflicts.pendingIds("message"), "no conflict parked");
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
     assertTrue(
         new MessageStore(main.db).findById(lost.id()).isPresent(), "the room lands, then it");
   }
@@ -276,38 +276,46 @@ class LivenessAuditTest {
         () ->
             new FileStore(ada.db)
                 .put("acme", "big.txt", new ByteArrayInputStream("0123456789".getBytes()), 0644));
-    var server = main.server(ADA).content(main.db, new FileLimits(4));
+    main.limits(new FileLimits(4));
 
-    var first = round(ada, server);
-    assertFalse(first.containsKey("message"), "a refused upload fails later types: " + first);
-    for (var i = 0; i < 2; i++) {
-      if (round(ada, main.server(ADA).content(main.db, new FileLimits(4))).isEmpty()) {
-        return;
-      }
-    }
-    throw new AssertionError("the file is refused every round: " + first);
+    var first = round(ada, ADA);
+
+    assertNothingFails(first, "a refused upload never fails later types");
+    assertConvergedWithin(2, ada, ADA);
+    assertTrue(new FileStore(ada.db).find("acme", "big.txt").isEmpty(), "withdrawn once");
   }
 
-  /** L1 (bounded): a spec created in a project main erased settles once the erasure pages. */
+  /**
+   * L1: a spec created in a project main erased is denied gone, and goes with the project's erasure
+   * the round pages right after, so the round that hears gone leaves nothing behind.
+   */
   @Test
-  void aNewSpecInAProjectMainErasedSettlesWithinTwoRounds() throws IOException {
+  void aNewSpecInAProjectMainErasedSettlesInTheRoundThatHearsIt() {
     ownSpec(main, "ada", "old", "ada");
     round(ada, ADA);
     Acting.as("ada", () -> ada.specs.create(spec("fresh", "ada")));
     eraseProject();
 
-    assertSettlesWithin(2, ada, ADA);
+    var reports = round(ada, ADA);
+
+    assertNothingFails(reports, "a gone answer never fails the type");
+    assertEquals(
+        List.of("fresh"),
+        reports.stream().flatMap(r -> r.denials().stream()).map(SyncSession.Denial::id).toList());
+    assertTrue(ada.specs.findById("fresh").isEmpty(), "gone with its project, in that round");
+    assertConvergedWithin(1, ada, ADA);
   }
 
-  /** L3: that same spec is offered and refused before its project's erasure pages. */
+  /** L1: that same spec never fails the round, before or after its project's erasure pages. */
   @Test
-  void aNewSpecInAProjectMainErasedIsNotOfferedBeforeTheErasureArrives() throws IOException {
+  void aNewSpecInAProjectMainErasedNeverFailsTheRound() throws IOException {
     ownSpec(main, "ada", "old", "ada");
     round(ada, ADA);
     Acting.as("ada", () -> ada.specs.create(spec("fresh", "ada")));
     eraseProject();
 
-    assertEquals(Map.of(), round(ada, ADA), "L3: nothing fails");
+    assertNothingFails(round(ada, ADA), "L3: nothing fails");
+    assertConvergedWithin(2, ada, ADA);
   }
 
   /** L1: a spec born in the room of a spec deleted, with that room, before either synced. */
@@ -322,7 +330,7 @@ class LivenessAuditTest {
           new RoomStore(ada.db).delete("parent");
         });
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
   }
 
   /** L2/L3: a finished review of a spec held back for its new room is denied, not held back. */
@@ -339,7 +347,7 @@ class LivenessAuditTest {
               return id;
             });
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
     assertTrue(
         reviews.findReview(review).isPresent(),
         "the node keeps its review; main held: "
@@ -347,25 +355,6 @@ class LivenessAuditTest {
     assertTrue(
         new ReviewStore(main.db).findReview(review).isPresent(),
         "main takes the review once its spec lands");
-  }
-
-  /** L1: a file main's limits.file_max refuses is offered, and refused, every round. */
-  @Test
-  void aFileAboveMainsFileMaxSettles() throws IOException {
-    Acting.as(
-        "ada",
-        () ->
-            new FileStore(ada.db)
-                .put("acme", "big.txt", new ByteArrayInputStream("0123456789".getBytes()), 0644));
-    var history = new ArrayList<Map<String, String>>();
-    for (var i = 0; i < 3; i++) {
-      var failures = round(ada, main.server(ADA).content(main.db, new FileLimits(4)));
-      history.add(failures);
-      if (failures.isEmpty()) {
-        return;
-      }
-    }
-    throw new AssertionError("no clean round within 3 rounds: " + history);
   }
 
   /** A spec an agent authored, whose run main denied, is withdrawn with its history kept. */
@@ -380,7 +369,7 @@ class LivenessAuditTest {
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     var before = new ChangeLog(ada.db).history("spec", "born").size();
 
-    assertSettlesWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
 
     assertTrue(ada.specs.findById("born").isEmpty(), "the spec is withdrawn");
     assertTrue(
@@ -400,7 +389,7 @@ class LivenessAuditTest {
     Acting.by(agent, () -> ada.specs.create(spec("born", null).withRoomId("lab")));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
 
     assertTrue(new RunStore(main.db).findById(run).isEmpty(), "main denied the run");
 
@@ -426,7 +415,7 @@ class LivenessAuditTest {
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
     var before = new ChangeLog(ada.db).history("spec", "born").size();
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
 
     assertTrue(new RunStore(main.db).findById(run).isEmpty(), "main denied the run");
     assertTrue(ada.specs.findById("born").isEmpty(), "withdrawn here");
@@ -446,7 +435,7 @@ class LivenessAuditTest {
     Acting.as("ada", () -> ada.specs.create(spec("first", "ada").withRoomId("lab")));
     Acting.as("ada", () -> ada.specs.create(spec("second", "ada").withRoomId("lab")));
 
-    assertSettlesWithin(5, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(5, ada, Actor.sync("ada", Role.VIEWER));
 
     assertTrue(new RoomStore(ada.db).findById("lab").isEmpty(), "the room was denied");
     assertTrue(ada.specs.findById("first").isEmpty(), "the first spec settled");
@@ -465,7 +454,7 @@ class LivenessAuditTest {
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
 
-    assertSettlesWithin(3, ada, ADA);
+    assertConvergedWithin(3, ada, ADA);
 
     var landed = main.specs.findById("born").orElseThrow();
     assertEquals("born", landed.roomId(), "re-homed into its own identity room");
@@ -511,7 +500,7 @@ class LivenessAuditTest {
     Acting.system(() -> new RunStore(ada.db).complete(review, "stopped", null));
     Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
 
-    assertSettlesWithin(3, ada, viewer);
+    assertConvergedWithin(3, ada, viewer);
 
     assertTrue(reviews.findReview(review).isEmpty(), "withdrawn once it finished");
   }
@@ -522,19 +511,17 @@ class LivenessAuditTest {
     var files = new FileStore(ada.db);
     Acting.as(
         "ada", () -> files.put("acme", "a.txt", new ByteArrayInputStream("hi".getBytes()), 0644));
-    round(ada, main.server(ADA).content(main.db, new FileLimits(16)));
-    round(ada, main.server(ADA).content(main.db, new FileLimits(16)));
+    main.limits(new FileLimits(16));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
     Acting.as(
         "ada",
         () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    main.limits(new FileLimits(4));
 
-    for (var i = 0; i < 3; i++) {
-      round(ada, main.server(ADA).content(main.db, new FileLimits(4)));
-    }
+    assertConvergedWithin(3, ada, ADA);
 
     assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "reverted, not deleted");
-    SyncBox.assertEqualToMain(main, ada);
   }
 
   /**
@@ -550,6 +537,7 @@ class LivenessAuditTest {
       Acting.as(
           "node",
           () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+      new SyncLimits(node.db).recordMainFileMax(4);
       var replaced = new CountDownLatch(1);
       var commit = new CountDownLatch(1);
       var upload =
@@ -576,15 +564,15 @@ class LivenessAuditTest {
                                 return null;
                               })));
       assertTrue(replaced.await(5, TimeUnit.SECONDS));
-      var settling = executor.submit(() -> new Decidability(node.db).settle("node", 4));
-      assertThrows(TimeoutException.class, () -> settling.get(100, TimeUnit.MILLISECONDS));
+      var settlement = new Settlement(node.db, Decidability.onNode(node.db), "node");
+      var settling = executor.submit(settlement::settle);
       commit.countDown();
       upload.get(5, TimeUnit.SECONDS);
 
       assertEquals(List.of(), settling.get(5, TimeUnit.SECONDS));
       assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "the replacement stays");
-      var nodeSyncs = Actor.sync("node", Role.MEMBER);
-      round(node, main.server(nodeSyncs).content(main.db, new FileLimits(4)));
+      main.limits(new FileLimits(4));
+      assertConvergedWithin(2, node, Actor.sync("node", Role.MEMBER));
       assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     }
   }
@@ -601,14 +589,14 @@ class LivenessAuditTest {
           Acting.system(
               () -> new MessageStore(bob.db).append("mine", MessageStore.SAIL_AUTHOR, "ok", null));
       Acting.system(() -> new RunStore(bob.db).complete(run, "stopped", null));
-      assertSettlesWithin(3, bob, bobSyncs);
+      assertConvergedWithin(3, bob, bobSyncs);
       var adaIsAdmin = Actor.sync("ada", Role.ADMIN);
       round(ada, adaIsAdmin);
       var reply =
           Acting.as(
               "ada", () -> new MessageStore(ada.db).append("mine", "ada", "thanks", verdict.id()));
 
-      assertSettlesWithin(3, ada, adaIsAdmin);
+      assertConvergedWithin(3, ada, adaIsAdmin);
 
       assertTrue(new MessageStore(main.db).findById(reply.id()).isPresent(), "the reply lands");
     }
@@ -625,10 +613,209 @@ class LivenessAuditTest {
             () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
     Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
 
-    assertSettlesWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+    assertConvergedWithin(3, ada, Actor.sync("ada", Role.VIEWER));
 
     assertTrue(new MessageStore(ada.db).findById(post.id()).isEmpty(), "withdrawn here");
     assertTrue(new MessageStore(main.db).findById(post.id()).isEmpty(), "never on main");
+  }
+
+  /** L1/C4: a reply is never lost because its parent's commit threw once beside it. */
+  @Test
+  void aReplyWhoseParentsCommitThrowsOnceLandsWithItsParent() {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    var messages = new MessageStore(ada.db);
+    var parent = Acting.as("ada", () -> messages.append("mine", "ada", "parent", null));
+    var reply = Acting.as("ada", () -> messages.append("mine", "ada", "reply", parent.id()));
+
+    var first =
+        SyncBox.round(
+            main.serverFailingCommitsOf(ADA, "message", parent.id(), new AtomicInteger(1)), ada);
+
+    assertNothingFails(first, "a throwing commit is that offer's refusal");
+    assertTrue(messages.findById(reply.id()).isPresent(), "the reply waits with its parent");
+    assertConvergedWithin(2, ada, ADA);
+    assertTrue(new MessageStore(main.db).findById(reply.id()).isPresent(), "the reply lands");
+  }
+
+  /**
+   * L1: a commit that throws refuses that offer alone, the offers beside it land, and it settles.
+   */
+  @Test
+  void anOfferWhoseCommitThrowsIsRefusedAloneAndLandsOnceTheFaultIsGone() {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    Acting.as("ada", () -> ada.specs.create(spec("bad", "ada")));
+    Acting.as("ada", () -> ada.specs.create(spec("good", "ada")));
+    var faults = new AtomicInteger(1);
+
+    var reports = SyncBox.round(main.serverFailingCommitsOf(ADA, "spec", "bad", faults), ada);
+
+    assertNothingFails(reports, "one offer's fault never fails the type");
+    var specs = reports.stream().filter(r -> r.type().equals("spec")).findFirst().orElseThrow();
+    assertEquals(List.of("bad"), specs.refusals().stream().map(SyncSession.Refusal::id).toList());
+    assertTrue(main.specs.findById("good").isPresent(), "the offer beside it lands");
+    assertTrue(main.specs.findById("bad").isEmpty());
+    assertConvergedWithin(2, ada, ADA);
+    assertTrue(main.specs.findById("bad").isPresent(), "it lands once the fault is gone");
+  }
+
+  /** A spec main holds stays editable from a node after the room it was born in is deleted here. */
+  @Test
+  void anEditToASyncedSpecWhoseRoomWasDeletedHereLands() {
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("lab")));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+    Acting.as("ada", () -> ada.specs.updateStatus("child", SpecStatus.IN_PROGRESS));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("child").orElseThrow().status());
+  }
+
+  /** A spec main holds stays editable from a node after main deleted the room it was born in. */
+  @Test
+  void aSpecWhoseRoomMainDeletedStaysEditableOnTheNode() {
+    room(main, "ada", "lab");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> ada.specs.create(spec("child", "ada").withRoomId("lab")));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> new RoomStore(main.db).delete("lab"));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> ada.specs.updateStatus("child", SpecStatus.IN_PROGRESS));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("child").orElseThrow().status());
+  }
+
+  /** A review finishing after its spec was deleted here still reaches main. */
+  @Test
+  void aReviewFinishingAfterItsSpecWasDeletedHereLands() {
+    ownSpec(main, "ada", "mine", "ada");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("mine", 1));
+    Acting.system(() -> reviews.updateReviewStatus(review, "running"));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> ada.specs.delete("mine"));
+    Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertEquals("failed", new ReviewStore(main.db).findReview(review).orElseThrow().status());
+  }
+
+  /**
+   * A post in a room this box deleted after it synced is main's to decide, never withdrawn here:
+   * main, holding the room's deletion, denies it and says so, where the node used to drop it
+   * silently.
+   */
+  @Test
+  void aPostInARoomThisBoxDeletedAfterSyncIsMainsToDecide() {
+    room(ada, "ada", "lab");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    var post =
+        Acting.as("ada", () -> new MessageStore(ada.db).append("lab", "ada", "last word", null));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+
+    var round = SyncBox.roundSettling(main, ada.syncsAs(ADA));
+
+    assertEquals(List.of(), round.settled(), "the node settles nothing main can decide");
+    var messages = round.types().stream().filter(r -> r.type().equals("message")).findFirst();
+    assertEquals(
+        List.of(post.id()),
+        messages.orElseThrow().denials().stream().map(SyncSession.Denial::id).toList(),
+        "main decides it, and says so");
+    assertConvergedWithin(2, ada, ADA);
+  }
+
+  /** A born-in spec whose room main deleted before the node offered it is re-homed and lands. */
+  @Test
+  void aSpecBornInARoomMainDeletedIsReHomedAndLands() {
+    room(main, "ada", "lab");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> ada.specs.create(spec("born", "ada").withRoomId("lab")));
+    Acting.as("ada", () -> new RoomStore(main.db).delete("lab"));
+
+    var first = SyncBox.roundSettling(main, ada.syncsAs(ADA));
+
+    assertEquals(1, first.settled().size(), "re-homed in the round that heard gone: " + first);
+    assertTrue(first.settled().getFirst().describe().contains("re-homed"));
+    assertConvergedWithin(2, ada, ADA);
+    assertEquals("born", main.specs.findById("born").orElseThrow().roomId(), "re-homed");
+    assertTrue(new RoomStore(main.db).findById("lab").isEmpty(), "the room stays deleted");
+  }
+
+  /**
+   * A spec re-created over main's deletion, born in a room gone here, is main's to decide: its room
+   * is fixed at birth, so main denies the move and every box settles on main's deletion.
+   */
+  @Test
+  void aSpecReCreatedOverMainsDeletionInAnotherRoomIsDeniedAndSettles() {
+    ownSpec(main, "ada", "mine", "ada");
+    room(ada, "ada", "lab");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> main.specs.delete("mine"));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+    Acting.as("ada", () -> ada.specs.create(spec("mine", "ada").withRoomId("lab")));
+
+    assertConvergedWithin(3, ada, ADA);
+
+    assertTrue(main.specs.findById("mine").isEmpty(), "main keeps its deletion");
+    assertTrue(ada.specs.findById("mine").isEmpty(), "and the node settles on it");
+  }
+
+  /** A file re-added over main's deletion above main's ceiling is withdrawn, never an error. */
+  @Test
+  void aFileReAddedAboveTheCeilingOverMainsDeletionIsWithdrawn() {
+    var files = new FileStore(ada.db);
+    Acting.as(
+        "ada", () -> files.put("acme", "a.txt", new ByteArrayInputStream("hi".getBytes()), 0644));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> new FileStore(main.db).delete("acme", "a.txt"));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    main.limits(new FileLimits(4));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertTrue(files.find("acme", "a.txt").isEmpty(), "withdrawn to main's deletion");
+  }
+
+  /** Settlement waits for an offer whose answer may merely be lost, which the round recovers. */
+  @Test
+  void aLostAcceptanceOfABornInSpecIsRecoveredBeforeItIsSettled() throws IOException {
+    room(ada, "ada", "lab");
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as("ada", () -> ada.specs.create(spec("kid", "ada").withRoomId("lab")));
+    SyncBox.pushLosingTheAnswer(main, ada.syncsAs(ADA), "spec");
+    assertTrue(main.specs.findById("kid").isPresent(), "main took the spec");
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+
+    var round = SyncBox.roundSettling(main, ada.syncsAs(ADA));
+
+    assertEquals(List.of(), round.settled(), "nothing settled over a lost answer");
+    assertConvergedWithin(2, ada, ADA);
+    assertEquals("lab", main.specs.findById("kid").orElseThrow().roomId(), "never re-homed");
+  }
+
+  /** What a round settles is announced, with where the work is kept. */
+  @Test
+  void aSettlementIsAnnounced() {
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> new MessageStore(ada.db).append("lab", "ada", "hello", null));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+
+    var round = SyncBox.roundSettling(main, ada.syncsAs(ADA));
+
+    assertEquals(1, round.settled().size(), round.settled().toString());
+    assertTrue(round.settled().getFirst().describe().contains("withdrawn"));
+    assertConvergedWithin(1, ada, ADA);
   }
 
   private void eraseProject() {

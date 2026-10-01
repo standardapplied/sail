@@ -306,12 +306,6 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Whether this box holds conversation {@code roomId} — a room, a spec living in it, or either's
-   * history — so a revision placed in it can be decided here. One this box has never held is
-   * refused ({@link SyncedStore.Unheld}), never denied: its room syncs in its own page, and the
-   * next round decides what lives in it.
-   */
-  /**
    * Whether this box holds a live conversation at {@code roomId} — a room row, or a spec living in
    * it — as opposed to only its history. How {@link Decidability} tells a conversation held from
    * one gone, where a tombstone in the log is not enough.
@@ -326,6 +320,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .orElse(false);
   }
 
+  /**
+   * Whether this box holds conversation {@code roomId} — a room, a spec living in it, or either's
+   * history short of an erasure — so a revision placed in it can be decided here; an erased
+   * conversation is gone, never a place to decide anything in.
+   */
   public boolean holdsConversation(String roomId) {
     return db.queryOne(
             """
@@ -432,6 +431,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   @Override
   public Map<String, Object> currentForSync(String id) {
     return journal.currentForSync(id);
+  }
+
+  @Override
+  public Optional<String> liveBase(String id) {
+    return journal.liveBase(id);
   }
 
   @Override

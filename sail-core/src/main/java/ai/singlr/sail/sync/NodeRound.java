@@ -33,15 +33,30 @@ public final class NodeRound {
    * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
    * #acknowledgeHeld}), every one main does not hold is stamped as this box's ({@link
    * #stampUnheld}), and so is every run of this box's that acts for no one, which an older release
-   * reserved and main would never take.
+   * reserved and main would never take. Main's file ceiling is recorded, and every offer whose
+   * dependency can never arrive is settled ({@link Settlement}). Returns what was settled, for the
+   * round's notices.
    */
-  public static void begin(SyncSession session, Sqlite db, String handle) {
+  public static List<Settlement.Settled> begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
     new SyncLimits(db).recordMainFileMax(session.mainFileMax());
-    new Decidability(db).settle(handle, session.mainFileMax());
+    return settle(db, handle);
+  }
+
+  /**
+   * Ends a round: settles, with the deletions and erasures the round paged in hand, every offer the
+   * round's denials and erasures left undecidable ({@link Settlement}), so a {@code gone} answer is
+   * settled in the round that heard it. Returns what was settled, for the round's notices.
+   */
+  public static List<Settlement.Settled> end(Sqlite db, String handle) {
+    return settle(db, handle);
+  }
+
+  private static List<Settlement.Settled> settle(Sqlite db, String handle) {
+    return new Settlement(db, Decidability.onNode(db), handle).settle();
   }
 
   /**

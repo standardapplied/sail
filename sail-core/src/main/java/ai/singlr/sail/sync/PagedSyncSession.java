@@ -82,6 +82,7 @@ public final class PagedSyncSession implements SyncSession {
   private int adopted;
   private Set<String> touched = Set.of();
   private List<SyncSession.Denial> denials = new ArrayList<>();
+  private List<SyncSession.Refusal> refusals = new ArrayList<>();
   private Consumer<String> notice = ignored -> {};
   private String broken;
   private String handle;
@@ -223,6 +224,7 @@ public final class PagedSyncSession implements SyncSession {
     sawTombstone = false;
     touched = Set.of();
     denials = new ArrayList<>();
+    refusals = new ArrayList<>();
     var ask = askedFor(type);
     adopted = ask.adopted();
     var tip = tips().get(type);
@@ -277,7 +279,8 @@ public final class PagedSyncSession implements SyncSession {
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore,
         0,
-        denials);
+        denials,
+        refusals);
   }
 
   /** What asking main to erase one type's pending prunes came to. */
@@ -976,7 +979,12 @@ public final class PagedSyncSession implements SyncSession {
               author(offer.id()),
               denied.gone());
         }
-        case SyncWire.Refused refused -> new CommitOutcome.Refused(refused.reason());
+        case SyncWire.Refused refused -> {
+          var refusal = new SyncSession.Refusal(type, refused.id(), refused.reason());
+          refusals.add(refusal);
+          notice.accept(refusal.describe());
+          yield new CommitOutcome.Refused(refused.reason());
+        }
       };
     }
   }

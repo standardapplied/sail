@@ -27,10 +27,12 @@ import static ai.singlr.sail.authority.Actors.VIEWER_SYNC;
 import static ai.singlr.sail.authority.Actors.projection;
 import static ai.singlr.sail.authority.Actors.with;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.Standing;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -331,18 +333,18 @@ class SpecAuthorityTest {
   void aPushNamingARunMainDoesNotHoldYetIsRefusedNotDenied() {
     var next = with(OWNED, "_actor", "claude/019fee00-0000-7000-8000-0000000000ff");
 
-    assertEquals(
-        Decidability.Status.PENDING,
-        new Decidability(board.db).forMain("spec", SPEC, next, OWNER_SYNC.handle()).status());
+    assertInstanceOf(
+        Standing.Pending.class,
+        Decidability.onMain(board.db).standing("spec", SPEC, next, OWNER_SYNC.handle()));
   }
 
   @Test
   void aBirthInARoomThisBoxHasNeverHeldIsRefusedNotDenied() {
     var next = with(BORN_IN_LOBBY, "room_id", "elsewhere");
 
-    assertEquals(
-        Decidability.Status.PENDING,
-        new Decidability(board.db).forMain("spec", "child", next, OWNER_SYNC.handle()).status());
+    assertInstanceOf(
+        Standing.Pending.class,
+        Decidability.onMain(board.db).standing("spec", "child", next, OWNER_SYNC.handle()));
   }
 
   @Test

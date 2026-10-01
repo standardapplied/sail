@@ -675,7 +675,7 @@ public final class SyncRpcServer {
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
       case CommitOutcome.Refused refused -> new SyncWire.Refused(offer.id(), refused.reason());
       case CommitOutcome.Denied denied -> {
-        deniedInSession = true;
+        deniedInSession |= offer.snapshot() != null && carriesContent(type);
         yield new SyncWire.Denied(
             offer.id(),
             denied.reason(),
@@ -686,6 +686,14 @@ public final class SyncRpcServer {
             denied.gone());
       }
     };
+  }
+
+  /**
+   * Whether offers of {@code type} carry content main stores before deciding them, so a denial may
+   * leave content behind to collect. Nothing does on a server without a content store.
+   */
+  private boolean carriesContent(String type) {
+    return db != null && !SyncedEntities.require(type).store(db).contentFields().isEmpty();
   }
 
   /**

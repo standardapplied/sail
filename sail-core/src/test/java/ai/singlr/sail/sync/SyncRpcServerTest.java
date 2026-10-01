@@ -715,48 +715,68 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aStoreExceptionAnywhereBecomesAFailedResponseNamingTheTypeAndTheRootCause()
+  void aCommitThatThrowsIsThatOffersRefusalNamingTheRootCauseAndTheOffersBesideItAreAnswered()
       throws Exception {
     var failing =
         new FakeMain() {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
-            throw new IllegalStateException("commit failed", new RuntimeException("disk full"));
+            if (id.equals("bad")) {
+              throw new IllegalStateException("commit failed", new RuntimeException("disk full"));
+            }
+            return new CommitOutcome.Accepted("1-x", null, null);
           }
+        };
+    var captured = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    SyncWire.Results results;
+    try {
+      results =
+          assertInstanceOf(
+              SyncWire.Results.class,
+              after(
+                  server(failing, "spec", Actor.sync("node", Role.MEMBER)),
+                  push(
+                      "spec",
+                      new MainReplica.Offer("bad", Map.of(), null),
+                      new MainReplica.Offer("good", Map.of(), null))));
+    } finally {
+      System.setErr(originalErr);
+    }
 
+    var refused = assertInstanceOf(SyncWire.Refused.class, results.results().get(0));
+    assertEquals("bad", refused.id());
+    assertEquals("disk full", refused.reason());
+    assertEquals("good", assertInstanceOf(SyncWire.Accepted.class, results.results().get(1)).id());
+    assertTrue(
+        captured.toString(StandardCharsets.UTF_8).contains("disk full"),
+        "a refused commit leaves a server-side diagnostic");
+  }
+
+  @Test
+  void aStoreExceptionOutsideACommitBecomesAFailedResponseNamingTheTypeAndTheRootCause()
+      throws Exception {
+    var failing =
+        new FakeMain() {
           @Override
           public long maxSeq() {
             throw new IllegalStateException("database is locked");
           }
         };
-    var server = server(failing, "file", Actor.sync("node", Role.MEMBER));
-    var captured = new ByteArrayOutputStream();
-    var originalErr = System.err;
-    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
-    List<SyncWire.Response> replies;
-    try {
-      replies =
-          serve(
-              server,
-              HELLO,
-              push("file", new MainReplica.Offer("acme/data.bin", Map.of(), null)),
-              new SyncWire.Pull("file", 0, 10),
-              new SyncWire.Heads());
-    } finally {
-      System.setErr(originalErr);
-    }
-    var pushFailure = assertInstanceOf(SyncWire.Failed.class, replies.get(1));
-    assertEquals("store", pushFailure.kind());
-    assertTrue(pushFailure.message().startsWith("file:"), pushFailure.message());
+    var replies =
+        serve(
+            server(failing, "file", Actor.sync("node", Role.MEMBER)),
+            HELLO,
+            new SyncWire.Pull("file", 0, 10),
+            new SyncWire.Heads());
+
     assertTrue(
-        assertInstanceOf(SyncWire.Failed.class, replies.get(2))
+        assertInstanceOf(SyncWire.Failed.class, replies.get(1))
             .message()
             .contains("database is locked"));
     assertTrue(
-        assertInstanceOf(SyncWire.Failed.class, replies.get(3)).message().startsWith("heads:"));
-    assertTrue(
-        captured.toString(StandardCharsets.UTF_8).contains("disk full"),
-        "a swallowed store exception must leave a server-side diagnostic");
+        assertInstanceOf(SyncWire.Failed.class, replies.get(2)).message().startsWith("heads:"));
   }
 
   @Test

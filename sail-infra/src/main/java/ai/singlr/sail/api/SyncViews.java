@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.util.LinkedHashMap;
@@ -32,11 +33,21 @@ public final class SyncViews {
     map.put("bytes_freed", round.freedBytes());
     map.put("types", round.types().stream().map(SyncViews::type).toList());
     map.put("denials", denials(round.denials()));
+    map.put("refusals", round.refusals().stream().map(SyncSession.Refusal::toMap).toList());
+    map.put("settled", round.settled().stream().map(SyncViews::settled).toList());
     return map;
   }
 
   public static List<Map<String, Object>> denials(List<SyncSession.Denial> denials) {
     return denials.stream().map(SyncSession.Denial::toMap).toList();
+  }
+
+  private static Map<String, Object> settled(Settlement.Settled settled) {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("type", settled.type());
+    map.put("id", settled.id());
+    map.put("how", settled.how());
+    return map;
   }
 
   public static Map<String, Object> type(SyncSession.TypeReport type) {

@@ -143,6 +143,11 @@ public final class RevisionJournal implements ConflictResolver {
     return base != null ? base : tombstoneBase(id);
   }
 
+  /** {@link SyncedStore#liveBase}: the live row's {@code base_rev} as written. */
+  public Optional<String> liveBase(String id) {
+    return schema.exists(id) ? Optional.of(column("base_rev", id)) : Optional.empty();
+  }
+
   /**
    * What this box holds of {@code id} as a replica reports it: its comparable snapshot, or, for a
    * deleted entity whose tombstone carries marks, those marks under the tombstone's author, so a
@@ -246,16 +251,17 @@ public final class RevisionJournal implements ConflictResolver {
   }
 
   /**
-   * The base the entity's latest tombstone records: a deletion adopted from main is its own merge
-   * base — this box holds main's deletion, not one of its own to offer — and a deletion this box
-   * decided keeps the base it was made from. Null when the entity has none, or was erased since.
+   * The base the entity's latest tombstone records: a deletion adopted from main, or a withdrawal
+   * of what main never held, is its own merge base — this box holds main's word, not a deletion of
+   * its own to offer — and a deletion this box decided keeps the base it was made from. Null when
+   * the entity has none, or was erased since.
    */
   private String tombstoneBase(String id) {
     return changeLog
         .latestTombstone(schema.entityType(), id)
         .map(
             tombstone ->
-                tombstone.heardFromMain()
+                tombstone.settledByMain()
                     ? tombstone.rev()
                     : Snapshots.text(YamlUtil.parseMap(tombstone.snapshot()), TOMBSTONE_BASE))
         .orElse(null);
@@ -273,14 +279,17 @@ public final class RevisionJournal implements ConflictResolver {
    * synced ancestor ({@code base_rev = rev}). A snapshot that stands for a deletion ({@link
    * Snapshots#isDeletion}) adopts it, recording its marks under the author it names, and the
    * tombstone is the new merge base ({@link #baseRevOf}), so a restore main makes later is pulled,
-   * never undone. Used by the sync engine; the revision is journaled with origin {@code sync}.
+   * never undone. A deletion at no revision is main holding nothing of the entity: this box
+   * withdraws its work, journaled as {@link ChangeLog.Entry#DENIED} so the withdrawal is never
+   * mistaken for a deletion heard from main, yet never offered. Used by the sync engine; a version
+   * of main's is journaled with origin {@code sync}.
    */
   public void applyRevision(String id, Map<String, Object> snapshot, String rev) {
     db.transaction(
         () -> {
           if (Snapshots.isDeletion(snapshot)) {
-            appendTombstone(
-                id, rev, ChangeLog.Entry.SYNC, null, marksOf(snapshot), authorOf(snapshot));
+            var origin = rev == null ? ChangeLog.Entry.DENIED : ChangeLog.Entry.SYNC;
+            appendTombstone(id, rev, origin, null, marksOf(snapshot), authorOf(snapshot));
             eraseRow(id);
           } else {
             schema.apply(id, snapshot);

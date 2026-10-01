@@ -108,11 +108,31 @@ public final class ChangeLog {
     public static final String LOCAL = "local";
 
     /**
+     * The origin of a withdrawal: a tombstone this box wrote over work main holds nothing of, on
+     * main's denial or because what the work depended on can never arrive. Main never held the
+     * entity, so the tombstone is not one heard from main, yet it is settled: nothing to offer.
+     */
+    public static final String DENIED = "denied";
+
+    /**
      * Whether this entry was heard from main rather than decided here: a tombstone heard from main
      * is main's deletion, its own merge base, never one this box has still to offer.
      */
     public boolean heardFromMain() {
       return SYNC.equals(origin);
+    }
+
+    /**
+     * Whether main has settled this entry — heard from main, or withdrawn because main holds
+     * nothing of it — so it is its own merge base and never offered again.
+     */
+    public boolean settledByMain() {
+      return heardFromMain() || DENIED.equals(origin);
+    }
+
+    /** Whether this entry is a withdrawal ({@link #DENIED}): main holds nothing of the entity. */
+    public boolean withdrawn() {
+      return DENIED.equals(origin);
     }
   }
 
@@ -518,18 +538,19 @@ public final class ChangeLog {
 
   /**
    * Entities of {@code entityType} whose latest entry is a deletion this box decided itself — a
-   * tombstone not adopted from main — and so still has to reach main, in the order they were
-   * decided.
+   * tombstone neither adopted from main nor a withdrawal of what main never held — and so still has
+   * to reach main, in the order they were decided.
    */
   public Set<String> localTombstones(String entityType) {
     return db
         .query(
             SELECT_HEAD
-                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin <> ?"
+                + " WHERE h.entity_type = ? AND l.kind = 'tombstone' AND l.origin NOT IN (?, ?)"
                 + " ORDER BY l.seq",
             row -> row.text(2),
             entityType,
-            Entry.SYNC)
+            Entry.SYNC,
+            Entry.DENIED)
         .stream()
         .collect(Collectors.toCollection(LinkedHashSet::new));
   }

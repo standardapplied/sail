@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
@@ -29,6 +30,8 @@ import java.io.OutputStream;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
 import java.io.UncheckedIOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,6 +39,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 
 /**
@@ -54,6 +58,7 @@ public final class SyncBox implements AutoCloseable {
   public final StoreReplica replica;
   private Actor session;
   private String handle;
+  private FileLimits limits = FileLimits.defaults();
 
   public SyncBox(Path dir, String id) {
     this(id, Sqlite.open(dir.resolve(id + ".db")));
@@ -119,12 +124,26 @@ public final class SyncBox implements AutoCloseable {
    * failure recorded against it while the rest of the round runs.
    */
   public static List<SyncSession.TypeReport> round(SyncBox main, SyncBox node) {
+    return roundSettling(main, node).types();
+  }
+
+  /** What one full round settled before it began, and how every type fared. */
+  public record Round(List<Settlement.Settled> settled, List<SyncSession.TypeReport> types) {}
+
+  /** As {@link #round}, keeping what the round settled at its start. */
+  public static Round roundSettling(SyncBox main, SyncBox node) {
     try (var link = connect(main.server(node.session()), node)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
+      var settled =
+          new ArrayList<>(
+              Actor.call(
+                  Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle())));
       var replicas = node.replicas();
-      return SyncedEntities.all().stream()
-          .map(entity -> reconcileOrFail(link, entity.type(), replicas.get(entity.type())))
-          .toList();
+      var types =
+          SyncedEntities.all().stream()
+              .map(entity -> reconcileOrFail(link, entity.type(), replicas.get(entity.type())))
+              .toList();
+      settled.addAll(Actor.call(Actor.main(), () -> NodeRound.end(node.db, node.handle())));
+      return new Round(List.copyOf(settled), types);
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
@@ -145,14 +164,30 @@ public final class SyncBox implements AutoCloseable {
    * the fleet has not settled within a few passes.
    */
   public static void quiesce(SyncBox main, SyncBox... nodes) {
+    quiesce(QUIESCE_PASSES, main, nodes);
+  }
+
+  /**
+   * As {@link #quiesce(SyncBox, SyncBox...)}, within {@code passes} rounds per node: a scenario
+   * states how many rounds settling it takes, and fails when it takes more.
+   */
+  public static void quiesce(int passes, SyncBox main, SyncBox... nodes) {
     var unsettled = List.<String>of();
-    for (var pass = 0; pass < QUIESCE_PASSES; pass++) {
+    for (var pass = 0; pass < passes; pass++) {
       unsettled = unsettled(main, nodes);
       if (unsettled.isEmpty()) {
         return;
       }
     }
-    fail("the fleet did not settle:\n" + String.join("\n", unsettled));
+    fail("the fleet did not settle within " + passes + " passes:\n" + String.join("\n", unsettled));
+  }
+
+  /** {@link #quiesce(int, SyncBox, SyncBox...)} then {@link #assertEqualToMain} for every node. */
+  public static void assertConvergedWithin(int passes, SyncBox main, SyncBox... nodes) {
+    quiesce(passes, main, nodes);
+    for (var node : nodes) {
+      assertEqualToMain(main, node);
+    }
   }
 
   private static final int QUIESCE_PASSES = 6;
@@ -160,9 +195,12 @@ public final class SyncBox implements AutoCloseable {
   private static List<String> unsettled(SyncBox main, SyncBox... nodes) {
     var unsettled = new ArrayList<String>();
     for (var node : nodes) {
-      for (var report : round(main, node)) {
+      var round = roundSettling(main, node);
+      round.settled().forEach(settled -> unsettled.add(node.id + " " + settled.describe()));
+      for (var report : round.types()) {
         if (report.failure() != null
             || !report.denials().isEmpty()
+            || !report.refusals().isEmpty()
             || report.report().total() != 0) {
           unsettled.add(node.id + " " + report);
         }
@@ -375,10 +413,71 @@ public final class SyncBox implements AutoCloseable {
     Acting.as(id, () -> specs.create(row));
   }
 
+  /** This box as main enforces {@code limits} on the files it takes and tells its nodes so. */
+  public SyncBox limits(FileLimits limits) {
+    this.limits = limits;
+    return this;
+  }
+
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
     return SyncRpcServer.over(
-        db, id, null, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR);
+            db, id, null, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR)
+        .content(db, limits);
+  }
+
+  /**
+   * As {@link #server}, but main's commit of {@code id} of {@code type} throws {@code times} times
+   * before working: a store fault inside one offer, the rest of the batch unharmed.
+   */
+  public SyncRpcServer serverFailingCommitsOf(
+      Actor as, String type, String id, AtomicInteger times) {
+    var replicas =
+        new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(db, this.id, null));
+    var real = replicas.get(type);
+    replicas.put(
+        type,
+        (MainReplica)
+            Proxy.newProxyInstance(
+                MainReplica.class.getClassLoader(),
+                new Class<?>[] {MainReplica.class},
+                (proxy, method, args) -> {
+                  if (method.getName().equals("commit") && id.equals(args[0]) && times.get() > 0) {
+                    times.decrementAndGet();
+                    throw new IllegalStateException("store fault committing " + id);
+                  }
+                  try {
+                    return method.invoke(real, args);
+                  } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                  }
+                }));
+    var changes = new ChangeLog(db);
+    return new SyncRpcServer(
+            replicas,
+            as,
+            FdeRoster.EMPTY,
+            SyncTransitionSink.NONE,
+            changes::headsAfter,
+            SyncWire.UPGRADE_FLOOR)
+        .content(db, limits)
+        .boxes(new SyncRpcServer.MainBox(null, this.id));
+  }
+
+  /** One full round of {@code node} against {@code server}, as {@link #round}. */
+  public static List<SyncSession.TypeReport> round(SyncRpcServer server, SyncBox node) {
+    try (var link = connect(server, node)) {
+      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
+      var replicas = node.replicas();
+      var types =
+          SyncedEntities.all().stream()
+              .map(entity -> reconcileOrFail(link, entity.type(), replicas.get(entity.type())))
+              .toList();
+      Actor.run(Actor.main(), () -> NodeRound.end(node.db, node.handle()));
+      return types;
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   /** A protocol-4 session over a pipe to {@code server}, plus the wire log and the notices. */

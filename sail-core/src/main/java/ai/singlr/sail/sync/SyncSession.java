@@ -64,10 +64,36 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
   }
 
   /**
+   * An offer main could not take yet, naming what it awaits: the node left its row as it is and
+   * offers it again next round. One that repeats round after round is the sign of a dependency that
+   * will never arrive.
+   */
+  record Refusal(String type, String id, String reason) {
+    public Refusal {
+      Objects.requireNonNull(type, "type");
+      Objects.requireNonNull(id, "id");
+      reason = Objects.requireNonNullElse(reason, "");
+    }
+
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("type", type);
+      map.put("id", id);
+      map.put("reason", reason);
+      return map;
+    }
+
+    /** The refusal as the FDE reads it: what main did not take yet, and why. */
+    public String describe() {
+      return type + " " + id + ": main did not take this yet — " + reason;
+    }
+  }
+
+  /**
    * How one entity type fared in a round: the engine's counts, how many pages and entries main
    * served for it, whether nothing at all had to move ({@code skipped}), the failure that stopped
    * it, if one did, the content bytes it moved each way, the bytes the collection after it freed,
-   * and the offers main denied.
+   * the offers main denied, and the offers main did not take yet.
    */
   record TypeReport(
       String type,
@@ -79,9 +105,11 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       long fetchedBytes,
       long sentBytes,
       long freedBytes,
-      List<Denial> denials) {
+      List<Denial> denials,
+      List<Refusal> refusals) {
     public TypeReport {
       denials = List.copyOf(denials);
+      refusals = List.copyOf(refusals);
     }
 
     public TypeReport(
@@ -93,7 +121,18 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
         String failure,
         long fetchedBytes,
         long sentBytes) {
-      this(type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, 0, List.of());
+      this(
+          type,
+          report,
+          pages,
+          entries,
+          skipped,
+          failure,
+          fetchedBytes,
+          sentBytes,
+          0,
+          List.of(),
+          List.of());
     }
 
     public TypeReport(
@@ -109,7 +148,17 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     /** This report with the bytes the collection after it freed. */
     public TypeReport withFreedBytes(long freed) {
       return new TypeReport(
-          type, report, pages, entries, skipped, failure, fetchedBytes, sentBytes, freed, denials);
+          type,
+          report,
+          pages,
+          entries,
+          skipped,
+          failure,
+          fetchedBytes,
+          sentBytes,
+          freed,
+          denials,
+          refusals);
     }
 
     public static TypeReport failed(String type, String failure) {

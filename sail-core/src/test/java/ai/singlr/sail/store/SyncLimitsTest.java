@@ -33,15 +33,15 @@ class SyncLimitsTest {
   @Test
   void anUnnamedLimitIsZeroAndCapsNothing() {
     assertEquals(0, limits.mainFileMax());
-    assertEquals(new FileLimits(100), new FileLimits(100).cappedAt(limits.mainFileMax()));
+    assertEquals(100, new FileLimits(100).cappedAt(limits.mainFileMax()).effectiveMax());
   }
 
   @Test
   void aNamedLimitIsRecordedReplacedAndCapsTheLowerOfTheTwo() {
     limits.recordMainFileMax(4);
     assertEquals(4, limits.mainFileMax());
-    assertEquals(new FileLimits(4), new FileLimits(100).cappedAt(limits.mainFileMax()));
-    assertEquals(new FileLimits(3), new FileLimits(3).cappedAt(limits.mainFileMax()));
+    assertEquals(4, new FileLimits(100).cappedAt(limits.mainFileMax()).effectiveMax());
+    assertEquals(3, new FileLimits(3).cappedAt(limits.mainFileMax()).effectiveMax());
 
     limits.recordMainFileMax(8);
     assertEquals(8, limits.mainFileMax());
