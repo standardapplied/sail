@@ -427,6 +427,23 @@ class LivenessAuditTest {
         "its history stays, with the withdrawal on top");
   }
 
+  /**
+   * Two unpublished specs born in one room main denies never anchor each other: an unacknowledged
+   * sibling is no evidence main holds the room, so each is re-homed and decided on its own.
+   */
+  @Test
+  void twoUnpublishedSpecsBornInADeniedRoomSettle() throws IOException {
+    room(ada, "ada", "lab");
+    Acting.as("ada", () -> ada.specs.create(spec("first", "ada").withRoomId("lab")));
+    Acting.as("ada", () -> ada.specs.create(spec("second", "ada").withRoomId("lab")));
+
+    assertSettlesWithin(5, ada, Actor.sync("ada", Role.VIEWER));
+
+    assertTrue(new RoomStore(ada.db).findById("lab").isEmpty(), "the room was denied");
+    assertTrue(ada.specs.findById("first").isEmpty(), "the first spec settled");
+    assertTrue(ada.specs.findById("second").isEmpty(), "the second spec settled");
+  }
+
   /** A born-in spec whose room was deleted here is re-homed and lands under its own author. */
   @Test
   void aSpecBornInARoomDeletedHereLandsReHomedUnderItsAuthor() throws IOException {

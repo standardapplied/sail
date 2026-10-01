@@ -271,7 +271,7 @@ public final class Decidability {
           ? Finding.HELD
           : pendingRoom(room, specId);
     }
-    if (anchoredByOtherSpec(room, specId)) {
+    if (anchoredByOtherSpec(room, specId, asMain)) {
       return Finding.HELD;
     }
     var head = changeLog.head(Erasure.ROOM, room);
@@ -302,13 +302,19 @@ public final class Decidability {
             "SELECT coalesce(base_rev, '') FROM " + table + " WHERE id = ?", r -> r.text(0), id);
   }
 
-  /** Whether a spec other than {@code specId} lives in {@code room}, anchoring its conversation. */
-  private boolean anchoredByOtherSpec(String room, String specId) {
+  /**
+   * Whether a spec other than {@code specId} lives in {@code room}, anchoring its conversation.
+   * Main trusts every spec it holds; the node counts only a spec main has acknowledged, so two
+   * unpublished siblings of a denied room never anchor each other and each is settled on its own.
+   */
+  private boolean anchoredByOtherSpec(String room, String specId, boolean asMain) {
     return db.queryOne(
-            "SELECT 1 FROM specs WHERE (id = ?1 OR room_id = ?1) AND id <> ?2 LIMIT 1",
+            "SELECT 1 FROM specs WHERE (id = ?1 OR room_id = ?1) AND id <> ?2"
+                + " AND (?3 OR coalesce(base_rev, '') <> '') LIMIT 1",
             r -> true,
             room,
-            specId)
+            specId,
+            asMain ? 1 : 0)
         .orElse(false);
   }
 
