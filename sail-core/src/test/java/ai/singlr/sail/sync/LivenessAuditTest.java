@@ -400,6 +400,96 @@ class LivenessAuditTest {
     assertTrue(new RoomStore(main.db).findById("lab").isPresent(), "its room stays live");
   }
 
+  /**
+   * A born-in spec of a denied run whose room is gone here is withdrawn too: re-homing it keeps its
+   * author, so the run it still names decides it, never the box's own machinery.
+   */
+  @Test
+  void aSpecOfADeniedRunBornInARoomDeletedHereIsWithdrawnNotRepublished() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    room(main, "ada", "lab");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
+    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null).withRoomId("lab")));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+    var before = new ChangeLog(ada.db).history("spec", "born").size();
+
+    assertSettlesWithin(3, ada, ADA);
+
+    assertTrue(new RunStore(main.db).findById(run).isEmpty(), "main denied the run");
+    assertTrue(ada.specs.findById("born").isEmpty(), "withdrawn here");
+    assertTrue(main.specs.findById("born").isEmpty(), "never on main");
+    assertTrue(
+        new ChangeLog(ada.db).history("spec", "born").size() > before,
+        "its history stays, with the withdrawal on top");
+  }
+
+  /** A born-in spec whose room was deleted here is re-homed and lands under its own author. */
+  @Test
+  void aSpecBornInARoomDeletedHereLandsReHomedUnderItsAuthor() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    room(main, "ada", "lab");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null).withRoomId("lab")));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
+
+    assertSettlesWithin(3, ada, ADA);
+
+    var landed = main.specs.findById("born").orElseThrow();
+    assertEquals("born", landed.roomId(), "re-homed into its own identity room");
+    assertEquals(agent.handle(), landed.updatedBy(), "under its author, not this box");
+  }
+
+  /**
+   * A review this box is still running is never withdrawn under its pipeline, even once its spec is
+   * denied; it settles the round after it finishes.
+   */
+  @Test
+  void aRunningReviewOfADeniedSpecIsKeptUntilItFinishes() throws IOException {
+    Acting.as("ada", () -> ada.specs.create(spec("child", "ada")));
+    var reviews = new ReviewStore(ada.db);
+    var review = Acting.system(() -> reviews.createReview("child", 1));
+    Acting.system(() -> reviews.updateReviewStatus(review, "running"));
+    Acting.as(
+        "ada",
+        () ->
+            new RunStore(ada.db)
+                .create(
+                    review,
+                    "acme",
+                    "child",
+                    "ada",
+                    "review",
+                    "claude-code",
+                    "b",
+                    "t",
+                    null,
+                    null,
+                    "/log",
+                    "unit"));
+    var viewer = Actor.sync("ada", Role.VIEWER);
+
+    round(ada, viewer);
+    round(ada, viewer);
+
+    assertTrue(ada.specs.findById("child").isEmpty(), "main denied the spec");
+    assertTrue(
+        reviews.findReview(review).isPresent(), "the running review is kept for its pipeline");
+
+    Acting.system(() -> new RunStore(ada.db).complete(review, "stopped", null));
+    Acting.system(() -> reviews.updateReviewStatus(review, "failed"));
+
+    assertSettlesWithin(3, ada, viewer);
+
+    assertTrue(reviews.findReview(review).isEmpty(), "withdrawn once it finished");
+  }
+
   /** A ceiling main lowered reverts an oversized edit to the version main holds, never deletes. */
   @Test
   void anOversizedEditOfASyncedFileRevertsToMainsVersionUnderALoweredCeiling() throws IOException {

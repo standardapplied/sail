@@ -107,9 +107,10 @@ public final class Decidability {
   /**
    * Settles on this box, as the FDE {@code boxHandle}, every unacknowledged offer whose dependency
    * is gone: a born-in spec whose room is gone is re-homed into its own identity room; anything
-   * else is withdrawn as a denial is settled, kept in the change log. Runs locally, needing no
-   * session, at the start of every round, so what a round's denials and erasures leave undecidable
-   * is settled by the next. Returns what it settled.
+   * else is withdrawn as a denial is settled, kept in the change log. Work still live here ({@link
+   * SyncedStore#live}) is left to its pipeline, as a denial leaves it, and settles once it has
+   * finished. Runs locally, needing no session, at the start of every round, so what a round's
+   * denials and erasures leave undecidable is settled by the next. Returns what it settled.
    *
    * <p>{@code mainFileMax} is main's file ceiling (0 when unknown): an offer of a file above it is
    * settled once here, never made, so an oversized file never breaks the channel mid-upload.
@@ -119,7 +120,7 @@ public final class Decidability {
     for (var entity : SyncedEntities.all()) {
       var store = entity.store(db);
       for (var id : List.copyOf(store.dirtyIds())) {
-        if (forNode(entity.type(), id, boxHandle) == Status.GONE) {
+        if (!store.live(id, boxHandle) && forNode(entity.type(), id, boxHandle) == Status.GONE) {
           settleGone(entity.type(), id);
           settled.add(entity.type() + " " + id);
         }
@@ -463,14 +464,20 @@ public final class Decidability {
         + " WHERE s.id = r.spec_id AND coalesce(s.base_rev, '') = ''))";
   }
 
+  /**
+   * A re-homed spec keeps its author: the run its {@code _actor} names still decides it, so a spec
+   * whose run main then denies is withdrawn the round after, never republished as this box's own.
+   */
   private void settleGone(String type, String id) {
     var store = SyncedEntities.require(type).store(db);
     db.transaction(
         () -> {
+          var snapshot = store.currentForSync(id);
           if (Strings.isNotBlank(store.baseRevOf(id))) {
             revertToBase(id, store);
-          } else if (onlyRoomGone(type, id, store.currentForSync(id))) {
-            Actor.run(Actor.system(), () -> new SpecStore(db).reHomeToOwnRoom(id));
+          } else if (onlyRoomGone(type, id, snapshot)) {
+            var author = Snapshots.text(snapshot, Snapshots.ACTOR);
+            Actor.run(Actor.main(author), () -> new SpecStore(db).reHomeToOwnRoom(id));
           } else {
             Actor.run(Actor.main(), () -> store.adoptForSync(id, null, null));
           }
