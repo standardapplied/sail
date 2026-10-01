@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -17,6 +18,7 @@ import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncLimits;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -263,7 +265,7 @@ class FileImporterTest {
             files,
             () -> {
               loads.incrementAndGet();
-              return ai.singlr.sail.config.FileLimits.defaults();
+              return FileLimits.defaults();
             });
 
     assertEquals(3, counting.importAll().imported());
@@ -287,6 +289,18 @@ class FileImporterTest {
 
     assertTrue(failure.getMessage().contains("limits.file_max"));
     assertTrue(files.find("acme", "a.txt").isEmpty());
+  }
+
+  @Test
+  void mainsLowerFileCapRefusesAnOversizedFileAtImport() throws Exception {
+    new SyncLimits(db).recordMainFileMax(1);
+    writeOnDisk("acme", "big.txt", "too big");
+    var bounded = new FileImporter(projectsDir, files, FileLimits::defaults);
+
+    var failure = assertThrows(IllegalArgumentException.class, bounded::importAll);
+
+    assertTrue(failure.getMessage().contains("limits.file_max"), failure.getMessage());
+    assertTrue(files.find("acme", "big.txt").isEmpty());
   }
 
   @Test

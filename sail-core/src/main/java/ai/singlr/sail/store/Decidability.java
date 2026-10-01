@@ -108,12 +108,11 @@ public final class Decidability {
    * Settles on this box, as the FDE {@code boxHandle}, every unacknowledged offer whose dependency
    * is gone: a born-in spec whose room is gone is re-homed into its own identity room; anything
    * else is withdrawn as a denial is settled, kept in the change log. Runs locally, needing no
-   * session, at the start of every round and after the node adopts an erasure, a denial or a gone
-   * answer. Returns what it settled.
+   * session, at the start of every round, so what a round's denials and erasures leave undecidable
+   * is settled by the next. Returns what it settled.
    *
-   * <p>{@code mainFileMax} is main's file ceiling (0 when unknown): a file already stored above it
-   * is withdrawn once here, never offered, so an oversized file never breaks the channel
-   * mid-upload.
+   * <p>{@code mainFileMax} is main's file ceiling (0 when unknown): an offer of a file above it is
+   * settled once here, never made, so an oversized file never breaks the channel mid-upload.
    */
   public List<String> settle(String boxHandle, long mainFileMax) {
     var settled = new ArrayList<String>();
@@ -127,17 +126,27 @@ public final class Decidability {
       }
     }
     for (var id : filesAbove(mainFileMax)) {
-      new Erasure(db).discard(List.of(new Erasure.Target(Erasure.FILE, id)));
+      settleGone(Erasure.FILE, id);
       settled.add(Erasure.FILE + " " + id);
     }
     return settled;
   }
 
+  /**
+   * The files this box offers that main's ceiling would refuse: only an outstanding offer is an
+   * offer, so a file main already holds above a ceiling it lowered since is left as it is, and an
+   * oversized edit of one is reverted to the version main holds rather than withdrawn.
+   */
   private List<String> filesAbove(long mainFileMax) {
     if (mainFileMax <= 0) {
       return List.of();
     }
-    return db.query("SELECT id FROM project_files WHERE size > ?", r -> r.text(0), mainFileMax);
+    var dirty = SyncedEntities.require(Erasure.FILE).store(db).dirtyIds();
+    return db
+        .query("SELECT id FROM project_files WHERE size > ?", r -> r.text(0), mainFileMax)
+        .stream()
+        .filter(dirty::contains)
+        .toList();
   }
 
   private Finding evaluate(
@@ -219,19 +228,22 @@ public final class Decidability {
 
   /**
    * A message's standing: its conversation, the run of an agent author — or, for a platform post, a
-   * run of its owner in the conversation — and its {@code reply_to} parent, whose standing it
-   * inherits so a reply is held or settled exactly with the post it answers, never merely because
-   * that post has not reached main yet (they sync in one round, parent first).
+   * run of its owner in the conversation — and, on the node, a {@code reply_to} parent main has not
+   * taken yet, whose standing it inherits so a reply is held or settled exactly with the post it
+   * answers, never merely because that post has not reached main yet (they sync in one round,
+   * parent first). A parent main holds passed its own admission, under its own author's run, and is
+   * never asked again as the replier.
    */
   private Finding messageFinding(
       Map<String, Object> snapshot, String handle, boolean asMain, Set<String> visited) {
     var room = MessageStore.roomIdOf(snapshot);
     var finding = conversationFinding(room, asMain);
     var reply = Snapshots.text(snapshot, "reply_to");
-    if (Strings.isNotBlank(reply) && visited.add(reply)) {
-      var parent = new MessageStore(db).currentForSync(reply);
-      if (parent != null) {
-        finding = finding.worse(messageFinding(parent, handle, asMain, visited));
+    if (!asMain && Strings.isNotBlank(reply) && visited.add(reply)) {
+      var messages = new MessageStore(db);
+      var parent = messages.currentForSync(reply);
+      if (parent != null && Strings.isBlank(messages.baseRevOf(reply))) {
+        finding = finding.worse(messageFinding(parent, handle, false, visited));
       }
     }
     var author = Snapshots.text(snapshot, "author");
@@ -400,9 +412,13 @@ public final class Decidability {
     if (asMain) {
       return hasRunOfOwnerInConversation(owner, room) ? Finding.HELD : pending;
     }
-    var unsynced = runOfOwnerInConversation(owner, room, false);
-    var synced = runOfOwnerInConversation(owner, room, true);
-    return unsynced && !synced ? pending : Finding.HELD;
+    if (runOfOwnerInConversation(owner, room, true)) {
+      return Finding.HELD;
+    }
+    return runOfOwnerInConversation(owner, room, false)
+        ? pending
+        : Finding.gone(
+            "no run of '" + owner + "' in room '" + room + "' remains to support this post");
   }
 
   private boolean hasRunOfOwnerInConversation(String owner, String room) {
@@ -456,7 +472,7 @@ public final class Decidability {
           } else if (Erasure.SPEC.equals(type) && bornInSpec(id)) {
             Actor.run(Actor.system(), () -> new SpecStore(db).reHomeToOwnRoom(id));
           } else {
-            new Erasure(db).discard(List.of(new Erasure.Target(type, id)));
+            Actor.run(Actor.main(), () -> store.adoptForSync(id, null, null));
           }
           return null;
         });

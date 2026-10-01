@@ -87,7 +87,10 @@ class LivenessAuditTest {
     throw new AssertionError("no settled round within " + rounds + " rounds: " + history);
   }
 
-  /** Whether {@code box} holds nothing back and parks no conflict — nothing left waiting. */
+  /**
+   * Whether {@code box} holds nothing back, has nothing left to settle and parks no conflict —
+   * nothing left waiting.
+   */
   private static boolean settled(SyncBox box) {
     var rule = new Decidability(box.db);
     for (var entity : SyncedEntities.all()) {
@@ -95,7 +98,7 @@ class LivenessAuditTest {
         return false;
       }
       for (var id : entity.store(box.db).dirtyIds()) {
-        if (rule.forNode(entity.type(), id, box.id) == Decidability.Status.PENDING) {
+        if (rule.forNode(entity.type(), id, box.id) != Decidability.Status.HELD) {
           return false;
         }
       }
@@ -354,6 +357,89 @@ class LivenessAuditTest {
       }
     }
     throw new AssertionError("no clean round within 3 rounds: " + history);
+  }
+
+  /** A spec an agent authored, whose run main denied, is withdrawn with its history kept. */
+  @Test
+  void aSpecOfADeniedRunIsWithdrawnButKeepsItsHistory() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null)));
+    Acting.by(agent, () -> ada.specs.updateStatus("born", SpecStatus.IN_PROGRESS));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+    var before = new ChangeLog(ada.db).history("spec", "born").size();
+
+    assertSettlesWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+
+    assertTrue(ada.specs.findById("born").isEmpty(), "the spec is withdrawn");
+    assertTrue(
+        new ChangeLog(ada.db).history("spec", "born").size() > before,
+        "its history stays, with the withdrawal on top");
+  }
+
+  /** A ceiling main lowered reverts an oversized edit to the version main holds, never deletes. */
+  @Test
+  void anOversizedEditOfASyncedFileRevertsToMainsVersionUnderALoweredCeiling() throws IOException {
+    var files = new FileStore(ada.db);
+    Acting.as(
+        "ada", () -> files.put("acme", "a.txt", new ByteArrayInputStream("hi".getBytes()), 0644));
+    round(ada, main.server(ADA).content(main.db, new FileLimits(16)));
+    round(ada, main.server(ADA).content(main.db, new FileLimits(16)));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+
+    for (var i = 0; i < 3; i++) {
+      round(ada, main.server(ADA).content(main.db, new FileLimits(4)));
+    }
+
+    assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
+    assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "reverted, not deleted");
+    SyncBox.assertEqualToMain(main, ada);
+  }
+
+  /** A reply to a narrator post main accepted under another FDE's run lands as the replier. */
+  @Test
+  void aReplyToAnAcceptedNarratorPostOfAnotherFdesRunLands() throws IOException {
+    try (var bob = new SyncBox("bob")) {
+      var bobSyncs = Actor.sync("bob", Role.MEMBER);
+      ownSpec(main, "bob", "mine", "bob");
+      round(bob, bobSyncs);
+      var run = run(bob, "bob", "mine");
+      var verdict =
+          Acting.system(
+              () -> new MessageStore(bob.db).append("mine", MessageStore.SAIL_AUTHOR, "ok", null));
+      Acting.system(() -> new RunStore(bob.db).complete(run, "stopped", null));
+      assertSettlesWithin(3, bob, bobSyncs);
+      var adaIsAdmin = Actor.sync("ada", Role.ADMIN);
+      round(ada, adaIsAdmin);
+      var reply =
+          Acting.as(
+              "ada", () -> new MessageStore(ada.db).append("mine", "ada", "thanks", verdict.id()));
+
+      assertSettlesWithin(3, ada, adaIsAdmin);
+
+      assertTrue(new MessageStore(main.db).findById(reply.id()).isPresent(), "the reply lands");
+    }
+  }
+
+  /** A narrator post whose only supporting run main denied is withdrawn, not offered forever. */
+  @Test
+  void aNarratorPostOfADeniedRunSettles() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    var post =
+        Acting.system(
+            () -> new MessageStore(ada.db).append("mine", MessageStore.SAIL_AUTHOR, "done", null));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+
+    assertSettlesWithin(3, ada, Actor.sync("ada", Role.VIEWER));
+
+    assertTrue(new MessageStore(ada.db).findById(post.id()).isEmpty(), "withdrawn here");
+    assertTrue(new MessageStore(main.db).findById(post.id()).isEmpty(), "never on main");
   }
 
   private void eraseProject() {
