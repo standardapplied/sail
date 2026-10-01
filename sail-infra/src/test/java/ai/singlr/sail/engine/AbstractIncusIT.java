@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -71,8 +72,10 @@ public abstract class AbstractIncusIT {
               Stream.of("python3", "podman", "uidmap", "sqlite3"))
           .distinct()
           .toList();
+  private static final Duration INSTALL_BUDGET = Duration.ofMinutes(10);
   private static final Object PREPARE_LOCK = new Object();
   private static boolean preparedImageReady;
+  private static Throwable bakeFailure;
 
   /**
    * Launches {@code container} from the locally published prepared image — the base image plus
@@ -82,13 +85,23 @@ public abstract class AbstractIncusIT {
    * step that touches the network (the public image server, container DNS, the apt archive), each
    * stage is retried and fails naming itself with diagnostics, and every test launch afterwards is
    * a local copy. Tests must never reach the internet from inside their own bodies — a bootstrap
-   * that depends on external infrastructure at test time is a defect of the test.
+   * that depends on external infrastructure at test time is a defect of the test. A bake that fails
+   * fails every later test of the run at once, naming the stage, instead of being retried by each
+   * of them until the job's own limit cancels the run.
    */
   protected void launchPrepared(String container) throws Exception {
     synchronized (PREPARE_LOCK) {
+      if (bakeFailure != null) {
+        throw new AssertionError("prepared image unavailable: " + bakeFailure.getMessage());
+      }
       if (!preparedImageReady) {
         if (!shell.exec(List.of("incus", "image", "show", PREPARED_ALIAS)).ok()) {
-          bakePreparedImage();
+          try {
+            bakePreparedImage();
+          } catch (Exception | AssertionError e) {
+            bakeFailure = e;
+            throw e;
+          }
         }
         preparedImageReady = true;
       }
@@ -133,7 +146,8 @@ public abstract class AbstractIncusIT {
                     "DEBIAN_FRONTEND=noninteractive",
                     "bash",
                     "-c",
-                    String.join(" ", install))));
+                    String.join(" ", install)),
+                INSTALL_BUDGET));
     retryStage("stop builder", () -> shell.exec(List.of("incus", "stop", BUILDER)));
     retryStage(
         "publish prepared image",
@@ -164,9 +178,19 @@ public abstract class AbstractIncusIT {
   }
 
   protected ShellExec.Result exec(String container, List<String> argv) throws Exception {
+    return shell.exec(execCommand(container, argv));
+  }
+
+  /** The bake's package install runs over a public mirror, so it gets its own time budget. */
+  private ShellExec.Result exec(String container, List<String> argv, Duration budget)
+      throws Exception {
+    return shell.exec(execCommand(container, argv), null, budget);
+  }
+
+  private static List<String> execCommand(String container, List<String> argv) {
     var command = new ArrayList<>(List.of("incus", "exec", container, "--"));
     command.addAll(argv);
-    return shell.exec(command);
+    return command;
   }
 
   protected void deleteContainerQuietly(String container) {
