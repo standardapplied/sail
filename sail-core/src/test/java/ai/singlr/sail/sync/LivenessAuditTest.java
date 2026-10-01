@@ -730,6 +730,25 @@ class LivenessAuditTest {
     assertTrue(files.find("acme", "a.txt").isEmpty(), "withdrawn to main's deletion");
   }
 
+  /** L1: an oversized file whose upload was cut, its offer still recorded, is withdrawn once. */
+  @Test
+  void anOversizedFileWhoseUploadWasCutStillSettles() throws IOException {
+    var files = new FileStore(ada.db);
+    main.limits(new FileLimits(16));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    SyncBox.uploadNeverReachingMain(main, ada.syncsAs(ADA), "file");
+    var id = files.dirtyIds().iterator().next();
+    assertTrue(new ChangeLog(ada.db).offer("file", id).isPresent(), "the offer stays recorded");
+    main.limits(new FileLimits(4));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertTrue(files.find("acme", "a.txt").isEmpty(), "withdrawn, never refused mid-upload");
+    assertTrue(new ChangeLog(ada.db).offer("file", id).isEmpty(), "and its record settled");
+  }
+
   /** Settlement waits for an offer whose answer may merely be lost, which the round recovers. */
   @Test
   void aLostAcceptanceOfABornInSpecIsRecoveredBeforeItIsSettled() throws IOException {

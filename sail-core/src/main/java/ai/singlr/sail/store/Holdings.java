@@ -192,11 +192,11 @@ public sealed interface Holdings {
 
     @Override
     public Standing conversation(String room) {
-      if (entries.rooms().holdsConversation(room)) {
-        return Standing.HELD;
+      if (entries.erased(Erasure.ROOM, room)) {
+        return new Standing.Gone(Reasons.roomPruned(room));
       }
-      return entries.erased(Erasure.ROOM, room)
-          ? new Standing.Gone(Reasons.roomPruned(room))
+      return entries.rooms().holdsConversation(room)
+          ? Standing.HELD
           : new Standing.Pending(Reasons.conversationPending(room));
     }
 

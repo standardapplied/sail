@@ -7,7 +7,6 @@ package ai.singlr.sail.sync;
 
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
-import static ai.singlr.sail.sync.SyncFixtures.room;
 import static ai.singlr.sail.sync.SyncFixtures.run;
 import static ai.singlr.sail.sync.SyncFixtures.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;

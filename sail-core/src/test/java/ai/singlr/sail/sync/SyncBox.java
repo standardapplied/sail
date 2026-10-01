@@ -536,6 +536,16 @@ public final class SyncBox implements AutoCloseable {
     pushCutAt(main, node, type, out -> out, cutting("push"));
   }
 
+  /**
+   * Starts {@code node}'s round for {@code type} and cuts the channel as the node announces the
+   * content its offer needs, so main holds neither the offer nor its content, and the node keeps
+   * the record of an offer main never answered.
+   */
+  public static void uploadNeverReachingMain(SyncBox main, SyncBox node, String type)
+      throws IOException {
+    pushCutAt(main, node, type, out -> out, cutting("announce"));
+  }
+
   private static void pushCutAt(
       SyncBox main,
       SyncBox node,
