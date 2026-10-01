@@ -118,8 +118,6 @@ class SyncTransportTest {
       var id = "spec-" + i;
       nodeA.specs.update(spec(id, "Edited " + i, "pending"));
     }
-    nodeA.db.execute("DELETE FROM sync_offers");
-
     try (var link = connect(nodeA, 8_192, out -> out)) {
       var paged = ((PagedSyncSession) link.session()).frame(8_192);
       var report = SyncBox.reconcile(paged, "spec", nodeA.replica);
