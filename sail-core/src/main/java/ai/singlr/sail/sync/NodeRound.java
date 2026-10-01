@@ -14,6 +14,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -68,7 +69,10 @@ public final class NodeRound {
     if (recorded.isEmpty()) {
       return;
     }
-    for (var entry : session.held(files.entityType(), recorded).accepted()) {
+    var heard = new LinkedHashMap<String, String>();
+    recorded.forEach(
+        id -> changeLog.latestHeard(files.entityType(), id).ifPresent(rev -> heard.put(id, rev)));
+    for (var entry : session.held(files.entityType(), recorded, heard).accepted()) {
       Actor.run(
           Actor.main(entry.author()),
           () -> files.acknowledge(entry.id(), entry.snapshot(), entry.rev()));

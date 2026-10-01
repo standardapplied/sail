@@ -792,6 +792,36 @@ class LivenessAuditTest {
     assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
   }
 
+  /**
+   * L1/C1: asked about an oversized offer, main answers only what it took after the version this
+   * box last heard, so a restore of an older version main once took is never adopted over a newer
+   * base; the oversized restore is reverted to what main holds.
+   */
+  @Test
+  void anOlderVersionMainTookFromThisBoxIsNotAdoptedOverANewerBase() throws IOException {
+    var files = new FileStore(ada.db);
+    main.limits(new FileLimits(16));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as(
+        "uday",
+        () ->
+            new FileStore(main.db)
+                .put("acme", "a.txt", new ByteArrayInputStream("hi".getBytes()), 0644));
+    SyncBox.quiesce(main, ada.syncsAs(ADA));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    SyncBox.pushNeverReachingMain(main, ada.syncsAs(ADA), "file");
+    main.limits(new FileLimits(4));
+
+    assertConvergedWithin(2, ada, ADA);
+
+    assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "main's version, not R1");
+  }
+
   /** Settlement waits for an offer whose answer may merely be lost, which the round recovers. */
   @Test
   void aLostAcceptanceOfABornInSpecIsRecoveredBeforeItIsSettled() throws IOException {

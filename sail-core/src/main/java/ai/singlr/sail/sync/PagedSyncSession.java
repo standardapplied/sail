@@ -501,6 +501,31 @@ public final class PagedSyncSession implements SyncSession {
       List<String> ids,
       Map<String, String> heard,
       BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    needWith(type, ids, heard, true, onAnswer);
+  }
+
+  /**
+   * Asks main, as {@link #need(String, List, BiConsumer)} does, for its rows of {@code ids}, its
+   * answer about what it took from this box bounded by {@code heard} as {@link #needAccepted} is.
+   */
+  private void needHeard(
+      String type,
+      List<String> ids,
+      Map<String, String> heard,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    needWith(type, ids, heard, false, onAnswer);
+  }
+
+  /**
+   * One paged ask naming, beside each id, the version this box last heard of it, so main answers
+   * only what it took after that; {@code acceptedOnly} leaves main's current versions out.
+   */
+  private void needWith(
+      String type,
+      List<String> ids,
+      Map<String, String> heard,
+      boolean acceptedOnly,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
     paged(
         type,
         ids,
@@ -512,7 +537,7 @@ public final class PagedSyncSession implements SyncSession {
         asked -> {
           var named = new LinkedHashMap<String, String>();
           asked.stream().filter(heard::containsKey).forEach(id -> named.put(id, heard.get(id)));
-          return SyncWire.Need.accepted(type, asked, named);
+          return new SyncWire.Need(type, asked, named, acceptedOnly);
         },
         onAnswer);
   }
@@ -719,14 +744,15 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   @Override
-  public Held held(String type, List<String> ids) {
+  public Held held(String type, List<String> ids, Map<String, String> heard) {
     return onLiveChannel(
         () -> {
           var current = new ArrayList<SyncWire.Entry>();
           var accepted = new ArrayList<SyncWire.Entry>();
-          need(
+          needHeard(
               type,
               ids,
+              heard,
               (consumed, page) -> {
                 current.addAll(page.entries());
                 accepted.addAll(page.accepted());

@@ -190,7 +190,15 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * tombstone or an erasure — and the latest version it took from this box, each in request order;
    * an id main never held is omitted from both. Reads only.
    */
-  Held held(String type, List<String> ids);
+  default Held held(String type, List<String> ids) {
+    return held(type, ids, Map.of());
+  }
+
+  /**
+   * As {@link #held(String, List)}, with {@code accepted} holding only what main took from this box
+   * after the version this box last heard of each id named in {@code heard}.
+   */
+  Held held(String type, List<String> ids, Map<String, String> heard);
 
   /**
    * Main's answer about ids a node asked after: {@code current} is main's version of each it holds,
