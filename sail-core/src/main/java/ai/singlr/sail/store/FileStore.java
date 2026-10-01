@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.FileLimits;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
@@ -42,6 +43,15 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     this.blobs = new BlobStore(db);
     this.changeLog = new ChangeLog(db);
     this.journal = new RevisionJournal(db, changeLog, new FileSchema());
+  }
+
+  /**
+   * {@code own} lowered to main's file ceiling as the last welcome named it ({@link SyncLimits}),
+   * so an ingest enforces the lower of this box's own limit and main's and an oversized file is
+   * refused before it enters rather than withdrawn after a round.
+   */
+  public FileLimits cappedByMain(FileLimits own) {
+    return own.cappedAt(new SyncLimits(db).mainFileMax());
   }
 
   public record FileRow(

@@ -10,6 +10,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncLimits;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -39,6 +40,7 @@ public final class NodeRound {
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
+    new SyncLimits(db).recordMainFileMax(session.mainFileMax());
     new Decidability(db).settle(handle, session.mainFileMax());
   }
 

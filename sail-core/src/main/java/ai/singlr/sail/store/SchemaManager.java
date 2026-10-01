@@ -133,6 +133,11 @@ public final class SchemaManager {
   public static final String NODES_HEAR_EVERY_HEAD_AGAIN = "UPDATE sync_state SET checkpoint = 0";
 
   /**
+   * Main's shared-file ceiling as its welcome named it, so the node enforces the lower at ingest.
+   */
+  static final String MAIN_FILE_LIMIT = "CREATE TABLE main_limits (file_max INTEGER NOT NULL)";
+
+  /**
    * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
    * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
    * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
@@ -623,7 +628,8 @@ public final class SchemaManager {
               offered_from TEXT,
               PRIMARY KEY (entity_type, entity_id)
           )""",
-          NODES_HEAR_EVERY_HEAD_AGAIN);
+          NODES_HEAR_EVERY_HEAD_AGAIN,
+          MAIN_FILE_LIMIT);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

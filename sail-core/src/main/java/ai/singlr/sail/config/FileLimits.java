@@ -30,6 +30,15 @@ public record FileLimits(long fileMax) {
     return new FileLimits(DEFAULT_MAX);
   }
 
+  /**
+   * This limit lowered to {@code otherMax} when that is a tighter positive cap — main's {@code
+   * file_max} as a node learned it — so an ingest enforces the lower of its own and main's; a 0
+   * ({@code otherMax} not yet known) or a looser cap leaves this one.
+   */
+  public FileLimits cappedAt(long otherMax) {
+    return otherMax > 0 && otherMax < fileMax ? new FileLimits(otherMax) : this;
+  }
+
   public static FileLimits fromMap(Map<String, Object> map) {
     if (map == null || !map.containsKey("file_max")) return defaults();
     var value = map.get("file_max");
