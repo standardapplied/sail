@@ -26,7 +26,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
-import ai.singlr.sail.store.SyncedStore;
 import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -352,21 +351,16 @@ class MessageSyncTest {
 
   @Test
   void aPostInAConversationMainNeverHeldIsRefusedNeverDenied() {
+    var id = "00000000-0000-7000-8000-000000000003";
     var refused =
-        assertThrows(
-            SyncedStore.Unheld.class,
-            () ->
-                Actor.call(
-                    Actor.sync("node", Role.MEMBER),
-                    () ->
-                        main.messages.commitRevision(
-                            "00000000-0000-7000-8000-000000000003",
-                            snapshot("node", "missing"),
-                            null,
-                            main.messages.authority())));
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
+            () -> main.replica.commit(id, snapshot("node", "missing"), null));
 
-    assertTrue(refused.getMessage().contains("room 'missing'"), refused.getMessage());
-    assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000003").isEmpty());
+    assertInstanceOf(CommitOutcome.Refused.class, refused);
+    assertTrue(
+        ((CommitOutcome.Refused) refused).reason().contains("room 'missing'"), refused.toString());
+    assertTrue(main.messages.findById(id).isEmpty());
 
     assertConverged();
   }
@@ -375,22 +369,18 @@ class MessageSyncTest {
   void anAuthorNamingARunMainHasNeverHeldIsRefusedUntilItLands() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var unheld = "codex/00000000-0000-7000-8000-0000000000ee";
+    var id = "00000000-0000-7000-8000-000000000004";
 
     var refused =
-        assertThrows(
-            SyncedStore.Unheld.class,
-            () ->
-                Actor.call(
-                    Actor.sync("node", Role.MEMBER),
-                    () ->
-                        main.messages.commitRevision(
-                            "00000000-0000-7000-8000-000000000004",
-                            snapshot(unheld, "room"),
-                            null,
-                            main.messages.authority())));
+        Actor.call(
+            Actor.sync("node", Role.MEMBER),
+            () -> main.replica.commit(id, snapshot(unheld, "room"), null));
 
-    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
-    assertTrue(main.messages.findById("00000000-0000-7000-8000-000000000004").isEmpty());
+    assertInstanceOf(CommitOutcome.Refused.class, refused);
+    assertTrue(
+        ((CommitOutcome.Refused) refused).reason().contains("does not hold run"),
+        refused.toString());
+    assertTrue(main.messages.findById(id).isEmpty());
 
     assertConverged();
   }

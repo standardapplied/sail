@@ -21,6 +21,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.NodeRound;
+import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.StoreReplica;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncEngine;
@@ -48,10 +49,11 @@ import picocli.CommandLine.Help.Ansi;
  * Runs the shared node-to-main round and its existing local projections. The round begins by
  * agreeing with main who this node is and stamping every run main has not taken ({@link
  * NodeRound#begin}); a node main knows by another handle fails there, having done nothing. It then
- * walks the entity registry in its order — the dependency order, a spec before its runs, a room
- * before its messages — and one type's failure is recorded against that type while the rest of the
- * round, post-steps included, still runs; the first failure is thrown afterwards with the others
- * suppressed, so a broken type never silences the materialization of the ones that succeeded.
+ * walks the entity registry in its order — the dependency order, a run before what its agent wrote,
+ * a room before its messages — and one type's failure is recorded against that type while the rest
+ * of the round, post-steps included, still runs; the first failure is thrown afterwards with the
+ * others suppressed, so a broken type never silences the materialization of the ones that
+ * succeeded.
  */
 public final class SyncOperations {
   public interface Channel extends AutoCloseable {
@@ -117,7 +119,7 @@ public final class SyncOperations {
         return new SyncReport(SyncEngine.Report.NONE, target.message());
       }
       var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
-      return new SyncReport(round.report(), null, round.types());
+      return new SyncReport(round.report(), null, round.types(), round.settled());
     }
   }
 
@@ -137,7 +139,10 @@ public final class SyncOperations {
   }
 
   private record Round(
-      SyncEngine.Report report, List<SyncSession.TypeReport> types, List<Event> pulledMessages) {}
+      SyncEngine.Report report,
+      List<SyncSession.TypeReport> types,
+      List<Event> pulledMessages,
+      List<Settlement.Settled> settled) {}
 
   private Round reconcileSession(String target, SyncConfig config) throws Exception {
     var messages = new MessageStore(db);
@@ -161,7 +166,7 @@ public final class SyncOperations {
       FileStore files,
       ProjectStore projects)
       throws Exception {
-    NodeRound.begin(session, db, handle);
+    var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();
@@ -174,6 +179,8 @@ public final class SyncOperations {
         types.add(SyncSession.TypeReport.failed(entity.type(), failure.getMessage()));
       }
     }
+    settled.addAll(NodeRound.end(db, handle));
+    settled.forEach(settlement -> notice(settlement.describe()));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
     try {
       reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
@@ -187,7 +194,7 @@ public final class SyncOperations {
         types.stream()
             .map(SyncSession.TypeReport::report)
             .reduce(SyncEngine.Report.NONE, SyncEngine.Report::plus);
-    var round = new Round(summed, List.copyOf(types), pulledMessages);
+    var round = new Round(summed, List.copyOf(types), pulledMessages, List.copyOf(settled));
     notify(round);
     if (!failures.isEmpty()) {
       var first = failures.getFirst();

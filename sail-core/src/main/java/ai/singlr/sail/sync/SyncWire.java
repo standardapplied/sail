@@ -96,6 +96,7 @@ public final class SyncWire {
   private static final String BOX = "box";
   private static final String MAIN_ID = "mainId";
   private static final String HANDLE = "handle";
+  private static final String FILE_MAX = "file_max";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -103,6 +104,7 @@ public final class SyncWire {
   private static final String ERASE = "erase";
   private static final String AUTHOR = "author";
   private static final String CREATOR = "creator";
+  private static final String GONE = "gone";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -356,11 +358,15 @@ public final class SyncWire {
    * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
    * null from an older main, which never says.
    */
-  public record Welcome(int protocol, String version, String mainId, String handle)
+  public record Welcome(int protocol, String version, String mainId, String handle, long fileMax)
       implements Response {
     /** A welcome that names no handle, as a main that predates saying so sends it. */
     public Welcome(int protocol, String version, String mainId) {
-      this(protocol, version, mainId, null);
+      this(protocol, version, mainId, null, 0);
+    }
+
+    public Welcome(int protocol, String version, String mainId, String handle) {
+      this(protocol, version, mainId, handle, 0);
     }
   }
 
@@ -482,16 +488,27 @@ public final class SyncWire {
       String rev,
       Map<String, Object> snapshot,
       boolean carried,
-      String author)
+      String author,
+      boolean gone)
       implements Result {
     public Denied(
         String id, String reason, String rev, Map<String, Object> snapshot, boolean carried) {
-      this(id, reason, rev, snapshot, carried, null);
+      this(id, reason, rev, snapshot, carried, null, false);
     }
 
-    /** This denial without main's version, which the node then fetches. */
+    public Denied(
+        String id,
+        String reason,
+        String rev,
+        Map<String, Object> snapshot,
+        boolean carried,
+        String author) {
+      this(id, reason, rev, snapshot, carried, author, false);
+    }
+
+    /** This denial without main's version, which the node then fetches; its mark is kept. */
     public Denied withheld() {
-      return new Denied(id, reason, null, null, false);
+      return new Denied(id, reason, null, null, false, null, gone);
     }
   }
 
@@ -645,6 +662,9 @@ public final class SyncWire {
         if (welcome.handle() != null) {
           map.put(HANDLE, welcome.handle());
         }
+        if (welcome.fileMax() > 0) {
+          map.put(FILE_MAX, welcome.fileMax());
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -732,7 +752,8 @@ public final class SyncWire {
               intValue(map, PROTOCOL_KEY),
               string(map, VERSION),
               string(map, MAIN_ID),
-              string(map, HANDLE));
+              string(map, HANDLE),
+              longValue(map, FILE_MAX));
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->
@@ -816,6 +837,9 @@ public final class SyncWire {
         var refused = new LinkedHashMap<String, Object>();
         refused.put(REASON, denied.reason());
         refused.put(DENIED, true);
+        if (denied.gone()) {
+          refused.put(GONE, true);
+        }
         if (denied.carried()) {
           refused.put(REV, denied.rev());
           refused.put(SNAPSHOT, denied.snapshot());
@@ -848,7 +872,8 @@ public final class SyncWire {
           string(refused, REV),
           snapshot(refused, SNAPSHOT),
           refused.containsKey(SNAPSHOT),
-          string(refused, AUTHOR));
+          string(refused, AUTHOR),
+          bool(refused, GONE));
     }
     if (refused != null) {
       return new Refused(id, string(refused, REASON));

@@ -12,7 +12,6 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncedStore;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -98,15 +97,6 @@ public final class SpecAuthority implements WriteAuthority {
     var bornIn = bornIn(id, next);
     if (bornIn == null) {
       return Optional.empty();
-    }
-    if (!rooms.holdsConversation(bornIn)) {
-      throw new SyncedStore.Unheld(
-          "room '"
-              + bornIn
-              + "', which spec '"
-              + id
-              + "' is born in, is not held here yet; it syncs in its own page, so the next round"
-              + " settles this");
     }
     var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn));
     if (posting.isPresent()) {

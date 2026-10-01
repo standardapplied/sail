@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.WriteAuthority;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -24,18 +25,6 @@ import java.util.Set;
  * handle is asking (runs and reviews do).
  */
 public interface SyncedStore {
-
-  /**
-   * A pushed change main cannot decide yet, because it names something main does not hold, such as
-   * the run that posted a message. Refused rather than denied, so the node keeps the change and
-   * offers it again once what it names has arrived. Thrown inside the commit's transaction, so
-   * nothing of the change lands.
-   */
-  final class Unheld extends IllegalStateException {
-    public Unheld(String message) {
-      super(message);
-    }
-  }
 
   /** The {@code change_log.entity_type} discriminator, e.g. {@code "spec"}. */
   String entityType();
@@ -67,6 +56,13 @@ public interface SyncedStore {
 
   /** The revision this row last synced from main; {@code null} if never. */
   String baseRevOf(String id);
+
+  /**
+   * The {@code base_rev} of the live row of {@code id} as written, blank while main has not taken
+   * the row; empty when there is no live row. How a node tells a row main holds from one it does
+   * not, without the merge base a re-created row derives from its tombstone.
+   */
+  Optional<String> liveBase(String id);
 
   /** Latest revision, including a tombstone; {@code null} if unknown. */
   String latestRev(String id);

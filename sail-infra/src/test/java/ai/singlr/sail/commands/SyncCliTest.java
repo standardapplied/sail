@@ -196,6 +196,7 @@ class SyncCliTest {
     db.execute("DROP TABLE sync_health");
     db.execute("DROP TABLE change_heads");
     db.execute("DROP TABLE sync_state");
+    db.execute("DROP TABLE main_limits");
     db.execute(
         "CREATE TABLE sync_state (peer TEXT PRIMARY KEY, checkpoint INTEGER NOT NULL DEFAULT 0,"
             + " updated_at TEXT NOT NULL)");

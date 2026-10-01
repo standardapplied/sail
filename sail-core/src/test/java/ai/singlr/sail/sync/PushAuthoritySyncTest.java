@@ -5,13 +5,17 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
+import static ai.singlr.sail.sync.SyncFixtures.principal;
+import static ai.singlr.sail.sync.SyncFixtures.room;
+import static ai.singlr.sail.sync.SyncFixtures.run;
+import static ai.singlr.sail.sync.SyncFixtures.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -103,74 +107,6 @@ class PushAuthoritySyncTest {
     SyncBox.quiesce(main, ada.syncsAs(adaAs), bob);
     SyncBox.assertEqualToMainBut(main, ada, "review", review, SyncBox.BOX_LOCAL_FINDINGS);
     SyncBox.assertEqualToMain(main, bob);
-  }
-
-  private static SpecStore.SpecRow spec(String id, String assignee) {
-    return new SpecStore.SpecRow(
-        id,
-        "acme",
-        "Spec " + id,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        "",
-        "",
-        null,
-        List.of(),
-        List.of());
-  }
-
-  /** A spec {@code as} creates on {@code box} in its own room, with that room. */
-  private static void ownSpec(SyncBox box, String as, String id, String assignee) {
-    Acting.as(
-        as,
-        () -> {
-          box.specs.create(spec(id, assignee));
-          new RoomStore(box.db)
-              .create(
-                  new RoomStore.RoomRow(
-                      id, "acme", "Spec " + id, assignee, null, null, null, null, null, null));
-        });
-  }
-
-  private static void room(SyncBox box, String as, String id) {
-    Acting.as(
-        as,
-        () ->
-            new RoomStore(box.db)
-                .create(
-                    new RoomStore.RoomRow(id, "acme", id, as, null, null, null, null, null, null)));
-  }
-
-  private static String run(SyncBox box, String fde, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    Acting.as(
-        fde,
-        () ->
-            new RunStore(box.db)
-                .create(
-                    id,
-                    "acme",
-                    specId,
-                    fde,
-                    "build",
-                    "claude-code",
-                    "b",
-                    "t",
-                    null,
-                    null,
-                    "/log",
-                    "unit"));
-    return id;
-  }
-
-  private static String principal(SyncBox box, String runId) {
-    return new RunStore(box.db).findById(runId).orElseThrow().principal();
   }
 
   private static void retitle(SyncBox box, String as, String id, String title) {
@@ -397,7 +333,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void anAgentsSpecAndPostBeforeItsRunIsOnMainAreRefusedAndLandTheRoundAfterTheRunDoes()
+  void anAgentsSpecAndPostBeforeItsRunIsOnMainAreHeldBackAndLandTheRoundAfterTheRunDoes()
       throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     sync(ada, ADA);
@@ -408,8 +344,9 @@ class PushAuthoritySyncTest {
         Acting.by(
             agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "early", null));
 
-    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
-    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
+    var heldSpec = push(ada, ADA, "spec");
+    assertNull(heldSpec.failure(), "the spec waits for its run rather than failing the round");
+    assertEquals(0, heldSpec.report().pushed(), "the spec is held back until its run lands");
     assertEquals(0, push(ada, ADA, "message").report().pushed(), "the post waits for its run");
     assertTrue(main.specs.findById("born").isEmpty());
 

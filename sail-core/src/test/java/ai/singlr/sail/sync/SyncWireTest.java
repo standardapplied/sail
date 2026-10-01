@@ -113,6 +113,50 @@ class SyncWireTest {
   }
 
   @Test
+  void aWelcomeCarriesMainsFileCeilingOnlyWhenItHasOne() {
+    assertFalse(
+        SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada")).contains("file_max"),
+        "an older main's welcome names no ceiling");
+    assertEquals(
+        0,
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.46.2\","
+                        + " \"mainId\": \"m\"}"))
+            .fileMax(),
+        "a node reads no ceiling as none");
+    assertEquals(
+        4096L,
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    SyncWire.encode(new SyncWire.Welcome(4, "0.46.3", "main-box", "ada", 4096))))
+            .fileMax());
+  }
+
+  @Test
+  void aGoneDenialIsAPlainDenialToANodeThatPredatesIt() {
+    var gone = new SyncWire.Denied("g", "pruned", null, null, true, null, true);
+    var encoded = SyncWire.encode(new SyncWire.Results(List.of(gone), 1));
+    var marker = "\"gone\": true";
+    assertTrue(encoded.contains(marker), encoded);
+
+    var decoded = (SyncWire.Denied) results(encoded).getFirst();
+    var plain = (SyncWire.Denied) results(encoded.replace(marker + ", ", "")).getFirst();
+
+    assertTrue(decoded.gone(), "a node that knows the mark reads it");
+    assertFalse(plain.gone(), "one that does not reads a plain denial");
+    assertTrue(decoded.withheld().gone(), "withholding main's version keeps the mark");
+    var plainDenial = new SyncWire.Denied("h", "r", null, null, true, null);
+    assertFalse(
+        SyncWire.encode(new SyncWire.Results(List.of(plainDenial), 1)).contains("gone"),
+        "a plain denial carries no mark");
+  }
+
+  private static List<SyncWire.Result> results(String line) {
+    return ((SyncWire.Results) SyncWire.decodeResponse(line)).results();
+  }
+
+  @Test
   void aDenialReadWithoutItsMarkerIsTheRefusalAnOlderNodeKnowsWithTheSameReason() {
     var denied =
         new SyncWire.Denied("auth", "your role is read-only", "5-main", snapshot(), true, null);

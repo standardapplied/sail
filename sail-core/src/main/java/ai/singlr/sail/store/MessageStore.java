@@ -31,25 +31,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   public static final int MAX_BODY_BYTES = 64 * 1024;
   private static final String ENTITY = "message";
 
-  /**
-   * Whether run {@code %1$s} belongs to the conversation named by {@code %2$s}: a run of the room
-   * itself, or of a spec whose room it is. A spec born in a room posts there while its runs name
-   * only the spec, so matching on the spec's id alone would miss them.
-   */
-  private static final String RUN_IN_CONVERSATION =
-      """
-      (%1$s.room_id = %2$s OR %1$s.spec_id = %2$s
-          OR %1$s.spec_id IN (SELECT id FROM specs WHERE room_id = %2$s))""";
-
-  /**
-   * Whether run {@code %1$s}, on a node, is one main holds, with the spec it belongs to: main
-   * places a run in a spec's conversation through its own copy of that spec.
-   */
-  private static final String RUN_ON_MAIN =
-      """
-      (coalesce(%1$s.base_rev, '') <> '' AND NOT EXISTS (SELECT 1 FROM specs s
-          WHERE s.id = %1$s.spec_id AND coalesce(s.base_rev, '') = ''))""";
-
   private static final String COLUMNS =
       "id, room_id, author, body, reply_to, created_at, rev, base_rev, question";
 
@@ -296,6 +277,12 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   @Override
+  public Optional<String> liveBase(String id) {
+    return db.queryOne(
+        "SELECT coalesce(base_rev, '') FROM room_messages WHERE id = ?", row -> row.text(0), id);
+  }
+
+  @Override
   public String entityType() {
     return ENTITY;
   }
@@ -324,41 +311,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Messages this box posted that main has not acknowledged, oldest first, so a reply is offered
-   * after the message it answers. Main decides an agent's post by its principal's run, in whatever
-   * conversation it runs, and the pipeline's by a run of the same owner in the conversation, so
-   * such a post waits, with the replies under it, until main holds what decides it: a run it names
-   * has a change main has not taken, or the pipeline's conversation has a run of that owner only
-   * this box holds. A post arriving first would be denied for good. Runs sync before messages, so
-   * it normally goes later in the round.
+   * after the message it answers. What main cannot decide yet is withheld by the replica, through
+   * the one rule ({@link Decidability}).
    */
   public Set<String> dirtyIds() {
     return new LinkedHashSet<>(
         db.query(
             """
-            WITH RECURSIVE
-              pending AS (
-                SELECT id, room_id, author, reply_to, rowid AS seq FROM room_messages
-                WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev),
-              held(id) AS (
-                SELECT p.id FROM pending p
-                WHERE EXISTS (SELECT 1 FROM runs r
-                    WHERE (NOT %2$s OR r.rev <> r.base_rev)
-                      AND (r.principal = p.author OR EXISTS (SELECT 1 FROM run_principals rp
-                          WHERE rp.run_id = r.id AND rp.principal = p.author)))
-                  OR (p.author = ?1 AND EXISTS (SELECT 1 FROM runs r
-                    WHERE %1$s AND NOT %2$s
-                      AND NOT EXISTS (SELECT 1 FROM runs a
-                          WHERE %3$s AND %4$s AND a.owner = r.owner)))
-                UNION
-                SELECT p.id FROM pending p JOIN held h ON p.reply_to = h.id)
-            SELECT id FROM pending WHERE id NOT IN (SELECT id FROM held) ORDER BY seq"""
-                .formatted(
-                    RUN_IN_CONVERSATION.formatted("r", "p.room_id"),
-                    RUN_ON_MAIN.formatted("r"),
-                    RUN_IN_CONVERSATION.formatted("a", "p.room_id"),
-                    RUN_ON_MAIN.formatted("a")),
-            row -> row.text(0),
-            SAIL_AUTHOR));
+            SELECT id FROM room_messages
+            WHERE base_rev IS NULL OR base_rev = '' OR rev <> base_rev ORDER BY rowid""",
+            row -> row.text(0)));
   }
 
   public Set<String> syncEntityIds() {
@@ -441,9 +403,9 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Compare-and-set commit as main of a message a node posted. A message never changes, so only a
-   * new one commits. One in a conversation main has never held is refused ({@link Unheld}), and one
-   * replying to a message main does not hold is denied; {@code authority} then decides who may post
-   * it, and as whom, before anything is written.
+   * new one commits. Whether main holds its conversation and the message it replies to is decided
+   * before the commit ({@link Decidability}); one replying to a message in another room is denied;
+   * {@code authority} then decides who may post it, and as whom, before anything is written.
    */
   @Override
   public PushOutcome commitRevision(
@@ -461,9 +423,8 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             throw new IllegalArgumentException("message '" + id + "' is immutable");
           }
           var row = fromSnapshot(id, snapshot);
-          requireDecidable(row);
           if (!holdsReplyTarget(row)) {
-            return new PushOutcome.Denied("it replies to a message main does not hold", null, null);
+            return new PushOutcome.Denied("it replies to a message in another room", null, null);
           }
           var refusal = authority.decide(Actor.current(), id, null, snapshot);
           if (refusal.isPresent()) {
@@ -479,35 +440,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /** The platform narrator: the review pipeline posts room verdicts under this author. */
   public static final String SAIL_AUTHOR = "sail";
-
-  /**
-   * Refuses to decide a post in a conversation main has never held ({@link SyncedStore.Unheld}):
-   * its room or spec syncs before its messages, so the next round decides it, where a denial now
-   * would remove a message whose room had simply not arrived. A conversation main held and lost is
-   * decided like any other.
-   */
-  private void requireDecidable(MessageRow row) {
-    if (!new RoomStore(db).holdsConversation(row.roomId())) {
-      throw new Unheld(
-          "main does not hold room '"
-              + row.roomId()
-              + "' yet; rooms sync before their messages, so the next round settles this");
-    }
-  }
-
-  /**
-   * Whether a run acting for {@code owner} is in conversation {@code roomId}: the evidence that the
-   * owner's box ran the pipeline that narrates there as {@link #SAIL_AUTHOR}.
-   */
-  public boolean ranInConversation(String owner, String roomId) {
-    return db.queryOne(
-            "SELECT 1 FROM runs r WHERE r.owner = ?1 AND %s LIMIT 1"
-                .formatted(RUN_IN_CONVERSATION.formatted("r", "?2")),
-            row -> true,
-            owner,
-            roomId)
-        .orElse(false);
-  }
 
   /**
    * Messages are append-only, so the only resolution that can stand is main's: {@code chosen} must

@@ -389,6 +389,28 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Re-homes a born-in spec into its own identity room ({@code room_id = id}), recording a local
+   * revision: how a node settles a born-in spec whose room is gone and main never took, so it
+   * anchors its own conversation and is offered like any spec of its own room. A spec already in
+   * its own room is untouched.
+   */
+  public void reHomeToOwnRoom(String id) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE specs SET room_id = ?, updated_at = ?, updated_by = ? WHERE id = ? AND"
+                  + " COALESCE(room_id, id) <> id",
+              id,
+              DateTimeUtils.now().toString(),
+              author(),
+              id);
+          if (db.changes() != 0) {
+            recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          }
+        });
+  }
+
+  /**
    * Status transition that commits only if the spec still holds {@code expected}, returning whether
    * it did. The check and the write are one statement under the write lock ({@code BEGIN
    * IMMEDIATE}), so a lifecycle writer racing another transition — above all an operator's {@code
@@ -936,19 +958,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Every spec with a change main has not taken, but a spec born in a room main has never
-   * acknowledged: main decides a birth by its room, and rooms sync after specs, so the spec waits a
-   * round for its room rather than be refused.
+   * Every spec with a change main has not taken. What main cannot decide yet — a spec born in a
+   * room main has not taken — is withheld by the replica, through the one rule ({@link
+   * Decidability}).
    */
   public Set<String> dirtyIds() {
-    var dirty = journal.dirtyIds();
-    dirty.removeAll(
-        db.query(
-            """
-            SELECT s.id FROM specs s JOIN rooms r ON r.id = s.room_id
-            WHERE s.room_id <> s.id AND (r.base_rev IS NULL OR r.base_rev = '')""",
-            row -> row.text(0)));
-    return dirty;
+    return journal.dirtyIds();
   }
 
   /** Attributes a spec solely for the retained versioned 0.14 data migration. */
@@ -992,6 +1007,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   @Override
   public Map<String, Object> currentForSync(String id) {
     return journal.currentForSync(id);
+  }
+
+  @Override
+  public Optional<String> liveBase(String id) {
+    return journal.liveBase(id);
   }
 
   @Override

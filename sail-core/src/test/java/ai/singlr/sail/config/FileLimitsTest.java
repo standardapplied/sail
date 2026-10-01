@@ -15,6 +15,24 @@ import org.junit.jupiter.api.Test;
 
 class FileLimitsTest {
   @Test
+  void aCapOfMainsNamesBothLimitsAndWhereToRaiseIt() {
+    var capped = new FileLimits(100).cappedAt(4);
+
+    assertEquals(4, capped.effectiveMax());
+    assertTrue(capped.problem(5).isPresent());
+    var problem = capped.problem(5).orElseThrow();
+    assertTrue(problem.contains("main's limits.file_max (4 bytes; this box allows 100)"), problem);
+    assertTrue(problem.contains("main's host.yaml"), problem);
+    assertTrue(
+        new FileLimits(100)
+            .problem(101)
+            .orElseThrow()
+            .contains("raise limits.file_max in host.yaml"));
+    assertEquals(new FileLimits(100), new FileLimits(100).cappedAt(0), "no cap known");
+    assertEquals(new FileLimits(100), new FileLimits(100).cappedAt(200), "a looser cap is none");
+  }
+
+  @Test
   void declaredOversizeIsRejectedWithoutReading() {
     var unreadable =
         new InputStream() {

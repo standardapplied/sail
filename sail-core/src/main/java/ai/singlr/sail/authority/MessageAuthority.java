@@ -26,13 +26,13 @@ import java.util.Optional;
 public final class MessageAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
-  private final MessageStore messages;
+  private final RunStore runs;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public MessageAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
-    this.messages = new MessageStore(db);
+    this.runs = new RunStore(db);
     this.attribution = new Attribution(db);
   }
 
@@ -65,7 +65,7 @@ public final class MessageAuthority implements WriteAuthority {
       return false;
     }
     if (MessageStore.SAIL_AUTHOR.equals(author)) {
-      return messages.ranInConversation(actor.handle(), roomId);
+      return runs.ranInConversation(actor.handle(), roomId);
     }
     return RunStore.isPrincipalHandle(author)
         && attribution.principalOfOwnedRun(actor.handle(), author);

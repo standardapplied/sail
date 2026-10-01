@@ -65,6 +65,9 @@ public final class PagedSyncSession implements SyncSession {
   /** Entries asked for per pull; the frame bound, not this, is what caps a page's size. */
   static final int PAGE_LIMIT = 2000;
 
+  /** The bytes a {@code bases} entry costs beyond its id and rev: {@code ": "} and {@code ", "}. */
+  private static final int BASE_PUNCTUATION = 4;
+
   private final InputStream in;
   private final OutputStream out;
   private final String mainId;
@@ -82,9 +85,11 @@ public final class PagedSyncSession implements SyncSession {
   private int adopted;
   private Set<String> touched = Set.of();
   private List<SyncSession.Denial> denials = new ArrayList<>();
+  private List<SyncSession.Refusal> refusals = new ArrayList<>();
   private Consumer<String> notice = ignored -> {};
   private String broken;
   private String handle;
+  private long mainFileMax;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
@@ -115,6 +120,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.contentFields = contentFields;
     copy.notice = notice;
     copy.handle = handle;
+    copy.mainFileMax = mainFileMax;
     return copy;
   }
 
@@ -152,6 +158,7 @@ public final class PagedSyncSession implements SyncSession {
     var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
     session.handle = welcome.handle();
+    session.mainFileMax = welcome.fileMax();
     return session;
   }
 
@@ -220,6 +227,7 @@ public final class PagedSyncSession implements SyncSession {
     sawTombstone = false;
     touched = Set.of();
     denials = new ArrayList<>();
+    refusals = new ArrayList<>();
     var ask = askedFor(type);
     adopted = ask.adopted();
     var tip = tips().get(type);
@@ -274,7 +282,8 @@ public final class PagedSyncSession implements SyncSession {
         fetchedBytes - fetchedBefore,
         sentBytes - sentBefore,
         0,
-        denials);
+        denials,
+        refusals);
   }
 
   /** What asking main to erase one type's pending prunes came to. */
@@ -495,18 +504,47 @@ public final class PagedSyncSession implements SyncSession {
       List<String> ids,
       Map<String, String> heard,
       BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    needWith(type, ids, heard, true, onAnswer);
+  }
+
+  /**
+   * Asks main, as {@link #need(String, List, BiConsumer)} does, for its rows of {@code ids}, its
+   * answer about what it took from this box bounded by {@code heard} as {@link #needAccepted} is.
+   */
+  private void needHeard(
+      String type,
+      List<String> ids,
+      Map<String, String> heard,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
+    needWith(type, ids, heard, false, onAnswer);
+  }
+
+  /**
+   * One paged ask naming, beside each id, the version this box last heard of it, so main answers
+   * only what it took after that; {@code acceptedOnly} leaves main's current versions out. An id
+   * with a heard version weighs its bytes in {@code ids} plus its entry in {@code bases}, the
+   * quoting and separators of the latter beyond what one id's separator covers.
+   */
+  private void needWith(
+      String type,
+      List<String> ids,
+      Map<String, String> heard,
+      boolean acceptedOnly,
+      BiConsumer<List<String>, SyncWire.Page> onAnswer) {
     paged(
         type,
         ids,
         id ->
             SyncWire.encodedLength(id)
                 + (heard.containsKey(id)
-                    ? SyncWire.encodedLength(id) + SyncWire.encodedLength(heard.get(id))
+                    ? SyncWire.encodedLength(id)
+                        + SyncWire.encodedLength(heard.get(id))
+                        + BASE_PUNCTUATION
                     : 0),
         asked -> {
           var named = new LinkedHashMap<String, String>();
           asked.stream().filter(heard::containsKey).forEach(id -> named.put(id, heard.get(id)));
-          return SyncWire.Need.accepted(type, asked, named);
+          return new SyncWire.Need(type, asked, named, acceptedOnly);
         },
         onAnswer);
   }
@@ -708,14 +746,20 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   @Override
-  public Held held(String type, List<String> ids) {
+  public long mainFileMax() {
+    return mainFileMax;
+  }
+
+  @Override
+  public Held held(String type, List<String> ids, Map<String, String> heard) {
     return onLiveChannel(
         () -> {
           var current = new ArrayList<SyncWire.Entry>();
           var accepted = new ArrayList<SyncWire.Entry>();
-          need(
+          needHeard(
               type,
               ids,
+              heard,
               (consumed, page) -> {
                 current.addAll(page.entries());
                 accepted.addAll(page.accepted());
@@ -962,11 +1006,18 @@ public final class PagedSyncSession implements SyncSession {
           denials.add(denial);
           notice.accept(denial.describe());
           yield new CommitOutcome.Denied(
-              denied.reason(), currentRev(offer.id()), current(offer.id()), author(offer.id()));
+              denied.reason(),
+              currentRev(offer.id()),
+              current(offer.id()),
+              author(offer.id()),
+              denied.gone());
         }
-        case SyncWire.Refused refused ->
-            throw new SyncTransportException(
-                "refused", type + " " + offer.id() + ": " + refused.reason(), null);
+        case SyncWire.Refused refused -> {
+          var refusal = new SyncSession.Refusal(type, refused.id(), refused.reason());
+          refusals.add(refusal);
+          notice.accept(refusal.describe());
+          yield new CommitOutcome.Refused(refused.reason());
+        }
       };
     }
   }

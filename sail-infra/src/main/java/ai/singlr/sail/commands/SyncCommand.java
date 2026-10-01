@@ -259,7 +259,11 @@ public final class SyncCommand implements Callable<Integer> {
     }
     var detail =
         round.types().stream().filter(SyncCommand::worthALine).map(SyncCommand::line).toList();
-    if (report.total() == 0 && detail.isEmpty() && round.denials().isEmpty()) {
+    if (report.total() == 0
+        && detail.isEmpty()
+        && round.denials().isEmpty()
+        && round.refusals().isEmpty()
+        && round.settled().isEmpty()) {
       return Ansi.AUTO.string("  @|green ✓|@ Already in sync with main.");
     }
     var lines = new ArrayList<String>();
@@ -273,6 +277,8 @@ public final class SyncCommand implements Callable<Integer> {
                 + report.merged()
                 + "|@ merged."));
     lines.addAll(detail);
+    round.refusals().forEach(refusal -> lines.add(Banner.warnLine(refusal.describe(), Ansi.AUTO)));
+    round.settled().forEach(settled -> lines.add(Banner.warnLine(settled.describe(), Ansi.AUTO)));
     if (report.conflicts() > 0) {
       lines.add(
           Banner.errorLine(
@@ -284,7 +290,7 @@ public final class SyncCommand implements Callable<Integer> {
   }
 
   private static boolean worthALine(SyncSession.TypeReport type) {
-    return type.failure() != null || type.report().total() > 0;
+    return type.failure() != null || type.report().total() > 0 || !type.refusals().isEmpty();
   }
 
   private static String line(SyncSession.TypeReport type) {

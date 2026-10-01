@@ -7,9 +7,14 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncLimits;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -31,13 +36,61 @@ public final class NodeRound {
    * it authenticated is not asked. Then every run main has never acknowledged is settled ({@link
    * #acknowledgeHeld}), every one main does not hold is stamped as this box's ({@link
    * #stampUnheld}), and so is every run of this box's that acts for no one, which an older release
-   * reserved and main would never take.
+   * reserved and main would never take. Main's file ceiling is recorded, and every offer whose
+   * dependency can never arrive is settled ({@link Settlement}). Returns what was settled, for the
+   * round's notices.
    */
-  public static void begin(SyncSession session, Sqlite db, String handle) {
+  public static List<Settlement.Settled> begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
+    var limits = new SyncLimits(db);
+    limits.recordMainFileMax(session.mainFileMax());
+    acknowledgeOversized(session, db, limits.mainFileMax());
+    return settle(db, handle);
+  }
+
+  /**
+   * Asks main, before an oversized file is settled, which of the files above its ceiling this box
+   * still offers it took — an earlier upload cut on the way leaves the offer recorded with no
+   * answer — and adopts each version main took as that file's base ({@link FileStore#acknowledge}).
+   * Every such record is then forgotten: main answers an oversized offer only with a refused
+   * channel, never per offer, so a record still standing once main has been asked can only be of an
+   * offer main never took. Settlement then judges exactly what is still an offer.
+   */
+  private static void acknowledgeOversized(SyncSession session, Sqlite db, long ceiling) {
+    var files = new FileStore(db);
+    var changeLog = new ChangeLog(db);
+    var recorded =
+        files.offersAbove(ceiling).stream()
+            .filter(id -> changeLog.offer(files.entityType(), id).isPresent())
+            .toList();
+    if (recorded.isEmpty()) {
+      return;
+    }
+    var heard = new LinkedHashMap<String, String>();
+    recorded.forEach(
+        id -> changeLog.latestHeard(files.entityType(), id).ifPresent(rev -> heard.put(id, rev)));
+    for (var entry : session.held(files.entityType(), recorded, heard).accepted()) {
+      Actor.run(
+          Actor.main(entry.author()),
+          () -> files.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
+    }
+    recorded.forEach(id -> changeLog.settleOffer(files.entityType(), id));
+  }
+
+  /**
+   * Ends a round: settles, with the deletions and erasures the round paged in hand, every offer the
+   * round's denials and erasures left undecidable ({@link Settlement}), so a {@code gone} answer is
+   * settled in the round that heard it. Returns what was settled, for the round's notices.
+   */
+  public static List<Settlement.Settled> end(Sqlite db, String handle) {
+    return settle(db, handle);
+  }
+
+  private static List<Settlement.Settled> settle(Sqlite db, String handle) {
+    return new Settlement(db, Decidability.onNode(db), handle).settle();
   }
 
   /**

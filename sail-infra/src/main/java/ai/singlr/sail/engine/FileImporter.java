@@ -44,7 +44,7 @@ public final class FileImporter {
   public record Report(int imported, List<String> notes) {}
 
   public Report importAll() {
-    var cap = limits.get();
+    var cap = files.cappedByMain(limits.get());
     if (!Files.isDirectory(projectsDir)) {
       return new Report(0, List.of());
     }

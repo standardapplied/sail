@@ -8,7 +8,6 @@ package ai.singlr.sail.sync;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -278,9 +277,12 @@ class DeniedSyncTest {
     assertNull(report.failure(), "a forged author is a decision, never a failed push");
     assertEquals(2, report.report().pushed());
     assertEquals(
-        List.of(forged.id(), reply.id()),
-        report.denials().stream().map(SyncSession.Denial::id).toList());
+        List.of(forged.id()), report.denials().stream().map(SyncSession.Denial::id).toList());
     assertTrue(report.denials().getFirst().reason().contains("may not post as 'grace'"));
+    assertEquals(
+        List.of(reply.id()),
+        report.refusals().stream().map(SyncSession.Refusal::id).toList(),
+        "the reply waits for its parent, which main did not take");
     var mains = new MessageStore(main.db);
     assertTrue(mains.findById(own.id()).isPresent());
     assertTrue(mains.findById(after.id()).isPresent());
@@ -509,10 +511,11 @@ class DeniedSyncTest {
     var messages = new MessageStore(node.db);
     var posted = messages.append("fresh", "ada", "first words", null);
 
-    var refused = assertThrows(SyncTransportException.class, () -> round(ADA, "message"));
+    var waiting = round(ADA, "message");
 
-    assertTrue(
-        refused.getMessage().contains("does not hold room 'fresh' yet"), refused.getMessage());
+    assertNull(waiting.failure(), "a refused post never fails the type");
+    assertEquals(0, waiting.report().pushed(), "the post waits for its room");
+    assertTrue(new MessageStore(main.db).findById(posted.id()).isEmpty());
     assertTrue(messages.findById(posted.id()).isPresent());
     round(ADA, "room");
     assertEquals(1, round(ADA, "message").report().pushed());

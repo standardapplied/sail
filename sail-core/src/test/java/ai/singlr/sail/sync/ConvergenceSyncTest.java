@@ -5,12 +5,15 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
+import static ai.singlr.sail.sync.SyncFixtures.principal;
+import static ai.singlr.sail.sync.SyncFixtures.run;
+import static ai.singlr.sail.sync.SyncFixtures.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
@@ -555,7 +558,7 @@ class ConvergenceSyncTest {
 
     var denied = SyncBox.round(main, ada);
 
-    assertEquals(1, denied.getFirst().denials().size(), "announced once");
+    assertEquals(1, denied.stream().mapToLong(r -> r.denials().size()).sum(), "announced once");
     assertConverged();
     assertEquals("Spec s", ada.specs.findById("s").orElseThrow().title());
   }
@@ -569,7 +572,7 @@ class ConvergenceSyncTest {
 
     var denied = SyncBox.round(main, ada);
 
-    assertEquals(1, denied.getFirst().denials().size(), "announced once");
+    assertEquals(1, denied.stream().mapToLong(r -> r.denials().size()).sum(), "announced once");
     assertConverged();
     assertEquals("Spec s", ada.specs.findById("s").orElseThrow().title());
   }
@@ -962,6 +965,28 @@ class ConvergenceSyncTest {
     assertTrue(new RunStore(main.db).findById(runId).isEmpty());
   }
 
+  /** L1/C4: a spec the agent of a denied run edited reverts to main's once the run settles. */
+  @Test
+  void aSpecEditedByTheAgentOfADeniedRunSettles() {
+    ownSpec(main, "ada", "mine", "ada");
+    SyncBox.round(main, ada);
+    var runId = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
+    var agent =
+        Actor.agentPrincipal(new RunStore(ada.db).findById(runId).orElseThrow().principal(), "ada");
+    Acting.by(agent, () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
+    Acting.as("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+
+    SyncBox.round(main, ada);
+
+    assertConverged();
+    assertTrue(new RunStore(main.db).findById(runId).isEmpty(), "main denied the run");
+    assertEquals(
+        SpecStatus.PENDING,
+        main.specs.findById("mine").orElseThrow().status(),
+        "the edit by the denied run's agent reverts to main's version");
+  }
+
   private void assertConverged() {
     SyncBox.assertConverged(main, ada, bob);
   }
@@ -1028,40 +1053,8 @@ class ConvergenceSyncTest {
         .orElse(null);
   }
 
-  private static SpecStore.SpecRow spec(String id, String assignee) {
-    return new SpecStore.SpecRow(
-        id,
-        "acme",
-        "Spec " + id,
-        SpecStatus.PENDING,
-        assignee,
-        null,
-        null,
-        null,
-        null,
-        0,
-        null,
-        "",
-        "",
-        null,
-        List.of(),
-        List.of());
-  }
-
   private static RoomStore.RoomRow room(String id, String assignee) {
     return new RoomStore.RoomRow(id, "acme", id, assignee, null, null, null, null, null, null);
-  }
-
-  private static void ownSpec(SyncBox box, String as, String id, String assignee) {
-    Acting.as(
-        as,
-        () -> {
-          box.specs.create(spec(id, assignee));
-          new RoomStore(box.db)
-              .create(
-                  new RoomStore.RoomRow(
-                      id, "acme", "Spec " + id, assignee, null, null, null, null, null, null));
-        });
   }
 
   private static void retitle(SyncBox box, String as, String id, String title) {
@@ -1110,27 +1103,5 @@ class ConvergenceSyncTest {
 
   private static InputStream content(String text) {
     return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
-  }
-
-  private static String run(SyncBox box, String fde, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    Acting.as(
-        fde,
-        () ->
-            new RunStore(box.db)
-                .create(
-                    id,
-                    "acme",
-                    specId,
-                    fde,
-                    "build",
-                    "claude-code",
-                    "b",
-                    "t",
-                    null,
-                    null,
-                    "/log",
-                    "unit"));
-    return id;
   }
 }

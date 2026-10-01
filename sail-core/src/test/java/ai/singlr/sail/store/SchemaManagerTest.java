@@ -410,6 +410,7 @@ class SchemaManagerTest {
     assertTrue(tables.contains("schema_version"));
     assertTrue(tables.contains("runs"));
     assertTrue(tables.contains("container_leases"));
+    assertTrue(tables.contains("main_limits"));
     assertFalse(tables.contains("agent_sessions"));
   }
 

@@ -489,7 +489,17 @@ class ApiRouterTest {
           null,
           List.of(
               new SyncSession.TypeReport(
-                  "spec", SyncEngine.Report.NONE, 0, 0, false, null, 0, 0, 0, List.of(DENIAL))));
+                  "spec",
+                  SyncEngine.Report.NONE,
+                  0,
+                  0,
+                  false,
+                  null,
+                  0,
+                  0,
+                  0,
+                  List.of(DENIAL),
+                  List.of())));
     }
 
     @Override

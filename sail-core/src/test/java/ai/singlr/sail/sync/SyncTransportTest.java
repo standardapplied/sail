@@ -108,6 +108,26 @@ class SyncTransportTest {
         List.of());
   }
 
+  @Test
+  void anAskNamingHeardVersionsForAFrameOfIdsNeverOutgrowsTheFrame() throws IOException {
+    for (var i = 0; i < 300; i++) {
+      nodeA.create(spec("spec-" + i, "Spec " + i, "pending"));
+    }
+    syncToMain(nodeA);
+    for (var i = 0; i < 300; i++) {
+      var id = "spec-" + i;
+      nodeA.specs.update(spec(id, "Edited " + i, "pending"));
+    }
+    try (var link = connect(nodeA, 8_192, out -> out)) {
+      var paged = ((PagedSyncSession) link.session()).frame(8_192);
+      var report = SyncBox.reconcile(paged, "spec", nodeA.replica);
+      assertNull(report.failure(), report.toString());
+      assertEquals(300, report.report().pushed());
+      assertEquals(2, link.count("need"), "two frames asking what main took");
+    }
+    assertConverged();
+  }
+
   private SyncBox.Link connect(SyncBox node) throws IOException {
     return SyncBox.connect(main.server(node.session()), node);
   }

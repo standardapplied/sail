@@ -298,6 +298,19 @@ class RoomStoreTest {
   }
 
   @Test
+  void anErasedConversationIsNotHeldThoughItsHistoryIs() {
+    Actor.run(Actor.system(), () -> rooms.create(room("den")));
+    assertTrue(rooms.holdsConversation("den"));
+    Actor.run(Actor.system(), () -> rooms.delete("den"));
+    assertTrue(rooms.holdsConversation("den"), "a deleted room's history is still a place");
+
+    new ChangeLog(db).erase("room", "den", "3-erased", ChangeLog.Entry.LOCAL);
+
+    assertFalse(rooms.holdsConversation("den"), "an erased room is no place to decide anything");
+    assertFalse(rooms.holdsLiveConversation("den"));
+  }
+
+  @Test
   void aConversationNoOneOwnsHasNoOwners() {
     insertRoom("empty", null, null);
 

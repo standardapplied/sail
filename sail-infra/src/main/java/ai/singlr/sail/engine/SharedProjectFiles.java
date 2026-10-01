@@ -38,12 +38,18 @@ public record SharedProjectFiles(
   }
 
   @Override
+  public FileLimits limits() {
+    return files.cappedByMain(limits);
+  }
+
+  @Override
   public String put(String path, InputStream bytes, long size, int mode) {
     if (!FilePicker.isShareablePath(path)) {
       throw new IllegalArgumentException("Unsafe share path: '" + path + "'.");
     }
-    limits.check(size);
-    files.put(project, path, limits.bounded(bytes, size), mode);
+    var effective = files.cappedByMain(limits);
+    effective.check(size);
+    files.put(project, path, effective.bounded(bytes, size), mode);
     return path;
   }
 

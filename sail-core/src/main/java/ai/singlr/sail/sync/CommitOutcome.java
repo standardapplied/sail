@@ -20,7 +20,10 @@ import java.util.Map;
  * the same change again every round.
  */
 public sealed interface CommitOutcome
-    permits CommitOutcome.Accepted, CommitOutcome.Rejected, CommitOutcome.Denied {
+    permits CommitOutcome.Accepted,
+        CommitOutcome.Rejected,
+        CommitOutcome.Refused,
+        CommitOutcome.Denied {
 
   /**
    * Main accepted the push and minted {@code rev}, recording {@code author} as who made it and
@@ -33,10 +36,24 @@ public sealed interface CommitOutcome
       implements CommitOutcome {}
 
   /**
+   * Main could not take the offer because a dependency it awaits has not arrived, naming why. Not a
+   * decision about who may write: the node leaves its row untouched and offers it again once the
+   * dependency lands, and this one offer never fails the type.
+   */
+  record Refused(String reason) implements CommitOutcome {}
+
+  /**
    * Main decided this principal may not make this change, naming why. {@code rev} and {@code
    * snapshot} are main's version: a revision, a tombstone (a rev with no snapshot), or nothing when
-   * main holds none; {@code author} is who main recorded as making it.
+   * main holds none; {@code author} is who main recorded as making it. {@code gone} marks a denial
+   * main made because a dependency it has erased can never arrive: the node settles it rather than
+   * offering it again.
    */
-  record Denied(String reason, String rev, Map<String, Object> snapshot, String author)
-      implements CommitOutcome {}
+  record Denied(
+      String reason, String rev, Map<String, Object> snapshot, String author, boolean gone)
+      implements CommitOutcome {
+    public Denied(String reason, String rev, Map<String, Object> snapshot, String author) {
+      this(reason, rev, snapshot, author, false);
+    }
+  }
 }

@@ -6,10 +6,10 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncedStore;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -21,8 +21,7 @@ import java.util.Optional;
  * its author the pusher, this box's machinery ({@link Actor#SYSTEM_HANDLE}), or a principal of a
  * run the pusher owns; absent, main records the pusher. A create may name only the pusher as its
  * creator; absent, the creator is the pusher. A principal naming a run main does not hold yet is
- * refused ({@link SyncedStore.Unheld}), never denied, so the next round decides it once the run
- * lands.
+ * refused by {@link Decidability}, never denied, so the next round decides it once the run lands.
  */
 final class Attribution {
 
@@ -75,27 +74,15 @@ final class Attribution {
 
   /**
    * Whether {@code author} is a principal of a run {@code pusher} owns: a principal names its run
-   * in the shape {@link RunStore#principalHandle} mints, so the run is read from the name itself. A
-   * principal naming a run main has never held is not decided but refused, so it is decided once
-   * the run lands.
+   * in the shape {@link RunStore#principalHandle} mints, so the run is read from the name itself.
+   * Whether main holds the run at all is not decided here but by {@link Decidability}, which
+   * refuses the offer until the run lands and denies it once the run is gone; this only weighs
+   * ownership of a run main holds.
    */
   boolean principalOfOwnedRun(String pusher, String author) {
-    var named = RunStore.runOf(author);
-    if (named.isEmpty()) {
-      return false;
-    }
-    var run = runs.findById(named.get());
-    if (run.isPresent()) {
-      return Objects.equals(run.get().owner(), pusher);
-    }
-    if (runs.latestRev(named.get()) == null) {
-      throw new SyncedStore.Unheld(
-          "main does not hold run '"
-              + named.get()
-              + "', which '"
-              + author
-              + "' names, yet; runs sync first, so the next round settles this");
-    }
-    return false;
+    return RunStore.runOf(author)
+        .flatMap(runs::findById)
+        .map(run -> Objects.equals(run.owner(), pusher))
+        .orElse(false);
   }
 }
