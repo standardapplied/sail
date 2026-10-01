@@ -469,7 +469,7 @@ public final class Decidability {
         () -> {
           if (Strings.isNotBlank(store.baseRevOf(id))) {
             revertToBase(id, store);
-          } else if (Erasure.SPEC.equals(type) && bornInSpec(id)) {
+          } else if (onlyRoomGone(type, id, store.currentForSync(id))) {
             Actor.run(Actor.system(), () -> new SpecStore(db).reHomeToOwnRoom(id));
           } else {
             Actor.run(Actor.main(), () -> store.adoptForSync(id, null, null));
@@ -485,11 +485,18 @@ public final class Decidability {
     Actor.run(Actor.main(author), () -> store.applyRevision(id, snapshot, base));
   }
 
-  private boolean bornInSpec(String id) {
-    return new SpecStore(db)
-        .findById(id)
-        .filter(spec -> !spec.roomIdOrIdentity().equals(id))
-        .isPresent();
+  /**
+   * Whether a born-in spec lost only its room: re-homing it keeps its author's work, but a spec
+   * whose author's run or project is gone has nothing left to be re-homed under and is withdrawn.
+   */
+  private boolean onlyRoomGone(String type, String id, Map<String, Object> snapshot) {
+    if (!Erasure.SPEC.equals(type) || snapshot == null) {
+      return false;
+    }
+    var otherDependencies =
+        ownersFinding(type, snapshot).worse(actorRunFinding(type, id, snapshot, false));
+    return otherDependencies.status() != Status.GONE
+        && bornInFinding(id, snapshot, false).status() == Status.GONE;
   }
 
   private Map<String, Object> currentSnapshot(String type, String id) {

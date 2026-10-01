@@ -379,6 +379,27 @@ class LivenessAuditTest {
         "its history stays, with the withdrawal on top");
   }
 
+  /** A born-in spec of a denied run is withdrawn, never re-homed into a publishable offer. */
+  @Test
+  void aSpecOfADeniedRunBornInALiveRoomIsWithdrawnNotReHomed() throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    room(main, "ada", "lab");
+    round(ada, ADA);
+    var run = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", run);
+    var agent = Actor.agentPrincipal(principal(ada, run), "ada");
+    Acting.by(agent, () -> ada.specs.create(spec("born", null).withRoomId("lab")));
+    Acting.system(() -> new RunStore(ada.db).complete(run, "stopped", null));
+
+    assertSettlesWithin(3, ada, ADA);
+
+    assertTrue(new RunStore(main.db).findById(run).isEmpty(), "main denied the run");
+
+    assertTrue(ada.specs.findById("born").isEmpty(), "withdrawn here");
+    assertTrue(main.specs.findById("born").isEmpty(), "never on main");
+    assertTrue(new RoomStore(main.db).findById("lab").isPresent(), "its room stays live");
+  }
+
   /** A ceiling main lowered reverts an oversized edit to the version main holds, never deletes. */
   @Test
   void anOversizedEditOfASyncedFileRevertsToMainsVersionUnderALoweredCeiling() throws IOException {
