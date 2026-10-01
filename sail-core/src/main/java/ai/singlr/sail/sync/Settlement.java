@@ -103,14 +103,14 @@ public final class Settlement {
     for (var entity : SyncedEntities.all()) {
       var store = entity.store(db);
       for (var id : List.copyOf(store.dirtyIds())) {
-        settle(entity.type(), id, store, () -> gone(entity.type(), id, store), true)
+        settle(entity.type(), id, store, () -> gone(entity.type(), id, store))
             .ifPresent(settled::add);
       }
     }
     var files = new FileStore(db);
     var ceiling = new SyncLimits(db).mainFileMax();
     for (var id : files.offersAbove(ceiling)) {
-      settle(Erasure.FILE, id, files, () -> Optional.of(aboveCeiling(ceiling)), false)
+      settle(Erasure.FILE, id, files, () -> Optional.of(aboveCeiling(ceiling)))
           .ifPresent(settled::add);
     }
     return settled;
@@ -129,24 +129,24 @@ public final class Settlement {
 
   /**
    * Settles {@code id} when {@code cause} finds a reason to, in one write transaction with the
-   * judgement, unless the work is still live here or — where {@code mainAnswers} the offer, so its
-   * answer may merely be lost — its offer is still recorded. An oversized file gets no answer per
-   * offer, only a refused channel, so its record never stands in the way.
+   * judgement, unless the work is still live here or its offer is still recorded, its answer
+   * perhaps merely lost ({@link NodeRound#begin} asks main about an oversized one first).
    */
   private Optional<Settled> settle(
-      String type,
-      String id,
-      SyncedStore store,
-      Supplier<Optional<String>> cause,
-      boolean mainAnswers) {
+      String type, String id, SyncedStore store, Supplier<Optional<String>> cause) {
     try {
       return db.transaction(
           () -> {
-            if (store.live(id, boxHandle)
-                || (mainAnswers && changeLog.offer(type, id).isPresent())) {
+            if (store.live(id, boxHandle) || changeLog.offer(type, id).isPresent()) {
               return Optional.empty();
             }
-            return cause.get().map(why -> new Settled(type, id, settleGone(type, id, store), why));
+            return cause
+                .get()
+                .map(
+                    why -> {
+                      changeLog.settleOffer(type, id);
+                      return new Settled(type, id, settleGone(type, id, store), why);
+                    });
           });
     } catch (RuntimeException e) {
       var reason = Objects.requireNonNullElse(e.getMessage(), e.toString());
@@ -166,7 +166,6 @@ public final class Settlement {
       return new How.ReHomed();
     }
     Actor.run(Actor.main(null), () -> store.adoptForSync(id, null, null));
-    changeLog.settleOffer(type, id);
     return new How.Withdrawn();
   }
 

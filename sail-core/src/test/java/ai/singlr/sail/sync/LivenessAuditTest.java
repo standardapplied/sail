@@ -749,6 +749,26 @@ class LivenessAuditTest {
     assertTrue(new ChangeLog(ada.db).offer("file", id).isEmpty(), "and its record settled");
   }
 
+  /** A file main took under its old ceiling, the answer lost, is main's: never withdrawn here. */
+  @Test
+  void aFileMainTookWhoseAnswerWasLostIsNotWithdrawnUnderALoweredCeiling() throws IOException {
+    var files = new FileStore(ada.db);
+    main.limits(new FileLimits(16));
+    Acting.as(
+        "ada",
+        () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+    SyncBox.pushLosingTheAnswer(main, ada.syncsAs(ADA), "file");
+    assertEquals(9, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
+    main.limits(new FileLimits(4));
+
+    var round = SyncBox.roundSettling(main, ada.syncsAs(ADA));
+
+    assertEquals(List.of(), round.settled(), "main took it; nothing to settle");
+    assertConvergedWithin(2, ada, ADA);
+    assertEquals(9, files.find("acme", "a.txt").orElseThrow().size(), "main's version stays");
+    assertTrue(files.dirtyIds().isEmpty(), "acknowledged, not offered again");
+  }
+
   /** Settlement waits for an offer whose answer may merely be lost, which the round recovers. */
   @Test
   void aLostAcceptanceOfABornInSpecIsRecoveredBeforeItIsSettled() throws IOException {

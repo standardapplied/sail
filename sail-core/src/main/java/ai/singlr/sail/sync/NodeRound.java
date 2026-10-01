@@ -7,7 +7,9 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
@@ -16,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * What a node does first in every round, once main has welcomed it, before it offers or adopts
@@ -42,8 +45,39 @@ public final class NodeRound {
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
-    new SyncLimits(db).recordMainFileMax(session.mainFileMax());
+    var limits = new SyncLimits(db);
+    limits.recordMainFileMax(session.mainFileMax());
+    acknowledgeOversized(session, db, limits.mainFileMax());
     return settle(db, handle);
+  }
+
+  /**
+   * Asks main, before an oversized file is settled, which of the files above its ceiling this box
+   * still offers it took — an earlier upload cut on the way leaves the offer recorded with no
+   * answer — and adopts each version main took as that file's base ({@link FileStore#acknowledge});
+   * the record of one main never saw is forgotten, since main answers an oversized offer only with
+   * a refused channel, never per offer. Settlement then judges exactly what is still an offer.
+   */
+  private static void acknowledgeOversized(SyncSession session, Sqlite db, long ceiling) {
+    var files = new FileStore(db);
+    var changeLog = new ChangeLog(db);
+    var recorded =
+        files.offersAbove(ceiling).stream()
+            .filter(id -> changeLog.offer(files.entityType(), id).isPresent())
+            .toList();
+    if (recorded.isEmpty()) {
+      return;
+    }
+    var answer = session.held(files.entityType(), recorded);
+    for (var entry : answer.accepted()) {
+      Actor.run(
+          Actor.main(entry.author()),
+          () -> files.acknowledge(entry.id(), entry.snapshot(), entry.rev()));
+    }
+    var taken = answer.accepted().stream().map(SyncWire.Entry::id).collect(Collectors.toSet());
+    recorded.stream()
+        .filter(id -> !taken.contains(id))
+        .forEach(id -> changeLog.settleOffer(files.entityType(), id));
   }
 
   /**

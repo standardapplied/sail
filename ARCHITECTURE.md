@@ -402,8 +402,10 @@ be lost to the round's recovery. Each settlement is its own write transaction, a
 cannot be settled is reported, never a wedge for the rest. Every settlement is announced in the
 round's notices and report, as a denial is, naming what became of the work. A file already stored
 above main's `limits.file_max`, which the welcome carries, is withdrawn once rather than refused
-mid-upload, and the node refuses an oversized file at ingest against the lower of its own limit
-and main's, naming both, so one never breaks the channel. Content uploaded for an offer of a
+mid-upload — main is asked first which of them it took, since an oversized offer gets no answer
+per offer, only a refused channel, and one main took is acknowledged, not withdrawn — and the
+node refuses an oversized file at ingest against the lower of its own limit and main's, naming
+both, so one never breaks the channel. Content uploaded for an offer of a
 content-bearing type main then denies is collected, never left on main.
 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
