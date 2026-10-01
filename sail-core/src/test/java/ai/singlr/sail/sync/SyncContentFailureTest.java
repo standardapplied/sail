@@ -81,7 +81,6 @@ class SyncContentFailureTest {
     WRONG_RESULTS,
     MISSING_RESULTS,
     WRONG_RESULT_ID,
-    REFUSED_RESULT,
     BAD_HEADS,
     UNKNOWN_FAILURE_KIND,
     NEED_NO_PROGRESS
@@ -109,7 +108,7 @@ class SyncContentFailureTest {
                       "file", SyncedEntities.replicas(node.db, "node", "node").get("file"));
                 }
               });
-      assertEquals(fault == AnswerFault.REFUSED_RESULT ? "refused" : "protocol", failure.kind());
+      assertEquals("protocol", failure.kind());
       assertEquals(revision, files.latestRev("project/file"));
       assertTrue(files.dirtyIds().contains("project/file"));
       assertEquals(0, node.syncState.checkpoint("main", "file"));
@@ -146,10 +145,6 @@ class SyncContentFailureTest {
             case WRONG_RESULT_ID ->
                 message.put(
                     "results", List.of(Map.of("id", "wrong", "accepted", Map.of("rev", "1-main"))));
-            case REFUSED_RESULT ->
-                message.put(
-                    "results",
-                    List.of(Map.of("id", "project/file", "refused", Map.of("reason", "policy"))));
             default -> {}
           }
         }

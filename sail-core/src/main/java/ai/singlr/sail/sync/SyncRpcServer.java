@@ -16,7 +16,6 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncedStore;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -76,6 +75,7 @@ public final class SyncRpcServer {
   private Erasure erasure;
   private EraseAuthority authority;
   private boolean erasedInSession;
+  private boolean deniedInSession;
   private MainBox mainBox;
 
   public SyncRpcServer(MainReplica main, boolean writable) {
@@ -178,21 +178,22 @@ public final class SyncRpcServer {
       return;
     }
     erasedInSession = false;
+    deniedInSession = false;
     try (var scope = blobs.retain()) {
       serveSession(in, out, frame);
     } finally {
-      if (erasedInSession) {
-        collectAfterErasure();
+      if (erasedInSession || deniedInSession) {
+        collectOrphanedContent();
       }
     }
   }
 
-  private void collectAfterErasure() {
+  private void collectOrphanedContent() {
     try {
       blobs.gc(BlobStore.Compaction.NONE, true);
     } catch (RuntimeException e) {
       System.err.println(
-          "  [sync] could not collect content after an erasure; 'sail sync gc' frees it: "
+          "  [sync] could not collect content a denial or erasure left; 'sail sync gc' frees it: "
               + rootMessage(e));
     }
   }
@@ -657,8 +658,9 @@ public final class SyncRpcServer {
       outcome =
           Actor.call(
               principal, () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
-    } catch (BlobStore.NotHeld | ChangeLog.Pruned | SyncedStore.Unheld e) {
-      return new SyncWire.Refused(offer.id(), e.getMessage());
+    } catch (RuntimeException e) {
+      System.err.println("  [sync] " + type + " " + offer.id() + ": " + rootMessage(e));
+      return new SyncWire.Refused(offer.id(), rootMessage(e));
     }
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
@@ -667,9 +669,18 @@ public final class SyncRpcServer {
             offer.id(), accepted.rev(), accepted.author(), accepted.creator());
       }
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
-      case CommitOutcome.Denied denied ->
-          new SyncWire.Denied(
-              offer.id(), denied.reason(), denied.rev(), denied.snapshot(), true, denied.author());
+      case CommitOutcome.Refused refused -> new SyncWire.Refused(offer.id(), refused.reason());
+      case CommitOutcome.Denied denied -> {
+        deniedInSession = true;
+        yield new SyncWire.Denied(
+            offer.id(),
+            denied.reason(),
+            denied.rev(),
+            denied.snapshot(),
+            true,
+            denied.author(),
+            denied.gone());
+      }
     };
   }
 

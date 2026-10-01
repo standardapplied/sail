@@ -65,6 +65,12 @@ public final class SyncedEntities {
   private static final List<Entity> ENTITIES =
       List.of(
           new Entity(
+              "run",
+              RunStore::new,
+              RunStore::new,
+              (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
+              Map.of("run", TransitionKind.RUN_STATUS)),
+          new Entity(
               "spec",
               SpecStore::new,
               SpecStore::new,
@@ -73,12 +79,6 @@ public final class SyncedEntities {
           new Entity("room", RoomStore::new, RoomStore::new, NONE, Map.of()),
           new Entity("file", FileStore::new, FileStore::new, NONE, Map.of()),
           new Entity("project", ProjectStore::new, ProjectStore::new, NONE, Map.of()),
-          new Entity(
-              "run",
-              RunStore::new,
-              RunStore::new,
-              (id, before, after) -> SyncTransitions.statusChange("run", id, before, after),
-              Map.of("run", TransitionKind.RUN_STATUS)),
           new Entity(
               "review",
               ReviewStore::new,

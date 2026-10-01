@@ -38,7 +38,7 @@ class SyncedEntitiesTest {
     try (var db = Sqlite.open(tempDir.resolve("test.db"))) {
       new SchemaManager(db).migrate();
       assertEquals(
-          List.of("spec", "room", "file", "project", "run", "review", "message"),
+          List.of("run", "spec", "room", "file", "project", "review", "message"),
           SyncedEntities.all().stream().map(SyncedEntities.Entity::type).toList());
       for (var entity : SyncedEntities.all()) {
         assertEquals(entity.type(), entity.store(db).entityType());

@@ -555,7 +555,7 @@ class ConvergenceSyncTest {
 
     var denied = SyncBox.round(main, ada);
 
-    assertEquals(1, denied.getFirst().denials().size(), "announced once");
+    assertEquals(1, denied.stream().mapToLong(r -> r.denials().size()).sum(), "announced once");
     assertConverged();
     assertEquals("Spec s", ada.specs.findById("s").orElseThrow().title());
   }
@@ -569,7 +569,7 @@ class ConvergenceSyncTest {
 
     var denied = SyncBox.round(main, ada);
 
-    assertEquals(1, denied.getFirst().denials().size(), "announced once");
+    assertEquals(1, denied.stream().mapToLong(r -> r.denials().size()).sum(), "announced once");
     assertConverged();
     assertEquals("Spec s", ada.specs.findById("s").orElseThrow().title());
   }

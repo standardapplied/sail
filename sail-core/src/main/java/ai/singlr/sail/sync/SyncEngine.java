@@ -373,12 +373,16 @@ public final class SyncEngine {
         case CommitOutcome.Accepted a -> settleAccepted(offer, a);
         case CommitOutcome.Rejected r ->
             redetect(offer.id(), r.currentSnapshot(), r.currentRev(), offer.redetectsLeft());
-        case CommitOutcome.Denied d ->
-            !liveHere(offer.id())
-                    && adopt(
-                        offer.id(), offer.offeredFrom().rev(), d.snapshot(), d.rev(), d.author())
-                ? Outcome.PULLED
-                : Outcome.DENIED;
+        case CommitOutcome.Refused _ -> Outcome.HELD;
+        case CommitOutcome.Denied d -> {
+          if (d.gone()) {
+            yield Outcome.HELD;
+          }
+          yield !liveHere(offer.id())
+                  && adopt(offer.id(), offer.offeredFrom().rev(), d.snapshot(), d.rev(), d.author())
+              ? Outcome.PULLED
+              : Outcome.DENIED;
+        }
       };
     }
 

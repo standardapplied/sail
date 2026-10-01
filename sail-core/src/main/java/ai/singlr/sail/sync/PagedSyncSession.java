@@ -962,11 +962,13 @@ public final class PagedSyncSession implements SyncSession {
           denials.add(denial);
           notice.accept(denial.describe());
           yield new CommitOutcome.Denied(
-              denied.reason(), currentRev(offer.id()), current(offer.id()), author(offer.id()));
+              denied.reason(),
+              currentRev(offer.id()),
+              current(offer.id()),
+              author(offer.id()),
+              denied.gone());
         }
-        case SyncWire.Refused refused ->
-            throw new SyncTransportException(
-                "refused", type + " " + offer.id() + ": " + refused.reason(), null);
+        case SyncWire.Refused refused -> new CommitOutcome.Refused(refused.reason());
       };
     }
   }

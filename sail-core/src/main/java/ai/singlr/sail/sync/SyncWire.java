@@ -103,6 +103,7 @@ public final class SyncWire {
   private static final String ERASE = "erase";
   private static final String AUTHOR = "author";
   private static final String CREATOR = "creator";
+  private static final String GONE = "gone";
 
   private static final String OP_HELLO = "hello";
   private static final String OP_HEADS = "heads";
@@ -482,16 +483,27 @@ public final class SyncWire {
       String rev,
       Map<String, Object> snapshot,
       boolean carried,
-      String author)
+      String author,
+      boolean gone)
       implements Result {
     public Denied(
         String id, String reason, String rev, Map<String, Object> snapshot, boolean carried) {
-      this(id, reason, rev, snapshot, carried, null);
+      this(id, reason, rev, snapshot, carried, null, false);
     }
 
-    /** This denial without main's version, which the node then fetches. */
+    public Denied(
+        String id,
+        String reason,
+        String rev,
+        Map<String, Object> snapshot,
+        boolean carried,
+        String author) {
+      this(id, reason, rev, snapshot, carried, author, false);
+    }
+
+    /** This denial without main's version, which the node then fetches; its mark is kept. */
     public Denied withheld() {
-      return new Denied(id, reason, null, null, false);
+      return new Denied(id, reason, null, null, false, null, gone);
     }
   }
 
@@ -816,6 +828,9 @@ public final class SyncWire {
         var refused = new LinkedHashMap<String, Object>();
         refused.put(REASON, denied.reason());
         refused.put(DENIED, true);
+        if (denied.gone()) {
+          refused.put(GONE, true);
+        }
         if (denied.carried()) {
           refused.put(REV, denied.rev());
           refused.put(SNAPSHOT, denied.snapshot());
@@ -848,7 +863,8 @@ public final class SyncWire {
           string(refused, REV),
           snapshot(refused, SNAPSHOT),
           refused.containsKey(SNAPSHOT),
-          string(refused, AUTHOR));
+          string(refused, AUTHOR),
+          bool(refused, GONE));
     }
     if (refused != null) {
       return new Refused(id, string(refused, REASON));

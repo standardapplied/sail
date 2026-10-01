@@ -61,6 +61,11 @@ public final class ChangeLog {
     this.db = db;
   }
 
+  /** The database this log and its siblings share, for a rule that must read beside it. */
+  public Sqlite db() {
+    return db;
+  }
+
   /** What one entry records about its entity. */
   public enum Kind {
     REVISION,

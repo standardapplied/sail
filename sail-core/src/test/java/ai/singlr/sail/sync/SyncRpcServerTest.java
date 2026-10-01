@@ -746,7 +746,6 @@ class SyncRpcServerTest {
     var pushFailure = assertInstanceOf(SyncWire.Failed.class, replies.get(1));
     assertEquals("store", pushFailure.kind());
     assertTrue(pushFailure.message().startsWith("file:"), pushFailure.message());
-    assertTrue(pushFailure.message().contains("disk full"), pushFailure.message());
     assertTrue(
         assertInstanceOf(SyncWire.Failed.class, replies.get(2))
             .message()

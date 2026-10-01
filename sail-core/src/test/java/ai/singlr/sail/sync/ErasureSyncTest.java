@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -525,13 +526,10 @@ class ErasureSyncTest {
       var replicas = replicas();
       link.reconcile("spec", replicas.get("spec"));
       prune(main, "old", "uday");
-      var refused =
-          assertThrows(
-              SyncTransportException.class, () -> link.reconcile("run", replicas.get("run")));
-      assertEquals("refused", refused.kind());
-      assertTrue(
-          refused.getMessage().contains("belongs to spec 'old', which was pruned"),
-          refused.getMessage());
+      var report = link.reconcile("run", replicas.get("run"));
+      assertNull(report.failure(), "a run main refuses never fails the round");
+      assertEquals(0, report.report().pushed(), "main refuses the run whose spec it pruned");
+      assertTrue(new RunStore(main.db).findById(late).isEmpty());
     }
     round(NODE);
 

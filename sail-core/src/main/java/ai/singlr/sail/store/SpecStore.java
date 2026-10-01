@@ -389,6 +389,28 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Re-homes a born-in spec into its own identity room ({@code room_id = id}), recording a local
+   * revision: how a node settles a born-in spec whose room is gone and main never took, so it
+   * anchors its own conversation and is offered like any spec of its own room. A spec already in
+   * its own room is untouched.
+   */
+  public void reHomeToOwnRoom(String id) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "UPDATE specs SET room_id = ?, updated_at = ?, updated_by = ? WHERE id = ? AND"
+                  + " COALESCE(room_id, id) <> id",
+              id,
+              DateTimeUtils.now().toString(),
+              author(),
+              id);
+          if (db.changes() != 0) {
+            recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          }
+        });
+  }
+
+  /**
    * Status transition that commits only if the spec still holds {@code expected}, returning whether
    * it did. The check and the write are one statement under the write lock ({@code BEGIN
    * IMMEDIATE}), so a lifecycle writer racing another transition — above all an operator's {@code

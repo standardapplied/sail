@@ -7,7 +7,9 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.Snapshots;
@@ -44,6 +46,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private final SyncConflicts conflicts;
   private final SyncState syncState;
   private final String handle;
+  private final Decidability decidability;
 
   public StoreReplica(
       String id,
@@ -67,6 +70,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     this.conflicts = Objects.requireNonNull(conflicts, "conflicts");
     this.syncState = Objects.requireNonNull(syncState, "syncState");
     this.handle = handle;
+    this.decidability = new Decidability(changeLog.db());
   }
 
   @Override
@@ -83,6 +87,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   public Set<String> dirtyIds() {
     var dirty = new LinkedHashSet<>(store.dirtyIds());
     dirty.addAll(conflicts.pendingIds(store.entityType()));
+    dirty.removeAll(decidability.pending(store.entityType(), dirty, handle));
     return dirty;
   }
 
@@ -241,6 +246,15 @@ public final class StoreReplica implements LocalReplica, MainReplica {
           var erased = erasure(entityId);
           if (erased.isPresent()) {
             return new CommitOutcome.Rejected(erased.get().rev(), null);
+          }
+          var decidable =
+              decidability.forMain(
+                  store.entityType(), entityId, snapshot, Actor.current().handle());
+          if (decidable.status() == Decidability.Status.GONE) {
+            return new CommitOutcome.Denied(decidable.reason(), null, null, author(entityId), true);
+          }
+          if (decidable.status() == Decidability.Status.PENDING) {
+            return new CommitOutcome.Refused(decidable.reason());
           }
           return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
             case PushOutcome.Accepted a ->

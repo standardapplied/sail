@@ -18,6 +18,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
@@ -68,6 +69,13 @@ class ReviewSyncTest {
     main = new Box("main");
     node = new Box("node");
     other = new Box("other");
+    for (var box : List.of(main, node, other)) {
+      box.db.execute(
+          """
+          INSERT INTO specs (id, project, title, status, assignee, created_at, updated_at,
+              rev, base_rev)
+          VALUES ('auth', 'acme', 'Auth', 'pending', 'node', 'now', 'now', 'r0', 'r0')""");
+    }
   }
 
   @AfterEach

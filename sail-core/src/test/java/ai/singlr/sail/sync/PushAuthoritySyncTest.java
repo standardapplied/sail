@@ -397,7 +397,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void anAgentsSpecAndPostBeforeItsRunIsOnMainAreRefusedAndLandTheRoundAfterTheRunDoes()
+  void anAgentsSpecAndPostBeforeItsRunIsOnMainAreHeldBackAndLandTheRoundAfterTheRunDoes()
       throws IOException {
     ownSpec(main, "ada", "mine", "ada");
     sync(ada, ADA);
@@ -408,8 +408,9 @@ class PushAuthoritySyncTest {
         Acting.by(
             agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "early", null));
 
-    var refused = assertThrows(SyncTransportException.class, () -> push(ada, ADA, "spec"));
-    assertTrue(refused.getMessage().contains("does not hold run"), refused.getMessage());
+    var heldSpec = push(ada, ADA, "spec");
+    assertNull(heldSpec.failure(), "the spec waits for its run rather than failing the round");
+    assertEquals(0, heldSpec.report().pushed(), "the spec is held back until its run lands");
     assertEquals(0, push(ada, ADA, "message").report().pushed(), "the post waits for its run");
     assertTrue(main.specs.findById("born").isEmpty());
 

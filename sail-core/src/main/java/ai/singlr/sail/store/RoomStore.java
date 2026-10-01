@@ -311,13 +311,29 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * refused ({@link SyncedStore.Unheld}), never denied: its room syncs in its own page, and the
    * next round decides what lives in it.
    */
+  /**
+   * Whether this box holds a live conversation at {@code roomId} — a room row, or a spec living in
+   * it — as opposed to only its history. How {@link Decidability} tells a conversation held from
+   * one gone, where a tombstone in the log is not enough.
+   */
+  public boolean holdsLiveConversation(String roomId) {
+    return db.queryOne(
+            """
+            SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
+                OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)""",
+            row -> true,
+            roomId)
+        .orElse(false);
+  }
+
   public boolean holdsConversation(String roomId) {
     return db.queryOne(
             """
             SELECT 1 WHERE EXISTS (SELECT 1 FROM rooms WHERE id = ?1)
                 OR EXISTS (SELECT 1 FROM specs WHERE room_id = ?1)
-                OR EXISTS (SELECT 1 FROM change_heads
-                    WHERE entity_type IN ('room', 'spec') AND entity_id = ?1)""",
+                OR EXISTS (SELECT 1 FROM change_heads h JOIN change_log l ON l.seq = h.seq
+                    WHERE h.entity_type IN ('room', 'spec') AND h.entity_id = ?1
+                    AND l.kind <> 'erasure')""",
             row -> true,
             roomId)
         .orElse(false);

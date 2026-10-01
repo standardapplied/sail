@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Collections;
@@ -38,6 +39,7 @@ public final class NodeRound {
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
+    new Decidability(db).settle(handle);
   }
 
   /**

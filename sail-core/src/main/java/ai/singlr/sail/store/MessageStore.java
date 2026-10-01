@@ -461,7 +461,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
             throw new IllegalArgumentException("message '" + id + "' is immutable");
           }
           var row = fromSnapshot(id, snapshot);
-          requireDecidable(row);
           if (!holdsReplyTarget(row)) {
             return new PushOutcome.Denied("it replies to a message main does not hold", null, null);
           }
@@ -479,21 +478,6 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /** The platform narrator: the review pipeline posts room verdicts under this author. */
   public static final String SAIL_AUTHOR = "sail";
-
-  /**
-   * Refuses to decide a post in a conversation main has never held ({@link SyncedStore.Unheld}):
-   * its room or spec syncs before its messages, so the next round decides it, where a denial now
-   * would remove a message whose room had simply not arrived. A conversation main held and lost is
-   * decided like any other.
-   */
-  private void requireDecidable(MessageRow row) {
-    if (!new RoomStore(db).holdsConversation(row.roomId())) {
-      throw new Unheld(
-          "main does not hold room '"
-              + row.roomId()
-              + "' yet; rooms sync before their messages, so the next round settles this");
-    }
-  }
 
   /**
    * Whether a run acting for {@code owner} is in conversation {@code roomId}: the evidence that the
