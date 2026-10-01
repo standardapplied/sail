@@ -110,8 +110,12 @@ public final class Decidability {
    * else is withdrawn as a denial is settled, kept in the change log. Runs locally, needing no
    * session, at the start of every round and after the node adopts an erasure, a denial or a gone
    * answer. Returns what it settled.
+   *
+   * <p>{@code mainFileMax} is main's file ceiling (0 when unknown): a file already stored above it
+   * is withdrawn once here, never offered, so an oversized file never breaks the channel
+   * mid-upload.
    */
-  public List<String> settle(String boxHandle) {
+  public List<String> settle(String boxHandle, long mainFileMax) {
     var settled = new ArrayList<String>();
     for (var entity : SyncedEntities.all()) {
       var store = entity.store(db);
@@ -122,7 +126,18 @@ public final class Decidability {
         }
       }
     }
+    for (var id : filesAbove(mainFileMax)) {
+      new Erasure(db).discard(List.of(new Erasure.Target(Erasure.FILE, id)));
+      settled.add(Erasure.FILE + " " + id);
+    }
     return settled;
+  }
+
+  private List<String> filesAbove(long mainFileMax) {
+    if (mainFileMax <= 0) {
+      return List.of();
+    }
+    return db.query("SELECT id FROM project_files WHERE size > ?", r -> r.text(0), mainFileMax);
   }
 
   private Finding evaluate(

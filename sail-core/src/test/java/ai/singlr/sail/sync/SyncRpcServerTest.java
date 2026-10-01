@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -322,7 +323,8 @@ class SyncRpcServerTest {
                     new SyncWire.Hello(4, "0.44.9", SyncWire.UPGRADE_FLOOR, "b"))
                 .getFirst());
     assertEquals(
-        new SyncWire.Welcome(SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", ""),
+        new SyncWire.Welcome(
+            SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", "", FileLimits.DEFAULT_MAX),
         welcome,
         "a session naming no FDE is welcomed as no one");
   }

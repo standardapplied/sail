@@ -130,6 +130,12 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
   Optional<String> handle();
 
   /**
+   * Main's {@code limits.file_max} as its welcome named it, 0 from a main that predates saying so:
+   * the ceiling the node enforces together with its own before a file ever reaches a sync.
+   */
+  long mainFileMax();
+
+  /**
    * What main holds of each of {@code ids} of {@code type}: its current version — a revision, a
    * tombstone or an erasure — and the latest version it took from this box, each in request order;
    * an id main never held is omitted from both. Reads only.

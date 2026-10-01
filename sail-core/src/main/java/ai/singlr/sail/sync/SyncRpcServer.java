@@ -419,7 +419,11 @@ public final class SyncRpcServer {
     }
     welcomed = true;
     return new SyncWire.Welcome(
-        SyncWire.PROTOCOL, version, mainId(), Objects.toString(principal.handle(), ""));
+        SyncWire.PROTOCOL,
+        version,
+        mainId(),
+        Objects.toString(principal.handle(), ""),
+        limits.fileMax());
   }
 
   /**

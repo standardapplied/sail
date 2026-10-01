@@ -39,7 +39,7 @@ public final class NodeRound {
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
-    new Decidability(db).settle(handle);
+    new Decidability(db).settle(handle, session.mainFileMax());
   }
 
   /**

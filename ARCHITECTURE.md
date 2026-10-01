@@ -187,17 +187,17 @@ and the spec that closes it.
 | A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest`, `EraseRequestTest`, `SpecPruneTest`; purge case open: `sail-journal-authority` |
 | T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest` (a revision main recorded with no author), `WireAuthorSyncTest`, `ConvergenceSyncTest` (a resolve holds main's revision under main's author, a deletion's included), `ConflictOperationsTest`, `MessageSyncTest` and `ReplyChainSyncTest` (a message under its poster), `ProjectSyncTest` (a rename's deletion under its deleter), `NativeFleetIT` (change-log heads) |
 | T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores), `ConvergenceSyncTest` (restored and re-created on another box), every sync test through `SyncBox.assertEqualToMain` |
-| L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | open: `sail-sync-liveness` |
-| L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | open: `sail-sync-liveness` |
-| L3 | A node holds back what main cannot decide yet instead of failing the round. | posts behind their run: `DeniedSyncTest`; open for every type: `sail-sync-liveness` |
+| L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | `LivenessAuditTest` (posts, born-in specs, reviews, oversized files, a commit that throws, an erased project), `SyncRpcServerTest` (per-offer answers), `SyncContentFailureTest` |
+| L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | `LivenessAuditTest`, `DeniedSyncTest`, `MessageSyncTest`, `SpecAuthorityTest`/`MessageAuthorityTest` (`Decidability.forMain` is pending, never denied) |
+| L3 | A node holds back what main cannot decide yet instead of failing the round. | `LivenessAuditTest` (a spec, review and post behind their run or room), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
-| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; open for failed rounds: `sail-sync-liveness` |
+| L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; a refused batch: `LivenessAuditTest` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); open for a review whose findings the box holds: `sail-review-findings-sync` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
-| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | open: `sail-sync-liveness`, `sail-review-findings-sync`, `sail-files-materialized-version` |
-| E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; open for a prune racing a born-in spec: `sail-sync-liveness` |
+| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | a gone dependency's offer, re-homed or withdrawn: `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content); open for reviews and files: `sail-review-findings-sync`, `sail-files-materialized-version` |
+| E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
 
 Every test in the `sync` package that drives a round between boxes ends each scenario by
 quiescing every box and asserting each replica equals main — fields, author, revision, head kind
@@ -211,7 +211,8 @@ every box's change-log heads (id, rev, kind, author) equal main's for every type
 ### What syncs, and how
 
 `sail sync` runs one bidirectional reconciliation per registered entity type, in the
-registry's dependency order (a spec before its runs, a room before its messages), plus one
+registry's dependency order — runs first, so an agent's run lands before anything its
+principals wrote, then specs, rooms, files, projects, reviews and messages — plus one
 one-way roster pull:
 
 | Entity | Direction | Notes |
@@ -252,8 +253,9 @@ is an earlier offer's when the recorded one never reached it.
 
 A session opens with `hello` (protocol, build, fleet floor, box id) and is `welcome`d or
 `refuse`d once; floors compare as versions. The `welcome` names the handle main authenticated the
-session as, and a node whose configured sync handle is blank or another does nothing that round
-(`NodeRound.begin`); an older main names none and is not asked. Main records the first box that
+session as and main's `limits.file_max`, so the node enforces the lower of its own limit and
+main's before a file ever reaches a sync; a node whose configured sync handle is blank or another
+does nothing that round (`NodeRound.begin`); an older main names neither and is not asked. Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
 from any other until an admin runs `sail fde release-box`; removing an FDE releases its box. A
 node's answer to an offer main took can be lost on the way back. Main records the box each
@@ -353,26 +355,38 @@ re-raise, and every version stays in the change log, so no choice loses work. A 
 before conflicts kept main's revision names none, and every strategy on it is refused until
 `sail sync` re-records it.
 
+One rule in sail-core (`Decidability`) names what each offer depends on, whether main holds it,
+and what becomes of an offer whose dependency can never arrive — a spec on the room it is born
+in, a review on its spec, a message on its conversation, its reply parent and the run of an
+agent author, any revision on the run its `_actor` names, and every type on the project it
+belongs to. Main's answer, the node's hold-back and the node's settlement all read it.
+
 Main answers each offer on its own: `accepted` with the rev it minted, `stale` when it moved
-since the node fetched, `refused` on integrity grounds (content it does not hold, a pruned id, a
-run pushed with no node handle, a principal naming a run main does not hold yet), or `denied`
-when this principal may not make this change. A denial is decided inside the commit's
-transaction, after its compare-and-set and integrity checks and before its first write, never
-thrown, and never fails the offers beside it. Main denies what the type's write rule refuses the
-pusher (below, **One rule per type**), and a reply to a message main does not hold. A message in
-a room main has never held is refused instead, because its room has simply not arrived; rooms
-sync before messages, so the next round decides it. Main decides an agent's post by its
-principal's run, in whatever conversation it runs, and the review pipeline's by a run of the
-same owner in the conversation, placing a run in a conversation through its room or its spec's
-room. So the node holds such a post, with the replies under it, until main holds what decides
-it: while the agent's run, or that run's spec, has a change main has not taken, or while the
-pipeline's owner has no run there that main holds. Runs sync before messages, so the post
-normally goes later in the same round. A run main denies leaves the node with the posts its
-principals made that main never took, since nothing could ever decide them. The
-answer carries main's current version of the entity: a revision, a tombstone, or nothing. The
-node budgets every offer for its answer as well as its bytes, and a version that would take the
-answer past that room is withheld; the node fetches it with `need`, as it does for a stale offer.
-A push from a node of this release therefore never gets results larger than the frame it fit.
+since the node fetched, `refused` when a dependency has not arrived yet or a commit throws, or
+`denied` when this principal may not make the change. A denial is decided inside the commit's
+transaction, after its compare-and-set and before its first write, never thrown, and never fails
+the offers beside it; so is a refusal — any exception inside one commit is that offer's refusal
+with its reason, and an offer that cannot be taken is refused alone while the batch's others keep
+their answers. Main denies what the type's write rule refuses the pusher (below, **One rule per
+type**), and a reply to a message main does not hold. Main refuses, never denies, while a
+dependency has simply not arrived — a born-in spec's room, a message's conversation, an agent
+revision's or post's run, a review's spec — because they sync in order (runs first), so the next
+round decides it; and the node holds such an offer back rather than offering it to be refused,
+through the same rule. A dependency main has erased is terminal: main denies the offer with no
+version and marks it `gone`, and the node settles it that round. The answer carries main's
+current version of the entity: a revision, a tombstone, or nothing. The node budgets every offer
+for its answer as well as its bytes, and a version that would take the answer past that room is
+withheld; the node fetches it with `need`, as it does for a stale offer. A push from a node of
+this release therefore never gets results larger than the frame it fit.
+
+The node settles what can never be decided, reading the same rule at the start of every round: a
+born-in spec whose room is gone — deleted before its first sync, denied, or erased — is re-homed
+into its own identity room, which it may because main never took it; anything else is withdrawn
+as a denial is, kept in the change log. A spec an erased run's agent edited reverts to main's
+version once the run's denial settles. A file already stored above main's `limits.file_max`,
+which the welcome carries, is withdrawn once rather than refused mid-upload, and the node refuses
+an oversized file at ingest against the lower of its own limit and main's, so one never breaks
+the channel. Content uploaded for an offer main then denies is collected, never left on main.
 
 The node settles a denial as it settles a pull, and counts it as one: it adopts main's version at
 main's rev, or removes its row when main holds none. Adopting a deletion makes main's tombstone the
@@ -403,7 +417,9 @@ print it even when the round then fails; `sail sync --json` and `GET /v1/sync` l
 id, reason). On the wire a denial is a `refused` result marked `denied: true`, so
 a 0.46 node reads a refusal and fails that type's round naming the reason: as before for a
 read-only push and a forged author, while a run main may not take from it, which a 0.46 main
-answered as stale, now fails its run type until the node upgrades.
+answered as stale, now fails its run type until the node upgrades. A terminal denial carries an
+optional `gone: true`; a node at the same floor that predates it reads a plain denial and removes
+the offer, as before, so nothing new is lost.
 
 A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
 a resolve is refused (`409` over the API) when the live row no longer matches the conflict's

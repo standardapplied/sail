@@ -962,6 +962,28 @@ class ConvergenceSyncTest {
     assertTrue(new RunStore(main.db).findById(runId).isEmpty());
   }
 
+  /** L1/C4: a spec the agent of a denied run edited reverts to main's once the run settles. */
+  @Test
+  void aSpecEditedByTheAgentOfADeniedRunSettles() {
+    ownSpec(main, "ada", "mine", "ada");
+    SyncBox.round(main, ada);
+    var runId = run(ada, "ada", "mine");
+    ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
+    var agent =
+        Actor.agentPrincipal(new RunStore(ada.db).findById(runId).orElseThrow().principal(), "ada");
+    Acting.by(agent, () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
+    Acting.as("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+
+    SyncBox.round(main, ada);
+
+    assertConverged();
+    assertTrue(new RunStore(main.db).findById(runId).isEmpty(), "main denied the run");
+    assertEquals(
+        SpecStatus.PENDING,
+        main.specs.findById("mine").orElseThrow().status(),
+        "the edit by the denied run's agent reverts to main's version");
+  }
+
   private void assertConverged() {
     SyncBox.assertConverged(main, ada, bob);
   }

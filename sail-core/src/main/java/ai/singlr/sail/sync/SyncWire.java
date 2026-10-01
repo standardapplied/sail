@@ -96,6 +96,7 @@ public final class SyncWire {
   private static final String BOX = "box";
   private static final String MAIN_ID = "mainId";
   private static final String HANDLE = "handle";
+  private static final String FILE_MAX = "file_max";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -357,11 +358,15 @@ public final class SyncWire {
    * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
    * null from an older main, which never says.
    */
-  public record Welcome(int protocol, String version, String mainId, String handle)
+  public record Welcome(int protocol, String version, String mainId, String handle, long fileMax)
       implements Response {
     /** A welcome that names no handle, as a main that predates saying so sends it. */
     public Welcome(int protocol, String version, String mainId) {
-      this(protocol, version, mainId, null);
+      this(protocol, version, mainId, null, 0);
+    }
+
+    public Welcome(int protocol, String version, String mainId, String handle) {
+      this(protocol, version, mainId, handle, 0);
     }
   }
 
@@ -657,6 +662,9 @@ public final class SyncWire {
         if (welcome.handle() != null) {
           map.put(HANDLE, welcome.handle());
         }
+        if (welcome.fileMax() > 0) {
+          map.put(FILE_MAX, welcome.fileMax());
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -744,7 +752,8 @@ public final class SyncWire {
               intValue(map, PROTOCOL_KEY),
               string(map, VERSION),
               string(map, MAIN_ID),
-              string(map, HANDLE));
+              string(map, HANDLE),
+              longValue(map, FILE_MAX));
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->

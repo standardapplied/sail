@@ -85,6 +85,7 @@ public final class PagedSyncSession implements SyncSession {
   private Consumer<String> notice = ignored -> {};
   private String broken;
   private String handle;
+  private long mainFileMax;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
@@ -115,6 +116,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.contentFields = contentFields;
     copy.notice = notice;
     copy.handle = handle;
+    copy.mainFileMax = mainFileMax;
     return copy;
   }
 
@@ -152,6 +154,7 @@ public final class PagedSyncSession implements SyncSession {
     var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
     session.handle = welcome.handle();
+    session.mainFileMax = welcome.fileMax();
     return session;
   }
 
@@ -705,6 +708,11 @@ public final class PagedSyncSession implements SyncSession {
   @Override
   public Optional<String> handle() {
     return Optional.ofNullable(handle);
+  }
+
+  @Override
+  public long mainFileMax() {
+    return mainFileMax;
   }
 
   @Override
