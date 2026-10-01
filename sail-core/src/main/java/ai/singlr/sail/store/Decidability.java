@@ -114,23 +114,31 @@ public final class Decidability {
    *
    * <p>{@code mainFileMax} is main's file ceiling (0 when unknown): an offer of a file above it is
    * settled once here, never made, so an oversized file never breaks the channel mid-upload.
+   *
+   * <p>One write transaction covers choosing and settling: another writer (an upload from the pty
+   * host or a CLI) waits its turn, so what is settled is exactly what was judged, never a
+   * replacement that landed in between and would have passed.
    */
   public List<String> settle(String boxHandle, long mainFileMax) {
-    var settled = new ArrayList<String>();
-    for (var entity : SyncedEntities.all()) {
-      var store = entity.store(db);
-      for (var id : List.copyOf(store.dirtyIds())) {
-        if (!store.live(id, boxHandle) && forNode(entity.type(), id, boxHandle) == Status.GONE) {
-          settleGone(entity.type(), id);
-          settled.add(entity.type() + " " + id);
-        }
-      }
-    }
-    for (var id : filesAbove(mainFileMax)) {
-      settleGone(Erasure.FILE, id);
-      settled.add(Erasure.FILE + " " + id);
-    }
-    return settled;
+    return db.transaction(
+        () -> {
+          var settled = new ArrayList<String>();
+          for (var entity : SyncedEntities.all()) {
+            var store = entity.store(db);
+            for (var id : List.copyOf(store.dirtyIds())) {
+              if (!store.live(id, boxHandle)
+                  && forNode(entity.type(), id, boxHandle) == Status.GONE) {
+                settleGone(entity.type(), id);
+                settled.add(entity.type() + " " + id);
+              }
+            }
+          }
+          for (var id : filesAbove(mainFileMax)) {
+            settleGone(Erasure.FILE, id);
+            settled.add(Erasure.FILE + " " + id);
+          }
+          return settled;
+        });
   }
 
   /**
@@ -476,19 +484,15 @@ public final class Decidability {
    */
   private void settleGone(String type, String id) {
     var store = SyncedEntities.require(type).store(db);
-    db.transaction(
-        () -> {
-          var snapshot = store.currentForSync(id);
-          if (Strings.isNotBlank(store.baseRevOf(id))) {
-            revertToBase(id, store);
-          } else if (onlyRoomGone(type, id, snapshot)) {
-            var author = Snapshots.text(snapshot, Snapshots.ACTOR);
-            Actor.run(Actor.main(author), () -> new SpecStore(db).reHomeToOwnRoom(id));
-          } else {
-            Actor.run(Actor.main(), () -> store.adoptForSync(id, null, null));
-          }
-          return null;
-        });
+    var snapshot = store.currentForSync(id);
+    if (Strings.isNotBlank(store.baseRevOf(id))) {
+      revertToBase(id, store);
+    } else if (onlyRoomGone(type, id, snapshot)) {
+      var author = Snapshots.text(snapshot, Snapshots.ACTOR);
+      Actor.run(Actor.main(author), () -> new SpecStore(db).reHomeToOwnRoom(id));
+    } else {
+      Actor.run(Actor.main(), () -> store.adoptForSync(id, null, null));
+    }
   }
 
   private void revertToBase(String id, SyncedStore store) {

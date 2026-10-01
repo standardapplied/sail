@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -24,21 +25,29 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 /** Liveness audit (L1-L3, L6): every offer a legitimate node makes settles in bounded rounds. */
 class LivenessAuditTest {
 
   private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
 
+  @TempDir Path dir;
   private SyncBox main;
   private SyncBox ada;
 
@@ -526,6 +535,58 @@ class LivenessAuditTest {
     assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
     assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "reverted, not deleted");
     SyncBox.assertEqualToMain(main, ada);
+  }
+
+  /**
+   * An upload that replaces an oversized offer while the round is settling it waits its turn: what
+   * the round settles is what it judged, so a replacement under the ceiling is kept and lands.
+   */
+  @Test
+  void aReplacementUnderTheCeilingUploadedDuringSettlementIsKept() throws Exception {
+    try (var node = new SyncBox(dir, "node");
+        var uploadDb = Sqlite.open(dir.resolve("node.db"));
+        var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+      var files = new FileStore(node.db);
+      Acting.as(
+          "node",
+          () -> files.put("acme", "a.txt", new ByteArrayInputStream("123456789".getBytes()), 0644));
+      var replaced = new CountDownLatch(1);
+      var commit = new CountDownLatch(1);
+      var upload =
+          executor.submit(
+              () ->
+                  Acting.as(
+                      "node",
+                      () ->
+                          uploadDb.transaction(
+                              () -> {
+                                new FileStore(uploadDb)
+                                    .put(
+                                        "acme",
+                                        "a.txt",
+                                        new ByteArrayInputStream("hi".getBytes()),
+                                        0644);
+                                replaced.countDown();
+                                try {
+                                  commit.await();
+                                } catch (InterruptedException e) {
+                                  Thread.currentThread().interrupt();
+                                  throw new IllegalStateException(e);
+                                }
+                                return null;
+                              })));
+      assertTrue(replaced.await(5, TimeUnit.SECONDS));
+      var settling = executor.submit(() -> new Decidability(node.db).settle("node", 4));
+      assertThrows(TimeoutException.class, () -> settling.get(100, TimeUnit.MILLISECONDS));
+      commit.countDown();
+      upload.get(5, TimeUnit.SECONDS);
+
+      assertEquals(List.of(), settling.get(5, TimeUnit.SECONDS));
+      assertEquals(2, files.find("acme", "a.txt").orElseThrow().size(), "the replacement stays");
+      var nodeSyncs = Actor.sync("node", Role.MEMBER);
+      round(node, main.server(nodeSyncs).content(main.db, new FileLimits(4)));
+      assertEquals(2, new FileStore(main.db).find("acme", "a.txt").orElseThrow().size());
+    }
   }
 
   /** A reply to a narrator post main accepted under another FDE's run lands as the replier. */
