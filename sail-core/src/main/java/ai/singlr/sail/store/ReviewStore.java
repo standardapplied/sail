@@ -824,9 +824,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Writes the projection of the review's content: its finding rows are exactly the content's, in
-   * its order. The only writer of {@code review_findings}.
+   * its order. The only writer of {@code review_findings}. Content naming a stage of another
+   * review, or none this box holds, aborts the enclosing transaction: a review's content may only
+   * ever write its own rows, whoever offered it.
    */
   private void project(String reviewId, List<Map<String, Object>> findings) {
+    for (var finding : findings) {
+      requireStageOf(reviewId, Snapshots.text(finding, "stage_id"));
+    }
     db.execute(
         "DELETE FROM review_findings WHERE stage_id IN"
             + " (SELECT id FROM review_stages WHERE review_id = ?)",
@@ -840,6 +845,16 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
               carry_evidence, followup)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
           CONTENT_FIELDS.stream().map(finding::get).toArray());
+    }
+  }
+
+  private void requireStageOf(String reviewId, String stageId) {
+    var owner =
+        db.queryOne("SELECT review_id FROM review_stages WHERE id = ?", row -> row.text(0), stageId)
+            .orElse(null);
+    if (!reviewId.equals(owner)) {
+      throw new IllegalArgumentException(
+          "Finding stage " + stageId + " does not belong to review " + reviewId);
     }
   }
 

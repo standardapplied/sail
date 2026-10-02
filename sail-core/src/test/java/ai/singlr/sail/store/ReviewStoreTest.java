@@ -13,11 +13,14 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -63,13 +66,17 @@ class ReviewStoreTest {
   }
 
   private void createSpec(String id) {
+    createSpec(id, null);
+  }
+
+  private void createSpec(String id, String assignee) {
     specStore.create(
         new SpecStore.SpecRow(
             id,
             "test-project",
             "Follow-up",
             SpecStatus.DRAFT,
-            null,
+            assignee,
             null,
             null,
             null,
@@ -140,6 +147,40 @@ class ReviewStoreTest {
     assertEquals(rev, main.latestRev(reviewId));
     assertEquals(store.comparableSnapshot(reviewId), main.comparableSnapshot(reviewId));
     mainDb.close();
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void aPushedReviewsContentCannotWriteIntoAnotherOwnersReview() {
+    createSpec("ada-spec", "ada");
+    createSpec("bob-spec", "bob");
+    var adas = store.createReview("ada-spec", 1);
+    addOpenFinding(store.createStage(adas, "security", "agent"), Finding.Severity.HIGH, "Adas");
+    var bobs = store.createReview("bob-spec", 1);
+    var bobsStage = store.createStage(bobs, "security", "agent");
+    var bobsRev = store.latestRev(bobs);
+    var adasRev = store.latestRev(adas);
+
+    var blobs = new BlobStore(db);
+    var offered = new LinkedHashMap<>(store.comparableSnapshot(adas));
+    var content = YamlUtil.parseMap(blobs.text((String) offered.get("findings_hash")));
+    var finding = ((List<Map<String, Object>>) content.get("findings")).getFirst();
+    finding.put("stage_id", bobsStage);
+    offered.put("findings_hash", blobs.putText(YamlUtil.dumpJson(content)));
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                Actor.call(
+                    Actor.sync("ada", Role.MEMBER),
+                    () -> store.commitRevision(adas, offered, adasRev, store.authority())));
+    assertTrue(refused.getMessage().contains(bobsStage), refused.getMessage());
+    assertEquals(List.of(), store.findingsForReview(bobs), "Bob's review holds no foreign finding");
+    assertEquals(bobsRev, store.latestRev(bobs));
+    assertEquals(adasRev, store.latestRev(adas), "the whole push rolled back");
+    assertEquals(
+        List.of("Adas"), store.findingsForReview(adas).stream().map(Finding::title).toList());
   }
 
   @Test
