@@ -35,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -459,7 +460,7 @@ public final class ProjectFilesCommand implements Runnable {
             all
                 ? operations.catalog().projectsWithFiles()
                 : List.of(CurrentProject.require(project));
-        var report = export(target -> operations.projectFiles(target).materialize(), targets);
+        var report = export(operations::projectFiles, targets);
         print(report);
         System.out.println(
             Ansi.AUTO.string(
@@ -478,13 +479,7 @@ public final class ProjectFilesCommand implements Runnable {
      */
     record ExportReport(int written, int deleted, List<String> skipped, List<String> undecided) {}
 
-    /** One project's materialize, as the command or a test provides it. */
-    @FunctionalInterface
-    interface Materialize {
-      FileMaterializer.Report of(String project) throws IOException;
-    }
-
-    static ExportReport export(Materialize materialize, Collection<String> targets)
+    static ExportReport export(Function<String, ProjectFiles> files, Collection<String> targets)
         throws IOException {
       var written = 0;
       var deleted = 0;
@@ -492,7 +487,7 @@ public final class ProjectFilesCommand implements Runnable {
       var undecided = new ArrayList<String>();
       for (var target : targets) {
         NameValidator.requireValidProjectName(target);
-        var report = materialize.of(target);
+        var report = files.apply(target).materialize();
         written += report.written();
         deleted += report.deleted();
         report.skipped().forEach(skip -> skipped.add(target + "/" + skip));

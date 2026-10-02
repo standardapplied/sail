@@ -38,6 +38,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -403,14 +404,14 @@ class ProjectFilesCommandTest {
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
     ContentFixtures.put(files, "acme", "a.txt", "A");
-    var materializer = new FileMaterializer(files, projectsDir);
-    var report =
-        ProjectFilesCommand.Export.export(materializer::materialize, files.projectsWithFiles());
+    Function<String, ProjectFiles> shared =
+        name -> new SharedProjectFiles(files, projectsDir, name, FileLimits.defaults());
+    var report = ProjectFilesCommand.Export.export(shared, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
     ContentFixtures.put(files, "acme", "a.txt", "A2");
-    var second = ProjectFilesCommand.Export.export(materializer::materialize, List.of("acme"));
+    var second = ProjectFilesCommand.Export.export(shared, List.of("acme"));
 
     assertEquals(0, second.written());
     assertEquals(List.of("acme/a.txt"), second.skipped());
@@ -419,7 +420,7 @@ class ProjectFilesCommandTest {
     files.forgetMaterialized(FileStore.idOf("acme", "a.txt"));
     files.recordUndecided(
         FileStore.idOf("acme", "a.txt"), files.blobs().putText("LOCAL EDIT"), 0644);
-    var third = ProjectFilesCommand.Export.export(materializer::materialize, List.of("acme"));
+    var third = ProjectFilesCommand.Export.export(shared, List.of("acme"));
 
     assertEquals(0, third.written());
     assertEquals(List.of(), third.skipped());
