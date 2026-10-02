@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
@@ -14,8 +15,10 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -116,6 +119,25 @@ class MaterializedFilesMigrationTest {
     assertEquals(1, run.report().applied(), "only the file not yet recorded");
     assertTrue(files.materialized("acme/done.txt", hashOf("earlier"), 0600));
     assertTrue(files.materialized("acme/pending.txt", hashOf("v1"), 0644));
+  }
+
+  @Test
+  void anUnreadableCopyFailsTheRunBeforeItsMarkerSoARerunSeedsItOnceReadable() throws IOException {
+    ContentFixtures.put(files, "acme", "stale.txt", "v1");
+    var copy = copy("acme", "stale.txt", "v1");
+    ContentFixtures.put(files, "acme", "stale.txt", "v2");
+    Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("---------"));
+
+    var failure = assertThrows(UncheckedIOException.class, this::migrate);
+    Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("rw-r--r--"));
+    var rerun = migrate().getFirst();
+
+    assertTrue(failure.getMessage().contains("acme/stale.txt"), failure.getMessage());
+    assertTrue(failure.getMessage().contains("rerun sail migrate"), failure.getMessage());
+    assertFalse(rerun.alreadyApplied(), "the failed run left no completion marker");
+    assertEquals(1, rerun.report().applied());
+    assertTrue(files.materialized("acme/stale.txt", hashOf("v1"), 0644));
+    assertTrue(migrate().getFirst().alreadyApplied());
   }
 
   @Test

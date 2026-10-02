@@ -23,11 +23,12 @@ import java.util.Objects;
  *
  * <ul>
  *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it is the copy this
- *       box recorded writing, in content and in mode ({@link FileStore#materialized}); a file a
- *       human edited locally without {@code sail project files add} differs from that record, so it
- *       is left alone and reported as skipped. The record is written after the file: a {@code
- *       WRITE} moves the file into place and then records it, a {@code DELETE} removes the file and
- *       then forgets it, and a copy already in sync is recorded as it stands.
+ *       box recorded writing, in content and in mode ({@link FileStore#materialized}), or matches
+ *       the current row exactly, as a copy a person edited and then published with {@code sail
+ *       project files add} does; a file a human edited locally without publishing differs from
+ *       both, so it is left alone and reported as skipped. The record is written after the file: a
+ *       {@code WRITE} moves the file into place and then records it, a {@code DELETE} removes the
+ *       file and then forgets it, and a copy already in sync is recorded as it stands.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
  *       (a malicious {@code ../}) is refused — the content comes from other FDEs over the wire.
  * </ul>
@@ -71,8 +72,7 @@ public final class FileMaterializer {
       }
 
       var onDisk = diskHash(destination);
-      var ours = onDisk != null && files.materialized(id, onDisk, WorkspaceFiles.mode(destination));
-      switch (decide(targetContent, onDisk, ours)) {
+      switch (decide(targetContent, onDisk, ours(id, target, destination, onDisk))) {
         case IN_SYNC -> {
           if (target == null) {
             files.forgetMaterialized(id);
@@ -110,6 +110,20 @@ public final class FileMaterializer {
       return Action.IN_SYNC;
     }
     return targetContent == null ? Action.DELETE : Action.WRITE;
+  }
+
+  /**
+   * Whether the disk copy is this box's to refresh or remove: the version it recorded writing, or
+   * exactly the current row, which a person publishing their edit of the copy makes it.
+   */
+  private boolean ours(String id, FileStore.FileRow target, Path destination, String onDisk)
+      throws IOException {
+    if (onDisk == null) {
+      return false;
+    }
+    var mode = WorkspaceFiles.mode(destination);
+    var matchesRow = target != null && target.contentHash().equals(onDisk) && target.mode() == mode;
+    return matchesRow || files.materialized(id, onDisk, mode);
   }
 
   private static boolean hasSymlinkBelow(Path root, Path path) {

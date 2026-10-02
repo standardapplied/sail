@@ -105,6 +105,22 @@ class FileMaterializerTest {
   }
 
   @Test
+  void aLocalEditOncePublishedIsThisBoxsCopySoLaterVersionsRefreshIt() throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    materializer.materialize("acme");
+    Files.writeString(filesDir.resolve("x.txt"), "B");
+    ContentFixtures.put(files, "acme", "x.txt", "B");
+
+    var published = materializer.materialize("acme");
+    ContentFixtures.put(files, "acme", "x.txt", "C");
+    var refreshed = materializer.materialize("acme");
+
+    assertEquals(new FileMaterializer.Report(0, 0, List.of()), published);
+    assertEquals(new FileMaterializer.Report(1, 0, List.of()), refreshed);
+    assertEquals("C", Files.readString(filesDir.resolve("x.txt")));
+  }
+
+  @Test
   void aPrunedProjectsFilesAreLeftOnDiskUnreportedAndItIsNoLongerOneWithFiles() throws Exception {
     ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");

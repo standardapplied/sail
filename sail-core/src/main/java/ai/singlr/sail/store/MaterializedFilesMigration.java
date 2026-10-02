@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -26,7 +27,9 @@ import java.util.Objects;
  * its content at any mode that grants no execute bit the row lacks: that materializer never wrote
  * one, so one on disk was put there on purpose. History's one permitted use for the decision; from
  * the seed on, the record alone decides. Resumable: each file records in its own transaction, and a
- * file already recorded is left as it is.
+ * file already recorded is left as it is. A copy this box cannot read fails the run before its
+ * completion marker, so the import never takes that copy for a person's edit once it is readable;
+ * what the run recorded stays, and the rerun finishes.
  */
 public final class MaterializedFilesMigration implements DataMigration {
 
@@ -82,8 +85,13 @@ public final class MaterializedFilesMigration implements DataMigration {
       hash = BlobStore.hash(input);
       mode = WorkspaceFiles.mode(copy);
     } catch (IOException e) {
-      notes.add("Left " + id + " unrecorded: could not read " + copy + " (" + e.getMessage() + ")");
-      return false;
+      throw new UncheckedIOException(
+          "Cannot seed what this box wrote of "
+              + id
+              + ": could not read "
+              + copy
+              + "; restore access and rerun sail migrate",
+          e);
     }
     if (!isRetainedVersion(db, id, row, hash, mode)) {
       notes.add(
