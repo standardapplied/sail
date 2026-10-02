@@ -263,12 +263,12 @@ class FilesAuditTest {
     assertEquals(last, ContentFixtures.text(main, "acme", "app.conf"));
     assertTrue(main.find("acme", "gone.conf").isEmpty(), "the import resurrected a deleted file");
     assertEquals(
-        new FileMaterializer.Report(0, 0, List.of("app.conf", "gone.conf")),
+        new FileMaterializer.Report(0, 0, List.of(), List.of("app.conf", "gone.conf")),
         report,
-        "both copies are kept and reported until the person publishes or discards them");
+        "both copies are kept and reported apart until the person publishes or discards them");
     assertEquals("v0", Files.readString(copy));
     Files.delete(copy);
-    assertEquals(new FileMaterializer.Report(1, 0, List.of("gone.conf")), materialize());
+    assertEquals(new FileMaterializer.Report(1, 0, List.of(), List.of("gone.conf")), materialize());
     assertEquals(last, Files.readString(copy), "a discarded copy is refreshed");
     converged();
   }

@@ -45,7 +45,15 @@ public final class FileMaterializer {
     SKIP_DIRTY
   }
 
-  public record Report(int written, int deleted, List<String> skipped) {}
+  /**
+   * What one materialize did: {@code skipped} names the copies a person edited and {@code
+   * undecided} those the upgrade's seed could not tell from an edit, both left as they are.
+   */
+  public record Report(int written, int deleted, List<String> skipped, List<String> undecided) {
+    public Report(int written, int deleted, List<String> skipped) {
+      this(written, deleted, skipped, List.of());
+    }
+  }
 
   private final FileStore files;
   private final Path projectsDir;
@@ -61,6 +69,7 @@ public final class FileMaterializer {
     var written = 0;
     var deleted = 0;
     var skipped = new ArrayList<String>();
+    var undecided = new ArrayList<String>();
 
     for (var id : files.idsForProject(project)) {
       var path = id.substring(project.length() + 1);
@@ -86,7 +95,8 @@ public final class FileMaterializer {
             files.recordMaterialized(id, target.contentHash(), target.mode());
           }
         }
-        case SKIP_DIRTY -> skipped.add(path);
+        case SKIP_DIRTY ->
+            (copy == MaterializedFiles.Copy.UNDECIDED ? undecided : skipped).add(path);
         case WRITE -> {
           files.recordWriting(id, target.contentHash(), target.mode());
           writeFile(destination, target);
@@ -100,7 +110,7 @@ public final class FileMaterializer {
         }
       }
     }
-    return new Report(written, deleted, List.copyOf(skipped));
+    return new Report(written, deleted, List.copyOf(skipped), List.copyOf(undecided));
   }
 
   /**

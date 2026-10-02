@@ -237,11 +237,11 @@ class MaterializedFilesMigrationTest {
                         && note.contains("sail project files add")),
         run.report().notes().toString());
     assertTrue(migrate().getFirst().alreadyApplied());
-    files.recordWriting("acme/stale.conf", hashOf("v9"), 0644);
+    files.recordMaterialized("acme/stale.conf", hashOf("v9"), 0644);
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf("acme/stale.conf", hashOf("v1"), 0644),
-        "once this box writes the file again, the undecided copy is not kept as its own");
+        "once a version this box writes lands, the undecided copy is not kept as its own");
   }
 
   /**

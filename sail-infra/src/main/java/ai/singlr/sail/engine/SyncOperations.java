@@ -400,6 +400,18 @@ public final class SyncOperations {
                       + String.join(", ", report.skipped()),
                   Ansi.AUTO));
         }
+        if (!report.undecided().isEmpty()) {
+          System.err.println(
+              Banner.errorLine(
+                  "Kept "
+                      + report.undecided().size()
+                      + " file(s) in '"
+                      + project
+                      + "' the upgrade could not tell from your edits (delete to take main's, or"
+                      + " capture with 'sail project files add' if yours): "
+                      + String.join(", ", report.undecided()),
+                  Ansi.AUTO));
+        }
       } catch (IOException e) {
         System.err.println(
             Banner.errorLine(

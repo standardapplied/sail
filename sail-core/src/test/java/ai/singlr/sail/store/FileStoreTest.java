@@ -135,7 +135,7 @@ class FileStoreTest {
   }
 
   @Test
-  void anUndecidedCopyIsNeitherThisBoxsNorAPersonsUntilThisBoxWritesOrPublishesAgain() {
+  void anUndecidedCopyIsNeitherThisBoxsNorAPersonsUntilAVersionThisBoxWritesLandsInItsPlace() {
     var undecided = files.blobs().putText("undecided");
     var next = files.blobs().putText("next");
 
@@ -149,11 +149,17 @@ class FileStoreTest {
         files.copyOf(id("doubt"), next, 0644),
         "one undecided copy per file, the first the seed met");
     files.recordWriting(id("doubt"), next, 0644);
+    assertEquals(MaterializedFiles.Copy.OURS, files.copyOf(id("doubt"), next, 0644));
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED,
+        files.copyOf(id("doubt"), undecided, 0644),
+        "a write in flight leaves the undecided copy as it is: it may still be on disk");
+    files.recordMaterialized(id("doubt"), next, 0644);
     assertEquals(MaterializedFiles.Copy.SETTLED, files.copyOf(id("doubt"), next, 0644));
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf(id("doubt"), undecided, 0644),
-        "a write gives the undecided copy no standing");
+        "a write that landed in its place retires it");
     files.recordUndecided(id("doubt"), undecided, 0644);
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
@@ -197,8 +203,14 @@ class FileStoreTest {
     files.recordMaterialized(id("a.txt"), hash, 0644);
     files.recordMaterialized(id("gone.txt"), old, 0644);
 
+    files.recordUndecided(id("doubt.txt"), old, 0644);
+
     files.reproject("acme", "globex");
 
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED,
+        files.copyOf("globex/doubt.txt", old, 0644),
+        "an undecided copy stays undecided under the new name, never a person's to publish");
     assertTrue(files.copyOf("globex/a.txt", hash, 0644).ours(), "re-keyed with the row");
     assertTrue(
         files.copyOf("globex/gone.txt", old, 0644).ours(), "a deleted file's copy moves too");

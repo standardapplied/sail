@@ -88,9 +88,9 @@ public final class SchemaManager {
    * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
    * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
    * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
-   * record of the one box each FDE syncs from) and {@code materialized_files} (the version of each
-   * shared file this box last wrote to disk) are local-only as well — none of the six ever joins a
-   * sync snapshot.
+   * record of the one box each FDE syncs from) and {@code materialized_files} (the versions of each
+   * shared file this box wrote to disk or published) are local-only as well — none of the six ever
+   * joins a sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were

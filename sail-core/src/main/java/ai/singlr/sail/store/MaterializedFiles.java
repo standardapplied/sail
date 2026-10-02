@@ -16,7 +16,7 @@ import java.util.Objects;
  * lands, that version alone. A copy matching any of them is this box's ({@link Copy#OURS}) to
  * refresh or remove. A copy the one-time seed could not tell, matching no version its file's
  * history still holds, is recorded as {@link Copy#UNDECIDED}: left alone and never published, until
- * this box writes or publishes the file again. Any other copy is a person's. Local to this box:
+ * a version this box writes lands in its place. Any other copy is a person's. Local to this box:
  * never journaled, never synced, not a blob reference.
  */
 public final class MaterializedFiles {
@@ -47,11 +47,11 @@ public final class MaterializedFiles {
   /**
    * Records that this box is about to write {@code contentHash} at {@code mode} as file {@code id},
    * or published it for the materialize that follows: the version is this box's beside every other
-   * it has in flight, until {@link #wrote} says one landed; an undecided record gives way to it.
+   * it has in flight, and beside an undecided copy still on disk, until {@link #wrote} says one
+   * landed.
    */
   void writing(String id, String contentHash, int mode) {
     requireValid(id, contentHash, mode);
-    db.execute("DELETE FROM materialized_files WHERE id = ? AND undecided = 1", id);
     db.execute(
         """
         INSERT INTO materialized_files (id, content_hash, mode, undecided) VALUES (?, ?, ?, 0)

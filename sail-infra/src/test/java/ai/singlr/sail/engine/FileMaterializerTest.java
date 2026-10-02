@@ -115,7 +115,7 @@ class FileMaterializerTest {
   }
 
   @Test
-  void aCopyTheUpgradeCouldNotTellIsKeptReportedAndRefreshedOnceThisBoxPublishesAgain()
+  void aCopyTheUpgradeCouldNotTellIsKeptAndReportedApartUntilAVersionLandsInItsPlace()
       throws Exception {
     ContentFixtures.put(files, "acme", "x.txt", "A");
     Files.createDirectories(filesDir);
@@ -133,14 +133,18 @@ class FileMaterializerTest {
     Files.writeString(filesDir.resolve("x.txt"), "B");
     var published = materializer.materialize("acme");
 
-    assertEquals(new FileMaterializer.Report(0, 0, List.of("x.txt")), kept);
-    assertEquals(new FileMaterializer.Report(0, 0, List.of("x.txt")), stillKept);
+    assertEquals(new FileMaterializer.Report(0, 0, List.of(), List.of("x.txt")), kept);
+    assertEquals(new FileMaterializer.Report(0, 0, List.of(), List.of("x.txt")), stillKept);
     assertEquals("old", untouched, "kept as it was");
     assertEquals(
-        MaterializedFiles.Copy.PERSONS,
+        MaterializedFiles.Copy.UNDECIDED,
         oldCopy,
-        "this box publishing the file again decides the record; the old copy is then a person's");
+        "a publish of the file leaves the undecided copy so until a version lands in its place");
     assertEquals(new FileMaterializer.Report(0, 0, List.of()), published);
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id, files.blobs().putText("old"), 0644),
+        "the copy the person made hold the row landed; the undecided one is retired");
     assertEquals(
         MaterializedFiles.Copy.SETTLED, files.copyOf(id, files.blobs().putText("B"), 0644));
   }

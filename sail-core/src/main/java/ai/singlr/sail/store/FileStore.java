@@ -29,9 +29,9 @@ import java.util.Set;
  * entity type {@code file} within one transaction — the same revision/CAS/conflict machinery {@link
  * SpecStore} uses — so files get history, restore, and bidirectional conflict resolution for free.
  *
- * <p>Box-local and never synced, {@link MaterializedFiles} records the version of each file this
- * box last wrote to disk or published from it, so whether a copy on disk is this box's output or a
- * person's edit is decided from that record alone ({@link #copyOf}), never from retained history.
+ * <p>Box-local and never synced, {@link MaterializedFiles} records the versions of each file this
+ * box wrote to disk or published, so whether a copy on disk is this box's output or a person's edit
+ * is decided from that record alone ({@link #copyOf}), never from retained history.
  */
 public final class FileStore implements ConflictResolver, SyncedStore {
 
@@ -280,7 +280,8 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   /**
    * Records the copy of file {@code id} on disk as one this box cannot tell from a person's edit,
-   * for the one-time seed ({@link MaterializedFiles#recordUndecided}).
+   * for the one-time seed ({@link MaterializedFiles#recordUndecided}); it stays so until a version
+   * this box writes lands in its place.
    */
   public void recordUndecided(String id, String contentHash, int mode) {
     materialized.recordUndecided(id, contentHash, mode);
