@@ -57,13 +57,14 @@ public final class MaterializedFilesMigration implements DataMigration {
     for (var project : files.projectsWithFiles()) {
       var filesDir = projectsDir.resolve(project).resolve("files").normalize();
       for (var id : files.idsForProject(project)) {
-        var copy = filesDir.resolve(id.substring(project.length() + 1)).normalize();
+        var path = id.substring(project.length() + 1);
+        var copy = filesDir.resolve(path).normalize();
         if (!copy.startsWith(filesDir)
             || !Files.isRegularFile(copy, LinkOption.NOFOLLOW_LINKS)
             || isRecorded(db, id)) {
           continue;
         }
-        var row = files.find(project, id.substring(project.length() + 1)).orElse(null);
+        var row = files.find(project, path).orElse(null);
         if (seed(db, files, id, row, copy, notes)) {
           recorded++;
         }
