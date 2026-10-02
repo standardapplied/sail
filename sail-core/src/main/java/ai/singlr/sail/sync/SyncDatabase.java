@@ -52,8 +52,9 @@ public final class SyncDatabase implements AutoCloseable {
   public static void prepare(Sqlite db, String box) {
     try {
       new SchemaManager(db).migrate();
-      if (DataMigrations.anyPending(db)) {
-        MigrationRunner.applyAll(db, DataMigrations.ALL, DataMigration.Prompter.NON_INTERACTIVE);
+      var migrations = DataMigrations.databaseOnly();
+      if (DataMigrations.anyPending(db, migrations)) {
+        MigrationRunner.applyAll(db, migrations, DataMigration.Prompter.NON_INTERACTIVE);
       }
     } catch (SchemaManager.PreFloorException e) {
       throw e;

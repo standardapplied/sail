@@ -10,12 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
@@ -75,11 +80,8 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(2, report.imported());
-    assertEquals(
-        b64("hello"),
-        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
-    assertEquals(
-        b64("docs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "README.md"));
+    assertEquals(b64("hello"), ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(b64("docs"), ContentFixtures.encoded(files, "acme", "README.md"));
   }
 
   @Test
@@ -159,12 +161,117 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(1, report.imported());
-    assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+    assertEquals(b64("A2"), ContentFixtures.encoded(files, "acme", "a.txt"));
   }
 
   @Test
-  void aLegacyScriptsUnchangedCopyAtTheUmasksModeRecordsNothing() throws Exception {
+  void aCopyThisBoxWroteThatAnotherBoxHasSinceSupersededIsNotImported() throws Exception {
+    writeOnDisk("acme", "a.txt", "v1");
+    importer.importAll();
+    new FileMaterializer(files, projectsDir).materialize("acme");
+    ContentFixtures.put(files, "acme", "a.txt", "v2");
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported(), "this box's stale output is not a person's edit");
+    assertEquals(b64("v2"), ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aCopyTheUpgradeCouldNotTellIsNeverPublished() throws Exception {
+    writeOnDisk("acme", "a.txt", "old");
+    ContentFixtures.put(files, "acme", "a.txt", "v9");
+    var id = FileStore.idOf("acme", "a.txt");
+    files.forgetMaterialized(id);
+    files.recordUndecided(
+        id,
+        files.blobs().putText("old"),
+        WorkspaceFiles.mode(projectsDir.resolve("acme/files/a.txt")));
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported(), "an undecided copy is not a person's edit to publish");
+    assertEquals(b64("v9"), ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aCopyPublishedFromDiskAndSupersededByMainBeforeAnyMaterializeIsNotRepublished()
+      throws Exception {
+    writeOnDisk("acme", "a.txt", "v1");
+    importer.importAll();
+    new FileMaterializer(files, projectsDir).materialize("acme");
+    writeOnDisk("acme", "a.txt", "v2");
+    try (var input = Files.newInputStream(projectsDir.resolve("acme/files/a.txt"))) {
+      files.put("acme", "a.txt", input, 0644);
+    }
+    mainsVersionArrives("acme", "a.txt", "v3");
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported(), "a version this box published is never a lost edit");
+    assertEquals(b64("v3"), ContentFixtures.encoded(files, "acme", "a.txt"));
+    assertEquals(1, new FileMaterializer(files, projectsDir).materialize("acme").written());
+  }
+
+  /** Main's version of the file lands here as a pull does, touching no record of this box's. */
+  private void mainsVersionArrives(String project, String path, String text) {
+    try (var main = Sqlite.open(tempDir.resolve("main-" + text + ".db"))) {
+      new SchemaManager(main).migrate();
+      var mains = new FileStore(main);
+      ContentFixtures.put(mains, project, path, text);
+      var id = FileStore.idOf(project, path);
+      files.blobs().putText(text);
+      files.applyRevision(id, mains.comparableSnapshot(id), "9-" + text);
+    }
+  }
+
+  @Test
+  void aDeletedFilesCopyThisBoxWroteIsLeftForTheMaterializerNotImported() throws Exception {
+    writeOnDisk("acme", "a.txt", "v1");
+    importer.importAll();
+    new FileMaterializer(files, projectsDir).materialize("acme");
+    files.delete("acme", "a.txt");
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported());
+    assertTrue(files.find("acme", "a.txt").isEmpty(), "resurrected");
+    assertEquals(1, new FileMaterializer(files, projectsDir).materialize("acme").deleted());
+  }
+
+  @Test
+  void aPersonsCopyIsPublishedOnceAndRecordedAsThisBoxsFromThenOn() throws Exception {
+    writeOnDisk("acme", "a.txt", "mine");
+    var copy = projectsDir.resolve("acme/files/a.txt");
+    WorkspaceFiles.mode(copy, 0600);
+
+    assertEquals(1, importer.importAll().imported());
+
+    var hash = files.find("acme", "a.txt").orElseThrow().contentHash();
+    assertTrue(files.copyOf(FileStore.idOf("acme", "a.txt"), hash, 0600).ours());
+    ContentFixtures.put(files, "acme", "a.txt", "theirs");
+    assertEquals(0, importer.importAll().imported(), "published once, never again over newer");
+  }
+
+  @Test
+  void aCopyTheStoreAlreadyHoldsIsRecordedAsThisBoxsWithoutARevision() throws Exception {
+    ContentFixtures.put(files, "acme", "a.txt", "same");
+    writeOnDisk("acme", "a.txt", "same");
+    var copy = projectsDir.resolve("acme/files/a.txt");
+    WorkspaceFiles.mode(copy, 0644);
+    var id = FileStore.idOf("acme", "a.txt");
+
+    assertEquals(0, importer.importAll().imported());
+
+    assertEquals(1, revisions(id));
+    assertTrue(
+        files.copyOf(id, files.find("acme", "a.txt").orElseThrow().contentHash(), 0644).ours());
+  }
+
+  @Test
+  void aLegacyCopyAtTheUmasksModeIsSeededAsThisBoxsAndNotImported() throws Exception {
     var id = legacy("deploy.sh", 0644, 0755);
+    seed();
 
     var report = importer.importAll();
 
@@ -174,8 +281,9 @@ class FileImporterTest {
   }
 
   @Test
-  void aLegacyFileRestrictedOnlyByTheUmaskStaysAsItsRowSays() throws Exception {
+  void aLegacyCopyRestrictedOnlyByTheUmaskIsSeededAndStaysAsItsRowSays() throws Exception {
     var id = legacy("notes.md", 0600, 0644);
+    seed();
 
     assertEquals(0, importer.importAll().imported());
     assertEquals(0644, files.find("acme", "notes.md").orElseThrow().mode());
@@ -185,10 +293,18 @@ class FileImporterTest {
   @Test
   void aLegacyExecutableKeepsTheExecuteBitSomeoneGaveIt() throws Exception {
     var id = legacy("bin/setup", 0755, 0644);
+    seed();
 
     assertEquals(1, importer.importAll().imported());
     assertEquals(0755, files.find("acme", "bin/setup").orElseThrow().mode());
     assertEquals(2, revisions(id));
+  }
+
+  private void seed() {
+    new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
+        .run(
+            ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
+            DataMigration.Prompter.NON_INTERACTIVE);
   }
 
   @Test
@@ -208,7 +324,7 @@ class FileImporterTest {
 
   /**
    * A shared file as the content migration left it: one revision recording no mode, the row at
-   * {@code rowMode}, and the copy on disk at {@code diskMode}.
+   * {@code rowMode}, the copy on disk at {@code diskMode}, and no record of what this box wrote.
    */
   private String legacy(String path, int diskMode, int rowMode) throws Exception {
     return Acting.system(
@@ -226,6 +342,7 @@ class FileImporterTest {
               YamlUtil.dumpJson(snapshot),
               id);
           db.execute("UPDATE project_files SET mode = ? WHERE id = ?", rowMode, id);
+          files.forgetMaterialized(id);
           return id;
         });
   }

@@ -13,6 +13,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
@@ -61,11 +62,17 @@ class FileMaterializerTest {
 
   @Test
   void decideCoversTheFourActions() {
-    assertEquals(FileMaterializer.Action.IN_SYNC, FileMaterializer.decide("A", "A", true));
-    assertEquals(FileMaterializer.Action.WRITE, FileMaterializer.decide("A", null, false));
-    assertEquals(FileMaterializer.Action.WRITE, FileMaterializer.decide("B", "A", true));
-    assertEquals(FileMaterializer.Action.DELETE, FileMaterializer.decide(null, "A", true));
-    assertEquals(FileMaterializer.Action.SKIP_DIRTY, FileMaterializer.decide("B", "user", false));
+    assertEquals(
+        FileMaterializer.Action.IN_SYNC, FileMaterializer.decide(null, null, false, false));
+    assertEquals(FileMaterializer.Action.WRITE, FileMaterializer.decide("A", null, false, false));
+    assertEquals(FileMaterializer.Action.IN_SYNC, FileMaterializer.decide("A", "A", true, false));
+    assertEquals(FileMaterializer.Action.IN_SYNC, FileMaterializer.decide("A", "A", true, true));
+    assertEquals(FileMaterializer.Action.WRITE, FileMaterializer.decide("B", "A", false, true));
+    assertEquals(FileMaterializer.Action.DELETE, FileMaterializer.decide(null, "A", false, true));
+    assertEquals(
+        FileMaterializer.Action.SKIP_DIRTY, FileMaterializer.decide("B", "user", false, false));
+    assertEquals(
+        FileMaterializer.Action.SKIP_DIRTY, FileMaterializer.decide(null, "user", false, false));
   }
 
   @Test
@@ -91,6 +98,76 @@ class FileMaterializerTest {
   }
 
   @Test
+  void aWriteThatDiedBeforeMovingTheFileLeavesACopyThisBoxStillRefreshes() throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    materializer.materialize("acme");
+    files.recordWriting(FileStore.idOf("acme", "x.txt"), files.blobs().putText("B"), 0644);
+    ContentFixtures.put(files, "acme", "x.txt", "C");
+
+    var report = materializer.materialize("acme");
+
+    assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
+    assertEquals("C", Files.readString(filesDir.resolve("x.txt")));
+    assertEquals(
+        MaterializedFiles.Copy.SETTLED,
+        files.copyOf(FileStore.idOf("acme", "x.txt"), files.blobs().putText("C"), 0644),
+        "the write landed and the record says so");
+  }
+
+  @Test
+  void aCopyTheUpgradeCouldNotTellIsKeptAndReportedApartUntilAVersionLandsInItsPlace()
+      throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    Files.createDirectories(filesDir);
+    Files.writeString(filesDir.resolve("x.txt"), "old");
+    WorkspaceFiles.mode(filesDir.resolve("x.txt"), 0644);
+    var id = FileStore.idOf("acme", "x.txt");
+    files.forgetMaterialized(id);
+    files.recordUndecided(id, files.blobs().putText("old"), 0644);
+
+    var kept = materializer.materialize("acme");
+    ContentFixtures.put(files, "acme", "x.txt", "B");
+    var stillKept = materializer.materialize("acme");
+    var untouched = Files.readString(filesDir.resolve("x.txt"));
+    var oldCopy = files.copyOf(id, files.blobs().putText("old"), 0644);
+    Files.writeString(filesDir.resolve("x.txt"), "B");
+    var published = materializer.materialize("acme");
+
+    assertEquals(new FileMaterializer.Report(0, 0, List.of(), List.of("x.txt")), kept);
+    assertEquals(new FileMaterializer.Report(0, 0, List.of(), List.of("x.txt")), stillKept);
+    assertEquals("old", untouched, "kept as it was");
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED,
+        oldCopy,
+        "a publish of the file leaves the undecided copy so until a version lands in its place");
+    assertEquals(new FileMaterializer.Report(0, 0, List.of()), published);
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id, files.blobs().putText("old"), 0644),
+        "the copy the person made hold the row landed; the undecided one is retired");
+    assertEquals(
+        MaterializedFiles.Copy.SETTLED, files.copyOf(id, files.blobs().putText("B"), 0644));
+  }
+
+  @Test
+  void aCopyAlreadyInSyncAndSettledIsNotRecordedAgain() throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    materializer.materialize("acme");
+    var hash = files.blobs().putText("A");
+    db.execute("DROP TABLE materialized_files");
+    db.execute(
+        "CREATE VIEW materialized_files AS SELECT 'acme/x.txt' AS id, '"
+            + hash
+            + "' AS content_hash, 420 AS mode, NULL AS previous_hash, NULL AS previous_mode,"
+            + " 0 AS undecided");
+
+    var report = materializer.materialize("acme");
+
+    assertEquals(
+        new FileMaterializer.Report(0, 0, List.of()), report, "a read-only record suffices");
+  }
+
+  @Test
   void leavesALocallyEditedFileUntouchedAndReportsIt() throws Exception {
     ContentFixtures.put(files, "acme", "x.txt", "A");
     materializer.materialize("acme");
@@ -102,6 +179,22 @@ class FileMaterializerTest {
     assertEquals(0, report.written());
     assertEquals(List.of("x.txt"), report.skipped());
     assertEquals("MY LOCAL EDIT", Files.readString(filesDir.resolve("x.txt")));
+  }
+
+  @Test
+  void aLocalEditOncePublishedIsThisBoxsCopySoLaterVersionsRefreshIt() throws Exception {
+    ContentFixtures.put(files, "acme", "x.txt", "A");
+    materializer.materialize("acme");
+    Files.writeString(filesDir.resolve("x.txt"), "B");
+    ContentFixtures.put(files, "acme", "x.txt", "B");
+
+    var published = materializer.materialize("acme");
+    ContentFixtures.put(files, "acme", "x.txt", "C");
+    var refreshed = materializer.materialize("acme");
+
+    assertEquals(new FileMaterializer.Report(0, 0, List.of()), published);
+    assertEquals(new FileMaterializer.Report(1, 0, List.of()), refreshed);
+    assertEquals("C", Files.readString(filesDir.resolve("x.txt")));
   }
 
   @Test

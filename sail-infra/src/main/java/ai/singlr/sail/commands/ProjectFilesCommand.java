@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.TerminalFilePicker;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -34,6 +35,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -458,22 +460,8 @@ public final class ProjectFilesCommand implements Runnable {
             all
                 ? operations.catalog().projectsWithFiles()
                 : List.of(CurrentProject.require(project));
-        var written = 0;
-        var deleted = 0;
-        var skipped = new ArrayList<String>();
-        for (var target : targets) {
-          var materialized = operations.projectFiles(target).materialize();
-          written += materialized.written();
-          deleted += materialized.deleted();
-          for (var skip : materialized.skipped()) {
-            skipped.add(target + "/" + skip);
-          }
-        }
-        var report = new ExportReport(written, deleted, List.copyOf(skipped));
-        for (var skip : report.skipped()) {
-          System.err.println(
-              Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));
-        }
+        var report = export(operations::projectFiles, targets);
+        print(report);
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Pulled: "
@@ -485,24 +473,43 @@ public final class ProjectFilesCommand implements Runnable {
       return 0;
     }
 
-    record ExportReport(int written, int deleted, List<String> skipped) {}
+    /**
+     * What a pull did across its projects: {@code skipped} are a person's edits, {@code undecided}
+     * the copies the upgrade's seed could not tell from one, each left as it is.
+     */
+    record ExportReport(int written, int deleted, List<String> skipped, List<String> undecided) {}
 
-    static ExportReport export(FileStore files, Path projectsDir, Collection<String> targets)
+    static ExportReport export(Function<String, ProjectFiles> files, Collection<String> targets)
         throws IOException {
-      var materializer = new FileMaterializer(files, projectsDir);
       var written = 0;
       var deleted = 0;
       var skipped = new ArrayList<String>();
+      var undecided = new ArrayList<String>();
       for (var target : targets) {
         NameValidator.requireValidProjectName(target);
-        var report = materializer.materialize(target);
+        var report = files.apply(target).materialize();
         written += report.written();
         deleted += report.deleted();
-        for (var skip : report.skipped()) {
-          skipped.add(target + "/" + skip);
-        }
+        report.skipped().forEach(skip -> skipped.add(target + "/" + skip));
+        report.undecided().forEach(copy -> undecided.add(target + "/" + copy));
       }
-      return new ExportReport(written, deleted, List.copyOf(skipped));
+      return new ExportReport(written, deleted, List.copyOf(skipped), List.copyOf(undecided));
+    }
+
+    static void print(ExportReport report) {
+      for (var skip : report.skipped()) {
+        System.err.println(
+            Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));
+      }
+      for (var copy : report.undecided()) {
+        System.err.println(
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ kept "
+                    + copy
+                    + ": the upgrade could not tell it from your edit ("
+                    + MaterializedFiles.UNDECIDED_REMEDY
+                    + ")"));
+      }
     }
   }
 

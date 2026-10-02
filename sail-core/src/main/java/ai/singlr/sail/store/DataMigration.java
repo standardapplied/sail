@@ -25,6 +25,15 @@ public interface DataMigration {
   }
 
   /**
+   * A migration that reads this box's own files on disk, under the home of the engineer who runs
+   * it: {@code sail migrate} and the server apply it; the sync lane, which converges the shared
+   * database as another user, leaves it to them and never records it applied.
+   */
+  default boolean readsBoxFiles() {
+    return false;
+  }
+
+  /**
    * Applies the migration. Receives the database, a snapshot of registered projects (loaded from
    * {@code ~/.sail/projects/}), and a prompter so interactive heuristics can ask the operator.
    *

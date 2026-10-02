@@ -22,7 +22,9 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
@@ -36,6 +38,7 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -96,9 +99,7 @@ class ProjectFilesCommandTest {
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
-    assertEquals(
-        b64("echo hi"),
-        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(b64("echo hi"), ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals("echo hi", Files.readString(filesDir("acme").resolve("scripts/deploy.sh")));
   }
 
@@ -140,6 +141,17 @@ class ProjectFilesCommandTest {
       assertEquals("private", Files.readString(copy));
       assertEquals(0600, WorkspaceFiles.mode(copy));
       assertEquals(0600, WorkspaceFiles.mode(source));
+      Files.writeString(copy, "edited in place");
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", copy.toString()));
+      assertEquals(
+          "edited in place", ContentFixtures.text(new FileStore(database), "acme", "linked.txt"));
+      ContentFixtures.put(new FileStore(database), "acme", "linked.txt", "newer elsewhere");
+      assertEquals(0, new CommandLine(new ProjectFilesCommand.Export()).execute("-p", "acme"));
+      assertEquals(
+          "newer elsewhere",
+          Files.readString(copy),
+          "a copy edited and published with files add is this box's to refresh from then on");
       var big = source.resolveSibling("big.bin");
       try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
         raf.setLength(FileLimits.DEFAULT_MAX + 1);
@@ -334,8 +346,8 @@ class ProjectFilesCommandTest {
 
   @Test
   void lsRendersHumanTableAndJson() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "b.txt", "B");
+    ContentFixtures.put(files, "acme", "a.txt", "AAAA");
+    ContentFixtures.put(files, "acme", "b.txt", "B");
 
     var captured = new ByteArrayOutputStream();
     Banner.printProjectFilesTable(
@@ -360,7 +372,7 @@ class ProjectFilesCommandTest {
 
   @Test
   void catStreamsContentAndIsEmptyWhenAbsent() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "payload");
+    ContentFixtures.put(files, "acme", "a.txt", "payload");
 
     assertArrayEquals(
         "payload".getBytes(),
@@ -391,16 +403,51 @@ class ProjectFilesCommandTest {
 
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A");
-    var report = ProjectFilesCommand.Export.export(files, projectsDir, files.projectsWithFiles());
+    ContentFixtures.put(files, "acme", "a.txt", "A");
+    Function<String, ProjectFiles> shared =
+        name -> new SharedProjectFiles(files, projectsDir, name, FileLimits.defaults());
+    var report = ProjectFilesCommand.Export.export(shared, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A2");
-    var second = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
+    ContentFixtures.put(files, "acme", "a.txt", "A2");
+    var second = ProjectFilesCommand.Export.export(shared, List.of("acme"));
 
     assertEquals(0, second.written());
     assertEquals(List.of("acme/a.txt"), second.skipped());
+    assertEquals(List.of(), second.undecided());
+
+    files.forgetMaterialized(FileStore.idOf("acme", "a.txt"));
+    files.recordUndecided(
+        FileStore.idOf("acme", "a.txt"), files.blobs().putText("LOCAL EDIT"), 0644);
+    var third = ProjectFilesCommand.Export.export(shared, List.of("acme"));
+
+    assertEquals(0, third.written());
+    assertEquals(List.of(), third.skipped());
+    assertEquals(
+        List.of("acme/a.txt"),
+        third.undecided(),
+        "a copy the upgrade could not tell is reported apart from a person's edit");
+  }
+
+  @Test
+  void aPullNamesEachKeptCopyWithWhatItIsAndWhatToDo() {
+    var err = System.err;
+    var captured = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      ProjectFilesCommand.Export.print(
+          new ProjectFilesCommand.Export.ExportReport(
+              1, 0, List.of("acme/edited.txt"), List.of("acme/stale.conf")));
+    } finally {
+      System.setErr(err);
+    }
+
+    var lines = captured.toString(StandardCharsets.UTF_8).lines().toList();
+    assertEquals(2, lines.size(), lines.toString());
+    assertTrue(lines.get(0).contains("kept local edit: acme/edited.txt (unchanged)"), lines.get(0));
+    assertTrue(lines.get(1).contains("kept acme/stale.conf"), lines.get(1));
+    assertTrue(lines.get(1).contains(MaterializedFiles.UNDECIDED_REMEDY), lines.get(1));
   }
 
   @Test

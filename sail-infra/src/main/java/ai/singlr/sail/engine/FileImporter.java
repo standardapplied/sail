@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,10 +20,14 @@ import java.util.stream.Stream;
 /**
  * Imports each project's on-disk workspace files ({@code ~/.sail/projects/<name>/files/**}) into
  * the synced {@link FileStore}, so the file tree an FDE already has becomes the shared, replicated
- * copy the moment they upgrade — the disk-to-DB counterpart of {@link FileMaterializer}.
- * Idempotent: a file already stored with the same content is skipped, so re-running on every
- * upgrade neither churns revisions nor re-imports. The read-only counterpart to the git-based
- * {@code project pull} files directory it replaces.
+ * copy the moment they upgrade — the disk-to-DB counterpart of {@link FileMaterializer}. It
+ * publishes only a person's copy ({@link FileStore#copyOf}): one this box wrote or published is its
+ * own, whether current, since superseded by another box's version, or of a file since deleted, and
+ * is never published or resurrected over the fleet's newer state; a deleted file's copy is left for
+ * the materializer to remove; a copy the upgrade's seed could not tell is left for the person to
+ * publish or discard. A person's copy is published unless the store already holds it, and is this
+ * box's from then on, so no later upgrade publishes it again. Idempotent: re-running on every
+ * upgrade neither churns revisions nor re-imports.
  */
 public final class FileImporter {
 
@@ -83,34 +88,21 @@ public final class FileImporter {
           hash = BlobStore.hash(limits.bounded(input, size));
         }
         var mode = WorkspaceFiles.mode(file);
-        if (files.find(project, path).map(row -> changed(row, hash, mode)).orElse(true)) {
-          try (var input = Files.newInputStream(file)) {
-            files.put(project, path, limits.bounded(input, size), mode);
-          }
-          imported++;
+        var id = FileStore.idOf(project, path);
+        if (files.copyOf(id, hash, mode) != MaterializedFiles.Copy.PERSONS) {
+          continue;
         }
+        if (files.find(project, path).map(row -> row.holds(hash, mode)).orElse(false)) {
+          files.recordMaterialized(id, hash, mode);
+          continue;
+        }
+        try (var input = Files.newInputStream(file)) {
+          files.put(project, path, limits.bounded(input, size), mode);
+        }
+        files.recordMaterialized(id, hash, mode);
+        imported++;
       }
     }
     return imported;
-  }
-
-  /**
-   * Whether the copy on disk is an edit the store has not seen. New content always is. A new mode
-   * on the same content is when this file's history already records a mode for that content — a
-   * real {@code chmod}, even one back to an earlier mode — or when it grants an execute bit the row
-   * lacks. Otherwise the history is legacy and recorded no mode: an older materializer wrote {@code
-   * 0666 & ~umask}, so a copy that differs only by the umask it got is no edit, and recording it
-   * would raise a mode conflict on every node; but it never wrote an execute bit, so one on disk
-   * was put there on purpose.
-   */
-  private boolean changed(FileStore.FileRow row, String hash, int mode) {
-    if (!row.contentHash().equals(hash)) {
-      return true;
-    }
-    if (row.mode() == mode) {
-      return false;
-    }
-    return (mode & ~row.mode() & 0111) != 0
-        || files.recordsModeFor(FileStore.idOf(row.project(), row.path()), hash);
   }
 }

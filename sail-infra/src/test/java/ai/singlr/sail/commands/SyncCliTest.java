@@ -17,6 +17,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -167,6 +168,8 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("DROP TABLE materialized_files");
+    db.execute("DELETE FROM data_migrations WHERE name = ?", MaterializedFilesMigration.NAME);
     db.execute("ALTER TABLE reviews DROP COLUMN findings_hash");
     db.execute("ALTER TABLE review_findings DROP COLUMN followup");
     db.execute(

@@ -11,15 +11,20 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -186,6 +191,26 @@ class RetentionSweeperTest {
     assertEquals(1, scheduler.getQueue().size());
     sweeper.close();
     assertTrue(scheduler.isShutdown());
+  }
+
+  @Test
+  void aCopyMainWroteIsStillItsOwnAfterTheSweepCompactedItsRevisionAway() throws Exception {
+    var files = new FileStore(db);
+    var projectsDir = dir.resolve("projects");
+    ContentFixtures.put(files, "acme", "app.conf", "v0");
+    new FileMaterializer(files, projectsDir).materialize("acme");
+    String last;
+    try (var node = Sqlite.open(dir.resolve("node.db"))) {
+      new SchemaManager(node).migrate();
+      SyncBox.round(db, node, "file");
+      last = SyncBox.pushPastHistory(db, node, "acme", "app.conf");
+    }
+    assertTrue(sweeper.collect().compacted() > 0);
+
+    var report = new FileMaterializer(files, projectsDir).materialize("acme");
+
+    assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
+    assertEquals(last, Files.readString(projectsDir.resolve("acme/files/app.conf")));
   }
 
   private void archived(String id, Instant since) {
