@@ -22,6 +22,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.ShippedFollowUps;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
@@ -103,7 +104,9 @@ public final class SyncServerCommand implements Callable<Integer> {
    * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
    * this main ({@code box}), whose own FDE syncs from no box but main. A session with no token is a
    * read-only one that owns nothing; a token whose FDE is disabled is refused before anything is
-   * served.
+   * served. Main first fixes the findings of every shipped follow-up it holds ({@link
+   * ShippedFollowUps#catchUp}), so a resolution a busy database cost an earlier session lands
+   * before this one can move a follow-up on; failing that fails the session for the node to retry.
    */
   static int serve(
       SyncDatabase converged,
@@ -119,6 +122,15 @@ public final class SyncServerCommand implements Callable<Integer> {
     if (principal.isEmpty()) {
       System.err.println(
           "sail _sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
+      return 1;
+    }
+    try {
+      new ShippedFollowUps(db).catchUp();
+    } catch (RuntimeException e) {
+      System.err.println(
+          "sail _sync: main could not fix the findings of its shipped follow-ups ("
+              + e.getMessage()
+              + "); run sail sync again.");
       return 1;
     }
     SyncRpcServer.over(
@@ -138,13 +150,17 @@ public final class SyncServerCommand implements Callable<Integer> {
    * events and posts each to the local sail-api, where main's bus (and its Slack reactor) picks it
    * up. This {@code _sync} subprocess shares main's database but not the server's in-process bus,
    * so the local-socket publisher {@code notifyBoardUpdated} already uses is the one proven path.
-   * Best-effort by contract: a down sail-api costs the narration, never the sync.
+   * Best-effort by contract: a down sail-api costs the narration, never the sync. A follow-up a
+   * node marked done resolves its source findings here first ({@link ShippedFollowUps}), main being
+   * the one box that may write any review.
    */
   static SyncTransitionSink transitionBridge(Sqlite db, String host) {
     var specs = new SpecStore(db);
     var reviews = new ReviewStore(db);
+    var shipped = new ShippedFollowUps(db);
     var publisher = new SailEventPublisher[1];
     return transition -> {
+      shipped.onTransition(transition);
       var events =
           SyncTransitionEvents.eventsFor(
               transition,

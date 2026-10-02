@@ -35,6 +35,14 @@ public interface SyncedStore {
    */
   Set<String> latestWinsFields();
 
+  /**
+   * This store's own merge of a field both sides changed differently ({@link
+   * ConflictDetector.FieldMerger}); none by default, so such a field is a conflict.
+   */
+  default ConflictDetector.FieldMerger fieldMerger() {
+    return ConflictDetector.FieldMerger.NONE;
+  }
+
   /** The content hashes this store's live rows reference; empty unless it has content fields. */
   default Set<String> liveContentHashes() {
     return Set.of();

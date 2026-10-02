@@ -404,7 +404,8 @@ class SchemaManagerTest {
     assertTrue(tables.contains("spec_dependencies"));
     assertTrue(tables.contains("spec_repos"));
     assertTrue(tables.contains("spec_content"));
-    assertTrue(tables.contains("spec_attachments"));
+    assertFalse(tables.contains("spec_attachments"));
+    assertFalse(tables.contains("spec_source_findings"));
     assertTrue(tables.contains("events"));
     assertTrue(tables.contains("api_tokens"));
     assertTrue(tables.contains("schema_version"));
@@ -1099,6 +1100,65 @@ class SchemaManagerTest {
   }
 
   @Test
+  void fromThe0_46_3ReleaseAFindingsFollowUpLinkBecomesItsFollowUpAndTheBoxLocalTablesGo() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE reviews ADD COLUMN findings_hash");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth', 'T', 'done', 't0', 't0')");
+    db.execute(
+        "INSERT INTO specs (id, title, status, created_at, updated_at)"
+            + " VALUES ('auth-followup', 'F', 'pending', 't0', 't0')");
+    db.execute(
+        "INSERT INTO reviews (id, spec_id, iteration, status, created_at)"
+            + " VALUES ('r1', 'auth', 1, 'failed', 't0')");
+    db.execute(
+        "INSERT INTO review_stages (id, review_id, name, stage_type, status, finding_counts)"
+            + " VALUES ('s1', 'r1', 'security', 'agent', 'failed', '{\"HIGH\": 2}')");
+    for (var id : List.of("f1", "f2", "f3")) {
+      db.execute(
+          "INSERT INTO review_findings (id, stage_id, severity, category, title, description,"
+              + " confidence, resolution) VALUES (?, 's1', 'HIGH', 'SECURITY', 'Leak', 'D',"
+              + " 0.9, 'OPEN')",
+          id);
+    }
+    db.execute("INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth', 'f1')");
+    db.execute(
+        "INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth-followup', 'f1')");
+    db.execute(
+        "INSERT INTO spec_source_findings (spec_id, finding_id) VALUES ('auth-followup', 'f2')");
+    db.execute(
+        """
+        INSERT INTO spec_attachments (id, spec_id, filename, content_type, size_bytes,
+            storage_path, created_at) VALUES ('a1', 'auth', 'x', 'text/plain', 1, '/x', 't0')""");
+
+    new SchemaManager(db).migrate();
+
+    assertEquals(
+        List.of("auth-followup", "auth-followup", "null"),
+        db.query(
+            "SELECT COALESCE(followup, 'null') FROM review_findings ORDER BY id", r -> r.text(0)),
+        "the latest link of each finding becomes its follow-up");
+    assertEquals(
+        "",
+        db.queryOne(
+                "SELECT COALESCE(findings_hash, '') FROM reviews WHERE id = 'r1'", r -> r.text(0))
+            .orElseThrow(),
+        "the data migration folds the rows into content; the schema only makes room");
+    var tables =
+        db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
+    assertFalse(tables.contains("spec_source_findings"));
+    assertFalse(tables.contains("spec_attachments"));
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void theFindingsRebuildCarriesRowsAndSourceLinksForwardAndAdmitsDisputed() {
     stageAtBaseline();
     db.execute(
@@ -1132,12 +1192,9 @@ class SchemaManagerTest {
             .orElseThrow();
     assertEquals(List.of("Leak", "OPEN", "null", "null", "null"), survived);
     assertEquals(
-        1,
-        (int)
-            db.queryOne(
-                    "SELECT COUNT(*) FROM spec_source_findings WHERE finding_id = 'f1'",
-                    r -> (int) r.integer(0))
-                .orElseThrow(),
+        "auth",
+        db.queryOne("SELECT followup FROM review_findings WHERE id = 'f1'", r -> r.text(0))
+            .orElseThrow(),
         "the rebuild must never cascade the follow-up links away");
     db.execute("UPDATE review_findings SET resolution = 'DISPUTED' WHERE id = 'f1'");
     assertEquals(

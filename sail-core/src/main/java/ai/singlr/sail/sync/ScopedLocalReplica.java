@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.MainVersion;
 import java.util.Collections;
 import java.util.LinkedHashSet;
@@ -72,6 +73,11 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
   @Override
   public Set<String> latestWinsFields() {
     return inner.latestWinsFields();
+  }
+
+  @Override
+  public ConflictDetector.FieldMerger fieldMerger() {
+    return inner.fieldMerger();
   }
 
   @Override

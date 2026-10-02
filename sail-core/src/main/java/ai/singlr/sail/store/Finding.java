@@ -159,10 +159,14 @@ public record Finding(
         carryEvidence);
   }
 
+  /**
+   * A reviewer's finding as its report describes it, under an id this box mints: an id the report
+   * names is ignored, so two reviews can never claim one finding row.
+   */
   @SuppressWarnings("unchecked")
   public static Finding fromMap(Map<String, Object> map) {
     return new Finding(
-        (String) map.getOrDefault("id", DateTimeUtils.newId().toString()),
+        DateTimeUtils.newId().toString(),
         Severity.parse((String) map.get("severity")),
         Category.parse((String) map.get("category")),
         (String) map.get("file"),

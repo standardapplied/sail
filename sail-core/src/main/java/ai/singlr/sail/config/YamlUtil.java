@@ -133,7 +133,11 @@ public final class YamlUtil {
     return sb.toString();
   }
 
-  /** Dump a Map to a valid JSON string. */
+  /**
+   * Dump a Map to a valid JSON string that the YAML parser reads back verbatim: every character
+   * YAML forbids in a document — C0 and C1 controls, DEL, the non-characters U+FFFE and U+FFFF, a
+   * lone surrogate — is {@code \\uXXXX}-escaped.
+   */
   public static String dumpJson(Map<String, Object> map) {
     var sb = new StringBuilder();
     appendJson(sb, map);
@@ -183,7 +187,7 @@ public final class YamlUtil {
         case '\b' -> sb.append("\\b");
         case '\f' -> sb.append("\\f");
         default -> {
-          if (ch < 0x20) {
+          if (yamlRejects(s, i)) {
             sb.append(String.format("\\u%04x", (int) ch));
           } else {
             sb.append(ch);
@@ -192,5 +196,20 @@ public final class YamlUtil {
       }
     }
     return sb.toString();
+  }
+
+  /**
+   * Whether the YAML parser refuses the character at {@code i} of {@code s} in a document: a C0 or
+   * C1 control, DEL, a non-character, or a surrogate that is not half of a pair.
+   */
+  private static boolean yamlRejects(String s, int i) {
+    var ch = s.charAt(i);
+    if (ch < 0x20 || (ch >= 0x7f && ch <= 0x9f) || ch == '\ufffe' || ch == '\uffff') {
+      return true;
+    }
+    if (Character.isHighSurrogate(ch)) {
+      return i + 1 >= s.length() || !Character.isLowSurrogate(s.charAt(i + 1));
+    }
+    return Character.isLowSurrogate(ch) && (i == 0 || !Character.isHighSurrogate(s.charAt(i - 1)));
   }
 }

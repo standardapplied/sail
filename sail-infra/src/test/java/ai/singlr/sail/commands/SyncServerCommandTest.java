@@ -20,7 +20,9 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -47,6 +49,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -331,6 +334,120 @@ class SyncServerCommandTest {
     assertEquals("spec", seen.getFirst().entityType());
     assertEquals("auth", seen.getFirst().entityId());
     assertEquals("in_progress", seen.getFirst().to());
+  }
+
+  @Test
+  void theBridgeResolvesTheSourceFindingsOfAFollowUpANodeMarkedDone() {
+    Acting.as("uday", () -> mainSpecs.create(spec("fix", "Fix")));
+    Acting.as("uday", () -> mainSpecs.create(spec("followup", "Follow-up")));
+    var reviews = new ReviewStore(mainDb);
+    var found =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "A.java",
+            1,
+            2,
+            "leak",
+            "desc",
+            "evidence",
+            null,
+            0.9);
+    var review =
+        Acting.as(
+            "uday",
+            () -> {
+              var id = reviews.createReview("fix", 1);
+              reviews.addFinding(reviews.createStage(id, "security", "agent"), found);
+              reviews.linkSourceFindings("followup", List.of(found.id()));
+              return id;
+            });
+
+    Acting.as("uday", () -> mainSpecs.updateStatus("followup", SpecStatus.DONE));
+
+    SyncServerCommand.transitionBridge(mainDb, "main")
+        .onTransition(new SyncTransition("spec", "followup", "pending", "done", Map.of()));
+
+    assertEquals(
+        Finding.Resolution.FIXED, reviews.findingsForReview(review).getFirst().resolution());
+  }
+
+  @Test
+  void aSessionOpensByFixingTheFindingsOfEveryShippedFollowUpMainHolds() throws Exception {
+    Acting.as("uday", () -> mainSpecs.create(spec("fix", "Fix")));
+    Acting.as("uday", () -> mainSpecs.create(spec("followup", "Follow-up")));
+    var reviews = new ReviewStore(mainDb);
+    var found =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "A.java",
+            1,
+            2,
+            "leak",
+            "desc",
+            "evidence",
+            null,
+            0.9);
+    var review =
+        Acting.as(
+            "uday",
+            () -> {
+              var id = reviews.createReview("fix", 1);
+              reviews.addFinding(reviews.createStage(id, "security", "agent"), found);
+              reviews.linkSourceFindings("followup", List.of(found.id()));
+              mainSpecs.updateStatus("followup", SpecStatus.DONE);
+              return id;
+            });
+    assertEquals(
+        Finding.Resolution.OPEN, reviews.findingsForReview(review).getFirst().resolution());
+
+    syncWithToken(tokenFor("member"));
+
+    assertEquals(
+        Finding.Resolution.FIXED, reviews.findingsForReview(review).getFirst().resolution());
+  }
+
+  @Test
+  void aSessionMainCannotOpenByFixingItsShippedFollowUpsFailsNamingTheRemedy() throws Exception {
+    Acting.as("uday", () -> mainSpecs.create(spec("fix", "Fix")));
+    Acting.as("uday", () -> mainSpecs.create(spec("followup", "Follow-up")));
+    var reviews = new ReviewStore(mainDb);
+    var found =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "A.java",
+            1,
+            2,
+            "leak",
+            "desc",
+            "evidence",
+            null,
+            0.9);
+    Acting.as(
+        "uday",
+        () -> {
+          var id = reviews.createReview("fix", 1);
+          reviews.addFinding(reviews.createStage(id, "security", "agent"), found);
+          reviews.linkSourceFindings("followup", List.of(found.id()));
+          mainSpecs.updateStatus("followup", SpecStatus.DONE);
+          new ChangeLog(mainDb).erase("spec", "fix", "erased", "local");
+        });
+    var out = new ByteArrayOutputStream();
+
+    var exit =
+        SyncServerCommand.serve(
+            mainReplicaDb,
+            "main",
+            tokenFor("member"),
+            new ByteArrayInputStream(new byte[0]),
+            out,
+            SyncTransitionSink.NONE,
+            SyncConfig::unset);
+
+    assertEquals(1, exit, "a catch-up that cannot write fails the session for the node to retry");
+    assertEquals(0, out.size(), "nothing is served");
   }
 
   @Test

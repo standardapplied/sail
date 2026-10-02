@@ -5,77 +5,49 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.finding;
+import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.ChangeLog;
-import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncConflicts;
-import ai.singlr.sail.store.SyncState;
 import java.nio.file.Path;
 import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * The review aggregate reconciles up to main and on to every other box through the same {@link
- * SyncEngine} as runs, so main can narrate the review loop from replicated state: the review row,
- * its stages, and each stage's finding counts land on main and every reader box, while the finding
- * ROWS stay on the executing node. Single-writer: only the executing node mutates its own reviews.
+ * The review aggregate reconciles up to main and on to every other box through the same sessions as
+ * runs, so main can narrate the review loop and every box reads the same findings: the review row,
+ * its stages, and its findings as content land on main and every reader box. Single-writer: only
+ * the executing node mutates its own reviews, and its writes landing while an offer is in flight
+ * are never lost.
  */
 @ActingAs
 class ReviewSyncTest {
 
   @TempDir Path tempDir;
-  private final SyncEngine engine = new SyncEngine();
 
-  private Box main;
-  private Box node;
-  private Box other;
-
-  private final class Box implements AutoCloseable {
-    final String id;
-    final Sqlite db;
-    final ReviewStore reviews;
-    final SyncConflicts conflicts;
-    final StoreReplica replica;
-
-    Box(String id) {
-      this.id = id;
-      this.db = Sqlite.open(tempDir.resolve(id + ".db"));
-      new SchemaManager(db).migrate();
-      this.reviews = new ReviewStore(db);
-      this.conflicts = new SyncConflicts(db);
-      this.replica = new StoreReplica(id, reviews, new ChangeLog(db), conflicts, new SyncState(db));
-    }
-
-    @Override
-    public void close() {
-      db.close();
-    }
-  }
+  private SyncBox main;
+  private SyncBox node;
+  private SyncBox other;
+  private ReviewStore reviews;
 
   @BeforeEach
   void setUp() {
-    main = new Box("main");
-    node = new Box("node");
-    other = new Box("other");
-    for (var box : List.of(main, node, other)) {
-      box.db.execute(
-          """
-          INSERT INTO specs (id, project, title, status, assignee, created_at, updated_at,
-              rev, base_rev)
-          VALUES ('auth', 'acme', 'Auth', 'pending', 'node', 'now', 'now', 'r0', 'r0')""");
-    }
+    main = new SyncBox(tempDir, "main");
+    node = new SyncBox(tempDir, "node");
+    other = new SyncBox(tempDir, "other");
+    ownSpec(main, "node", "auth", "node");
+    sync(node);
+    sync(other);
+    reviews = new ReviewStore(node.db);
   }
 
   @AfterEach
@@ -85,113 +57,114 @@ class ReviewSyncTest {
     main.close();
   }
 
-  private void sync(Box box) {
-    engine.reconcile(box.replica, main.replica);
+  private List<SyncSession.TypeReport> sync(SyncBox box) {
+    return SyncBox.round(main, box);
   }
 
-  private static Finding finding(Finding.Severity severity) {
-    return Finding.create(
-        severity,
-        Finding.Category.SECURITY,
-        "src/Auth.java",
-        1,
-        2,
-        "issue",
-        "desc",
-        "evidence",
-        new Finding.Suggestion("a", "b", "c"),
-        0.9);
+  private static SyncSession.TypeReport reviewReport(List<SyncSession.TypeReport> reports) {
+    return reports.stream()
+        .filter(report -> report.type().equals("review"))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private String failedReviewWithFindings(int findings) {
+    return Acting.as(
+        "node",
+        () -> {
+          var reviewId = reviews.createReview("auth", 1);
+          var stageId = reviews.createStage(reviewId, "security", "agent");
+          reviews.startStage(stageId, "codex");
+          for (var i = 0; i < findings; i++) {
+            reviews.addFinding(stageId, finding("issue " + i));
+          }
+          reviews.completeStage(stageId, "failed");
+          reviews.updateReviewStatus(reviewId, "failed");
+          return reviewId;
+        });
+  }
+
+  private String stageOf(String reviewId) {
+    return reviews.stagesForReview(reviewId).getFirst().id();
   }
 
   @Test
-  void aReviewAndItsStageCountsReplicateToMainAndOtherBoxes() {
-    var reviewId = node.reviews.createReview("auth", 1);
-    var stageId = node.reviews.createStage(reviewId, "security", "agent");
-    node.reviews.startStage(stageId, "codex");
-    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
-    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
-    node.reviews.completeStage(stageId, "failed");
-    node.reviews.updateReviewStatus(reviewId, "failed");
+  void aReviewAndItsFindingsReplicateToMainAndOtherBoxes() {
+    var reviewId = failedReviewWithFindings(2);
 
     sync(node);
 
-    var onMain = main.reviews.findReview(reviewId).orElseThrow();
+    var mains = new ReviewStore(main.db);
+    var onMain = mains.findReview(reviewId).orElseThrow();
     assertEquals("failed", onMain.status());
-    var mainStage = main.reviews.stagesForReview(reviewId).getFirst();
+    var mainStage = mains.stagesForReview(reviewId).getFirst();
     assertEquals("failed", mainStage.status());
-    assertEquals(2, main.reviews.findingCountsForStage(mainStage.id()).get("HIGH"));
-    assertTrue(
-        main.reviews.findingsForStage(mainStage.id()).isEmpty(),
-        "finding rows stay on the executing node; only counts replicate");
+    assertEquals(2, mains.findingCountsForStage(mainStage.id()).get("HIGH"));
+    assertEquals(
+        reviews.findingsForReview(reviewId),
+        mains.findingsForReview(reviewId),
+        "the findings are the review's content and land with it");
 
     sync(other);
-    var otherStage = other.reviews.stagesForReview(reviewId).getFirst();
-    assertEquals(2, other.reviews.findingCountsForStage(otherStage.id()).get("HIGH"));
+    var others = new ReviewStore(other.db);
+    assertEquals(2, others.findingCountsForStage(stageOf(reviewId)).get("HIGH"));
+    assertEquals(reviews.findingsForReview(reviewId), others.findingsForReview(reviewId));
 
-    assertConverged();
+    SyncBox.assertConverged(main, node, other);
   }
 
   @Test
   void aSuccessfulPushLeavesTheExecutingNodesFindingRowsIntact() {
-    var reviewId = node.reviews.createReview("auth", 1);
-    var stageId = node.reviews.createStage(reviewId, "security", "agent");
-    node.reviews.startStage(stageId, "codex");
-    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
-    node.reviews.completeStage(stageId, "failed");
-    node.reviews.updateReviewStatus(reviewId, "failed");
+    var reviewId = failedReviewWithFindings(1);
 
     sync(node);
 
     assertEquals(
         1,
-        node.reviews.findingsForStage(stageId).size(),
-        "adopting main's identical aggregate after a push must link the revision without"
-            + " rebuilding — the rebuild deletes the finding rows that carry-forward and"
-            + " dispute resolution read");
+        reviews.findingsForStage(stageOf(reviewId)).size(),
+        "adopting main's identical aggregate after a push links the revision and rewrites nothing");
 
-    assertConverged();
+    SyncBox.assertConverged(main, node, other);
   }
 
   @Test
   void aFindingAddedWhileThePushIsInFlightSurvivesTheAcceptedSnapshot() {
-    var reviewId = node.reviews.createReview("auth", 1);
-    var stageId = node.reviews.createStage(reviewId, "security", "agent");
-    node.reviews.startStage(stageId, "codex");
-    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+    var reviewId = failedReviewWithFindings(1);
+    var stageId = stageOf(reviewId);
+    var landed = new AtomicBoolean();
+    var landing =
+        main.serverInterceptingCommitsOf(
+            node.session(),
+            "review",
+            reviewId,
+            () -> {
+              if (landed.compareAndSet(false, true)) {
+                Acting.as("node", () -> reviews.addFinding(stageId, finding("racing")));
+              }
+            });
 
-    var racing =
-        racingMain(() -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL)));
-    engine.reconcile(node.replica, racing);
+    SyncBox.round(landing, node);
 
     assertEquals(
         2,
-        node.reviews.findingsForStage(stageId).size(),
-        "adopting a snapshot accepted while a local write landed must never rebuild the"
-            + " aggregate — the rebuild deletes the non-replicated finding rows");
+        reviews.findingsForStage(stageId).size(),
+        "a write landing while the offer is in flight is kept on top of the accepted version");
 
-    try (var mainBox = opened(main);
-        var nodeBox = opened(node);
-        var otherBox = opened(other)) {
-      SyncBox.quiesce(mainBox, nodeBox, otherBox);
-      SyncBox.assertEqualToMainBut(
-          mainBox, nodeBox, "review", reviewId, SyncBox.BOX_LOCAL_FINDINGS);
-      SyncBox.assertEqualToMain(mainBox, otherBox);
-    }
+    SyncBox.assertConverged(main, node, other);
+    assertEquals(2, new ReviewStore(main.db).findingsForStage(stageId).size());
   }
 
   @Test
   void syncRoundsRacingAConcurrentLocalWriterNeverLoseFindingRows() throws InterruptedException {
-    var reviewId = node.reviews.createReview("auth", 1);
-    var stageId = node.reviews.createStage(reviewId, "security", "agent");
-    node.reviews.startStage(stageId, "codex");
-    node.reviews.addFinding(stageId, finding(Finding.Severity.HIGH));
+    var reviewId = failedReviewWithFindings(1);
+    var stageId = stageOf(reviewId);
 
     var rounds = 25;
     for (var round = 0; round < rounds; round++) {
       var writer =
           new Thread(
               Actor.carrying(
-                  () -> node.reviews.addFinding(stageId, finding(Finding.Severity.CRITICAL))));
+                  () -> Acting.as("node", () -> reviews.addFinding(stageId, finding("racing")))));
       writer.start();
       sync(node);
       writer.join();
@@ -200,122 +173,43 @@ class ReviewSyncTest {
 
     assertEquals(
         1 + rounds,
-        node.reviews.findingsForStage(stageId).size(),
-        "snapshot capture and adoption must be atomic against concurrent local writes — a torn"
-            + " snapshot/revision pair or a write between the revision check and adoption"
-            + " rebuilds the aggregate and deletes the non-replicated finding rows");
+        reviews.findingsForStage(stageId).size(),
+        "snapshot capture and adoption are atomic against concurrent local writes");
 
-    keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(reviewId);
-    try (var mainBox = opened(main);
-        var nodeBox = opened(node);
-        var otherBox = opened(other)) {
-      SyncBox.quiesce(mainBox, nodeBox, otherBox);
-      SyncBox.assertEqualToMainUnless(
-          mainBox, nodeBox, "review", reviewId, SyncBox.BOX_LOCAL_FINDINGS);
-      SyncBox.assertEqualToMain(mainBox, otherBox);
-    }
-  }
-
-  private void keepMineWhereARaceOverBoxLocalFindingsParkedTheReview(String reviewId) {
-    node.conflicts
-        .pendingFor("review", reviewId)
-        .ifPresent(
-            parked -> {
-              var mine = node.reviews.comparableSnapshot(reviewId);
-              var rev = node.reviews.resolveConflict(reviewId, mine, parked.theirs());
-              assertTrue(node.conflicts.resolve(parked.id(), rev), SyncBox.BOX_LOCAL_FINDINGS);
-            });
-  }
-
-  private MainReplica racingMain(Runnable onFirstCommit) {
-    return new MainReplica() {
-      private Runnable pending = onFirstCommit;
-
-      @Override
-      public String id() {
-        return main.replica.id();
-      }
-
-      @Override
-      public Set<String> entityIds() {
-        return main.replica.entityIds();
-      }
-
-      @Override
-      public Map<String, Object> current(String entityId) {
-        return main.replica.current(entityId);
-      }
-
-      @Override
-      public String currentRev(String entityId) {
-        return main.replica.currentRev(entityId);
-      }
-
-      @Override
-      public State state(String entityId) {
-        return main.replica.state(entityId);
-      }
-
-      @Override
-      public long maxSeq() {
-        return main.replica.maxSeq();
-      }
-
-      @Override
-      public CommitOutcome commit(
-          String entityId, Map<String, Object> snapshot, String expectedRev) {
-        if (pending != null) {
-          var hook = pending;
-          pending = null;
-          hook.run();
-        }
-        return main.replica.commit(entityId, snapshot, expectedRev);
-      }
-    };
+    SyncBox.assertConverged(main, node, other);
+    assertEquals(1 + rounds, new ReviewStore(main.db).findingsForStage(stageId).size());
   }
 
   @Test
   void aLaterTransitionOnTheOwningNodePropagates() {
-    var reviewId = node.reviews.createReview("auth", 1);
+    var reviewId = Acting.as("node", () -> reviews.createReview("auth", 1));
     sync(node);
     sync(other);
 
-    node.reviews.updateReviewStatus(reviewId, "passed");
+    Acting.as("node", () -> reviews.updateReviewStatus(reviewId, "passed"));
     sync(node);
-    assertEquals("passed", main.reviews.findReview(reviewId).orElseThrow().status());
+    assertEquals("passed", new ReviewStore(main.db).findReview(reviewId).orElseThrow().status());
 
     sync(other);
-    assertEquals("passed", other.reviews.findReview(reviewId).orElseThrow().status());
+    assertEquals("passed", new ReviewStore(other.db).findReview(reviewId).orElseThrow().status());
 
-    assertConverged();
+    SyncBox.assertConverged(main, node, other);
   }
 
   @Test
   void aReaderBoxNeverPushesAForeignReviewAndStaysConflictFree() {
-    var reviewId = node.reviews.createReview("auth", 1);
+    var reviewId = failedReviewWithFindings(1);
     sync(node);
     sync(other);
 
-    var mainRevAfterPull = main.reviews.latestRev(reviewId);
-    var report = engine.reconcile(other.replica, main.replica);
+    var mainRevAfterPull = new ReviewStore(main.db).latestRev(reviewId);
+    var report = reviewReport(sync(other));
 
-    assertEquals(0, report.pushed(), "a reader box pushes nothing for a foreign review");
-    assertEquals(0, report.conflicts());
-    assertEquals(mainRevAfterPull, main.reviews.latestRev(reviewId));
+    assertEquals(0, report.report().pushed(), "a reader box pushes nothing for a foreign review");
+    assertEquals(0, report.report().conflicts());
+    assertEquals(mainRevAfterPull, new ReviewStore(main.db).latestRev(reviewId));
     assertTrue(other.conflicts.pending().isEmpty());
 
-    assertConverged();
-  }
-
-  private void assertConverged() {
-    try (var mainBox = opened(main);
-        var nodeBox = opened(node);
-        var otherBox = opened(other)) {
-      SyncBox.assertConverged(mainBox, nodeBox, otherBox);
-    }
-  }
-
-  private SyncBox opened(Box box) {
-    return SyncBox.opening(tempDir.resolve(box.id + ".db"), box.id);
+    SyncBox.assertConverged(main, node, other);
   }
 }

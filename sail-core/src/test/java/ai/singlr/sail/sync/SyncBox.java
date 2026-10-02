@@ -59,6 +59,7 @@ public final class SyncBox implements AutoCloseable {
   private Actor session;
   private String handle;
   private FileLimits limits = FileLimits.defaults();
+  private SyncTransitionSink transitions = SyncTransitionSink.NONE;
 
   public SyncBox(Path dir, String id) {
     this(id, Sqlite.open(dir.resolve(id + ".db")));
@@ -242,52 +243,6 @@ public final class SyncBox implements AutoCloseable {
     }
   }
 
-  /**
-   * As {@link #assertEqualToMain}, for a scenario that cannot converge on one entity for a reason
-   * another change owns, named by {@code why}: every other entity equals main's, and that one still
-   * differs, so the scenario fails the moment the divergence is fixed and the exception can go.
-   */
-  public static void assertEqualToMainBut(
-      SyncBox main, SyncBox node, String type, String id, String why) {
-    assertEqualToMainExcept(main, node, type + " " + id, why, true);
-  }
-
-  /**
-   * As {@link #assertEqualToMainBut} for a scenario whose timing decides whether the one entity
-   * diverges for the reason {@code why} names: every other entity equals main's, and that one is
-   * not checked. Only for a scenario that races a real writer; one that stages the race asserts
-   * which way it went.
-   */
-  public static void assertEqualToMainUnless(
-      SyncBox main, SyncBox node, String type, String id, String why) {
-    assertEqualToMainExcept(main, node, type + " " + id, why, false);
-  }
-
-  private static void assertEqualToMainExcept(
-      SyncBox main, SyncBox node, String known, String why, boolean mustDiverge) {
-    var mismatches = mismatches(main, node);
-    if (mustDiverge && !mismatches.containsKey(known)) {
-      fail(known + " now equals main's; drop the exception (" + why + ")");
-    }
-    mismatches.remove(known);
-    if (!mismatches.isEmpty()) {
-      fail(
-          node.id
-              + " differs from main beyond "
-              + why
-              + ":\n"
-              + String.join("\n", mismatches.values()));
-    }
-  }
-
-  /**
-   * Why a box that holds a review's findings cannot equal main on that review yet: its findings are
-   * box-local, and its aggregate counts its own rows at main's revision.
-   */
-  public static final String BOX_LOCAL_FINDINGS =
-      "a review's findings are box-local until sail-review-findings-sync, so the box holding them"
-          + " counts its own finding rows at main's revision";
-
   private static Map<String, String> mismatches(SyncBox main, SyncBox node) {
     var mismatches = new LinkedHashMap<String, String>();
     var mains = main.replicas();
@@ -429,10 +384,16 @@ public final class SyncBox implements AutoCloseable {
     return this;
   }
 
+  /** This box as main hands every committed transition to {@code sink}, as main's server does. */
+  public SyncBox transitions(SyncTransitionSink sink) {
+    this.transitions = sink;
+    return this;
+  }
+
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
     return SyncRpcServer.over(
-            db, id, null, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR)
+            db, id, null, as, FdeRoster.EMPTY, transitions, SyncWire.UPGRADE_FLOOR)
         .content(db, limits);
   }
 
@@ -442,6 +403,23 @@ public final class SyncBox implements AutoCloseable {
    */
   public SyncRpcServer serverFailingCommitsOf(
       Actor as, String type, String id, AtomicInteger times) {
+    return serverInterceptingCommitsOf(
+        as,
+        type,
+        id,
+        () -> {
+          if (times.getAndDecrement() > 0) {
+            throw new IllegalStateException("store fault committing " + id);
+          }
+        });
+  }
+
+  /**
+   * As {@link #server}, but {@code beforeCommit} runs on main's thread before each commit of {@code
+   * id} of {@code type}: a write landing on the node while its offer is in flight, or a fault.
+   */
+  public SyncRpcServer serverInterceptingCommitsOf(
+      Actor as, String type, String id, Runnable beforeCommit) {
     var replicas =
         new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(db, this.id, null));
     var real = replicas.get(type);
@@ -452,9 +430,8 @@ public final class SyncBox implements AutoCloseable {
                 MainReplica.class.getClassLoader(),
                 new Class<?>[] {MainReplica.class},
                 (proxy, method, args) -> {
-                  if (method.getName().equals("commit") && id.equals(args[0]) && times.get() > 0) {
-                    times.decrementAndGet();
-                    throw new IllegalStateException("store fault committing " + id);
+                  if (method.getName().equals("commit") && id.equals(args[0])) {
+                    beforeCommit.run();
                   }
                   try {
                     return method.invoke(real, args);

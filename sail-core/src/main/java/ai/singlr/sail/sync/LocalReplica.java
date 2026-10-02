@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.MainVersion;
 import java.util.List;
 import java.util.Map;
@@ -79,6 +80,9 @@ public interface LocalReplica {
 
   /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#latestWinsFields}. */
   Set<String> latestWinsFields();
+
+  /** The replicated store's {@link ai.singlr.sail.store.SyncedStore#fieldMerger}. */
+  ConflictDetector.FieldMerger fieldMerger();
 
   /** A comparable snapshot paired with the exact revision it was read at. */
   record Captured(Map<String, Object> snapshot, String rev) {}

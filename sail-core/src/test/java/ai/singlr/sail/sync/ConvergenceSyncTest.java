@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.assign;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
 import static ai.singlr.sail.sync.SyncFixtures.run;
@@ -1063,10 +1064,6 @@ class ConvergenceSyncTest {
 
   private static void reprioritize(SyncBox box, String as, String id, int priority) {
     edit(box, as, id, row -> with(row, row.title(), priority, row.assignee()));
-  }
-
-  private static void assign(SyncBox box, String as, String id, String assignee) {
-    edit(box, as, id, row -> with(row, row.title(), row.priority(), assignee));
   }
 
   private static void edit(

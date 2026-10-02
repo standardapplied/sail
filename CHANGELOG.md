@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.46.4
+
+- **A review's findings sync with it, so every box holds the same review.** Findings used to live only on the box that ran the review, with the synced review carrying counts; a review denied after its spec was reassigned lost them, a node that kept them held a review main never had, and a follow-up's links to them vanished when its spec was deleted.
+  - Every stage's findings — each field, resolution, evidence, what it was carried from, and the follow-up spec drafted from it — are the review's content, hashed into its snapshot and stored once in the blob store like a spec's body. Main, every node and Mast read the same findings; the API's shape for reviews and findings is unchanged.
+  - Adding, resolving, disputing and carrying findings into the next iteration each write one revision of the review, decided by the review rule like any other write. A node adopting main's review takes main's findings exactly; a review main never took is withdrawn with its findings kept in the change log and announced.
+  - A finding names the follow-up spec drafted from it in that content, so the link survives the follow-up's delete and restore on every box, and marking the follow-up `done` fixes the finding in the same content — written by main, when the follow-up is marked done there or when a node's change reaches it — a resolution that outlives the follow-up's archive and erasure. Findings two boxes changed at once merge finding by finding, so main fixing one while its owner's review rules on another parks no conflict. A finding names one follow-up, the latest drafted from it; the upgrade keeps the latest of several earlier links. The box-local `spec_source_findings` table is gone, and so is the unused `spec_attachments` table.
+  - A reviewer's finding always gets an id this box mints, so two reviews can never claim one finding row, and a review's content may only write its own rows: a stage or finding another review holds is refused with the reason, never written over.
+  - Every control character in a synced snapshot or content document is escaped on the wire, where a C1 character in a finding's text used to make every other box refuse the review for good.
+  - The upgrade leaves a review whose spec main pruned — held here only until its own erasure pages in — unfolded and reported, instead of failing the whole upgrade on it.
+  - The upgrade folds each box's existing finding rows into one revision per review, which a node's next sync pushes; if the spec is no longer that box's FDE's, main denies it and the node keeps the revision in its change log.
+  - The fleet floor is 0.46.4: an older node would push a review back without its findings.
+
 ## 0.46.3
 
 - **Every offer settles, and no round fails for something that will arrive.** One rule in sail-core (`Decidability`) decides what an offer depends on, whether main holds it, and what becomes of an offer whose dependency can never arrive. Main's refusal, the node's hold-back and the node's settlement all read it; the per-store hold-back SQL is gone.

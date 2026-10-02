@@ -986,6 +986,50 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
+  void aRulingOnAFindingAHumanResolvedDuringTheStageIsSetAsideAndFlaggedInTheRoom() {
+    createSpec("auth", "in_progress");
+    var messages = new MessageStore(db);
+    var highOutput =
+        """
+        ```json
+        {"verdicts": [], "findings": [{"severity": "HIGH", "category": "LOGIC", "file": "a.java",
+          "line_start": 1, "line_end": 1, "title": "Stubborn high",
+          "description": "d", "evidence": "e", "confidence": 0.9,
+          "suggestion": {"before": "old", "after": "new", "rationale": "r"}}]}
+        ```
+        """;
+    var calls = new AtomicInteger();
+    ReviewAgentRunner runner =
+        (p, a, prompt, rid, cred) ->
+            switch (calls.incrementAndGet()) {
+              case 1 -> highOutput;
+              case 2 -> "fix applied";
+              case 3 -> {
+                var carried = ReviewScripts.carriedFromPrompt(prompt).keySet().iterator().next();
+                reviewStore.resolveFinding(carried, Finding.Resolution.DISMISSED, "by design");
+                yield fixAllCarried(prompt);
+              }
+              default -> fixAllCarried(prompt);
+            };
+    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner, null);
+    ctrl.useMessages(messages);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertTrue(
+        messages.list("auth", null, 50).stream()
+            .anyMatch(m -> m.body().contains("resolved while the stage ran")),
+        "the human's dismissal stands and the room is told the reviewer's ruling was set aside");
+    assertTrue(
+        reviewStore
+            .findingsForReview(reviewStore.latestReviewForSpec("auth").orElseThrow().id())
+            .stream()
+            .noneMatch(f -> f.carriedFrom() != null),
+        "a dismissed finding is not carried into the next iteration");
+  }
+
+  @Test
   void aHumanStageOpensWithTheRoomVerdictListingDisputedFindings() {
     createSpec("auth", "in_progress");
     var messages = new MessageStore(db);

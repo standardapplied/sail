@@ -314,6 +314,19 @@ class SyncRpcServerTest {
   }
 
   @Test
+  void aNodeAtThePreviousFloorThatPushedReviewsWithoutTheirFindingsIsRefusedUntilItUpgrades()
+      throws Exception {
+    var refusal =
+        assertInstanceOf(
+            SyncWire.Refuse.class,
+            serve(
+                    new SyncRpcServer(new FakeMain(), true),
+                    new SyncWire.Hello(4, "0.46.3", "0.46.3", "b"))
+                .getFirst());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+  }
+
+  @Test
   void theSameFloorAtANewerPatchIsWelcomedWithMainsIdentity() throws Exception {
     var welcome =
         assertInstanceOf(

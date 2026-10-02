@@ -327,7 +327,12 @@ public final class RevisionJournal implements ConflictResolver {
           var from = offer.isPresent() ? offer.get().from() : now;
           var took = offer.isPresent() ? tookOf(from, accepted) : accepted;
           var rebase =
-              ConflictDetector.detect(live(from), live(now), live(took), schema.latestWinsFields());
+              ConflictDetector.detect(
+                  live(from),
+                  live(now),
+                  live(took),
+                  schema.latestWinsFields(),
+                  schema.fieldMerger());
           if (rebase instanceof ConflictDetector.Conflict) {
             return false;
           }

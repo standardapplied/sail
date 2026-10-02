@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.assign;
+import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
 import static ai.singlr.sail.sync.SyncFixtures.room;
@@ -103,12 +105,6 @@ class PushAuthoritySyncTest {
     SyncBox.assertConverged(main, ada.syncsAs(adaAs), bob);
   }
 
-  private void assertEveryBoxConvergedBut(Actor adaAs, String review) {
-    SyncBox.quiesce(main, ada.syncsAs(adaAs), bob);
-    SyncBox.assertEqualToMainBut(main, ada, "review", review, SyncBox.BOX_LOCAL_FINDINGS);
-    SyncBox.assertEqualToMain(main, bob);
-  }
-
   private static void retitle(SyncBox box, String as, String id, String title) {
     var row = box.specs.findById(id).orElseThrow();
     Acting.as(
@@ -121,32 +117,6 @@ class PushAuthoritySyncTest {
                     title,
                     row.status(),
                     row.assignee(),
-                    row.agent(),
-                    row.model(),
-                    row.reasoningEffort(),
-                    row.branch(),
-                    row.priority(),
-                    row.createdBy(),
-                    row.createdAt(),
-                    row.updatedAt(),
-                    row.updatedBy(),
-                    row.dependsOn(),
-                    row.repos(),
-                    row.roomId())));
-  }
-
-  private static void assign(SyncBox box, String as, String id, String assignee) {
-    var row = box.specs.findById(id).orElseThrow();
-    Acting.as(
-        as,
-        () ->
-            box.specs.update(
-                new SpecStore.SpecRow(
-                    row.id(),
-                    row.project(),
-                    row.title(),
-                    row.status(),
-                    assignee,
                     row.agent(),
                     row.model(),
                     row.reasoningEffort(),
@@ -246,7 +216,7 @@ class PushAuthoritySyncTest {
   }
 
   @Test
-  void anotherMembersRoomReviewAndVerdictAreDeniedAndTheNodeKeepsItsFindings() throws IOException {
+  void anotherMembersRoomReviewAndVerdictAreDeniedAndTheNodeAdoptsMainsReview() throws IOException {
     ownSpec(main, "bob", "theirs", "bob");
     room(main, "bob", "den");
     var review = Acting.as("bob", () -> new ReviewStore(main.db).createReview("theirs", 1));
@@ -271,12 +241,15 @@ class PushAuthoritySyncTest {
 
     assertEquals("pending", reviews.findReview(review).orElseThrow().status());
     assertEquals(
-        List.of(finding.id()),
-        reviews.findingsForReview(review).stream().map(Finding::id).toList(),
-        "adopting main's review never deletes the findings this box holds");
+        List.of(),
+        reviews.findingsForReview(review),
+        "the node adopts main's version of the review exactly, findings included");
+    assertTrue(
+        findingKeptInChangeLog(ada, review, finding.id()),
+        "the denied revision keeps the findings in the change log");
     assertEquals("pending", new ReviewStore(main.db).findReview(review).orElseThrow().status());
     assertEquals(List.of(), new ReviewStore(main.db).findingsForReview(review));
-    assertEveryBoxConvergedBut(ADA, review);
+    assertEveryBoxConverged(ADA);
   }
 
   @Test
@@ -444,11 +417,11 @@ class PushAuthoritySyncTest {
     assertEquals("bob", ada.specs.findById("mine").orElseThrow().assignee());
     assertEquals("stopped", new RunStore(main.db).findById(agentRun).orElseThrow().status());
     assertEquals(
-        List.of(finding.id()),
-        reviews.findingsForReview(review).stream().map(Finding::id).toList(),
-        "the old box keeps its findings");
+        List.of(), reviews.findingsForReview(review), "the old box holds main's review exactly");
+    assertTrue(
+        findingKeptInChangeLog(ada, review, finding.id()), "its findings stay in its change log");
     assertTrue(new MessageStore(main.db).findById(narration.id()).isEmpty());
-    assertEveryBoxConvergedBut(ADA, review);
+    assertEveryBoxConverged(ADA);
   }
 
   @Test

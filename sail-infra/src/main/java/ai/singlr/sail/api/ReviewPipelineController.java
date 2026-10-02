@@ -474,9 +474,11 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
    * enforced by {@link FindingParser#reconcile}) resolve the predecessor row with the evidence
    * recorded; everything else — {@code still_open}, a missing verdict, a ruling without evidence —
    * re-attaches the finding to this stage as a carried row, so it keeps aging and keeps facing the
-   * gate. A reviewer that stops mentioning last iteration's finding launders nothing. Atomicity: if
-   * any new finding fails to insert, the resolutions roll back too, so an errored stage retries
-   * with every carried finding still {@code OPEN} instead of silently retired.
+   * gate. A reviewer that stops mentioning last iteration's finding launders nothing. A finding a
+   * human resolved while the stage ran keeps that resolution, and the room is told the ruling on it
+   * was set aside. Atomicity: if any new finding fails to insert, the resolutions roll back too, so
+   * an errored stage retries with every carried finding still {@code OPEN} instead of silently
+   * retired.
    */
   private void applyStageResult(
       String specId,
@@ -497,7 +499,19 @@ public final class ReviewPipelineController implements EventSubscriber, AutoClos
                       finding, resolutionOf(verdict.ruling()), verdict.evidence());
                 })
             .toList();
-    reviewStore.applyStageResult(stageId, rulings, parsed.findings());
+    var alreadyResolved = reviewStore.applyStageResult(stageId, rulings, parsed.findings());
+    if (!alreadyResolved.isEmpty()) {
+      postRoom(specId, alreadyResolvedNote(alreadyResolved.size()));
+    }
+  }
+
+  private static String alreadyResolvedNote(int count) {
+    return "Note: the reviewer ruled on "
+        + count
+        + " finding"
+        + (count == 1 ? "" : "s")
+        + " someone resolved while the stage ran; that resolution stands and the reviewer's ruling"
+        + " on it was set aside.";
   }
 
   private static Finding.Resolution resolutionOf(FindingParser.Ruling ruling) {

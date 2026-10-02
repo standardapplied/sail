@@ -22,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -37,6 +38,7 @@ final class GlobalSpecOperations {
   private final EventBus eventBus;
   private final RunStore runStore;
   private final Supplier<RoomStore> rooms;
+  private final BooleanSupplier authoritative;
 
   GlobalSpecOperations(SpecStore specStore) {
     this(specStore, null, null);
@@ -61,11 +63,27 @@ final class GlobalSpecOperations {
       EventBus eventBus,
       RunStore runStore,
       Supplier<RoomStore> rooms) {
+    this(specStore, reviewStore, eventBus, runStore, rooms, () -> true);
+  }
+
+  /**
+   * {@code authoritative} says whether this box resolves the findings a shipped follow-up was
+   * drafted from: main and a box that syncs nobody do; a node leaves them to main, which resolves
+   * them when the transition commits there ({@code ShippedFollowUps}).
+   */
+  GlobalSpecOperations(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      RunStore runStore,
+      Supplier<RoomStore> rooms,
+      BooleanSupplier authoritative) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
     this.runStore = runStore;
     this.rooms = rooms;
+    this.authoritative = authoritative;
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -260,6 +278,9 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
+    if (existing.status() == SpecStatus.DONE && updated.status() != SpecStatus.DONE) {
+      catchUpOnShippedFollowUps();
+    }
     specStore.update(updated);
     if (wake != null) {
       writeWake(updated, wake.value());
@@ -267,7 +288,7 @@ final class GlobalSpecOperations {
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
-      reviewStore.resolveSourceFindings(specId);
+      catchUpOnShippedFollowUps();
       reviewStore.resolveShippedFindings(specId);
     }
     var result = specStore.findById(specId).orElseThrow();
@@ -392,6 +413,9 @@ final class GlobalSpecOperations {
     requireStore();
     var existing = findOrThrow(specId);
     authorize(specId, specStore.held(specId), null);
+    if (existing.status() == SpecStatus.DONE) {
+      catchUpOnShippedFollowUps();
+    }
     var store = rooms.get();
     var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
@@ -552,6 +576,18 @@ final class GlobalSpecOperations {
         .orElseThrow(
             () ->
                 new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+  }
+
+  /**
+   * Fixes the findings of every shipped follow-up, as this box's machinery: after a transition into
+   * {@code done}, for the follow-up itself, and before a done spec leaves {@code done} or is
+   * deleted here, so a resolution an earlier run lost lands while the follow-up still reads as
+   * shipped. Only an authoritative box writes them.
+   */
+  private void catchUpOnShippedFollowUps() {
+    if (reviewStore != null && authoritative.getAsBoolean()) {
+      Actor.run(Actor.system(), reviewStore::resolveFindingsOfShippedFollowUps);
+    }
   }
 
   private void requireStore() {
