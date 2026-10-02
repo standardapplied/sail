@@ -21,27 +21,24 @@ import java.util.Objects;
  * the history that decided it until now. A disk copy matching any retained revision of its file —
  * the current one, an older one that pushes from other boxes have since superseded, or one of a
  * file since deleted — is this box's output, recorded so that the import {@code sail migrate} runs
- * next publishes none of them. A copy matching no retained revision is a person's edit when the
- * file's history is whole: left unrecorded and reported, for that import to publish. When history
- * was compacted — its first revision is gone — the copy may match a version compaction dropped, so
- * the seed cannot tell it from an edit: an operator at the terminal is asked; otherwise it is
- * recorded as undecided ({@link FileStore#recordUndecided}), kept, reported and never published,
- * until this box writes or publishes the file again. A revision the content migration converted
- * recorded no mode, since the old materializer wrote whatever the box's umask gave, so it matches
- * its content at any mode that grants no execute bit the row lacks: that materializer never wrote
- * one, so one on disk was put there on purpose. History's one permitted use for the decision; from
- * the seed on, the record alone decides. Resumable: each file records in its own transaction, and a
- * file already recorded is left as it is. A copy this box cannot read fails the run before its
- * completion marker, so the import never takes that copy for a person's edit once it is readable;
- * what the run recorded stays, and the rerun finishes. Reads this box's own files, so it runs only
- * where they are ({@link #readsBoxFiles}).
+ * next publishes none of them. A copy matching no retained revision may be a person's unpublished
+ * edit or a version this box wrote that compaction has since dropped — on main, whose copies lag
+ * the fleet's pushes, mostly the latter — and nothing left can tell which: it is recorded as
+ * undecided ({@link FileStore#recordUndecided}), kept, reported with the remedy, and never
+ * published, until this box writes or publishes the file again. A revision the content migration
+ * converted recorded no mode, since the old materializer wrote whatever the box's umask gave, so it
+ * matches its content at any mode that grants no execute bit the row lacks: that materializer never
+ * wrote one, so one on disk was put there on purpose, the one edit history can still tell, left for
+ * the import to publish. History's one permitted use for the decision; from the seed on, the record
+ * alone decides. Resumable: each file records in its own transaction, and a file already recorded
+ * is left as it is. A copy this box cannot read fails the run before its completion marker, so the
+ * import never takes that copy for a person's edit once it is readable; what the run recorded
+ * stays, and the rerun finishes. Reads this box's own files, so it runs only where they are ({@link
+ * #readsBoxFiles}).
  */
 public final class MaterializedFilesMigration implements DataMigration {
 
   public static final String NAME = "materialized-files-v1";
-
-  static final String WROTE = "this box, which wrote it: refresh it from the shared version";
-  static final String EDITED = "you, who edited it: publish it";
 
   private final Path projectsDir;
 
@@ -68,9 +65,9 @@ public final class MaterializedFilesMigration implements DataMigration {
   @Override
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
     var files = new FileStore(db);
-    var history = new ChangeLog(db);
     var recorded = 0;
     var undecided = 0;
+    var skipped = 0;
     var notes = new ArrayList<String>();
     for (var project : files.projectsWithFiles()) {
       var filesDir = projectsDir.resolve(project).resolve("files").normalize();
@@ -82,26 +79,28 @@ public final class MaterializedFilesMigration implements DataMigration {
             || files.recordedMaterialization(id)) {
           continue;
         }
-        switch (seed(db, files, history, id, project, path, copy, prompter, notes)) {
+        switch (seed(db, files, id, project, path, copy, notes)) {
           case OURS -> recorded++;
           case UNDECIDED -> undecided++;
-          case PERSONS -> {}
+          default -> skipped++;
         }
       }
     }
     notes.addFirst("Recorded the copy this box wrote of " + recorded + " shared file(s)");
-    return new Report(recorded, undecided, notes.size() - 1 - undecided, notes);
+    return new Report(recorded, undecided, skipped, notes);
   }
 
+  /**
+   * Seeds the copy as this box's when history still holds its version, as undecided when it holds
+   * no version of its content, and leaves a person's deliberate chmod for the import.
+   */
   private static MaterializedFiles.Copy seed(
       Sqlite db,
       FileStore files,
-      ChangeLog history,
       String id,
       String project,
       String path,
       Path copy,
-      Prompter prompter,
       List<String> notes) {
     String hash;
     int mode;
@@ -118,55 +117,36 @@ public final class MaterializedFilesMigration implements DataMigration {
           e);
     }
     var row = files.find(project, path).orElse(null);
-    var copyIs = MaterializedFiles.Copy.PERSONS;
-    if (isRetainedVersion(db, id, row, hash, mode)) {
-      copyIs = MaterializedFiles.Copy.OURS;
-    } else if (!historyWhole(history, id)) {
-      copyIs = ask(prompter, id, notes);
-    } else {
-      notes.add(
-          "Left "
-              + id
-              + " unrecorded: its copy on disk matches no version this box holds, so it is a"
-              + " person's edit and the import publishes it");
-    }
+    var copyIs = retained(db, id, row, hash, mode);
     switch (copyIs) {
       case OURS -> db.transaction(() -> files.recordMaterialized(id, hash, mode));
-      case UNDECIDED -> db.transaction(() -> files.recordUndecided(id, hash, mode));
-      case PERSONS -> {}
+      case PERSONS ->
+          notes.add(
+              "Left "
+                  + id
+                  + " unrecorded: its copy on disk carries an execute bit no version of it had, put"
+                  + " there on purpose, so it is a person's edit and the import publishes it");
+      default -> {
+        db.transaction(() -> files.recordUndecided(id, hash, mode));
+        notes.add(
+            "Left "
+                + id
+                + " undecided: its copy on disk matches no version this box still holds, so it may"
+                + " be your unpublished edit or a version this box wrote before history was"
+                + " compacted. It is kept and not published; share it with sail project files add"
+                + " if it is your edit, or delete the copy to have sail refresh it");
+      }
     }
     return copyIs;
   }
 
-  private static MaterializedFiles.Copy ask(Prompter prompter, String id, List<String> notes) {
-    var answer =
-        prompter.choose(
-            "The copy of shared file "
-                + id
-                + " on disk, which matches no version this box still holds (its history was"
-                + " compacted),",
-            List.of(WROTE, EDITED));
-    if (answer.isPresent()) {
-      return WROTE.equals(answer.get())
-          ? MaterializedFiles.Copy.OURS
-          : MaterializedFiles.Copy.PERSONS;
-    }
-    notes.add(
-        "Left "
-            + id
-            + " undecided: its copy on disk matches no version this box still holds and its"
-            + " history was compacted. It is kept and not published; share it with sail project"
-            + " files add if it is your edit, or delete the copy to have sail refresh it");
-    return MaterializedFiles.Copy.UNDECIDED;
-  }
-
-  /** Whether the file's first revision is still retained: nothing of its history was compacted. */
-  private static boolean historyWhole(ChangeLog history, String id) {
-    return history.history(Erasure.FILE, id).stream()
-        .anyMatch(entry -> Revisions.counterOf(entry.rev()) == 1);
-  }
-
-  private static boolean isRetainedVersion(
+  /**
+   * What retained history says of the copy: {@code OURS} when a revision holds its content at its
+   * mode, or at no mode and the copy grants no execute bit the row lacks; {@code PERSONS} when a
+   * mode-less revision holds its content and the copy does grant one, which the old materializer
+   * never wrote; {@code UNDECIDED} when no retained revision holds its content at all.
+   */
+  private static MaterializedFiles.Copy retained(
       Sqlite db, String id, FileStore.FileRow row, String hash, int mode) {
     var modes =
         db.query(
@@ -179,8 +159,14 @@ public final class MaterializedFilesMigration implements DataMigration {
             LEGACY,
             id,
             hash);
-    return modes.contains((long) mode)
-        || (modes.contains(LEGACY) && (row == null || (mode & ~row.mode() & 0111) == 0));
+    if (modes.contains((long) mode)) {
+      return MaterializedFiles.Copy.OURS;
+    }
+    if (modes.contains(LEGACY)) {
+      var extraExecuteBit = row != null && (mode & ~row.mode() & 0111) != 0;
+      return extraExecuteBit ? MaterializedFiles.Copy.PERSONS : MaterializedFiles.Copy.OURS;
+    }
+    return MaterializedFiles.Copy.UNDECIDED;
   }
 
   private static final long LEGACY = -1;

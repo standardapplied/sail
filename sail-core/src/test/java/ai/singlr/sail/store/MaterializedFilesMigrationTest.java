@@ -21,7 +21,6 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +29,7 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * The upgrade seeds, once, what this box wrote of each shared file from the history that decided it
  * until now: a copy matching any retained revision, a superseded one or a deleted file's included,
- * is this box's output; a copy matching none is a person's edit, reported and left.
+ * is this box's output; a copy matching none is undecided, kept, reported and never published.
  */
 @ActingAs
 class MaterializedFilesMigrationTest {
@@ -54,12 +53,10 @@ class MaterializedFilesMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate() {
-    return migrate(DataMigration.Prompter.NON_INTERACTIVE);
-  }
-
-  private List<DataMigrator.Run> migrate(DataMigration.Prompter prompter) {
     return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
-        .run(ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")), prompter);
+        .run(
+            ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
+            DataMigration.Prompter.NON_INTERACTIVE);
   }
 
   /** The record as a box upgrading has it: empty, publishes before the upgrade recorded nothing. */
@@ -93,7 +90,7 @@ class MaterializedFilesMigrationTest {
   }
 
   @Test
-  void seedsEveryCopyMatchingARetainedVersionOnceAndReportsAPersonsEdit() throws IOException {
+  void seedsEveryCopyMatchingARetainedVersionOnceAndLeavesTheRestUndecided() throws IOException {
     ContentFixtures.put(files, "acme", "current.txt", "v1");
     copy("acme", "current.txt", "v1");
     ContentFixtures.put(files, "acme", "stale.txt", "v1");
@@ -111,18 +108,19 @@ class MaterializedFilesMigrationTest {
     var second = migrate().getFirst();
 
     assertEquals(3, first.report().applied());
-    assertEquals(1, first.report().skipped());
+    assertEquals(1, first.report().ambiguous());
     assertTrue(
         first.report().notes().stream()
-            .anyMatch(note -> note.contains("acme/edited.txt") && note.contains("person's edit")),
+            .anyMatch(note -> note.contains("acme/edited.txt") && note.contains("undecided")),
         first.report().notes().toString());
     assertTrue(second.alreadyApplied());
     assertTrue(files.copyOf("acme/current.txt", hashOf("v1"), 0644).ours());
     assertTrue(files.copyOf("acme/stale.txt", hashOf("v1"), 0644).ours(), "a superseded copy");
     assertTrue(files.copyOf("acme/gone.txt", hashOf("v1"), 0644).ours(), "a deleted file's copy");
-    assertFalse(files.copyOf("acme/edited.txt", hashOf("mine"), 0644).ours());
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED, files.copyOf("acme/edited.txt", hashOf("mine"), 0644));
     assertFalse(files.copyOf("acme/edited.txt", hashOf("v1"), 0644).ours());
-    assertEquals(3L, records(), "nothing recorded for a file with no copy on disk");
+    assertEquals(4L, records(), "nothing recorded for a file with no copy on disk");
   }
 
   @Test
@@ -205,8 +203,7 @@ class MaterializedFilesMigrationTest {
   }
 
   @Test
-  void aCopyMatchingNothingOfACompactedHistoryIsUndecidedKeptAndNeverPublished()
-      throws IOException {
+  void aCopyMatchingNothingThisBoxStillHoldsIsUndecidedKeptAndNeverPublished() throws IOException {
     ContentFixtures.put(files, "acme", "stale.conf", "v1");
     copy("acme", "stale.conf", "v1");
     compacted("stale.conf");
@@ -222,14 +219,15 @@ class MaterializedFilesMigrationTest {
     var run = migrate().getFirst();
 
     assertEquals(0, run.report().applied());
-    assertEquals(2, run.report().ambiguous());
-    assertEquals(1, run.report().skipped(), "the whole-history edit is a person's");
+    assertEquals(3, run.report().ambiguous());
     assertEquals(
         MaterializedFiles.Copy.UNDECIDED, files.copyOf("acme/stale.conf", hashOf("v1"), 0644));
     assertEquals(
         MaterializedFiles.Copy.UNDECIDED, files.copyOf("acme/gone.conf", hashOf("v1"), 0644));
     assertEquals(
-        MaterializedFiles.Copy.PERSONS, files.copyOf("acme/fresh.txt", hashOf("mine"), 0644));
+        MaterializedFiles.Copy.UNDECIDED,
+        files.copyOf("acme/fresh.txt", hashOf("mine"), 0644),
+        "nothing left can tell an edit from a version compaction dropped");
     assertTrue(
         run.report().notes().stream()
             .anyMatch(
@@ -239,36 +237,11 @@ class MaterializedFilesMigrationTest {
                         && note.contains("sail project files add")),
         run.report().notes().toString());
     assertTrue(migrate().getFirst().alreadyApplied());
-    files.recordMaterialized("acme/stale.conf", hashOf("v9"), 0644);
+    files.recordWriting("acme/stale.conf", hashOf("v9"), 0644);
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf("acme/stale.conf", hashOf("v1"), 0644),
         "once this box writes the file again, the undecided copy is not kept as its own");
-  }
-
-  @Test
-  void anOperatorAtTheTerminalDecidesACompactedCopy() throws IOException {
-    ContentFixtures.put(files, "acme", "wrote.conf", "v1");
-    copy("acme", "wrote.conf", "v1");
-    compacted("wrote.conf");
-    ContentFixtures.put(files, "acme", "edited.conf", "v1");
-    copy("acme", "edited.conf", "v1");
-    compacted("edited.conf");
-    beforeUpgrade();
-    DataMigration.Prompter operator =
-        (context, candidates) ->
-            Optional.of(
-                context.contains("acme/wrote.conf")
-                    ? MaterializedFilesMigration.WROTE
-                    : MaterializedFilesMigration.EDITED);
-
-    var run = migrate(operator).getFirst();
-
-    assertEquals(1, run.report().applied());
-    assertEquals(0, run.report().ambiguous());
-    assertTrue(files.copyOf("acme/wrote.conf", hashOf("v1"), 0644).ours());
-    assertEquals(
-        MaterializedFiles.Copy.PERSONS, files.copyOf("acme/edited.conf", hashOf("v1"), 0644));
   }
 
   /**

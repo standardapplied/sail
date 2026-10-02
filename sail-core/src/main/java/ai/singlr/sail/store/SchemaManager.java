@@ -650,12 +650,11 @@ public final class SchemaManager {
           "DROP TABLE spec_attachments",
           """
           CREATE TABLE materialized_files (
-              id TEXT PRIMARY KEY,
+              id TEXT NOT NULL,
               content_hash TEXT NOT NULL,
               mode INTEGER NOT NULL,
-              previous_hash TEXT,
-              previous_mode INTEGER,
-              undecided INTEGER NOT NULL DEFAULT 0
+              undecided INTEGER NOT NULL DEFAULT 0,
+              PRIMARY KEY (id, content_hash, mode)
           )""");
 
   /** The schema version this binary converges every database to. */

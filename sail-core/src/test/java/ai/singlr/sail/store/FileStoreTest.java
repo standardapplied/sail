@@ -92,14 +92,14 @@ class FileStoreTest {
   }
 
   @Test
-  void aCopyIsThisBoxsAsTheVersionItWroteAndWhileAWriteIsInFlightTheOneBefore() {
+  void aCopyIsThisBoxsAsAnyVersionItHasInFlightUntilOneLandsAndThatOneAlone() {
     var first = files.blobs().putText("first");
     var second = files.blobs().putText("second");
     var third = files.blobs().putText("third");
 
     files.recordMaterialized(id("known"), first, 0644);
 
-    assertTrue(files.copyOf(id("known"), first, 0644).ours());
+    assertEquals(MaterializedFiles.Copy.SETTLED, files.copyOf(id("known"), first, 0644));
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf(id("known"), first, 0600),
@@ -113,31 +113,25 @@ class FileStoreTest {
         files.copyOf(id("other"), first, 0644),
         "no record, a person's");
     files.recordWriting(id("known"), second, 0600);
-    assertTrue(
-        files.copyOf(id("known"), first, 0644).ours(),
-        "the version written before stays this box's while the write is in flight");
-    assertTrue(files.copyOf(id("known"), second, 0600).ours());
-    files.recordWriting(id("known"), second, 0600);
-    assertTrue(
-        files.copyOf(id("known"), first, 0644).ours(),
-        "a write recorded again keeps the one before");
-    files.recordMaterialized(id("known"), second, 0600);
+    files.recordWriting(id("known"), third, 0644);
+    assertEquals(
+        MaterializedFiles.Copy.OURS,
+        files.copyOf(id("known"), first, 0644),
+        "the version that landed stays this box's while writes are in flight");
+    assertEquals(
+        MaterializedFiles.Copy.OURS,
+        files.copyOf(id("known"), second, 0600),
+        "so does every write in flight, whether or not it landed");
+    assertEquals(MaterializedFiles.Copy.OURS, files.copyOf(id("known"), third, 0644));
+    files.recordMaterialized(id("known"), third, 0644);
+    assertEquals(MaterializedFiles.Copy.SETTLED, files.copyOf(id("known"), third, 0644));
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf(id("known"), first, 0644),
-        "once the write landed, a hand revert to the earlier version is a person's");
-    files.recordWriting(id("known"), third, 0644);
-    files.recordWriting(id("known"), first, 0644);
-    assertTrue(
-        files.copyOf(id("known"), second, 0600).ours(),
-        "the last version known to have landed stays this box's across writes in flight");
-    assertEquals(
-        MaterializedFiles.Copy.PERSONS,
-        files.copyOf(id("known"), third, 0644),
-        "a write that never landed is not kept once another is in flight");
-    assertTrue(files.copyOf(id("known"), first, 0644).ours());
+        "once a write landed, a hand revert to an earlier version is a person's");
+    assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("known"), second, 0600));
     files.forgetMaterialized(id("known"));
-    assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("known"), first, 0644));
+    assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("known"), third, 0644));
   }
 
   @Test
@@ -151,17 +145,20 @@ class FileStoreTest {
     assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("doubt"), undecided, 0600));
     files.recordUndecided(id("doubt"), next, 0644);
     assertEquals(
-        MaterializedFiles.Copy.UNDECIDED,
-        files.copyOf(id("doubt"), undecided, 0644),
-        "an undecided record is never written over by another");
-    files.recordMaterialized(id("doubt"), next, 0644);
-    assertTrue(files.copyOf(id("doubt"), next, 0644).ours());
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("doubt"), next, 0644),
+        "one undecided copy per file, the first the seed met");
+    files.recordWriting(id("doubt"), next, 0644);
+    assertEquals(MaterializedFiles.Copy.SETTLED, files.copyOf(id("doubt"), next, 0644));
     assertEquals(
         MaterializedFiles.Copy.PERSONS,
         files.copyOf(id("doubt"), undecided, 0644),
-        "the undecided copy is not kept as the version before");
+        "a write gives the undecided copy no standing");
     files.recordUndecided(id("doubt"), undecided, 0644);
-    assertTrue(files.copyOf(id("doubt"), next, 0644).ours(), "nor over a decided one");
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("doubt"), undecided, 0644),
+        "nor is one recorded beside what this box holds");
   }
 
   @Test

@@ -37,7 +37,8 @@ class FilesUpgradeCliTest {
   @TempDir Path home;
 
   @Test
-  void theUpgradeOnMainImportsOnlyAPersonsEditAndPullStillRefreshesMainsCopies() throws Exception {
+  void theUpgradeOnMainPublishesNothingItCannotTellAndPullStillRefreshesMainsCopies()
+      throws Exception {
     var data = Files.createDirectories(home.resolve(".sail"));
     var output = home.resolve("output.txt");
     var builder =
@@ -84,20 +85,33 @@ class FilesUpgradeCliTest {
 
       assertEquals("v1", ContentFixtures.text(main, "acme", "stale.conf"), "republished");
       assertTrue(main.find("acme", "gone.conf").isEmpty(), "resurrected");
-      assertEquals("a person's edit", ContentFixtures.text(main, "acme", "edited.conf"));
+      assertEquals(
+          "v0",
+          ContentFixtures.text(main, "acme", "edited.conf"),
+          "an edit of a shared file nothing can tell from a stale copy is not published unasked");
       assertEquals(busy, ContentFixtures.text(main, "acme", "busy.conf"));
       SyncBox.round(mainDb, nodeDb, "file");
       assertEquals("v1", ContentFixtures.text(node, "acme", "stale.conf"));
       assertTrue(node.find("acme", "gone.conf").isEmpty());
-      assertEquals("a person's edit", ContentFixtures.text(node, "acme", "edited.conf"));
 
       assertEquals(0, new CommandLine(new SyncCommand.Gc()).execute());
       assertEquals(0, new CommandLine(new ProjectFilesCommand.Export()).execute("-p", "acme"));
 
       assertEquals("v1", Files.readString(filesDir.resolve("stale.conf")));
       assertEquals(busy, Files.readString(filesDir.resolve("busy.conf")));
-      assertEquals("a person's edit", Files.readString(filesDir.resolve("edited.conf")));
+      assertEquals(
+          "a person's edit",
+          Files.readString(filesDir.resolve("edited.conf")),
+          "the undecided copy is kept until the person shares it");
       assertFalse(Files.exists(filesDir.resolve("gone.conf")));
+
+      assertEquals(
+          0,
+          new CommandLine(new ProjectFilesCommand.Add())
+              .execute("-p", "acme", filesDir.resolve("edited.conf").toString()));
+      assertEquals("a person's edit", ContentFixtures.text(main, "acme", "edited.conf"));
+      SyncBox.round(mainDb, nodeDb, "file");
+      assertEquals("a person's edit", ContentFixtures.text(node, "acme", "edited.conf"));
     }
   }
 }

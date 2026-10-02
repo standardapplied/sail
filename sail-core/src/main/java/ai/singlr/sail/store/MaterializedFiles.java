@@ -10,23 +10,22 @@ import java.util.Objects;
 
 /**
  * What this box knows of each shared file's copy on disk, so a copy is told from a person's edit by
- * this record alone, never by retained history: the version this box last wrote to disk or
- * published from it, and the one before, since a write records before it moves the file into place
- * and may die between the two. A copy matching either is this box's ({@link Copy#OURS}) to refresh
- * or remove. A copy the one-time seed could not tell, its file's history compacted past the version
- * it might match, is recorded as {@link Copy#UNDECIDED}: left alone and never published, until this
- * box writes or publishes the file again. Any other copy is a person's. Local to this box: never
- * journaled, never synced, not a blob reference.
+ * this record alone, never by retained history: every version this box wrote to disk or published
+ * since the last one it knows landed — a write records before it moves the file into place and may
+ * die between the two, and a publish is landed only by the materialize that follows — and, once one
+ * lands, that version alone. A copy matching any of them is this box's ({@link Copy#OURS}) to
+ * refresh or remove. A copy the one-time seed could not tell, matching no version its file's
+ * history still holds, is recorded as {@link Copy#UNDECIDED}: left alone and never published, until
+ * this box writes or publishes the file again. Any other copy is a person's. Local to this box:
+ * never journaled, never synced, not a blob reference.
  */
 public final class MaterializedFiles {
 
   /** What a copy on disk is to this box. */
   public enum Copy {
-    /** The version this box wrote, with no write in flight: nothing to record. */
+    /** The one version this box wrote, with no write in flight: nothing to record. */
     SETTLED,
-    /**
-     * This box's: a version it wrote or published, or the one before while a write is in flight.
-     */
+    /** This box's: a version it wrote or published, landed or in flight. */
     OURS,
     /** A copy the seed could not tell from an edit: kept, never published. */
     UNDECIDED,
@@ -46,46 +45,37 @@ public final class MaterializedFiles {
   }
 
   /**
-   * Records that this box is about to write {@code contentHash} at {@code mode} as file {@code id}:
-   * the version becomes this box's, and the last one it knows landed on disk stays this box's too,
-   * until {@link #wrote} says this write landed — a write that dies in between, or a publish whose
-   * materialize never ran, leaves a copy this box still knows.
+   * Records that this box is about to write {@code contentHash} at {@code mode} as file {@code id},
+   * or published it for the materialize that follows: the version is this box's beside every other
+   * it has in flight, until {@link #wrote} says one landed; an undecided record gives way to it.
    */
   void writing(String id, String contentHash, int mode) {
     requireValid(id, contentHash, mode);
+    db.execute("DELETE FROM materialized_files WHERE id = ? AND undecided = 1", id);
     db.execute(
         """
-        INSERT INTO materialized_files (id, content_hash, mode, previous_hash, previous_mode,
-            undecided)
-        VALUES (?, ?, ?, NULL, NULL, 0)
-        ON CONFLICT(id) DO UPDATE SET
-            previous_hash = CASE WHEN undecided = 1 THEN NULL
-                WHEN content_hash = excluded.content_hash AND mode = excluded.mode
-                THEN previous_hash ELSE COALESCE(previous_hash, content_hash) END,
-            previous_mode = CASE WHEN undecided = 1 THEN NULL
-                WHEN content_hash = excluded.content_hash AND mode = excluded.mode
-                THEN previous_mode ELSE COALESCE(previous_mode, mode) END,
-            content_hash = excluded.content_hash,
-            mode = excluded.mode,
-            undecided = 0""",
+        INSERT INTO materialized_files (id, content_hash, mode, undecided) VALUES (?, ?, ?, 0)
+            ON CONFLICT(id, content_hash, mode) DO UPDATE SET undecided = 0""",
         id,
         contentHash,
         mode);
   }
 
   /**
-   * Records {@code contentHash} at {@code mode} as the version of file {@code id} this box wrote to
-   * disk or published, and that alone: a write that landed, a copy found in sync, a publish.
+   * Records {@code contentHash} at {@code mode} as the version of file {@code id} on disk, and that
+   * alone: a write that landed, a copy found in sync, a publish whose bytes came from the copy.
    */
   void wrote(String id, String contentHash, int mode) {
     requireValid(id, contentHash, mode);
     db.execute(
+        "DELETE FROM materialized_files WHERE id = ? AND NOT (content_hash = ? AND mode = ?)",
+        id,
+        contentHash,
+        mode);
+    db.execute(
         """
-        INSERT INTO materialized_files (id, content_hash, mode, previous_hash, previous_mode,
-            undecided)
-        VALUES (?, ?, ?, NULL, NULL, 0)
-        ON CONFLICT(id) DO UPDATE SET content_hash = excluded.content_hash,
-            mode = excluded.mode, previous_hash = NULL, previous_mode = NULL, undecided = 0""",
+        INSERT INTO materialized_files (id, content_hash, mode, undecided) VALUES (?, ?, ?, 0)
+            ON CONFLICT(id, content_hash, mode) DO UPDATE SET undecided = 0""",
         id,
         contentHash,
         mode);
@@ -94,43 +84,42 @@ public final class MaterializedFiles {
   /**
    * Records the copy of file {@code id} holding {@code contentHash} at {@code mode} as one this box
    * cannot tell from a person's edit: kept, reported, never published, until the file is written or
-   * published here again. Never over a decided record.
+   * published here again. Never beside a record this box holds.
    */
   void recordUndecided(String id, String contentHash, int mode) {
     requireValid(id, contentHash, mode);
-    db.execute(
-        """
-        INSERT INTO materialized_files (id, content_hash, mode, previous_hash, previous_mode,
-            undecided)
-        VALUES (?, ?, ?, NULL, NULL, 1) ON CONFLICT(id) DO NOTHING""",
-        id,
-        contentHash,
-        mode);
+    if (!recorded(id)) {
+      db.execute(
+          "INSERT INTO materialized_files (id, content_hash, mode, undecided) VALUES (?, ?, ?, 1)",
+          id,
+          contentHash,
+          mode);
+    }
   }
 
   /**
    * What a disk copy of file {@code id} holding {@code contentHash} at {@code mode} is to this box.
    */
   Copy copyOf(String id, String contentHash, int mode) {
-    return db.queryOne(
-            """
-            SELECT undecided, content_hash = ? AND mode = ? AND previous_hash IS NULL
-                FROM materialized_files WHERE id = ?
-                AND ((content_hash = ? AND mode = ?)
-                     OR (undecided = 0 AND previous_hash = ? AND previous_mode = ?))""",
-            row ->
-                row.integer(0) == 1
-                    ? Copy.UNDECIDED
-                    : row.integer(1) == 1 ? Copy.SETTLED : Copy.OURS,
-            contentHash,
-            mode,
-            id,
-            contentHash,
-            mode,
-            contentHash,
-            mode)
-        .orElse(Copy.PERSONS);
+    var versions =
+        db.query(
+            "SELECT content_hash, mode, undecided FROM materialized_files WHERE id = ?",
+            row -> new Version(row.text(0), (int) row.integer(1), row.integer(2) == 1),
+            id);
+    var matched =
+        versions.stream()
+            .filter(version -> version.hash().equals(contentHash) && version.mode() == mode)
+            .findFirst();
+    if (matched.isEmpty()) {
+      return Copy.PERSONS;
+    }
+    if (matched.get().undecided()) {
+      return Copy.UNDECIDED;
+    }
+    return versions.size() == 1 ? Copy.SETTLED : Copy.OURS;
   }
+
+  private record Version(String hash, int mode, boolean undecided) {}
 
   /** Whether anything is recorded of file {@code id}. */
   boolean recorded(String id) {
