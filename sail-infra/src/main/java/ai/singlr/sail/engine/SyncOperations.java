@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
@@ -408,7 +409,7 @@ public final class SyncOperations {
                       + " file(s) in '"
                       + project
                       + "' the upgrade could not tell from your edits ("
-                      + FileMaterializer.Report.UNDECIDED_REMEDY
+                      + MaterializedFiles.UNDECIDED_REMEDY
                       + "): "
                       + String.join(", ", report.undecided()),
                   Ansi.AUTO));

@@ -133,8 +133,8 @@ public final class MaterializedFilesMigration implements DataMigration {
                 + id
                 + " undecided: its copy on disk matches no version this box still holds, so it may"
                 + " be your unpublished edit or a version this box wrote before history was"
-                + " compacted. It is kept and not published; share it with sail project files add"
-                + " if it is your edit, or delete the copy to have sail refresh it");
+                + " compacted. It is kept and not published; "
+                + MaterializedFiles.UNDECIDED_REMEDY);
       }
     }
     return copyIs;

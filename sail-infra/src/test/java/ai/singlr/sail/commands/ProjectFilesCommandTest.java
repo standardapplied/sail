@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
@@ -402,12 +403,14 @@ class ProjectFilesCommandTest {
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
     ContentFixtures.put(files, "acme", "a.txt", "A");
-    var report = ProjectFilesCommand.Export.export(files, projectsDir, files.projectsWithFiles());
+    var materializer = new FileMaterializer(files, projectsDir);
+    var report =
+        ProjectFilesCommand.Export.export(materializer::materialize, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
     ContentFixtures.put(files, "acme", "a.txt", "A2");
-    var second = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
+    var second = ProjectFilesCommand.Export.export(materializer::materialize, List.of("acme"));
 
     assertEquals(0, second.written());
     assertEquals(List.of("acme/a.txt"), second.skipped());
@@ -416,7 +419,7 @@ class ProjectFilesCommandTest {
     files.forgetMaterialized(FileStore.idOf("acme", "a.txt"));
     files.recordUndecided(
         FileStore.idOf("acme", "a.txt"), files.blobs().putText("LOCAL EDIT"), 0644);
-    var third = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
+    var third = ProjectFilesCommand.Export.export(materializer::materialize, List.of("acme"));
 
     assertEquals(0, third.written());
     assertEquals(List.of(), third.skipped());
@@ -424,6 +427,26 @@ class ProjectFilesCommandTest {
         List.of("acme/a.txt"),
         third.undecided(),
         "a copy the upgrade could not tell is reported apart from a person's edit");
+  }
+
+  @Test
+  void aPullNamesEachKeptCopyWithWhatItIsAndWhatToDo() {
+    var err = System.err;
+    var captured = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      ProjectFilesCommand.Export.print(
+          new ProjectFilesCommand.Export.ExportReport(
+              1, 0, List.of("acme/edited.txt"), List.of("acme/stale.conf")));
+    } finally {
+      System.setErr(err);
+    }
+
+    var lines = captured.toString(StandardCharsets.UTF_8).lines().toList();
+    assertEquals(2, lines.size(), lines.toString());
+    assertTrue(lines.get(0).contains("kept local edit: acme/edited.txt (unchanged)"), lines.get(0));
+    assertTrue(lines.get(1).contains("kept acme/stale.conf"), lines.get(1));
+    assertTrue(lines.get(1).contains(MaterializedFiles.UNDECIDED_REMEDY), lines.get(1));
   }
 
   @Test
