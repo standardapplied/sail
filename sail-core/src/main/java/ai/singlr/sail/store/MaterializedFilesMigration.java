@@ -40,8 +40,8 @@ public final class MaterializedFilesMigration implements DataMigration {
 
   public static final String NAME = "materialized-files-v1";
 
-  static final String WROTE = "this box wrote it: refresh it from the shared version";
-  static final String EDITED = "I edited it: publish it";
+  static final String WROTE = "this box, which wrote it: refresh it from the shared version";
+  static final String EDITED = "you, who edited it: publish it";
 
   private final Path projectsDir;
 
@@ -143,8 +143,8 @@ public final class MaterializedFilesMigration implements DataMigration {
         prompter.choose(
             "The copy of shared file "
                 + id
-                + " on disk matches no version this box still holds, and its history was"
-                + " compacted, so it may be a version this box wrote or your unpublished edit.",
+                + " on disk, which matches no version this box still holds (its history was"
+                + " compacted),",
             List.of(WROTE, EDITED));
     if (answer.isPresent()) {
       return WROTE.equals(answer.get())
