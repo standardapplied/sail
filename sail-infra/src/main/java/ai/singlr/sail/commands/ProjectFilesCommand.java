@@ -498,8 +498,9 @@ public final class ProjectFilesCommand implements Runnable {
               Ansi.AUTO.string(
                   "  @|yellow ⚠|@ kept "
                       + copy
-                      + ": the upgrade could not tell it from your edit (delete it to take"
-                      + " main's, or 'sail project files add' it if yours)"));
+                      + ": the upgrade could not tell it from your edit ("
+                      + FileMaterializer.Report.UNDECIDED_REMEDY
+                      + ")"));
         }
       }
     }

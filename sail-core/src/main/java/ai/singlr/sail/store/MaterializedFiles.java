@@ -83,8 +83,8 @@ public final class MaterializedFiles {
 
   /**
    * Records the copy of file {@code id} holding {@code contentHash} at {@code mode} as one this box
-   * cannot tell from a person's edit: kept, reported, never published, until the file is written or
-   * published here again. Never beside a record this box holds.
+   * cannot tell from a person's edit: kept, reported, never published, until a version this box
+   * writes lands in its place. Never beside a record this box holds.
    */
   void recordUndecided(String id, String contentHash, int mode) {
     requireValid(id, contentHash, mode);

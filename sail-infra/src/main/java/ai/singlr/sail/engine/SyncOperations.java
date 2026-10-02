@@ -407,8 +407,9 @@ public final class SyncOperations {
                       + report.undecided().size()
                       + " file(s) in '"
                       + project
-                      + "' the upgrade could not tell from your edits (delete to take main's, or"
-                      + " capture with 'sail project files add' if yours): "
+                      + "' the upgrade could not tell from your edits ("
+                      + FileMaterializer.Report.UNDECIDED_REMEDY
+                      + "): "
                       + String.join(", ", report.undecided()),
                   Ansi.AUTO));
         }

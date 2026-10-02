@@ -203,6 +203,8 @@ class FileStoreTest {
     files.recordMaterialized(id("a.txt"), hash, 0644);
     files.recordMaterialized(id("gone.txt"), old, 0644);
 
+    ContentFixtures.put(files, "acme", "doubt.txt", "current");
+    files.forgetMaterialized(id("doubt.txt"));
     files.recordUndecided(id("doubt.txt"), old, 0644);
 
     files.reproject("acme", "globex");

@@ -27,10 +27,11 @@ import java.util.Objects;
  *       box wrote or published, in content and in mode ({@link FileStore#copyOf}); a copy already
  *       holding the current row is in sync whatever its provenance and is recorded as this box's
  *       from then on; a file a human edited locally without publishing is neither, so it is left
- *       alone and reported as skipped, as is a copy the upgrade's seed could not tell. A {@code
- *       WRITE} records the version before it moves the file into place and again once it has, so a
- *       write that dies between the two leaves a copy this box still knows as its own; a {@code
- *       DELETE} removes the file and then forgets it.
+ *       alone and reported as skipped; a copy the upgrade's seed could not tell is left alone too
+ *       and reported apart, with {@link Report#UNDECIDED_REMEDY}. A {@code WRITE} records the
+ *       version before it moves the file into place and again once it has, so a write that dies
+ *       between the two leaves a copy this box still knows as its own; a {@code DELETE} removes the
+ *       file and then forgets it.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
  *       (a malicious {@code ../}) is refused — the content comes from other FDEs over the wire.
  * </ul>
@@ -50,6 +51,11 @@ public final class FileMaterializer {
    * undecided} those the upgrade's seed could not tell from an edit, both left as they are.
    */
   public record Report(int written, int deleted, List<String> skipped, List<String> undecided) {
+
+    /** What to do with a copy the upgrade's seed could not tell from a person's edit. */
+    public static final String UNDECIDED_REMEDY =
+        "delete it to take main's, or capture it with 'sail project files add' if yours";
+
     public Report(int written, int deleted, List<String> skipped) {
       this(written, deleted, skipped, List.of());
     }
