@@ -67,9 +67,9 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * {@code authoritative} says whether this box resolves the findings a follow-up marked done here
-   * was drafted from: main and a box that syncs nobody do; a node leaves them to main, which
-   * resolves them when the transition commits there ({@code ShippedFollowUps}).
+   * {@code authoritative} says whether this box resolves the findings a shipped follow-up was
+   * drafted from: main and a box that syncs nobody do; a node leaves them to main, which resolves
+   * them when the transition commits there ({@code ShippedFollowUps}).
    */
   GlobalSpecOperations(
       SpecStore specStore,
@@ -278,6 +278,9 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
+    if (updated.status() != existing.status()) {
+      catchUpOnShippedFollowUps();
+    }
     specStore.update(updated);
     if (wake != null) {
       writeWake(updated, wake.value());
@@ -285,9 +288,7 @@ final class GlobalSpecOperations {
     if (updated.status() == SpecStatus.DONE
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
-      if (authoritative.getAsBoolean()) {
-        reviewStore.resolveFindingsOfShippedFollowUps();
-      }
+      catchUpOnShippedFollowUps();
       reviewStore.resolveShippedFindings(specId);
     }
     var result = specStore.findById(specId).orElseThrow();
@@ -572,6 +573,17 @@ final class GlobalSpecOperations {
         .orElseThrow(
             () ->
                 new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+  }
+
+  /**
+   * Fixes the findings of every shipped follow-up, as this box's machinery, around every status
+   * change here: before one, so a follow-up leaving {@code done} has its findings fixed first;
+   * after one into {@code done}, for the follow-up itself. Only an authoritative box writes them.
+   */
+  private void catchUpOnShippedFollowUps() {
+    if (reviewStore != null && authoritative.getAsBoolean()) {
+      Actor.run(Actor.system(), reviewStore::resolveFindingsOfShippedFollowUps);
+    }
   }
 
   private void requireStore() {

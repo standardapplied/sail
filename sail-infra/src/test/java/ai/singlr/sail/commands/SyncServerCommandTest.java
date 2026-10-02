@@ -373,6 +373,42 @@ class SyncServerCommandTest {
   }
 
   @Test
+  void aSessionOpensByFixingTheFindingsOfEveryShippedFollowUpMainHolds() throws Exception {
+    Acting.as("uday", () -> mainSpecs.create(spec("fix", "Fix")));
+    Acting.as("uday", () -> mainSpecs.create(spec("followup", "Follow-up")));
+    var reviews = new ReviewStore(mainDb);
+    var found =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "A.java",
+            1,
+            2,
+            "leak",
+            "desc",
+            "evidence",
+            null,
+            0.9);
+    var review =
+        Acting.as(
+            "uday",
+            () -> {
+              var id = reviews.createReview("fix", 1);
+              reviews.addFinding(reviews.createStage(id, "security", "agent"), found);
+              reviews.linkSourceFindings("followup", List.of(found.id()));
+              mainSpecs.updateStatus("followup", SpecStatus.DONE);
+              return id;
+            });
+    assertEquals(
+        Finding.Resolution.OPEN, reviews.findingsForReview(review).getFirst().resolution());
+
+    syncWithToken(tokenFor("member"));
+
+    assertEquals(
+        Finding.Resolution.FIXED, reviews.findingsForReview(review).getFirst().resolution());
+  }
+
+  @Test
   void aReSyncedUnchangedSpecEmitsNoTransition() throws Exception {
     Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");

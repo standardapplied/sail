@@ -104,7 +104,9 @@ public final class SyncServerCommand implements Callable<Integer> {
    * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
    * this main ({@code box}), whose own FDE syncs from no box but main. A session with no token is a
    * read-only one that owns nothing; a token whose FDE is disabled is refused before anything is
-   * served.
+   * served. Main first fixes the findings of every shipped follow-up it holds ({@link
+   * ShippedFollowUps#catchUp}), so a resolution a busy database cost an earlier session lands
+   * before this one can move a follow-up on; failing that fails the session for the node to retry.
    */
   static int serve(
       SyncDatabase converged,
@@ -122,6 +124,7 @@ public final class SyncServerCommand implements Callable<Integer> {
           "sail _sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
       return 1;
     }
+    new ShippedFollowUps(db).catchUp();
     SyncRpcServer.over(
             db,
             mainId,

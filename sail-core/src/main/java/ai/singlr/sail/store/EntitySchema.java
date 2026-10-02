@@ -76,6 +76,14 @@ public interface EntitySchema {
    * Instant-valued fields that only ever move forward and so can never be a conflict: when both
    * sides moved one, the later instant wins. None by default.
    */
+  /**
+   * The schema's own merge of a field both sides changed differently ({@link
+   * ConflictDetector.FieldMerger}); none by default, so such a field is a conflict.
+   */
+  default ConflictDetector.FieldMerger fieldMerger() {
+    return ConflictDetector.FieldMerger.NONE;
+  }
+
   default Set<String> latestWinsFields() {
     return Set.of();
   }

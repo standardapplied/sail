@@ -13,10 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -709,6 +711,60 @@ class GlobalSpecOperationsTest {
         Finding.Resolution.FIXED,
         reviewStore.findingsForReview(reviewId).getFirst().resolution(),
         "the fix outlives the follow-up's archive");
+  }
+
+  @Test
+  void archivingAShippedFollowUpFixesItsSourceFindingsFirstWhenAnEarlierRunWasLost() {
+    Acting.by(ADMIN, () -> ops.create(createReq(Map.of("status", "done"))));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+    var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
+    Acting.by(
+        ADMIN,
+        () ->
+            ops.create(
+                createReq(
+                    Map.of("id", "auth-followup", "title", "Follow-up", "status", "pending"))));
+    reviewStore.linkSourceFindings("auth-followup", List.of(findingId));
+    specStore.updateStatus("auth-followup", SpecStatus.DONE);
+    assertEquals(
+        Finding.Resolution.OPEN, reviewStore.findingsForReview(reviewId).getFirst().resolution());
+
+    Acting.by(
+        ADMIN,
+        () -> ops.update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "archived"))));
+
+    var fixed = reviewStore.findingsForReview(reviewId).getFirst();
+    assertEquals(Finding.Resolution.FIXED, fixed.resolution());
+    assertEquals(
+        Actor.system().handle(),
+        new ChangeLog(db).head("review", reviewId).orElseThrow().actor(),
+        "the fix is this box's machinery's, not the archiving user's");
+  }
+
+  @Test
+  void aNodeMarkingItsFollowUpDoneLeavesTheSourceFindingsToMain() {
+    var node =
+        new GlobalSpecOperations(specStore, reviewStore, null, null, () -> null, () -> false);
+    Acting.by(ADMIN, () -> node.create(createReq(Map.of("status", "done"))));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+    var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
+    Acting.by(
+        ADMIN,
+        () ->
+            node.create(
+                createReq(
+                    Map.of("id", "auth-followup", "title", "Follow-up", "status", "pending"))));
+    reviewStore.linkSourceFindings("auth-followup", List.of(findingId));
+    var rev = reviewStore.latestRev(reviewId);
+
+    Acting.by(
+        ADMIN,
+        () -> node.update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done"))));
+
+    assertEquals(
+        Finding.Resolution.OPEN, reviewStore.findingsForReview(reviewId).getFirst().resolution());
+    assertEquals(
+        rev, reviewStore.latestRev(reviewId), "a node writes nothing to the source review");
   }
 
   @Test

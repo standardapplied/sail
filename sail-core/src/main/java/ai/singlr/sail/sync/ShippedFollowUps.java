@@ -18,7 +18,9 @@ import java.util.Objects;
  * resolves them — a node marking its follow-up done leaves them to main — since the source review
  * is as often another FDE's, whose review a node may not write but main always may. The sink is
  * best-effort by contract, so it catches up on every spec transition rather than acting on the one
- * that just committed: a run lost to a busy database is made good by the next.
+ * that just committed, and main catches up again as every session opens ({@link #catchUp}), before
+ * any transition of that session can move a shipped follow-up on: a run lost to a busy database is
+ * made good by the next, or fails that session loudly for the node to retry.
  */
 public final class ShippedFollowUps implements SyncTransitionSink {
 
@@ -31,7 +33,12 @@ public final class ShippedFollowUps implements SyncTransitionSink {
   @Override
   public void onTransition(SyncTransition transition) {
     if (Erasure.SPEC.equals(transition.entityType())) {
-      Actor.run(Actor.system(), reviews::resolveFindingsOfShippedFollowUps);
+      catchUp();
     }
+  }
+
+  /** Resolves the findings of every shipped follow-up main holds, as this box's machinery. */
+  public void catchUp() {
+    Actor.run(Actor.system(), reviews::resolveFindingsOfShippedFollowUps);
   }
 }

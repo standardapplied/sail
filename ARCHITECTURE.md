@@ -249,8 +249,10 @@ node adopting main's version takes main's findings exactly. A finding names the 
 drafted from it in that content, so the link survives the follow-up's delete and restore on
 every box, and the follow-up reaching `done` resolves the finding `FIXED` in the same content —
 one revision of the source review, written by main: locally when main marks the follow-up done,
-and on every spec transition a node commits there (`ShippedFollowUps`, which resolves the
-findings of every shipped follow-up, so a run lost to a busy database is made good by the next),
+and on every spec transition a node commits there and as every session opens (`ShippedFollowUps`,
+which resolves the findings of every shipped follow-up, so a run lost to a busy database is made
+good by the next before any follow-up can leave `done`; main also catches up around each status
+change it makes itself),
 since the source review is as often another FDE's, which a node may not write — so the
 resolution outlives the follow-up's archive and erasure. Findings two boxes changed at once merge
 finding by finding (`ReviewFindingsContent.merge`, the review store's `FieldMerger`): main fixing

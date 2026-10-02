@@ -43,12 +43,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   private final Sqlite db;
   private final ChangeLog changeLog;
   private final RevisionJournal revisions;
+  private final ReviewSchema schema;
   private final ReviewFindingsContent content;
 
   public ReviewStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
-    this.revisions = new RevisionJournal(db, changeLog, new ReviewSchema());
+    this.schema = new ReviewSchema();
+    this.revisions = new RevisionJournal(db, changeLog, schema);
     this.content = new ReviewFindingsContent(db, new BlobStore(db));
   }
 
@@ -806,17 +808,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return Set.of(FINDINGS_HASH);
   }
 
-  /**
-   * Findings both sides changed merge finding by finding ({@link ReviewFindingsContent#merge}):
-   * main resolving one as a follow-up ships while this box's review run rules on another is no
-   * conflict.
-   */
   @Override
   public ConflictDetector.FieldMerger fieldMerger() {
-    return (field, base, local, remote) ->
-        FINDINGS_HASH.equals(field)
-            ? content.merge((String) base, (String) local, (String) remote).map(hash -> hash)
-            : Optional.empty();
+    return schema.fieldMerger();
   }
 
   @Override
@@ -1035,6 +1029,19 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     @Override
     public String entityType() {
       return ENTITY;
+    }
+
+    /**
+     * Findings both sides changed merge finding by finding ({@link ReviewFindingsContent#merge}):
+     * main resolving one as a follow-up ships while this box's review run rules on another is no
+     * conflict.
+     */
+    @Override
+    public ConflictDetector.FieldMerger fieldMerger() {
+      return (field, base, local, remote) ->
+          FINDINGS_HASH.equals(field)
+              ? content.merge((String) base, (String) local, (String) remote).map(hash -> hash)
+              : Optional.empty();
     }
 
     @Override
