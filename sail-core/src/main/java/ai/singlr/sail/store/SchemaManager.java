@@ -138,6 +138,19 @@ public final class SchemaManager {
   static final String MAIN_FILE_LIMIT = "CREATE TABLE main_limits (file_max INTEGER NOT NULL)";
 
   /**
+   * A finding names the follow-up spec drafted from it in its review's synced content, where the
+   * box-local {@code spec_source_findings} link used to be the only record and vanished with the
+   * follow-up's row. The link becomes the finding's {@code followup} before the table is dropped,
+   * and the data migration folds it into the review's content with the finding. Named so the
+   * migration test runs this exact statement.
+   */
+  static final String FOLLOWUPS_FROM_LINKS =
+      """
+      UPDATE review_findings SET followup = (
+          SELECT l.spec_id FROM spec_source_findings l WHERE l.finding_id = review_findings.id
+          ORDER BY l.rowid DESC LIMIT 1)""";
+
+  /**
    * When a spec entered {@code archived} or {@code cancelled} on this box: the timestamp retention
    * ages on. Kept by the database on every path that writes a status — create, edit, a lifecycle
    * transition, a sync adoption, a restore — so no writer can forget it; leaving the status clears
@@ -629,7 +642,12 @@ public final class SchemaManager {
               PRIMARY KEY (entity_type, entity_id)
           )""",
           NODES_HEAR_EVERY_HEAD_AGAIN,
-          MAIN_FILE_LIMIT);
+          MAIN_FILE_LIMIT,
+          "ALTER TABLE reviews ADD COLUMN findings_hash TEXT",
+          "ALTER TABLE review_findings ADD COLUMN followup TEXT",
+          FOLLOWUPS_FROM_LINKS,
+          "DROP TABLE spec_source_findings",
+          "DROP TABLE spec_attachments");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

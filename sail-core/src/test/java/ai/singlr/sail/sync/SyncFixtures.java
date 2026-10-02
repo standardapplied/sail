@@ -7,11 +7,18 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
+import java.util.Objects;
 
 /** The rows the sync scenarios make, in project {@code acme}, as one FDE or another. */
 final class SyncFixtures {
@@ -88,5 +95,39 @@ final class SyncFixtures {
   /** The principal minted for run {@code runId} on {@code box}. */
   static String principal(SyncBox box, String runId) {
     return new RunStore(box.db).findById(runId).orElseThrow().principal();
+  }
+
+  /** An open HIGH security finding titled {@code title}, with a fresh id. */
+  static Finding finding(String title) {
+    return Finding.create(
+        Finding.Severity.HIGH,
+        Finding.Category.SECURITY,
+        "A.java",
+        1,
+        2,
+        title,
+        "desc",
+        "evidence",
+        new Finding.Suggestion("a", "b", "c"),
+        0.9);
+  }
+
+  /** The findings {@code box} holds for review {@code reviewId}. */
+  static List<Finding> findings(SyncBox box, String reviewId) {
+    return new ReviewStore(box.db).findingsForReview(reviewId);
+  }
+
+  /**
+   * Whether a revision of review {@code reviewId} in {@code box}'s change log carries the finding
+   * {@code findingId} in the content its snapshot names, and the box still holds that content.
+   */
+  static boolean findingKeptInChangeLog(SyncBox box, String reviewId, String findingId) {
+    var blobs = new BlobStore(box.db);
+    return new ChangeLog(box.db)
+        .history("review", reviewId).stream()
+            .map(entry -> Snapshots.text(YamlUtil.parseMap(entry.snapshot()), "findings_hash"))
+            .filter(Objects::nonNull)
+            .filter(blobs::has)
+            .anyMatch(hash -> blobs.text(hash).contains(findingId));
   }
 }

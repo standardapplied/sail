@@ -101,13 +101,14 @@ class ReviewStoreTest {
   }
 
   @Test
-  void theAggregateSnapshotRoundTripsOntoAFreshBoxAsCountsWithoutFindingRows() {
+  void theAggregateSnapshotRoundTripsOntoAFreshBoxWithItsFindings() {
     var reviewId = store.createReview("auth", 2);
     var stageId = store.createStage(reviewId, "security", "agent");
     store.startStage(stageId, "codex");
     addOpenFinding(stageId, Finding.Severity.HIGH, "One");
     addOpenFinding(stageId, Finding.Severity.HIGH, "Two");
-    addOpenFinding(stageId, Finding.Severity.MEDIUM, "Three");
+    var third = addOpenFinding(stageId, Finding.Severity.MEDIUM, "Three");
+    store.resolveFinding(third.id(), Finding.Resolution.DISPUTED, "by design");
     store.completeStage(stageId, "failed");
     store.updateReviewStatus(reviewId, "failed");
 
@@ -116,6 +117,9 @@ class ReviewStoreTest {
 
     var mainDb = Sqlite.open(tempDir.resolve("main.db"));
     new SchemaManager(mainDb).migrate();
+    var hash = (String) snapshot.get("findings_hash");
+    assertNotNull(hash, "the findings ride in the snapshot as content");
+    new BlobStore(mainDb).putText(new BlobStore(db).text(hash));
     var main = new ReviewStore(mainDb);
     main.applyRevision(reviewId, snapshot, rev);
 
@@ -129,11 +133,51 @@ class ReviewStoreTest {
     var counts = main.findingCountsForStage(stages.getFirst().id());
     assertEquals(2, counts.get("HIGH"));
     assertEquals(1, counts.get("MEDIUM"));
-    assertTrue(
-        main.findingsForStage(stages.getFirst().id()).isEmpty(),
-        "finding rows stay on the executing node; only counts replicate");
+    assertEquals(
+        store.findingsForReview(reviewId),
+        main.findingsForReview(reviewId),
+        "every field of every finding, its resolution and evidence included, lands");
     assertEquals(rev, main.latestRev(reviewId));
+    assertEquals(store.comparableSnapshot(reviewId), main.comparableSnapshot(reviewId));
     mainDb.close();
+  }
+
+  @Test
+  void adoptingMainsRevisionProjectsExactlyItsContent() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    addOpenFinding(stageId, Finding.Severity.HIGH, "Mains");
+    var mains = store.comparableSnapshot(reviewId);
+    var mainsRev = store.latestRev(reviewId);
+    var local = addOpenFinding(stageId, Finding.Severity.LOW, "Local");
+
+    store.applyRevision(reviewId, mains, mainsRev);
+
+    assertEquals(
+        List.of("Mains"),
+        store.findingsForReview(reviewId).stream().map(Finding::title).toList(),
+        "the projection is written from the adopted content and nothing else");
+    assertTrue(store.findFinding(local.id()).isEmpty());
+    assertEquals(mains, store.comparableSnapshot(reviewId));
+  }
+
+  @Test
+  void aFindingWriteIsOneRevisionCarryingTheContentHash() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var log = new ChangeLog(db);
+    var before = log.history("review", reviewId).size();
+
+    var finding = addOpenFinding(stageId, Finding.Severity.HIGH, "One");
+    store.resolveFinding(finding.id(), Finding.Resolution.FIXED, "proof");
+    store.resolveFinding(finding.id(), Finding.Resolution.FIXED, "proof");
+
+    var history = log.history("review", reviewId);
+    assertEquals(before + 2, history.size(), "one revision per change, none for no change");
+    var hash = (String) store.comparableSnapshot(reviewId).get("findings_hash");
+    assertTrue(history.getLast().snapshot().contains(hash));
+    assertTrue(new BlobStore(db).text(hash).contains("proof"));
+    assertEquals(java.util.Set.of(hash), store.liveContentHashes());
   }
 
   @Test
@@ -150,28 +194,27 @@ class ReviewStoreTest {
   }
 
   @Test
-  void resolvingSourceFindingsJournalsTheReviewItChangedAndNothingElse() {
+  void linkingSourceFindingsJournalsTheReviewItChangedAndNothingElse() {
     var reviewId = store.createReview("auth", 1);
     var stageId = store.createStage(reviewId, "security", "agent");
     var linked = addOpenFinding(stageId, Finding.Severity.HIGH, "Linked");
     createSpec("auth-followup");
-    store.linkSourceFindings("auth-followup", List.of(linked.id()));
     var log = new ChangeLog(db);
     var before = log.head("review", reviewId).orElseThrow();
 
-    store.resolveSourceFindings("auth-followup");
+    store.linkSourceFindings("auth-followup", List.of(linked.id()));
     var resolved = log.head("review", reviewId).orElseThrow();
-    store.resolveSourceFindings("auth-followup");
+    store.linkSourceFindings("auth-followup", List.of(linked.id()));
 
-    assertNotEquals(before.rev(), resolved.rev(), "the resolution is a revision of the review");
+    assertNotEquals(before.rev(), resolved.rev(), "the link is a revision of the review");
     assertEquals(
         resolved.seq(),
         log.head("review", reviewId).orElseThrow().seq(),
-        "resolving nothing journals nothing");
+        "linking nothing new journals nothing");
   }
 
   @Test
-  void resolveSourceFindingsMarksOnlyLinkedOpenFindingsFixed() {
+  void aDoneFollowUpReadsItsLinkedOpenFindingsAsFixedWithoutWritingTheReview() {
     var reviewId = store.createReview("auth", 1);
     var stageId = store.createStage(reviewId, "security", "agent");
     var linked = addOpenFinding(stageId, Finding.Severity.HIGH, "Linked");
@@ -180,31 +223,28 @@ class ReviewStoreTest {
     store.resolveFinding(dismissed.id(), Finding.Resolution.DISMISSED);
     createSpec("auth-followup");
     store.linkSourceFindings("auth-followup", List.of(linked.id(), dismissed.id()));
+    var rev = store.latestRev(reviewId);
+    assertEquals(
+        Finding.Resolution.OPEN, store.findFinding(linked.id()).orElseThrow().resolution());
 
-    assertEquals(1, store.resolveSourceFindings("auth-followup"));
+    specStore.updateStatus("auth-followup", SpecStatus.DONE);
 
-    var byId = store.findingsForReview(reviewId);
     assertEquals(
-        Finding.Resolution.FIXED,
-        byId.stream()
-            .filter(f -> f.id().equals(linked.id()))
-            .findFirst()
-            .orElseThrow()
-            .resolution());
+        Finding.Resolution.FIXED, store.findFinding(linked.id()).orElseThrow().resolution());
     assertEquals(
-        Finding.Resolution.DISMISSED,
-        byId.stream()
-            .filter(f -> f.id().equals(dismissed.id()))
-            .findFirst()
-            .orElseThrow()
-            .resolution());
+        "fixed by follow-up auth-followup",
+        store.findFinding(linked.id()).orElseThrow().resolutionEvidence());
     assertEquals(
-        Finding.Resolution.OPEN,
-        byId.stream()
-            .filter(f -> f.id().equals(unlinked.id()))
-            .findFirst()
-            .orElseThrow()
-            .resolution());
+        Finding.Resolution.DISMISSED, store.findFinding(dismissed.id()).orElseThrow().resolution());
+    assertEquals(
+        Finding.Resolution.OPEN, store.findFinding(unlinked.id()).orElseThrow().resolution());
+    assertEquals(List.of(unlinked.id()), ids(store.openFindingsForReview(reviewId)));
+    assertEquals(rev, store.latestRev(reviewId), "nothing is written to the source review");
+    assertEquals(List.of(linked.id(), dismissed.id()), store.sourceFindingIds("auth-followup"));
+  }
+
+  private static List<String> ids(List<Finding> findings) {
+    return findings.stream().map(Finding::id).toList();
   }
 
   @Test

@@ -116,7 +116,7 @@ Sixteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
 | `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
 | `FdeSshKeyStore` | `fde_ssh_keys`, SSH fingerprint to FDE | Local |
 | `EventStore` | `events`, the audit stream persisted from the bus | Local |
-| `ReviewStore` | `reviews`, `review_stages`, `review_findings` | Local |
+| `ReviewStore` | `reviews`, `review_stages`, and `review_findings` as the projection of each review's content | Yes, entity `review`, its findings as content |
 | `SessionStore` | `agent_sessions`, agent lifecycle | Local |
 | `AuthSessionStore` | `sessions`, login and gateway sessions | Local |
 | `TokenStore` | `api_tokens`, SHA-256 hashed with optional expiry | Local |
@@ -193,10 +193,10 @@ and the spec that closes it.
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
 | L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; a refused batch: `LivenessAuditTest` |
-| C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); open for a review whose findings the box holds: `sail-review-findings-sync` |
-| C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | open for reviews: `sail-review-findings-sync` |
+| C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); reviews with their findings: `ReviewFindingsSyncTest` (two iterations, a dispute and a resolution reach main and every box alike; a denied review adopted as main's exactly), `ReviewSyncTest`, `PushAuthoritySyncTest` |
+| C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | reviews hold no such state: a review's findings and its follow-up links are its synced content, so adopting main's version loses nothing (`ReviewFindingsSyncTest`: a follow-up's links survive its spec's delete and restore on every box; `ReviewStoreTest`: the projection is written only from the adopted content) |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | open: `sail-files-materialized-version` |
-| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | a gone dependency's offer, re-homed or withdrawn and announced (`Settlement.Settled`): `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content; a member's and an admin's child of a pruned room re-homed and landed); open for reviews and files: `sail-review-findings-sync`, `sail-files-materialized-version` |
+| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | a gone dependency's offer, re-homed or withdrawn and announced (`Settlement.Settled`): `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content; a member's and an admin's child of a pruned room re-homed and landed); a review main never took, withdrawn with its findings kept in the change log and announced, and a node's legacy findings denied after a reassign: `ReviewFindingsSyncTest`; open for files: `sail-files-materialized-version` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
 
 Every test in the `sync` package that drives a round between boxes ends each scenario by
@@ -221,12 +221,12 @@ one-way roster pull:
 | rooms and messages | Bidirectional; messages are immutable once posted | The conversation |
 | project definitions | Bidirectional | The `sail.yaml` catalog |
 | shared workspace files | Bidirectional | The `files/` bundle, opaque content |
-| runs and reviews | Bidirectional; a run is pushed only by the box that executes it | Execution provenance |
+| runs and reviews | Bidirectional; a run is pushed only by the box that executes it; a review carries its findings as content | Execution provenance |
 | FDE roster | One-way, main-authoritative pull | Handle, name, email, role, status, and never keys or tokens |
 
-Content — a spec's body and plan, a shared file's bytes — is not in any row or snapshot. A
-synced store names its content fields (`SyncedStore.contentFields`), a snapshot carries a
-SHA-256 in their place, and the bytes live once in the `BlobStore`: content-defined chunks
+Content — a spec's body and plan, a shared file's bytes, a review's findings — is not in any
+row or snapshot. A synced store names its content fields (`SyncedStore.contentFields`), a
+snapshot carries a SHA-256 in their place, and the bytes live once in the `BlobStore`: content-defined chunks
 (`FastCdc`, 64 KiB–1 MiB) under a manifest per blob, every chunk hashed before it is written
 and every blob assembled only when each chunk is present and the whole hashes right. The
 materialized text stays where reads find it (`spec_content`, a file's row carries hash, size,
@@ -237,6 +237,23 @@ materialization and download all stream. `sail sync gc` compacts history and fre
 live row, retained history row or open conflict references; a session or an ingest holds a shared lease
 (`BlobRetention`, one file lock beside the database) that GC's exclusive lease waits for, so
 a chunk that just arrived is never collected under a round.
+
+A review's findings are its content. Every stage's findings — each field, its resolution and
+evidence, what it was carried from, and the follow-up spec drafted from it — are serialized
+canonically and hashed into the review's snapshot as `findings_hash`, so every box, main and
+Mast hold the same review. `review_findings` is a projection of that content, written only by
+applying a review revision, on every box; every finding query reads it, and a stage's
+`finding_counts` in the snapshot are counted from it. Adding, resolving, disputing or carrying a
+finding is one revision of its review, decided by the review rule like any other write, and a
+node adopting main's version takes main's findings exactly. A finding whose follow-up spec is
+`done` reads as `FIXED` wherever it is read, so shipping a follow-up never writes the source
+review and the links survive the follow-up's delete and restore. A review main denies is
+adopted as main's; one main never took is withdrawn, its findings recoverable from the content
+its change-log entries name. The upgrade folds each box's finding rows from before into one
+revision per review (`ReviewFindingsMigration`), which a node's next round pushes; a review
+whose findings never became content — run on a box retired before the upgrade — keeps the
+counts its snapshot replicated in the legacy `finding_counts` column, which nothing writes for
+a review with content.
 
 One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over any synced
 store, so the same box acts as the node when it syncs up and as the authority when another

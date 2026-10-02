@@ -165,6 +165,18 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("ALTER TABLE reviews DROP COLUMN findings_hash");
+    db.execute("ALTER TABLE review_findings DROP COLUMN followup");
+    db.execute(
+        "CREATE TABLE spec_source_findings (spec_id TEXT NOT NULL, finding_id TEXT NOT NULL,"
+            + " PRIMARY KEY (spec_id, finding_id))");
+    db.execute(
+        "CREATE TABLE spec_attachments (id TEXT PRIMARY KEY, spec_id TEXT NOT NULL,"
+            + " filename TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,"
+            + " storage_path TEXT NOT NULL, created_at TEXT NOT NULL)");
+    db.execute(
+        "DELETE FROM data_migrations WHERE name = ?",
+        ai.singlr.sail.store.ReviewFindingsMigration.NAME);
     db.execute("DROP TRIGGER change_log_kind_from_deleted");
     for (var index :
         List.of(

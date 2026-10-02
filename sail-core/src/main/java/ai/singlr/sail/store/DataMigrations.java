@@ -18,6 +18,7 @@ public final class DataMigrations {
       List.of(
           new ContentMigration(),
           new LegacyDataMigration(),
+          new ReviewFindingsMigration(),
           new RoomsBackfillMigration(),
           new OrphanErasure(),
           new PersonalRoomErasure());

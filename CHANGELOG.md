@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.46.4
+
+- **A review's findings sync with it, so every box holds the same review.** Findings used to live only on the box that ran the review, with the synced review carrying counts; a review denied after its spec was reassigned lost them, a node that kept them held a review main never had, and a follow-up's links to them vanished when its spec was deleted.
+  - Every stage's findings — each field, resolution, evidence, what it was carried from, and the follow-up spec drafted from it — are the review's content, hashed into its snapshot and stored once in the blob store like a spec's body. Main, every node and Mast read the same findings; the API's shape for reviews and findings is unchanged.
+  - Adding, resolving, disputing and carrying findings into the next iteration each write one revision of the review, decided by the review rule like any other write. A node adopting main's review takes main's findings exactly; a review main never took is withdrawn with its findings kept in the change log and announced.
+  - A finding whose follow-up spec is `done` reads as fixed on every box, wherever it is read, without writing the source review; the links survive the follow-up's delete and restore. The box-local `spec_source_findings` table is gone, and so is the unused `spec_attachments` table.
+  - The upgrade folds each box's existing finding rows into one revision per review, which a node's next sync pushes; if the spec is no longer that box's FDE's, main denies it and the node keeps the revision in its change log.
+  - The fleet floor is 0.46.4: an older node would push a review back without its findings.
+
 ## 0.46.3
 
 - **Every offer settles, and no round fails for something that will arrive.** One rule in sail-core (`Decidability`) decides what an offer depends on, whether main holds it, and what becomes of an offer whose dependency can never arrive. Main's refusal, the node's hold-back and the node's settlement all read it; the per-store hold-back SQL is gone.

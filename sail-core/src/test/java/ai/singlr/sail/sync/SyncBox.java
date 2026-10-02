@@ -280,14 +280,6 @@ public final class SyncBox implements AutoCloseable {
     }
   }
 
-  /**
-   * Why a box that holds a review's findings cannot equal main on that review yet: its findings are
-   * box-local, and its aggregate counts its own rows at main's revision.
-   */
-  public static final String BOX_LOCAL_FINDINGS =
-      "a review's findings are box-local until sail-review-findings-sync, so the box holding them"
-          + " counts its own finding rows at main's revision";
-
   private static Map<String, String> mismatches(SyncBox main, SyncBox node) {
     var mismatches = new LinkedHashMap<String, String>();
     var mains = main.replicas();
@@ -442,6 +434,23 @@ public final class SyncBox implements AutoCloseable {
    */
   public SyncRpcServer serverFailingCommitsOf(
       Actor as, String type, String id, AtomicInteger times) {
+    return serverInterceptingCommitsOf(
+        as,
+        type,
+        id,
+        () -> {
+          if (times.getAndDecrement() > 0) {
+            throw new IllegalStateException("store fault committing " + id);
+          }
+        });
+  }
+
+  /**
+   * As {@link #server}, but {@code beforeCommit} runs on main's thread before each commit of {@code
+   * id} of {@code type}: a write landing on the node while its offer is in flight, or a fault.
+   */
+  public SyncRpcServer serverInterceptingCommitsOf(
+      Actor as, String type, String id, Runnable beforeCommit) {
     var replicas =
         new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(db, this.id, null));
     var real = replicas.get(type);
@@ -452,9 +461,8 @@ public final class SyncBox implements AutoCloseable {
                 MainReplica.class.getClassLoader(),
                 new Class<?>[] {MainReplica.class},
                 (proxy, method, args) -> {
-                  if (method.getName().equals("commit") && id.equals(args[0]) && times.get() > 0) {
-                    times.decrementAndGet();
-                    throw new IllegalStateException("store fault committing " + id);
+                  if (method.getName().equals("commit") && id.equals(args[0])) {
+                    beforeCommit.run();
                   }
                   try {
                     return method.invoke(real, args);
