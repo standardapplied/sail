@@ -95,6 +95,21 @@ class FindingTest {
   }
 
   @Test
+  void fromMapMintsTheIdWhateverTheReportNames() {
+    var map = new LinkedHashMap<String, Object>();
+    map.put("id", "F1");
+    map.put("severity", "HIGH");
+    map.put("category", "SECURITY");
+    map.put("title", "One");
+
+    var first = Finding.fromMap(map);
+    var second = Finding.fromMap(map);
+
+    assertNotEquals("F1", first.id());
+    assertNotEquals(first.id(), second.id(), "two reports naming one id never share a row");
+  }
+
+  @Test
   void fromMapHandlesMissingOptionalFields() {
     var map = new LinkedHashMap<String, Object>();
     map.put("severity", "low");

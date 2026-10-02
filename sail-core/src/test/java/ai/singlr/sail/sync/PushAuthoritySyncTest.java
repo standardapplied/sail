@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.assign;
 import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.ownSpec;
 import static ai.singlr.sail.sync.SyncFixtures.principal;
@@ -116,32 +117,6 @@ class PushAuthoritySyncTest {
                     title,
                     row.status(),
                     row.assignee(),
-                    row.agent(),
-                    row.model(),
-                    row.reasoningEffort(),
-                    row.branch(),
-                    row.priority(),
-                    row.createdBy(),
-                    row.createdAt(),
-                    row.updatedAt(),
-                    row.updatedBy(),
-                    row.dependsOn(),
-                    row.repos(),
-                    row.roomId())));
-  }
-
-  private static void assign(SyncBox box, String as, String id, String assignee) {
-    var row = box.specs.findById(id).orElseThrow();
-    Acting.as(
-        as,
-        () ->
-            box.specs.update(
-                new SpecStore.SpecRow(
-                    row.id(),
-                    row.project(),
-                    row.title(),
-                    row.status(),
-                    assignee,
                     row.agent(),
                     row.model(),
                     row.reasoningEffort(),

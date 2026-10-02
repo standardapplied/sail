@@ -97,6 +97,19 @@ class YamlUtilTest {
   }
 
   @Test
+  void dumpJsonEscapesEveryControlCharacterSoTheYamlParserReadsItBack() {
+    var text = "del\u007f nel\u0085 c1\u0090 tab\t bell\u0007 \u2028 ok";
+    var map = new LinkedHashMap<String, Object>();
+    map.put("msg", text);
+
+    var json = YamlUtil.dumpJson(map);
+
+    assertEquals(
+        "{\"msg\": \"del\\u007f nel\\u0085 c1\\u0090 tab\\t bell\\u0007 \u2028 ok\"}", json);
+    assertEquals(text, YamlUtil.parseMap(json).get("msg"));
+  }
+
+  @Test
   void dumpJsonHandlesSpecialCharacters() {
     var map = new LinkedHashMap<String, Object>();
     map.put("msg", "hello \"world\"");

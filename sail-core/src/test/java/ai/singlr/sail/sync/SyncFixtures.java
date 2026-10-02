@@ -59,6 +59,33 @@ final class SyncFixtures {
         });
   }
 
+  /** Spec {@code id} on {@code box} reassigned to {@code assignee} by {@code as}. */
+  static void assign(SyncBox box, String as, String id, String assignee) {
+    var row = box.specs.findById(id).orElseThrow();
+    Acting.as(
+        as,
+        () ->
+            box.specs.update(
+                new SpecStore.SpecRow(
+                    row.id(),
+                    row.project(),
+                    row.title(),
+                    row.status(),
+                    assignee,
+                    row.agent(),
+                    row.model(),
+                    row.reasoningEffort(),
+                    row.branch(),
+                    row.priority(),
+                    row.createdBy(),
+                    row.createdAt(),
+                    row.updatedAt(),
+                    row.updatedBy(),
+                    row.dependsOn(),
+                    row.repos(),
+                    row.roomId())));
+  }
+
   /** A room {@code id} that {@code as} creates on {@code box} and is assigned. */
   static void room(SyncBox box, String as, String id) {
     Acting.as(

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import static ai.singlr.sail.sync.SyncFixtures.assign;
 import static ai.singlr.sail.sync.SyncFixtures.finding;
 import static ai.singlr.sail.sync.SyncFixtures.findingKeptInChangeLog;
 import static ai.singlr.sail.sync.SyncFixtures.findings;
@@ -21,10 +22,10 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -75,32 +76,6 @@ class ReviewFindingsSyncTest {
         .flatMap(report -> report.denials().stream())
         .map(SyncSession.Denial::id)
         .toList();
-  }
-
-  private static void assign(SyncBox box, String as, String id, String assignee) {
-    var row = box.specs.findById(id).orElseThrow();
-    Acting.as(
-        as,
-        () ->
-            box.specs.update(
-                new SpecStore.SpecRow(
-                    row.id(),
-                    row.project(),
-                    row.title(),
-                    row.status(),
-                    assignee,
-                    row.agent(),
-                    row.model(),
-                    row.reasoningEffort(),
-                    row.branch(),
-                    row.priority(),
-                    row.createdBy(),
-                    row.createdAt(),
-                    row.updatedAt(),
-                    row.updatedBy(),
-                    row.dependsOn(),
-                    row.repos(),
-                    row.roomId())));
   }
 
   private static Finding byId(List<Finding> findings, String id) {
@@ -181,6 +156,21 @@ class ReviewFindingsSyncTest {
   }
 
   @Test
+  void aFindingWhoseTextCarriesControlCharactersLandsOnEveryBoxVerbatim() {
+    ownSpec(main, "ada", "s", "ada");
+    round(ada);
+    round(bob);
+    var mojibake = finding("smart \u0091quotes\u0092 and a NEL\u0085 and DEL\u007f");
+    var review = failedReview("s", mojibake);
+
+    SyncBox.assertConvergedWithin(2, main, ada, bob);
+
+    for (var box : List.of(main, bob)) {
+      assertEquals(mojibake.title(), byId(findings(box, review), mojibake.id()).title(), box.id);
+    }
+  }
+
+  @Test
   void aReviewDeniedAfterItsSpecWasReassignedAwayIsAdoptedAsMainsVersionExactly() {
     ownSpec(main, "ada", "s", "ada");
     round(ada);
@@ -251,7 +241,6 @@ class ReviewFindingsSyncTest {
       assertEquals(
           List.of(found.id()), new ReviewStore(box.db).sourceFindingIds("followup"), box.id);
     }
-    var reviewRevOnMain = new ReviewStore(main.db).latestRev(review);
 
     Acting.as("root", () -> main.specs.delete("followup"));
     round(ada);
@@ -270,20 +259,37 @@ class ReviewFindingsSyncTest {
     round(ada);
     round(bob);
     Acting.as("root", () -> main.specs.updateStatus("followup", SpecStatus.DONE));
+    assertEquals(
+        1, Acting.as("root", () -> new ReviewStore(main.db).resolveSourceFindings("followup")));
     round(ada);
     round(bob);
+    assertFixedEverywhere(review, found.id());
 
+    Acting.as("root", () -> main.specs.updateStatus("followup", SpecStatus.ARCHIVED));
+    prune(main, "followup");
+    round(ada);
+    round(bob);
+    assertTrue(bob.specs.findById("followup").isEmpty(), "bob adopted the erasure");
+    assertFixedEverywhere(review, found.id());
+    SyncBox.assertConvergedWithin(2, main, ada, bob);
+  }
+
+  private void assertFixedEverywhere(String review, String findingId) {
     for (var box : List.of(main, ada, bob)) {
-      var fixed = byId(findings(box, review), found.id());
+      var fixed = byId(findings(box, review), findingId);
       assertEquals(Finding.Resolution.FIXED, fixed.resolution(), box.id);
       assertEquals("fixed by follow-up followup", fixed.resolutionEvidence(), box.id);
       assertEquals(List.of(), new ReviewStore(box.db).openFindingsForReview(review), box.id);
     }
-    assertEquals(
-        reviewRevOnMain,
-        new ReviewStore(main.db).latestRev(review),
-        "shipping the follow-up writes nothing to the source review");
-    SyncBox.assertConvergedWithin(2, main, ada, bob);
+  }
+
+  private static void prune(SyncBox box, String specId) {
+    var erasure = new Erasure(box.db);
+    Acting.as(
+        "root",
+        () ->
+            erasure.erase(
+                erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, specId))), "local"));
   }
 
   private void foldLegacyFindings(SyncBox box) {

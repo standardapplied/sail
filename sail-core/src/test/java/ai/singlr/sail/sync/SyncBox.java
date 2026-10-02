@@ -242,44 +242,6 @@ public final class SyncBox implements AutoCloseable {
     }
   }
 
-  /**
-   * As {@link #assertEqualToMain}, for a scenario that cannot converge on one entity for a reason
-   * another change owns, named by {@code why}: every other entity equals main's, and that one still
-   * differs, so the scenario fails the moment the divergence is fixed and the exception can go.
-   */
-  public static void assertEqualToMainBut(
-      SyncBox main, SyncBox node, String type, String id, String why) {
-    assertEqualToMainExcept(main, node, type + " " + id, why, true);
-  }
-
-  /**
-   * As {@link #assertEqualToMainBut} for a scenario whose timing decides whether the one entity
-   * diverges for the reason {@code why} names: every other entity equals main's, and that one is
-   * not checked. Only for a scenario that races a real writer; one that stages the race asserts
-   * which way it went.
-   */
-  public static void assertEqualToMainUnless(
-      SyncBox main, SyncBox node, String type, String id, String why) {
-    assertEqualToMainExcept(main, node, type + " " + id, why, false);
-  }
-
-  private static void assertEqualToMainExcept(
-      SyncBox main, SyncBox node, String known, String why, boolean mustDiverge) {
-    var mismatches = mismatches(main, node);
-    if (mustDiverge && !mismatches.containsKey(known)) {
-      fail(known + " now equals main's; drop the exception (" + why + ")");
-    }
-    mismatches.remove(known);
-    if (!mismatches.isEmpty()) {
-      fail(
-          node.id
-              + " differs from main beyond "
-              + why
-              + ":\n"
-              + String.join("\n", mismatches.values()));
-    }
-  }
-
   private static Map<String, String> mismatches(SyncBox main, SyncBox node) {
     var mismatches = new LinkedHashMap<String, String>();
     var mains = main.replicas();

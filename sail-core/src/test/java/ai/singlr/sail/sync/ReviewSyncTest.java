@@ -62,7 +62,10 @@ class ReviewSyncTest {
   }
 
   private static SyncSession.TypeReport reviewReport(List<SyncSession.TypeReport> reports) {
-    return reports.stream().filter(report -> report.type().equals("review")).findFirst().get();
+    return reports.stream()
+        .filter(report -> report.type().equals("review"))
+        .findFirst()
+        .orElseThrow();
   }
 
   private String failedReviewWithFindings(int findings) {

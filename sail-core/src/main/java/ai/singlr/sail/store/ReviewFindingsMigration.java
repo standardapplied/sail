@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -14,7 +15,9 @@ import java.util.List;
  * carrying them as content. On main and a standalone box the revision is the review's new head; on
  * a node the next round pushes it, main decides it by the review rule, and a denial leaves it in
  * the node's change log. Resumable: each review folds in its own transaction, rechecked under the
- * write lock, and a review that already has content is left alone.
+ * write lock, and a review that already has content is left alone. A review whose spec main has
+ * pruned, held here because its own erasure has not paged in yet, cannot take a revision and is
+ * left as it is, reported, for that erasure to remove.
  */
 public final class ReviewFindingsMigration implements DataMigration {
 
@@ -34,16 +37,18 @@ public final class ReviewFindingsMigration implements DataMigration {
   public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
     var reviews = new ReviewStore(db);
     var folded = 0;
+    var notes = new ArrayList<String>();
     for (var id : legacyReviews(db)) {
-      if (db.transaction(() -> reviews.foldLegacyFindings(id))) {
-        folded++;
+      try {
+        if (db.transaction(() -> reviews.foldLegacyFindings(id))) {
+          folded++;
+        }
+      } catch (ChangeLog.Pruned pruned) {
+        notes.add("Left review " + id + " unfolded: " + pruned.getMessage());
       }
     }
-    return new Report(
-        folded,
-        0,
-        0,
-        List.of("Folded the findings of " + folded + " review(s) into their content"));
+    notes.addFirst("Folded the findings of " + folded + " review(s) into their content");
+    return new Report(folded, 0, notes.size() - 1, notes);
   }
 
   private static List<String> legacyReviews(Sqlite db) {

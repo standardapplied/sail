@@ -133,7 +133,10 @@ public final class YamlUtil {
     return sb.toString();
   }
 
-  /** Dump a Map to a valid JSON string. */
+  /**
+   * Dump a Map to a valid JSON string that the YAML parser reads back verbatim: C0 and C1 control
+   * characters are {@code \\uXXXX}-escaped, since YAML forbids C1 characters in a document.
+   */
   public static String dumpJson(Map<String, Object> map) {
     var sb = new StringBuilder();
     appendJson(sb, map);
@@ -183,7 +186,7 @@ public final class YamlUtil {
         case '\b' -> sb.append("\\b");
         case '\f' -> sb.append("\\f");
         default -> {
-          if (ch < 0x20) {
+          if (ch < 0x20 || (ch >= 0x7f && ch <= 0x9f)) {
             sb.append(String.format("\\u%04x", (int) ch));
           } else {
             sb.append(ch);

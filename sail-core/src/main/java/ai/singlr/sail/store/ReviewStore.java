@@ -11,7 +11,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -38,19 +37,19 @@ import java.util.Set;
 public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "review";
-  private static final String FINDINGS_HASH = "findings_hash";
+  private static final String FINDINGS_HASH = ReviewFindingsContent.HASH_FIELD;
   private static final Set<String> SURROGATE_FIELDS = Set.of("id");
 
   private final Sqlite db;
   private final ChangeLog changeLog;
   private final RevisionJournal revisions;
-  private final BlobStore blobs;
+  private final ReviewFindingsContent content;
 
   public ReviewStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
     this.revisions = new RevisionJournal(db, changeLog, new ReviewSchema());
-    this.blobs = new BlobStore(db);
+    this.content = new ReviewFindingsContent(db, new BlobStore(db));
   }
 
   /**
@@ -341,7 +340,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /** Adds a finding to a stage: one revision of its review, carrying the finding in its content. */
   public void addFinding(String stageId, Finding finding) {
-    db.transaction(() -> append(reviewOf(stageId), List.of(contentOf(stageId, finding))));
+    db.transaction(
+        () -> append(reviewOf(stageId), List.of(ReviewFindingsContent.of(stageId, finding))));
   }
 
   /**
@@ -372,10 +372,12 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * Applies a reviewer's complete stage result as one atomic write: every ruling on the carried
    * findings (resolving {@code FIXED}/{@code DISPUTED} predecessors, re-attaching {@code OPEN}
    * ones) and every newly discovered finding — one revision of this review, and one of each earlier
-   * review whose findings were resolved. Any failure — a duplicate finding id, a constraint
-   * violation, a journaling error — rolls the whole result back, so a partially committed verdict
-   * can never retire a carried finding on behalf of a stage that subsequently errors: the retry
-   * still sees it {@code OPEN} and carries it.
+   * review whose findings were resolved. A ruling rests on the finding as the reviewer saw it when
+   * the stage began: a predecessor someone resolved since — a human dismissing it on main while the
+   * stage ran — keeps that resolution and is neither carried nor resolved again. Any failure — a
+   * duplicate finding id, a constraint violation, a journaling error — rolls the whole result back,
+   * so a partially committed verdict can never retire a carried finding on behalf of a stage that
+   * subsequently errors: the retry still sees it {@code OPEN} and carries it.
    */
   public void applyStageResult(String stageId, List<StageRuling> rulings, List<Finding> findings) {
     db.transaction(
@@ -384,41 +386,38 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           var resolved = new LinkedHashMap<String, Map<String, Object>>();
           var added = new ArrayList<Map<String, Object>>();
           for (var ruling : rulings) {
+            if (!stillOpen(ruling.finding().id())) {
+              continue;
+            }
             if (ruling.resolution() == Finding.Resolution.OPEN) {
-              added.add(contentOf(stageId, carriedCopy(ruling.finding(), ruling.evidence())));
+              added.add(
+                  ReviewFindingsContent.of(
+                      stageId, carriedCopy(ruling.finding(), ruling.evidence())));
             } else {
               resolved.put(
                   ruling.finding().id(), resolutionOf(ruling.resolution(), ruling.evidence()));
             }
           }
-          findings.forEach(finding -> added.add(contentOf(stageId, finding)));
+          findings.forEach(finding -> added.add(ReviewFindingsContent.of(stageId, finding)));
           amend(resolved);
           append(reviewId, added);
         });
   }
 
-  private static final String FIXED_BY_FOLLOWUP =
-      "f.resolution = 'OPEN' AND EXISTS (SELECT 1 FROM specs sp"
-          + " WHERE sp.id = f.followup AND sp.status = 'done')";
-
-  private static final String RESOLUTION =
-      "CASE WHEN " + FIXED_BY_FOLLOWUP + " THEN 'FIXED' ELSE f.resolution END";
-
-  private static final String RESOLUTION_EVIDENCE =
-      "CASE WHEN "
-          + FIXED_BY_FOLLOWUP
-          + " THEN 'fixed by follow-up ' || f.followup ELSE f.resolution_evidence END";
+  private boolean stillOpen(String findingId) {
+    return db.queryOne(
+            "SELECT resolution FROM review_findings WHERE id = ?", row -> row.text(0), findingId)
+        .map(Finding.Resolution.OPEN.name()::equals)
+        .orElse(false);
+  }
 
   private static final String FINDING_COLUMNS =
       "f.id, f.severity, f.category, f.file, f.line_start, f.line_end,"
           + " f.title, f.description, f.evidence, f.suggestion_before,"
-          + " f.suggestion_after, f.suggestion_rationale, f.confidence, "
-          + RESOLUTION
-          + ", "
-          + RESOLUTION_EVIDENCE
-          + ", f.carried_from, f.carry_evidence";
+          + " f.suggestion_after, f.suggestion_rationale, f.confidence, f.resolution,"
+          + " f.resolution_evidence, f.carried_from, f.carry_evidence";
 
-  private static final String OPEN = RESOLUTION + " = 'OPEN'";
+  private static final String OPEN = "f.resolution = 'OPEN'";
 
   private static final String SEVERITY_ORDER =
       "CASE f.severity WHEN 'CRITICAL' THEN 0 WHEN 'HIGH' THEN 1"
@@ -587,8 +586,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Names the follow-up spec drafted from each finding, in its review's content, so completing the
-   * spec reads exactly those findings as fixed on every box. Idempotent: a finding already naming
-   * the spec changes nothing, and a review none of whose findings change gets no revision.
+   * spec resolves exactly those findings ({@link #resolveSourceFindings}) on every box. A finding
+   * names one follow-up, the latest drafted from it. Idempotent: a finding already naming the spec
+   * changes nothing, and a review none of whose findings change gets no revision.
    */
   public void linkSourceFindings(String specId, List<String> findingIds) {
     var links = new LinkedHashMap<String, Map<String, Object>>();
@@ -604,6 +604,29 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         "SELECT id FROM review_findings WHERE followup = ? ORDER BY rowid ASC",
         row -> row.text(0),
         specId);
+  }
+
+  /**
+   * Marks every still-open finding the follow-up spec was drafted from {@code FIXED}, in its
+   * review's content — one revision per source review — returning how many changed. Called when the
+   * follow-up reaches {@code done}; the resolution outlives the follow-up's archive or erasure.
+   * Findings already dismissed or fixed by other means are left untouched.
+   */
+  public int resolveSourceFindings(String specId) {
+    return db.transaction(
+        () -> {
+          var fixed = new LinkedHashMap<String, Map<String, Object>>();
+          for (var findingId :
+              db.query(
+                  "SELECT f.id FROM review_findings f WHERE f.followup = ? AND " + OPEN,
+                  row -> row.text(0),
+                  specId)) {
+            fixed.put(
+                findingId, resolutionOf(Finding.Resolution.FIXED, "fixed by follow-up " + specId));
+          }
+          amend(fixed);
+          return fixed.size();
+        });
   }
 
   /**
@@ -670,93 +693,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return counts;
   }
 
-  private static final List<String> CONTENT_FIELDS =
-      List.of(
-          "stage_id",
-          "id",
-          "severity",
-          "category",
-          "file",
-          "line_start",
-          "line_end",
-          "title",
-          "description",
-          "evidence",
-          "suggestion_before",
-          "suggestion_after",
-          "suggestion_rationale",
-          "confidence",
-          "resolution",
-          "resolution_evidence",
-          "carried_from",
-          "carry_evidence",
-          "followup");
-
-  private static Map<String, Object> contentOf(String stageId, Finding finding) {
-    var suggestion =
-        Objects.requireNonNullElse(finding.suggestion(), new Finding.Suggestion(null, null, null));
-    var content = new LinkedHashMap<String, Object>();
-    content.put("stage_id", stageId);
-    content.put("id", finding.id());
-    content.put("severity", finding.severity().name());
-    content.put("category", finding.category().name());
-    content.put("file", finding.file());
-    content.put("line_start", finding.lineStart());
-    content.put("line_end", finding.lineEnd());
-    content.put("title", finding.title());
-    content.put("description", finding.description());
-    content.put("evidence", finding.evidence());
-    content.put("suggestion_before", suggestion.before());
-    content.put("suggestion_after", suggestion.after());
-    content.put("suggestion_rationale", suggestion.rationale());
-    content.put("confidence", finding.confidence());
-    content.put("resolution", finding.resolution().name());
-    content.put("resolution_evidence", finding.resolutionEvidence());
-    content.put("carried_from", finding.carriedFrom());
-    content.put("carry_evidence", finding.carryEvidence());
-    content.put("followup", null);
-    return content;
-  }
-
-  /** The review's findings as its content holds them, read back from the projection. */
-  private List<Map<String, Object>> content(String reviewId) {
-    return db.query(
-        """
-        SELECT f.stage_id, f.id, f.severity, f.category, f.file, f.line_start, f.line_end,
-            f.title, f.description, f.evidence, f.suggestion_before, f.suggestion_after,
-            f.suggestion_rationale, f.confidence, f.resolution, f.resolution_evidence,
-            f.carried_from, f.carry_evidence, f.followup
-        FROM review_findings f JOIN review_stages s ON s.id = f.stage_id
-        WHERE s.review_id = ? ORDER BY s.rowid, f.id""",
-        row -> {
-          var content = new LinkedHashMap<String, Object>();
-          for (var i = 0; i < CONTENT_FIELDS.size(); i++) {
-            content.put(CONTENT_FIELDS.get(i), contentValue(CONTENT_FIELDS.get(i), row, i));
-          }
-          return content;
-        },
-        reviewId);
-  }
-
-  private static Object contentValue(String field, Sqlite.Row row, int column) {
-    if (row.isNull(column)) {
-      return null;
-    }
-    return switch (field) {
-      case "line_start", "line_end" -> (int) row.integer(column);
-      case "confidence" -> Double.parseDouble(row.text(column));
-      default -> row.text(column);
-    };
-  }
-
   /** Appends {@code findings} to the review's content: one revision, none for nothing. */
   private void append(String reviewId, List<Map<String, Object>> findings) {
     if (findings.isEmpty()) {
       return;
     }
-    var content = new ArrayList<>(content(reviewId));
-    content.addAll(findings);
-    writeContent(reviewId, content);
+    var all = new ArrayList<>(content.read(reviewId));
+    all.addAll(findings);
+    writeContent(reviewId, all);
   }
 
   /**
@@ -770,97 +714,29 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       reviewOfFinding(findingId).ifPresent(reviews::add);
     }
     for (var reviewId : reviews) {
-      var content = new ArrayList<Map<String, Object>>();
+      var amended = new ArrayList<Map<String, Object>>();
       var changed = false;
-      for (var finding : content(reviewId)) {
-        var amended = new LinkedHashMap<>(finding);
-        amended.putAll(changes.getOrDefault(Snapshots.text(finding, "id"), Map.of()));
-        changed |= !amended.equals(finding);
-        content.add(amended);
+      for (var finding : content.read(reviewId)) {
+        var next = new LinkedHashMap<>(finding);
+        next.putAll(changes.getOrDefault(Snapshots.text(finding, "id"), Map.of()));
+        changed |= !next.equals(finding);
+        amended.add(next);
       }
       if (changed) {
-        writeContent(reviewId, content);
+        writeContent(reviewId, amended);
       }
     }
   }
 
-  /**
-   * Writes {@code findings} as the review's content — canonically ordered, hashed into the row, the
-   * bytes in the blob store — projects it, and journals the revision.
-   */
+  /** Stores {@code findings} as the review's content and journals the revision. */
   private void writeContent(String reviewId, List<Map<String, Object>> findings) {
-    var content = canonical(reviewId, findings);
-    var hash = blobs.putText(serialize(content));
-    db.execute("UPDATE reviews SET findings_hash = ? WHERE id = ?", hash, reviewId);
-    project(reviewId, content);
+    content.store(reviewId, findings);
     journal(reviewId);
   }
 
-  private List<Map<String, Object>> canonical(String reviewId, List<Map<String, Object>> findings) {
-    var stages = stagesForReview(reviewId).stream().map(StageRow::id).toList();
-    return findings.stream()
-        .sorted(
-            Comparator.comparingInt(
-                    (Map<String, Object> f) -> stages.indexOf(Snapshots.text(f, "stage_id")))
-                .thenComparing(f -> Snapshots.text(f, "id")))
-        .toList();
-  }
-
-  private static String serialize(List<Map<String, Object>> findings) {
-    var document = new LinkedHashMap<String, Object>();
-    document.put("findings", findings);
-    return YamlUtil.dumpJson(document);
-  }
-
-  /** The findings a content hash names; none for a review that has no content. */
-  @SuppressWarnings("unchecked")
-  private List<Map<String, Object>> findingsOf(String hash) {
-    if (hash == null) {
-      return List.of();
-    }
-    blobs.requireHeld(hash);
-    return (List<Map<String, Object>>) YamlUtil.parseMap(blobs.text(hash)).get("findings");
-  }
-
-  /**
-   * Writes the projection of the review's content: its finding rows are exactly the content's, in
-   * its order. The only writer of {@code review_findings}. Content naming a stage of another
-   * review, or none this box holds, aborts the enclosing transaction: a review's content may only
-   * ever write its own rows, whoever offered it.
-   */
-  private void project(String reviewId, List<Map<String, Object>> findings) {
-    for (var finding : findings) {
-      requireStageOf(reviewId, Snapshots.text(finding, "stage_id"));
-    }
-    db.execute(
-        "DELETE FROM review_findings WHERE stage_id IN"
-            + " (SELECT id FROM review_stages WHERE review_id = ?)",
-        reviewId);
-    for (var finding : findings) {
-      db.execute(
-          """
-          INSERT INTO review_findings (stage_id, id, severity, category, file, line_start,
-              line_end, title, description, evidence, suggestion_before, suggestion_after,
-              suggestion_rationale, confidence, resolution, resolution_evidence, carried_from,
-              carry_evidence, followup)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-          CONTENT_FIELDS.stream().map(finding::get).toArray());
-    }
-  }
-
-  private void requireStageOf(String reviewId, String stageId) {
-    var owner =
-        db.queryOne("SELECT review_id FROM review_stages WHERE id = ?", row -> row.text(0), stageId)
-            .orElse(null);
-    if (!reviewId.equals(owner)) {
-      throw new IllegalArgumentException(
-          "Finding stage " + stageId + " does not belong to review " + reviewId);
-    }
-  }
-
   private String reviewOf(String stageId) {
-    return db.queryOne(
-            "SELECT review_id FROM review_stages WHERE id = ?", row -> row.text(0), stageId)
+    return findStage(stageId)
+        .map(StageRow::reviewId)
         .orElseThrow(() -> new IllegalArgumentException("Review stage " + stageId + " not found"));
   }
 
@@ -875,22 +751,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Folds the finding rows a box holds for review {@code id} from before findings were content into
-   * one revision carrying them, for {@link ReviewFindingsMigration}; false when the review already
-   * has content.
+   * one revision carrying them, for {@link ReviewFindingsMigration}; false when the review is
+   * absent or already has content.
    */
   boolean foldLegacyFindings(String id) {
-    var legacy =
-        db.queryOne(
-            "SELECT findings_hash IS NULL FROM reviews WHERE id = ?",
-            row -> row.integer(0) == 1,
-            id);
-    if (legacy.isEmpty() || !legacy.get()) {
+    if (findReview(id).isEmpty() || findingsHashOf(id) != null) {
       return false;
     }
-    var content = canonical(id, content(id));
-    db.execute(
-        "UPDATE reviews SET findings_hash = ? WHERE id = ?", blobs.putText(serialize(content)), id);
-    project(id, content);
+    content.store(id, content.read(id));
     recordRevision(id, "migration");
     return true;
   }
@@ -1048,7 +916,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   @SuppressWarnings("unchecked")
   private void writeAggregate(String id, Map<String, Object> snapshot) {
     var hash = Snapshots.text(snapshot, FINDINGS_HASH);
-    var findings = findingsOf(hash);
+    var findings = content.findingsOf(hash);
     db.execute(
         """
         INSERT INTO reviews (id, spec_id, iteration, status, created_at, completed_at,
@@ -1074,12 +942,13 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
             (List<Map<String, Object>>) snapshot.get("stages"), List.<Map<String, Object>>of());
     for (var stage : stages) {
       var counts = hash == null ? stage.get("finding_counts") : null;
+      requireStageUnclaimed(id, Snapshots.text(stage, "id"));
       db.execute(
           """
           INSERT INTO review_stages (id, review_id, name, stage_type, status, reviewer,
               started_at, completed_at, error, finding_counts)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(id) DO UPDATE SET review_id = excluded.review_id, name = excluded.name,
+          ON CONFLICT(id) DO UPDATE SET name = excluded.name,
               stage_type = excluded.stage_type, status = excluded.status,
               reviewer = excluded.reviewer, started_at = excluded.started_at,
               completed_at = excluded.completed_at, error = excluded.error,
@@ -1101,7 +970,16 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         AND id NOT IN (SELECT value FROM json_each(?))""",
         id,
         YamlUtil.dumpJson(stages.stream().map(stage -> Snapshots.text(stage, "id")).toList()));
-    project(id, findings);
+    content.project(id, findings);
+  }
+
+  /** A snapshot may only name stages of its own review: another review's stage is never moved. */
+  private void requireStageUnclaimed(String reviewId, String stageId) {
+    var owner = findStage(stageId).map(StageRow::reviewId).orElse(reviewId);
+    if (!reviewId.equals(owner)) {
+      throw new IllegalArgumentException(
+          "Review stage " + stageId + " belongs to review " + owner + ", not " + reviewId);
+    }
   }
 
   private void deleteAggregate(String id) {

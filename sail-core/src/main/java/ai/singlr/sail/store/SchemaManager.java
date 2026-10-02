@@ -140,9 +140,8 @@ public final class SchemaManager {
   /**
    * A finding names the follow-up spec drafted from it in its review's synced content, where the
    * box-local {@code spec_source_findings} link used to be the only record and vanished with the
-   * follow-up's row. The link becomes the finding's {@code followup} before the table is dropped,
-   * and the data migration folds it into the review's content with the finding. Named so the
-   * migration test runs this exact statement.
+   * follow-up's row. The latest link becomes the finding's one {@code followup} before the table is
+   * dropped, and the data migration folds it into the review's content with the finding.
    */
   static final String FOLLOWUPS_FROM_LINKS =
       """

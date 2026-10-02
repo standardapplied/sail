@@ -15,7 +15,9 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncHealth;
@@ -174,9 +176,7 @@ class SyncCliTest {
         "CREATE TABLE spec_attachments (id TEXT PRIMARY KEY, spec_id TEXT NOT NULL,"
             + " filename TEXT NOT NULL, content_type TEXT NOT NULL, size_bytes INTEGER NOT NULL,"
             + " storage_path TEXT NOT NULL, created_at TEXT NOT NULL)");
-    db.execute(
-        "DELETE FROM data_migrations WHERE name = ?",
-        ai.singlr.sail.store.ReviewFindingsMigration.NAME);
+    db.execute("DELETE FROM data_migrations WHERE name = ?", ReviewFindingsMigration.NAME);
     db.execute("DROP TRIGGER change_log_kind_from_deleted");
     for (var index :
         List.of(
@@ -203,8 +203,7 @@ class SyncCliTest {
     for (var column : List.of("content_hash", "size", "mode", "kind"))
       db.execute("ALTER TABLE project_files DROP COLUMN " + column);
     db.execute("ALTER TABLE project_files ADD COLUMN content TEXT NOT NULL DEFAULT ''");
-    db.execute(
-        "DELETE FROM data_migrations WHERE name = ?", ai.singlr.sail.store.ContentMigration.NAME);
+    db.execute("DELETE FROM data_migrations WHERE name = ?", ContentMigration.NAME);
     db.execute("DROP TABLE sync_health");
     db.execute("DROP TABLE change_heads");
     db.execute("DROP TABLE sync_state");

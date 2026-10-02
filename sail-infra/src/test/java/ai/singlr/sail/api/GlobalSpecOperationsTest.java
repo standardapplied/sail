@@ -698,9 +698,17 @@ class GlobalSpecOperationsTest {
     Acting.by(
         ADMIN,
         () -> ops.update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done"))));
-
     assertEquals(
         Finding.Resolution.FIXED, reviewStore.findingsForReview(reviewId).getFirst().resolution());
+
+    Acting.by(
+        ADMIN,
+        () -> ops.update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "archived"))));
+
+    assertEquals(
+        Finding.Resolution.FIXED,
+        reviewStore.findingsForReview(reviewId).getFirst().resolution(),
+        "the fix outlives the follow-up's archive");
   }
 
   @Test

@@ -18,9 +18,11 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -218,7 +220,7 @@ class ReviewStoreTest {
     var hash = (String) store.comparableSnapshot(reviewId).get("findings_hash");
     assertTrue(history.getLast().snapshot().contains(hash));
     assertTrue(new BlobStore(db).text(hash).contains("proof"));
-    assertEquals(java.util.Set.of(hash), store.liveContentHashes());
+    assertEquals(Set.of(hash), store.liveContentHashes());
   }
 
   @Test
@@ -255,7 +257,7 @@ class ReviewStoreTest {
   }
 
   @Test
-  void aDoneFollowUpReadsItsLinkedOpenFindingsAsFixedWithoutWritingTheReview() {
+  void aShippedFollowUpFixesItsLinkedOpenFindingsInTheirReviewsContentForGood() {
     var reviewId = store.createReview("auth", 1);
     var stageId = store.createStage(reviewId, "security", "agent");
     var linked = addOpenFinding(stageId, Finding.Severity.HIGH, "Linked");
@@ -264,12 +266,14 @@ class ReviewStoreTest {
     store.resolveFinding(dismissed.id(), Finding.Resolution.DISMISSED);
     createSpec("auth-followup");
     store.linkSourceFindings("auth-followup", List.of(linked.id(), dismissed.id()));
-    var rev = store.latestRev(reviewId);
-    assertEquals(
-        Finding.Resolution.OPEN, store.findFinding(linked.id()).orElseThrow().resolution());
+    var linkedRev = store.latestRev(reviewId);
 
-    specStore.updateStatus("auth-followup", SpecStatus.DONE);
+    assertEquals(1, store.resolveSourceFindings("auth-followup"));
+    var fixedRev = store.latestRev(reviewId);
+    assertEquals(0, store.resolveSourceFindings("auth-followup"), "fixing again changes nothing");
 
+    assertNotEquals(linkedRev, fixedRev, "the fix is a revision of the source review");
+    assertEquals(fixedRev, store.latestRev(reviewId));
     assertEquals(
         Finding.Resolution.FIXED, store.findFinding(linked.id()).orElseThrow().resolution());
     assertEquals(
@@ -280,8 +284,14 @@ class ReviewStoreTest {
     assertEquals(
         Finding.Resolution.OPEN, store.findFinding(unlinked.id()).orElseThrow().resolution());
     assertEquals(List.of(unlinked.id()), ids(store.openFindingsForReview(reviewId)));
-    assertEquals(rev, store.latestRev(reviewId), "nothing is written to the source review");
     assertEquals(List.of(linked.id(), dismissed.id()), store.sourceFindingIds("auth-followup"));
+
+    specStore.updateStatus("auth-followup", SpecStatus.ARCHIVED);
+    db.execute("DELETE FROM specs WHERE id = ?", "auth-followup");
+    assertEquals(
+        Finding.Resolution.FIXED,
+        store.findFinding(linked.id()).orElseThrow().resolution(),
+        "the fix outlives the follow-up's archive and erasure");
   }
 
   private static List<String> ids(List<Finding> findings) {
@@ -876,6 +886,94 @@ class ReviewStoreTest {
     store.createStage(r1, "security", "agent");
 
     assertTrue(store.carryForwardFindings("auth", r1, "security").isEmpty());
+  }
+
+  @Test
+  void aRulingOnAFindingSomeoneResolvedSinceTheStageBeganNeitherCarriesNorResolvesIt() {
+    var r1 = store.createReview("auth", 1);
+    var stage1 = store.createStage(r1, "security", "agent");
+    var dismissedMeanwhile = addOpenFinding(stage1, Finding.Severity.HIGH, "Dismissed on main");
+    var fixedMeanwhile = addOpenFinding(stage1, Finding.Severity.HIGH, "Fixed on main");
+    var stubborn = addOpenFinding(stage1, Finding.Severity.MEDIUM, "Still there");
+    store.completeStage(stage1, "failed");
+    store.updateReviewStatus(r1, "failed");
+    var r2 = store.createReview("auth", 2);
+    var stage2 = store.createStage(r2, "security", "agent");
+    var carried = store.carryForwardFindings("auth", r2, "security");
+    assertEquals(3, carried.size());
+    store.resolveFinding(dismissedMeanwhile.id(), Finding.Resolution.DISMISSED, "by design");
+    store.resolveFinding(fixedMeanwhile.id(), Finding.Resolution.FIXED, "shipped in #7");
+    var r1Rev = store.latestRev(r1);
+
+    store.applyStageResult(
+        stage2,
+        List.of(
+            new ReviewStore.StageRuling(dismissedMeanwhile, Finding.Resolution.OPEN, "still"),
+            new ReviewStore.StageRuling(fixedMeanwhile, Finding.Resolution.FIXED, "commit abc"),
+            new ReviewStore.StageRuling(stubborn, Finding.Resolution.OPEN, "still races")),
+        List.of());
+
+    assertEquals(
+        List.of(stubborn.id()),
+        store.findingsForStage(stage2).stream().map(Finding::carriedFrom).toList(),
+        "only the finding still open is carried");
+    var dismissed = store.findFinding(dismissedMeanwhile.id()).orElseThrow();
+    assertEquals(Finding.Resolution.DISMISSED, dismissed.resolution());
+    assertEquals("by design", dismissed.resolutionEvidence());
+    assertEquals(
+        "shipped in #7",
+        store.findFinding(fixedMeanwhile.id()).orElseThrow().resolutionEvidence(),
+        "the earlier resolution stands");
+    assertEquals(r1Rev, store.latestRev(r1), "the earlier review takes no revision");
+  }
+
+  @Test
+  void aFindingIdAnotherReviewHoldsIsRefusedNamingBothReviews() {
+    var first = store.createReview("auth", 1);
+    var held =
+        addOpenFinding(
+            store.createStage(first, "security", "agent"), Finding.Severity.HIGH, "Held");
+    var second = store.createReview("auth", 2);
+    var stage = store.createStage(second, "security", "agent");
+    var secondRev = store.latestRev(second);
+
+    var refused = assertThrows(IllegalArgumentException.class, () -> store.addFinding(stage, held));
+
+    assertTrue(refused.getMessage().contains(held.id()), refused.getMessage());
+    assertTrue(refused.getMessage().contains(first), refused.getMessage());
+    assertEquals(secondRev, store.latestRev(second));
+    assertEquals(List.of(), store.findingsForReview(second));
+    assertEquals(
+        List.of("Held"), store.findingsForReview(first).stream().map(Finding::title).toList());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void aSnapshotNamingAnotherReviewsStageIsRefusedAndMovesNothing() {
+    var victim = store.createReview("auth", 1);
+    var victimsStage = store.createStage(victim, "security", "agent");
+    addOpenFinding(victimsStage, Finding.Severity.HIGH, "Victims");
+    var victimsRev = store.latestRev(victim);
+    var thief = store.createReview("auth", 2);
+    store.createStage(thief, "security", "agent");
+    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(thief));
+    var stages = new ArrayList<Map<String, Object>>();
+    for (var stage : (List<Map<String, Object>>) snapshot.get("stages")) {
+      var moved = new LinkedHashMap<>(stage);
+      moved.put("id", victimsStage);
+      stages.add(moved);
+    }
+    snapshot.put("stages", stages);
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> store.applyRevision(thief, snapshot, "9-thief"));
+
+    assertTrue(refused.getMessage().contains(victim), refused.getMessage());
+    assertEquals(victim, store.findStage(victimsStage).orElseThrow().reviewId());
+    assertEquals(
+        List.of("Victims"), store.findingsForReview(victim).stream().map(Finding::title).toList());
+    assertEquals(victimsRev, store.latestRev(victim));
   }
 
   @Test

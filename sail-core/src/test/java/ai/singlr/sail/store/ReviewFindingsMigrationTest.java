@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -175,6 +176,27 @@ class ReviewFindingsMigrationTest {
     assertEquals(doneHead, log.head("review", done).orElseThrow().seq());
     assertNotNull(findingsHash(pending));
     assertEquals(2, log.history("review", pending).size());
+  }
+
+  @Test
+  void aReviewOfAPrunedSpecIsLeftForItsErasureAndTheRestStillFold() {
+    var orphan = legacyReview("r-orphan", 1, null);
+    var folds = legacyReview("r1", 1, null);
+    db.execute("UPDATE reviews SET spec_id = 'gone' WHERE id = ?", orphan);
+    log.erase("spec", "gone", "erased", "local");
+
+    var run = migrate().getFirst();
+
+    assertEquals(1, run.report().applied());
+    assertEquals(1, run.report().skipped());
+    assertTrue(run.report().notes().getLast().contains(orphan), run.report().notes().toString());
+    assertNotNull(findingsHash(folds));
+    assertNull(findingsHash(orphan));
+    assertEquals(
+        1, store.findingsForReview(orphan).size(), "the orphan's rows are left as they are");
+    assertTrue(migrate().getFirst().alreadyApplied(), "the migration is recorded as applied");
+    assertFalse(db.transaction(() -> store.foldLegacyFindings(folds)), "already content");
+    assertFalse(db.transaction(() -> store.foldLegacyFindings("no-such-review")));
   }
 
   private static Finding finding() {

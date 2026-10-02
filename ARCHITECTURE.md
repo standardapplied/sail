@@ -110,7 +110,7 @@ Sixteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
 
 | Store | Owns | Synced across boxes? |
 |---|---|---|
-| `SpecStore` | `specs` and their dependencies, repos, content, and attachments | Yes, entity `spec` |
+| `SpecStore` | `specs` and their dependencies, repos, and content | Yes, entity `spec` |
 | `ProjectStore` | `projects`, the `sail.yaml` descriptor blob plus attribution | Yes, entity `project` |
 | `FileStore` | `project_files`, shared workspace files keyed by project and path | Yes, entity `file` |
 | `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
@@ -202,11 +202,11 @@ and the spec that closes it.
 Every test in the `sync` package that drives a round between boxes ends each scenario by
 quiescing every box and asserting each replica equals main — fields, author, revision, head kind
 and the merge base it descends from — so a divergence cannot pass unseen: `SyncBox.quiesce` and
-`SyncBox.assertEqualToMain`, together `SyncBox.assertConverged`. A scenario that cannot converge
-on one entity for a reason another spec owns says so with `SyncBox.assertEqualToMainBut`, which
-names the reason, holds every other entity to main's, and fails the moment that entity
-converges. The fleet lane (`NativeFleetIT`) asserts after every scenario's final round that
-every box's change-log heads (id, rev, kind, author) equal main's for every type.
+`SyncBox.assertEqualToMain`, together `SyncBox.assertConverged`; `SyncBox.assertConvergedWithin`
+settles a fleet of boxes round by round first, counting a refusal or a settlement as unsettled.
+No scenario is excepted from equality: every entity converges. The fleet lane (`NativeFleetIT`)
+asserts after every scenario's final round that every box's change-log heads (id, rev, kind,
+author) equal main's for every type.
 
 ### What syncs, and how
 
@@ -245,9 +245,11 @@ Mast hold the same review. `review_findings` is a projection of that content, wr
 applying a review revision, on every box; every finding query reads it, and a stage's
 `finding_counts` in the snapshot are counted from it. Adding, resolving, disputing or carrying a
 finding is one revision of its review, decided by the review rule like any other write, and a
-node adopting main's version takes main's findings exactly. A finding whose follow-up spec is
-`done` reads as `FIXED` wherever it is read, so shipping a follow-up never writes the source
-review and the links survive the follow-up's delete and restore. A review main denies is
+node adopting main's version takes main's findings exactly. A finding names the follow-up spec
+drafted from it in that content, so the link survives the follow-up's delete and restore on
+every box, and the follow-up reaching `done` resolves the finding `FIXED` in the same content —
+one revision of the source review, by the box that marks the follow-up done — so the resolution
+outlives the follow-up's archive and erasure. A review main denies is
 adopted as main's; one main never took is withdrawn, its findings recoverable from the content
 its change-log entries name. The upgrade folds each box's finding rows from before into one
 revision per review (`ReviewFindingsMigration`), which a node's next round pushes; a review
