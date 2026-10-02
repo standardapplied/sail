@@ -25,7 +25,7 @@ import java.util.Objects;
  * edit or a version this box wrote that compaction has since dropped — on main, whose copies lag
  * the fleet's pushes, mostly the latter — and nothing left can tell which: it is recorded as
  * undecided ({@link FileStore#recordUndecided}), kept, reported with the remedy, and never
- * published, until this box writes or publishes the file again. A revision the content migration
+ * published, until a version this box writes lands in its place. A revision the content migration
  * converted recorded no mode, since the old materializer wrote whatever the box's umask gave, so it
  * matches its content at any mode that grants no execute bit the row lacks: that materializer never
  * wrote one, so one on disk was put there on purpose, the one edit history can still tell, left for

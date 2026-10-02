@@ -97,9 +97,7 @@ class ProjectFilesCommandTest {
     new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals("scripts/deploy.sh", path);
-    assertEquals(
-        b64("echo hi"),
-        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(b64("echo hi"), ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals("echo hi", Files.readString(filesDir("acme").resolve("scripts/deploy.sh")));
   }
 
@@ -346,8 +344,8 @@ class ProjectFilesCommandTest {
 
   @Test
   void lsRendersHumanTableAndJson() {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "AAAA");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "b.txt", "B");
+    ContentFixtures.put(files, "acme", "a.txt", "AAAA");
+    ContentFixtures.put(files, "acme", "b.txt", "B");
 
     var captured = new ByteArrayOutputStream();
     Banner.printProjectFilesTable(
@@ -372,7 +370,7 @@ class ProjectFilesCommandTest {
 
   @Test
   void catStreamsContentAndIsEmptyWhenAbsent() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "payload");
+    ContentFixtures.put(files, "acme", "a.txt", "payload");
 
     assertArrayEquals(
         "payload".getBytes(),
@@ -403,16 +401,29 @@ class ProjectFilesCommandTest {
 
   @Test
   void exportWritesEveryTargetAndCountsDeletionsAndSkips() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A");
+    ContentFixtures.put(files, "acme", "a.txt", "A");
     var report = ProjectFilesCommand.Export.export(files, projectsDir, files.projectsWithFiles());
     assertEquals(1, report.written());
 
     Files.writeString(filesDir("acme").resolve("a.txt"), "LOCAL EDIT");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "A2");
+    ContentFixtures.put(files, "acme", "a.txt", "A2");
     var second = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
 
     assertEquals(0, second.written());
     assertEquals(List.of("acme/a.txt"), second.skipped());
+    assertEquals(List.of(), second.undecided());
+
+    files.forgetMaterialized(FileStore.idOf("acme", "a.txt"));
+    files.recordUndecided(
+        FileStore.idOf("acme", "a.txt"), files.blobs().putText("LOCAL EDIT"), 0644);
+    var third = ProjectFilesCommand.Export.export(files, projectsDir, List.of("acme"));
+
+    assertEquals(0, third.written());
+    assertEquals(List.of(), third.skipped());
+    assertEquals(
+        List.of("acme/a.txt"),
+        third.undecided(),
+        "a copy the upgrade could not tell is reported apart from a person's edit");
   }
 
   @Test

@@ -461,19 +461,17 @@ public final class ProjectFilesCommand implements Runnable {
         var written = 0;
         var deleted = 0;
         var skipped = new ArrayList<String>();
+        var undecided = new ArrayList<String>();
         for (var target : targets) {
           var materialized = operations.projectFiles(target).materialize();
           written += materialized.written();
           deleted += materialized.deleted();
-          for (var skip : materialized.skipped()) {
-            skipped.add(target + "/" + skip);
-          }
+          materialized.skipped().forEach(skip -> skipped.add(target + "/" + skip));
+          materialized.undecided().forEach(copy -> undecided.add(target + "/" + copy));
         }
-        var report = new ExportReport(written, deleted, List.copyOf(skipped));
-        for (var skip : report.skipped()) {
-          System.err.println(
-              Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));
-        }
+        var report =
+            new ExportReport(written, deleted, List.copyOf(skipped), List.copyOf(undecided));
+        report.print();
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Pulled: "
@@ -485,7 +483,26 @@ public final class ProjectFilesCommand implements Runnable {
       return 0;
     }
 
-    record ExportReport(int written, int deleted, List<String> skipped) {}
+    /**
+     * What a pull did across its projects: {@code skipped} are a person's edits, {@code undecided}
+     * the copies the upgrade's seed could not tell from one, each left as it is.
+     */
+    record ExportReport(int written, int deleted, List<String> skipped, List<String> undecided) {
+      void print() {
+        for (var skip : skipped) {
+          System.err.println(
+              Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));
+        }
+        for (var copy : undecided) {
+          System.err.println(
+              Ansi.AUTO.string(
+                  "  @|yellow ⚠|@ kept "
+                      + copy
+                      + ": the upgrade could not tell it from your edit (delete it to take"
+                      + " main's, or 'sail project files add' it if yours)"));
+        }
+      }
+    }
 
     static ExportReport export(FileStore files, Path projectsDir, Collection<String> targets)
         throws IOException {
@@ -493,16 +510,16 @@ public final class ProjectFilesCommand implements Runnable {
       var written = 0;
       var deleted = 0;
       var skipped = new ArrayList<String>();
+      var undecided = new ArrayList<String>();
       for (var target : targets) {
         NameValidator.requireValidProjectName(target);
         var report = materializer.materialize(target);
         written += report.written();
         deleted += report.deleted();
-        for (var skip : report.skipped()) {
-          skipped.add(target + "/" + skip);
-        }
+        report.skipped().forEach(skip -> skipped.add(target + "/" + skip));
+        report.undecided().forEach(copy -> undecided.add(target + "/" + copy));
       }
-      return new ExportReport(written, deleted, List.copyOf(skipped));
+      return new ExportReport(written, deleted, List.copyOf(skipped), List.copyOf(undecided));
     }
   }
 
