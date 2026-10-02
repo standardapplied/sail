@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.PushOutcome;
@@ -135,6 +136,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   @Override
   public Set<String> latestWinsFields() {
     return store.latestWinsFields();
+  }
+
+  @Override
+  public ConflictDetector.FieldMerger fieldMerger() {
+    return store.fieldMerger();
   }
 
   @Override

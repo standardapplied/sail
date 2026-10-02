@@ -267,10 +267,12 @@ class ReviewStoreTest {
     createSpec("auth-followup");
     store.linkSourceFindings("auth-followup", List.of(linked.id(), dismissed.id()));
     var linkedRev = store.latestRev(reviewId);
+    assertEquals(0, store.resolveFindingsOfShippedFollowUps(), "the follow-up has not shipped");
 
-    assertEquals(1, store.resolveSourceFindings("auth-followup"));
+    specStore.updateStatus("auth-followup", SpecStatus.DONE);
+    assertEquals(1, store.resolveFindingsOfShippedFollowUps());
     var fixedRev = store.latestRev(reviewId);
-    assertEquals(0, store.resolveSourceFindings("auth-followup"), "fixing again changes nothing");
+    assertEquals(0, store.resolveFindingsOfShippedFollowUps(), "fixing again changes nothing");
 
     assertNotEquals(linkedRev, fixedRev, "the fix is a revision of the source review");
     assertEquals(fixedRev, store.latestRev(reviewId));

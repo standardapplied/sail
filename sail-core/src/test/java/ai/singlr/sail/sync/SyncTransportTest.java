@@ -326,6 +326,11 @@ class SyncTransportTest {
     }
 
     @Override
+    public ConflictDetector.FieldMerger fieldMerger() {
+      return inner.fieldMerger();
+    }
+
+    @Override
     public <T> T atomically(Supplier<T> work) {
       var result = inner.atomically(work);
       afterTransaction.run();

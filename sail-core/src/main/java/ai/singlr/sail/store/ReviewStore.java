@@ -591,9 +591,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Names the follow-up spec drafted from each finding, in its review's content, so completing the
-   * spec resolves exactly those findings ({@link #resolveSourceFindings}) on every box. A finding
-   * names one follow-up, the latest drafted from it. Idempotent: a finding already naming the spec
-   * changes nothing, and a review none of whose findings change gets no revision.
+   * spec resolves exactly those findings ({@link #resolveFindingsOfShippedFollowUps}) on every box.
+   * A finding names one follow-up, the latest drafted from it. Idempotent: a finding already naming
+   * the spec changes nothing, and a review none of whose findings change gets no revision.
    */
   public void linkSourceFindings(String specId, List<String> findingIds) {
     var links = new LinkedHashMap<String, Map<String, Object>>();
@@ -612,23 +612,27 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Marks every still-open finding the follow-up spec was drafted from {@code FIXED}, in its
-   * review's content — one revision per source review — returning how many changed. Called when the
-   * follow-up reaches {@code done}; the resolution outlives the follow-up's archive or erasure.
-   * Findings already dismissed or fixed by other means are left untouched.
+   * Marks every still-open finding whose follow-up spec is {@code done} {@code FIXED}, in its
+   * review's content — one revision per source review — returning how many changed. Run when a
+   * follow-up reaches {@code done}, and again on any later occasion, since it leaves resolved what
+   * it already resolved: a run that was lost is made good by the next. The resolution outlives the
+   * follow-up's archive or erasure; findings dismissed or fixed by other means are left untouched.
    */
-  public int resolveSourceFindings(String specId) {
+  public int resolveFindingsOfShippedFollowUps() {
     return db.transaction(
         () -> {
           var fixed = new LinkedHashMap<String, Map<String, Object>>();
-          for (var findingId :
-              db.query(
-                  "SELECT f.id FROM review_findings f WHERE f.followup = ? AND " + OPEN,
-                  row -> row.text(0),
-                  specId)) {
-            fixed.put(
-                findingId, resolutionOf(Finding.Resolution.FIXED, "fixed by follow-up " + specId));
-          }
+          db.query(
+                  "SELECT f.id, f.followup FROM review_findings f"
+                      + " JOIN specs sp ON sp.id = f.followup WHERE sp.status = 'done' AND "
+                      + OPEN,
+                  row -> Map.entry(row.text(0), row.text(1)))
+              .forEach(
+                  entry ->
+                      fixed.put(
+                          entry.getKey(),
+                          resolutionOf(
+                              Finding.Resolution.FIXED, "fixed by follow-up " + entry.getValue())));
           amend(fixed);
           return fixed.size();
         });
@@ -800,6 +804,19 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   @Override
   public Set<String> contentFields() {
     return Set.of(FINDINGS_HASH);
+  }
+
+  /**
+   * Findings both sides changed merge finding by finding ({@link ReviewFindingsContent#merge}):
+   * main resolving one as a follow-up ships while this box's review run rules on another is no
+   * conflict.
+   */
+  @Override
+  public ConflictDetector.FieldMerger fieldMerger() {
+    return (field, base, local, remote) ->
+        FINDINGS_HASH.equals(field)
+            ? content.merge((String) base, (String) local, (String) remote).map(hash -> hash)
+            : Optional.empty();
   }
 
   @Override

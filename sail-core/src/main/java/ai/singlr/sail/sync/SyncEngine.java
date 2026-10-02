@@ -195,7 +195,7 @@ public final class SyncEngine {
       }
       var localRev = captured.rev();
       return switch (ConflictDetector.detect(
-          base, localSnap, remoteLive, local.latestWinsFields())) {
+          base, localSnap, remoteLive, local.latestWinsFields(), local.fieldMerger())) {
         case ConflictDetector.Converged ignored ->
             converged(id, captured, localSnap, remote, remoteRev, redetectsLeft);
         case ConflictDetector.TakeRemote ignored ->
@@ -432,7 +432,8 @@ public final class SyncEngine {
       var base = local.base(id);
       var localSnap = local.current(id);
       var fields =
-          ConflictDetector.detect(base, localSnap, remoteSnap, local.latestWinsFields())
+          ConflictDetector.detect(
+                      base, localSnap, remoteSnap, local.latestWinsFields(), local.fieldMerger())
                   instanceof ConflictDetector.Conflict c
               ? c.fields()
               : List.of(STALE_FIELD);

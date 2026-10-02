@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -272,5 +273,28 @@ class ConflictDetectorTest {
         List.of(ConflictDetector.DELETED_FIELD), ConflictDetector.drift(row, null, Set.of()));
     assertEquals(
         List.of(ConflictDetector.DELETED_FIELD), ConflictDetector.drift(null, row, Set.of()));
+  }
+
+  @Test
+  void aFieldBothSidesChangedIsMergedWhenTheStoreCanReconcileItAndAConflictWhenItCannot() {
+    var base = Map.<String, Object>of("doc", "b", "title", "T");
+    var local = Map.<String, Object>of("doc", "l", "title", "T");
+    var remote = Map.<String, Object>of("doc", "r", "title", "T2");
+    ConflictDetector.FieldMerger joining =
+        (field, was, ours, theirs) ->
+            field.equals("doc") ? Optional.of(was + "+" + ours + "+" + theirs) : Optional.empty();
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class,
+            ConflictDetector.detect(base, local, remote, Set.of(), joining));
+    assertEquals(Map.of("doc", "b+l+r", "title", "T2"), merged.result());
+    assertEquals(
+        List.of("doc"),
+        assertInstanceOf(
+                ConflictDetector.Conflict.class,
+                ConflictDetector.detect(
+                    base, local, remote, Set.of(), ConflictDetector.FieldMerger.NONE))
+            .fields());
   }
 }

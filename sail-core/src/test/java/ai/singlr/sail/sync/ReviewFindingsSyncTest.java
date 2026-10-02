@@ -265,7 +265,7 @@ class ReviewFindingsSyncTest {
     round(bob);
     Acting.as("root", () -> main.specs.updateStatus("followup", SpecStatus.DONE));
     assertEquals(
-        1, Acting.as("root", () -> new ReviewStore(main.db).resolveSourceFindings("followup")));
+        1, Acting.as("root", () -> new ReviewStore(main.db).resolveFindingsOfShippedFollowUps()));
     round(ada);
     round(bob);
     assertFixedEverywhere(review, found.id());
@@ -307,6 +307,78 @@ class ReviewFindingsSyncTest {
 
     assertFixedEverywhere(review, found.id());
     SyncBox.assertConvergedWithin(2, main, ada, bob);
+  }
+
+  @Test
+  void mainFixingASourceFindingWhileItsOwnerRulesOnAnotherMergesInsteadOfParkingAConflict() {
+    main.transitions(new ShippedFollowUps(main.db));
+    ownSpec(main, "bob", "fix", "bob");
+    ownSpec(main, "ada", "followup", "ada");
+    round(ada);
+    round(bob);
+    var leak = finding("leak");
+    var other = finding("other");
+    var review = Acting.as("bob", () -> failedReviewOn(bob, "fix", leak, other));
+    round(bob);
+    round(ada);
+    Acting.as(
+        "root", () -> new ReviewStore(main.db).linkSourceFindings("followup", List.of(leak.id())));
+    round(ada);
+    round(bob);
+
+    Acting.as(
+        "bob",
+        () ->
+            new ReviewStore(bob.db)
+                .resolveFinding(other.id(), Finding.Resolution.DISMISSED, "by design"));
+    Acting.as("ada", () -> ada.specs.updateStatus("followup", SpecStatus.DONE));
+    round(ada);
+    var bobsRound = round(bob);
+
+    assertEquals(
+        0,
+        bobsRound.types().stream().mapToInt(type -> type.report().conflicts()).sum(),
+        "disjoint findings merge");
+    assertTrue(bob.conflicts.pendingFor("review", review).isEmpty());
+    SyncBox.assertConvergedWithin(2, main, ada, bob);
+    for (var box : List.of(main, ada, bob)) {
+      assertEquals(
+          Finding.Resolution.FIXED, byId(findings(box, review), leak.id()).resolution(), box.id);
+      assertEquals(
+          Finding.Resolution.DISMISSED,
+          byId(findings(box, review), other.id()).resolution(),
+          box.id);
+    }
+  }
+
+  @Test
+  void aResolutionMainMissedIsMadeGoodByTheNextSpecTransitionItTakes() {
+    ownSpec(main, "bob", "fix", "bob");
+    ownSpec(main, "ada", "followup", "ada");
+    round(ada);
+    round(bob);
+    var leak = finding("leak");
+    var review = Acting.as("bob", () -> failedReviewOn(bob, "fix", leak));
+    round(bob);
+    round(ada);
+    Acting.as(
+        "root", () -> new ReviewStore(main.db).linkSourceFindings("followup", List.of(leak.id())));
+    round(ada);
+    round(bob);
+    Acting.as("ada", () -> ada.specs.updateStatus("followup", SpecStatus.DONE));
+    round(ada);
+    assertEquals(
+        Finding.Resolution.OPEN,
+        byId(findings(main, review), leak.id()).resolution(),
+        "main's sink missed the done transition");
+
+    main.transitions(new ShippedFollowUps(main.db));
+    Acting.as("bob", () -> bob.specs.updateStatus("fix", SpecStatus.IN_PROGRESS));
+    round(bob);
+
+    assertEquals(Finding.Resolution.FIXED, byId(findings(main, review), leak.id()).resolution());
+    SyncBox.assertConvergedWithin(2, main, ada, bob);
+    assertFixedEverywhere(review, leak.id());
   }
 
   private void assertFixedEverywhere(String review, String findingId) {

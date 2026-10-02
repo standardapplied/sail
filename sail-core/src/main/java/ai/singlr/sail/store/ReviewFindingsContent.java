@@ -9,9 +9,11 @@ import ai.singlr.sail.config.YamlUtil;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -162,6 +164,43 @@ final class ReviewFindingsContent {
           "Review findings content " + hash + " holds no findings list");
     }
     return new ArrayList<>((List<Map<String, Object>>) findings);
+  }
+
+  /**
+   * Three-way merge of a review's content both sides changed: finding by finding, a finding one
+   * side changed, added or kept takes that side's version; one both sides changed differently
+   * cannot be reconciled, and the merge is empty. The merged document is stored, its hash returned,
+   * in the local order with the findings only main holds after.
+   */
+  Optional<String> merge(String baseHash, String localHash, String remoteHash) {
+    var base = byId(findingsOf(baseHash));
+    var local = byId(findingsOf(localHash));
+    var remote = byId(findingsOf(remoteHash));
+    var merged = new LinkedHashMap<String, Map<String, Object>>();
+    var ids = new LinkedHashSet<>(local.keySet());
+    ids.addAll(remote.keySet());
+    for (var id : ids) {
+      var ours = local.get(id);
+      var theirs = remote.get(id);
+      var was = base.get(id);
+      if (Objects.equals(ours, theirs) || Objects.equals(theirs, was)) {
+        merged.put(id, ours);
+      } else if (Objects.equals(ours, was)) {
+        merged.put(id, theirs);
+      } else {
+        return Optional.empty();
+      }
+    }
+    var findings = merged.values().stream().filter(Objects::nonNull).toList();
+    return Optional.of(blobs.putText(serialize(findings)));
+  }
+
+  private static Map<String, Map<String, Object>> byId(List<Map<String, Object>> findings) {
+    var byId = new LinkedHashMap<String, Map<String, Object>>();
+    for (var finding : findings) {
+      byId.put(Snapshots.text(finding, "id"), finding);
+    }
+    return byId;
   }
 
   /**

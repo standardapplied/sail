@@ -286,7 +286,7 @@ final class GlobalSpecOperations {
         && existing.status() != SpecStatus.DONE
         && reviewStore != null) {
       if (authoritative.getAsBoolean()) {
-        reviewStore.resolveSourceFindings(specId);
+        reviewStore.resolveFindingsOfShippedFollowUps();
       }
       reviewStore.resolveShippedFindings(specId);
     }

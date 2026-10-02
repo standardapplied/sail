@@ -12,6 +12,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -50,6 +51,18 @@ public final class ConflictDetector {
   /** The single field name used to report a delete-vs-edit conflict. */
   public static final String DELETED_FIELD = "<deleted>";
 
+  /**
+   * A store's own merge of one field both sides changed differently — a document both edited in
+   * disjoint parts, such as a review's findings — given the three values; empty when the two
+   * changes cannot be reconciled and the field is a conflict after all.
+   */
+  @FunctionalInterface
+  public interface FieldMerger {
+    FieldMerger NONE = (field, base, local, remote) -> Optional.empty();
+
+    Optional<Object> merge(String field, Object base, Object local, Object remote);
+  }
+
   public static Resolution detect(
       Map<String, Object> base, Map<String, Object> local, Map<String, Object> remote) {
     return detect(base, local, remote, Set.of());
@@ -65,6 +78,19 @@ public final class ConflictDetector {
       Map<String, Object> local,
       Map<String, Object> remote,
       Set<String> latestWins) {
+    return detect(base, local, remote, latestWins, FieldMerger.NONE);
+  }
+
+  /**
+   * As {@link #detect(Map, Map, Map, Set)}, with {@code merger} given the chance to reconcile a
+   * field both sides changed differently before it is reported as a conflict.
+   */
+  public static Resolution detect(
+      Map<String, Object> base,
+      Map<String, Object> local,
+      Map<String, Object> remote,
+      Set<String> latestWins,
+      FieldMerger merger) {
     var localDeleted = local == null;
     var remoteDeleted = remote == null;
 
@@ -100,17 +126,22 @@ public final class ConflictDetector {
     }
 
     var conflicts = new ArrayList<String>();
+    var reconciled = new LinkedHashMap<String, Object>();
     for (var field : localChanged) {
       if (remoteChanged.contains(field)
           && !latestWins.contains(field)
           && !Objects.equals(local.get(field), remote.get(field))) {
-        conflicts.add(field);
+        merger
+            .merge(field, safeBase.get(field), local.get(field), remote.get(field))
+            .ifPresentOrElse(value -> reconciled.put(field, value), () -> conflicts.add(field));
       }
     }
     if (!conflicts.isEmpty()) {
       return new Conflict(List.copyOf(conflicts));
     }
-    return new Merged(merge(safeBase, local, remote, localChanged, remoteChanged, latestWins));
+    var merged = merge(safeBase, local, remote, localChanged, remoteChanged, latestWins);
+    merged.putAll(reconciled);
+    return new Merged(merged);
   }
 
   /**

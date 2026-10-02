@@ -363,6 +363,8 @@ class SyncServerCommandTest {
               return id;
             });
 
+    Acting.as("uday", () -> mainSpecs.updateStatus("followup", SpecStatus.DONE));
+
     SyncServerCommand.transitionBridge(mainDb, "main")
         .onTransition(new SyncTransition("spec", "followup", "pending", "done", Map.of()));
 
