@@ -299,6 +299,22 @@ class ReviewStoreTest {
         "the fix outlives the follow-up's archive and erasure");
   }
 
+  @Test
+  void catchingUpWithNothingToFixTakesNoWriteLock() {
+    var reviewId = store.createReview("auth", 1);
+    var linked =
+        addOpenFinding(
+            store.createStage(reviewId, "security", "agent"), Finding.Severity.HIGH, "Linked");
+    createSpec("auth-followup");
+    store.linkSourceFindings("auth-followup", List.of(linked.id()));
+    try (var writer = Sqlite.open(tempDir.resolve("test.db"))) {
+      writer.execute("BEGIN IMMEDIATE");
+      assertEquals(
+          0, store.resolveFindingsOfShippedFollowUps(), "nothing shipped, no wait, no lock");
+      writer.execute("ROLLBACK");
+    }
+  }
+
   private static List<String> ids(List<Finding> findings) {
     return findings.stream().map(Finding::id).toList();
   }
