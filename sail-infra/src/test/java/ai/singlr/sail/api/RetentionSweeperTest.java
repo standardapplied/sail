@@ -199,20 +199,18 @@ class RetentionSweeperTest {
     var projectsDir = dir.resolve("projects");
     ContentFixtures.put(files, "acme", "app.conf", "v0");
     new FileMaterializer(files, projectsDir).materialize("acme");
+    String last;
     try (var node = Sqlite.open(dir.resolve("node.db"))) {
       new SchemaManager(node).migrate();
       SyncBox.round(db, node, "file");
-      for (var i = 1; i <= 25; i++) {
-        ContentFixtures.put(new FileStore(node), "acme", "app.conf", "v" + i);
-        SyncBox.round(db, node, "file");
-      }
+      last = SyncBox.pushPastHistory(db, node, "acme", "app.conf");
     }
     assertTrue(sweeper.collect().compacted() > 0);
 
     var report = new FileMaterializer(files, projectsDir).materialize("acme");
 
     assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
-    assertEquals("v25", Files.readString(projectsDir.resolve("acme/files/app.conf")));
+    assertEquals(last, Files.readString(projectsDir.resolve("acme/files/app.conf")));
   }
 
   private void archived(String id, Instant since) {

@@ -92,21 +92,102 @@ class FileStoreTest {
   }
 
   @Test
-  void aCopyIsThisBoxsOutputOnlyAsRecordedInContentAndMode() {
+  void aCopyIsThisBoxsAsTheVersionItWroteAndWhileAWriteIsInFlightTheOneBefore() {
     var first = files.blobs().putText("first");
     var second = files.blobs().putText("second");
+    var third = files.blobs().putText("third");
 
     files.recordMaterialized(id("known"), first, 0644);
 
-    assertTrue(files.materialized(id("known"), first, 0644));
-    assertFalse(files.materialized(id("known"), first, 0600), "a chmod is a person's");
-    assertFalse(files.materialized(id("known"), second, 0644), "an edit is a person's");
-    assertFalse(files.materialized(id("other"), first, 0644), "no record, a person's copy");
+    assertTrue(files.copyOf(id("known"), first, 0644).ours());
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("known"), first, 0600),
+        "a chmod is a person's");
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("known"), second, 0644),
+        "an edit is a person's");
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("other"), first, 0644),
+        "no record, a person's");
+    files.recordWriting(id("known"), second, 0600);
+    assertTrue(
+        files.copyOf(id("known"), first, 0644).ours(),
+        "the version written before stays this box's while the write is in flight");
+    assertTrue(files.copyOf(id("known"), second, 0600).ours());
+    files.recordWriting(id("known"), second, 0600);
+    assertTrue(
+        files.copyOf(id("known"), first, 0644).ours(),
+        "a write recorded again keeps the one before");
     files.recordMaterialized(id("known"), second, 0600);
-    assertFalse(files.materialized(id("known"), first, 0644), "one record per file");
-    assertTrue(files.materialized(id("known"), second, 0600));
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("known"), first, 0644),
+        "once the write landed, a hand revert to the earlier version is a person's");
+    files.recordWriting(id("known"), third, 0644);
+    files.recordWriting(id("known"), first, 0644);
+    assertTrue(
+        files.copyOf(id("known"), second, 0600).ours(),
+        "the last version known to have landed stays this box's across writes in flight");
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("known"), third, 0644),
+        "a write that never landed is not kept once another is in flight");
+    assertTrue(files.copyOf(id("known"), first, 0644).ours());
     files.forgetMaterialized(id("known"));
-    assertFalse(files.materialized(id("known"), second, 0600));
+    assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("known"), first, 0644));
+  }
+
+  @Test
+  void anUndecidedCopyIsNeitherThisBoxsNorAPersonsUntilThisBoxWritesOrPublishesAgain() {
+    var undecided = files.blobs().putText("undecided");
+    var next = files.blobs().putText("next");
+
+    files.recordUndecided(id("doubt"), undecided, 0644);
+
+    assertEquals(MaterializedFiles.Copy.UNDECIDED, files.copyOf(id("doubt"), undecided, 0644));
+    assertEquals(MaterializedFiles.Copy.PERSONS, files.copyOf(id("doubt"), undecided, 0600));
+    files.recordUndecided(id("doubt"), next, 0644);
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED,
+        files.copyOf(id("doubt"), undecided, 0644),
+        "an undecided record is never written over by another");
+    files.recordMaterialized(id("doubt"), next, 0644);
+    assertTrue(files.copyOf(id("doubt"), next, 0644).ours());
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf(id("doubt"), undecided, 0644),
+        "the undecided copy is not kept as the version before");
+    files.recordUndecided(id("doubt"), undecided, 0644);
+    assertTrue(files.copyOf(id("doubt"), next, 0644).ours(), "nor over a decided one");
+  }
+
+  @Test
+  void publishingAVersionRecordsItAsThisBoxs() {
+    ContentFixtures.put(files, "acme", "pub.txt", "v1");
+    var row = files.find("acme", "pub.txt").orElseThrow();
+
+    assertTrue(
+        files.copyOf(id("pub.txt"), row.contentHash(), row.mode()).ours(),
+        "a copy on disk holding a version this box published is never a lost edit");
+    ContentFixtures.put(files, "acme", "pub.txt", "v2");
+    assertTrue(
+        files.copyOf(id("pub.txt"), row.contentHash(), row.mode()).ours(),
+        "the version before stays this box's until the materialize that follows lands");
+    assertTrue(row.holds(row.contentHash(), row.mode()));
+    assertFalse(row.holds(row.contentHash(), row.mode() ^ 0100));
+  }
+
+  @Test
+  void aRecordIsValidatedBeforeItIsWritten() {
+    var hash = files.blobs().putText("x");
+    assertThrows(IllegalArgumentException.class, () -> files.recordMaterialized(" ", hash, 0644));
+    assertThrows(
+        IllegalArgumentException.class, () -> files.recordMaterialized(id("x"), "nothash", 0644));
+    assertThrows(
+        IllegalArgumentException.class, () -> files.recordMaterialized(id("x"), hash, 01000));
   }
 
   @Test
@@ -121,11 +202,12 @@ class FileStoreTest {
 
     files.reproject("acme", "globex");
 
-    assertTrue(files.materialized("globex/a.txt", hash, 0644), "re-keyed with the row");
-    assertTrue(files.materialized("globex/gone.txt", old, 0644), "a deleted file's copy moves too");
-    assertFalse(files.materialized(id("a.txt"), hash, 0644));
+    assertTrue(files.copyOf("globex/a.txt", hash, 0644).ours(), "re-keyed with the row");
+    assertTrue(
+        files.copyOf("globex/gone.txt", old, 0644).ours(), "a deleted file's copy moves too");
+    assertFalse(files.copyOf(id("a.txt"), hash, 0644).ours());
     files.eraseRow("globex/a.txt");
-    assertFalse(files.materialized("globex/a.txt", hash, 0644), "the record went with the row");
+    assertFalse(files.copyOf("globex/a.txt", hash, 0644).ours(), "the record went with the row");
     assertTrue(files.find("globex", "a.txt").isEmpty());
   }
 

@@ -29,9 +29,9 @@ import java.util.Set;
  * entity type {@code file} within one transaction — the same revision/CAS/conflict machinery {@link
  * SpecStore} uses — so files get history, restore, and bidirectional conflict resolution for free.
  *
- * <p>Box-local and never synced, {@code materialized_files} records the version of each file this
- * box last wrote to disk, so whether a copy on disk is this box's output or a person's edit is
- * decided from that record alone ({@link #materialized}), never from retained history.
+ * <p>Box-local and never synced, {@link MaterializedFiles} records the version of each file this
+ * box last wrote to disk or published from it, so whether a copy on disk is this box's output or a
+ * person's edit is decided from that record alone ({@link #copyOf}), never from retained history.
  */
 public final class FileStore implements ConflictResolver, SyncedStore {
 
@@ -41,12 +41,14 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   private final ChangeLog changeLog;
   private final BlobStore blobs;
   private final RevisionJournal journal;
+  private final MaterializedFiles materialized;
 
   public FileStore(Sqlite db) {
     this.db = db;
     this.blobs = new BlobStore(db);
     this.changeLog = new ChangeLog(db);
     this.journal = new RevisionJournal(db, changeLog, new FileSchema());
+    this.materialized = new MaterializedFiles(db);
   }
 
   /**
@@ -77,6 +79,12 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   public record FileRow(
       String project, String path, String contentHash, long size, int mode, String kind) {
+
+    /** Whether a copy holding {@code contentHash} at {@code mode} is exactly this version. */
+    public boolean holds(String contentHash, int mode) {
+      return this.contentHash.equals(contentHash) && this.mode == mode;
+    }
+
     public FileRow {
       if (contentHash == null)
         throw new IllegalStateException(
@@ -130,12 +138,19 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return project + "/" + path;
   }
 
-  /** Stores or replaces a file's content as a local edit. */
+  /**
+   * Stores or replaces a file's content as a local edit, and records the version as one this box
+   * published and is about to materialize: a copy on disk holding it is never a lost edit, whether
+   * the bytes came from that copy or arrived over the API, and the copy this box wrote before stays
+   * its own until the materialize that follows lands.
+   */
   public void put(FileRow row) {
     db.transaction(
         () -> {
           writeRow(row);
-          journal.recordRevision(idOf(row.project(), row.path()), ChangeLog.Entry.LOCAL, false);
+          var id = idOf(row.project(), row.path());
+          journal.recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          materialized.writing(id, row.contentHash(), row.mode());
         });
   }
 
@@ -165,6 +180,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     }
     db.transaction(
         () -> {
+          materialized.rename(old, renamed);
           for (var file : list(old)) {
             delete(old, file.path());
             put(
@@ -176,14 +192,6 @@ public final class FileStore implements ConflictResolver, SyncedStore {
                     file.mode(),
                     file.kind()));
           }
-          var prefix = old + "/";
-          db.execute(
-              "UPDATE OR REPLACE materialized_files SET id = ? || substr(id, ?)"
-                  + " WHERE substr(id, 1, ?) = ?",
-              renamed + "/",
-              prefix.length() + 1,
-              prefix.length(),
-              prefix);
         });
   }
 
@@ -255,40 +263,48 @@ public final class FileStore implements ConflictResolver, SyncedStore {
       WHERE h.entity_type = ? AND l.kind <> 'erasure'""";
 
   /**
-   * Records {@code contentHash} at {@code mode} as the copy of file {@code id} this box last wrote
-   * to disk: what the materializer put there, or what the importer published from there.
+   * Records that this box is about to write {@code contentHash} at {@code mode} as file {@code id}
+   * ({@link MaterializedFiles#writing}); {@link #recordMaterialized} once it has.
    */
-  public void recordMaterialized(String id, String contentHash, int mode) {
-    db.execute(
-        "INSERT INTO materialized_files (id, content_hash, mode) VALUES (?, ?, ?)"
-            + " ON CONFLICT(id) DO UPDATE SET content_hash = excluded.content_hash,"
-            + " mode = excluded.mode",
-        id,
-        contentHash,
-        mode);
+  public void recordWriting(String id, String contentHash, int mode) {
+    materialized.writing(id, contentHash, mode);
   }
 
   /**
-   * Whether a disk copy of file {@code id} holding {@code contentHash} at {@code mode} is this
-   * box's output: exactly what it recorded writing. Any other copy — one this box never recorded,
-   * or one that differs from what it recorded, in content or in mode — is a person's. The one place
-   * that decides it, for the materializer and the importer alike.
+   * Records {@code contentHash} at {@code mode} as the version of file {@code id} this box wrote to
+   * disk or published ({@link MaterializedFiles#wrote}).
    */
-  public boolean materialized(String id, String contentHash, int mode) {
-    return db.queryOne(
-            "SELECT 1 FROM materialized_files WHERE id = ? AND content_hash = ? AND mode = ?",
-            row -> row.integer(0),
-            id,
-            contentHash,
-            mode)
-        .isPresent();
+  public void recordMaterialized(String id, String contentHash, int mode) {
+    materialized.wrote(id, contentHash, mode);
+  }
+
+  /**
+   * Records the copy of file {@code id} on disk as one this box cannot tell from a person's edit,
+   * for the one-time seed ({@link MaterializedFiles#recordUndecided}).
+   */
+  public void recordUndecided(String id, String contentHash, int mode) {
+    materialized.recordUndecided(id, contentHash, mode);
+  }
+
+  /**
+   * What a disk copy of file {@code id} holding {@code contentHash} at {@code mode} is to this box
+   * ({@link MaterializedFiles.Copy}): the one place that decides it, for the materializer and the
+   * importer alike, from the record alone.
+   */
+  public MaterializedFiles.Copy copyOf(String id, String contentHash, int mode) {
+    return materialized.copyOf(id, contentHash, mode);
+  }
+
+  /** Whether anything is recorded of what this box wrote of file {@code id}. */
+  public boolean recordedMaterialization(String id) {
+    return materialized.recorded(id);
   }
 
   /**
    * Forgets what this box wrote of file {@code id}: its copy left the disk, or the file is erased.
    */
   public void forgetMaterialized(String id) {
-    db.execute("DELETE FROM materialized_files WHERE id = ?", id);
+    materialized.forget(id);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -345,7 +361,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
   @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
-    forgetMaterialized(id);
+    materialized.forget(id);
   }
 
   /** Who may write files on this box: any writer, as its doors and main's commit decide. */

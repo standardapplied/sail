@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,12 +21,13 @@ import java.util.stream.Stream;
  * Imports each project's on-disk workspace files ({@code ~/.sail/projects/<name>/files/**}) into
  * the synced {@link FileStore}, so the file tree an FDE already has becomes the shared, replicated
  * copy the moment they upgrade — the disk-to-DB counterpart of {@link FileMaterializer}. It
- * publishes only a person's copy: one this box recorded writing ({@link FileStore#materialized}) is
- * its own output, whether current, since superseded by another box's version, or of a file since
- * deleted, and is never published or resurrected over the fleet's newer state; a deleted file's
- * copy is left for the materializer to remove. A person's copy is published unless the store
- * already holds it, and recorded as this box's either way, so no later upgrade publishes it again.
- * Idempotent: re-running on every upgrade neither churns revisions nor re-imports.
+ * publishes only a person's copy ({@link FileStore#copyOf}): one this box wrote or published is its
+ * own, whether current, since superseded by another box's version, or of a file since deleted, and
+ * is never published or resurrected over the fleet's newer state; a deleted file's copy is left for
+ * the materializer to remove; a copy the upgrade's seed could not tell is left for the person to
+ * publish or discard. A person's copy is published unless the store already holds it, and is this
+ * box's from then on, so no later upgrade publishes it again. Idempotent: re-running on every
+ * upgrade neither churns revisions nor re-imports.
  */
 public final class FileImporter {
 
@@ -87,22 +89,20 @@ public final class FileImporter {
         }
         var mode = WorkspaceFiles.mode(file);
         var id = FileStore.idOf(project, path);
-        if (files.materialized(id, hash, mode)) {
+        if (files.copyOf(id, hash, mode) != MaterializedFiles.Copy.PERSONS) {
           continue;
         }
-        if (!files.find(project, path).map(row -> holds(row, hash, mode)).orElse(false)) {
-          try (var input = Files.newInputStream(file)) {
-            files.put(project, path, limits.bounded(input, size), mode);
-          }
-          imported++;
+        if (files.find(project, path).map(row -> row.holds(hash, mode)).orElse(false)) {
+          files.recordMaterialized(id, hash, mode);
+          continue;
+        }
+        try (var input = Files.newInputStream(file)) {
+          files.put(project, path, limits.bounded(input, size), mode);
         }
         files.recordMaterialized(id, hash, mode);
+        imported++;
       }
     }
     return imported;
-  }
-
-  private static boolean holds(FileStore.FileRow row, String hash, int mode) {
-    return row.contentHash().equals(hash) && row.mode() == mode;
   }
 }

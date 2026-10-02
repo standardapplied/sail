@@ -652,7 +652,10 @@ public final class SchemaManager {
           CREATE TABLE materialized_files (
               id TEXT PRIMARY KEY,
               content_hash TEXT NOT NULL,
-              mode INTEGER NOT NULL
+              mode INTEGER NOT NULL,
+              previous_hash TEXT,
+              previous_mode INTEGER,
+              undecided INTEGER NOT NULL DEFAULT 0
           )""");
 
   /** The schema version this binary converges every database to. */

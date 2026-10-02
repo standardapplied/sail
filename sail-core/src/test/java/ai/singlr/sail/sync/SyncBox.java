@@ -16,6 +16,8 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -715,6 +717,22 @@ public final class SyncBox implements AutoCloseable {
 
   public static SyncEngine.Report round(Sqlite main, Sqlite node, String type) {
     return round(main, node, "node", type);
+  }
+
+  /**
+   * The box whose database is {@code node} pushes more versions of {@code path} than history keeps
+   * ({@link ChangeLog#HISTORY_REVISIONS}), one round each, so main's copy from before is a version
+   * compaction may drop. Returns the text of the last version pushed.
+   */
+  public static String pushPastHistory(Sqlite main, Sqlite node, String project, String path) {
+    var files = new FileStore(node);
+    var text = "";
+    for (var i = 1; i <= ChangeLog.HISTORY_REVISIONS + 5; i++) {
+      text = "v" + i;
+      ContentFixtures.put(files, project, path, text);
+      round(main, node, "file");
+    }
+    return text;
   }
 
   /**

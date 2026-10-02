@@ -108,10 +108,7 @@ class SyncCommandTest {
       ContentFixtures.put(files, "acme", "app.conf", "v0");
       new FileMaterializer(files, projectsDir).materialize("acme");
       SyncBox.round(db, node, "file");
-      for (var i = 1; i <= 25; i++) {
-        ContentFixtures.put(new FileStore(node), "acme", "app.conf", "v" + i);
-        SyncBox.round(db, node, "file");
-      }
+      var last = SyncBox.pushPastHistory(db, node, "acme", "app.conf");
       var operations =
           OperationsFactory.create(
                   db,
@@ -145,7 +142,7 @@ class SyncCommandTest {
       var report = new FileMaterializer(files, projectsDir).materialize("acme");
 
       assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
-      assertEquals("v25", Files.readString(projectsDir.resolve("acme/files/app.conf")));
+      assertEquals(last, Files.readString(projectsDir.resolve("acme/files/app.conf")));
     }
   }
 

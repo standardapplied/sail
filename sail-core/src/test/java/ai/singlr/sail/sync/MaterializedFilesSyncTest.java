@@ -16,6 +16,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -44,11 +45,11 @@ class MaterializedFilesSyncTest {
       SyncBox.assertConvergedWithin(2, main, node);
 
       assertEquals("v1", ContentFixtures.text(nodeFiles, "acme", "app.conf"));
-      assertTrue(mainFiles.materialized("acme/app.conf", hash, 0644), "main's record stands");
-      assertFalse(mainFiles.materialized("acme/app.conf", hash, 0600));
-      assertTrue(nodeFiles.materialized("acme/app.conf", hash, 0600), "the node's stands");
-      assertFalse(nodeFiles.materialized("acme/app.conf", hash, 0644));
-      for (var db : java.util.List.of(main.db, node.db)) {
+      assertTrue(mainFiles.copyOf("acme/app.conf", hash, 0644).ours(), "main's record stands");
+      assertFalse(mainFiles.copyOf("acme/app.conf", hash, 0600).ours());
+      assertTrue(nodeFiles.copyOf("acme/app.conf", hash, 0600).ours(), "the node's stands");
+      assertFalse(nodeFiles.copyOf("acme/app.conf", hash, 0644).ours());
+      for (var db : List.of(main.db, node.db)) {
         assertEquals(1L, records(db), "one box, one record of its own");
         assertTrue(
             db.query("SELECT snapshot FROM change_log", row -> row.text(0)).stream()

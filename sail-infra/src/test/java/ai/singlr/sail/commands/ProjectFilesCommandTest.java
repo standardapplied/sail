@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -140,6 +141,17 @@ class ProjectFilesCommandTest {
       assertEquals("private", Files.readString(copy));
       assertEquals(0600, WorkspaceFiles.mode(copy));
       assertEquals(0600, WorkspaceFiles.mode(source));
+      Files.writeString(copy, "edited in place");
+      assertEquals(
+          0, new CommandLine(new ProjectFilesCommand.Add()).execute("-p", "acme", copy.toString()));
+      assertEquals(
+          "edited in place", ContentFixtures.text(new FileStore(database), "acme", "linked.txt"));
+      ContentFixtures.put(new FileStore(database), "acme", "linked.txt", "newer elsewhere");
+      assertEquals(0, new CommandLine(new ProjectFilesCommand.Export()).execute("-p", "acme"));
+      assertEquals(
+          "newer elsewhere",
+          Files.readString(copy),
+          "a copy edited and published with files add is this box's to refresh from then on");
       var big = source.resolveSibling("big.bin");
       try (var raf = new java.io.RandomAccessFile(big.toFile(), "rw")) {
         raf.setLength(FileLimits.DEFAULT_MAX + 1);

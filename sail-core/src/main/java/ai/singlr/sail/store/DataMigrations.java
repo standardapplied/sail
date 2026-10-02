@@ -27,9 +27,14 @@ public final class DataMigrations {
 
   private DataMigrations() {}
 
-  /** Whether any registered migration has not yet been applied to {@code db}. */
-  public static boolean anyPending(Sqlite db) {
-    return ALL.stream()
+  /** The migrations the sync lane applies: those that need nothing of this box's own files. */
+  public static List<DataMigration> databaseOnly() {
+    return ALL.stream().filter(migration -> !migration.readsBoxFiles()).toList();
+  }
+
+  /** Whether any of {@code migrations} has not yet been applied to {@code db}. */
+  public static boolean anyPending(Sqlite db, List<DataMigration> migrations) {
+    return migrations.stream()
         .anyMatch(
             migration ->
                 db.queryOne(

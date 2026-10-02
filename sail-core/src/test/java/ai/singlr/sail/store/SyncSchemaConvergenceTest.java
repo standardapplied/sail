@@ -212,4 +212,29 @@ class SyncSchemaConvergenceTest {
       assertEquals(versionAfterFirst, new SchemaManager(second.db()).currentVersion());
     }
   }
+
+  @Test
+  void theSyncLaneAppliesEveryMigrationButThoseReadingThisBoxsFilesAndRecordsNoneOfThoseApplied() {
+    var path = currentDatabase("lane");
+
+    try (var converged = SyncDatabase.converge(path, "box")) {
+      var applied =
+          converged
+              .db()
+              .query("SELECT name FROM data_migrations ORDER BY name", row -> row.text(0));
+      for (var migration : DataMigrations.ALL) {
+        assertEquals(
+            !migration.readsBoxFiles(),
+            applied.contains(migration.name()),
+            migration.name()
+                + ": the lane converges the shared database as another user, whose home holds"
+                + " none of this box's files, so it leaves such a migration to sail migrate");
+      }
+      assertTrue(DataMigrations.anyPending(converged.db(), DataMigrations.ALL));
+      assertTrue(!DataMigrations.anyPending(converged.db(), DataMigrations.databaseOnly()));
+      assertTrue(
+          DataMigrations.databaseOnly().stream().noneMatch(DataMigration::readsBoxFiles)
+              && DataMigrations.ALL.stream().anyMatch(DataMigration::readsBoxFiles));
+    }
+  }
 }

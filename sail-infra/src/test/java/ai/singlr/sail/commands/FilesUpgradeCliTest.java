@@ -19,6 +19,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -67,7 +68,7 @@ class FilesUpgradeCliTest {
       new SchemaManager(nodeDb).migrate();
       var main = new FileStore(mainDb);
       var node = new FileStore(nodeDb);
-      for (var path : java.util.List.of("stale.conf", "gone.conf", "edited.conf", "busy.conf")) {
+      for (var path : List.of("stale.conf", "gone.conf", "edited.conf", "busy.conf")) {
         ContentFixtures.put(main, "acme", path, "v0");
       }
       assertEquals(0, new CommandLine(new ProjectFilesCommand.Export()).execute("-p", "acme"));
@@ -76,10 +77,7 @@ class FilesUpgradeCliTest {
       SyncBox.round(mainDb, nodeDb, "file");
       ContentFixtures.put(node, "acme", "stale.conf", "v1");
       Acting.system(() -> node.delete("acme", "gone.conf"));
-      for (var i = 1; i <= 25; i++) {
-        ContentFixtures.put(node, "acme", "busy.conf", "v" + i);
-        SyncBox.round(mainDb, nodeDb, "file");
-      }
+      var busy = SyncBox.pushPastHistory(mainDb, nodeDb, "acme", "busy.conf");
       Files.writeString(filesDir.resolve("edited.conf"), "a person's edit");
 
       assertEquals(0, new CommandLine(new MigrateCommand()).execute("--non-interactive"));
@@ -87,7 +85,7 @@ class FilesUpgradeCliTest {
       assertEquals("v1", ContentFixtures.text(main, "acme", "stale.conf"), "republished");
       assertTrue(main.find("acme", "gone.conf").isEmpty(), "resurrected");
       assertEquals("a person's edit", ContentFixtures.text(main, "acme", "edited.conf"));
-      assertEquals("v25", ContentFixtures.text(main, "acme", "busy.conf"));
+      assertEquals(busy, ContentFixtures.text(main, "acme", "busy.conf"));
       SyncBox.round(mainDb, nodeDb, "file");
       assertEquals("v1", ContentFixtures.text(node, "acme", "stale.conf"));
       assertTrue(node.find("acme", "gone.conf").isEmpty());
@@ -97,7 +95,7 @@ class FilesUpgradeCliTest {
       assertEquals(0, new CommandLine(new ProjectFilesCommand.Export()).execute("-p", "acme"));
 
       assertEquals("v1", Files.readString(filesDir.resolve("stale.conf")));
-      assertEquals("v25", Files.readString(filesDir.resolve("busy.conf")));
+      assertEquals(busy, Files.readString(filesDir.resolve("busy.conf")));
       assertEquals("a person's edit", Files.readString(filesDir.resolve("edited.conf")));
       assertFalse(Files.exists(filesDir.resolve("gone.conf")));
     }

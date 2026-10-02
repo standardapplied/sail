@@ -15,6 +15,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.Erasure;
@@ -79,11 +80,8 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(2, report.imported());
-    assertEquals(
-        b64("hello"),
-        ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
-    assertEquals(
-        b64("docs"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "README.md"));
+    assertEquals(b64("hello"), ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
+    assertEquals(b64("docs"), ContentFixtures.encoded(files, "acme", "README.md"));
   }
 
   @Test
@@ -163,7 +161,7 @@ class FileImporterTest {
     var report = importer.importAll();
 
     assertEquals(1, report.imported());
-    assertEquals(b64("A2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+    assertEquals(b64("A2"), ContentFixtures.encoded(files, "acme", "a.txt"));
   }
 
   @Test
@@ -171,12 +169,60 @@ class FileImporterTest {
     writeOnDisk("acme", "a.txt", "v1");
     importer.importAll();
     new FileMaterializer(files, projectsDir).materialize("acme");
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "v2");
+    ContentFixtures.put(files, "acme", "a.txt", "v2");
 
     var report = importer.importAll();
 
     assertEquals(0, report.imported(), "this box's stale output is not a person's edit");
-    assertEquals(b64("v2"), ai.singlr.sail.store.ContentFixtures.encoded(files, "acme", "a.txt"));
+    assertEquals(b64("v2"), ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aCopyTheUpgradeCouldNotTellIsNeverPublished() throws Exception {
+    writeOnDisk("acme", "a.txt", "old");
+    ContentFixtures.put(files, "acme", "a.txt", "v9");
+    var id = FileStore.idOf("acme", "a.txt");
+    files.forgetMaterialized(id);
+    files.recordUndecided(
+        id,
+        files.blobs().putText("old"),
+        WorkspaceFiles.mode(projectsDir.resolve("acme/files/a.txt")));
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported(), "an undecided copy is not a person's edit to publish");
+    assertEquals(b64("v9"), ContentFixtures.encoded(files, "acme", "a.txt"));
+  }
+
+  @Test
+  void aCopyPublishedFromDiskAndSupersededByMainBeforeAnyMaterializeIsNotRepublished()
+      throws Exception {
+    writeOnDisk("acme", "a.txt", "v1");
+    importer.importAll();
+    new FileMaterializer(files, projectsDir).materialize("acme");
+    writeOnDisk("acme", "a.txt", "v2");
+    try (var input = Files.newInputStream(projectsDir.resolve("acme/files/a.txt"))) {
+      files.put("acme", "a.txt", input, 0644);
+    }
+    mainsVersionArrives("acme", "a.txt", "v3");
+
+    var report = importer.importAll();
+
+    assertEquals(0, report.imported(), "a version this box published is never a lost edit");
+    assertEquals(b64("v3"), ContentFixtures.encoded(files, "acme", "a.txt"));
+    assertEquals(1, new FileMaterializer(files, projectsDir).materialize("acme").written());
+  }
+
+  /** Main's version of the file lands here as a pull does, touching no record of this box's. */
+  private void mainsVersionArrives(String project, String path, String text) {
+    try (var main = Sqlite.open(tempDir.resolve("main-" + text + ".db"))) {
+      new SchemaManager(main).migrate();
+      var mains = new FileStore(main);
+      ContentFixtures.put(mains, project, path, text);
+      var id = FileStore.idOf(project, path);
+      files.blobs().putText(text);
+      files.applyRevision(id, mains.comparableSnapshot(id), "9-" + text);
+    }
   }
 
   @Test
@@ -202,14 +248,14 @@ class FileImporterTest {
     assertEquals(1, importer.importAll().imported());
 
     var hash = files.find("acme", "a.txt").orElseThrow().contentHash();
-    assertTrue(files.materialized(FileStore.idOf("acme", "a.txt"), hash, 0600));
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "theirs");
+    assertTrue(files.copyOf(FileStore.idOf("acme", "a.txt"), hash, 0600).ours());
+    ContentFixtures.put(files, "acme", "a.txt", "theirs");
     assertEquals(0, importer.importAll().imported(), "published once, never again over newer");
   }
 
   @Test
   void aCopyTheStoreAlreadyHoldsIsRecordedAsThisBoxsWithoutARevision() throws Exception {
-    ai.singlr.sail.store.ContentFixtures.put(files, "acme", "a.txt", "same");
+    ContentFixtures.put(files, "acme", "a.txt", "same");
     writeOnDisk("acme", "a.txt", "same");
     var copy = projectsDir.resolve("acme/files/a.txt");
     WorkspaceFiles.mode(copy, 0644);
@@ -219,7 +265,7 @@ class FileImporterTest {
 
     assertEquals(1, revisions(id));
     assertTrue(
-        files.materialized(id, files.find("acme", "a.txt").orElseThrow().contentHash(), 0644));
+        files.copyOf(id, files.find("acme", "a.txt").orElseThrow().contentHash(), 0644).ours());
   }
 
   @Test

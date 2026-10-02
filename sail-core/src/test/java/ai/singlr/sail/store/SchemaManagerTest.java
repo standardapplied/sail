@@ -1155,7 +1155,7 @@ class SchemaManagerTest {
   }
 
   @Test
-  void fromThe0_46_4ReleaseABoxGetsATableForWhatItWroteOfEachSharedFile() {
+  void fromTheUnreleased0_46_4ShapeABoxGetsATableForWhatItWroteOfEachSharedFile() {
     stageAtBaseline();
     var prior = migrationIndex("CREATE TABLE materialized_files");
     db.execute("PRAGMA foreign_keys = OFF");
@@ -1170,8 +1170,9 @@ class SchemaManagerTest {
 
     assertTrue(tables().contains("materialized_files"));
     var files = new FileStore(db);
-    files.recordMaterialized("acme/a.txt", "h", 0644);
-    assertTrue(files.materialized("acme/a.txt", "h", 0644));
+    var hash = files.blobs().putText("a");
+    files.recordMaterialized("acme/a.txt", hash, 0644);
+    assertTrue(files.copyOf("acme/a.txt", hash, 0644).ours());
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 

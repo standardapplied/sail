@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFiles;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
@@ -22,13 +23,14 @@ import java.util.Objects;
  * container. Safe by construction:
  *
  * <ul>
- *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it is the copy this
- *       box recorded writing, in content and in mode ({@link FileStore#materialized}), or matches
- *       the current row exactly, as a copy a person edited and then published with {@code sail
- *       project files add} does; a file a human edited locally without publishing differs from
- *       both, so it is left alone and reported as skipped. The record is written after the file: a
- *       {@code WRITE} moves the file into place and then records it, a {@code DELETE} removes the
- *       file and then forgets it, and a copy already in sync is recorded as it stands.
+ *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it is a copy this
+ *       box wrote or published, in content and in mode ({@link FileStore#copyOf}); a copy already
+ *       holding the current row is in sync whatever its provenance and is recorded as this box's
+ *       from then on; a file a human edited locally without publishing is neither, so it is left
+ *       alone and reported as skipped, as is a copy the upgrade's seed could not tell. A {@code
+ *       WRITE} records the version before it moves the file into place and again once it has, so a
+ *       write that dies between the two leaves a copy this box still knows as its own; a {@code
+ *       DELETE} removes the file and then forgets it.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
  *       (a malicious {@code ../}) is refused — the content comes from other FDEs over the wire.
  * </ul>
@@ -72,17 +74,21 @@ public final class FileMaterializer {
       }
 
       var onDisk = diskHash(destination);
-      switch (decide(targetContent, onDisk, ours(id, target, destination, onDisk))) {
+      var mode = onDisk == null ? 0 : WorkspaceFiles.mode(destination);
+      var inSync = onDisk != null && target != null && target.holds(onDisk, mode);
+      var copy = onDisk == null ? MaterializedFiles.Copy.PERSONS : files.copyOf(id, onDisk, mode);
+      switch (decide(targetContent, onDisk, inSync, copy.ours())) {
         case IN_SYNC -> {
           if (target == null) {
             files.forgetMaterialized(id);
-          } else {
+          } else if (!inSync || copy != MaterializedFiles.Copy.SETTLED) {
             WorkspaceFiles.mode(destination, target.mode());
             files.recordMaterialized(id, target.contentHash(), target.mode());
           }
         }
         case SKIP_DIRTY -> skipped.add(path);
         case WRITE -> {
+          files.recordWriting(id, target.contentHash(), target.mode());
           writeFile(destination, target);
           files.recordMaterialized(id, target.contentHash(), target.mode());
           written++;
@@ -98,32 +104,22 @@ public final class FileMaterializer {
   }
 
   /**
-   * The action for one file: nothing if disk already matches the DB; refresh or remove if disk
-   * holds the copy this box wrote; leave a locally-edited file alone (skip) so a human's work is
-   * never lost.
+   * The action for one file: nothing when no copy is on disk and none is wanted, or the copy holds
+   * the current row ({@code inSync}), or holds its content and is this box's to re-mode ({@code
+   * ours}); refresh or remove a copy that is this box's; leave any other copy alone (skip) so a
+   * human's work is never lost.
    */
-  static Action decide(String targetContent, String onDisk, boolean onDiskIsOurs) {
-    if (onDisk != null && !onDiskIsOurs) {
-      return Action.SKIP_DIRTY;
+  static Action decide(String targetContent, String onDisk, boolean inSync, boolean ours) {
+    if (onDisk == null) {
+      return targetContent == null ? Action.IN_SYNC : Action.WRITE;
     }
     if (Objects.equals(onDisk, targetContent)) {
-      return Action.IN_SYNC;
+      return inSync || ours ? Action.IN_SYNC : Action.SKIP_DIRTY;
+    }
+    if (!ours) {
+      return Action.SKIP_DIRTY;
     }
     return targetContent == null ? Action.DELETE : Action.WRITE;
-  }
-
-  /**
-   * Whether the disk copy is this box's to refresh or remove: the version it recorded writing, or
-   * exactly the current row, which a person publishing their edit of the copy makes it.
-   */
-  private boolean ours(String id, FileStore.FileRow target, Path destination, String onDisk)
-      throws IOException {
-    if (onDisk == null) {
-      return false;
-    }
-    var mode = WorkspaceFiles.mode(destination);
-    var matchesRow = target != null && target.contentHash().equals(onDisk) && target.mode() == mode;
-    return matchesRow || files.materialized(id, onDisk, mode);
   }
 
   private static boolean hasSymlinkBelow(Path root, Path path) {

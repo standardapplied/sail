@@ -195,8 +195,9 @@ public final class ContentMigration implements DataMigration {
    * A snapshot with its content moved into the blob store. A legacy file snapshot gets no {@code
    * mode}: the old materializer wrote whatever the box's umask gave, so the mode of a copy on disk
    * was never recorded, and {@link MaterializedFilesMigration} seeds a revision without one as
-   * matching any. The live row and an open conflict's sides carry {@link #legacyMode} instead,
-   * because both are applied to disk.
+   * matching any mode that grants no execute bit the row lacks, which that materializer never
+   * wrote. The live row and an open conflict's sides carry {@link #legacyMode} instead, because
+   * both are applied to disk.
    */
   private static String snapshot(BlobStore blobs, String type, String json, boolean applied) {
     if (json == null) return null;

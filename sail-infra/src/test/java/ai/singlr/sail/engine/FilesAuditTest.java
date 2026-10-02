@@ -9,14 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
@@ -37,6 +40,8 @@ import org.junit.jupiter.api.io.TempDir;
 class FilesAuditTest {
 
   @TempDir Path tempDir;
+  private SyncBox mainBox;
+  private SyncBox nodeBox;
   private Sqlite mainDb;
   private Sqlite nodeDb;
   private FileStore main;
@@ -46,10 +51,10 @@ class FilesAuditTest {
 
   @BeforeEach
   void setUp() {
-    mainDb = Sqlite.open(tempDir.resolve("main.db"));
-    nodeDb = Sqlite.open(tempDir.resolve("node.db"));
-    new SchemaManager(mainDb).migrate();
-    new SchemaManager(nodeDb).migrate();
+    mainBox = new SyncBox(tempDir, "main");
+    nodeBox = new SyncBox(tempDir, "node");
+    mainDb = mainBox.db;
+    nodeDb = nodeBox.db;
     main = new FileStore(mainDb);
     node = new FileStore(nodeDb);
     projectsDir = tempDir.resolve("projects");
@@ -58,8 +63,12 @@ class FilesAuditTest {
 
   @AfterEach
   void tearDown() {
-    nodeDb.close();
-    mainDb.close();
+    nodeBox.close();
+    mainBox.close();
+  }
+
+  private void converged() {
+    SyncBox.assertConvergedWithin(2, mainBox, nodeBox);
   }
 
   private FileMaterializer.Report materialize() throws IOException {
@@ -71,8 +80,8 @@ class FilesAuditTest {
     SyncBox.round(mainDb, nodeDb, "file");
   }
 
-  private void nodePushesMoreThanHistoryKeeps() {
-    for (var i = 1; i <= 25; i++) nodePushes("v" + i);
+  private String nodePushesMoreThanHistoryKeeps() {
+    return SyncBox.pushPastHistory(mainDb, nodeDb, "acme", "app.conf");
   }
 
   private void mainCompacts() {
@@ -90,13 +99,14 @@ class FilesAuditTest {
     ContentFixtures.put(main, "acme", "app.conf", "v0");
     materialize();
     SyncBox.round(mainDb, nodeDb, "file");
-    nodePushesMoreThanHistoryKeeps();
+    var last = nodePushesMoreThanHistoryKeeps();
     mainCompacts();
 
     var report = materialize();
 
     assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
-    assertEquals("v25", Files.readString(copy));
+    assertEquals(last, Files.readString(copy));
+    converged();
   }
 
   @Test
@@ -112,6 +122,7 @@ class FilesAuditTest {
 
     assertEquals(new FileMaterializer.Report(0, 0, List.of("app.conf")), report);
     assertEquals("mine", Files.readString(copy));
+    converged();
   }
 
   @Test
@@ -143,6 +154,7 @@ class FilesAuditTest {
     assertEquals(new FileMaterializer.Report(0, 1, List.of()), report);
     assertFalse(Files.exists(copy));
     assertEquals(0, records(mainDb), "the record went with the copy");
+    converged();
   }
 
   @Test
@@ -156,13 +168,14 @@ class FilesAuditTest {
     SyncBox.round(mainDb, nodeDb, "file");
     assertEquals(new FileMaterializer.Report(0, 0, List.of()), materialize());
     assertEquals(0600, WorkspaceFiles.mode(copy));
-    nodePushesMoreThanHistoryKeeps();
+    var last = nodePushesMoreThanHistoryKeeps();
     mainCompacts();
 
     var report = materialize();
 
     assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
-    assertEquals("v25", Files.readString(copy));
+    assertEquals(last, Files.readString(copy));
+    converged();
   }
 
   @Test
@@ -178,6 +191,7 @@ class FilesAuditTest {
     assertEquals("v2", ContentFixtures.text(main, "acme", "app.conf"));
     SyncBox.round(mainDb, nodeDb, "file");
     assertEquals("v2", ContentFixtures.text(node, "acme", "app.conf"));
+    converged();
   }
 
   @Test
@@ -193,6 +207,7 @@ class FilesAuditTest {
 
     assertTrue(main.find("acme", "app.conf").isEmpty(), "the import resurrected the deleted file");
     assertEquals(1, materialize().deleted(), "left for the materializer to remove");
+    converged();
   }
 
   @Test
@@ -217,6 +232,45 @@ class FilesAuditTest {
 
     assertEquals("v1", Files.readString(copy), "an erased file's copy stays with the project");
     assertEquals("only here", Files.readString(nodeProjects.resolve("acme/files/draft.conf")));
+    converged();
+  }
+
+  @Test
+  void theUpgradeOfAMainThatCompactedPublishesNeitherItsStaleCopyNorADeletedFilesCopy()
+      throws Exception {
+    ContentFixtures.put(main, "acme", "app.conf", "v0");
+    ContentFixtures.put(main, "acme", "gone.conf", "v0");
+    new FileMaterializer(main, projectsDir).materialize("acme");
+    SyncBox.round(mainDb, nodeDb, "file");
+    var last = nodePushesMoreThanHistoryKeeps();
+    SyncBox.pushPastHistory(mainDb, nodeDb, "acme", "gone.conf");
+    Acting.system(() -> node.delete("acme", "gone.conf"));
+    SyncBox.round(mainDb, nodeDb, "file");
+    mainCompacts();
+    mainDb.execute("DELETE FROM materialized_files");
+
+    var seed =
+        new DataMigrator(mainDb, List.of(new MaterializedFilesMigration(projectsDir)))
+            .run(
+                ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
+                DataMigration.Prompter.NON_INTERACTIVE)
+            .getFirst();
+    var imported = new FileImporter(projectsDir, main).importAll();
+    var report = materialize();
+
+    assertEquals(2, seed.report().ambiguous(), "neither copy matches what compaction left");
+    assertEquals(0, imported.imported(), "the import republished a copy the seed could not tell");
+    assertEquals(last, ContentFixtures.text(main, "acme", "app.conf"));
+    assertTrue(main.find("acme", "gone.conf").isEmpty(), "the import resurrected a deleted file");
+    assertEquals(
+        new FileMaterializer.Report(0, 0, List.of("app.conf", "gone.conf")),
+        report,
+        "both copies are kept and reported until the person publishes or discards them");
+    assertEquals("v0", Files.readString(copy));
+    Files.delete(copy);
+    assertEquals(new FileMaterializer.Report(1, 0, List.of("gone.conf")), materialize());
+    assertEquals(last, Files.readString(copy), "a discarded copy is refreshed");
+    converged();
   }
 
   @Test
@@ -230,11 +284,12 @@ class FilesAuditTest {
     Files.move(projectsDir.resolve("acme"), projectsDir.resolve("globex"));
     var materializer = new FileMaterializer(main, projectsDir);
 
-    assertTrue(main.materialized("globex/app.conf", hash, 0644));
-    assertFalse(main.materialized("acme/app.conf", hash, 0644));
+    assertTrue(main.copyOf("globex/app.conf", hash, 0644).ours());
+    assertFalse(main.copyOf("acme/app.conf", hash, 0644).ours());
     assertEquals(new FileMaterializer.Report(0, 0, List.of()), materializer.materialize("globex"));
     assertEquals(new FileMaterializer.Report(0, 0, List.of()), materializer.materialize("acme"));
     assertEquals("v1", Files.readString(projectsDir.resolve("globex/files/app.conf")));
     assertEquals(1, records(mainDb));
+    converged();
   }
 }

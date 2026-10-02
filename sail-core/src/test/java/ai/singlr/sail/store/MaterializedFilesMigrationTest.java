@@ -21,6 +21,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -53,10 +54,30 @@ class MaterializedFilesMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate() {
+    return migrate(DataMigration.Prompter.NON_INTERACTIVE);
+  }
+
+  private List<DataMigrator.Run> migrate(DataMigration.Prompter prompter) {
     return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
-        .run(
-            ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
-            DataMigration.Prompter.NON_INTERACTIVE);
+        .run(ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")), prompter);
+  }
+
+  /** The record as a box upgrading has it: empty, publishes before the upgrade recorded nothing. */
+  private void beforeUpgrade() {
+    db.execute("DELETE FROM materialized_files");
+  }
+
+  private long records() {
+    return db.queryOne("SELECT count(*) FROM materialized_files", row -> row.integer(0))
+        .orElseThrow();
+  }
+
+  /** Pushes past the history cap and compacts, as main does under a busy node. */
+  private void compacted(String path) {
+    for (var i = 2; i <= ChangeLog.HISTORY_REVISIONS + 5; i++) {
+      ContentFixtures.put(files, "acme", path, "v" + i);
+    }
+    files.blobs().gc(BlobStore.Compaction.ALL, true);
   }
 
   private Path copy(String project, String path, String text) throws IOException {
@@ -85,6 +106,7 @@ class MaterializedFilesMigrationTest {
     copy("acme", "edited.txt", "mine");
     ContentFixtures.put(files, "acme", "absent.txt", "v1");
 
+    beforeUpgrade();
     var first = migrate().getFirst();
     var second = migrate().getFirst();
 
@@ -95,15 +117,12 @@ class MaterializedFilesMigrationTest {
             .anyMatch(note -> note.contains("acme/edited.txt") && note.contains("person's edit")),
         first.report().notes().toString());
     assertTrue(second.alreadyApplied());
-    assertTrue(files.materialized("acme/current.txt", hashOf("v1"), 0644));
-    assertTrue(files.materialized("acme/stale.txt", hashOf("v1"), 0644), "a superseded copy");
-    assertTrue(files.materialized("acme/gone.txt", hashOf("v1"), 0644), "a deleted file's copy");
-    assertFalse(files.materialized("acme/edited.txt", hashOf("mine"), 0644));
-    assertFalse(files.materialized("acme/edited.txt", hashOf("v1"), 0644));
-    assertEquals(
-        3L,
-        db.queryOne("SELECT count(*) FROM materialized_files", row -> row.integer(0)).orElseThrow(),
-        "nothing recorded for a file with no copy on disk");
+    assertTrue(files.copyOf("acme/current.txt", hashOf("v1"), 0644).ours());
+    assertTrue(files.copyOf("acme/stale.txt", hashOf("v1"), 0644).ours(), "a superseded copy");
+    assertTrue(files.copyOf("acme/gone.txt", hashOf("v1"), 0644).ours(), "a deleted file's copy");
+    assertFalse(files.copyOf("acme/edited.txt", hashOf("mine"), 0644).ours());
+    assertFalse(files.copyOf("acme/edited.txt", hashOf("v1"), 0644).ours());
+    assertEquals(3L, records(), "nothing recorded for a file with no copy on disk");
   }
 
   @Test
@@ -112,13 +131,14 @@ class MaterializedFilesMigrationTest {
     copy("acme", "done.txt", "v1");
     ContentFixtures.put(files, "acme", "pending.txt", "v1");
     copy("acme", "pending.txt", "v1");
+    beforeUpgrade();
     files.recordMaterialized("acme/done.txt", hashOf("earlier"), 0600);
 
     var run = migrate().getFirst();
 
     assertEquals(1, run.report().applied(), "only the file not yet recorded");
-    assertTrue(files.materialized("acme/done.txt", hashOf("earlier"), 0600));
-    assertTrue(files.materialized("acme/pending.txt", hashOf("v1"), 0644));
+    assertTrue(files.copyOf("acme/done.txt", hashOf("earlier"), 0600).ours());
+    assertTrue(files.copyOf("acme/pending.txt", hashOf("v1"), 0644).ours());
   }
 
   @Test
@@ -127,6 +147,7 @@ class MaterializedFilesMigrationTest {
     var copy = copy("acme", "stale.txt", "v1");
     ContentFixtures.put(files, "acme", "stale.txt", "v2");
     Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("---------"));
+    beforeUpgrade();
 
     var failure = assertThrows(UncheckedIOException.class, this::migrate);
     Files.setPosixFilePermissions(copy, PosixFilePermissions.fromString("rw-r--r--"));
@@ -136,7 +157,7 @@ class MaterializedFilesMigrationTest {
     assertTrue(failure.getMessage().contains("rerun sail migrate"), failure.getMessage());
     assertFalse(rerun.alreadyApplied(), "the failed run left no completion marker");
     assertEquals(1, rerun.report().applied());
-    assertTrue(files.materialized("acme/stale.txt", hashOf("v1"), 0644));
+    assertTrue(files.copyOf("acme/stale.txt", hashOf("v1"), 0644).ours());
     assertTrue(migrate().getFirst().alreadyApplied());
   }
 
@@ -147,20 +168,21 @@ class MaterializedFilesMigrationTest {
     legacy("bin/setup", 0755, 0644);
     legacy("bin/gone", 0755, 0644);
     files.delete("acme", "bin/gone");
+    beforeUpgrade();
 
     var run = migrate().getFirst();
 
     assertEquals(3, run.report().applied());
-    assertTrue(files.materialized("acme/umask.sh", hashOf("umask.sh"), 0664));
-    assertTrue(files.materialized("acme/restricted.md", hashOf("restricted.md"), 0600));
+    assertTrue(files.copyOf("acme/umask.sh", hashOf("umask.sh"), 0664).ours());
+    assertTrue(files.copyOf("acme/restricted.md", hashOf("restricted.md"), 0600).ours());
     assertFalse(
-        files.materialized("acme/bin/setup", hashOf("bin/setup"), 0755),
+        files.copyOf("acme/bin/setup", hashOf("bin/setup"), 0755).ours(),
         "an execute bit the old materializer never wrote was put there on purpose");
     assertTrue(
         run.report().notes().stream().anyMatch(note -> note.contains("acme/bin/setup")),
         run.report().notes().toString());
     assertTrue(
-        files.materialized("acme/bin/gone", hashOf("bin/gone"), 0755),
+        files.copyOf("acme/bin/gone", hashOf("bin/gone"), 0755).ours(),
         "with no row to lack the bit, a deleted file's legacy copy matches at any mode");
   }
 
@@ -173,15 +195,80 @@ class MaterializedFilesMigrationTest {
     copy("globex", "a.txt", "v1");
     var erasure = new Erasure(db);
     erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "globex"))), "local");
+    beforeUpgrade();
 
     var run = migrate().getFirst();
 
     assertEquals(0, run.report().applied());
     assertEquals(0, run.report().skipped());
+    assertEquals(0L, records());
+  }
+
+  @Test
+  void aCopyMatchingNothingOfACompactedHistoryIsUndecidedKeptAndNeverPublished()
+      throws IOException {
+    ContentFixtures.put(files, "acme", "stale.conf", "v1");
+    copy("acme", "stale.conf", "v1");
+    compacted("stale.conf");
+    ContentFixtures.put(files, "acme", "gone.conf", "v1");
+    copy("acme", "gone.conf", "v1");
+    compacted("gone.conf");
+    files.delete("acme", "gone.conf");
+    files.blobs().gc(BlobStore.Compaction.ALL, true);
+    ContentFixtures.put(files, "acme", "fresh.txt", "v1");
+    copy("acme", "fresh.txt", "mine");
+    beforeUpgrade();
+
+    var run = migrate().getFirst();
+
+    assertEquals(0, run.report().applied());
+    assertEquals(2, run.report().ambiguous());
+    assertEquals(1, run.report().skipped(), "the whole-history edit is a person's");
     assertEquals(
-        0L,
-        db.queryOne("SELECT count(*) FROM materialized_files", row -> row.integer(0))
-            .orElseThrow());
+        MaterializedFiles.Copy.UNDECIDED, files.copyOf("acme/stale.conf", hashOf("v1"), 0644));
+    assertEquals(
+        MaterializedFiles.Copy.UNDECIDED, files.copyOf("acme/gone.conf", hashOf("v1"), 0644));
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS, files.copyOf("acme/fresh.txt", hashOf("mine"), 0644));
+    assertTrue(
+        run.report().notes().stream()
+            .anyMatch(
+                note ->
+                    note.contains("acme/stale.conf")
+                        && note.contains("undecided")
+                        && note.contains("sail project files add")),
+        run.report().notes().toString());
+    assertTrue(migrate().getFirst().alreadyApplied());
+    files.recordMaterialized("acme/stale.conf", hashOf("v9"), 0644);
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS,
+        files.copyOf("acme/stale.conf", hashOf("v1"), 0644),
+        "once this box writes the file again, the undecided copy is not kept as its own");
+  }
+
+  @Test
+  void anOperatorAtTheTerminalDecidesACompactedCopy() throws IOException {
+    ContentFixtures.put(files, "acme", "wrote.conf", "v1");
+    copy("acme", "wrote.conf", "v1");
+    compacted("wrote.conf");
+    ContentFixtures.put(files, "acme", "edited.conf", "v1");
+    copy("acme", "edited.conf", "v1");
+    compacted("edited.conf");
+    beforeUpgrade();
+    DataMigration.Prompter operator =
+        (context, candidates) ->
+            Optional.of(
+                context.contains("acme/wrote.conf")
+                    ? MaterializedFilesMigration.WROTE
+                    : MaterializedFilesMigration.EDITED);
+
+    var run = migrate(operator).getFirst();
+
+    assertEquals(1, run.report().applied());
+    assertEquals(0, run.report().ambiguous());
+    assertTrue(files.copyOf("acme/wrote.conf", hashOf("v1"), 0644).ours());
+    assertEquals(
+        MaterializedFiles.Copy.PERSONS, files.copyOf("acme/edited.conf", hashOf("v1"), 0644));
   }
 
   /**
