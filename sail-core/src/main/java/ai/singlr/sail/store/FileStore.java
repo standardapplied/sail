@@ -28,6 +28,10 @@ import java.util.Set;
  * <p>Each mutation journals the file's full post-state into the shared {@link ChangeLog} under
  * entity type {@code file} within one transaction — the same revision/CAS/conflict machinery {@link
  * SpecStore} uses — so files get history, restore, and bidirectional conflict resolution for free.
+ *
+ * <p>Box-local and never synced, {@code materialized_files} records the version of each file this
+ * box last wrote to disk, so whether a copy on disk is this box's output or a person's edit is
+ * decided from that record alone ({@link #materialized}), never from retained history.
  */
 public final class FileStore implements ConflictResolver, SyncedStore {
 
@@ -172,6 +176,14 @@ public final class FileStore implements ConflictResolver, SyncedStore {
                     file.mode(),
                     file.kind()));
           }
+          var prefix = old + "/";
+          db.execute(
+              "UPDATE OR REPLACE materialized_files SET id = ? || substr(id, ?)"
+                  + " WHERE substr(id, 1, ?) = ?",
+              renamed + "/",
+              prefix.length() + 1,
+              prefix.length(),
+              prefix);
         });
   }
 
@@ -226,8 +238,8 @@ public final class FileStore implements ConflictResolver, SyncedStore {
 
   /**
    * Projects this box has any file for, current or tombstoned — drives materialization. An erased
-   * file is not one: it left no history to tell a copy this box wrote from one a person edited, so
-   * whatever of it is on disk stays as it is, with the project's container.
+   * file is not one: what this box wrote of it went with its erasure, so whatever of it is on disk
+   * stays as it is, with the project's container.
    */
   public LinkedHashSet<String> projectsWithFiles() {
     var projects = new LinkedHashSet<String>();
@@ -243,40 +255,40 @@ public final class FileStore implements ConflictResolver, SyncedStore {
       WHERE h.entity_type = ? AND l.kind <> 'erasure'""";
 
   /**
-   * Whether any retained revision of the file records a mode for this content — history written
-   * since modes are journaled, as opposed to the mode-less revisions the content migration left.
+   * Records {@code contentHash} at {@code mode} as the copy of file {@code id} this box last wrote
+   * to disk: what the materializer put there, or what the importer published from there.
    */
-  public boolean recordsModeFor(String id, String hash) {
+  public void recordMaterialized(String id, String contentHash, int mode) {
+    db.execute(
+        "INSERT INTO materialized_files (id, content_hash, mode) VALUES (?, ?, ?)"
+            + " ON CONFLICT(id) DO UPDATE SET content_hash = excluded.content_hash,"
+            + " mode = excluded.mode",
+        id,
+        contentHash,
+        mode);
+  }
+
+  /**
+   * Whether a disk copy of file {@code id} holding {@code contentHash} at {@code mode} is this
+   * box's output: exactly what it recorded writing. Any other copy — one this box never recorded,
+   * or one that differs from what it recorded, in content or in mode — is a person's. The one place
+   * that decides it, for the materializer and the importer alike.
+   */
+  public boolean materialized(String id, String contentHash, int mode) {
     return db.queryOne(
-            """
-            SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
-                AND json_extract(snapshot, '$.content_hash') = ?
-                AND json_extract(snapshot, '$.mode') IS NOT NULL LIMIT 1
-            """,
+            "SELECT 1 FROM materialized_files WHERE id = ? AND content_hash = ? AND mode = ?",
             row -> row.integer(0),
             id,
-            hash)
+            contentHash,
+            mode)
         .isPresent();
   }
 
   /**
-   * Whether this content-and-mode pair is a recorded version of the file. A revision the content
-   * migration converted recorded no mode — the old materializer wrote whatever the box's umask gave
-   * — so it matches its content at any mode.
+   * Forgets what this box wrote of file {@code id}: its copy left the disk, or the file is erased.
    */
-  public boolean isKnownVersion(String id, String hash, int mode) {
-    return db.queryOne(
-            """
-            SELECT 1 FROM change_log WHERE entity_type = 'file' AND entity_id = ?
-                AND json_extract(snapshot, '$.content_hash') = ?
-                AND (json_extract(snapshot, '$.mode') = ?
-                     OR json_extract(snapshot, '$.mode') IS NULL) LIMIT 1
-            """,
-            row -> row.integer(0),
-            id,
-            hash,
-            mode)
-        .isPresent();
+  public void forgetMaterialized(String id) {
+    db.execute("DELETE FROM materialized_files WHERE id = ?", id);
   }
 
   public Map<String, Object> comparableAtRev(String id, String rev) {
@@ -326,9 +338,14 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return journal.liveBase(id);
   }
 
+  /**
+   * Removes the file's live row for an erasure, and with it what this box wrote of the file: with
+   * its history gone no materialize visits it again, so its copy stays on disk with the project.
+   */
   @Override
   public void eraseRow(String id) {
     journal.eraseRow(id);
+    forgetMaterialized(id);
   }
 
   /** Who may write files on this box: any writer, as its doors and main's commit decide. */

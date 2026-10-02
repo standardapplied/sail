@@ -13,11 +13,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.WriterAuthority;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -94,55 +92,41 @@ class FileStoreTest {
   }
 
   @Test
-  void aRevisionRecordedWithoutAModeIsKnownAtAnyMode() {
-    ContentFixtures.put(files, "acme", "legacy.sh", "first");
-    var hash = files.find("acme", "legacy.sh").orElseThrow().contentHash();
-    var stripped =
-        new LinkedHashMap<>(
-            YamlUtil.parseMap(
-                new ChangeLog(db).head("file", id("legacy.sh")).orElseThrow().snapshot()));
-    stripped.remove("mode");
-    db.execute(
-        "UPDATE change_log SET snapshot = ? WHERE entity_type = 'file' AND entity_id = ?",
-        YamlUtil.dumpJson(stripped),
-        id("legacy.sh"));
-
-    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0664), "umask 002 on the old box");
-    assertTrue(files.isKnownVersion(id("legacy.sh"), hash, 0755));
-    assertFalse(files.isKnownVersion(id("legacy.sh"), files.blobs().putText("edited"), 0644));
-  }
-
-  @Test
-  void onlyHistoryWrittenSinceModesAreJournaledRecordsAModeForContent() {
-    var journaled = files.blobs().putText("journaled");
-    files.put(new FileStore.FileRow("acme", "run.sh", journaled, 9, 0755, "text"));
-    ContentFixtures.put(files, "acme", "legacy.sh", "legacy");
-    var legacy = files.find("acme", "legacy.sh").orElseThrow().contentHash();
-    db.execute(
-        "UPDATE change_log SET snapshot = json_remove(snapshot, '$.mode')"
-            + " WHERE entity_type = 'file' AND entity_id = ?",
-        id("legacy.sh"));
-
-    assertTrue(files.recordsModeFor(id("run.sh"), journaled));
-    assertFalse(files.recordsModeFor(id("run.sh"), files.blobs().putText("other")));
-    assertFalse(files.recordsModeFor(id("legacy.sh"), legacy));
-    assertFalse(files.recordsModeFor(id("absent"), journaled));
-  }
-
-  @Test
-  void knownVersionsMatchContentAndModeFromTheSameRevisionOfTheSameFile() {
+  void aCopyIsThisBoxsOutputOnlyAsRecordedInContentAndMode() {
     var first = files.blobs().putText("first");
     var second = files.blobs().putText("second");
-    files.put(new FileStore.FileRow("acme", "known", first, 5, 0644, "text"));
-    files.put(new FileStore.FileRow("acme", "known", second, 6, 0600, "text"));
-    files.delete("acme", "known");
 
-    assertTrue(files.isKnownVersion(id("known"), first, 0644));
-    assertTrue(files.isKnownVersion(id("known"), second, 0600));
-    assertFalse(files.isKnownVersion(id("known"), first, 0600));
-    assertFalse(files.isKnownVersion(id("known"), second, 0644));
-    assertFalse(files.isKnownVersion(id("other"), first, 0644));
-    assertFalse(files.isKnownVersion(id("known"), files.blobs().putText("unknown"), 0644));
+    files.recordMaterialized(id("known"), first, 0644);
+
+    assertTrue(files.materialized(id("known"), first, 0644));
+    assertFalse(files.materialized(id("known"), first, 0600), "a chmod is a person's");
+    assertFalse(files.materialized(id("known"), second, 0644), "an edit is a person's");
+    assertFalse(files.materialized(id("other"), first, 0644), "no record, a person's copy");
+    files.recordMaterialized(id("known"), second, 0600);
+    assertFalse(files.materialized(id("known"), first, 0644), "one record per file");
+    assertTrue(files.materialized(id("known"), second, 0600));
+    files.forgetMaterialized(id("known"));
+    assertFalse(files.materialized(id("known"), second, 0600));
+  }
+
+  @Test
+  void theRecordGoesWithAnErasureAndMovesWithARename() {
+    ContentFixtures.put(files, "acme", "a.txt", "v1");
+    ContentFixtures.put(files, "acme", "gone.txt", "old");
+    files.delete("acme", "gone.txt");
+    var hash = files.find("acme", "a.txt").orElseThrow().contentHash();
+    var old = files.blobs().putText("old");
+    files.recordMaterialized(id("a.txt"), hash, 0644);
+    files.recordMaterialized(id("gone.txt"), old, 0644);
+
+    files.reproject("acme", "globex");
+
+    assertTrue(files.materialized("globex/a.txt", hash, 0644), "re-keyed with the row");
+    assertTrue(files.materialized("globex/gone.txt", old, 0644), "a deleted file's copy moves too");
+    assertFalse(files.materialized(id("a.txt"), hash, 0644));
+    files.eraseRow("globex/a.txt");
+    assertFalse(files.materialized("globex/a.txt", hash, 0644), "the record went with the row");
+    assertTrue(files.find("globex", "a.txt").isEmpty());
   }
 
   @Test
@@ -267,21 +251,6 @@ class FileStoreTest {
   }
 
   @Test
-  void isKnownVersionRecognizesAnyRevisionThisBoxWroteAtItsRecordedMode() {
-    ContentFixtures.put(files, "acme", "a.txt", "v1");
-    ContentFixtures.put(files, "acme", "a.txt", "v2");
-    var recorded = files.find("acme", "a.txt").orElseThrow().mode();
-
-    assertTrue(
-        files.isKnownVersion(id("a.txt"), files.blobs().putText("v1"), recorded),
-        "a superseded revision is still ours");
-    assertTrue(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded));
-    assertFalse(files.isKnownVersion(id("a.txt"), files.blobs().putText("v2"), recorded ^ 0111));
-    assertFalse(
-        files.isKnownVersion(id("a.txt"), files.blobs().putText("a local human edit"), recorded));
-  }
-
-  @Test
   void resolveTakeTheirsAdoptsMainAndCannotReRaise() {
     ContentFixtures.put(files, "acme", "a.txt", "mine");
 
@@ -305,11 +274,9 @@ class FileStoreTest {
         new MainVersion(ContentFixtures.snapshot(files, "theirs"), "9-main", "mady"));
 
     assertEquals("mine", ContentFixtures.text(files, "acme", "a.txt"));
-    assertTrue(
-        files.isKnownVersion(
-            id("a.txt"),
-            files.blobs().putText("theirs"),
-            files.find("acme", "a.txt").orElseThrow().mode()),
+    assertEquals(
+        files.blobs().putText("theirs"),
+        files.comparableAtRev(id("a.txt"), files.baseRevOf(id("a.txt"))).get("content_hash"),
         "theirs is journaled as the base");
   }
 

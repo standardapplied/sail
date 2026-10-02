@@ -22,10 +22,12 @@ import java.util.Objects;
  * container. Safe by construction:
  *
  * <ul>
- *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it matches a
- *       revision's content and mode ({@link FileStore#isKnownVersion}); a file a human edited
- *       locally without {@code sail project files add} matches nothing in history, so it is left
- *       alone and reported as skipped.
+ *   <li><b>No data loss.</b> A file on disk is overwritten or deleted only when it is the copy this
+ *       box recorded writing, in content and in mode ({@link FileStore#materialized}); a file a
+ *       human edited locally without {@code sail project files add} differs from that record, so it
+ *       is left alone and reported as skipped. The record is written after the file: a {@code
+ *       WRITE} moves the file into place and then records it, a {@code DELETE} removes the file and
+ *       then forgets it, and a copy already in sync is recorded as it stands.
  *   <li><b>No path traversal.</b> A synced path that escapes the project's {@code files/} directory
  *       (a malicious {@code ../}) is refused — the content comes from other FDEs over the wire.
  * </ul>
@@ -69,20 +71,25 @@ public final class FileMaterializer {
       }
 
       var onDisk = diskHash(destination);
-      switch (decide(
-          targetContent,
-          onDisk,
-          onDisk != null && files.isKnownVersion(id, onDisk, WorkspaceFiles.mode(destination)))) {
+      var ours = onDisk != null && files.materialized(id, onDisk, WorkspaceFiles.mode(destination));
+      switch (decide(targetContent, onDisk, ours)) {
         case IN_SYNC -> {
-          if (target != null) WorkspaceFiles.mode(destination, target.mode());
+          if (target == null) {
+            files.forgetMaterialized(id);
+          } else {
+            WorkspaceFiles.mode(destination, target.mode());
+            files.recordMaterialized(id, target.contentHash(), target.mode());
+          }
         }
         case SKIP_DIRTY -> skipped.add(path);
         case WRITE -> {
           writeFile(destination, target);
+          files.recordMaterialized(id, target.contentHash(), target.mode());
           written++;
         }
         case DELETE -> {
           Files.deleteIfExists(destination);
+          files.forgetMaterialized(id);
           deleted++;
         }
       }
@@ -92,11 +99,11 @@ public final class FileMaterializer {
 
   /**
    * The action for one file: nothing if disk already matches the DB; refresh or remove if disk
-   * holds a copy this box wrote; leave a locally-edited file alone (skip) so a human's work is
+   * holds the copy this box wrote; leave a locally-edited file alone (skip) so a human's work is
    * never lost.
    */
-  static Action decide(String targetContent, String onDisk, boolean onDiskIsKnown) {
-    if (onDisk != null && !onDiskIsKnown) {
+  static Action decide(String targetContent, String onDisk, boolean onDiskIsOurs) {
+    if (onDisk != null && !onDiskIsOurs) {
       return Action.SKIP_DIRTY;
     }
     if (Objects.equals(onDisk, targetContent)) {

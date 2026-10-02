@@ -43,7 +43,6 @@ class ContentMigrationTest {
             YamlUtil.parseMap(snapshot).containsKey("mode"),
             "a legacy revision recorded no mode: " + snapshot);
       }
-      assertTrue(new FileStore(db).isKnownVersion("proj/file", row.contentHash(), 0664));
       assertEquals(
           List.of("body_hash"),
           new SyncConflicts(db).pending().getFirst().fields(),

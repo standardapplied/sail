@@ -19,11 +19,15 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -31,12 +35,14 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.Settlement;
+import ai.singlr.sail.sync.SyncBox;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -87,6 +93,59 @@ class SyncCommandTest {
           output.toString().contains("Compacted 0 history entries; freed 6 bytes"),
           output.toString());
       assertFalse(new BlobStore(db).has(hash));
+    }
+  }
+
+  @Test
+  void afterSyncGcCompactedItsHistoryMainStillRefreshesTheCopyItWrote(@TempDir Path home)
+      throws Exception {
+    try (var db = Sqlite.open(home.resolve("main.db"));
+        var node = Sqlite.open(home.resolve("node.db"))) {
+      new SchemaManager(db).migrate();
+      new SchemaManager(node).migrate();
+      var files = new FileStore(db);
+      var projectsDir = home.resolve("projects");
+      ContentFixtures.put(files, "acme", "app.conf", "v0");
+      new FileMaterializer(files, projectsDir).materialize("acme");
+      SyncBox.round(db, node, "file");
+      for (var i = 1; i <= 25; i++) {
+        ContentFixtures.put(new FileStore(node), "acme", "app.conf", "v" + i);
+        SyncBox.round(db, node, "file");
+      }
+      var operations =
+          OperationsFactory.create(
+                  db,
+                  new ShellExecutor(true),
+                  "sail.yaml",
+                  null,
+                  null,
+                  SyncScheduler.disabled(),
+                  SessionYield.NONE)
+              .useControlPlane(
+                  db,
+                  home,
+                  new SyncOperations(
+                      db,
+                      "box",
+                      home,
+                      SyncConfig::unset,
+                      target -> {
+                        throw new IOException("offline");
+                      }));
+      var previous = System.out;
+      try (var stream = new PrintStream(new ByteArrayOutputStream())) {
+        System.setOut(stream);
+        assertEquals(0, new SyncCommand.Gc(() -> operations).call());
+      } finally {
+        System.setOut(previous);
+      }
+      assertEquals(
+          ChangeLog.HISTORY_REVISIONS, new ChangeLog(db).history("file", "acme/app.conf").size());
+
+      var report = new FileMaterializer(files, projectsDir).materialize("acme");
+
+      assertEquals(new FileMaterializer.Report(1, 0, List.of()), report);
+      assertEquals("v25", Files.readString(projectsDir.resolve("acme/files/app.conf")));
     }
   }
 

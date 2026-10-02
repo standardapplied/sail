@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.engine.SailPaths;
 import java.util.List;
 
 /**
@@ -21,7 +22,8 @@ public final class DataMigrations {
           new ReviewFindingsMigration(),
           new RoomsBackfillMigration(),
           new OrphanErasure(),
-          new PersonalRoomErasure());
+          new PersonalRoomErasure(),
+          new MaterializedFilesMigration(SailPaths.projectsDir()));
 
   private DataMigrations() {}
 

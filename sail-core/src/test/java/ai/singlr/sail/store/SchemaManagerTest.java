@@ -63,11 +63,7 @@ class SchemaManagerTest {
     }
 
     new SchemaManager(db).migrate();
-    var files = new FileStore(db);
 
-    assertTrue(files.isKnownVersion("acme/known", hash, 0644));
-    assertTrue(files.isKnownVersion("acme/known", hash, 0600));
-    assertFalse(files.isKnownVersion("acme/known", hash, 0755));
     var plan =
         db.query(
             """
@@ -1156,6 +1152,31 @@ class SchemaManagerTest {
     assertFalse(tables.contains("spec_source_findings"));
     assertFalse(tables.contains("spec_attachments"));
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
+  void fromThe0_46_4ReleaseABoxGetsATableForWhatItWroteOfEachSharedFile() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE materialized_files");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    assertFalse(tables().contains("materialized_files"));
+
+    new SchemaManager(db).migrate();
+
+    assertTrue(tables().contains("materialized_files"));
+    var files = new FileStore(db);
+    files.recordMaterialized("acme/a.txt", "h", 0644);
+    assertTrue(files.materialized("acme/a.txt", "h", 0644));
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  private List<String> tables() {
+    return db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
   }
 
   @Test

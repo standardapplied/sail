@@ -87,9 +87,10 @@ public final class SchemaManager {
    * {@code run_credentials} table is local-only secret material (per-run credential hashes), and
    * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
    * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
-   * container_leases} (a box's own exclusive-container-operation claims) and {@code fde_boxes}
-   * (main's record of the one box each FDE syncs from) are local-only as well — none of the five
-   * ever joins a sync snapshot.
+   * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
+   * record of the one box each FDE syncs from) and {@code materialized_files} (the version of each
+   * shared file this box last wrote to disk) are local-only as well — none of the six ever joins a
+   * sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
@@ -646,7 +647,13 @@ public final class SchemaManager {
           "ALTER TABLE review_findings ADD COLUMN followup TEXT",
           FOLLOWUPS_FROM_LINKS,
           "DROP TABLE spec_source_findings",
-          "DROP TABLE spec_attachments");
+          "DROP TABLE spec_attachments",
+          """
+          CREATE TABLE materialized_files (
+              id TEXT PRIMARY KEY,
+              content_hash TEXT NOT NULL,
+              mode INTEGER NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

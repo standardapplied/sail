@@ -194,7 +194,7 @@ public final class ContentMigration implements DataMigration {
   /**
    * A snapshot with its content moved into the blob store. A legacy file snapshot gets no {@code
    * mode}: the old materializer wrote whatever the box's umask gave, so the mode of a copy on disk
-   * was never recorded, and {@link FileStore#isKnownVersion} treats a revision without one as
+   * was never recorded, and {@link MaterializedFilesMigration} seeds a revision without one as
    * matching any. The live row and an open conflict's sides carry {@link #legacyMode} instead,
    * because both are applied to disk.
    */
