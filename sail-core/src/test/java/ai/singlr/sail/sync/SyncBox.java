@@ -59,6 +59,7 @@ public final class SyncBox implements AutoCloseable {
   private Actor session;
   private String handle;
   private FileLimits limits = FileLimits.defaults();
+  private SyncTransitionSink transitions = SyncTransitionSink.NONE;
 
   public SyncBox(Path dir, String id) {
     this(id, Sqlite.open(dir.resolve(id + ".db")));
@@ -383,10 +384,16 @@ public final class SyncBox implements AutoCloseable {
     return this;
   }
 
+  /** This box as main hands every committed transition to {@code sink}, as main's server does. */
+  public SyncBox transitions(SyncTransitionSink sink) {
+    this.transitions = sink;
+    return this;
+  }
+
   /** This box serving every registered type as main, to sessions authenticated as {@code as}. */
   public SyncRpcServer server(Actor as) {
     return SyncRpcServer.over(
-            db, id, null, as, FdeRoster.EMPTY, SyncTransitionSink.NONE, SyncWire.UPGRADE_FLOOR)
+            db, id, null, as, FdeRoster.EMPTY, transitions, SyncWire.UPGRADE_FLOOR)
         .content(db, limits);
   }
 

@@ -38,7 +38,9 @@ import org.junit.jupiter.api.io.TempDir;
  * synced content, so every box holds the same review, a node adopting main's version takes main's
  * findings exactly, a review main never took leaves only by denial with its findings kept in the
  * change log and announced, and a follow-up's links ride the content through its spec's delete and
- * restore, its shipping marking the source findings fixed everywhere without writing their review.
+ * restore, its shipping fixing the source findings in their review's content — by the box that
+ * marks it done when that box is main, by main when a node's done commits there — so the fix
+ * outlives the follow-up.
  */
 class ReviewFindingsSyncTest {
 
@@ -84,19 +86,22 @@ class ReviewFindingsSyncTest {
 
   /** A failed first review of {@code specId} on ada's box with findings {@code found}. */
   private String failedReview(String specId, Finding... found) {
-    return Acting.system(
-        () -> {
-          var reviewId = reviews.createReview(specId, 1);
-          reviews.updateReviewStatus(reviewId, "running");
-          var stageId = reviews.createStage(reviewId, "security", "agent");
-          reviews.startStage(stageId, "codex");
-          for (var finding : found) {
-            reviews.addFinding(stageId, finding);
-          }
-          reviews.completeStage(stageId, "failed");
-          reviews.updateReviewStatus(reviewId, "failed");
-          return reviewId;
-        });
+    return Acting.system(() -> failedReviewOn(ada, specId, found));
+  }
+
+  /** A failed first review of {@code specId} on {@code box}, by the bound actor. */
+  private static String failedReviewOn(SyncBox box, String specId, Finding... found) {
+    var reviews = new ReviewStore(box.db);
+    var reviewId = reviews.createReview(specId, 1);
+    reviews.updateReviewStatus(reviewId, "running");
+    var stageId = reviews.createStage(reviewId, "security", "agent");
+    reviews.startStage(stageId, "codex");
+    for (var finding : found) {
+      reviews.addFinding(stageId, finding);
+    }
+    reviews.completeStage(stageId, "failed");
+    reviews.updateReviewStatus(reviewId, "failed");
+    return reviewId;
   }
 
   @Test
@@ -270,6 +275,36 @@ class ReviewFindingsSyncTest {
     round(ada);
     round(bob);
     assertTrue(bob.specs.findById("followup").isEmpty(), "bob adopted the erasure");
+    assertFixedEverywhere(review, found.id());
+    SyncBox.assertConvergedWithin(2, main, ada, bob);
+  }
+
+  @Test
+  void aFollowUpAnotherFdeShipsOnItsNodeFixesTheSourceFindingsOnceMainTakesIt() {
+    main.transitions(new ShippedFollowUps(main.db));
+    ownSpec(main, "bob", "fix", "bob");
+    ownSpec(main, "ada", "followup", "ada");
+    round(ada);
+    round(bob);
+    var found = finding("leak");
+    var review = Acting.as("bob", () -> failedReviewOn(bob, "fix", found));
+    round(bob);
+    round(ada);
+    Acting.as(
+        "root", () -> new ReviewStore(main.db).linkSourceFindings("followup", List.of(found.id())));
+    round(ada);
+    round(bob);
+
+    Acting.as("ada", () -> ada.specs.updateStatus("followup", SpecStatus.DONE));
+    assertEquals(Finding.Resolution.OPEN, byId(findings(ada, review), found.id()).resolution());
+    round(ada);
+    assertEquals(
+        Finding.Resolution.FIXED,
+        byId(findings(main, review), found.id()).resolution(),
+        "main resolves the source finding when the follow-up's done commits there");
+    round(ada);
+    round(bob);
+
     assertFixedEverywhere(review, found.id());
     SyncBox.assertConvergedWithin(2, main, ada, bob);
   }

@@ -314,7 +314,7 @@ class SyncRpcServerTest {
   }
 
   @Test
-  void aNodeAtTheFloorThatPushedReviewsWithoutTheirFindingsIsRefusedUntilItUpgrades()
+  void aNodeAtThePreviousFloorThatPushedReviewsWithoutTheirFindingsIsRefusedUntilItUpgrades()
       throws Exception {
     var refusal =
         assertInstanceOf(

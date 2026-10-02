@@ -22,6 +22,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.ShippedFollowUps;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
@@ -138,13 +139,17 @@ public final class SyncServerCommand implements Callable<Integer> {
    * events and posts each to the local sail-api, where main's bus (and its Slack reactor) picks it
    * up. This {@code _sync} subprocess shares main's database but not the server's in-process bus,
    * so the local-socket publisher {@code notifyBoardUpdated} already uses is the one proven path.
-   * Best-effort by contract: a down sail-api costs the narration, never the sync.
+   * Best-effort by contract: a down sail-api costs the narration, never the sync. A follow-up a
+   * node marked done resolves its source findings here first ({@link ShippedFollowUps}), main being
+   * the one box that may write any review.
    */
   static SyncTransitionSink transitionBridge(Sqlite db, String host) {
     var specs = new SpecStore(db);
     var reviews = new ReviewStore(db);
+    var shipped = new ShippedFollowUps(db);
     var publisher = new SailEventPublisher[1];
     return transition -> {
+      shipped.onTransition(transition);
       var events =
           SyncTransitionEvents.eventsFor(
               transition,

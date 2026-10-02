@@ -377,16 +377,20 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * stage ran — keeps that resolution and is neither carried nor resolved again. Any failure — a
    * duplicate finding id, a constraint violation, a journaling error — rolls the whole result back,
    * so a partially committed verdict can never retire a carried finding on behalf of a stage that
-   * subsequently errors: the retry still sees it {@code OPEN} and carries it.
+   * subsequently errors: the retry still sees it {@code OPEN} and carries it. Returns the ids of
+   * the findings whose rulings were left aside, already resolved.
    */
-  public void applyStageResult(String stageId, List<StageRuling> rulings, List<Finding> findings) {
-    db.transaction(
+  public List<String> applyStageResult(
+      String stageId, List<StageRuling> rulings, List<Finding> findings) {
+    return db.transaction(
         () -> {
           var reviewId = reviewOf(stageId);
           var resolved = new LinkedHashMap<String, Map<String, Object>>();
           var added = new ArrayList<Map<String, Object>>();
+          var alreadyResolved = new ArrayList<String>();
           for (var ruling : rulings) {
             if (!stillOpen(ruling.finding().id())) {
+              alreadyResolved.add(ruling.finding().id());
               continue;
             }
             if (ruling.resolution() == Finding.Resolution.OPEN) {
@@ -401,6 +405,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
           findings.forEach(finding -> added.add(ReviewFindingsContent.of(stageId, finding)));
           amend(resolved);
           append(reviewId, added);
+          return List.copyOf(alreadyResolved);
         });
   }
 

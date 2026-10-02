@@ -248,8 +248,10 @@ finding is one revision of its review, decided by the review rule like any other
 node adopting main's version takes main's findings exactly. A finding names the follow-up spec
 drafted from it in that content, so the link survives the follow-up's delete and restore on
 every box, and the follow-up reaching `done` resolves the finding `FIXED` in the same content —
-one revision of the source review, by the box that marks the follow-up done — so the resolution
-outlives the follow-up's archive and erasure. A review main denies is
+one revision of the source review, written by main: locally when main marks the follow-up done,
+and when a node's `done` commits there (`ShippedFollowUps`), since the source review is as often
+another FDE's, which a node may not write — so the resolution outlives the follow-up's archive
+and erasure. A review main denies is
 adopted as main's; one main never took is withdrawn, its findings recoverable from the content
 its change-log entries name. The upgrade folds each box's finding rows from before into one
 revision per review (`ReviewFindingsMigration`), which a node's next round pushes; a review

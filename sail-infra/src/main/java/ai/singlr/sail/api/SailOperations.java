@@ -121,9 +121,12 @@ public final class SailOperations implements HostOperations {
         pruner, RetentionConfig::load, new BlobStore(controlPlane), this::authoritative);
   }
 
-  /** Whether this box authors erasures and sweeps retention: main, or a box that syncs nobody. */
+  /**
+   * Whether this box authors erasures, sweeps retention and resolves the findings a shipped
+   * follow-up was drafted from: main, or a box that syncs nobody.
+   */
   private boolean authoritative() {
-    return !syncOperations.configuration().isNode();
+    return !box().isNode();
   }
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
@@ -667,7 +670,8 @@ public final class SailOperations implements HostOperations {
     this.projects = new ProjectLoader(shell, file);
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps =
-        new GlobalSpecOperations(specStore, reviewStore, eventBus, runStore, () -> roomStore);
+        new GlobalSpecOperations(
+            specStore, reviewStore, eventBus, runStore, () -> roomStore, this::authoritative);
     this.reviewOps = new ReviewOperations(reviewStore, specStore);
     this.dispatchOps =
         new DispatchOperations(

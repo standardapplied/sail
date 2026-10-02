@@ -287,7 +287,10 @@ class ReviewStoreTest {
     assertEquals(List.of(linked.id(), dismissed.id()), store.sourceFindingIds("auth-followup"));
 
     specStore.updateStatus("auth-followup", SpecStatus.ARCHIVED);
-    db.execute("DELETE FROM specs WHERE id = ?", "auth-followup");
+    var erasure = new Erasure(db);
+    erasure.erase(
+        erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, "auth-followup"))), "local");
+    assertTrue(specStore.findById("auth-followup").isEmpty());
     assertEquals(
         Finding.Resolution.FIXED,
         store.findFinding(linked.id()).orElseThrow().resolution(),
@@ -905,14 +908,16 @@ class ReviewStoreTest {
     store.resolveFinding(fixedMeanwhile.id(), Finding.Resolution.FIXED, "shipped in #7");
     var r1Rev = store.latestRev(r1);
 
-    store.applyStageResult(
-        stage2,
-        List.of(
-            new ReviewStore.StageRuling(dismissedMeanwhile, Finding.Resolution.OPEN, "still"),
-            new ReviewStore.StageRuling(fixedMeanwhile, Finding.Resolution.FIXED, "commit abc"),
-            new ReviewStore.StageRuling(stubborn, Finding.Resolution.OPEN, "still races")),
-        List.of());
+    var setAside =
+        store.applyStageResult(
+            stage2,
+            List.of(
+                new ReviewStore.StageRuling(dismissedMeanwhile, Finding.Resolution.OPEN, "still"),
+                new ReviewStore.StageRuling(fixedMeanwhile, Finding.Resolution.FIXED, "commit abc"),
+                new ReviewStore.StageRuling(stubborn, Finding.Resolution.OPEN, "still races")),
+            List.of());
 
+    assertEquals(List.of(dismissedMeanwhile.id(), fixedMeanwhile.id()), setAside);
     assertEquals(
         List.of(stubborn.id()),
         store.findingsForStage(stage2).stream().map(Finding::carriedFrom).toList(),
