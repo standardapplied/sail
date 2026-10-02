@@ -409,6 +409,48 @@ class SyncServerCommandTest {
   }
 
   @Test
+  void aSessionMainCannotOpenByFixingItsShippedFollowUpsFailsNamingTheRemedy() throws Exception {
+    Acting.as("uday", () -> mainSpecs.create(spec("fix", "Fix")));
+    Acting.as("uday", () -> mainSpecs.create(spec("followup", "Follow-up")));
+    var reviews = new ReviewStore(mainDb);
+    var found =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.SECURITY,
+            "A.java",
+            1,
+            2,
+            "leak",
+            "desc",
+            "evidence",
+            null,
+            0.9);
+    Acting.as(
+        "uday",
+        () -> {
+          var id = reviews.createReview("fix", 1);
+          reviews.addFinding(reviews.createStage(id, "security", "agent"), found);
+          reviews.linkSourceFindings("followup", List.of(found.id()));
+          mainSpecs.updateStatus("followup", SpecStatus.DONE);
+          new ChangeLog(mainDb).erase("spec", "fix", "erased", "local");
+        });
+    var out = new ByteArrayOutputStream();
+
+    var exit =
+        SyncServerCommand.serve(
+            mainReplicaDb,
+            "main",
+            tokenFor("member"),
+            new ByteArrayInputStream(new byte[0]),
+            out,
+            SyncTransitionSink.NONE,
+            SyncConfig::unset);
+
+    assertEquals(1, exit, "a catch-up that cannot write fails the session for the node to retry");
+    assertEquals(0, out.size(), "nothing is served");
+  }
+
+  @Test
   void aReSyncedUnchangedSpecEmitsNoTransition() throws Exception {
     Acting.as("uday", () -> nodeSpecs.create(spec("auth", "Auth")));
     var token = tokenFor("member");

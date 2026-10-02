@@ -742,6 +742,27 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void deletingAShippedFollowUpFixesItsSourceFindingsFirstWhenAnEarlierRunWasLost() {
+    Acting.by(ADMIN, () -> ops.create(createReq(Map.of("status", "done"))));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+    var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
+    Acting.by(
+        ADMIN,
+        () ->
+            ops.create(
+                createReq(
+                    Map.of("id", "auth-followup", "title", "Follow-up", "status", "pending"))));
+    reviewStore.linkSourceFindings("auth-followup", List.of(findingId));
+    specStore.updateStatus("auth-followup", SpecStatus.DONE);
+
+    Acting.by(ADMIN, () -> ops.delete("auth-followup"));
+
+    assertTrue(specStore.findById("auth-followup").isEmpty());
+    assertEquals(
+        Finding.Resolution.FIXED, reviewStore.findingsForReview(reviewId).getFirst().resolution());
+  }
+
+  @Test
   void aNodeMarkingItsFollowUpDoneLeavesTheSourceFindingsToMain() {
     var node =
         new GlobalSpecOperations(specStore, reviewStore, null, null, () -> null, () -> false);

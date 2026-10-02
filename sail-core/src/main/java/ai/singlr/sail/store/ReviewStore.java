@@ -621,23 +621,34 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * follow-up's archive or erasure; findings dismissed or fixed by other means are left untouched.
    */
   public int resolveFindingsOfShippedFollowUps() {
+    if (db.read(this::openFindingsOfShippedFollowUps).isEmpty()) {
+      return 0;
+    }
     return db.transaction(
         () -> {
           var fixed = new LinkedHashMap<String, Map<String, Object>>();
-          db.query(
-                  "SELECT f.id, f.followup FROM review_findings f"
-                      + " JOIN specs sp ON sp.id = f.followup WHERE sp.status = 'done' AND "
-                      + OPEN,
-                  row -> Map.entry(row.text(0), row.text(1)))
+          openFindingsOfShippedFollowUps()
               .forEach(
-                  entry ->
+                  (findingId, followUp) ->
                       fixed.put(
-                          entry.getKey(),
+                          findingId,
                           resolutionOf(
-                              Finding.Resolution.FIXED, "fixed by follow-up " + entry.getValue())));
+                              Finding.Resolution.FIXED, "fixed by follow-up " + followUp)));
           amend(fixed);
           return fixed.size();
         });
+  }
+
+  /** Open finding ids to the done follow-up each was drafted from; read before any write lock. */
+  private Map<String, String> openFindingsOfShippedFollowUps() {
+    var shipped = new LinkedHashMap<String, String>();
+    db.query(
+            "SELECT f.id, f.followup FROM review_findings f"
+                + " JOIN specs sp ON sp.id = f.followup WHERE sp.status = 'done' AND "
+                + OPEN,
+            row -> Map.entry(row.text(0), row.text(1)))
+        .forEach(entry -> shipped.put(entry.getKey(), entry.getValue()));
+    return shipped;
   }
 
   /**

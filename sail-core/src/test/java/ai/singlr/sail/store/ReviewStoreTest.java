@@ -984,6 +984,37 @@ class ReviewStoreTest {
   }
 
   @Test
+  void aLostAnswerIsAcknowledgedByMergingMainsVersionWithTheFindingsResolvedSince() {
+    var reviewId = store.createReview("auth", 1);
+    var stageId = store.createStage(reviewId, "security", "agent");
+    var leak = addOpenFinding(stageId, Finding.Severity.HIGH, "Leak");
+    var other = addOpenFinding(stageId, Finding.Severity.LOW, "Other");
+    var base = store.comparableSnapshot(reviewId);
+    store.applyRevision(reviewId, base, "1-main");
+    store.resolveFinding(other.id(), Finding.Resolution.DISMISSED, "by design");
+    var offered = store.comparableSnapshot(reviewId);
+    new ChangeLog(db).recordOffer("review", reviewId, offered, base);
+    store.resolveFinding(leak.id(), Finding.Resolution.FIXED, "plugged");
+
+    assertTrue(store.acknowledge(reviewId, offered, "2-main"), "main took the offer");
+
+    assertEquals("2-main", store.baseRevOf(reviewId));
+    assertNotEquals("2-main", store.latestRev(reviewId), "the fix since rides on top");
+    var findings = store.findingsForReview(reviewId);
+    assertEquals(Finding.Resolution.FIXED, byId(findings, leak.id()).resolution());
+    assertEquals(Finding.Resolution.DISMISSED, byId(findings, other.id()).resolution());
+    var content = new ReviewFindingsContent(db, new BlobStore(db));
+    assertEquals(
+        content.findingsOf((String) store.comparableSnapshot(reviewId).get("findings_hash")),
+        content.read(reviewId),
+        "the rows are exactly the merged content");
+  }
+
+  private static Finding byId(List<Finding> findings, String id) {
+    return findings.stream().filter(finding -> finding.id().equals(id)).findFirst().orElseThrow();
+  }
+
+  @Test
   void applyStageResultAppliesRulingsAndNewFindingsTogether() {
     var r1 = store.createReview("auth", 1);
     var stage1 = store.createStage(r1, "security", "agent");

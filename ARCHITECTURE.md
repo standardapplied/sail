@@ -251,8 +251,8 @@ every box, and the follow-up reaching `done` resolves the finding `FIXED` in the
 one revision of the source review, written by main: locally when main marks the follow-up done,
 and on every spec transition a node commits there and as every session opens (`ShippedFollowUps`,
 which resolves the findings of every shipped follow-up, so a run lost to a busy database is made
-good by the next before any follow-up can leave `done`; main also catches up around each status
-change it makes itself),
+good as the next session opens; main also catches up before a done spec of its own leaves `done`
+or is deleted through the API, and after one reaches it),
 since the source review is as often another FDE's, which a node may not write — so the
 resolution outlives the follow-up's archive and erasure. Findings two boxes changed at once merge
 finding by finding (`ReviewFindingsContent.merge`, the review store's `FieldMerger`): main fixing

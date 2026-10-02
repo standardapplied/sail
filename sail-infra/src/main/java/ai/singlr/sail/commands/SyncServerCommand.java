@@ -124,7 +124,15 @@ public final class SyncServerCommand implements Callable<Integer> {
           "sail _sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
       return 1;
     }
-    new ShippedFollowUps(db).catchUp();
+    try {
+      new ShippedFollowUps(db).catchUp();
+    } catch (RuntimeException e) {
+      System.err.println(
+          "sail _sync: main could not fix the findings of its shipped follow-ups ("
+              + e.getMessage()
+              + "); run sail sync again.");
+      return 1;
+    }
     SyncRpcServer.over(
             db,
             mainId,

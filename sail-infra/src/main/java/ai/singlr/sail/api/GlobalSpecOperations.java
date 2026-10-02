@@ -278,7 +278,7 @@ final class GlobalSpecOperations {
             request.dependsOn() != null ? request.dependsOn() : existing.dependsOn(),
             request.repos() != null ? request.repos() : existing.repos(),
             existing.roomIdOrIdentity());
-    if (updated.status() != existing.status()) {
+    if (existing.status() == SpecStatus.DONE && updated.status() != SpecStatus.DONE) {
       catchUpOnShippedFollowUps();
     }
     specStore.update(updated);
@@ -413,6 +413,9 @@ final class GlobalSpecOperations {
     requireStore();
     var existing = findOrThrow(specId);
     authorize(specId, specStore.held(specId), null);
+    if (existing.status() == SpecStatus.DONE) {
+      catchUpOnShippedFollowUps();
+    }
     var store = rooms.get();
     var mintedItsRoom = existing.roomIdOrIdentity().equals(specId);
     specStore.atomically(
@@ -576,9 +579,10 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * Fixes the findings of every shipped follow-up, as this box's machinery, around every status
-   * change here: before one, so a follow-up leaving {@code done} has its findings fixed first;
-   * after one into {@code done}, for the follow-up itself. Only an authoritative box writes them.
+   * Fixes the findings of every shipped follow-up, as this box's machinery: after a transition into
+   * {@code done}, for the follow-up itself, and before a done spec leaves {@code done} or is
+   * deleted here, so a resolution an earlier run lost lands while the follow-up still reads as
+   * shipped. Only an authoritative box writes them.
    */
   private void catchUpOnShippedFollowUps() {
     if (reviewStore != null && authoritative.getAsBoolean()) {
