@@ -116,21 +116,24 @@ public final class EventAuthority {
    * What an event is about, as this box knows it. A run this box holds decides its conversation, so
    * an event never pairs a run its sender owns with a spec it does not; the spec or room, worked by
    * the run or named directly, decides the project, and a run that works neither its own. {@code
-   * runId} is null when no run this box holds is named. {@code owners} are whom a sender who is not
-   * this box's FDE must act for: the owners of the spec or room, named directly or worked by the
-   * run; for a run that works neither, the run's own; and none for work this box does not hold. An
-   * announcement alone is not held to them but to the owners of its conversation. {@code
-   * executedHere} is whether this box executed the run.
+   * runId} is null when no run this box holds is named. {@code owners} are who drives it, whom a
+   * sender who is not this box's FDE must act for: the owners of the spec or room, named directly
+   * or worked by the run; for a run that works neither, the run's own; and none for work this box
+   * does not hold. {@code voices} are who may post in its conversation ({@link RoomStore#owners}),
+   * wider than who drives it, whom an announcement is held to. {@code executedHere} is whether this
+   * box executed the run.
    */
   public record Subject(
       String project,
       String conversation,
       String runId,
       List<String> owners,
+      List<String> voices,
       boolean executedHere) {
 
     public Subject {
       owners = List.copyOf(owners);
+      voices = List.copyOf(voices);
     }
   }
 
@@ -152,13 +155,15 @@ public final class EventAuthority {
         worked.conversation() == null
             ? RunAuthority.owners(held, this::specOwner)
             : worked.owners(),
+        worked.voices(),
         held.ownedBy(boxFde.get()));
   }
 
   private Subject about(String project, String conversation) {
     if (Strings.isBlank(conversation)) {
-      return new Subject(project, null, null, List.of(), false);
+      return new Subject(project, null, null, List.of(), List.of(), false);
     }
+    var voices = rooms.owners(conversation);
     var spec = specs.findById(conversation);
     if (spec.isPresent()) {
       var owner = spec.get().owner();
@@ -167,14 +172,13 @@ public final class EventAuthority {
           conversation,
           null,
           Strings.isBlank(owner) ? List.of() : List.of(owner),
+          voices,
           false);
     }
     return rooms
         .findById(conversation)
-        .map(
-            room ->
-                new Subject(room.project(), conversation, null, rooms.owners(conversation), false))
-        .orElseGet(() -> new Subject(project, conversation, null, List.of(), false));
+        .map(room -> new Subject(room.project(), conversation, null, voices, voices, false))
+        .orElseGet(() -> new Subject(project, conversation, null, List.of(), voices, false));
   }
 
   /**
@@ -203,7 +207,7 @@ public final class EventAuthority {
       return Optional.empty();
     }
     var box = actor.actsFor(boxFde.get());
-    var owners = rule == Rule.ANNOUNCES ? rooms.owners(subject.conversation()) : subject.owners();
+    var owners = rule == Rule.ANNOUNCES ? subject.voices() : subject.owners();
     var owner = owners.stream().anyMatch(actor::actsFor);
     var admitted =
         switch (rule) {

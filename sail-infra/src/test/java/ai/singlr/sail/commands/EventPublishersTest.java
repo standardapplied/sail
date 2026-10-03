@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.BusTesting;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
@@ -50,6 +51,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
@@ -93,6 +96,8 @@ class EventPublishersTest {
   private SailEventPublisher publisher;
   private String yaml;
   private final List<Event> landed = new CopyOnWriteArrayList<>();
+  private final Semaphore delivered = new Semaphore(0);
+  private long consumed;
 
   @AfterEach
   void tearDown() {
@@ -147,7 +152,7 @@ class EventPublishersTest {
                     new DispatchOperations.AdhocRequest("look", null, null, true, false),
                     ME));
 
-    var types = landed.stream().map(Event::type).toList();
+    var types = landedSoFar().stream().map(Event::type).toList();
     assertEquals(
         List.of(
             Event.WellKnownTypes.SPEC_DISPATCHED,
@@ -173,18 +178,21 @@ class EventPublishersTest {
         () ->
             runs.reserveDispatch(
                 run, "acme", "auth", ME, "build", List.of(), "claude-code", "b", "t", "l", "u"));
-    bus.subscribe(new RunTracker(runs, SyncScheduler.disabled(), () -> ME));
+    var tracked = new CountDownLatch(1);
+    bus.subscribe(
+        BusTesting.latching(new RunTracker(runs, SyncScheduler.disabled(), () -> ME), tracked));
 
     AgentWatchCommand.emitSyntheticStop(
         publisher::publish,
         "acme",
         new AgentSession.ExitState(false, 0, "auth", "claude-code", run, "build"));
 
-    var stop = landed.getFirst();
+    var stop = landedSoFar().getFirst();
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, stop.type());
     assertEquals(MEMBER_ME, stop.publisher());
     assertEquals(Event.WellKnownData.SOURCE_WATCHER, stop.data().get(Event.WellKnownData.SOURCE));
-    awaitRunStatus(runs, run, "stopped");
+    BusTesting.awaitDelivery(tracked);
+    assertEquals("stopped", runs.findById(run).orElseThrow().status());
   }
 
   @Test
@@ -216,13 +224,14 @@ class EventPublishersTest {
 
       Acting.by(new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> sync.sync(new SyncRequest(null)));
 
+      var announcements = landedSoFar();
       assertEquals(
           List.of(Event.WellKnownTypes.SPEC_MESSAGE_POSTED, Event.WellKnownTypes.BOARD_UPDATED),
-          landed.stream().map(Event::type).toList());
-      var announced = landed.getFirst();
+          announcements.stream().map(Event::type).toList());
+      var announced = announcements.getFirst();
       assertEquals("uday", announced.agent());
       assertEquals("shared", announced.spec());
-      assertEquals(message.id(), announced.data().get("message_id"));
+      assertEquals(message.id(), announced.data().get(Event.WellKnownData.MESSAGE_ID));
       assertEquals("hello", announced.data().get("preview"));
       assertTrue(landed.stream().allMatch(event -> MEMBER_ME.equals(event.publisher())));
     }
@@ -238,18 +247,18 @@ class EventPublishersTest {
       var runs = new RunStore(node.db);
       var run = startRunOn(runs, "auth");
       SyncBox.round(box, node);
-      landed.clear();
+      forgetLanded();
       Acting.system(() -> runs.transition(run, "running", "stopped", 2));
 
       SyncBox.round(box, node);
 
-      var relayed = landed.stream().map(Event::type).toList();
+      var relayed = landedSoFar();
       assertEquals(
           List.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_FAILED),
-          relayed);
+          relayed.stream().map(Event::type).toList());
       var pusher = new Event.Publisher("mady", "member", "api");
-      assertTrue(landed.stream().allMatch(event -> pusher.equals(event.publisher())));
-      for (var event : landed) {
+      assertTrue(relayed.stream().allMatch(event -> pusher.equals(event.publisher())));
+      for (var event : relayed) {
         assertEquals(run, event.data().get(Event.WellKnownData.RUN_ID));
         assertEquals(Event.WellKnownData.SOURCE_SYNC, event.data().get(Event.WellKnownData.SOURCE));
         assertEquals("auth", event.spec());
@@ -272,7 +281,7 @@ class EventPublishersTest {
       var runs = new RunStore(node.db);
       var forged = startRunOn(runs, "theirs");
       SyncBox.round(box, node);
-      landed.clear();
+      forgetLanded();
       Acting.system(() -> runs.transition(forged, "running", "stopped", 2));
 
       SyncBox.round(box, node);
@@ -281,7 +290,7 @@ class EventPublishersTest {
           "stopped",
           new RunStore(box.db).findById(forged).orElseThrow().status(),
           "main took the run, so its bridge was handed the transition");
-      assertEquals(List.of(), landed.stream().map(Event::type).toList());
+      assertEquals(List.of(), landedSoFar());
       assertEquals(SpecStatus.IN_PROGRESS, box.specs.findById("theirs").orElseThrow().status());
     }
   }
@@ -384,8 +393,28 @@ class EventPublishersTest {
       @Override
       public void onEvent(Event event) {
         landed.add(event);
+        delivered.release();
       }
     };
+  }
+
+  /**
+   * Every event the bus has taken so far, once the recorder holds each: the bus counts a publish
+   * before the door's response returns, and delivers to the recorder on its own thread.
+   */
+  private List<Event> landedSoFar() throws InterruptedException {
+    var published = bus.publishedCount();
+    var pending = Math.toIntExact(published - consumed);
+    if (!delivered.tryAcquire(pending, BusTesting.DELIVERY_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+      throw new AssertionError("bus did not deliver " + pending + " events in time");
+    }
+    consumed = published;
+    return List.copyOf(landed);
+  }
+
+  private void forgetLanded() throws InterruptedException {
+    landedSoFar();
+    landed.clear();
   }
 
   private static void seedSpec(SyncBox on, String id, String assignee) {
@@ -412,16 +441,5 @@ class EventPublishersTest {
                   List.of()));
           on.specs.setContent(id, "Do " + id, "");
         });
-  }
-
-  private static void awaitRunStatus(RunStore runs, String run, String status)
-      throws InterruptedException {
-    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(30);
-    while (!status.equals(runs.findById(run).orElseThrow().status())) {
-      if (System.nanoTime() > deadline) {
-        throw new AssertionError("run " + run + " never became " + status);
-      }
-      Thread.onSpinWait();
-    }
   }
 }

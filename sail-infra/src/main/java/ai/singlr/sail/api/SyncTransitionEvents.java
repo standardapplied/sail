@@ -250,7 +250,7 @@ public final class SyncTransitionEvents {
       boolean question,
       String host) {
     var data = new LinkedHashMap<String, Object>();
-    data.put("message_id", messageId);
+    data.put(Event.WellKnownData.MESSAGE_ID, messageId);
     data.put("preview", preview(body));
     if (question) {
       data.put("question", true);

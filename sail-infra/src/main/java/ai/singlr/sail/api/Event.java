@@ -284,6 +284,9 @@ public record Event(
      */
     public static final String RUN_ID = "run_id";
 
+    /** The id of the message a {@code spec_message_posted} event announces. */
+    public static final String MESSAGE_ID = "message_id";
+
     /**
      * The stopped run's lane ({@code build}, {@code adhoc}, {@code fix}, {@code room}), carried on
      * stop signals so lane-aware reactors decide without a store lookup — above all the review

@@ -170,7 +170,7 @@ class EventDoorTest {
   }
 
   @Test
-  void aMembersForgedStopOfARoomRunIsRefusedSoTheRoomGuardKeepsItsBaseline() throws Exception {
+  void aMembersForgedStopOfARoomRunNeverReachesTheRoomGuard() throws Exception {
     var run = reserve(null, "den", DispatchGate.ROOM_ROLE);
     var data = new LinkedHashMap<String, Object>(watcherStop(run));
     data.put(Event.WellKnownData.RUN_ROLE, Event.WellKnownData.RUN_ROLE_ROOM);

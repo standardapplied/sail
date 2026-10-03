@@ -32,7 +32,6 @@ import org.junit.jupiter.api.Test;
 
 class LocalApiRouterTest {
 
-  private final EventBus bus = new EventBus();
   private final RecordingOps ops = new RecordingOps();
   private final LocalApiRouter router = new LocalApiRouter(ops);
 

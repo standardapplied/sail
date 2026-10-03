@@ -31,8 +31,6 @@ import java.util.function.Supplier;
  */
 final class EventDoor {
 
-  private static final String MESSAGE_ID = "message_id";
-
   private final EventAuthority authority;
   private final MessageStore messages;
 
@@ -49,16 +47,16 @@ final class EventDoor {
   Event admit(Event offered) {
     return Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(offered.type())
         ? announcement(offered)
-        : about(offered);
+        : report(offered);
   }
 
-  private Event about(Event offered) {
+  private Event report(Event offered) {
     var subject =
         authority.subject(
             offered.project(),
             offered.spec(),
             Objects.toString(offered.data().get(Event.WellKnownData.RUN_ID), null));
-    var publisher = admitted(offered, subject);
+    var publisher = publisher(offered, subject);
     return offered.admitted(
         subject.project(),
         Strings.isBlank(offered.spec()) ? null : subject.conversation(),
@@ -67,13 +65,13 @@ final class EventDoor {
   }
 
   private Event announcement(Event offered) {
-    var message = messages.findById(Objects.toString(offered.data().get(MESSAGE_ID), ""));
+    var message = messages.findById(announced(offered));
     var subject =
         authority.subject(
             offered.project(),
             message.map(MessageStore.MessageRow::roomId).orElse(offered.spec()),
             null);
-    var publisher = admitted(offered, subject);
+    var publisher = publisher(offered, subject);
     var held = message.orElseThrow(() -> unheld(offered));
     return SyncTransitionEvents.messagePosted(
             subject.project(),
@@ -86,12 +84,16 @@ final class EventDoor {
         .admitted(subject.project(), held.roomId(), publisher, DateTimeUtils.now());
   }
 
-  private Event.Publisher admitted(Event offered, EventAuthority.Subject subject) {
+  private Event.Publisher publisher(Event offered, EventAuthority.Subject subject) {
     var actor = Actor.current();
     var retold =
         Event.WellKnownData.SOURCE_SYNC.equals(offered.data().get(Event.WellKnownData.SOURCE));
     Refusals.enforce(authority.decide(actor, offered.type(), subject, retold));
     return Event.Publisher.of(actor);
+  }
+
+  private static String announced(Event offered) {
+    return Objects.toString(offered.data().get(Event.WellKnownData.MESSAGE_ID), "");
   }
 
   private static ApiException unheld(Event offered) {
@@ -100,7 +102,7 @@ final class EventDoor {
         "Event type '"
             + offered.type()
             + "' announces a message this box holds, and it holds none with id '"
-            + Objects.toString(offered.data().get(MESSAGE_ID), "")
+            + announced(offered)
             + "'.",
         "Post through the messages route; the server announces a post itself.");
   }

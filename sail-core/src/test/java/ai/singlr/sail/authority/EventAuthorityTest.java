@@ -506,13 +506,13 @@ class EventAuthorityTest {
     boxFde = OWNER;
 
     assertEquals(
-        new Subject("acme", "auth", RUN, List.of(CAROL), true),
+        new Subject("acme", "auth", RUN, List.of(CAROL), List.of(CAROL), true),
         rule.subject("elsewhere", "billing", RUN));
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(CAROL), List.of(CAROL), false),
         rule.subject("elsewhere", "billing", OTHER_RUN));
     assertEquals(
-        new Subject("acme", null, ADHOC, List.of(OTHER), false),
+        new Subject("acme", null, ADHOC, List.of(OTHER), List.of(), false),
         rule.subject("elsewhere", "billing", ADHOC));
   }
 
@@ -529,27 +529,27 @@ class EventAuthorityTest {
     board.db.execute("DELETE FROM specs WHERE id = 'auth'");
 
     assertEquals(
-        new Subject("acme", "auth", OTHER_RUN, List.of(), false),
+        new Subject("acme", "auth", OTHER_RUN, List.of(), List.of(), false),
         rule.subject("elsewhere", null, OTHER_RUN));
   }
 
   @Test
-  void aSpecOrRoomDecidesItsProjectAndOwners() {
+  void aSpecOrRoomDecidesItsProjectItsOwnersAndWhoHasAVoiceInIt() {
     assertEquals(
-        new Subject("acme", "billing", null, List.of(OTHER), false),
+        new Subject("acme", "billing", null, List.of(OTHER), List.of(OTHER, CAROL), false),
         rule.subject("elsewhere", "billing", null));
     assertEquals(
-        new Subject("acme", "den", null, List.of(CAROL, OTHER), false),
+        new Subject("acme", "den", null, List.of(CAROL, OTHER), List.of(CAROL, OTHER), false),
         rule.subject("elsewhere", "den", "no-such-run"));
   }
 
   @Test
   void workThisBoxDoesNotHoldIsAsItsSenderNamedItAndNoOnes() {
     assertEquals(
-        new Subject("elsewhere", "gone", null, List.of(), false),
+        new Subject("elsewhere", "gone", null, List.of(), List.of(), false),
         rule.subject("elsewhere", "gone", null));
     assertEquals(
-        new Subject("elsewhere", null, null, List.of(), false),
+        new Subject("elsewhere", null, null, List.of(), List.of(), false),
         rule.subject("elsewhere", " ", " "));
   }
 

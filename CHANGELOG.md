@@ -10,7 +10,8 @@
   - The server stamps what it knows: its own clock as `ts`, the project and conversation of the run, spec or room the event names, and the publisher (handle, role, lane) it authenticated, stored with the event and served as `publisher` on the stream and in history. `agent` is a label, no longer who published.
   - A refusal is a 403 naming the event type and what the sender may not drive; a refused event never reaches the bus.
   - A relayed `agent_failed` names its run, as its stop does.
-  - A member who runs `sail spec dispatch` or `sail agent stop` through main's SSH gateway publishes as themselves, not as main's FDE, so those lifecycle events are now refused; the run is still finished by the missed-stop reconciler within a sweep.
+  - A member who runs `sail spec dispatch`, `sail run` or `sail agent stop` through main's SSH gateway publishes as themselves, not as main's FDE, so the events those commands and their watcher publish (`spec_dispatched`, `snapshot_created`, `agent_session_started`, `agent_cancelled`, the watcher's `agent_session_stopped`) are refused: the dispatch itself still lands, but Mast's timeline and Slack show no dispatch row for it, and the spec moves to review and its review starts when the missed-stop reconciler's next sweep finishes the run, not when the agent exits.
+  - A spec an admin reassigns while another FDE's box is still running it loses that run's relayed stop on main: the rule holds a run another box executed to the owner of the spec it works, and that owner is no longer the FDE who pushed it. The run still finishes on its own box, and the spec's status still syncs; main's Slack narration of the stop does not.
   - Mast shows the publisher the server stamped. An event stored before this release, or one the server emitted itself, has none and shows its `agent` as before.
   - No floor change: events never cross the sync wire. The `events` table gains a `publisher` column.
 

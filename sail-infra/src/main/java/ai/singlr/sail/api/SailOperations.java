@@ -89,6 +89,7 @@ public final class SailOperations implements HostOperations {
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
     this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
+    this.door = new EventDoor(db, () -> box().handle());
     this.schema = new HostLanes.Schema(db, syncOperations);
     this.catalog =
         new HostLanes.Catalog(
@@ -323,6 +324,7 @@ public final class SailOperations implements HostOperations {
   private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
   private SpecPruner pruner;
+  private EventDoor door;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
@@ -846,7 +848,7 @@ public final class SailOperations implements HostOperations {
       throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
     }
     var data = new LinkedHashMap<String, Object>();
-    data.put("message_id", row.id());
+    data.put(Event.WellKnownData.MESSAGE_ID, row.id());
     data.put("preview", preview(row.body()));
     if (row.question()) {
       data.put("question", true);
@@ -1571,7 +1573,7 @@ public final class SailOperations implements HostOperations {
           "Event bus is not wired into this SailOperations instance.",
           "Use the SailOperations constructor that accepts an EventBus.");
     }
-    if (controlPlane == null) {
+    if (door == null) {
       return Result.failure(
           ErrorCode.INTERNAL,
           "This SailOperations instance has no control-plane database to decide an event by.",
@@ -1580,7 +1582,6 @@ public final class SailOperations implements HostOperations {
     var result =
         safe(
             () -> {
-              var door = new EventDoor(controlPlane, () -> box().handle());
               var stamped = eventBus.publish(door.admit(event));
               return new EventPublishResponse(stamped.id(), stamped.toMap());
             });

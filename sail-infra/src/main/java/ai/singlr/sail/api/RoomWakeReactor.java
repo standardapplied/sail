@@ -422,7 +422,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
    * store still gates on authorship.
    */
   private Message messageOf(Event event) {
-    var messageId = Objects.toString(event.data().get("message_id"), null);
+    var messageId = Objects.toString(event.data().get(Event.WellKnownData.MESSAGE_ID), null);
     if (messageStore != null && messageId != null) {
       var row = messageStore.findById(messageId).orElse(null);
       if (row != null) {
