@@ -201,8 +201,9 @@ class FileImporterTest {
     importer.importAll();
     new FileMaterializer(files, projectsDir).materialize("acme");
     writeOnDisk("acme", "a.txt", "v2");
-    try (var input = Files.newInputStream(projectsDir.resolve("acme/files/a.txt"))) {
-      files.put("acme", "a.txt", input, 0644);
+    var copy = projectsDir.resolve("acme/files/a.txt");
+    try (var input = Files.newInputStream(copy)) {
+      files.put("acme", "a.txt", input, WorkspaceFiles.mode(copy));
     }
     mainsVersionArrives("acme", "a.txt", "v3");
 
