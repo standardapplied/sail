@@ -23,8 +23,10 @@ import java.util.Set;
  * orchestrator and by agent hooks inside project containers; they flow to in-process subscribers
  * (audit persister, webhook reactor) and out to live consumers over SSE.
  *
- * <p>The {@link #type} field is intentionally free-form. {@link WellKnownTypes} documents the names
- * sail itself emits; agents and future reactors may add new ones without coordinated releases.
+ * <p>The {@link #type} field is free-form for what the server emits: {@link WellKnownTypes}
+ * documents the names sail itself uses, and subscribers ignore types they do not recognize. What a
+ * client may publish is not free-form: the doors accept only the types {@code EventAuthority}
+ * lists, from a sender who may drive what the event names ({@link EventDoor}).
  *
  * @param v schema version (always {@code 1} until a breaking change forces a bump)
  * @param id monotonic identifier stamped by the bus on publish; {@code 0} on freshly-built events
