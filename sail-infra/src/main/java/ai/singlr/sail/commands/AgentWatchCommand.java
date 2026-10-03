@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventStreamClient;
+import ai.singlr.sail.api.RunStops;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.ServerConnectionConfig;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -21,9 +22,9 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WebhookNotifier;
@@ -44,17 +45,29 @@ import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 
 /**
- * Long-running watcher that enforces a dispatched agent's guardrails: a wall-clock ceiling ({@code
- * max_duration}) and an idle/stall window ({@code max_idle}). Event-driven: subscribes to the
- * sail-api {@code /v1/events/stream} and, via {@code BlockingQueue.poll}, wakes the moment the next
- * deadline fires — the wall-clock deadline or the stall deadline (last progress event + {@code
- * max_idle}), whichever is sooner. Progress events (tool calls, log chunks) push the stall deadline
- * out, so a long but active build is never mistaken for a hung agent. The stall clock starts at
- * watch launch, not session start: idleness the watcher never observed is not idleness, which
- * matters when the daemon re-arms a watcher onto a session already hours into its run. The
- * wall-clock deadline stays anchored to the session's {@code started_at}, so a re-armed agent keeps
- * only its remaining budget. Supervision is on by default (see {@code Guardrails.defaults()});
- * sail.yaml overrides every threshold and the action.
+ * Long-running watcher that supervises one agent run, whichever lane launched it — a build, an
+ * ad-hoc run, a chat turn, a reviewer, a fix agent — and ends it one way. It enforces the run's
+ * guardrails: a wall-clock ceiling ({@code max_duration}) and an idle/stall window ({@code
+ * max_idle}). Event-driven: subscribes to the sail-api {@code /v1/events/stream} and, via {@code
+ * BlockingQueue.poll}, wakes the moment the next deadline fires — the wall-clock deadline or the
+ * stall deadline (last progress event + {@code max_idle}), whichever is sooner. Progress events
+ * (tool calls, log chunks) push the stall deadline out, so a long but active build is never
+ * mistaken for a hung agent. The stall clock starts at watch launch, not session start: idleness
+ * the watcher never observed is not idleness, which matters when the daemon re-arms a watcher onto
+ * a session already hours into its run. The wall-clock deadline stays anchored to the session's
+ * {@code started_at}, so a re-armed agent keeps only its remaining budget.
+ *
+ * <p>The limits are the run's lane's, handed over on the command line by whoever spawned the
+ * watcher ({@code --max-duration}, {@code --max-idle}, {@code --action}); the watcher never reads a
+ * project's guardrails itself, so a run is held to the limits it launched under and an edit applies
+ * to the next run. A limit left off is not enforced.
+ *
+ * <p>A run ends through the watcher in one of two ways, and each publishes the authoritative {@code
+ * agent_session_stopped} that finishes the run and that the review pipeline advances on. The agent
+ * exits on its own: the stop carries its exit code. Or a guardrail trips with a stopping action:
+ * the watcher kills the unit in the container, records the trigger beside the run, and — only once
+ * the unit is verified gone — publishes the stop carrying the reason. A reaped agent is dead before
+ * anything is told it ended.
  *
  * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises and
  * {@code --unit} the systemd unit that run was launched as (recorded on the run, never re-derived
@@ -92,6 +105,22 @@ public final class AgentWatchCommand implements Runnable {
           "Systemd unit the run was launched as, as recorded on the run (default: derived from"
               + " --run).")
   private String unitName;
+
+  @Option(
+      names = "--max-duration",
+      description = "Wall-clock limit of the run (e.g. 4h, 45m); none when omitted.")
+  private String maxDuration;
+
+  @Option(
+      names = "--max-idle",
+      description = "Stall limit: time without a progress event (e.g. 20m); none when omitted.")
+  private String maxIdle;
+
+  @Option(
+      names = "--action",
+      description = "What a crossed limit does: stop, snapshot-and-stop, notify.",
+      defaultValue = "stop")
+  private String action;
 
   @Option(names = "--dry-run", description = "Print actions instead of executing them.")
   private boolean dryRun;
@@ -136,9 +165,8 @@ public final class AgentWatchCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
 
+    var guardrails = Guardrails.of(maxDuration, maxIdle, action);
     var config = loadConfig();
-    var configured = config.agent() != null ? config.agent().guardrails() : null;
-    var guardrails = configured != null ? configured : Guardrails.defaults();
     var notifier = buildNotifier(config.agent() != null ? config.agent().notifications() : null);
 
     unit = resolveUnit();
@@ -245,7 +273,7 @@ public final class AgentWatchCommand implements Runnable {
       var decision =
           onTimeout(exit.active(), guardrailFired, !DateTimeUtils.now().isBefore(deadlineAt));
       if (decision == TimeoutDecision.SYNTHESIZE_STOP) {
-        emitSyntheticStop(publisher, name, exit);
+        emitStop(publisher, name, exit, null);
         handleAgentExited(notifier, notifications);
         return;
       }
@@ -261,15 +289,31 @@ public final class AgentWatchCommand implements Runnable {
       }
       var elapsed =
           GuardrailChecker.formatDuration(Duration.between(startedAt, DateTimeUtils.now()));
-      var snapshotLabel = applyTriggerAction(triggered, shell, agentSession);
+      var snapshotLabel = snapshotBefore(triggered, shell);
+      if (!stops(triggered) || dryRun) {
+        writeTriggerFile(shell, name, unit, triggered);
+      } else if (!reap(name, unit, triggered, exit, shell, publisher)) {
+        System.err.println(
+            "  [watch] "
+                + unit.unitName()
+                + " survived the kill for "
+                + triggered.cause()
+                + "; no stop published, trying again at the next poll");
+        continue;
+      }
       reportTrigger(triggered, elapsed, snapshotLabel);
       notifyTriggered(notifier, notifications, triggered);
       guardrailFired = true;
-      if (!"notify".equals(triggered.action())) {
+      if (stops(triggered)) {
         notifySessionDone(notifier, notifications);
         return;
       }
     }
+  }
+
+  /** Whether a crossed limit ends the run, as every action but {@code notify} does. */
+  private static boolean stops(GuardrailChecker.GuardrailResult.Triggered triggered) {
+    return !"notify".equals(triggered.action());
   }
 
   private void requireRunning(ShellExecutor shell) throws Exception {
@@ -361,33 +405,43 @@ public final class AgentWatchCommand implements Runnable {
                 + ")|@"));
   }
 
-  private String applyTriggerAction(
-      GuardrailChecker.GuardrailResult.Triggered triggered,
-      ShellExecutor shell,
-      AgentSession agentSession)
-      throws Exception {
-    writeTriggerFile(shell, name, triggered);
-    return switch (triggered.action()) {
-      case "snapshot-and-stop" -> snapshotAndStop(shell, agentSession);
-      case "stop" -> {
-        if (!dryRun) {
-          agentSession.killAgent(name, unit);
-        }
-        yield "";
-      }
-      default -> "";
-    };
-  }
-
-  private String snapshotAndStop(ShellExecutor shell, AgentSession agentSession) throws Exception {
-    if (dryRun) {
+  /**
+   * The snapshot a {@code snapshot-and-stop} limit takes while the agent's state is still there;
+   * blank for every other action and on a dry run.
+   */
+  private String snapshotBefore(
+      GuardrailChecker.GuardrailResult.Triggered triggered, ShellExec shell) throws Exception {
+    if (dryRun || !"snapshot-and-stop".equals(triggered.action())) {
       return "";
     }
-    var snapMgr = new SnapshotManager(shell);
     var label = "guardrail-" + SnapshotManager.defaultLabel().substring(5);
-    snapMgr.create(name, label);
-    agentSession.killAgent(name, unit);
+    new SnapshotManager(shell).create(name, label);
     return label;
+  }
+
+  /**
+   * Ends a run for the limit it crossed, in the order a reaped run needs: the unit is killed in the
+   * container — its whole cgroup, so no child of the agent outlives it — the trigger is recorded
+   * beside the run, and only then is the stop published, carrying why. Returns false, having
+   * recorded and published nothing, when the unit is still active after the kill: a run is never
+   * reported ended while its agent can still push work.
+   */
+  static boolean reap(
+      String project,
+      AgentUnit unit,
+      GuardrailChecker.GuardrailResult.Triggered triggered,
+      AgentSession.ExitState exit,
+      ShellExec shell,
+      StopPublisher publisher)
+      throws Exception {
+    var session = new AgentSession(shell);
+    session.killAgent(project, unit);
+    if (session.unitActive(project, unit)) {
+      return false;
+    }
+    writeTriggerFile(shell, project, unit, triggered);
+    emitStop(publisher, project, exit, triggered.cause());
+    return true;
   }
 
   private void reportTrigger(
@@ -419,8 +473,12 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  static void emitSyntheticStop(
-      StopPublisher publisher, String project, AgentSession.ExitState exit) {
+  /**
+   * Publishes the run's authoritative stop: {@code reason} is why the watcher ended it, null when
+   * the agent exited on its own.
+   */
+  static void emitStop(
+      StopPublisher publisher, String project, AgentSession.ExitState exit, String reason) {
     if (publisher == null) {
       return;
     }
@@ -433,45 +491,38 @@ public final class AgentWatchCommand implements Runnable {
       return;
     }
     try {
-      publisher.publish(syntheticStop(project, exit));
+      publisher.publish(stop(project, exit, reason));
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint [watch] published stop for "
                   + (Strings.isBlank(exit.specId())
                       ? "run " + exit.runId()
                       : "spec " + exit.specId())
-                  + " (exit "
-                  + exit.exitCode()
+                  + " ("
+                  + (reason == null ? "exit " + exit.exitCode() : reason)
                   + ")|@"));
     } catch (Exception e) {
-      System.err.println(
-          "  [watch] could not publish synthetic stop for " + project + ": " + e.getMessage());
+      System.err.println("  [watch] could not publish stop for " + project + ": " + e.getMessage());
     }
   }
 
   /**
-   * Builds the {@code agent_session_stopped} the watcher emits when it observes the unit exit
-   * without a hook-fired stop reaching the bus. Carries the real exit code so consumers can tell a
-   * crash from a clean finish; {@code source=watcher} marks it as watcher-synthesized.
+   * The {@code agent_session_stopped} the watcher emits when the run it supervises ends. A run that
+   * exited on its own carries its real exit code, so consumers can tell a crash from a clean
+   * finish. A run the watcher killed carries {@code reason} instead — it did not end itself, so it
+   * has no exit code of its own, and reporting the one systemd shows for a reset unit would call a
+   * reaped run clean.
    */
-  static Event syntheticStop(String project, AgentSession.ExitState exit) {
-    var agent = Strings.isBlank(exit.agentType()) ? Event.SAIL_AGENT : exit.agentType();
-    var data = new LinkedHashMap<String, Object>();
-    data.put(Event.WellKnownData.EXIT_CODE, exit.exitCode());
-    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
-    if (Strings.isNotBlank(exit.runId())) {
-      data.put(Event.WellKnownData.RUN_ID, exit.runId());
-    }
-    if (Strings.isNotBlank(exit.role())) {
-      data.put(Event.WellKnownData.RUN_ROLE, exit.role());
-    }
-    return Event.of(
+  static Event stop(String project, AgentSession.ExitState exit, String reason) {
+    return RunStops.of(
+        Event.WellKnownData.SOURCE_WATCHER,
         project,
-        Strings.isBlank(exit.specId()) ? null : exit.specId(),
-        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-        agent,
-        HostInfo.hostname(),
-        data);
+        exit.specId(),
+        exit.agentType(),
+        exit.runId(),
+        exit.role(),
+        exit.exitCode(),
+        reason);
   }
 
   private void handleAgentExited(WebhookNotifier notifier, Notifications notifications) {
@@ -517,8 +568,9 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   private static void writeTriggerFile(
-      ShellExecutor shell,
+      ShellExec shell,
       String containerName,
+      AgentUnit unit,
       GuardrailChecker.GuardrailResult.Triggered triggered)
       throws Exception {
     var map = new LinkedHashMap<String, Object>();
@@ -533,9 +585,10 @@ public final class AgentWatchCommand implements Runnable {
             List.of(
                 "bash",
                 "-c",
-                "printf '%s' \"$1\" > /home/dev/guardrail-triggered.yaml",
+                "mkdir -p \"$(dirname \"$2\")\" && printf '%s' \"$1\" > \"$2\"",
                 "bash",
-                yaml));
+                yaml,
+                unit.guardrailTriggerPath()));
     shell.exec(cmd);
   }
 

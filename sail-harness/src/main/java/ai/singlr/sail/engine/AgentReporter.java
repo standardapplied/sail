@@ -182,11 +182,13 @@ public final class AgentReporter {
     String guardrailReason = null;
     String guardrailAction = null;
     try {
-      var triggerCmd =
-          ContainerExec.asDevUser(
-              containerName, List.of("cat", "/home/dev/guardrail-triggered.yaml"));
-      var triggerResult = shell.exec(triggerCmd);
-      if (triggerResult.ok() && !triggerResult.stdout().isBlank()) {
+      var triggerResult =
+          session == null
+              ? null
+              : shell.exec(
+                  ContainerExec.asDevUser(
+                      containerName, List.of("cat", unitOf(session).guardrailTriggerPath())));
+      if (triggerResult != null && triggerResult.ok() && !triggerResult.stdout().isBlank()) {
         var triggerMap = YamlUtil.parseMap(triggerResult.stdout());
         guardrailTriggered = true;
         guardrailReason = Objects.toString(triggerMap.get("reason"), null);

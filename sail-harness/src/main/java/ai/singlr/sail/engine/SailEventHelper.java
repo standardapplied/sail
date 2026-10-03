@@ -39,8 +39,9 @@ public final class SailEventHelper {
       # request and scopes it: the server stamps project/spec/run/author from the authenticated
       # run and ignores the fields below. No credential means an untracked engineer session with
       # no run to speak for — skip silently so ad-hoc 'claude' invocations never pollute the spec
-      # event bus. This is why a credentialed reviewer/fix run (no SAIL_SPEC_ID, no SAIL_RUN_ID)
-      # still emits and shows presence. SAIL_SPEC_ID rides along only as an advisory hint.
+      # event bus. Every sail-launched run carries one, whichever lane launched it, so a
+      # reviewer's and a fix agent's tool calls reach the bus as a build's do. SAIL_SPEC_ID
+      # rides along only as an advisory hint.
       set -eu
 
       EVENT_TYPE="${1:?event type required}"

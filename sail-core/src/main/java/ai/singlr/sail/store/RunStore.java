@@ -27,7 +27,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * The Run aggregate on SQLite: one dispatch execution of a spec. Records where it ran ({@code node}
@@ -60,8 +59,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /**
    * {@code unit} is the systemd unit the run was launched as — recorded at launch as part of the
    * run's identity, so every later consumer (stop, probe, reconciler, watcher) addresses the unit
-   * the run actually owns instead of re-deriving a name that could drift across releases. Build
-   * runs always carry one; foreground review runs intentionally do not use systemd.
+   * the run actually owns instead of re-deriving a name that could drift across releases.
    *
    * <p>{@code repos} is the repo set the dispatch reserved at launch — the run's own claim, not a
    * lookup through its spec, so the overlap gate reads a value that existed before the spec was
@@ -80,6 +78,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * <p>{@code lastActivityAt} is when the run's agent last showed progress (a tool call or a log
    * chunk) — see {@link #stampActivity}. Null until the first stamp, and on every row adopted from
    * a pre-upgrade snapshot; presence readers treat null as "unknown", never as quiet.
+   *
+   * <p>{@code reviewId} is the review a reviewer's or a fix agent's run serves, stamped at creation
+   * and never changed: the review pipeline reads it to know which review a stop advances. Null for
+   * every other lane, and on a row an older box wrote.
    */
   public record RunRow(
       String id,
@@ -106,11 +108,68 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String sessionSource,
       String transcriptPath,
       String lastActivityAt,
-      String roomId) {
+      String roomId,
+      String reviewId) {
 
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
       return specId != null ? specId : roomId;
+    }
+
+    /** A row that serves no review — every lane but the reviewer's and the fix agent's. */
+    public RunRow(
+        String id,
+        String project,
+        String specId,
+        String node,
+        String role,
+        String agent,
+        String branch,
+        String task,
+        Integer pid,
+        Integer watcherPid,
+        String status,
+        Integer exitCode,
+        String logPath,
+        String unit,
+        String startedAt,
+        String completedAt,
+        List<String> repos,
+        Long pidTicks,
+        String principal,
+        String owner,
+        String sessionId,
+        String sessionSource,
+        String transcriptPath,
+        String lastActivityAt,
+        String roomId) {
+      this(
+          id,
+          project,
+          specId,
+          node,
+          role,
+          agent,
+          branch,
+          task,
+          pid,
+          watcherPid,
+          status,
+          exitCode,
+          logPath,
+          unit,
+          startedAt,
+          completedAt,
+          repos,
+          pidTicks,
+          principal,
+          owner,
+          sessionId,
+          sessionSource,
+          transcriptPath,
+          lastActivityAt,
+          roomId,
+          null);
     }
 
     /** A row without activity — the shape every run has until its first progress stamp. */
@@ -162,6 +221,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
+          null,
           null,
           null);
     }
@@ -271,24 +331,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           : Actor.agentPrincipal(principal, owner);
     }
 
-    /**
-     * Whether this row is a review execution — the reviewer or its fix agent, which share the one
-     * review row. Their own stop must never re-enter the pipeline, so lane-aware reactors consult
-     * this as the fallback when a stop signal lost its role marker.
-     */
-    public boolean reviewRole() {
-      return Lane.REVIEW.matches(role);
-    }
-
-    /**
-     * Whether this row is an agent session the run-scoped machinery owns — a build attempt, an
-     * ad-hoc run, or a room wake — as opposed to a pipeline-driven review execution. Session rows
-     * are the ones the stop, status, log, reaper, and missed-stop lanes address; room runs join
-     * them because they launch through the same systemd unit and must be reaped and stoppable like
-     * any other.
-     */
-    public boolean sessionRole() {
-      return Lane.isSession(role);
+    /** Whether this row serves a review: a reviewer's run, or the fix agent's that answers it. */
+    public boolean servesReview() {
+      return lane().map(Lane::servesReview).orElse(false);
     }
 
     /**
@@ -311,17 +356,11 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
   }
 
-  /** The {@code role IN (...)} clause over every session role, live and retired. */
-  private static final String SESSION_ROLES =
-      Lane.sessionRoles().stream()
-          .map(role -> "'" + role + "'")
-          .collect(Collectors.joining(", ", "role IN (", ")"));
-
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
           + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
-          + " room_id";
+          + " room_id, review_id";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -347,7 +386,19 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit) {
     createReturningCredential(
-        id, project, specId, boxHandle, role, agent, branch, task, pid, watcherPid, logPath, unit);
+        id,
+        project,
+        specId,
+        null,
+        boxHandle,
+        role,
+        agent,
+        branch,
+        task,
+        pid,
+        watcherPid,
+        logPath,
+        unit);
     return id;
   }
 
@@ -355,6 +406,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String id,
       String project,
       String specId,
+      String reviewId,
       String boxHandle,
       String role,
       String agent,
@@ -380,12 +432,13 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           db.execute(
               """
-              INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
-                  watcher_pid, status, started_at, log_path, unit, principal, owner)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)""",
+              INSERT INTO runs (id, project, spec_id, review_id, node, role, agent, branch, task,
+                  pid, watcher_pid, status, started_at, log_path, unit, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
+              reviewId,
               node,
               role,
               agent,
@@ -406,34 +459,42 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Records a review negotiation under the review UUID that owns its prompt, session, and log
-   * files. Reviewer and fix invocations deliberately share that identity, so one run row remains
-   * addressable as {@code ~/.sail/runs/<reviewId>/review.log} throughout the negotiation. {@code
-   * unit} is the review's real execution identity ({@code sail-review-<id>}), recorded so a probe
-   * of any run row is honest even though reviews execute as blocking foreground work. It is stamped
-   * as every run this box executes is ({@link #stamp}), for {@code boxHandle}. Fails if an
-   * exclusive container lease (see {@link #acquireContainerLease}) is held — a review must never
+   * Records one invocation of the review pipeline — a reviewer or the fix agent that answers it —
+   * as its own run, naming the review it serves. Each invocation is a run like any other: its own
+   * id, unit, log and principal ({@code <agent>/review-<runId>}, {@code <agent>/fix-<runId>}), so
+   * its room posts are attributed to the lane that wrote them and its stop addresses it alone. It
+   * is stamped as every run this box executes is ({@link #stamp}), for {@code boxHandle}. Fails if
+   * an exclusive container lease (see {@link #acquireContainerLease}) is held — a review must never
    * launch into a container mid-restore; the pipeline surfaces the error and the reconciler's
-   * rescue replay retries the kickoff after the lease is released. Returns the run's plaintext
-   * credential, surfaced exactly once so the launched review agent can actually act as the
-   * principal this row records; only the hash is at rest.
+   * rescue replay retries after the lease is released. Returns the run's plaintext credential,
+   * surfaced exactly once so the launched agent can act as the principal this row records; only the
+   * hash is at rest.
+   *
+   * @param lane {@link Lane#REVIEW} or {@link Lane#FIX}
    */
-  public String createReview(
+  public String createForReview(
+      String id,
       String reviewId,
       String project,
       String specId,
       String boxHandle,
+      Lane lane,
       String agent,
       String branch,
       String task,
       String logPath,
       String unit) {
+    if (!lane.servesReview()) {
+      throw new IllegalArgumentException(
+          "A run serves a review only in the review or fix lane, not " + lane.wire() + ".");
+    }
     return createReturningCredential(
-        reviewId,
+        id,
         project,
         specId,
+        Objects.requireNonNull(reviewId, "reviewId"),
         boxHandle,
-        Lane.REVIEW.wire(),
+        lane.wire(),
         agent,
         branch,
         task,
@@ -441,47 +502,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         null,
         logPath,
         unit);
-  }
-
-  /**
-   * Rotates the credential of a live run — the seam the review pipeline's lanes use to rejoin the
-   * run after another invocation already created it (the fix lane rejoining its review's still-open
-   * negotiation, a later stage's reviewer rejoining after it). The original plaintext is
-   * unrecoverable by design, so rejoining means a fresh credential; the run holds exactly one at a
-   * time (the schema enforces it), so rotation retires the previous invocation's credential in the
-   * same transaction. The rejoining invocation also stamps its own identity: the run row's {@code
-   * agent} and {@code principal} become the invocation's ({@code <agent>/fix-<id>} for the fix
-   * lane, {@code <agent>/review-<id>} for a reviewer), journaled so the honest attribution
-   * replicates — rooms and run views read the principal, and the author must be the lane that
-   * wrote. Fails loud on a missing or finished run — a dead run's identity is never resurrected.
-   *
-   * @param lane {@code "fix"} or {@code "review"} — the invocation rejoining the run, which selects
-   *     the principal's marker; the run row's {@code role} stays {@code review}
-   */
-  public String rotateCredential(String id, String agent, String lane) {
-    return db.transaction(
-        () -> {
-          var run =
-              findById(id)
-                  .orElseThrow(
-                      () ->
-                          new IllegalStateException(
-                              "No run " + id + " to issue a credential for."));
-          if (!"running".equals(run.status())) {
-            throw new IllegalStateException(
-                "Run " + id + " is " + run.status() + "; only a running run can be credentialed.");
-          }
-          db.execute(
-              "UPDATE runs SET agent = ?, principal = ? WHERE id = ?",
-              agent,
-              principalHandle(agent, lane, id),
-              id);
-          recordPrincipal(id, principalHandle(agent, lane, id));
-          revokeCredential(id);
-          var credential = mintCredential(id, null);
-          recordRevision(id, ChangeLog.Entry.LOCAL, false);
-          return credential;
-        });
   }
 
   /**
@@ -522,11 +542,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * restore): within a single {@code BEGIN IMMEDIATE} transaction, refuses if another lease is held
    * or any local run of the project is live ({@code running} or {@code stopping}, every role — even
    * a room wake loses its session when the container is rolled back), then inserts the lease. Every
-   * run insert — {@link #reserveDispatch}, {@link #create}, {@link #createReview} — checks this
+   * run insert — {@link #reserveDispatch}, {@link #create}, {@link #createForReview} — checks this
    * lease inside its own transaction, so the two sides can never interleave: a restore is refused
-   * over live work, and no run can start until {@link #releaseContainerLease} runs. Rejoining an
-   * existing negotiation via {@link #rotateCredential} needs no check: it requires a {@code
-   * running} row, and any running row refuses the lease.
+   * over live work, and no run can start until {@link #releaseContainerLease} runs.
    */
   public ContainerLease acquireContainerLease(String project, String localHandle, String action) {
     return db.transaction(
@@ -1240,20 +1258,17 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The latest agent session (build or ad-hoc) of {@code project} that executed on this box, or
-   * empty. Review runs remain in the aggregate but do not replace the session used by agent status,
-   * log, and report commands. Ownership is by node: a box with a handle owns exactly the runs
-   * stamped with it; a box with no handle owns exactly its own blank-node runs and never a run
-   * adopted from another box via sync.
+   * The latest run of {@code project} that executed on this box, whichever lane, or empty: the
+   * session agent status, log, and report commands read. Ownership is by node: a box with a handle
+   * owns exactly the runs stamped with it; a box with no handle owns exactly its own blank-node
+   * runs and never a run adopted from another box via sync.
    */
   public Optional<RunRow> latestForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
-            + " AND "
-            + SESSION_ROLES
-            + " ORDER BY started_at DESC"
+            + " ORDER BY started_at DESC, id DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -1261,65 +1276,46 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The active agent session (build or ad-hoc) of {@code project} that executed on this box, or
-   * empty. {@code stopping} counts as active: an interrupted stop's claim must stay addressable so
-   * a project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
+   * The active run of {@code project} that executed on this box, whichever lane, or empty. {@code
+   * stopping} counts as active: an interrupted stop's claim must stay addressable so a
+   * project-targeted stop retry resumes it. Node-scoped like {@link #latestForProjectOnNode}.
    */
   public Optional<RunRow> runningForProjectOnNode(String project, String localHandle) {
     return db.queryOne(
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-            + " AND IFNULL(node, '') = ? AND "
-            + SESSION_ROLES
-            + " ORDER BY started_at DESC LIMIT 1",
+            + " AND IFNULL(node, '') = ?"
+            + " ORDER BY started_at DESC, id DESC LIMIT 1",
         this::mapRow,
         project,
         ownerKey(localHandle));
   }
 
   /**
-   * Every agent session (build or ad-hoc) holding an unfinished stop claim ({@code stopping}) — a
-   * stop that recorded its terminal intent but was interrupted before the halt was verified. The
-   * reconciler's interrupted-stop pass finalizes these once their unit is gone.
+   * Every run holding an unfinished stop claim ({@code stopping}) — a stop that recorded its
+   * terminal intent but was interrupted before the halt was verified. The reconciler's
+   * interrupted-stop pass finalizes these once their unit is gone.
    */
   public List<RunRow> stopping() {
-    return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping' AND " + SESSION_ROLES,
-        this::mapRow);
+    return db.query("SELECT " + COLUMNS + " FROM runs WHERE status = 'stopping'", this::mapRow);
   }
 
   /**
-   * Every agent session (build or ad-hoc) still in the {@code running} state, across all projects
-   * and nodes — the session reaper's full input. Review executions are foreground work owned and
-   * completed by the review controller, so the systemd reaper must not probe them as build units.
+   * Every run still in the {@code running} state, across all projects, nodes and lanes — what the
+   * watcher re-armer, the missed-stop reconciler, the session reaper and presence each walk. A
+   * reviewer and a fix agent are runs like a build: launched as a unit, watched, and reconciled.
    */
   public List<RunRow> running() {
-    return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE status = 'running' AND " + SESSION_ROLES,
-        this::mapRow);
-  }
-
-  /**
-   * Every running run, review executions included — the presence lanes. Unlike {@link #running()},
-   * which the systemd reaper scopes to {@link #SESSION_ROLES}, presence covers a reviewer or fix
-   * agent too: they are agents at work and show a chip like any other run. Read-time presence still
-   * filters to the stamped rows; this only widens which running rows the emitter considers.
-   */
-  public List<RunRow> runningForPresence() {
     return db.query("SELECT " + COLUMNS + " FROM runs WHERE status = 'running'", this::mapRow);
   }
 
-  /** Marks local review executions orphaned by a server restart failed. */
-  public int failRunningReviewsOnNode(String localHandle) {
-    var ids =
-        db.query(
-            "SELECT id FROM runs WHERE status = 'running' AND role = 'review'"
-                + " AND IFNULL(node, '') = ?",
-            row -> row.text(0),
-            ownerKey(localHandle));
-    ids.forEach(id -> complete(id, "failed", null));
-    return ids.size();
+  /** The runs that serve {@code reviewId} — its reviewers and its fix agent — newest first. */
+  public List<RunRow> forReview(String reviewId) {
+    return db.query(
+        "SELECT " + COLUMNS + " FROM runs WHERE review_id = ? ORDER BY started_at DESC, id DESC",
+        this::mapRow,
+        reviewId);
   }
 
   private static String ownerKey(String localHandle) {
@@ -1349,18 +1345,38 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The newest build attempt of {@code specId} — the one run whose stop moves the spec, which a
-   * stop, a reconciler replay and a review rescue act on — or empty when it has none. Ties on
-   * {@code started_at} break on the UUIDv7 id, which orders by mint time.
+   * The newest build attempt of {@code specId} — the one run whose stop moves the spec out of
+   * {@code in_progress}, which an operator's stop cancels — or empty when it has none.
    */
   public Optional<RunRow> latestBuildAttempt(String specId) {
+    return latestInLanes(specId, Lane.BUILD);
+  }
+
+  /**
+   * The newest run of the review loop for {@code specId} — its build, or the reviewer or fix agent
+   * that came after — or empty when it has none: the run whose stop the loop is waiting on, or last
+   * acted on. A chat turn in the spec's room is not one of the loop's.
+   */
+  public Optional<RunRow> latestLoopRun(String specId) {
+    return latestInLanes(specId, Lane.BUILD, Lane.REVIEW, Lane.FIX);
+  }
+
+  /**
+   * The newest run of {@code specId} among {@code lanes}, or empty when it has none. Ties on {@code
+   * started_at} break on the UUIDv7 id, which orders by mint time.
+   */
+  public Optional<RunRow> latestInLanes(String specId, Lane... lanes) {
+    var parameters = new ArrayList<Object>();
+    parameters.add(specId);
+    Arrays.stream(lanes).map(Lane::wire).forEach(parameters::add);
     return db.queryOne(
         "SELECT "
             + COLUMNS
-            + " FROM runs WHERE spec_id = ? AND role = ? ORDER BY started_at DESC, id DESC LIMIT 1",
+            + " FROM runs WHERE spec_id = ? AND role IN ("
+            + String.join(", ", Arrays.stream(lanes).map(lane -> "?").toList())
+            + ") ORDER BY started_at DESC, id DESC LIMIT 1",
         this::mapRow,
-        specId,
-        Lane.BUILD.wire());
+        parameters.toArray());
   }
 
   /** Runs for a spec, optionally scoped to a project — the read behind {@code GET /v1/runs}. */
@@ -1651,8 +1667,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
             principal, owner, session_id, session_source, transcript_path, last_activity_at,
-            room_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            room_id, review_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1663,7 +1679,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             principal = excluded.principal, owner = excluded.owner,
             session_id = excluded.session_id, session_source = excluded.session_source,
             transcript_path = excluded.transcript_path,
-            last_activity_at = excluded.last_activity_at, room_id = excluded.room_id""",
+            last_activity_at = excluded.last_activity_at, room_id = excluded.room_id,
+            review_id = excluded.review_id""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1688,7 +1705,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.sessionSource(),
         row.transcriptPath(),
         row.lastActivityAt(),
-        row.roomId());
+        row.roomId(),
+        row.reviewId());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1718,6 +1736,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("transcript_path", run.transcriptPath());
     map.put("last_activity_at", run.lastActivityAt());
     map.put("room_id", run.roomId());
+    map.put("review_id", run.reviewId());
     return map;
   }
 
@@ -1751,6 +1770,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           "session_source",
           "last_activity_at",
           "room_id",
+          "review_id",
           "principals");
 
   /**
@@ -1797,7 +1817,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "session_source"),
         Snapshots.text(snapshot, "transcript_path"),
         Snapshots.text(snapshot, "last_activity_at"),
-        Snapshots.text(snapshot, "room_id"));
+        Snapshots.text(snapshot, "room_id"),
+        Snapshots.text(snapshot, "review_id"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -1889,6 +1910,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.text(21),
         row.text(22),
         row.text(23),
-        row.text(24));
+        row.text(24),
+        row.text(25));
   }
 }

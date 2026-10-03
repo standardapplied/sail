@@ -316,4 +316,46 @@ class ReviewPipelineConfigTest {
     assertNull(stage.agent());
     assertEquals(ReviewPipelineConfig.Gate.NO_CRITICAL, stage.gate());
   }
+
+  @Test
+  void aPipelineThatNamesNoGuardrailsRunsItsLanesUnderTheReviewDefaults() {
+    var parsed = ReviewPipelineConfig.fromMap(Map.of("stages", List.of()));
+
+    assertEquals(new Guardrails("45m", "20m", "stop"), parsed.guardrails());
+    assertEquals(Guardrails.reviewDefaults(), ReviewPipelineConfig.mandatoryDefault().guardrails());
+  }
+
+  @Test
+  void aPipelinesGuardrailsParseAsAnAgentsDoAndSerializeWithIt() {
+    var parsed =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(),
+                "guardrails",
+                Map.of("max_duration", "90m", "action", "snapshot-and-stop")));
+
+    assertEquals(new Guardrails("90m", null, "snapshot-and-stop"), parsed.guardrails());
+    assertEquals(
+        Map.of("max_duration", "90m", "action", "snapshot-and-stop"),
+        parsed.toMap().get("guardrails"));
+    assertEquals(
+        parsed.guardrails(),
+        ReviewPipelineConfig.fromMap(
+                Map.of("stages", List.of(), "guardrails", parsed.toMap().get("guardrails")))
+            .guardrails());
+  }
+
+  @Test
+  void anInvalidPipelineGuardrailIsRefusedAtParseNamingTheAcceptedForms() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ReviewPipelineConfig.fromMap(
+                    Map.of("stages", List.of(), "guardrails", Map.of("max_idle", "forever"))));
+
+    assertTrue(refused.getMessage().contains("`max_idle`"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+  }
 }

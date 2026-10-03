@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -118,11 +119,13 @@ class WriteAuthorshipTest {
       var credential =
           Acting.system(
               () ->
-                  runs.createReview(
+                  runs.createForReview(
+                      "review-1",
                       "review-1",
                       "acme",
                       "auth",
                       "uday",
+                      Lane.REVIEW,
                       "claude-code",
                       "main",
                       "review it",

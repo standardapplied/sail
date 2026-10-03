@@ -143,7 +143,7 @@ public final class AgentLogStreamer implements HttpHandler {
       var since = parseSince(exchange.getRequestURI().getQuery());
       String[] tailCommand;
       try {
-        tailCommand = buildTailCommand(run.project(), run.id(), run.role(), since);
+        tailCommand = buildTailCommand(run.project(), run.id(), since);
       } catch (IllegalArgumentException e) {
         sendError(exchange, 400, "invalid_request", e.getMessage(), null);
         return;
@@ -230,14 +230,14 @@ public final class AgentLogStreamer implements HttpHandler {
    * output starts clean and empty — waiting for lines — rather than emitting tail's "cannot open"
    * error onto the stream.
    *
-   * <p>The path is derived from the validated run id and its role, never from the run's persisted
-   * {@code log_path}: run rows arrive over sync from writable peers, so a replicated {@code
-   * log_path} is untrusted input that could name an arbitrary file or carry shell metacharacters.
-   * The derived path is then passed as a positional shell argument ({@code "$1"}) rather than
-   * interpolated into the script, so it can never be interpreted as shell syntax.
+   * <p>The path is derived from the validated run id, never from the run's persisted {@code
+   * log_path}: run rows arrive over sync from writable peers, so a replicated {@code log_path} is
+   * untrusted input that could name an arbitrary file or carry shell metacharacters. The derived
+   * path is then passed as a positional shell argument ({@code "$1"}) rather than interpolated into
+   * the script, so it can never be interpreted as shell syntax.
    */
-  static String[] buildTailCommand(String project, String runId, String role, int since) {
-    var logPath = AgentUnit.logPathForRole(role, runId);
+  static String[] buildTailCommand(String project, String runId, int since) {
+    var logPath = AgentUnit.forRun(runId).logPath();
     var script =
         since > 0
             ? "touch -- \"$1\" 2>/dev/null; exec tail -n \"+$2\" -f -- \"$1\""

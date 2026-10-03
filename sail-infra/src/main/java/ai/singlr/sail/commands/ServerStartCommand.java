@@ -45,7 +45,6 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
@@ -218,26 +217,15 @@ public final class ServerStartCommand implements Runnable {
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
-    var orphans = failOrphans(reviewStore, runStore, NodeIdentity.handle());
-    if (orphans.runs() > 0) {
-      syncScheduler.afterWrite();
-    }
-    if (orphans.reviews() > 0) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|yellow ⚠|@ Failed "
-                  + orphans.reviews()
-                  + " review(s) interrupted by a restart (they were blocking their specs)"));
-    }
     var reviewController =
         ReviewWiring.controller(
                 specStore,
                 reviewStore,
+                runStore,
                 bus,
                 ServerStartCommand::loadProjectYaml,
-                new ShellExecutor(false),
+                operations.reviewLanes(),
                 syncScheduler::afterWrite,
-                runStore,
                 NodeIdentity::handle)
             .useMessages(messageStore);
     bus.subscribe(new RunTracker(runStore, syncScheduler, NodeIdentity::handle));
@@ -433,16 +421,6 @@ public final class ServerStartCommand implements Runnable {
         new AuthSessionStore(db),
         new PendingChallengeStore(db),
         webauthn.sessionTtl());
-  }
-
-  /** How many reviews, and review runs on this node, a restart left running. */
-  record Orphans(int reviews, int runs) {}
-
-  /** Fails what the restart orphaned, as this box's machinery. */
-  static Orphans failOrphans(ReviewStore reviews, RunStore runs, String node) {
-    return Actor.call(
-        Actor.system(),
-        () -> new Orphans(reviews.failOrphanedRunning(node), runs.failRunningReviewsOnNode(node)));
   }
 
   /**

@@ -57,12 +57,19 @@ class LegacyDataMigrationTest {
     assertEquals("stopped", build.status());
     assertNotNull(build.completedAt());
     assertEquals("node-a", build.node());
-    assertTrue(new RunStore(db).runningForProjectOnNode("acme", "node-a").isEmpty());
 
     var review = new RunStore(db).findById("review-run").orElseThrow();
     assertEquals("review", review.role());
     assertEquals("running", review.status());
     assertEquals("", review.unit());
+    assertEquals(
+        "review-run",
+        review.reviewId(),
+        "a review run recorded before runs named their review ran under its review's own id");
+    assertEquals(
+        "review-run",
+        new RunStore(db).runningForProjectOnNode("acme", "node-a").orElseThrow().id(),
+        "the build is finished; the review run is a run like any other, the reconciler's to end");
 
     assertEquals(
         "acme",

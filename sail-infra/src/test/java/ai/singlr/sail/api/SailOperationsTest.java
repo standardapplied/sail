@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -1386,11 +1387,13 @@ class SailOperationsTest {
                   null,
                   R2_LOG,
                   "sail-agent-" + R2);
-              runs.createReview(
+              runs.createForReview(
+                  R3,
                   R3,
                   "acme",
                   "auth",
                   "node-a",
+                  Lane.REVIEW,
                   "codex",
                   "feat/auth",
                   "review it",
@@ -2036,6 +2039,73 @@ class SailOperationsTest {
         null,
         null,
         null);
+  }
+
+  @Test
+  void theReviewLanesTheServerHandsThePipelineAreItsDispatchLanes() throws Exception {
+    var operations =
+        operations(
+            guardrailsYaml(),
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            (command, logPath) -> 4242L);
+
+    assertEquals(
+        List.of(),
+        operations.reviewLanes().ensureCommitted("acme", List.of(), "feat/auth", "fix"),
+        "a spec with no repos has nothing to rescue");
+  }
+
+  @Test
+  void aReArmedWatcherIsHandedItsRunsLanesLimits() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("systemd-run --user", new ShellExec.Result(0, "", ""));
+    var operations =
+        operations(
+            """
+            name: acme
+            agent:
+              type: claude-code
+              guardrails:
+                max_duration: 6h
+              review_pipeline:
+                guardrails:
+                  max_duration: 90m
+            """,
+            shell,
+            (command, logPath) -> 4242L);
+    var reviewer =
+        new RunStore.RunRow(
+            R1,
+            "acme",
+            "auth",
+            "node-a",
+            "fix",
+            "codex",
+            null,
+            "t",
+            null,
+            null,
+            "running",
+            null,
+            null,
+            "sail-agent-" + R1,
+            "t0",
+            null,
+            List.of(),
+            null,
+            null,
+            null);
+
+    operations.relaunchWatcher(reviewer).orElseThrow();
+
+    var spawned =
+        shell.invocations.stream()
+            .filter(invocation -> invocation.contains("systemd-run --user"))
+            .findFirst()
+            .orElseThrow();
+    assertTrue(spawned.endsWith("--action stop --max-duration 90m"), spawned);
   }
 
   @Test

@@ -17,7 +17,9 @@ import java.util.List;
  * reviewer's exact scenario — with code or a dispute argument, never a bare re-claim. The agent
  * receives actionable instructions, not vague feedback — and a dispute lane: a finding it believes
  * is wrong is argued in the spec room for the re-review to rule on, never coded around and never
- * silently skipped.
+ * silently skipped. The task ends at a pushed commit: the fix lane runs under its own time limit
+ * ({@code agent.review_pipeline.guardrails}), so it verifies locally and leaves CI to the pull
+ * request rather than spending its budget polling checks.
  */
 public final class FixTaskBuilder {
 
@@ -126,10 +128,12 @@ public final class FixTaskBuilder {
 
     sb.append(
         """
-        When every finding is addressed: run the project's verification, commit all changes to
-        the current branch with a clear message, and push. Never leave uncommitted work in the
-        workspace — the re-review reads the branch, and uncommitted files contaminate the next
-        dispatch in this shared clone.
+        When every finding is addressed: run the project's verification locally, commit all
+        changes to the current branch with a clear message, push, and end your turn. Do not
+        wait for or watch CI: the re-review judges the branch, and the pull request shows its
+        checks to whoever merges. Never leave uncommitted work in the workspace — the re-review
+        reads the branch, and uncommitted files contaminate the next dispatch in this shared
+        clone.
         """);
 
     return new Built(sb.toString(), conversation.fullyRendered());

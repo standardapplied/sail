@@ -182,10 +182,11 @@ class EventPublishersTest {
     bus.subscribe(
         BusTesting.latching(new RunTracker(runs, SyncScheduler.disabled(), () -> ME), tracked));
 
-    AgentWatchCommand.emitSyntheticStop(
+    AgentWatchCommand.emitStop(
         publisher::publish,
         "acme",
-        new AgentSession.ExitState(false, 0, "auth", "claude-code", run, "build"));
+        new AgentSession.ExitState(false, 0, "auth", "claude-code", run, "build"),
+        null);
 
     var stop = landedSoFar().getFirst();
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, stop.type());

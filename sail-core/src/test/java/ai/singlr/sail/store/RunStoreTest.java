@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -391,11 +392,13 @@ class RunStoreTest {
   @Test
   void runIfLatestAttemptIgnoresReviewRowsWhenPickingTheLatestAttempt() {
     var build = newRun("backend", "auth");
-    store.createReview(
+    store.createForReview(
+        DateTimeUtils.newId().toString(),
         DateTimeUtils.newId().toString(),
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "claude-code",
         "feat/x",
         "review",
@@ -450,11 +453,13 @@ class RunStoreTest {
     store.transition(claimed, "running", "stopping");
     newRun("backend", "other");
     var review =
-        store.createReview(
+        store.createForReview(
+            DateTimeUtils.newId().toString(),
             DateTimeUtils.newId().toString(),
             "backend",
             "auth",
             "node-a",
+            Lane.REVIEW,
             "codex",
             "feat/x",
             "review",
@@ -483,11 +488,13 @@ class RunStoreTest {
     var id = DateTimeUtils.newId().toString();
     var logPath = "/home/dev/.sail/runs/" + id + "/review.log";
 
-    store.createReview(
+    store.createForReview(
+        id,
         id,
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/auth",
         "review it",
@@ -655,51 +662,75 @@ class RunStoreTest {
   }
 
   @Test
-  void buildSessionQueriesIgnoreRunningReviewRows() {
+  void aReviewerRunIsASessionEveryRunQuerySees() {
     var buildId = newRun("backend", "auth");
-    var reviewId = DateTimeUtils.newId().toString();
-    store.createReview(
-        reviewId,
+    var reviewerId = DateTimeUtils.newId().toString();
+    store.createForReview(
+        reviewerId,
+        DateTimeUtils.newId().toString(),
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/x",
         "review it",
-        "/home/dev/.sail/runs/" + reviewId + "/review.log",
-        "sail-review-" + reviewId);
+        "/home/dev/.sail/runs/" + reviewerId + "/agent.log",
+        "sail-agent-" + reviewerId);
 
-    assertEquals(buildId, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
-    assertEquals(buildId, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
-    assertEquals(List.of(buildId), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(reviewerId, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(reviewerId, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(
-        Set.of(buildId, reviewId),
-        store.runningForPresence().stream().map(RunStore.RunRow::id).collect(Collectors.toSet()),
-        "presence covers the review execution too — it is an agent at work");
-    assertEquals(2, store.listForProject("backend").size(), "the aggregate still lists both roles");
+        Set.of(buildId, reviewerId),
+        store.running().stream().map(RunStore.RunRow::id).collect(Collectors.toSet()),
+        "the re-armer, the reconciler and presence walk a reviewer as they walk a build");
+    assertEquals(buildId, store.latestBuildAttempt("auth").orElseThrow().id());
+    assertEquals(reviewerId, store.latestLoopRun("auth").orElseThrow().id());
   }
 
   @Test
-  void startupFailsOnlyLocalRunningReviewRows() {
-    var local = DateTimeUtils.newId().toString();
-    var foreign = DateTimeUtils.newId().toString();
-    store.createReview(
-        local, "backend", "auth", "node-a", "codex", "b", "t", "/runs/" + local, "sail-review-l");
-    store.createReview(
-        foreign,
-        "backend",
-        "auth",
-        "node-b",
-        "codex",
-        "b",
-        "t",
-        "/runs/" + foreign,
-        "sail-review-f");
+  void aReviewerAndAFixAgentAreEachTheirOwnRunNamingTheReviewTheyServe() {
+    var review = DateTimeUtils.newId().toString();
+    var reviewer = DateTimeUtils.newId().toString();
+    var fix = DateTimeUtils.newId().toString();
+    store.createForReview(
+        reviewer, review, "backend", "auth", "node-a", Lane.REVIEW, "codex", "b", "t", "/l", "u");
+    store.createForReview(
+        fix, review, "backend", "auth", "node-a", Lane.FIX, "claude-code", "b", "t", "/l", "u");
 
-    assertEquals(1, store.failRunningReviewsOnNode("node-a"));
-    assertEquals("failed", store.findById(local).orElseThrow().status());
-    assertNotNull(store.findById(local).orElseThrow().completedAt());
-    assertEquals("running", store.findById(foreign).orElseThrow().status());
+    var reviewerRow = store.findById(reviewer).orElseThrow();
+    var fixRow = store.findById(fix).orElseThrow();
+    assertEquals(review, reviewerRow.reviewId());
+    assertEquals("review", reviewerRow.role());
+    assertEquals("codex/review-" + reviewer, reviewerRow.principal());
+    assertEquals(review, fixRow.reviewId());
+    assertEquals("fix", fixRow.role());
+    assertEquals("claude/fix-" + fix, fixRow.principal());
+    assertTrue(reviewerRow.servesReview());
+    assertTrue(fixRow.servesReview());
+    assertEquals(
+        List.of(fix, reviewer),
+        store.forReview(review).stream().map(RunStore.RunRow::id).toList(),
+        "newest first: the run a review waits on is the first");
+    assertEquals(review, store.comparableSnapshot(fix).get("review_id"), "the link replicates");
+    assertEquals(fix, store.latestInLanes("auth", Lane.FIX).orElseThrow().id());
+    assertTrue(store.latestInLanes("auth", Lane.ROOM).isEmpty());
+  }
+
+  @Test
+  void onlyTheReviewAndFixLanesServeAReview() {
+    var id = DateTimeUtils.newId().toString();
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                store.createForReview(
+                    id, id, "backend", "auth", "node-a", Lane.BUILD, "codex", "b", "t", "/l", "u"));
+
+    assertTrue(refused.getMessage().contains("build"), refused.getMessage());
+    assertTrue(store.findById(id).isEmpty());
+    assertFalse(store.findById(newRun("backend", "auth")).orElseThrow().servesReview());
   }
 
   @Test
@@ -1163,7 +1194,6 @@ class RunStoreTest {
     assertEquals("room", run.role());
     assertEquals("claude/room-" + id, run.principal());
     assertTrue(run.roomRole());
-    assertTrue(run.sessionRole(), "room runs join the stop/status/reaper lanes");
     assertEquals(List.of("claude/room-" + id), store.principals(id));
   }
 
@@ -1202,7 +1232,6 @@ class RunStoreTest {
     assertEquals("codex/" + historical, row.principal());
     assertFalse(row.chatRole());
     assertFalse(row.readOnlyLane(), "a full invite held a member-tier credential");
-    assertTrue(row.sessionRole(), "stop and the reaper still address a historical invite");
     assertFalse(row.triggersReview(), "a retired invite's stop never enters the review loop");
     assertTrue(
         store.running().stream().map(RunStore.RunRow::id).toList().contains(historical),
@@ -1286,27 +1315,27 @@ class RunStoreTest {
   }
 
   @Test
-  void sessionRoleCoversBuildAndAdhocButNeverReview() {
+  void aRowKnowsItsLane() {
     var adhoc = DateTimeUtils.newId().toString();
     reserveAdhoc(adhoc, "node-a");
     var build = newRun("backend", "auth");
     var review = DateTimeUtils.newId().toString();
-    store.createReview(
+    store.createForReview(
+        review,
         review,
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/x",
         "review",
         "/home/dev/.sail/runs/rev/review.log",
         "sail-review-rev");
 
-    assertTrue(store.findById(adhoc).orElseThrow().sessionRole());
-    assertTrue(store.findById(build).orElseThrow().sessionRole());
     assertFalse(store.findById(build).orElseThrow().adhocRole());
     assertTrue(store.findById(adhoc).orElseThrow().adhocRole());
-    assertFalse(store.findById(review).orElseThrow().sessionRole());
+    assertTrue(store.findById(review).orElseThrow().servesReview());
     assertFalse(store.findById(adhoc).orElseThrow().buildRole());
   }
 
@@ -1323,11 +1352,13 @@ class RunStoreTest {
   void createReviewRecordsItsUnit() {
     var id = DateTimeUtils.newId().toString();
 
-    store.createReview(
+    store.createForReview(
+        id,
         id,
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/auth",
         "review it",
@@ -1462,11 +1493,13 @@ class RunStoreTest {
   }
 
   private void createReview(String reviewId, String node) {
-    store.createReview(
+    store.createForReview(
+        reviewId,
         reviewId,
         "backend",
         "auth",
         node,
+        Lane.REVIEW,
         "claude-code",
         "feat/x",
         "review",
@@ -1717,11 +1750,13 @@ class RunStoreTest {
   void createReviewMintsAReviewMarkedPrincipalActingForTheBoxsFde() {
     var id = DateTimeUtils.newId().toString();
 
-    store.createReview(
+    store.createForReview(
+        id,
         id,
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/x",
         "review it",
@@ -1744,69 +1779,14 @@ class RunStoreTest {
     assertEquals(id, store.findByCredential(credential).orElseThrow().id());
   }
 
-  @Test
-  void rotateCredentialRetiresTheOldPlaintextAndMintsAFreshOne() {
-    var id = DateTimeUtils.newId().toString();
-    var original = createReview(id);
-
-    var rotated = store.rotateCredential(id, "claude-code", "fix");
-
-    assertEquals(id, store.findByCredential(rotated).orElseThrow().id());
-    assertTrue(
-        store.findByCredential(original).isEmpty(),
-        "the previous invocation's credential is retired by the rotation");
-    assertEquals(1, credentialRows(id), "a run holds exactly one credential at a time");
-
-    assertTrue(store.transition(id, "running", "completed", 0));
-
-    assertTrue(store.findByCredential(rotated).isEmpty(), "the credential dies with the run");
-    assertEquals(0, credentialRows(id));
-  }
-
-  @Test
-  void rotateCredentialStampsTheRejoiningInvocationsIdentityAndJournalsIt() {
-    var id = DateTimeUtils.newId().toString();
-    createReview(id);
-
-    store.rotateCredential(id, "claude-code", "fix");
-
-    var asFix = store.findById(id).orElseThrow();
-    assertEquals("claude-code", asFix.agent());
-    assertEquals("claude/fix-" + id, asFix.principal());
-    assertEquals("review", asFix.role(), "the row stays a review run; only the identity changes");
-    assertEquals(
-        "claude/fix-" + id,
-        store.comparableSnapshot(id).get("principal"),
-        "the honest attribution joins the journaled snapshot and replicates");
-
-    store.rotateCredential(id, "codex", "review");
-
-    var asReviewer = store.findById(id).orElseThrow();
-    assertEquals("codex", asReviewer.agent());
-    assertEquals("codex/review-" + id, asReviewer.principal());
-  }
-
-  @Test
-  void rotateCredentialRefusesAMissingOrFinishedRun() {
-    assertThrows(
-        IllegalStateException.class, () -> store.rotateCredential("ghost", "codex", "review"));
-
-    var id = DateTimeUtils.newId().toString();
-    createReview(id);
-    assertTrue(store.transition(id, "running", "completed", 0));
-
-    assertThrows(
-        IllegalStateException.class,
-        () -> store.rotateCredential(id, "codex", "review"),
-        "a dead run's identity is never resurrected");
-  }
-
   private String createReview(String id) {
-    return store.createReview(
+    return store.createForReview(
+        id,
         id,
         "backend",
         "auth",
         "node-a",
+        Lane.REVIEW,
         "codex",
         "feat/x",
         "review it",
@@ -1991,27 +1971,6 @@ class RunStoreTest {
     assertTrue(store.deliveredMessageIds(id).isEmpty());
     assertThrows(
         IllegalArgumentException.class, () -> store.markDelivered(id, List.of("not-a-uuid")));
-  }
-
-  @Test
-  void rotationAppendsToTheReplicatedPrincipalHistory() {
-    var id = newRun("backend", "auth");
-    var first = store.findById(id).orElseThrow().principal();
-
-    store.rotateCredential(id, "claude-code", "fix");
-
-    var rotated = store.findById(id).orElseThrow().principal();
-    assertTrue(rotated.contains("fix"), "the live row shows the current lane's identity");
-    assertEquals(
-        List.of(first, rotated).stream().sorted().toList(),
-        store.principals(id),
-        "history is append-only: rotation never erases the identity earlier messages were"
-            + " authored under");
-    var snapshot = store.comparableSnapshot(id);
-    assertEquals(
-        store.principals(id),
-        snapshot.get("principals"),
-        "the history replicates with the run, so main can authenticate late-syncing messages");
   }
 
   @Test

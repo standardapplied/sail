@@ -379,14 +379,20 @@ public record SailYaml(
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (methodology != null) map.put("methodology", methodology.toMap());
-      if (reviewPipeline != null)
-        map.put(
-            "review_pipeline",
-            Map.of(
-                "max_iterations", reviewPipeline.maxIterations(),
-                "max_finding_age", reviewPipeline.maxFindingAge(),
-                "stages", reviewPipeline.stages()));
+      if (reviewPipeline != null) map.put("review_pipeline", reviewPipeline.toMap());
       return map;
+    }
+
+    /**
+     * The limits a run in {@code lane} is held to: {@code review_pipeline.guardrails} for a
+     * reviewer or a fix agent, {@code guardrails} for every other lane, each lane's own defaults
+     * when its block is absent. The one place a lane is mapped to its limits.
+     */
+    public Guardrails guardrailsFor(Lane lane) {
+      if (lane != null && lane.servesReview()) {
+        return reviewPipeline != null ? reviewPipeline.guardrails() : Guardrails.reviewDefaults();
+      }
+      return guardrails != null ? guardrails : Guardrails.defaults();
     }
   }
 
@@ -529,7 +535,8 @@ public record SailYaml(
             agent.config(),
             agent.guardrails(),
             agent.notifications(),
-            agent.methodology());
+            agent.methodology(),
+            agent.reviewPipeline());
     return new SailYaml(
         name,
         description,

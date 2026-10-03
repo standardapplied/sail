@@ -235,17 +235,6 @@ public final class StopOperations {
           "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
           "Stop it from " + node + "'s box.");
     }
-    if (!run.sessionRole()) {
-      throw new ApiException(
-          ErrorCode.INVALID_ROLE,
-          "Run "
-              + run.id()
-              + " is a "
-              + run.role()
-              + " run driven by the review pipeline, not a"
-              + " stoppable agent session.",
-          "Stop the spec's build run instead, or let the pipeline finish.");
-    }
     authorize(run, dryRun);
     projects.requireExists(run.project());
     return stopResolved(run, dryRun);

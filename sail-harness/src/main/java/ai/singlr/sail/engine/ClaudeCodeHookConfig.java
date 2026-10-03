@@ -48,13 +48,15 @@ import java.util.concurrent.TimeoutException;
  * pushes the {@code max_idle} deadline out on every tool call. Without them the stall timer counts
  * from launch and kills even a busy agent at {@code max_idle}.
  *
- * <p>This is the one hooks layer for every sail-launched Claude session; the lane is expressed
- * entirely by the environment, never by a second settings file. Dispatch exports {@code
- * SAIL_SPEC_ID} and {@code SAIL_RUN_ID} (events + stop gate); the review pipeline's fix lane
- * exports only {@code SAIL_RUN_ID} (gate armed, events silent); the reviewer exports neither, so
- * every hook is inert. The scripts self-gate on those variables, which keeps the file install-once
- * at provision/sync time rather than rewritten per dispatch — and keeps Claude Code and Codex
- * symmetric, since Codex's fixed hooks discovery admits no per-session file either.
+ * <p>This is the one hooks layer for every sail-launched Claude session, whichever lane launched it
+ * — a build, a reviewer, a fix agent, a chat turn: each exports the same {@code SAIL_SPEC_ID},
+ * {@code SAIL_RUN_ID}, {@code SAIL_RUN_ROLE} and {@code SAIL_RUN_CREDENTIAL}, never a second
+ * settings file, so every lane's tool calls reset its watcher's stall timer the same way. What a
+ * lane is asked at its stop is the gate's to decide from the run's session file ({@link
+ * SailStopGate}). An engineer's own session exports none of them and every hook is inert. The
+ * scripts self-gate on those variables, which keeps the file install-once at provision/sync time
+ * rather than rewritten per dispatch — and keeps Claude Code and Codex symmetric, since Codex's
+ * fixed hooks discovery admits no per-session file either.
  */
 public final class ClaudeCodeHookConfig {
 

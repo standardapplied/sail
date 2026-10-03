@@ -457,25 +457,6 @@ class DeniedSyncTest {
   }
 
   @Test
-  void aPostByARotatedPrincipalWaitsForTheRunsNewRevision() throws IOException {
-    sharedRoom();
-    var runs = new RunStore(node.db);
-    var id = startRun(runs, "ada");
-    round(ADA, "run");
-    runs.rotateCredential(id, "codex", "fix");
-    var posted =
-        new MessageStore(node.db)
-            .append("room", runs.findById(id).orElseThrow().principal(), "fixing", null);
-
-    assertEquals(0, round(ADA, "message").report().pushed());
-    round(ADA, "run");
-
-    assertEquals(1, round(ADA, "message").report().pushed());
-    assertTrue(new MessageStore(main.db).findById(posted.id()).isPresent());
-    assertConverged(ADA);
-  }
-
-  @Test
   void thePostsOfARunMainDeniesLeaveWithItAndNothingIsOfferedAgain() throws IOException {
     sharedRoom();
     var runs = new RunStore(node.db);

@@ -47,6 +47,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 public final class Fleet implements AutoCloseable {
@@ -272,16 +273,6 @@ public final class Fleet implements AutoCloseable {
       messages = new MessageStore(db);
       fdes.add(handle, handle, handle + "@example.dev", "admin");
       bus = new EventBus();
-      reviewsController =
-          new ReviewPipelineController(
-              specs,
-              reviews,
-              project -> REVIEW,
-              project -> "codex",
-              (project, agent, prompt, reviewId, credential) -> CLEAN_REVIEW,
-              bus,
-              () -> {},
-              new DirectExecutorService());
       var shell = new FleetShell();
       dispatcher =
           new DispatchOperations(
@@ -297,6 +288,17 @@ public final class Fleet implements AutoCloseable {
               command -> 0,
               DispatchOperations.Listener.NONE,
               SessionYield.NONE);
+      reviewsController =
+          new ReviewPipelineController(
+              specs,
+              reviews,
+              runs,
+              project -> REVIEW,
+              project -> "codex",
+              dispatcher.reviewLanes(),
+              bus,
+              () -> {},
+              () -> handle);
       stopper =
           new StopOperations(
               shell,
@@ -441,6 +443,35 @@ public final class Fleet implements AutoCloseable {
                   0));
       reviewsController.onEvent(event);
       bus.publish(event);
+      reviewersFinish();
+    }
+
+    /**
+     * Ends every reviewer this box launched, as its watcher would: the run finishes and its stop
+     * reaches the pipeline, until the loop has nothing left running.
+     */
+    private void reviewersFinish() {
+      for (var reviewer = runningReviewer(); reviewer.isPresent(); reviewer = runningReviewer()) {
+        var run = reviewer.get();
+        Acting.system(() -> runs.complete(run.id(), "stopped", 0));
+        reviewsController.onEvent(
+            RunStops.of(
+                Event.WellKnownData.SOURCE_WATCHER,
+                PROJECT,
+                run.specId(),
+                run.agent(),
+                run.id(),
+                run.role(),
+                0,
+                null));
+      }
+    }
+
+    private Optional<RunStore.RunRow> runningReviewer() {
+      return runs.running().stream()
+          .filter(RunStore.RunRow::servesReview)
+          .filter(run -> run.ownedBy(handle))
+          .findFirst();
     }
 
     public SpecMessageView postMessage(String specId, String body) {
@@ -504,10 +535,11 @@ public final class Fleet implements AutoCloseable {
   private static final class FleetShell implements ShellExec {
     @Override
     public Result exec(List<String> command) {
-      if (String.join(" ", command).contains("incus list")) {
+      var joined = String.join(" ", command);
+      if (joined.contains("incus list")) {
         return new Result(0, RUNNING_JSON, "");
       }
-      return new Result(0, "", "");
+      return new Result(0, joined.endsWith("/agent.log") ? CLEAN_REVIEW : "", "");
     }
 
     @Override

@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -145,7 +146,14 @@ class ApiCoverageEdgesTest {
       new SchemaManager(db).migrate();
       var controller =
           ReviewWiring.controller(
-              new SpecStore(db), new ReviewStore(db), bus, p -> null, null, () -> {});
+              new SpecStore(db),
+              new ReviewStore(db),
+              new RunStore(db),
+              bus,
+              p -> null,
+              new NoReviewLanes(),
+              () -> {},
+              () -> null);
       try (var server =
           new SailApiServer(
               "127.0.0.1",

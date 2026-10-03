@@ -13,7 +13,6 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.EventStore;
@@ -26,7 +25,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -42,26 +40,28 @@ import java.util.function.Supplier;
  * died with a daemon restart or crashed) is reconciled within a sweep interval instead of requiring
  * another restart.
  *
- * <p>Each pass walks the {@code in_progress} specs and applies {@link MissedStops#assess} to each
- * spec's newest session, and only when <em>this node executed it</em> — a synced foreign run is its
- * executing node's to reconcile, and probing the local unit for it would synthesize an
- * authoritative stop for an agent that is still alive elsewhere. Ownership is checked after
- * selecting the newest run, never before: filtering first would fall back to a superseded local
- * session and replay its stop over a newer foreign run that is still executing. Database-only
- * checks come first, so a pass with nothing to reconcile issues no systemctl calls. A terminal
- * session replays the stop with its recorded exit code — after probing its recorded unit, because
- * the row may be a hook-backstop claim for an agent that is still running (an active unit vetoes
- * the replay). A running session past the launch grace period whose recorded run identity is
- * inactive or absent gets a synthesized stop, unless its stop was recorded already and reached no
- * finisher: then the row alone is finished once its process probes gone. Every session — background
- * or foreground — records its run-scoped identity, and the probe reads the pid file before the
- * systemd unit, so foreground sessions reconcile the same way; only a legacy row with no recorded
- * unit is skipped, because its blocking launcher owned its completion. The synthesized stop carries
- * <em>no exit code</em>: the transient unit is garbage-collected on exit, so the real code is
- * unrecoverable, and the replay path makes the same choice for a terminal session that never
- * recorded one — the pipeline treats the absent code as not-a-failure and lets review judge the
- * work. Every replayed stop carries {@code source=reconcile} so the event log shows it was
- * reconstructed, not observed.
+ * <p>Every run of the review loop is reconciled the same way, whichever lane it ran in: a build, a
+ * reviewer and a fix agent are each a run with a unit to probe and a stop the loop advances on.
+ * Each pass walks the {@code in_progress} specs and applies {@link MissedStops#assess} to each
+ * spec's newest loop run ({@link RunStore#latestLoopRun} — its build, or the fix agent answering a
+ * review), and only when <em>this node executed it</em> — a synced foreign run is its executing
+ * node's to reconcile, and probing the local unit for it would synthesize an authoritative stop for
+ * an agent that is still alive elsewhere. Ownership is checked after selecting the newest run,
+ * never before: filtering first would fall back to a superseded local session and replay its stop
+ * over a newer foreign run that is still executing. Database-only checks come first, so a pass with
+ * nothing to reconcile issues no systemctl calls. A terminal session replays the stop with its
+ * recorded exit code — after probing its recorded unit, because the row may be a hook-backstop
+ * claim for an agent that is still running (an active unit vetoes the replay). A running session
+ * past the launch grace period whose recorded run identity is inactive or absent gets a synthesized
+ * stop, unless its stop was recorded already and reached no finisher: then the row alone is
+ * finished once its process probes gone. Every session — background or foreground — records its
+ * run-scoped identity, and the probe reads the pid file before the systemd unit, so foreground
+ * sessions reconcile the same way; only a legacy row with no recorded unit is skipped, because its
+ * blocking launcher owned its completion. The synthesized stop carries <em>no exit code</em>: the
+ * transient unit is garbage-collected on exit, so the real code is unrecoverable, and the replay
+ * path makes the same choice for a terminal session that never recorded one — the pipeline treats
+ * the absent code as not-a-failure and judges the run on the work it left. Every replayed stop
+ * carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -245,20 +245,25 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Finishes every running session this box owns whose process is gone, other than the one the
+   * Ends every running session this box owns whose process is gone, other than the one the
    * in-progress pass reconciles: a dispatch whose spec never left {@code pending} (a crash between
    * reserve and claim) or outlived its work, a spec-less ad-hoc session, a superseded build
-   * session, a room or room-full run of a spec still under way, and the newest build session of a
-   * spec in {@code review}, which the review rescue leaves {@code running}. The newest build
-   * session of an {@code in_progress} spec, or of a spec whose stop this sweep already replayed, is
-   * the in-progress pass's: it replays that spec's stop, or finishes a row whose recorded stop
-   * reached no finisher, and a spec stop is never replayed for any other run. Only a run older than
-   * {@link #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never
-   * disturbed, and a run is finished only once it is {@linkplain #gone gone} — a reservation must
-   * never be freed under a working agent. A spec's run is finished with the exit code the recorded
-   * stop naming it carried. The finish is the same {@code running → stopped} compare-and-set every
-   * finisher uses, so racing the watcher's own completion can never overwrite a recorded exit, and
-   * it is logged as reconstructed. Foreign runs are left to their executing box and never probed.
+   * session, a room or room-full run of a spec still under way, a reviewer of a spec in {@code
+   * review}, and the newest build session of a spec in {@code review}, which the review rescue
+   * leaves {@code running}. The newest loop run of an {@code in_progress} spec, or of a spec whose
+   * stop this sweep already replayed, is the in-progress pass's: it replays that spec's stop, or
+   * finishes a row whose recorded stop reached no finisher. Only a run older than {@link
+   * #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never disturbed,
+   * and a run is ended only once it is {@linkplain #gone gone} — a reservation must never be freed
+   * under a working agent.
+   *
+   * <p>How a dead run ends depends on whether anything waits on its stop. A reviewer or a fix agent
+   * whose stop was never recorded has a review waiting on it, so its stop is published — the same
+   * stop the watcher would have, without the exit code nobody observed — and the tracker finishes
+   * the row while the pipeline goes on. Any other run is finished in place, with the exit code the
+   * recorded stop naming it carried: the same {@code running → stopped} compare-and-set every
+   * finisher uses, so racing the watcher's own completion can never overwrite a recorded exit,
+   * logged as reconstructed. Foreign runs are left to their executing box and never probed.
    */
   int finishDeadSessions(Set<String> handledThisSweep) {
     var node = localHandle.get();
@@ -271,13 +276,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         continue;
       }
       try {
-        if (gone(run)
-            && finish(
-                run,
-                Strings.isBlank(run.specId()) ? null : stopCoverage(run.specId(), run).exitCode(),
-                Strings.isBlank(run.specId())
-                    ? "session with no spec whose recorded process is gone"
-                    : "running with its recorded process gone")) {
+        if (gone(run) && end(run)) {
           released++;
         }
       } catch (Exception e) {
@@ -285,6 +284,18 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
     }
     return released;
+  }
+
+  private boolean end(RunStore.RunRow run) {
+    if (Strings.isBlank(run.specId())) {
+      return finish(run, null, "session with no spec whose recorded process is gone");
+    }
+    var coverage = stopCoverage(run.specId(), run);
+    if (run.servesReview() && coverage.observedAt() == null) {
+      publishStop(run, null, "its review waits on a stop nobody observed");
+      return true;
+    }
+    return finish(run, coverage.exitCode(), "running with its recorded process gone");
   }
 
   /**
@@ -304,14 +315,14 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Whether {@code run} is the in-progress pass's to reconcile: its spec's newest build session,
-   * while the spec is {@code in_progress} or had its stop replayed earlier in this sweep, whose
-   * async status flip must not make one sweep both replay and release the one run.
+   * Whether {@code run} is the in-progress pass's to reconcile: its spec's newest loop run, while
+   * the spec is {@code in_progress} or had its stop replayed earlier in this sweep, whose async
+   * status flip must not make one sweep both replay and release the one run.
    */
   private boolean reconciledBySpec(RunStore.RunRow run, Set<String> handledThisSweep) {
     if (Strings.isBlank(run.specId())
         || sessionStore
-            .latestBuildAttempt(run.specId())
+            .latestLoopRun(run.specId())
             .filter(newest -> newest.id().equals(run.id()))
             .isEmpty()) {
       return false;
@@ -384,19 +395,21 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Rescues a spec stranded in {@code review}, in either of the two shapes that leave it parked
-   * with nothing coming to move it. <em>Dropped kickoff</em>: an out-of-band status write (a manual
+   * Rescues a spec stranded in {@code review}, in any of the shapes that leave it parked with
+   * nothing coming to move it. <em>Dropped kickoff</em>: an out-of-band status write (a manual
    * edit, or a sync revision from another box) moved the spec to {@code review} while its agent was
    * still running here, so the authoritative stop hit the pipeline's guard against a non-{@code
    * in_progress} spec and no review was created. <em>Errored review</em>: the pipeline ran but its
-   * last attempt failed by infrastructure (unparseable reviewer output, an agent crash) — the
-   * design retries an errored attempt on the next stop, but the fix agent runs inline and produces
-   * no stop, so without a replay the retry never comes (the nexus-accounts-apis field incident).
-   * Replaying the stop lets the pipeline kick off or retry. Each rescue key — the spec for a
-   * dropped kickoff, the errored review row for a retry — fires at most once per server lifetime,
-   * and the pipeline's errored-attempt budget escalates a persistent failure, so neither shape can
-   * loop; an escalated or running review is left alone, since a human or a live pipeline owns the
-   * spec then.
+   * last attempt failed by infrastructure (a reviewer the watcher killed, unparseable output, a
+   * launch the container refused) — the design retries an errored attempt on the next stop, and no
+   * further stop is coming. <em>Unserved review</em>: a review is {@code running} with an agent
+   * stage to run and no run serving it — the daemon died between writing its rows and launching the
+   * reviewer. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
+   * pipeline kick off, retry, or go on from the stage rows. Each rescue key — the spec for a
+   * dropped kickoff, the review row otherwise — fires at most once per server lifetime, and the
+   * pipeline's errored-attempt budget escalates a persistent failure, so no shape can loop; an
+   * escalated review, or one waiting on a person or on a live run, is left alone, since a human or
+   * a working agent owns the spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
     var rescue = rescueFor(spec);
@@ -406,14 +419,14 @@ public final class MissedStopReconciler implements AutoCloseable {
     var node = localHandle.get();
     var latest =
         sessionStore
-            .latestBuildAttempt(spec.id())
+            .latestLoopRun(spec.id())
             .filter(run -> run.ownedBy(node))
             .filter(run -> RunStatus.isTerminal(run.status()));
     if (latest.isEmpty() || !gone(latest.get())) {
       return false;
     }
     reviewRescueAttempted.add(rescue.key());
-    publishStop(spec, latest.get(), latest.get().exitCode(), rescue.why());
+    publishStop(latest.get(), latest.get().exitCode(), rescue.why());
     return true;
   }
 
@@ -425,19 +438,46 @@ public final class MissedStopReconciler implements AutoCloseable {
           spec.id(),
           "stranded in review with no review started; replaying the stop to kick it off");
     }
-    return reviewStore
-        .latestReviewForSpec(spec.id())
-        .filter(review -> review.errored() && "failed".equals(review.status()))
-        .map(
-            review ->
-                new Rescue(
-                    review.id(),
-                    "review "
-                        + review.id()
-                        + " errored ("
-                        + review.error()
-                        + "); replaying the stop to retry the iteration"))
-        .orElse(null);
+    var latest = reviewStore.latestReviewForSpec(spec.id()).orElse(null);
+    if (latest == null) {
+      return null;
+    }
+    if (latest.errored() && "failed".equals(latest.status())) {
+      return new Rescue(
+          latest.id(),
+          "review "
+              + latest.id()
+              + " errored ("
+              + latest.error()
+              + "); replaying the stop to retry the iteration");
+    }
+    if ("running".equals(latest.status()) && unserved(latest.id())) {
+      return new Rescue(
+          latest.id(),
+          "review "
+              + latest.id()
+              + " is running with no run serving it; replaying the stop to go on from its stages");
+    }
+    return null;
+  }
+
+  /**
+   * Whether a running review has an agent stage to run and nothing running it: no stage waits on a
+   * person, and every run that served the review finished longer ago than {@link #LAUNCH_GRACE} — a
+   * reviewer that only just ended has a stop the pipeline is still acting on.
+   */
+  private boolean unserved(String reviewId) {
+    var waitsOnPerson =
+        reviewStore.stagesForReview(reviewId).stream()
+            .anyMatch(
+                stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
+    var settled = clock.get().minus(LAUNCH_GRACE);
+    return !waitsOnPerson
+        && sessionStore.forReview(reviewId).stream()
+            .allMatch(
+                run ->
+                    RunStatus.isTerminal(run.status())
+                        && MissedStops.parseOr(run.completedAt(), Instant.MAX).isBefore(settled));
   }
 
   private boolean reviewStarted(String specId) {
@@ -446,7 +486,7 @@ public final class MissedStopReconciler implements AutoCloseable {
 
   private boolean reconcile(SpecStore.SpecRow spec) throws Exception {
     var node = localHandle.get();
-    var latest = sessionStore.latestBuildAttempt(spec.id()).filter(run -> run.ownedBy(node));
+    var latest = sessionStore.latestLoopRun(spec.id()).filter(run -> run.ownedBy(node));
     if (latest.isEmpty()) {
       return false;
     }
@@ -458,14 +498,14 @@ public final class MissedStopReconciler implements AutoCloseable {
         if (!gone(session)) {
           yield false;
         }
-        publishStop(spec, session, replay.exitCode(), replay.why());
+        publishStop(session, replay.exitCode(), replay.why());
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
         if (Strings.isBlank(session.unit()) || !gone(session)) {
           yield false;
         }
-        publishStop(spec, session, null, "unit inactive or gone; " + probe.why());
+        publishStop(session, null, "unit inactive or gone; " + probe.why());
         yield true;
       }
       case MissedStops.Outcome.FinishRun unfinished ->
@@ -531,8 +571,11 @@ public final class MissedStopReconciler implements AutoCloseable {
       List.of(
           Event.WellKnownTypes.AGENT_FAILED,
           "review_stage_started",
+          "review_stage_passed",
           "review_stage_failed",
+          "review_completed",
           "review_errored",
+          "review_iteration_failed",
           "review_escalated");
 
   private boolean actedOnSince(String specId, Instant since) {
@@ -547,42 +590,37 @@ public final class MissedStopReconciler implements AutoCloseable {
     return MissedStops.parseOr(row.timestamp(), Instant.MAX);
   }
 
-  private void publishStop(
-      SpecStore.SpecRow spec, RunStore.RunRow session, Integer exitCode, String why) {
+  private void publishStop(RunStore.RunRow session, Integer exitCode, String why) {
     System.err.println(
         "  [reconcile] replaying missed stop for "
-            + spec.project()
+            + session.project()
             + "/"
-            + spec.id()
-            + " (session "
+            + session.specId()
+            + " ("
+            + session.role()
+            + " session "
             + session.id()
             + ", exit "
             + (exitCode != null ? exitCode : "unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(spec, session.id(), session.role(), exitCode));
+    bus.publish(stopEvent(session, exitCode));
   }
 
-  static Event stopEvent(SpecStore.SpecRow spec, String runId, String role, Integer exitCode) {
-    var agent = spec.agent() != null ? spec.agent() : Event.SAIL_AGENT;
-    var data = new LinkedHashMap<String, Object>();
-    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
-    if (exitCode != null) {
-      data.put(Event.WellKnownData.EXIT_CODE, exitCode);
-    }
-    if (runId != null && !runId.isBlank()) {
-      data.put(Event.WellKnownData.RUN_ID, runId);
-    }
-    if (role != null && !role.isBlank()) {
-      data.put(Event.WellKnownData.RUN_ROLE, role);
-    }
-    return Event.of(
-        spec.project(),
-        spec.id(),
-        Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-        agent,
-        HostInfo.hostname(),
-        data);
+  /**
+   * The stop of {@code run} as this box reconstructs it: addressed to the run and its lane, so the
+   * pipeline routes it as it would the watcher's own.
+   */
+  static Event stopEvent(RunStore.RunRow run, Integer exitCode) {
+    return RunStops.of(
+        Event.WellKnownData.SOURCE_RECONCILE,
+        run.project(),
+        run.specId(),
+        run.agent(),
+        run.id(),
+        run.role(),
+        exitCode,
+        null);
   }
 
   @Override

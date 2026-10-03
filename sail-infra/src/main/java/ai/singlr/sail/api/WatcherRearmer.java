@@ -18,15 +18,15 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
- * Keeps every running agent guarded: for each local {@code running} session run — build or ad-hoc,
- * the run table is the one session model — whose recorded agent unit is still active but which no
- * live watcher covers, this relaunches the watcher — at daemon start and then periodically, so a
- * watcher that dies mid-run (crash, OOM kill) leaves the agent unguarded for at most one pass
- * interval. The relaunched {@code sail agent watch} recomputes its wall-clock deadline from the
- * session's original {@code started_at}, so an agent three hours into a four-hour budget gets the
- * remaining hour, not a fresh four. Only sessions this node executed are considered — a synced
- * foreign run is its executing node's to guard, and arming a local watcher against it would
- * eventually enforce a foreign deadline on this box's container.
+ * Keeps every running agent guarded: for each local {@code running} run — a build, an ad-hoc run, a
+ * chat turn, a reviewer, a fix agent; the run table is the one session model — whose recorded agent
+ * unit is still active but which no live watcher covers, this relaunches the watcher — at daemon
+ * start and then periodically, so a watcher that dies mid-run (crash, OOM kill) leaves the agent
+ * unguarded for at most one pass interval. The relaunched {@code sail agent watch} recomputes its
+ * wall-clock deadline from the session's original {@code started_at}, so an agent three hours into
+ * a four-hour budget gets the remaining hour, not a fresh four. Only sessions this node executed
+ * are considered — a synced foreign run is its executing node's to guard, and arming a local
+ * watcher against it would eventually enforce a foreign deadline on this box's container.
  *
  * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
  * that is still alive (free, in-process check) or any {@code sail agent watch} process for the run

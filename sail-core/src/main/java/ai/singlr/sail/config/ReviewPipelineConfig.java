@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.Finding;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Configurable multi-stage review pipeline. Parsed from the {@code agent.review_pipeline} block in
@@ -19,10 +20,19 @@ import java.util.Map;
  *     escalates it as stuck — a convergence measure, unlike {@code maxIterations}' blind budget: a
  *     loop resolving old findings while new ones surface keeps running; a loop replaying the same
  *     finding stops here
+ * @param guardrails the limits every reviewer and fix agent of this pipeline runs under, {@link
+ *     Guardrails#reviewDefaults()} when the block names none
  */
-public record ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
+public record ReviewPipelineConfig(
+    int maxIterations, int maxFindingAge, List<StageConfig> stages, Guardrails guardrails) {
+
+  /** A pipeline under the review lanes' default limits. */
+  public ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
+    this(maxIterations, maxFindingAge, stages, Guardrails.reviewDefaults());
+  }
 
   public ReviewPipelineConfig {
+    Objects.requireNonNull(guardrails, "guardrails");
     if (stages.stream().map(StageConfig::name).distinct().count() != stages.size()) {
       throw new IllegalArgumentException(
           "review_pipeline stage names must be unique — carry-forward is keyed by stage name;"
@@ -115,7 +125,20 @@ public record ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<St
         map.containsKey("max_finding_age") ? ((Number) map.get("max_finding_age")).intValue() : 2;
     var stagesList = (List<Map<String, Object>>) map.getOrDefault("stages", List.of());
     var stages = stagesList.stream().map(StageConfig::fromMap).toList();
-    return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages);
+    var guardrails =
+        map.get("guardrails") instanceof Map<?, ?> limits
+            ? Guardrails.fromMap((Map<String, Object>) limits)
+            : Guardrails.reviewDefaults();
+    return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages, guardrails);
+  }
+
+  /** This pipeline as its {@code review_pipeline} block. */
+  public Map<String, Object> toMap() {
+    return Map.of(
+        "max_iterations", maxIterations,
+        "max_finding_age", maxFindingAge,
+        "stages", stages,
+        "guardrails", guardrails.toMap());
   }
 
   public List<StageConfig> agentStages() {

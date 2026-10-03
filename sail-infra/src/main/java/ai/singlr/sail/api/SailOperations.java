@@ -707,6 +707,11 @@ public final class SailOperations implements HostOperations {
     return dispatchOps.startRoomRun(project, specId, localHandle);
   }
 
+  /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
+  public ReviewLanes reviewLanes() {
+    return dispatchOps.reviewLanes();
+  }
+
   /** Runs the room commit guard through the shared dispatch executor. */
   public void guardRoomRun(String project, String runId) {
     dispatchOps.guardRoomRun(project, runId);
@@ -1440,7 +1445,6 @@ public final class SailOperations implements HostOperations {
             ? List.<RunStore.RunRow>of()
             : runStore.listForProject(project).stream()
                 .filter(DispatchOperations::ownsLiveAgent)
-                .filter(RunStore.RunRow::sessionRole)
                 .filter(run -> run.ownedBy(localHandle))
                 .toList();
     if (running.isEmpty()) {
@@ -1460,17 +1464,17 @@ public final class SailOperations implements HostOperations {
   /**
    * Tails a local run's own log file — the run-scoped {@code ~/.sail/runs/<runId>/agent.log} — so a
    * log address names exactly one execution, never whatever the shared per-container file currently
-   * holds. The path is derived from the run's canonical UUID and role rather than the persisted
-   * {@code log_path}: run rows replicate over sync, so a stored path is untrusted input that could
-   * point anywhere the container's dev user can read. The provenance guard already established the
-   * run is local.
+   * holds. The path is derived from the run's canonical UUID rather than the persisted {@code
+   * log_path}: run rows replicate over sync, so a stored path is untrusted input that could point
+   * anywhere the container's dev user can read. The provenance guard already established the run is
+   * local.
    */
   private RunLogResponse runLogValue(RunStore.RunRow run, int tail) {
     projects.requireExists(run.project());
     if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
-    var logPath = AgentUnit.logPathForRole(run.role(), run.id());
+    var logPath = AgentUnit.forRun(run.id()).logPath();
     var cmd =
         ContainerExec.asDevUser(
             run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));
@@ -1509,25 +1513,9 @@ public final class SailOperations implements HostOperations {
     };
   }
 
-  /**
-   * Relaunches the guardrail watcher for a run whose original watcher died (e.g. with a daemon
-   * restart mid-run), addressed at the run's recorded unit. Unit-or-nothing: the relaunch never
-   * falls back to a plain process, so a doubled watcher is unrepresentable on this path — empty
-   * means the project declares no agent block or no systemd scope accepted the unit. The relaunched
-   * {@code sail agent watch} recomputes its deadlines from the session's original {@code
-   * started_at} inside the container, so a re-armed agent keeps its remaining budget rather than
-   * getting a fresh one.
-   */
+  /** Relaunches a run's watcher — see {@link DispatchOperations#relaunchWatcher}. */
   public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
-    var loaded = projects.load(run.project());
-    if (loaded.config().agent() == null) {
-      return Optional.empty();
-    }
-    return watcherSpawner.spawnUnitForRun(
-        run.project(),
-        SailPaths.resolveSailYaml(run.project(), file).toAbsolutePath(),
-        run.id(),
-        run.unit());
+    return dispatchOps.relaunchWatcher(run);
   }
 
   private AgentSession.SessionInfo querySession(

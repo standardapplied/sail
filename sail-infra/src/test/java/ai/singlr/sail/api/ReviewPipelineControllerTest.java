@@ -13,8 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
@@ -26,11 +30,12 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
@@ -44,21 +49,31 @@ import org.junit.jupiter.api.io.TempDir;
 class ReviewPipelineControllerTest {
 
   @TempDir Path tempDir;
+  private ReviewLoop loop;
   private Sqlite db;
   private SpecStore specStore;
   private ReviewStore reviewStore;
+  private RunStore runStore;
+  private Function<String, ReviewPipelineConfig> configs = project -> null;
+  private Function<String, String> reviewers = project -> "codex";
 
   @BeforeEach
   void setUp() {
-    db = Sqlite.open(tempDir.resolve("test.db"));
-    new SchemaManager(db).migrate();
-    specStore = new SpecStore(db);
-    reviewStore = new ReviewStore(db);
+    loop =
+        new ReviewLoop(
+            tempDir,
+            ReviewLoop.YAML,
+            project -> configs.apply(project),
+            project -> reviewers.apply(project));
+    db = loop.db;
+    specStore = loop.specs;
+    reviewStore = loop.reviews;
+    runStore = loop.runs;
   }
 
   @AfterEach
   void tearDown() {
-    if (db != null) db.close();
+    loop.close();
   }
 
   private void createSpec(String id, String status) {
@@ -66,11 +81,16 @@ class ReviewPipelineControllerTest {
   }
 
   private void createSpec(String id, String status, List<String> repos) {
-    createSpec(id, status, repos, null, null);
+    createSpec(id, status, repos, null, null, null);
   }
 
   private void createSpec(
-      String id, String status, List<String> repos, String model, String reasoningEffort) {
+      String id,
+      String status,
+      List<String> repos,
+      String agent,
+      String model,
+      String reasoningEffort) {
     Acting.as(
         null,
         () ->
@@ -81,7 +101,7 @@ class ReviewPipelineControllerTest {
                     "Test spec",
                     SpecStatus.fromWire(status),
                     null,
-                    null,
+                    agent,
                     model,
                     reasoningEffort,
                     "feat/test",
@@ -200,50 +220,32 @@ class ReviewPipelineControllerTest {
                     gate))));
   }
 
-  private ReviewPipelineController controller(
-      ReviewPipelineConfig config, ReviewAgentRunner runner) {
-    return controller(p -> config, p -> "codex", runner, null);
+  private ReviewLoop controller(ReviewPipelineConfig config, ScriptedAgent agents) {
+    return controller(p -> config, p -> "codex", agents);
   }
 
-  private ReviewPipelineController controller(
+  private ReviewLoop controller(
       Function<String, ReviewPipelineConfig> config,
       Function<String, String> reviewer,
-      ReviewAgentRunner runner,
-      EventBus bus) {
-    return new ReviewPipelineController(
-        specStore,
-        reviewStore,
-        config,
-        reviewer,
-        runner,
-        bus,
-        () -> {},
-        new DirectExecutorService());
+      ScriptedAgent agents) {
+    configs = config;
+    reviewers = reviewer;
+    return loop.scripted(agents);
   }
 
   @Test
   void advancingASpecTriggersSyncSoTheTransitionReachesMain() {
     createSpec("auth", "in_progress");
-    var syncs = new java.util.concurrent.atomic.AtomicInteger();
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-            null,
-            syncs::incrementAndGet,
-            new DirectExecutorService());
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
-    assertTrue(syncs.get() > 0, "a spec status transition must trigger sync-on-write to main");
+    assertTrue(loop.syncs.get() > 0, "a spec status transition must trigger sync-on-write to main");
   }
 
   private Event roomStopEvent(String specId, String runId) {
-    var data = new java.util.LinkedHashMap<String, Object>();
+    var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
     data.put(Event.WellKnownData.EXIT_CODE, 0);
     data.put(Event.WellKnownData.RUN_ROLE, Event.WellKnownData.RUN_ROLE_ROOM);
@@ -274,7 +276,7 @@ class ReviewPipelineControllerTest {
   }
 
   private Event laneStopEvent(String specId, String role, String runId) {
-    var data = new java.util.LinkedHashMap<String, Object>();
+    var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
     data.put(Event.WellKnownData.EXIT_CODE, 0);
     if (role != null) {
@@ -301,7 +303,8 @@ class ReviewPipelineControllerTest {
 
     assertTrue(
         reviewStore.reviewsForSpec("auth").isEmpty(),
-        "a reviewer's own stop — even carrying the spec id — must never re-enter the pipeline");
+        "a reviewer's stop that names no run this box holds — even carrying the spec id — must"
+            + " never start a review");
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
@@ -314,7 +317,7 @@ class ReviewPipelineControllerTest {
 
     assertTrue(
         reviewStore.reviewsForSpec("auth").isEmpty(),
-        "a fix agent's own stop must never re-enter the pipeline");
+        "a fix agent's stop that names no run this box holds must never start a review");
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
   }
 
@@ -332,8 +335,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aRoomStopThatLostItsRoleMarkerIsStillCaughtByTheRunRow() {
     createSpec("auth", "review");
-    var runStore = new ai.singlr.sail.store.RunStore(db);
-    var runId = ai.singlr.sail.common.DateTimeUtils.newId().toString();
+    var runId = DateTimeUtils.newId().toString();
     Acting.system(
         () ->
             runStore.create(
@@ -349,19 +351,8 @@ class ReviewPipelineControllerTest {
                 null,
                 null,
                 "sail-agent-" + runId));
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runStore,
-            () -> "node-a");
-    var data = new java.util.LinkedHashMap<String, Object>();
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+    var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
     data.put(Event.WellKnownData.RUN_ID, runId);
 
@@ -382,28 +373,22 @@ class ReviewPipelineControllerTest {
   @Test
   void aContainerLeaseHeldByARestoreErrorsTheReviewInsteadOfLaunchingIntoTheContainer() {
     createSpec("auth", "in_progress");
-    var runStore = new RunStore(db);
     Acting.system(() -> runStore.acquireContainerLease("test-project", "node-a", "restore"));
-    var launched = new java.util.concurrent.atomic.AtomicBoolean();
+    var launched = new AtomicBoolean();
     var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
+        controller(
+            singleAgentStage("no_critical"),
             (p, a, pr, rid, cred) -> {
               launched.set(true);
               return CLEAN_REVIEW;
-            },
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runStore,
-            () -> "node-a");
+            });
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertFalse(launched.get(), "a review agent must never launch into a container mid-restore");
+    assertTrue(
+        loop.container.launched().isEmpty(),
+        "nothing is started in a container a restore is rolling back");
     var errored = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("failed", errored.status());
     assertTrue(errored.errored());
@@ -423,7 +408,7 @@ class ReviewPipelineControllerTest {
     createSpec("auth", "in_progress");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
-    var data = new java.util.LinkedHashMap<String, Object>();
+    var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
     data.put(Event.WellKnownData.RUN_ROLE, "build");
     ctrl.onEvent(
@@ -474,19 +459,24 @@ class ReviewPipelineControllerTest {
   void messageStoreWiringIsFluent() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
-    assertEquals(ctrl, ctrl.useMessages(new MessageStore(db)));
+    assertEquals(ctrl.controller, ctrl.controller.useMessages(new MessageStore(db)));
   }
 
   @Test
   void aReviewAlreadyRunningIsNotRestartedWhenStatusIsReview() {
     createSpec("auth", "review");
-    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
-    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+    var ctrl = controller(singleAgentStage("no_critical"), null);
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    var reviewer = loop.live().getFirst();
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(
+        List.of(reviewer.id()),
+        loop.container.launched(),
+        "a review its reviewer still serves is left to that reviewer's own stop");
+    assertEquals("running", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
   }
 
   @Test
@@ -513,13 +503,12 @@ class ReviewPipelineControllerTest {
   void stageWithoutAnAgentUsesTheRosterReviewer() {
     createSpec("auth", "in_progress");
     var capturedAgent = new AtomicReference<String>();
-    ReviewAgentRunner capturing =
+    ScriptedAgent capturing =
         (p, a, prompt, rid, cred) -> {
           capturedAgent.set(a);
           return CLEAN_REVIEW;
         };
-    var ctrl =
-        controller(p -> singleStageNoAgent("no_critical"), p -> "claude-code", capturing, null);
+    var ctrl = controller(p -> singleStageNoAgent("no_critical"), p -> "claude-code", capturing);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -533,8 +522,7 @@ class ReviewPipelineControllerTest {
         controller(
             p -> singleStageNoAgent("no_critical"),
             p -> null,
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-            null);
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -543,39 +531,31 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void reusesOneExecutorAcrossEventsAndShutsItDownOnClose() {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    createSpec("auth", "in_progress");
-    createSpec("billing", "in_progress");
-
-    ctrl.onEvent(agentStoppedEvent("auth"));
-    ctrl.onEvent(agentStoppedEvent("billing"));
-    var executor = ctrl.pipelineExecutor();
-    assertFalse(executor.isShutdown(), "shared executor should stay open while running");
-
-    ctrl.close();
-    assertTrue(executor.isShutdown(), "close() must shut the shared executor down");
-  }
-
-  @Test
   void filterAcceptsAgentSessionStoppedWithSpec() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     var event = agentStoppedEvent("auth");
-    assertTrue(ctrl.filter().test(event));
+    assertTrue(ctrl.controller.filter().test(event));
   }
 
   @Test
-  void filterRejectsEventsWithoutSpec() {
+  void aStopThatNamesNeitherASpecNorARunStartsNothing() {
+    createSpec("auth", "in_progress");
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    var event = Event.of("proj", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "sail", "h");
-    assertFalse(ctrl.filter().test(event));
+
+    ctrl.onEvent(agentStoppedEvent(null));
+
+    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertTrue(loop.container.launched().isEmpty());
+    assertTrue(
+        loop.events("review_pipeline_error").isEmpty(),
+        "a stop the loop has nothing to route is dropped quietly, not reported as a failure");
   }
 
   @Test
   void filterRejectsUnrelatedEventTypes() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     var event = Event.of("proj", "spec", "spec_dispatched", "sail", "h");
-    assertFalse(ctrl.filter().test(event));
+    assertFalse(ctrl.controller.filter().test(event));
   }
 
   @Test
@@ -678,18 +658,18 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void aReconcilerReplayLandingMidPipelineIsShedByTheStatusGuard() {
+  void aReconcilerReplayLandingMidReviewIsShedWhileTheReviewerStillRuns() {
     createSpec("auth", "in_progress");
-    var ctrl = new AtomicReference<ReviewPipelineController>();
-    ctrl.set(
-        controller(
-            singleAgentStage("no_critical"),
-            (p, a, pr, rid, cred) -> {
-              ctrl.get().onEvent(reconcilerStoppedEvent("auth"));
-              return CLEAN_REVIEW;
-            }));
+    var ctrl = controller(singleAgentStage("no_critical"), null);
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    var reviewer = loop.live().getFirst();
 
-    ctrl.get().onEvent(agentStoppedEvent("auth"));
+    ctrl.onEvent(reconcilerStoppedEvent("auth"));
+
+    assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(List.of(reviewer.id()), loop.container.launched());
+
+    ctrl.finish(reviewer.id(), CLEAN_REVIEW);
 
     assertEquals(1, reviewStore.reviewsForSpec("auth").size());
     assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
@@ -760,9 +740,11 @@ class ReviewPipelineControllerTest {
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
     assertEquals("failed", review.status());
-    assertEquals("Quota exceeded", review.error(), "why it failed is durable, not journal-only");
+    assertEquals(
+        "reviewer failed: exit 1", review.error(), "why it failed is durable, not journal-only");
+    assertTrue(review.errored(), "a reviewer that crashed gave no verdict");
     var stage = reviewStore.stagesForReview(review.id()).getFirst();
-    assertEquals("Quota exceeded", stage.error());
+    assertEquals("reviewer failed: exit 1", stage.error());
   }
 
   @Test
@@ -866,8 +848,7 @@ class ReviewPipelineControllerTest {
   void twoStagesPipelineBothPass() {
     createSpec("auth", "in_progress");
     var ctrl =
-        controller(
-            p -> twoAgentStages(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
+        controller(p -> twoAgentStages(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -903,7 +884,7 @@ class ReviewPipelineControllerTest {
                         "type",
                         "agent",
                         "agent",
-                        "claude",
+                        "claude-code",
                         "gate",
                         "no_critical_or_high"))));
     var highOutput =
@@ -916,14 +897,17 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var promptsByAgent = new HashMap<String, List<String>>();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, agent, prompt, rid, cred) -> {
+          if (!prompt.contains("Review the changes on branch")) {
+            return "fix applied";
+          }
           var prompts = promptsByAgent.computeIfAbsent(agent, k -> new ArrayList<>());
           prompts.add(prompt);
-          if (agent.equals("claude")) {
+          if (agent.equals("claude-code")) {
             return prompts.size() == 1 ? highOutput : fixAllCarried(prompt);
           }
-          return agent.equals("codex") ? CLEAN_REVIEW : "fix applied";
+          return CLEAN_REVIEW;
         };
     var ctrl = controller(config, runner);
 
@@ -936,7 +920,7 @@ class ReviewPipelineControllerTest {
         codexPrompts.stream().allMatch(prompt -> ReviewScripts.carriedFromPrompt(prompt).isEmpty()),
         "a HIGH from the strict later stage must never be re-judged under the first stage's"
             + " looser gate");
-    var claudePrompts = promptsByAgent.get("claude");
+    var claudePrompts = promptsByAgent.get("claude-code");
     assertEquals(2, claudePrompts.size());
     assertTrue(
         claudePrompts.get(1).contains("Persistent high"),
@@ -946,7 +930,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aMisaddressedVerdictIsFlaggedInTheRoomNotSilentlyLeftOpen() {
     createSpec("auth", "in_progress");
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var highOutput =
         """
         ```json
@@ -964,7 +948,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) ->
             switch (calls.incrementAndGet()) {
               case 1 -> highOutput;
@@ -972,8 +956,7 @@ class ReviewPipelineControllerTest {
               case 2, 4 -> "fix applied";
               default -> fixAllCarried(prompt);
             };
-    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner, null);
-    ctrl.useMessages(messages);
+    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -988,7 +971,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aRulingOnAFindingAHumanResolvedDuringTheStageIsSetAsideAndFlaggedInTheRoom() {
     createSpec("auth", "in_progress");
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var highOutput =
         """
         ```json
@@ -999,20 +982,23 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) ->
             switch (calls.incrementAndGet()) {
               case 1 -> highOutput;
               case 2 -> "fix applied";
               case 3 -> {
                 var carried = ReviewScripts.carriedFromPrompt(prompt).keySet().iterator().next();
-                reviewStore.resolveFinding(carried, Finding.Resolution.DISMISSED, "by design");
+                Acting.as(
+                    "uday",
+                    () ->
+                        reviewStore.resolveFinding(
+                            carried, Finding.Resolution.DISMISSED, "by design"));
                 yield fixAllCarried(prompt);
               }
               default -> fixAllCarried(prompt);
             };
-    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner, null);
-    ctrl.useMessages(messages);
+    var ctrl = controller(p -> singleAgentStage("no_critical_or_high"), p -> "codex", runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1032,7 +1018,7 @@ class ReviewPipelineControllerTest {
   @Test
   void aHumanStageOpensWithTheRoomVerdictListingDisputedFindings() {
     createSpec("auth", "in_progress");
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var config =
         ReviewPipelineConfig.fromMap(
             Map.of(
@@ -1058,7 +1044,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) ->
             switch (calls.incrementAndGet()) {
               case 1 -> highOutput;
@@ -1066,7 +1052,6 @@ class ReviewPipelineControllerTest {
               default -> ReviewScripts.disputeAllCarried(prompt);
             };
     var ctrl = controller(config, runner);
-    ctrl.useMessages(messages);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1084,7 +1069,7 @@ class ReviewPipelineControllerTest {
   @Test
   void everyDisputedFindingReachesTheHumanVerdictUntruncated() {
     createSpec("auth", "in_progress");
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var config =
         ReviewPipelineConfig.fromMap(
             Map.of(
@@ -1110,7 +1095,7 @@ class ReviewPipelineControllerTest {
                         .formatted(i, i, i))
             .collect(Collectors.joining(", "));
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) ->
             switch (calls.incrementAndGet()) {
               case 1 -> "{\"verdicts\": [], \"findings\": [" + elevenHighs + "]}";
@@ -1118,7 +1103,6 @@ class ReviewPipelineControllerTest {
               default -> ReviewScripts.disputeAllCarried(prompt);
             };
     var ctrl = controller(config, runner);
-    ctrl.useMessages(messages);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1141,8 +1125,7 @@ class ReviewPipelineControllerTest {
   void humanStageStopsAndWaits() {
     createSpec("auth", "in_progress");
     var ctrl =
-        controller(
-            p -> agentThenHuman(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
+        controller(p -> agentThenHuman(), p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1159,7 +1142,7 @@ class ReviewPipelineControllerTest {
   @Test
   void noPipelineConfigSkipsReview() {
     createSpec("auth", "in_progress");
-    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW, null);
+    var ctrl = controller(p -> null, p -> "codex", (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1182,7 +1165,7 @@ class ReviewPipelineControllerTest {
   @Test
   void agentRunnerExceptionFailsStage() {
     createSpec("auth", "in_progress");
-    ReviewAgentRunner failing =
+    ScriptedAgent failing =
         (p, a, pr, rid, cred) -> {
           throw new RuntimeException("Agent crashed");
         };
@@ -1197,14 +1180,14 @@ class ReviewPipelineControllerTest {
   @Test
   void subscriberNameIsReviewPipeline() {
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    assertEquals("review-pipeline", ctrl.name());
+    assertEquals("review-pipeline", ctrl.controller.name());
   }
 
   @Test
   void reviewPromptIncludesCategories() {
     createSpec("auth", "in_progress");
     var capturedPrompt = new AtomicReference<String>();
-    ReviewAgentRunner capturing =
+    ScriptedAgent capturing =
         (p, a, prompt, rid, cred) -> {
           capturedPrompt.set(prompt);
           return CLEAN_REVIEW;
@@ -1230,7 +1213,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var callCount = new AtomicInteger(0);
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) -> {
           var call = callCount.incrementAndGet();
           return call == 1 ? criticalOutput : fixAllCarried(prompt);
@@ -1256,8 +1239,8 @@ class ReviewPipelineControllerTest {
           "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]}
         ```
         """;
-    var reviewIds = new java.util.ArrayList<String>();
-    ReviewAgentRunner runner =
+    var reviewIds = new ArrayList<String>();
+    ScriptedAgent runner =
         (p, a, prompt, rid, cred) -> {
           reviewIds.add(rid);
           return reviewIds.size() == 1 ? criticalOutput : fixAllCarried(prompt);
@@ -1308,7 +1291,7 @@ class ReviewPipelineControllerTest {
                         "codex",
                         "gate",
                         "no_critical"))));
-    var ctrl = controller(p -> config, p -> "codex", (p, a, pr, rid, cred) -> criticalOutput, null);
+    var ctrl = controller(p -> config, p -> "codex", (p, a, pr, rid, cred) -> criticalOutput);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1317,144 +1300,103 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void erroredRetriesAreBoundedSoARescueLoopCanNeverBurnAgentsForever() throws Exception {
+  void erroredRetriesAreBoundedSoARescueLoopCanNeverBurnAgentsForever() {
     createSpec("auth", "in_progress");
+    var ctrl =
+        controller(
+            singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "prose with no fenced block");
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> "prose with no fenced block",
-              bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    ctrl.onEvent(reconcilerStoppedEvent("auth"));
+    ctrl.onEvent(reconcilerStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      ctrl.onEvent(reconcilerStoppedEvent("auth"));
-      ctrl.onEvent(reconcilerStoppedEvent("auth"));
+    var reviews = reviewStore.reviewsForSpec("auth");
+    assertEquals(3, reviews.size());
+    assertTrue(
+        reviews.stream().allMatch(r -> r.errored() && r.iteration() == 1),
+        "errored attempts retry the same iteration");
 
-      var reviews = reviewStore.reviewsForSpec("auth");
-      assertEquals(3, reviews.size());
-      assertTrue(
-          reviews.stream().allMatch(r -> r.errored() && r.iteration() == 1),
-          "errored attempts retry the same iteration");
+    ctrl.onEvent(reconcilerStoppedEvent("auth"));
 
-      ctrl.onEvent(reconcilerStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertEquals(
-          3,
-          reviewStore.reviewsForSpec("auth").size(),
-          "the fourth stop must escalate instead of starting a fourth doomed review");
-      assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
-      var detail =
-          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
-      assertTrue(
-          detail.contains("errored"),
-          "escalation must say WHY — an error budget, not exhausted iterations: " + detail);
-    }
+    assertEquals(
+        3,
+        reviewStore.reviewsForSpec("auth").size(),
+        "the fourth stop must escalate instead of starting a fourth doomed review");
+    assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+    var detail = detailOf(loop.events("review_escalated").getFirst());
+    assertTrue(
+        detail.contains("errored"),
+        "escalation must say WHY — an error budget, not exhausted iterations: " + detail);
   }
 
   @Test
-  void anUnparseableReviewNarratesAsErroredNotAsAFailedGate() throws Exception {
+  void anUnparseableReviewNarratesAsErroredNotAsAFailedGate() {
     createSpec("auth", "in_progress");
+    var ctrl =
+        controller(
+            singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> "no fenced block here");
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_errored", "review_stage_failed"), 1);
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> "no fenced block here",
-              bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertEquals(
-          List.of("review_errored"),
-          captured.events().stream().map(Event::type).toList(),
-          "a parse failure is an infrastructure error, not a gate verdict — one message, not a"
-              + " misleading 'stage failed (no findings)' followed by 'errored'");
-    }
+    assertEquals(
+        List.of("review_errored"),
+        loop.published.stream()
+            .map(Event::type)
+            .filter(Set.of("review_errored", "review_stage_failed")::contains)
+            .toList(),
+        "a parse failure is an infrastructure error, not a gate verdict — one message, not a"
+            + " misleading 'stage failed (no findings)' followed by 'errored'");
   }
 
   @Test
-  void aFixIterationCommitsWorkTheAgentLeftUncommitted() throws Exception {
-    createSpec("auth", "in_progress", List.of("api"));
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
-    var ensured = new AtomicReference<List<Object>>();
+  void aFixIterationCommitsWorkTheAgentLeftUncommitted() {
+    createSpec("auth", "in_progress", List.of("api", "web"));
+    loop.container.dirty("api", " M Api.java\n?? ApiTest.java\n");
+    loop.container.dirty("web", " M App.tsx\n");
     var calls = new AtomicInteger();
-    var runner =
-        new ReviewAgentRunner() {
-          @Override
-          public String run(String p, String a, String prompt, String rid, String cred) {
-            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
-          }
+    var ctrl =
+        controller(
+            singleAgentStage("no_critical"),
+            (p, a, prompt, rid, cred) ->
+                calls.incrementAndGet() == 1 ? CRITICAL_FINDING : fixAllCarried(prompt));
 
-          @Override
-          public List<Rescue> ensureCommitted(
-              String project, List<String> repos, String branch, String commitMessage) {
-            ensured.set(List.of(project, repos, branch, commitMessage));
-            return List.of(
-                new Rescue("api", List.of("Api.java", "ApiTest.java")),
-                new Rescue("web", List.of("App.tsx")));
-          }
-        };
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of(Event.WellKnownTypes.GUARDRAIL_TRIGGERED), 1);
-      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
-
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertEquals(
-          List.of("test-project", List.of("api"), "feat/test"),
-          ensured.get().subList(0, 3),
-          "after the fix agent runs, its work is verified committed on the spec branch");
-      assertTrue(
-          ensured.get().get(3).toString().contains("Bad"),
-          "the rescue commit message names the findings the fix addressed, so the PR history"
-              + " explains itself instead of reading 'left uncommitted by the agent'");
-      var reason =
-          java.util.Objects.toString(captured.events().getFirst().data().get("reason"), "");
-      assertTrue(reason.contains("api"), "the guardrail names the contaminated repo");
-      assertTrue(
-          reason.contains("Api.java"),
-          "the guardrail names the files it swept, so debris is visible the moment it happens");
-      assertTrue(
-          reason.contains("web (1 file: App.tsx)"),
-          "every rescued repo is named, joined into one readable line");
-    }
+    var commits = loop.container.commits();
+    assertEquals(
+        List.of("api", "web"),
+        commits.stream().map(commit -> commit.substring(0, commit.indexOf(':'))).toList(),
+        "after the fix agent runs, what it left uncommitted on the spec branch is committed");
+    assertTrue(
+        commits.stream().allMatch(commit -> commit.contains("Bad")),
+        "the rescue commit message names the findings the fix addressed, so the PR history"
+            + " explains itself instead of reading 'left uncommitted by the agent': "
+            + commits);
+    var guardrails = loop.events(Event.WellKnownTypes.GUARDRAIL_TRIGGERED);
+    assertEquals(1, guardrails.size());
+    var reason = Objects.toString(guardrails.getFirst().data().get("reason"), "");
+    assertTrue(
+        reason.contains("api (2 files: Api.java, ApiTest.java)"),
+        "the guardrail names the contaminated repo and the files it swept, so debris is visible"
+            + " the moment it happens: "
+            + reason);
+    assertTrue(
+        reason.contains("web (1 file: App.tsx)"),
+        "every rescued repo is named, joined into one readable line: " + reason);
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test
-  void theFixLaneCarriesTheSpecBranchReposAndTuningIntoTheGate() throws Exception {
-    createSpec("auth", "in_progress", List.of("api"), "opus-5", "xhigh");
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
+  void theFixLaneCarriesTheSpecBranchReposAndTuningIntoTheGate() {
+    createSpec("auth", "in_progress", List.of("api"), "codex", "gpt-5", "xhigh");
     var fixLaunch = new AtomicReference<List<Object>>();
-    var reviewEffort = new AtomicReference<String>();
+    var reviewTuning = new ArrayList<String>();
     var calls = new AtomicInteger();
     var runner =
-        new ReviewAgentRunner() {
+        new ScriptedAgent() {
           @Override
           public String run(String p, String a, String prompt, String rid, String cred) {
-            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
+            return calls.incrementAndGet() == 1 ? CRITICAL_FINDING : fixAllCarried(prompt);
           }
 
           @Override
@@ -1466,7 +1408,7 @@ class ReviewPipelineControllerTest {
               String cred,
               String model,
               String effort) {
-            reviewEffort.set(effort);
+            reviewTuning.add(model + "/" + effort);
             return run(p, a, prompt, rid, cred);
           }
 
@@ -1485,44 +1427,38 @@ class ReviewPipelineControllerTest {
             return "done";
           }
         };
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_completed"), 1);
-      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertEquals(
-          List.of("claude-code", "feat/test", List.of("api"), "opus-5", "xhigh"),
-          fixLaunch.get(),
-          "the fix agent launches as the spec's own agent with the spec's branch, repo scope,"
-              + " model, and reasoning effort — a spec dispatched at xhigh is fixed at xhigh");
-      assertEquals(
-          "xhigh",
-          reviewEffort.get(),
-          "the reviewer judges at the spec's effort; the model stays out of the review lane"
-              + " because model names are agent-specific and the reviewer is the other agent");
-    }
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        List.of("codex", "feat/test", List.of("api"), "gpt-5", "xhigh"),
+        fixLaunch.get(),
+        "the fix agent launches as the spec's own agent with the spec's branch, repo scope,"
+            + " model, and reasoning effort — a spec dispatched at xhigh is fixed at xhigh");
+    var fix = loop.runsIn("auth", "fix").getFirst();
+    var session = YamlUtil.parseMap(loop.container.file(AgentUnit.forRun(fix.id()).sessionPath()));
+    assertEquals("feat/test", session.get("branch"), "the stop gate asks for this branch pushed");
+    assertEquals(
+        List.of("api"), session.get("repos"), "the stop gate is scoped to the spec's repos");
+    assertEquals("fix", session.get("role"));
+    assertEquals(
+        List.of("null/xhigh", "null/xhigh"),
+        reviewTuning,
+        "the reviewer judges at the spec's effort; the model stays out of the review lane"
+            + " because model names are agent-specific and the reviewer is the other agent");
   }
 
   @Test
-  void aFixCrashSurfacesAsIterationFailedAndEscalatesInsteadOfReReviewingUnfixedCode()
-      throws Exception {
+  void aFixCrashSurfacesAsIterationFailedAndEscalatesInsteadOfReReviewingUnfixedCode() {
     createSpec("auth", "in_progress", List.of("api"));
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
+    loop.container.dirty("api", " M Half.java\n");
     var runner =
-        new ReviewAgentRunner() {
+        new ScriptedAgent() {
           @Override
           public String run(String p, String a, String prompt, String rid, String cred) {
-            return criticalOutput;
+            return CRITICAL_FINDING;
           }
 
           @Override
@@ -1539,83 +1475,62 @@ class ReviewPipelineControllerTest {
             throw new IllegalStateException("fix agent quota exceeded");
           }
         };
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_iteration_failed", "review_escalated"), 2);
-      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertEquals(
-          1,
-          reviewStore.reviewsForSpec("auth").size(),
-          "a crashed fix must not spawn a second review — the branch still holds the unfixed code"
-              + " the reviewer just failed");
-      assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
-      var types = captured.events().stream().map(Event::type).toList();
-      assertTrue(
-          types.contains("review_iteration_failed"),
-          "the fix crash must surface as an event, never be swallowed to stderr: " + types);
-      assertTrue(types.contains("review_escalated"), types.toString());
-    }
+    assertEquals(
+        1,
+        reviewStore.reviewsForSpec("auth").size(),
+        "a crashed fix must not spawn a second review — the branch still holds the unfixed code"
+            + " the reviewer just failed");
+    assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+    assertEquals(
+        List.of("fix agent failed: exit 1"),
+        loop.events("review_iteration_failed").stream()
+            .map(ReviewPipelineControllerTest::detailOf)
+            .toList(),
+        "the fix crash must surface as an event, never be swallowed to stderr");
+    assertEquals(
+        List.of("fix iteration failed — fix agent failed: exit 1; triage and re-dispatch"),
+        loop.events("review_escalated").stream()
+            .map(ReviewPipelineControllerTest::detailOf)
+            .toList());
+    assertTrue(
+        loop.container.commits().isEmpty(),
+        "nothing a failed fix agent left behind is committed to the spec's branch");
   }
 
   @Test
   void aReviewRunActsForTheBoxThatRunsItWhoeverTheSpecIsAssignedTo() {
     createSpec("auth", "in_progress");
     db.execute("UPDATE specs SET assignee = 'bob' WHERE id = 'auth'");
-    var runStore = new RunStore(db);
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runStore,
-            () -> "node-a");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    var review = reviewStore.reviewsForSpec("auth").getFirst();
-    assertEquals("node-a", runStore.findById(review.id()).orElseThrow().owner());
+    assertEquals("node-a", loop.runsIn("auth", "review").getFirst().owner());
   }
 
   @Test
-  void theFixTaskCarriesTheRoomAndSeedsTheDeliveryWatermark() throws Exception {
+  void theFixTaskCarriesTheRoomAndSeedsTheDeliveryWatermark() {
     createSpec("auth", "in_progress", List.of("api"));
-    var messages = new MessageStore(db);
-    var runStore = new RunStore(db);
+    var messages = loop.messages;
     var oversized =
         Acting.system(
             () ->
                 messages.append(
-                    "auth",
-                    "uday",
-                    "x".repeat(ai.singlr.sail.engine.PromptConversation.MAX_CODE_POINTS + 1_000),
-                    null));
+                    "auth", "uday", "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000), null));
     var guidance =
         Acting.system(
             () -> messages.append("auth", "uday", "the retry finding is intentional", null));
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
     var fixPrompt = new AtomicReference<String>();
     var calls = new AtomicInteger();
     var runner =
-        new ReviewAgentRunner() {
+        new ScriptedAgent() {
           @Override
           public String run(String p, String a, String prompt, String rid, String cred) {
-            return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(prompt);
+            return calls.incrementAndGet() == 1 ? CRITICAL_FINDING : fixAllCarried(prompt);
           }
 
           @Override
@@ -1633,53 +1548,61 @@ class ReviewPipelineControllerTest {
             return "done";
           }
         };
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_completed"), 1);
-      var ctrl =
-          new ReviewPipelineController(
-              specStore,
-              reviewStore,
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              runner,
-              bus,
-              () -> {},
-              new DirectExecutorService(),
-              runStore,
-              () -> "node-a");
-      ctrl.useMessages(messages);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertTrue(
-          fixPrompt.get().contains("Conversation on this spec"),
-          "the fix task renders the room: " + fixPrompt.get());
-      assertTrue(
-          fixPrompt.get().contains("uday: the retry finding is intentional"),
-          "human guidance on disputed findings reaches the fix turn");
-      var seeded =
-          runStore.listForSpec("auth").stream()
-              .map(run -> runStore.deliveredMessageIds(run.id()))
-              .filter(ids -> !ids.isEmpty())
-              .toList();
-      assertEquals(1, seeded.size(), "exactly the fix run carries a seeded delivery ledger");
-      assertTrue(
-          seeded.getFirst().contains(guidance.id()),
-          "rendered messages count as delivered: the ledger seeds at fix launch");
-      assertFalse(
-          seeded.getFirst().contains(oversized.id()),
-          "delivery derives from presentation: a message the prompt budget truncated was never"
-              + " presented in full and stays owed a delivery through the relay or the stop"
-              + " gate");
-    }
+    assertTrue(
+        fixPrompt.get().contains("Conversation on this spec"),
+        "the fix task renders the room: " + fixPrompt.get());
+    assertTrue(
+        fixPrompt.get().contains("uday: the retry finding is intentional"),
+        "human guidance on disputed findings reaches the fix turn");
+    var seeded = runStore.deliveredMessageIds(loop.runsIn("auth", "fix").getFirst().id());
+    assertTrue(
+        seeded.contains(guidance.id()),
+        "rendered messages count as delivered: the fix run's own ledger seeds at its launch");
+    assertFalse(
+        seeded.contains(oversized.id()),
+        "delivery derives from presentation: a message the prompt budget truncated was never"
+            + " presented in full and stays owed a delivery through the relay or the stop"
+            + " gate");
   }
 
   @Test
-  void theLoopNarratesVerdictsIntoTheSpecRoom() throws Exception {
+  void aReviewersLedgerHoldsOnlyTheMessagesItsPromptRenderedInFull() {
+    createSpec("auth", "in_progress");
+    var oversized =
+        Acting.system(
+            () ->
+                loop.messages.append(
+                    "auth", "uday", "x".repeat(PromptConversation.MAX_CODE_POINTS + 1_000), null));
+    var guidance =
+        Acting.system(
+            () -> loop.messages.append("auth", "uday", "the retry finding is intentional", null));
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    var reviewer = loop.runsIn("auth", "review").getFirst();
+    assertTrue(
+        reviewer.task().contains("uday: the retry finding is intentional"),
+        "the review prompt renders the room");
+    var seeded = runStore.deliveredMessageIds(reviewer.id());
+    assertTrue(
+        seeded.contains(guidance.id()),
+        "rendered messages count as delivered: the reviewer's own ledger seeds at its launch");
+    assertFalse(
+        seeded.contains(oversized.id()),
+        "delivery derives from presentation: a message the review prompt truncated was never"
+            + " presented in full and stays owed a delivery through the relay or the stop"
+            + " gate");
+  }
+
+  @Test
+  void theLoopNarratesVerdictsIntoTheSpecRoom() {
     createSpec("auth", "in_progress", List.of("api"));
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var failedOutput =
         """
         ```json
@@ -1694,40 +1617,34 @@ class ReviewPipelineControllerTest {
           "line_start": 3, "line_end": 3, "title": "Off-by-one in pager",
           "description": "d", "confidence": 0.6}]""";
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) ->
             calls.incrementAndGet() == 1
                 ? failedOutput
                 : ReviewScripts.fixAllCarried(pr, lowFinding);
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_completed"), 1);
-      var ctrl = controller(p -> singleAgentStage("no_critical"), p -> "codex", runner, bus);
-      ctrl.useMessages(messages);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      var room = messages.list("auth", null, 50);
-      assertEquals(
-          2,
-          room.size(),
-          "one message per verdict and nothing else — lifecycle beats ride the event stream;"
-              + " the room carries only what events cannot: the findings themselves");
-      var failed = room.get(0);
-      assertEquals("sail", failed.author());
-      assertTrue(failed.body().contains("Review failed"), failed.body());
-      assertTrue(
-          failed.body().contains("Token logged in plaintext"),
-          "the failed verdict names its findings — the reviewer's next pass reads the room, so"
-              + " this is also the loop's cross-iteration memory");
-      assertTrue(failed.body().contains("Auth.java:7"), failed.body());
-      var passed = room.get(1);
-      assertTrue(passed.body().contains("Review passed"), passed.body());
-      assertTrue(
-          passed.body().contains("Off-by-one in pager"),
-          "sub-gate findings on a passed review deserve eyes before merge, not silence");
-    }
+    var room = messages.list("auth", null, 50);
+    assertEquals(
+        2,
+        room.size(),
+        "one message per verdict and nothing else — lifecycle beats ride the event stream;"
+            + " the room carries only what events cannot: the findings themselves");
+    var failed = room.get(0);
+    assertEquals("sail", failed.author());
+    assertTrue(failed.body().contains("Review failed"), failed.body());
+    assertTrue(
+        failed.body().contains("Token logged in plaintext"),
+        "the failed verdict names its findings — the reviewer's next pass reads the room, so"
+            + " this is also the loop's cross-iteration memory");
+    assertTrue(failed.body().contains("Auth.java:7"), failed.body());
+    var passed = room.get(1);
+    assertTrue(passed.body().contains("Review passed"), passed.body());
+    assertTrue(
+        passed.body().contains("Off-by-one in pager"),
+        "sub-gate findings on a passed review deserve eyes before merge, not silence");
   }
 
   @Test
@@ -1739,7 +1656,7 @@ class ReviewPipelineControllerTest {
     brokenDb.close();
 
     var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    ctrl.useMessages(brokenMessages);
+    ctrl.controller.useMessages(brokenMessages);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -1750,32 +1667,50 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void executePipelinePublishesEventsWhenBusProvided() {
-    createSpec("auth", "in_progress");
-    Acting.system(() -> specStore.updateStatus("auth", SpecStatus.REVIEW));
+  void aRunningReviewNoRunServesGoesOnFromItsStageRowsAtTheNextBuildStop() {
+    createSpec("auth", "review");
     var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
     Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
     Acting.system(() -> reviewStore.createStage(reviewId, "security", "agent"));
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
-    try (var bus = new EventBus()) {
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-              bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      Acting.system(
-          () ->
-              ctrl.executePipeline(
-                  reviewId, singleAgentStage("no_critical"), "test-project", "auth"));
-
-      assertTrue(bus.publishedCount() > 0);
-    }
+    assertEquals(
+        List.of(reviewId),
+        reviewStore.reviewsForSpec("auth").stream().map(ReviewStore.ReviewRow::id).toList(),
+        "the interrupted review goes on; no second one starts beside it");
+    assertEquals("passed", reviewStore.findReview(reviewId).orElseThrow().status());
+    assertEquals(reviewId, loop.runsIn("auth", "review").getFirst().reviewId());
+    assertEquals(
+        List.of("review_stage_started", "review_stage_passed", "review_completed"),
+        loop.published.stream()
+            .map(Event::type)
+            .filter(type -> type.startsWith("review_"))
+            .toList());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
   }
 
   @Test
-  void stageEventsCarryFindingCountsBySeverity() throws Exception {
+  void aRunningReviewMissingItsStageRowsIsNeverPassedUnreviewed() {
+    createSpec("auth", "review");
+    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
+    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+
+    ctrl.onEvent(agentStoppedEvent("auth"));
+
+    assertTrue(
+        specStore.findById("auth").orElseThrow().status() != SpecStatus.AWAITING_MERGE
+            || !loop.container.launched().isEmpty(),
+        "a review interrupted before its stage rows were written has judged nothing: with no"
+            + " reviewer ever launched, the spec must not be parked as reviewed (review "
+            + reviewStore.findReview(reviewId).orElseThrow().status()
+            + ")");
+  }
+
+  @Test
+  void stageEventsCarryFindingCountsBySeverity() {
     createSpec("auth", "in_progress");
     var agentOutput =
         """
@@ -1791,337 +1726,178 @@ class ReviewPipelineControllerTest {
           "description": "d", "confidence": 0.9}]}
         ```
         """;
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> agentOutput);
 
-    try (var bus = new EventBus()) {
-      var captured = captureStagePassedEvents(bus, 1);
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> agentOutput,
-              bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      var event = captured.events().getFirst();
-      assertEquals("security", event.data().get("detail"));
-      assertEquals(Map.of("high", 2, "low", 1), event.data().get("findings"));
-    }
+    var event = loop.events("review_stage_passed").getFirst();
+    assertEquals("security", event.data().get("detail"));
+    assertEquals(Map.of("high", 2, "low", 1), event.data().get("findings"));
   }
 
   @Test
-  void cleanStageEventOmitsFindingCounts() throws Exception {
+  void cleanStageEventOmitsFindingCounts() {
     createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
-    try (var bus = new EventBus()) {
-      var captured = captureStagePassedEvents(bus, 1);
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-              bus);
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
-
-      assertFalse(captured.events().getFirst().data().containsKey("findings"));
-    }
+    assertFalse(loop.events("review_stage_passed").getFirst().data().containsKey("findings"));
   }
 
-  private record Captured(List<Event> events, CountDownLatch latch) {}
-
-  private static Captured captureStagePassedEvents(EventBus bus, int expected) {
-    return captureEvents(bus, Set.of("review_stage_passed"), expected);
-  }
-
-  private static Captured captureEvents(EventBus bus, Set<String> types, int expected) {
-    var events = new java.util.concurrent.CopyOnWriteArrayList<Event>();
-    var latch = new CountDownLatch(expected);
-    bus.subscribe(
-        BusTesting.latching(
-            new EventSubscriber() {
-              @Override
-              public String name() {
-                return "capture";
-              }
-
-              @Override
-              public java.util.function.Predicate<Event> filter() {
-                return e -> types.contains(e.type());
-              }
-
-              @Override
-              public void onEvent(Event event) {
-                events.add(event);
-              }
-            },
-            latch));
-    return new Captured(events, latch);
+  private static String detailOf(Event event) {
+    return Objects.toString(event.data().get("detail"), "");
   }
 
   @Test
-  void aHandlerFailurePublishesALoudPipelineErrorEvent() throws Exception {
+  void aHandlerFailurePublishesALoudPipelineErrorEvent() {
     createSpec("auth", "in_progress");
-    try (var bus = new EventBus()) {
-      var events = new java.util.concurrent.CopyOnWriteArrayList<Event>();
-      var latch = new CountDownLatch(1);
-      bus.subscribe(
-          BusTesting.latching(
-              new EventSubscriber() {
-                @Override
-                public String name() {
-                  return "capture";
-                }
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+    db.close();
 
-                @Override
-                public java.util.function.Predicate<Event> filter() {
-                  return e -> "review_pipeline_error".equals(e.type());
-                }
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-                @Override
-                public void onEvent(Event event) {
-                  events.add(event);
-                }
-              },
-              latch));
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-              bus);
-      db.close();
-
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(latch);
-
-      assertEquals(1, events.size());
-      assertEquals("auth", events.getFirst().spec());
-      assertTrue(events.getFirst().data().get("detail").toString().contains("closed"));
-    }
+    var errors = loop.events("review_pipeline_error");
+    assertEquals(1, errors.size());
+    assertEquals("auth", errors.getFirst().spec());
+    assertTrue(detailOf(errors.getFirst()).contains("closed"));
   }
 
   @Test
   void aRunningReviewIsNotRestartedByADuplicateEvent() {
     createSpec("auth", "in_progress");
-    var reviewId = Acting.system(() -> reviewStore.createReview("auth", 1));
-    Acting.system(() -> reviewStore.updateReviewStatus(reviewId, "running"));
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+    var ctrl = controller(singleAgentStage("no_critical"), null);
+    ctrl.onEvent(agentStoppedEvent("auth"));
+    var reviewer = loop.live().getFirst();
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertEquals(1, reviewStore.reviewsForSpec("auth").size());
+    assertEquals(List.of(reviewer.id()), loop.container.launched());
   }
 
   @Test
-  void awaitCompletionBlocksUntilAnInFlightPipelineFinishes() throws Exception {
+  void reviewRunIsVisibleWhileTheAgentRunsAndStoppedOnExit() {
     createSpec("auth", "in_progress");
-    var started = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
-    ReviewAgentRunner gated =
-        (p, a, pr, rid, cred) -> {
-          started.countDown();
-          await(release);
-          return CLEAN_REVIEW;
-        };
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            gated,
-            null,
-            () -> {});
+    var ctrl = controller(singleAgentStage("no_critical"), null);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
-    assertTrue(started.await(5, TimeUnit.SECONDS), "pipeline should reach the agent runner");
-    release.countDown();
-    ctrl.awaitCompletion(5000);
 
     var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
-    assertEquals("passed", review.status());
-  }
-
-  @Test
-  void reviewRunIsVisibleWhileTheAgentRunsAndCompletedOnExit() throws Exception {
-    createSpec("auth", "in_progress");
-    var started = new CountDownLatch(1);
-    var release = new CountDownLatch(1);
-    ReviewAgentRunner gated =
-        (p, a, pr, rid, cred) -> {
-          started.countDown();
-          await(release);
-          return CLEAN_REVIEW;
-        };
-    var runs = new RunStore(db);
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            gated,
-            null,
-            () -> {},
-            java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor(),
-            runs,
-            () -> "node-a");
-
-    ctrl.onEvent(agentStoppedEvent("auth"));
-    assertTrue(started.await(5, TimeUnit.SECONDS), "pipeline should reach the agent runner");
-
-    var running = runs.listForSpec("auth").getFirst();
+    assertEquals(
+        "running",
+        review.status(),
+        "the build's stop is handled once the reviewer is launched; nothing waits on the agent");
+    var running = loop.live().getFirst();
     assertEquals("review", running.role());
+    assertEquals(review.id(), running.reviewId());
     assertEquals("running", running.status());
     assertEquals("node-a", running.node());
     assertEquals("codex", running.agent());
     assertEquals("feat/test", running.branch());
-    assertEquals("/home/dev/.sail/runs/" + running.id() + "/review.log", running.logPath());
+    assertEquals("/home/dev/.sail/runs/" + running.id() + "/agent.log", running.logPath());
 
-    release.countDown();
-    ctrl.awaitCompletion(5000);
+    ctrl.finish(running.id(), CLEAN_REVIEW);
 
-    var completed = runs.findById(running.id()).orElseThrow();
-    assertEquals("completed", completed.status());
-    assertEquals(0, completed.exitCode());
-    assertNotNull(completed.completedAt());
-    ctrl.close();
+    var stopped = runStore.findById(running.id()).orElseThrow();
+    assertEquals("stopped", stopped.status());
+    assertEquals(0, stopped.exitCode());
+    assertNotNull(stopped.completedAt());
+    assertEquals("passed", reviewStore.findReview(review.id()).orElseThrow().status());
   }
 
   @Test
   void reviewRunRecordsTheAgentExitCodeOnFailure() {
     createSpec("auth", "in_progress");
-    var runs = new RunStore(db);
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            (p, a, pr, rid, cred) -> {
-              throw new ReviewAgentExecutionException("quota", 17);
-            },
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runs,
-            () -> "node-a");
-
+    var ctrl = controller(singleAgentStage("no_critical"), null);
     ctrl.onEvent(agentStoppedEvent("auth"));
+    var reviewer = loop.live().getFirst();
 
-    var failed = runs.listForSpec("auth").getFirst();
-    assertEquals("failed", failed.status());
+    ctrl.exit(reviewer.id(), "quota", 17);
+
+    var failed = runStore.findById(reviewer.id()).orElseThrow();
+    assertEquals("stopped", failed.status());
     assertEquals(17, failed.exitCode());
     assertNotNull(failed.completedAt());
+    assertEquals(
+        "reviewer failed: exit 17",
+        reviewStore.latestReviewForSpec("auth").orElseThrow().error(),
+        "the review says why its reviewer gave no verdict");
   }
 
   @Test
-  void reviewerAndFixAgentsEachReceiveALiveCredentialForTheirReviewRun() {
+  void reviewerAndFixAgentsEachReceiveALiveCredentialForTheirOwnRun() {
     createSpec("auth", "in_progress");
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9,
-          "suggestion": {"before": "old", "after": "new", "rationale": "fix it"}}]}
-        ```
-        """;
-    var runs = new RunStore(db);
     var calls = new AtomicInteger();
-    var credentials = new java.util.concurrent.CopyOnWriteArrayList<List<String>>();
-    ReviewAgentRunner runner =
+    var invocations = new ArrayList<RunStore.RunRow>();
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
-          credentials.add(
-              List.of(rid, cred, runs.findByCredential(cred).orElseThrow().principal()));
-          return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
+          invocations.add(runStore.findByCredential(cred).orElseThrow());
+          return calls.incrementAndGet() == 1 ? CRITICAL_FINDING : fixAllCarried(pr);
         };
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            runner,
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runs,
-            () -> "node-a");
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    assertEquals(3, credentials.size(), "reviewer, fix agent, and re-reviewer all ran");
-    for (var invocation : credentials) {
-      assertFalse(invocation.get(1).isBlank(), "every review invocation carries a credential");
-    }
-    var r1 = credentials.get(0).get(0);
-    var r2 = credentials.get(2).get(0);
+    assertEquals(3, invocations.size(), "reviewer, fix agent, and re-reviewer all ran");
+    assertTrue(
+        invocations.stream().allMatch(run -> "running".equals(run.status())),
+        "every invocation carries a credential that resolves to a live run");
     assertEquals(
-        "codex/review-" + r1,
-        credentials.get(0).get(2),
+        3,
+        invocations.stream().map(RunStore.RunRow::id).distinct().count(),
+        "each invocation is a run of its own");
+    var reviews = reviewStore.reviewsForSpec("auth");
+    var reviewer = invocations.get(0);
+    var fix = invocations.get(1);
+    var reReviewer = invocations.get(2);
+    assertEquals("review", reviewer.role());
+    assertEquals(
+        "codex/review-" + reviewer.id(),
+        reviewer.principal(),
         "the reviewer invocation acts as the review principal");
+    assertEquals("fix", fix.role());
     assertEquals(
-        "claude/fix-" + r1,
-        credentials.get(1).get(2),
+        "claude/fix-" + fix.id(),
+        fix.principal(),
         "the fix invocation acts as its own fix principal, never the reviewer's");
-    assertEquals("codex/review-" + r2, credentials.get(2).get(2));
-    assertEquals("review", runs.findById(r1).orElseThrow().role());
+    assertEquals(reviews.get(0).id(), fix.reviewId(), "the fix run serves the review that failed");
+    assertEquals("codex/review-" + reReviewer.id(), reReviewer.principal());
+    assertEquals(reviews.get(1).id(), reReviewer.reviewId());
   }
 
   @Test
   void eachInvocationStampsItsOwnIdentitySoRoomPostsCarryTheHonestAuthor() {
     createSpec("auth", "in_progress");
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
-    var runs = new RunStore(db);
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var calls = new AtomicInteger();
-    var reviewIds = new java.util.concurrent.CopyOnWriteArrayList<String>();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
-          reviewIds.add(rid);
-          var principal = runs.findByCredential(cred).orElseThrow().principal();
+          var principal = runStore.findByCredential(cred).orElseThrow().principal();
           Acting.system(() -> messages.append("auth", principal, "posted by " + principal, null));
-          return calls.incrementAndGet() == 1 ? criticalOutput : fixAllCarried(pr);
+          return calls.incrementAndGet() == 1 ? CRITICAL_FINDING : fixAllCarried(pr);
         };
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            runner,
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runs,
-            () -> "node-a");
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    var r1 = reviewIds.get(0);
-    var r2 = reviewIds.get(2);
+    var reviewers = loop.runsIn("auth", "review");
+    var fix = loop.runsIn("auth", "fix").getFirst();
     assertEquals(
-        "claude/fix-" + r1,
-        runs.findById(r1).orElseThrow().principal(),
-        "after the fix rejoin the run row reads the fix lane's identity");
+        "codex/review-" + reviewers.get(0).id(),
+        reviewers.get(0).principal(),
+        "the fix agent ran as a run of its own, so the reviewer's row still reads the reviewer");
+    assertEquals("claude/fix-" + fix.id(), fix.principal());
     assertEquals(
-        "codex/review-" + r2,
-        runs.findById(r2).orElseThrow().principal(),
-        "the next reviewer invocation carries the reviewer identity");
+        "codex/review-" + reviewers.get(1).id(),
+        reviewers.get(1).principal(),
+        "the next reviewer invocation carries its own reviewer identity");
     assertEquals(
-        List.of("codex/review-" + r1, "claude/fix-" + r1, "codex/review-" + r2),
-        messages.listAfter("auth", null, 10).stream().map(MessageStore.MessageRow::author).toList(),
+        List.of(reviewers.get(0).principal(), fix.principal(), reviewers.get(1).principal()),
+        messages.listAfter("auth", null, 10).stream()
+            .map(MessageStore.MessageRow::author)
+            .filter(author -> !MessageStore.SAIL_AUTHOR.equals(author))
+            .toList(),
         "each room post is attributed to the lane that wrote it");
   }
 
@@ -2138,7 +1914,7 @@ class ReviewPipelineControllerTest {
         """;
     var evidence = "the seed window in DispatchOperations still races between reserve and claim";
     var prompts = new ArrayList<String>();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
           prompts.add(pr);
           return switch (prompts.size()) {
@@ -2170,106 +1946,40 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void aFixLaneCredentialResolvesToTheStillRunningReviewRun() throws Exception {
+  void aFixLaneCredentialResolvesToItsOwnRunningFixRun() {
     createSpec("auth", "in_progress");
-    var criticalOutput =
-        """
-        ```json
-        {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-          "line_start": 1, "line_end": 1, "title": "Bad",
-          "description": "Very bad", "confidence": 0.9}]}
-        ```
-        """;
-    var runs = new RunStore(db);
     var calls = new AtomicInteger();
     var fixResolved = new AtomicReference<RunStore.RunRow>();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
           if (calls.incrementAndGet() == 2) {
-            fixResolved.set(runs.findByCredential(cred).orElse(null));
+            fixResolved.set(runStore.findByCredential(cred).orElse(null));
           }
-          return calls.get() == 1 ? criticalOutput : fixAllCarried(pr);
+          return calls.get() == 1 ? CRITICAL_FINDING : fixAllCarried(pr);
         };
-    var ctrl =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            runner,
-            null,
-            () -> {},
-            new DirectExecutorService(),
-            runs,
-            () -> "node-a");
+    var ctrl = controller(singleAgentStage("no_critical"), runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
-    assertNotNull(fixResolved.get(), "the fix agent's re-issued credential resolves to a run");
-    assertEquals("review", fixResolved.get().role());
+    assertNotNull(fixResolved.get(), "the fix agent's credential resolves to a run");
+    assertEquals("fix", fixResolved.get().role());
     assertEquals(
         "running",
         fixResolved.get().status(),
-        "the fix lane rejoins the still-open review negotiation");
-  }
-
-  @Test
-  void closeAwaitsInFlightPipelines() {
-    createSpec("auth", "in_progress");
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-
-    ctrl.onEvent(agentStoppedEvent("auth"));
-    ctrl.close();
-
-    var review = reviewStore.latestReviewForSpec("auth").orElseThrow();
-    assertEquals("passed", review.status());
-  }
-
-  @Test
-  void awaitCompletionWithNoInFlightReturnsImmediately() throws Exception {
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    ctrl.awaitCompletion(1000);
+        "the fix agent holds a live run of its own while it answers the review");
+    assertEquals(
+        reviewStore.reviewsForSpec("auth").getFirst().id(),
+        fixResolved.get().reviewId(),
+        "and that run names the failed review it serves");
   }
 
   @Test
   void onEventSwallowsHandlerExceptions() {
-    var errDb = Sqlite.open(tempDir.resolve("err.db"));
-    new SchemaManager(errDb).migrate();
-    var errSpecStore = new SpecStore(errDb);
-    Acting.as(
-        null,
-        () ->
-            errSpecStore.create(
-                new SpecStore.SpecRow(
-                    "auth",
-                    "test-project",
-                    "Test spec",
-                    SpecStatus.IN_PROGRESS,
-                    null,
-                    null,
-                    null,
-                    null,
-                    "feat/test",
-                    0,
-                    null,
-                    "",
-                    "",
-                    null,
-                    List.of(),
-                    List.of())));
-    var ctrl =
-        new ReviewPipelineController(
-            errSpecStore,
-            new ReviewStore(errDb),
-            p -> singleAgentStage("no_critical"),
-            p -> "codex",
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-            null,
-            () -> {},
-            new DirectExecutorService());
-    errDb.close();
+    createSpec("auth", "in_progress");
+    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
+    db.close();
 
-    assertDoesNotThrow(() -> ctrl.onEvent(agentStoppedEvent("auth")));
+    assertDoesNotThrow(() -> ctrl.controller.onEvent(agentStoppedEvent("auth")));
   }
 
   @Test
@@ -2297,18 +2007,19 @@ class ReviewPipelineControllerTest {
   @Test
   void nonZeroExitPublishesAgentFailed() {
     createSpec("auth", "in_progress");
-    try (var bus = new EventBus()) {
-      var ctrl =
-          controller(
-              p -> singleAgentStage("no_critical"),
-              p -> "codex",
-              (p, a, pr, rid, cred) -> CLEAN_REVIEW,
-              bus);
+    var ctrl =
+        controller(
+            p -> singleAgentStage("no_critical"),
+            p -> "codex",
+            (p, a, pr, rid, cred) -> CLEAN_REVIEW);
 
-      ctrl.onEvent(agentStoppedEvent("auth", 1));
+    ctrl.onEvent(agentStoppedEvent("auth", 1));
 
-      assertTrue(bus.publishedCount() > 0);
-    }
+    assertEquals(
+        List.of("exit 1"),
+        loop.events(Event.WellKnownTypes.AGENT_FAILED).stream()
+            .map(ReviewPipelineControllerTest::detailOf)
+            .toList());
   }
 
   @Test
@@ -2345,7 +2056,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger(0);
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
           if (calls.incrementAndGet() == 1) return criticalOutput;
           throw new RuntimeException("fix agent crashed");
@@ -2354,14 +2065,6 @@ class ReviewPipelineControllerTest {
 
     assertDoesNotThrow(() -> ctrl.onEvent(agentStoppedEvent("auth")));
     assertTrue(calls.get() >= 2, "the review ran and a fix was attempted");
-  }
-
-  private static void await(CountDownLatch latch) {
-    try {
-      latch.await();
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-    }
   }
 
   private ReviewPipelineConfig noHighGate(int maxIterations) {
@@ -2381,6 +2084,15 @@ class ReviewPipelineControllerTest {
                     "gate",
                     "no_critical_or_high"))));
   }
+
+  private static final String CRITICAL_FINDING =
+      """
+      ```json
+      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        "line_start": 1, "line_end": 1, "title": "Bad",
+        "description": "Very bad", "confidence": 0.9}]}
+      ```
+      """;
 
   private static final String HIGH_FINDING =
       """
@@ -2418,9 +2130,9 @@ class ReviewPipelineControllerTest {
   void aCarriedOpenHighFailsTheGateEvenWhenTheNewFindingsListIsClean() {
     createSpec("auth", "in_progress");
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? HIGH_FINDING : CLEAN_REVIEW;
-    var ctrl = controller(p -> noHighGate(2), p -> "codex", runner, null);
+    var ctrl = controller(p -> noHighGate(2), p -> "codex", runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -2445,33 +2157,27 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void aGateBlockingFindingStillOpenTwiceEscalatesWithTheFindingNamed() throws Exception {
+  void aGateBlockingFindingStillOpenTwiceEscalatesWithTheFindingNamed() {
     createSpec("auth", "in_progress");
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? HIGH_FINDING : CLEAN_REVIEW;
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
-      var ctrl = controller(p -> noHighGate(5), p -> "codex", runner, bus);
+    var ctrl = controller(p -> noHighGate(5), p -> "codex", runner);
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      assertEquals(
-          3,
-          reviewStore.reviewsForSpec("auth").size(),
-          "the stuck loop is caught after 2 fix iterations, not after max_iterations=5");
-      var detail =
-          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
-      assertTrue(detail.contains("Sticky high"), "escalation names the stuck finding: " + detail);
-      assertTrue(detail.contains("survived 2 fix iterations"), detail);
-    }
+    assertEquals(
+        3,
+        reviewStore.reviewsForSpec("auth").size(),
+        "the stuck loop is caught after 2 fix iterations, not after max_iterations=5");
+    var detail = detailOf(loop.events("review_escalated").getFirst());
+    assertTrue(detail.contains("Sticky high"), "escalation names the stuck finding: " + detail);
+    assertTrue(detail.contains("survived 2 fix iterations"), detail);
   }
 
   @Test
-  void anotherStagesAgedSubGateFindingNeverTripsTheFailingStagesConvergenceCheck()
-      throws Exception {
+  void anotherStagesAgedSubGateFindingNeverTripsTheFailingStagesConvergenceCheck() {
     createSpec("auth", "in_progress");
     var config =
         ReviewPipelineConfig.fromMap(
@@ -2495,7 +2201,7 @@ class ReviewPipelineControllerTest {
                         "type",
                         "agent",
                         "agent",
-                        "claude",
+                        "claude-code",
                         "gate",
                         "all_clear"))));
     var toleratedHigh =
@@ -2508,43 +2214,40 @@ class ReviewPipelineControllerTest {
         """;
     var codexCalls = new AtomicInteger();
     var claudeCalls = new AtomicInteger();
-    ReviewAgentRunner runner =
-        (p, agent, prompt, rid, cred) ->
-            switch (agent) {
-              case "codex" -> codexCalls.incrementAndGet() == 1 ? toleratedHigh : CLEAN_REVIEW;
-              case "claude" ->
-                  ReviewScripts.fixAllCarried(
-                      prompt,
-                      ("[{\"severity\": \"LOW\", \"category\": \"LOGIC\", \"file\": \"b.java\","
-                              + " \"line_start\": 1, \"line_end\": 1, \"title\": \"Fresh low %d\","
-                              + " \"description\": \"d\", \"confidence\": 0.4}]")
-                          .formatted(claudeCalls.incrementAndGet()));
-              default -> "fix applied";
-            };
+    ScriptedAgent runner =
+        (p, agent, prompt, rid, cred) -> {
+          if (!prompt.contains("Review the changes on branch")) {
+            return "fix applied";
+          }
+          return switch (agent) {
+            case "codex" -> codexCalls.incrementAndGet() == 1 ? toleratedHigh : CLEAN_REVIEW;
+            default ->
+                ReviewScripts.fixAllCarried(
+                    prompt,
+                    ("[{\"severity\": \"LOW\", \"category\": \"LOGIC\", \"file\": \"b.java\","
+                            + " \"line_start\": 1, \"line_end\": 1, \"title\": \"Fresh low %d\","
+                            + " \"description\": \"d\", \"confidence\": 0.4}]")
+                        .formatted(claudeCalls.incrementAndGet()));
+          };
+        };
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_escalated"), 1);
-      var ctrl = controller(p -> config, p -> "codex", runner, bus);
+    var ctrl = controller(p -> config, p -> "codex", runner);
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      assertEquals(
-          3,
-          reviewStore.reviewsForSpec("auth").size(),
-          "a converging loop — new blocker each round — runs to max_iterations");
-      var detail =
-          java.util.Objects.toString(captured.events().getFirst().data().get("detail"), "");
-      assertTrue(
-          detail.contains("review iterations exhausted"),
-          "the loop exhausts its budget instead of escalating a foreign stage's finding: "
-              + detail);
-      assertFalse(
-          detail.contains("Tolerated high"),
-          "the security stage's aged HIGH passes its own gate; the correctness gate must never"
-              + " judge it: "
-              + detail);
-    }
+    assertEquals(
+        3,
+        reviewStore.reviewsForSpec("auth").size(),
+        "a converging loop — new blocker each round — runs to max_iterations");
+    var detail = detailOf(loop.events("review_escalated").getFirst());
+    assertTrue(
+        detail.contains("review iterations exhausted"),
+        "the loop exhausts its budget instead of escalating a foreign stage's finding: " + detail);
+    assertFalse(
+        detail.contains("Tolerated high"),
+        "the security stage's aged HIGH passes its own gate; the correctness gate must never"
+            + " judge it: "
+            + detail);
   }
 
   @Test
@@ -2559,9 +2262,9 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> calls.incrementAndGet() == 1 ? lowOutput : CLEAN_REVIEW;
-    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, null);
+    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -2586,7 +2289,7 @@ class ReviewPipelineControllerTest {
         ```
         """;
     var calls = new AtomicInteger();
-    ReviewAgentRunner runner =
+    ScriptedAgent runner =
         (p, a, pr, rid, cred) -> {
           if (calls.incrementAndGet() == 1) {
             return firstOutput;
@@ -2601,7 +2304,7 @@ class ReviewPipelineControllerTest {
               ], "findings": []}"""
               .formatted(ReviewScripts.carriedId(pr, "Real bug"));
         };
-    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, null);
+    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner);
 
     ctrl.onEvent(agentStoppedEvent("auth"));
 
@@ -2630,9 +2333,9 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void theDisputeNegotiationRetiresAFalsePositiveInTheOpenAndPassesTheGate() throws Exception {
+  void theDisputeNegotiationRetiresAFalsePositiveInTheOpenAndPassesTheGate() {
     createSpec("auth", "in_progress", List.of("api"));
-    var messages = new MessageStore(db);
+    var messages = loop.messages;
     var argument = "Worker cap is enforced upstream in Dispatcher.acquire; the finding is wrong";
     var firstOutput =
         """
@@ -2647,7 +2350,7 @@ class ReviewPipelineControllerTest {
     var reReviewPrompt = new AtomicReference<String>();
     var calls = new AtomicInteger();
     var runner =
-        new ReviewAgentRunner() {
+        new ScriptedAgent() {
           @Override
           public String run(String p, String a, String pr, String rid, String cred) {
             if (calls.incrementAndGet() == 1) {
@@ -2681,42 +2384,36 @@ class ReviewPipelineControllerTest {
           }
         };
 
-    try (var bus = new EventBus()) {
-      var captured = captureEvents(bus, Set.of("review_completed"), 1);
-      var ctrl = controller(p -> noHighGate(3), p -> "codex", runner, bus);
-      ctrl.useMessages(messages);
+    var ctrl = controller(p -> noHighGate(3), p -> "codex", runner);
 
-      ctrl.onEvent(agentStoppedEvent("auth"));
-      BusTesting.awaitDelivery(captured.latch());
+    ctrl.onEvent(agentStoppedEvent("auth"));
 
-      var reviews = reviewStore.reviewsForSpec("auth");
-      assertEquals("passed", reviews.get(1).status(), "the negotiation converges in one round");
-      assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    var reviews = reviewStore.reviewsForSpec("auth");
+    assertEquals("passed", reviews.get(1).status(), "the negotiation converges in one round");
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
 
-      var disputed = Acting.system(() -> reviewStore.disputedFindings("auth"));
-      assertEquals(List.of("Worker cap ignored"), disputed.stream().map(Finding::title).toList());
-      assertEquals(argument, disputed.getFirst().resolutionEvidence());
-      assertTrue(
-          reReviewPrompt.get().contains(argument),
-          "the re-review sees the fix agent's argument — the room rides the prompt");
+    var disputed = Acting.system(() -> reviewStore.disputedFindings("auth"));
+    assertEquals(List.of("Worker cap ignored"), disputed.stream().map(Finding::title).toList());
+    assertEquals(argument, disputed.getFirst().resolutionEvidence());
+    assertTrue(
+        reReviewPrompt.get().contains(argument),
+        "the re-review sees the fix agent's argument — the room rides the prompt");
 
-      var room = messages.list("auth", null, 50);
-      assertEquals(3, room.size(), "failed verdict, the dispute argument, passed verdict");
-      assertTrue(room.get(0).body().contains("Review failed"), room.get(0).body());
-      assertEquals(argument, room.get(1).body());
-      var passedBody = room.get(2).body();
-      assertTrue(passedBody.contains("Review passed"), passedBody);
-      assertTrue(
-          passedBody.contains("Disputed"),
-          "disputed findings are listed in the pass verdict for the human to confirm: "
-              + passedBody);
-      assertTrue(passedBody.contains("Worker cap ignored"), passedBody);
-      assertTrue(
-          passedBody.contains(argument),
-          "the ruled argument travels with the verdict so the human sees both sides");
-      assertTrue(
-          reviewStore.openFindingsAfterPass("auth").isEmpty(),
-          "a false positive retired by argument leaves nothing open — without a human dismiss");
-    }
+    var room = messages.list("auth", null, 50);
+    assertEquals(3, room.size(), "failed verdict, the dispute argument, passed verdict");
+    assertTrue(room.get(0).body().contains("Review failed"), room.get(0).body());
+    assertEquals(argument, room.get(1).body());
+    var passedBody = room.get(2).body();
+    assertTrue(passedBody.contains("Review passed"), passedBody);
+    assertTrue(
+        passedBody.contains("Disputed"),
+        "disputed findings are listed in the pass verdict for the human to confirm: " + passedBody);
+    assertTrue(passedBody.contains("Worker cap ignored"), passedBody);
+    assertTrue(
+        passedBody.contains(argument),
+        "the ruled argument travels with the verdict so the human sees both sides");
+    assertTrue(
+        reviewStore.openFindingsAfterPass("auth").isEmpty(),
+        "a false positive retired by argument leaves nothing open — without a human dismiss");
   }
 }

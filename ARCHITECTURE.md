@@ -692,18 +692,29 @@ description-loaded Codex skill. Java standards then reach the agent only while i
 never bloating the always-loaded context. The bodies are project-supplied, and sail ships
 none.
 
-**Guardrails and rollback:** `agent.guardrails` sets a `max_duration`, a `max_idle` stall
-window, and an action (`snapshot-and-stop`, `stop`, or `notify`). An event-driven watcher
-(`sail agent watch`, auto-started by dispatch) merges the wall-clock deadline with the stall
-deadline and with agent-exit events off the SSE stream. Progress events (tool calls and log
-chunks) push the stall deadline out, so a working agent is never killed and a silent one is.
-On a trip it snapshots or kills the agent and fires notifications. Rollback uses Incus
+**Guardrails and rollback:** a guardrails block sets a `max_duration`, a `max_idle` stall
+window, and an action (`snapshot-and-stop`, `stop`, or `notify`), and each lane reads its
+own: `agent.guardrails` bounds a build, an ad-hoc run and a chat turn (default `4h` / `20m`
+/ `stop`), `agent.review_pipeline.guardrails` a reviewer and a fix agent (default `45m` /
+`20m` / `stop`). Both parse through the one `Guardrails` record, which refuses an invalid
+duration or action where the descriptor is read, naming the accepted forms. An event-driven
+watcher (`sail agent watch`, started with every run) merges the wall-clock deadline with the
+stall deadline and with agent-exit events off the SSE stream. Progress events (tool calls and
+log chunks) push the stall deadline out, so a working agent is never killed and a silent one
+is. The watcher is handed its run's limits on its command line when it is spawned
+(`--max-duration`, `--max-idle`, `--action`) and never reads the project's guardrails itself,
+so an edit applies to the next run. On a trip with a stopping action it kills the unit's
+whole cgroup in the container, records the trigger beside the run
+(`~/.sail/runs/<runId>/guardrail-triggered.yaml`), and, once the unit is verified gone,
+publishes the run's stop carrying the reason (`time limit (45m)`, `stall (20m)`); a unit that
+survives the kill is not reported ended, and the watcher tries again. Rollback uses Incus
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
 The watcher runs detached, as the systemd transient unit `sail-watch-<runId>` — the same
 mechanism that runs the agent — so it survives Ctrl-C on the dispatch stream, the SSH
-session ending, and daemon restarts. Every dispatched run has its own identity end to end:
+session ending, and daemon restarts. Every run has its own identity end to end, whichever
+lane launched it:
 the agent runs as `sail-agent-<runId>` with its pid, session, task, and log files under
 `~/.sail/runs/<runId>/`, the run records the unit it was launched with, and every later
 consumer (stop, probe, reconciler, watcher) addresses that recorded unit — which is what
@@ -757,34 +768,97 @@ are different human acts and get distinct states. Because only `done` satisfies
 `depends_on`, a dependent spec never dispatches against a main that lacks its parent's
 unmerged work.
 
-Reviewer and fix agents run on the same agent command and log handling as dispatch, but not
-its process wrapper. Dispatch is fire-and-forget (it launches a detached `systemd-run --user`
-unit and an external `sail agent watch` monitors it); a review blocks the pipeline until it
-has findings, so `ContainerReviewAgentRunner` runs it as a bounded foreground `shell.exec`
-(30-minute per-invocation timeout) that needs no systemd user manager or D-Bus session, so it
-works in any container. Each review owns its files under `~/.sail/runs/<reviewId>/`: the
-pipeline reviews concurrently completed specs on concurrent virtual threads, so a shared
-prompt or log would cross-contaminate them. The output streams to the review's own
-`review.log` (appended, so one attempt's reviewer-and-fix negotiation lands in one
-live-followable log), findings are parsed from the bytes that run appended (read by offset so
-a plain agent's re-review is never fed a prior iteration's findings) via `StreamJsonResult`. The reviewer runs
-clean (empty `SAIL_SPEC_ID`, no hooks) so its own completion never re-enters the pipeline.
-Follow it live with `sail agent log <project> --review`.
+**The loop lanes.** A build, a reviewer, a fix agent and a chat turn are the same kind of
+process — a headless coding agent in the project container — and sail runs them one way. The
+lane (`Lane`: `build`, `adhoc`, `review`, `fix`, `room`, `room-full`) is data: it names what
+the run's stop means to the loop and whose limits bound it, never how the run launches or
+ends. The contract, each row with the tests that prove it (`ReviewLanesTest` drives the
+production launch path, pipeline, tracker and bus over a fake container shell;
+`ReviewAgentLoopIT` runs the same loop against a real container):
 
-The run aggregate records that negotiation as a `role=review` run using the review UUID. A
-stage UUID would be less truthful: reviewer and fix invocations deliberately share the review's
-file set, while a stage-scoped run ID would resolve to a directory they never write. The run is
-created before the first agent process starts, completes after the review's foreground work ends,
-and syncs like a build run. Retention always protects running run directories, including review
-runs that fall outside the normal keep window during concurrent work.
+- **P1. One run per invocation, one launch.** Every agent sail starts is its own run row with
+  its own `AgentUnit.forRun(runId)` (unit `sail-agent-<runId>`, session, task, pid and log
+  under `~/.sail/runs/<runId>/`), launched through `RunLauncher.launchSession` with a
+  `LaunchSpec` naming its lane. A reviewer's and a fix agent's run rows name the review they
+  serve (`runs.review_id`); the review id is not a run id. No lane runs an agent through a
+  blocking exec, and no lane has a log, unit or pid path of its own shape.
+  *`aReviewerThatCompletesHasItsStopRoutedByLaneAndItsStageResolvedFromItsOwnLog`,
+  `twoSpecsPipelinesInOneContainerEachAdvanceOnlyOnTheirOwnRunsStop`,
+  `RunStoreTest.aReviewerAndAFixAgentAreEachTheirOwnRunNamingTheReviewTheyServe`,
+  `ReviewAgentLoopIT.theReviewLoopReachesAwaitingMergeWithEveryAgentAsItsOwnUnit`.*
+- **P2. One supervisor.** Every such run has a watcher (`sail agent watch --run --unit`),
+  spawned the way the build lane spawns it, enforcing that run's lane's guardrails. A trip
+  kills the unit in the container, records the trigger beside the run, then publishes the
+  authoritative `agent_session_stopped` with `run_id`, `run_role` and `reason`. No host
+  process waits on an agent.
+  *`AgentWatchCommandTest.aTrippedRunIsKilledThenItsTriggerRecordedBesideItThenItsStopPublishedWithTheReason`,
+  `AgentWatchCommandTest.aRunThatSurvivesTheKillIsNeverReportedEnded`,
+  `aDaemonRestartWhileAReviewerRunsReArmsItsWatcherAndFailsNothing`.*
+- **P3. One stop, one router.** A run ends exactly one way: the watcher's, or the
+  reconciler's, authoritative stop (`RunStops`). `RunTracker` finishes the row as it does for
+  a build, and `ReviewPipelineController` routes the stop by the lane of the run that
+  stopped, read from this box's own row: a build's stop starts the review the spec is due; a
+  reviewer's resolves its stage from the findings in that run's own log; a fix agent's runs
+  `ensureCommitted` and starts the re-review as the next iteration; a room run's is ignored.
+  Never by a return value, and never by the spec's status, which is `in_progress` both while
+  a build runs and while a fix agent does.
+  *`aFixAgentThatCompletesIsFollowedByTheReReviewAsTheNextIterationWithItsOwnRun`,
+  `aBuildsStopWhileTheSpecsFixAgentRunsIsNotTakenAsTheFixAgentsStop`,
+  `aPlainReviewerAndAStreamingOneAreEachJudgedOnTheirOwnRunsLog`.*
+- **P4. One hook set.** Every lane's agent runs with the same hooks and the same
+  `SAIL_SPEC_ID`, `SAIL_RUN_ID`, `SAIL_RUN_ROLE`, `SAIL_RUN_CREDENTIAL` environment, so
+  progress (`agent_tool_*`) resets every lane's stall timer the same way. The one stop gate
+  asks by lane: a build for a clean, pushed tree behind a pull request whose checks it
+  watches; a fix agent for clean and pushed only; a reviewer for nothing, since its last
+  message is the verdict the pipeline parses. The pipeline's router, not a missing hook, is
+  what keeps a reviewer's stop from starting a review.
+  *`SailStopGateTest.aFixRunIsAskedToCommitAndPushAndNeverToWatchCi`,
+  `SailStopGateTest.aReviewerIsNeverBlockedByADirtyTreeNorByTheRoom`, and the launch
+  environment asserted in P1's first test.*
+- **P5. One guardrails record, per-lane values.** `Guardrails` is the only limits type,
+  parsed one way; `SailYaml.Agent.guardrailsFor(lane)` is the one place a lane is mapped to
+  its block and its defaults. The watcher receives its run's limits at spawn.
+  *`aReviewLanesLimitsDefaultTo45MinutesAndAnEditAppliesToTheNextRunOnly`,
+  `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
+  `GuardrailsTest.anInvalidDurationIsRefusedWhereTheBlockIsParsedNamingItsKeyAndTheAcceptedForms`.*
+- **P6. The loop's state is rows that already exist.** Which stage a review is in is its
+  stage rows' statuses; which iteration, the review row's `iteration`; which run it waits on,
+  the newest live run that names it. Nothing is held on a thread across an agent's lifetime,
+  and nothing at daemon start marks a running review failed: a run still going is re-armed
+  with a watcher (`WatcherRearmer`), and one that ended unobserved has its stop published by
+  `MissedStopReconciler`, which reconciles a reviewer and a fix agent as it does a build.
+  *`aDaemonRestartWhileAReviewerRunsReArmsItsWatcherAndFailsNothing`,
+  `aReviewerThatExitedWhileTheDaemonWasDownHasItsStopPublishedAtStart`,
+  `aFixAgentThatExitsUnwatchedIsReconciledAsABuildIsAndTheLoopGoesOn`,
+  `MissedStopReconcilerTest.aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce`.*
+- **P7. A reaped agent is dead.** After a trip there is no live agent process for that run in
+  the container, nothing of a killed fix agent's is committed, and the room says why:
+  `review_errored` (`reviewer killed: time limit (45m)`, `reviewer failed: exit 1`) and
+  `review_iteration_failed` (`fix agent killed: stall (20m)`), both narrated in Slack and in
+  Mast's room.
+  *`aReviewerPastItsTimeLimitIsKilledAndItsReviewErrorsWithTheReasonWithinTheRetryBudget`,
+  `aFixAgentPastItsTimeLimitIsKilledNothingOfItsLandsAndTheRoomIsToldWhy`,
+  `ReviewAgentLoopIT.aKilledReviewerLeavesNoAgentProcessBehindAndItsReviewErrorsWithTheReason`.*
+
+A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
+replaced — changes nothing, with one exception that is the loop's retry: when the spec's
+latest review failed by infrastructure error and no run serves it, such a stop starts that
+iteration again, within `MAX_ERRORED_RETRIES`. An operator's `sail agent stop` on a reviewer
+or a fix agent is a person's decision about the loop, so the review escalates rather than
+retrying over it. A fix agent is told to verify locally, commit and push, and not to watch
+CI: the re-review judges the branch, and the pull request shows its checks to whoever merges.
 
 **Recovery without losing work.** The git branch is the durable record: every coding agent
 (build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
-discards it. So an FDE always recovers by returning to the branch. When a spec is stuck: a
-guardrail-killed or failed dispatch leaves the work committed, so `sail spec dispatch
---restart` resumes on the branch; an escalated review parks in `review` with its findings (in
-the review store), its negotiation (`review.log`), and every fix commit intact, so the FDE
-reads it with `sail agent review <project>` plus `sail agent log <project> --review`, then
+discards it. So an FDE always recovers by returning to the branch. The loop recovers itself
+from a daemon restart or a dead watcher (P6): the missed-stop sweep publishes the stop of
+any loop run that ended unobserved, replays the newest loop stop once for a review that
+errored (the retry) or that is `running` with no run serving it and no person to wait on,
+and the pipeline goes on from the review's rows. When a spec is stuck: a guardrail-killed or
+failed dispatch leaves the work committed, so `sail spec dispatch --restart` resumes on the
+branch; an escalated review parks in `review` with its findings (in the review store), each
+reviewer's and fix agent's own run log, and every fix commit intact, so the FDE reads it with
+`sail agent review <project>` plus `sail agent log <project> --review` (or `--fix`), then
 resolves with `sail spec update <id> --status done` (accept the work as-is) or `--status
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 

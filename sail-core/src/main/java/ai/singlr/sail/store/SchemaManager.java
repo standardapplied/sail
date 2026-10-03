@@ -656,7 +656,57 @@ public final class SchemaManager {
               undecided INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (id, content_hash, mode)
           )""",
-          "ALTER TABLE events ADD COLUMN publisher TEXT");
+          "ALTER TABLE events ADD COLUMN publisher TEXT",
+          """
+          CREATE TABLE runs_v8 (
+              id TEXT PRIMARY KEY,
+              project TEXT NOT NULL,
+              spec_id TEXT,
+              agent TEXT NOT NULL,
+              branch TEXT,
+              task TEXT,
+              pid INTEGER,
+              status TEXT NOT NULL DEFAULT 'running'
+                  CHECK (status IN ('running', 'stopping', 'completed', 'stopped', 'failed')),
+              started_at TEXT NOT NULL,
+              completed_at TEXT,
+              exit_code INTEGER,
+              watcher_pid INTEGER,
+              node TEXT,
+              role TEXT NOT NULL DEFAULT 'build'
+                  CHECK (role IN ('build', 'adhoc', 'review', 'fix', 'room', 'room-full',
+                      'invite', 'invite-full')),
+              log_path TEXT,
+              rev TEXT,
+              base_rev TEXT,
+              unit TEXT,
+              repos TEXT,
+              pid_ticks INTEGER,
+              principal TEXT,
+              owner TEXT,
+              session_id TEXT,
+              session_source TEXT,
+              transcript_path TEXT,
+              last_activity_at TEXT,
+              room_id TEXT,
+              review_id TEXT
+          )""",
+          """
+          INSERT INTO runs_v8 (id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
+                  session_source, transcript_path, last_activity_at, room_id, review_id)
+              SELECT id, project, spec_id, agent, branch, task, pid, status,
+                  started_at, completed_at, exit_code, watcher_pid, node, role, log_path,
+                  rev, base_rev, unit, repos, pid_ticks, principal, owner, session_id,
+                  session_source, transcript_path, last_activity_at, room_id,
+                  CASE WHEN role = 'review' THEN id END FROM runs""",
+          "DROP TABLE runs",
+          "ALTER TABLE runs_v8 RENAME TO runs",
+          "CREATE INDEX idx_runs_project ON runs(project)",
+          "CREATE INDEX idx_runs_spec ON runs(spec_id)",
+          "CREATE INDEX idx_runs_room ON runs(room_id)",
+          "CREATE INDEX idx_runs_review ON runs(review_id)");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

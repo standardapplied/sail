@@ -26,11 +26,12 @@ import java.util.Optional;
 
 /**
  * The one run-launch engine every lane shares: stage the run-scoped task and session files, build
- * and run the launch command for the run's own systemd unit, and — once the process is confirmed —
- * verify it against a concurrent cancel and publish {@code agent_session_started}. The build,
- * ad-hoc, and room lanes differ only in the {@link LaunchSpec} they fill and the {@link RunContext}
- * they finish with; keeping the sequence here means the reserve→launch→verify→publish shape has a
- * single definition rather than a copy per lane.
+ * and run the launch command for the run's own systemd unit, spawn the watcher that holds the run
+ * to its lane's limits, and — once the process is confirmed — verify it against a concurrent cancel
+ * and publish {@code agent_session_started}. The build, ad-hoc, room, review and fix lanes differ
+ * only in the {@link LaunchSpec} they fill and the {@link RunContext} they finish with; keeping the
+ * sequence here means the reserve→launch→verify→publish shape has a single definition rather than a
+ * copy per lane.
  */
 public final class RunLauncher {
 
@@ -63,11 +64,12 @@ public final class RunLauncher {
 
   /**
    * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
-   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, and room lanes
-   * differ only in the fields they fill: a build carries a spec id, model, and reasoning effort; an
-   * ad-hoc a blank spec id; a room a viewer role and no repo reservation. {@code task}, {@code
-   * branch}, and {@code repoPaths} stage the session file and so are unused when only the launch
-   * command is built.
+   * than the 16-way signature the lanes used to spread by hand. The lanes differ only in the fields
+   * they fill: a build carries a spec id, model, and reasoning effort; an ad-hoc a blank spec id; a
+   * room a viewer role and no repo reservation; a reviewer and a fix agent the spec they serve.
+   * {@code task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused
+   * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
+   * {@code runId}: one shape for every lane, so no launch names its own.
    */
   record LaunchSpec(
       String project,
@@ -82,11 +84,15 @@ public final class RunLauncher {
       String branch,
       List<String> repoPaths,
       boolean background,
-      AgentUnit unit,
       String runId,
       String runCredential,
       String role,
-      String resumeSessionId) {}
+      String resumeSessionId) {
+
+    AgentUnit unit() {
+      return AgentUnit.forRun(runId);
+    }
+  }
 
   /**
    * The run identity the post-launch tail needs to verify the process, complete a foreground run,
@@ -113,7 +119,6 @@ public final class RunLauncher {
       boolean background,
       Spec spec,
       String agentType,
-      AgentUnit unit,
       String runId,
       String runCredential) {
     return launchSession(
@@ -130,7 +135,6 @@ public final class RunLauncher {
             branch,
             targetRepos.stream().map(SailYaml.Repo::path).toList(),
             background,
-            unit,
             runId,
             runCredential,
             Lane.BUILD.wire(),
@@ -187,8 +191,7 @@ public final class RunLauncher {
         if (exitCode != 0) {
           throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
         }
-        return new LaunchOutcome(
-            exitCode, launchWatcherIfAgent(s.project(), s.config(), s.runId(), s.unit()));
+        return new LaunchOutcome(exitCode, launchWatcherIfAgent(s));
       }
       return new LaunchOutcome(exitCode, Optional.empty());
     } catch (ApiException e) {
@@ -249,21 +252,23 @@ public final class RunLauncher {
 
   /**
    * Spawns the detached run-addressed watcher whenever the project declares an agent block —
-   * supervision is on by default, with {@code Guardrails.defaults()} applying when none are
-   * declared, and the watcher is also the authoritative stop observer the review pipeline depends
-   * on. One watcher per dispatch, supervising exactly this run's recorded unit.
+   * supervision is on by default, under the limits of the run's lane ({@link
+   * SailYaml.Agent#guardrailsFor}) as the project sets them at this launch, and the watcher is also
+   * the authoritative stop observer the review pipeline advances on. One watcher per run,
+   * supervising exactly this run's unit.
    */
-  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(
-      String project, SailYaml config, String runId, AgentUnit unit) throws IOException {
-    if (config.agent() == null) {
+  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(LaunchSpec s) throws IOException {
+    var agent = s.config().agent();
+    if (agent == null) {
       return Optional.empty();
     }
     return Optional.of(
         watcherSpawner.spawnForRun(
-            project,
-            SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-            runId,
-            unit.unitName()));
+            s.project(),
+            SailPaths.resolveSailYaml(s.project(), file).toAbsolutePath(),
+            s.runId(),
+            s.unit().unitName(),
+            agent.guardrailsFor(Lane.of(s.role()).orElse(null))));
   }
 
   /**

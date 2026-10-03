@@ -6,14 +6,20 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ReviewWiringTest {
 
@@ -82,9 +88,40 @@ class ReviewWiringTest {
   }
 
   @Test
-  void controllerFactoryAssemblesAReviewPipelineController() {
-    try (var controller = ReviewWiring.controller(null, null, null, p -> null, null, () -> {})) {
-      assertNotNull(controller);
+  void aBlockThatNamesNoStagesGetsTheDefaultReview() {
+    var sail =
+        SailYaml.fromMap(
+            Map.of(
+                "name",
+                "acme",
+                "agent",
+                Map.of(
+                    "type",
+                    "claude-code",
+                    "review_pipeline",
+                    Map.of("guardrails", Map.of("max_duration", "90m")))));
+
+    var resolved = ReviewWiring.configResolver(p -> sail).apply("acme");
+
+    assertEquals("review", resolved.stages().getFirst().name());
+  }
+
+  @Test
+  void controllerFactoryAssemblesAReviewPipelineController(@TempDir Path dir) {
+    try (var db = Sqlite.open(dir.resolve("wiring.db"))) {
+      new SchemaManager(db).migrate();
+
+      var controller =
+          ReviewWiring.controller(
+              new SpecStore(db),
+              new ReviewStore(db),
+              new RunStore(db),
+              null,
+              p -> null,
+              new NoReviewLanes(),
+              () -> {},
+              () -> "node-a");
+
       assertEquals("review-pipeline", controller.name());
     }
   }

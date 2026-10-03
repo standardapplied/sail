@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
@@ -155,7 +156,20 @@ class BoxRunsSyncTest {
     var liveAdhoc = reserve(ada, null, null, "adhoc");
     var review = DateTimeUtils.newId().toString();
     Acting.system(
-        () -> runs(ada).createReview(review, "acme", "mine", null, "codex", "b", "t", "/l", "u"));
+        () ->
+            runs(ada)
+                .createForReview(
+                    review,
+                    review,
+                    "acme",
+                    "mine",
+                    null,
+                    Lane.REVIEW,
+                    "codex",
+                    "b",
+                    "t",
+                    "/l",
+                    "u"));
     var agent = agentOf(ada, build);
     var posted =
         Acting.by(
@@ -470,7 +484,20 @@ class BoxRunsSyncTest {
     var reviews = new ReviewStore(ada.db);
     var review = Acting.system(() -> reviews.createReview("mine", 1));
     Acting.system(
-        () -> runs(ada).createReview(review, "acme", "mine", "ada", "codex", "b", "t", "/l", "u"));
+        () ->
+            runs(ada)
+                .createForReview(
+                    review,
+                    review,
+                    "acme",
+                    "mine",
+                    "ada",
+                    Lane.REVIEW,
+                    "codex",
+                    "b",
+                    "t",
+                    "/l",
+                    "u"));
     Acting.system(() -> reviews.updateReviewStatus(review, "running"));
     Acting.system(() -> reviews.createStage(review, "sign-off", "human"));
     finish(ada, review);
@@ -493,7 +520,18 @@ class BoxRunsSyncTest {
       Acting.system(
           () ->
               runs(bob)
-                  .createReview(review, "acme", "theirs", "bob", "codex", "b", "t", "/l", "u"));
+                  .createForReview(
+                      review,
+                      review,
+                      "acme",
+                      "theirs",
+                      "bob",
+                      Lane.REVIEW,
+                      "codex",
+                      "b",
+                      "t",
+                      "/l",
+                      "u"));
       Acting.system(() -> reviews.updateReviewStatus(review, "running"));
       SyncBox.quiesce(main, bob, ada);
 

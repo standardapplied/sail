@@ -7,27 +7,30 @@ package ai.singlr.sail.config;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
- * Agent guardrail configuration parsed from the {@code guardrails} block inside {@code agent} in
- * sail.yaml. Two time-based guardrails are enforced: a hard wall-clock ceiling ({@code
- * max_duration}) and an idle/stall window ({@code max_idle}). The stall window measures time since
- * the agent's last <em>progress event</em> (a tool call or log chunk) — not git activity. The
- * earlier git-based idle timeout was removed because an agent working without committing looked
- * idle; the agent event stream does not have that blind spot, so it distinguishes a long build from
- * a hung agent. Quality assessment still happens post-task via {@code agent review}.
+ * The limits one agent run is held to: a hard wall-clock ceiling ({@code max_duration}) and an
+ * idle/stall window ({@code max_idle}), with what to do when either is crossed. The one limits type
+ * every lane reads: {@code agent.guardrails} in sail.yaml bounds a build, an ad-hoc run and a chat
+ * turn, {@code agent.review_pipeline.guardrails} a reviewer and a fix agent, and both blocks parse
+ * here. The stall window measures time since the agent's last <em>progress event</em> (a tool call
+ * or log chunk) — not git activity. The earlier git-based idle timeout was removed because an agent
+ * working without committing looked idle; the agent event stream does not have that blind spot, so
+ * it distinguishes a long build from a hung agent. Quality assessment still happens post-task via
+ * {@code agent review}.
  *
- * @param maxDuration hard wall-clock stop (e.g. "4h", "90m")
- * @param maxIdle stall window — act when no progress event arrives for this long (e.g. "15m")
+ * @param maxDuration hard wall-clock stop (e.g. "4h", "90m"); null for none
+ * @param maxIdle stall window — act when no progress event arrives for this long (e.g. "15m"); null
+ *     for none
  * @param action what to do on trigger: stop, snapshot-and-stop, notify
  */
 public record Guardrails(String maxDuration, String maxIdle, String action) {
 
-  private static final Set<String> VALID_ACTIONS = Set.of("stop", "snapshot-and-stop", "notify");
+  private static final List<String> VALID_ACTIONS = List.of("stop", "snapshot-and-stop", "notify");
   private static final Pattern DURATION_PATTERN = Pattern.compile("^(\\d+)([hms])$");
 
   /**
@@ -39,6 +42,36 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
     return new Guardrails("4h", "20m", "stop");
   }
 
+  /**
+   * The supervision a reviewer and a fix agent get when {@code sail.yaml} configures no {@code
+   * review_pipeline.guardrails} block: 45 minutes of wall clock, enough for a fix that runs the
+   * project's full verification, and the build lane's 20m stall window, stopping the agent on
+   * either.
+   */
+  public static Guardrails reviewDefaults() {
+    return new Guardrails("45m", "20m", "stop");
+  }
+
+  /**
+   * The limits named by their three values, each checked: a duration in a form {@link
+   * #parseDuration} accepts or null, and an action sail knows.
+   *
+   * @throws IllegalArgumentException naming the accepted forms when a value is not one
+   */
+  public static Guardrails of(String maxDuration, String maxIdle, String action) {
+    parseDuration(maxDuration);
+    parseDuration(maxIdle);
+    var chosen = Objects.requireNonNullElse(action, "stop");
+    if (!VALID_ACTIONS.contains(chosen)) {
+      throw new IllegalArgumentException(
+          "Invalid guardrail action: '"
+              + chosen
+              + "'. Valid values: "
+              + String.join(", ", VALID_ACTIONS));
+    }
+    return new Guardrails(maxDuration, maxIdle, chosen);
+  }
+
   /** Parses a Guardrails record from a YAML map. */
   public static Guardrails fromMap(Map<String, Object> map) {
     return fromMap(map, "sail.yaml");
@@ -47,19 +80,25 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
   static Guardrails fromMap(Map<String, Object> map, String descriptor) {
     rejectRetiredKey(map, "idle_timeout", "max_idle", descriptor);
     rejectRetiredKey(map, "commit_burst", "max_idle", descriptor);
-    var maxDuration = (String) map.get("max_duration");
-    var maxIdle = (String) map.get("max_idle");
+    return of(
+        duration(map, "max_duration", descriptor),
+        duration(map, "max_idle", descriptor),
+        (String) map.get("action"));
+  }
 
-    var action = Objects.requireNonNullElse((String) map.get("action"), "stop");
-    if (!VALID_ACTIONS.contains(action)) {
-      throw new IllegalArgumentException(
-          "Invalid guardrail action: '"
-              + action
-              + "'. Valid values: "
-              + String.join(", ", VALID_ACTIONS));
+  private static String duration(Map<String, Object> map, String key, String descriptor) {
+    var raw = map.get(key);
+    if (raw == null) {
+      return null;
     }
-
-    return new Guardrails(maxDuration, maxIdle, action);
+    var value = raw.toString().strip();
+    try {
+      parseDuration(value);
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          "Invalid guardrail `" + key + "` in " + descriptor + ": " + e.getMessage(), e);
+    }
+    return value;
   }
 
   private static void rejectRetiredKey(

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -1229,23 +1230,34 @@ class StopOperationsTest {
   }
 
   @Test
-  void stoppingAReviewRunIsRefusedWithInvalidRole() throws Exception {
-    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+  void stoppingAReviewerRunHaltsItLikeAnySessionAndLeavesItsSpecToTheLoop() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent.pid", "456")
+            .on("kill -0 456", "")
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent-session.json", "{\"task\": \"review\"}");
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> shell.on("kill -0 456", new ShellExec.Result(1, "", "")),
+            StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
-    seedRun(123, UNIT);
     seedReviewRun();
 
-    var refusal =
-        assertThrows(
-            ApiException.class,
-            () ->
-                Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, false)));
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, false));
 
-    assertEquals(ErrorCode.INVALID_ROLE, refusal.failure().errorCode());
-    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertFalse(
+        stopped.specCancelled(),
+        "a reviewer is not its spec's build attempt: stopping it cancels no spec, and the review"
+            + " loop escalates the review it served");
+    assertEquals("stopped", runStore.findById(R2).orElseThrow().status());
     assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
-    assertTrue(events.isEmpty());
+    assertEquals(
+        List.of(Event.WellKnownTypes.AGENT_CANCELLED), events.stream().map(Event::type).toList());
+    assertEquals(R2, events.getFirst().data().get(Event.WellKnownData.RUN_ID));
   }
 
   @Test
@@ -1503,11 +1515,13 @@ class StopOperationsTest {
   }
 
   private void seedReviewRun() {
-    runStore.createReview(
+    runStore.createForReview(
+        R2,
         R2,
         "acme",
         "auth",
         LOCAL_HANDLE,
+        Lane.REVIEW,
         "codex",
         "feat/auth",
         "review",

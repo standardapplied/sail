@@ -158,4 +158,38 @@ class GuardrailsTest {
     assertNull(guardrails.maxIdle());
     assertFalse(guardrails.toMap().containsKey("max_idle"));
   }
+
+  @Test
+  void anInvalidDurationIsRefusedWhereTheBlockIsParsedNamingItsKeyAndTheAcceptedForms() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Guardrails.fromMap(Map.of("max_duration", "45 minutes")));
+
+    assertTrue(refused.getMessage().contains("`max_duration`"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("sail.yaml"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+  }
+
+  @Test
+  void aBareNumberForAStallWindowIsRefusedRatherThanReadAsNoLimit() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class, () -> Guardrails.fromMap(Map.of("max_idle", 20)));
+
+    assertTrue(refused.getMessage().contains("`max_idle`"), refused.getMessage());
+  }
+
+  @Test
+  void theReviewLanesDefaultIsItsOwnAndShorterThanTheBuildLanes() {
+    assertEquals(new Guardrails("4h", "20m", "stop"), Guardrails.defaults());
+    assertEquals(new Guardrails("45m", "20m", "stop"), Guardrails.reviewDefaults());
+  }
+
+  @Test
+  void limitsNamedByTheirValuesAreCheckedLikeAParsedBlock() {
+    assertEquals(new Guardrails("90m", null, "stop"), Guardrails.of("90m", null, null));
+    assertThrows(IllegalArgumentException.class, () -> Guardrails.of("90m", "soon", "stop"));
+    assertThrows(IllegalArgumentException.class, () -> Guardrails.of("90m", "20m", "explode"));
+  }
 }

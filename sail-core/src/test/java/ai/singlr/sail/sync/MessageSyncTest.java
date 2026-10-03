@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -109,7 +110,8 @@ class MessageSyncTest {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createReview(runId, "acme", "room", "node", "codex", "b", "t", "/log", "unit");
+    runs.createForReview(
+        runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", "b", "t", "/log", "unit");
     var principal = runs.findById(runId).orElseThrow().principal();
     var question = node.messages.append("room", principal, "Which flow?", null, true);
     var engine = new SyncEngine();
@@ -151,33 +153,6 @@ class MessageSyncTest {
   }
 
   @Test
-  void aMessageAuthoredBeforePrincipalRotationStillSyncs() {
-    var reviewId = "019fee00-0000-7000-8000-0000000000aa";
-    main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
-    var runs = new RunStore(main.db);
-    runs.createReview(reviewId, "acme", "room", "node", "codex", "b", "t", "/log", "unit");
-    var reviewerPrincipal = runs.findById(reviewId).orElseThrow().principal();
-    runs.rotateCredential(reviewId, "claude-code", "fix");
-
-    var accepted =
-        Actor.call(
-            Actor.sync("node", Role.MEMBER),
-            () ->
-                main.messages.commitRevision(
-                    "019fee00-0000-7000-8000-0000000000ab",
-                    snapshot(reviewerPrincipal, "room"),
-                    null,
-                    main.messages.authority()));
-
-    assertTrue(
-        accepted instanceof PushOutcome.Accepted,
-        "a reviewer-authored message that synchronizes after the fix lane rotated the run's"
-            + " principal authenticates against the replicated history, never wedging sync");
-
-    assertConverged();
-  }
-
-  @Test
   void aSpecRowGrantsPostingAuthorityBeforeItsRoomRowArrives() {
     main.db.execute(
         """
@@ -205,11 +180,13 @@ class MessageSyncTest {
   void thePipelineNarratorSyncsFromTheBoxThatRanTheReview() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createReview(
+    runs.createForReview(
+        "019fee00-0000-7000-8000-0000000000bb",
         "019fee00-0000-7000-8000-0000000000bb",
         "acme",
         "room",
         "node",
+        Lane.REVIEW,
         "codex",
         "b",
         "t",

@@ -5,10 +5,10 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
@@ -101,15 +101,11 @@ final class HostLanes {
     }
 
     @Override
-    public String reviewLog(String project, String node) {
+    public Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane) {
       return runs.listForProject(project).stream()
-          .filter(RunStore.RunRow::buildRole)
+          .filter(run -> lane.matches(run.role()))
           .filter(run -> run.ownedBy(node))
-          .findFirst()
-          .map(RunStore.RunRow::specId)
-          .flatMap(reviews::latestReviewForSpec)
-          .map(review -> AgentUnit.forReview(review.id()).logPath())
-          .orElseGet(AgentUnit.REVIEW::logPath);
+          .findFirst();
     }
   }
 

@@ -52,93 +52,17 @@ class AgentUnitTest {
   void runScopedIdentitiesRejectANonCanonicalRunId() {
     assertThrows(IllegalArgumentException.class, () -> AgentUnit.forRun("../escape"));
     assertThrows(IllegalArgumentException.class, () -> AgentUnit.recorded("$(rm -rf)", "unit"));
-    assertThrows(IllegalArgumentException.class, () -> AgentUnit.forReview("../escape"));
   }
 
   @Test
-  void reviewTemplateKeepsItsFixedFallbackPaths() {
-    assertEquals("sail-review", AgentUnit.REVIEW.unitName());
-    assertEquals("sail-review.service", AgentUnit.REVIEW.service());
-    assertEquals("/home/dev/.sail/review.log", AgentUnit.REVIEW.logPath());
-  }
+  void theGuardrailTriggerIsRecordedBesideTheRunsOwnFiles() {
+    var unit = AgentUnit.forRun(RUN_A);
 
-  @Test
-  void forReviewDerivesTheWholeIdentityUnderTheReviewsOwnDir() {
-    var reviewId = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
-
-    var unit = AgentUnit.forReview(reviewId);
-
-    assertEquals("sail-review-" + reviewId, unit.unitName());
-    assertEquals("/home/dev/.sail/runs/" + reviewId + "/review.log", unit.logPath());
-    assertEquals("/home/dev/.sail/runs/" + reviewId + "/review-prompt.txt", unit.taskPath());
     assertEquals(
-        "/home/dev/.sail/runs/" + reviewId + "/agent-session.json",
-        unit.sessionPath(),
-        "the stop gate resolves RUN_ID/agent-session.json, so the fix lane's repo scoping"
-            + " only works when the review unit names exactly that file");
-    assertEquals(
-        unit.logPath(),
-        AgentUnit.REVIEW.runLogPath(reviewId),
-        "the review-role log endpoints resolve exactly the file the review writes");
-  }
-
-  @Test
-  void twoReviewsGetFullyDisjointIdentities() {
-    var a = AgentUnit.forReview("cccccccc-cccc-4ccc-8ccc-cccccccccccc");
-    var b = AgentUnit.forReview("dddddddd-dddd-4ddd-8ddd-dddddddddddd");
-
-    assertNotEquals(a.logPath(), b.logPath());
-    assertNotEquals(a.taskPath(), b.taskPath());
-  }
-
-  @Test
-  void aRunAndAReviewOfTheSameIdNeverShareFiles() {
-    var run = AgentUnit.forRun(RUN_A);
-    var review = AgentUnit.forReview(RUN_A);
-
-    assertNotEquals(run.unitName(), review.unitName());
-    assertNotEquals(run.logPath(), review.logPath());
-    assertNotEquals(run.pidPath(), review.pidPath());
-    assertEquals(
-        run.sessionPath(),
-        review.sessionPath(),
-        "the session filename is the one deliberate overlap: the stop gate resolves"
-            + " RUN_ID/agent-session.json for whichever lane armed it, and run ids and review"
-            + " ids are minted from disjoint UUID sequences so the same id never names both");
-    assertNotEquals(run.taskPath(), review.taskPath());
-  }
-
-  @Test
-  void logPathForRoleResolvesBuildAndAdhocToTheRunsAgentLog() {
-    assertEquals(
-        "/home/dev/.sail/runs/" + RUN_A + "/agent.log", AgentUnit.logPathForRole("build", RUN_A));
-    assertEquals(
-        "/home/dev/.sail/runs/" + RUN_A + "/agent.log", AgentUnit.logPathForRole("adhoc", RUN_A));
-  }
-
-  @Test
-  void logPathForRoleResolvesReviewToTheRunsReviewLog() {
-    assertEquals(
-        "/home/dev/.sail/runs/" + RUN_A + "/review.log", AgentUnit.logPathForRole("review", RUN_A));
-  }
-
-  @Test
-  void logPathForRoleRejectsUnknownRole() {
-    assertThrows(IllegalArgumentException.class, () -> AgentUnit.logPathForRole("bogus", RUN_A));
-  }
-
-  @Test
-  void logPathForRoleRejectsANonCanonicalRunId() {
-    assertThrows(
-        IllegalArgumentException.class, () -> AgentUnit.logPathForRole("build", "../escape"));
-  }
-
-  @Test
-  void runScopedLogPathsNameExactlyOneExecutionUnderTheRunDir() {
-    assertEquals("/home/dev/.sail/runs/" + RUN_A, AgentUnit.runDir(RUN_A));
+        AgentUnit.runDir(RUN_A) + "/guardrail-triggered.yaml", unit.guardrailTriggerPath());
     assertNotEquals(
-        AgentUnit.logPathForRole("build", RUN_A),
-        AgentUnit.logPathForRole("build", RUN_B),
-        "two runs get isolated logs");
+        unit.guardrailTriggerPath(),
+        AgentUnit.forRun(RUN_B).guardrailTriggerPath(),
+        "two runs in one container never share a trigger file");
   }
 }

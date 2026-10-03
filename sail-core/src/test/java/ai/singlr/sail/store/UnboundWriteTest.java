@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import java.io.ByteArrayInputStream;
@@ -92,11 +93,13 @@ class UnboundWriteTest {
     assertRefused(
         () ->
             new RunStore(db)
-                .createReview(
+                .createForReview(
+                    "review-1",
                     "review-1",
                     "acme",
                     "auth",
                     "node-a",
+                    Lane.REVIEW,
                     "claude-code",
                     "main",
                     "review it",
