@@ -335,7 +335,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   /**
    * Plays the watcher for one run: waits for its unit to go inactive, reads the exit the way the
    * watcher reads it — from systemd, falling back to the run's session file once the transient unit
-   * is collected — and publishes the stop the watcher would.
+   * is collected — and publishes the stop the watcher would. A unit that reads inactive before its
+   * session file names the run has not been launched yet — the run's row is written first — and,
+   * like the watcher, this waits for it.
    */
   private void watcherObservesTheExitOf(RunStore.RunRow run) throws Exception {
     var session = new AgentSession(shell);
@@ -343,9 +345,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var deadline = Instant.now().plus(PATIENCE);
     while (Instant.now().isBefore(deadline)) {
       var exit = session.queryExitStatus(CONTAINER, unit);
-      if (!exit.active()) {
-        assertEquals(run.id(), exit.runId(), "the stop addresses the run it ends");
-        assertEquals(run.role(), exit.role(), "and names its lane");
+      if (!exit.active() && run.id().equals(exit.runId())) {
+        assertEquals(run.role(), exit.role(), "the stop names the lane of the run it ends");
         bus.publish(
             RunStops.of(
                 Event.WellKnownData.SOURCE_WATCHER,
