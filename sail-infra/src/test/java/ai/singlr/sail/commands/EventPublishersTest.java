@@ -19,6 +19,7 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SpecLifecycleReactor;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestAuth;
@@ -59,8 +60,9 @@ import org.junit.jupiter.api.io.TempDir;
  * Every legitimate publisher still lands its events, each through its real code path to a live
  * server's door: the host CLI's dispatch, restart, ad-hoc run and stop, and the watcher's stop, on
  * a node whose FDE is a member; a node's sync announcing what it pulled; and main's sync server
- * relaying a node's finished run and its post. Each lands with the publisher the server
- * authenticated: the box's FDE, whom its host token acts as.
+ * relaying a node's finished run. Each lands with the publisher the server authenticated: the box's
+ * FDE, whom its host token acts as, or for main's relay the FDE who pushed, whose session the
+ * gateway hands it. A run a node pushed on another member's spec is not relayed as that spec's.
  */
 class EventPublishersTest {
 
@@ -227,29 +229,14 @@ class EventPublishersTest {
   }
 
   @Test
-  void mainsSyncServerRelaysANodesFinishedRunThroughTheRealBridge() throws Exception {
+  void mainsSyncServerRelaysANodesFinishedRunAsTheFdeWhoPushedIt() throws Exception {
     serve(MAIN, "admin");
-    new FdeStore(box.db).add("mady", null, null, "member");
+    relayAs("mady");
     seedSpec(box, "auth", "mady");
-    box.transitions(SyncServerCommand.transitionBridge(box.db, "main"));
     try (var node = new SyncBox("mady")) {
       SyncBox.round(box, node);
       var runs = new RunStore(node.db);
-      var run = DateTimeUtils.newId().toString();
-      Acting.system(
-          () ->
-              runs.reserveDispatch(
-                  run,
-                  "acme",
-                  "auth",
-                  "mady",
-                  "build",
-                  List.of(),
-                  "claude-code",
-                  "b",
-                  "t",
-                  "l",
-                  "u"));
+      var run = startRunOn(runs, "auth");
       SyncBox.round(box, node);
       landed.clear();
       Acting.system(() -> runs.transition(run, "running", "stopped", 2));
@@ -260,14 +247,59 @@ class EventPublishersTest {
       assertEquals(
           List.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_FAILED),
           relayed);
-      var admin = new Event.Publisher("uday", "admin", "api");
-      assertTrue(landed.stream().allMatch(event -> admin.equals(event.publisher())));
-      var stop = landed.getFirst();
-      assertEquals(run, stop.data().get(Event.WellKnownData.RUN_ID));
-      assertEquals(Event.WellKnownData.SOURCE_SYNC, stop.data().get(Event.WellKnownData.SOURCE));
-      assertEquals("auth", stop.spec());
-      assertEquals("acme", stop.project());
+      var pusher = new Event.Publisher("mady", "member", "api");
+      assertTrue(landed.stream().allMatch(event -> pusher.equals(event.publisher())));
+      for (var event : landed) {
+        assertEquals(run, event.data().get(Event.WellKnownData.RUN_ID));
+        assertEquals(Event.WellKnownData.SOURCE_SYNC, event.data().get(Event.WellKnownData.SOURCE));
+        assertEquals("auth", event.spec());
+        assertEquals("acme", event.project());
+      }
     }
+  }
+
+  @Test
+  void aRunANodePushedOnAnotherMembersSpecIsNotRelayedAsThatSpecsStop() throws Exception {
+    serve(MAIN, "admin");
+    relayAs("mady");
+    new FdeStore(box.db).add("bob", null, null, "member");
+    seedSpec(box, "theirs", "bob");
+    Acting.system(
+        () -> box.specs.compareAndSetStatus("theirs", SpecStatus.PENDING, SpecStatus.IN_PROGRESS));
+    bus.subscribe(new SpecLifecycleReactor(box.specs));
+    try (var node = new SyncBox("mady")) {
+      SyncBox.round(box, node);
+      var runs = new RunStore(node.db);
+      var forged = startRunOn(runs, "theirs");
+      SyncBox.round(box, node);
+      landed.clear();
+      Acting.system(() -> runs.transition(forged, "running", "stopped", 2));
+
+      SyncBox.round(box, node);
+
+      assertEquals(
+          "stopped",
+          new RunStore(box.db).findById(forged).orElseThrow().status(),
+          "main took the run, so its bridge was handed the transition");
+      assertEquals(List.of(), landed.stream().map(Event::type).toList());
+      assertEquals(SpecStatus.IN_PROGRESS, box.specs.findById("theirs").orElseThrow().status());
+    }
+  }
+
+  private void relayAs(String pusher) {
+    var fde = new FdeStore(box.db).add(pusher, null, null, "member");
+    System.setProperty(
+        "SAIL_TOKEN", new TokenStore(box.db).create(pusher, "member", fde.id(), null).token());
+    box.transitions(SyncServerCommand.transitionBridge(box.db, "main"));
+  }
+
+  private static String startRunOn(RunStore runs, String spec) {
+    var run = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            runs.reserveDispatch(
+                run, "acme", spec, "mady", "build", List.of(), "claude-code", "b", "t", "l", "u"));
+    return run;
   }
 
   private void serve(SyncConfig config, String role) throws IOException {

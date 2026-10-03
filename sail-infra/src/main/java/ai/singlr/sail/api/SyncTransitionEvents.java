@@ -120,9 +120,9 @@ public final class SyncTransitionEvents {
 
   /**
    * A run reaching a terminal status is the agent's authoritative stop; a non-zero exit code also
-   * carries today's {@code agent_failed} follow-up. The run id rides along so run-addressed
-   * consumers can correlate — main's own run tracker ignores it, since the run belongs to the
-   * pushing node.
+   * carries today's {@code agent_failed} follow-up. The run id rides along on both, so the event
+   * door decides each by the run it names and run-addressed consumers can correlate — main's own
+   * run tracker ignores it, since the run belongs to the pushing node.
    */
   private static List<Event> runEvents(SyncTransition transition, String host) {
     var project = text(transition.snapshot(), "project");
@@ -153,7 +153,8 @@ public final class SyncTransitionEvents {
             Event.WellKnownTypes.AGENT_FAILED,
             Event.SAIL_AGENT,
             host,
-            Map.of("detail", "exit " + exitCode));
+            Map.of(
+                "detail", "exit " + exitCode, Event.WellKnownData.RUN_ID, transition.entityId()));
     return List.of(stopped, failed);
   }
 

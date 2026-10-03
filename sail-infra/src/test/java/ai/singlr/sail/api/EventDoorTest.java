@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -52,9 +53,11 @@ import org.junit.jupiter.params.provider.ValueSource;
  * A3 at both doors, on main, through the real HTTP server and the real socket router with the real
  * subscribers behind them: an event drives only what its sender may drive. A member's stop, failure
  * or review evidence for another member's spec, run or room never reaches the bus, so nothing
- * moves, launches, notifies or counts as evidence; a type the rule does not list is refused from
- * everyone; an owner's and an admin's events land; and what lands carries the server's clock, the
- * publisher the server authenticated, and the project and conversation of the run it names.
+ * moves, launches, notifies or counts as evidence; a run a member pushed is no key to the spec it
+ * names; a member is never taken at their word for what this box observed, so their event starts no
+ * review and finishes no run; a type the rule does not list is refused from everyone; an owner's
+ * retelling and an admin's report land; and what lands carries the server's clock, the publisher
+ * the server authenticated, and the project and conversation of the run it names.
  */
 class EventDoorTest {
 
@@ -210,12 +213,12 @@ class EventDoorTest {
   }
 
   @Test
-  void aRunAMemberOwnsNeverCarriesItsEventToAnotherMembersSpec() throws Exception {
-    var run = reserve("mine", null, "build");
+  void aRunDecidesWhatItsEventIsAboutWhateverSpecItsSenderNames() throws Exception {
+    var run = reserveOn("ada", "mine", null, "build");
     var delivered = new CountDownLatch(1);
     bus.subscribe(BusTesting.latching(new SpecLifecycleReactor(specs), delivered));
 
-    var response = publish(adaToken, event("theirs", "elsewhere", STOPPED, watcherStop(run)));
+    var response = publish(adaToken, event("theirs", "elsewhere", STOPPED, retoldStop(run)));
 
     var landed = landed(response);
     assertEquals("mine", landed.spec());
@@ -226,14 +229,44 @@ class EventDoorTest {
   }
 
   @Test
-  void anOwnersAndAnAdminsEventsLandAndDriveTheMachinery() throws Exception {
+  void aRunAMemberPushedIsNoKeyToAnotherMembersSpec() throws Exception {
+    var forged = reserveOn("ada", "theirs", null, "build");
+    bus.subscribe(new SpecLifecycleReactor(specs));
+
+    var retold = publish(adaToken, event("mine", STOPPED, retoldStop(forged)));
+    var observed = publish(adaToken, event("mine", STOPPED, watcherStop(forged)));
+
+    assertRefused(retold, "forbidden_not_assignee", STOPPED, "of 'theirs' (owned by 'bob')");
+    assertRefused(observed, "forbidden_not_assignee", STOPPED, "of 'theirs' (owned by 'bob')");
+    assertEquals(SpecStatus.IN_PROGRESS, specs.findById("theirs").orElseThrow().status());
+  }
+
+  @Test
+  void anOwnerIsNotTakenAtTheirWordForWhatThisBoxObserved() throws Exception {
+    var local = reserve("theirs", null, "build");
+    bus.subscribe(new RunTracker(runs, SyncScheduler.disabled(), () -> "root"));
+
+    var unnamed = publish(bobToken, event("theirs", STOPPED, watcherStop(null)));
+    var named = publish(bobToken, event("theirs", STOPPED, retoldStop(local)));
+
+    assertRefused(unnamed, "forbidden_not_assignee", STOPPED, "reports what this box observed");
+    assertRefused(named, "forbidden_not_assignee", STOPPED, "reports what this box observed");
+    assertEquals("running", runs.findById(local).orElseThrow().status());
+  }
+
+  @Test
+  void anOwnersRetellingAndAnAdminsReportLandAndDriveTheMachinery() throws Exception {
     var delivered = new CountDownLatch(2);
     bus.subscribe(BusTesting.latching(new SpecLifecycleReactor(specs), delivered));
 
-    var owners = publish(bobToken, event("theirs", STOPPED, watcherStop(null)));
+    var owners = publish(bobToken, event("theirs", STOPPED, retoldStop(null)));
     var admins = publish(rootToken, event("mine", STOPPED, watcherStop(null)));
 
     assertEquals(new Event.Publisher("bob", "member", "api"), landed(owners).publisher());
+    assertEquals(
+        Event.WellKnownData.SOURCE_SYNC,
+        landed(owners).data().get(Event.WellKnownData.SOURCE),
+        "a retelling starts no review and finishes no run here");
     assertEquals(new Event.Publisher("root", "admin", "api"), landed(admins).publisher());
     BusTesting.awaitDelivery(delivered);
     assertEquals(SpecStatus.REVIEW, specs.findById("theirs").orElseThrow().status());
@@ -259,13 +292,36 @@ class EventDoorTest {
   }
 
   @Test
-  void aMemberCannotAnnounceAMessage() throws Exception {
+  void aMemberWithNoVoiceInAConversationCannotAnnounceAMessageInIt() throws Exception {
     var message = Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "hi", null));
+    var announcement =
+        Map.<String, Object>of(
+            "message_id",
+            message.id(),
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_SYNC);
 
-    var response =
-        publish(adaToken, event("den", "spec_message_posted", Map.of("message_id", message.id())));
+    var response = publish(adaToken, event("mine", "spec_message_posted", announcement));
 
-    assertRefused(response, "forbidden_not_assignee", "spec_message_posted", "speaks for this box");
+    assertRefused(
+        response, "forbidden_not_assignee", "spec_message_posted", "'den' (owned by 'bob')");
+  }
+
+  @Test
+  void whoMayPostInAConversationRetellsAMessageInItAndNothingElse() throws Exception {
+    var message = Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "hi", null));
+    var asObserved = Map.<String, Object>of("message_id", message.id(), "preview", "forged");
+    var retold = new LinkedHashMap<>(asObserved);
+    retold.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_SYNC);
+
+    var refused = publish(bobToken, event("den", "spec_message_posted", asObserved));
+    assertRefused(refused, "forbidden_not_assignee", "spec_message_posted", "this box observed");
+    var landed = landed(publish(bobToken, event("mine", "spec_message_posted", retold)));
+
+    assertEquals("den", landed.spec());
+    assertEquals("bob", landed.agent());
+    assertEquals("hi", landed.data().get("preview"));
+    assertEquals(new Event.Publisher("bob", "member", "api"), landed.publisher());
   }
 
   @Test
@@ -310,7 +366,9 @@ class EventDoorTest {
   void theServerStampsItsOwnClockAndThePublisherItAuthenticated() throws Exception {
     var persisted = new CountDownLatch(1);
     bus.subscribe(BusTesting.latching(new SpecStoreAuditPersister(new EventStore(db)), persisted));
-    var offered = new LinkedHashMap<>(Event.of("acme", "mine", STOPPED, "root", "box").toMap());
+    var offered =
+        new LinkedHashMap<>(
+            Event.of("acme", "mine", STOPPED, "root", "box", retoldStop(null)).toMap());
     offered.put("ts", "2999-01-01T00:00:00Z");
     offered.put("publisher", Map.of("handle", "root", "role", "admin", "lane", "system"));
     var before = Instant.now();
@@ -374,20 +432,22 @@ class EventDoorTest {
   }
 
   @Test
-  void aRoomRunsHooksNarrateItsRunUnderItsRoom() throws Exception {
+  void aRoomRunsHooksNarrateItsRunAndNameNoConversationTheSenderLeftOut() throws Exception {
     Acting.system(() -> new RoomStore(db).create(room("lobby", "root")));
     var credential = reserveReserved(null, "lobby", DispatchGate.ROOM_ROLE).credential();
     var run = runs.findByCredential(credential).orElseThrow();
-    var delivered = new CountDownLatch(1);
+    var delivered = new CountDownLatch(2);
     bus.subscribe(BusTesting.latching(recorder(), delivered));
 
-    var hook = Event.of("acme", null, Event.WellKnownTypes.AGENT_TOOL_STARTED, "claude", "h");
+    var hook = Event.of("acme", "mine", Event.WellKnownTypes.AGENT_TOOL_STARTED, "claude", "h");
     assertEquals(202, socket(credential, hook.toJsonLine()).status());
+    var stop = landed(publish(rootToken, event("mine", STOPPED, watcherStop(run.id()))));
 
     BusTesting.awaitDelivery(delivered);
-    assertEquals("lobby", reached.getFirst().spec());
+    assertNull(reached.getFirst().spec(), "the socket names a run's spec, and this run has none");
     assertEquals(
         new Event.Publisher(run.principal(), "viewer", "room"), reached.getFirst().publisher());
+    assertEquals("lobby", stop.spec(), "a conversation its sender names is the run's own");
   }
 
   @ParameterizedTest
@@ -449,8 +509,16 @@ class EventDoorTest {
   }
 
   private static Map<String, Object> watcherStop(String run) {
+    return stop(Event.WellKnownData.SOURCE_WATCHER, run);
+  }
+
+  private static Map<String, Object> retoldStop(String run) {
+    return stop(Event.WellKnownData.SOURCE_SYNC, run);
+  }
+
+  private static Map<String, Object> stop(String source, String run) {
     var data = new LinkedHashMap<String, Object>();
-    data.put(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER);
+    data.put(Event.WellKnownData.SOURCE, source);
     data.put(Event.WellKnownData.EXIT_CODE, 0);
     if (run != null) {
       data.put(Event.WellKnownData.RUN_ID, run);
@@ -500,11 +568,20 @@ class EventDoorTest {
   }
 
   private String reserve(String specId, String roomId, String role) {
-    var reserved = reserveReserved(specId, roomId, role);
+    return reserveOn("root", specId, roomId, role);
+  }
+
+  private String reserveOn(String box, String specId, String roomId, String role) {
+    var reserved = reserveReserved(box, specId, roomId, role);
     return runs.findByCredential(reserved.credential()).orElseThrow().id();
   }
 
   private RunStore.Reservation.Reserved reserveReserved(String specId, String roomId, String role) {
+    return reserveReserved("root", specId, roomId, role);
+  }
+
+  private RunStore.Reservation.Reserved reserveReserved(
+      String box, String specId, String roomId, String role) {
     var id = DateTimeUtils.newId().toString();
     return (RunStore.Reservation.Reserved)
         Acting.system(
@@ -514,7 +591,7 @@ class EventDoorTest {
                     "acme",
                     specId,
                     roomId,
-                    "root",
+                    box,
                     role,
                     List.of(),
                     "claude-code",
