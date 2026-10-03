@@ -830,9 +830,11 @@ missed-stop reconciler finishes its run.
 Holding a relayed run to the owner of the spec it works, never to the FDE who pushed it,
 has one cost: a spec an admin reassigns while another FDE's box is still running it loses
 that run's relayed stop on main, since main cannot tell that run from one its pusher wrote
-against a spec they never owned. The run finishes on its own box and the spec's status
-syncs; main narrates nothing. A run create rule on the sync lane (`sail-journal-authority`)
-is where a pushed run comes to prove it works a spec its owner held when it was reserved.
+against a spec they never owned. The run finishes on its own box; main records nothing of
+it, and since that box's move of the spec to review is denied on the sync lane for the same
+reason, the spec stays `in_progress` on both boxes until an admin moves it. A run create rule
+on the sync lane (`sail-journal-authority`) is where a pushed run comes to prove it works a
+spec its owner held when it was reserved.
 
 What each type drives, which is why its sender is checked: `SpecLifecycleReactor` moves a spec
 to `review` on `agent_session_stopped`; `ReviewPipelineController` starts a review on one this
