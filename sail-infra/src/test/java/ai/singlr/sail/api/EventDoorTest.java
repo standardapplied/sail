@@ -352,6 +352,24 @@ class EventDoorTest {
   }
 
   @Test
+  void theOwnerOfASpecBornInASpecsRoomRetellsAMessageThereButDoesNotDriveTheSpec()
+      throws Exception {
+    Acting.as("ada", () -> specs.create(spec("born", "ada").withRoomId("theirs")));
+    var message = Acting.as("ada", () -> new MessageStore(db).append("theirs", "ada", "hi", null));
+    var retold = new LinkedHashMap<String, Object>(RETOLD);
+    retold.put("message_id", message.id());
+
+    var stop = publish(adaToken, event("theirs", STOPPED, RETOLD));
+    assertRefused(stop, "forbidden_not_assignee", STOPPED, "'theirs' (owned by 'bob')");
+    var landed = landed(publish(adaToken, event("theirs", "spec_message_posted", retold)));
+
+    assertEquals("theirs", landed.spec());
+    assertEquals("ada", landed.agent());
+    assertEquals(new Event.Publisher("ada", "member", "api"), landed.publisher());
+    assertEquals(SpecStatus.IN_PROGRESS, specs.findById("theirs").orElseThrow().status());
+  }
+
+  @Test
   void anAnnouncedMessageIsRebuiltFromTheStoredRowNeverFromTheBody() throws Exception {
     var message =
         Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "ship it?", null, true));

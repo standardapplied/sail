@@ -65,6 +65,7 @@ class EventAuthorityTest {
     board.spec("billing", "billing", OTHER, OTHER);
     board.spec("draft", "draft", null, OWNER);
     board.spec("guest", "den", CAROL, CAROL);
+    board.spec("ledger", "billing", CAROL, CAROL);
     Acting.system(
         () ->
             new RunStore(board.db)
@@ -298,6 +299,27 @@ class EventAuthorityTest {
             "den",
             null,
             null),
+        retold(
+            "the owner of a spec born in a spec's room retells a message in it",
+            CAROL_API,
+            POSTED,
+            "billing",
+            null,
+            null),
+        retold(
+            "a member with no voice in a spec's room cannot announce a message in it",
+            OWNER_API,
+            POSTED,
+            "billing",
+            null,
+            Kind.NOT_OWNER),
+        retold(
+            "an announcement in no conversation is no member's",
+            OWNER_API,
+            POSTED,
+            null,
+            null,
+            Kind.NOT_OWNER),
         observed(
             "who may post there does not announce it as this box's own",
             OTHER_API,
@@ -538,6 +560,7 @@ class EventAuthorityTest {
     var none = rule.decide(OWNER_API, STOP, rule.subject("acme", null, null), true);
     var observed = rule.decide(OTHER_API, STOP, rule.subject("acme", "billing", null), false);
     var box = rule.decide(OWNER_API, BOARD, rule.subject("acme", null, null), false);
+    var posted = rule.decide(OWNER_API, POSTED, rule.subject("acme", "billing", null), true);
     var agent = rule.decide(AGENT, TOOL, rule.subject("acme", "auth", OTHER_RUN), false);
 
     assertEquals(
@@ -557,6 +580,10 @@ class EventAuthorityTest {
         "Event type 'agent_session_stopped' reports what this box observed of 'billing' (owned by"
             + " 'bob'), which you may not drive: only this box's FDE or an admin reports that.",
         observed.orElseThrow().message());
+    assertEquals(
+        "Event type 'spec_message_posted' makes this box act on 'billing' (owned by 'bob' and"
+            + " 'carol'), which you may not drive.",
+        posted.orElseThrow().message());
     assertTrue(
         box.orElseThrow().message().startsWith("Event type 'board_updated' speaks for this"));
     assertTrue(agent.orElseThrow().message().contains("may narrate only its own run"));

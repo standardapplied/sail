@@ -60,7 +60,9 @@ public final class EventAuthority {
     /**
      * A message this box holds, announced so its room wakes and live clients see it: accepted from
      * an admin, from this box's FDE for what its sync pulled, and, retold, from an actor who acts
-     * for an owner of the conversation the message is in, who may post there.
+     * for an owner of the conversation the message is in ({@link RoomStore#owners}), who may post
+     * there ({@link PostingRule}): wider than who drives a spec, since the owner of a spec born in
+     * its room has a voice there.
      */
     ANNOUNCES,
     /**
@@ -116,8 +118,9 @@ public final class EventAuthority {
    * the run or named directly, decides the project, and a run that works neither its own. {@code
    * runId} is null when no run this box holds is named. {@code owners} are whom a sender who is not
    * this box's FDE must act for: the owners of the spec or room, named directly or worked by the
-   * run; for a run that works neither, the run's own; and none for work this box does not hold.
-   * {@code executedHere} is whether this box executed the run.
+   * run; for a run that works neither, the run's own; and none for work this box does not hold. An
+   * announcement alone is not held to them but to the owners of its conversation. {@code
+   * executedHere} is whether this box executed the run.
    */
   public record Subject(
       String project,
@@ -200,7 +203,8 @@ public final class EventAuthority {
       return Optional.empty();
     }
     var box = actor.actsFor(boxFde.get());
-    var owner = subject.owners().stream().anyMatch(actor::actsFor);
+    var owners = rule == Rule.ANNOUNCES ? rooms.owners(subject.conversation()) : subject.owners();
+    var owner = owners.stream().anyMatch(actor::actsFor);
     var admitted =
         switch (rule) {
           case BOX -> box;
@@ -226,7 +230,7 @@ public final class EventAuthority {
           "Event type '"
               + type
               + "' reports what this box observed of "
-              + described(subject)
+              + described(subject, owners)
               + ", which you may not drive: only this box's FDE or an admin reports that.",
           "What another box did reaches this one by sync.");
     }
@@ -235,7 +239,7 @@ public final class EventAuthority {
         "Event type '"
             + type
             + "' makes this box act on "
-            + described(subject)
+            + described(subject, owners)
             + ", which you may not drive.",
         "Only its owner or an admin may publish it.");
   }
@@ -255,7 +259,7 @@ public final class EventAuthority {
         "Event type '"
             + type
             + "' narrates "
-            + described(subject)
+            + described(subject, subject.owners())
             + ", and '"
             + actor.handle()
             + "' may narrate only its own run.",
@@ -266,11 +270,11 @@ public final class EventAuthority {
     return specs.findById(specId).map(SpecStore.SpecRow::owner);
   }
 
-  private static String described(Subject subject) {
+  private static String described(Subject subject, List<String> owners) {
     var owned =
-        subject.owners().isEmpty()
+        owners.isEmpty()
             ? " (no owner here)"
-            : subject.owners().stream()
+            : owners.stream()
                 .map(owner -> "'" + owner + "'")
                 .collect(Collectors.joining(" and ", " (owned by ", ")"));
     if (subject.runId() != null) {
