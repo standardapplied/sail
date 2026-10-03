@@ -40,6 +40,7 @@ final class FakeContainer implements ShellExec {
   private volatile boolean survivesKill;
   private volatile String gitFailure;
   private volatile String gitFailingVerb;
+  private volatile Runnable beforeGit = () -> {};
 
   private static final class Agent {
     private final int pid;
@@ -125,6 +126,11 @@ final class FakeContainer implements ShellExec {
   void gitFails(String message, String verb) {
     this.gitFailure = message;
     this.gitFailingVerb = verb;
+  }
+
+  /** Runs {@code hook} before every git command, as something that happens while a rescue runs. */
+  void beforeGit(Runnable hook) {
+    this.beforeGit = hook;
   }
 
   void stopped() {
@@ -245,6 +251,7 @@ final class FakeContainer implements ShellExec {
   }
 
   private Result git(List<String> inner) {
+    beforeGit.run();
     if (gitFailure != null && (gitFailingVerb == null || gitFailingVerb.equals(inner.get(3)))) {
       return fail(gitFailure);
     }

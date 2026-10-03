@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -30,6 +31,7 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Replays the {@code agent_session_stopped} events the control plane missed, so the subscribers
@@ -213,7 +215,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Rescues every spec stranded in {@code review}, skipping any whose stop was already replayed
+   * Rescues every spec stranded in its review loop, skipping any whose stop was already replayed
    * earlier in this same sweep. Without the skip a spec that the in-progress pass just reconciled —
    * whose replayed stop drives it {@code in_progress → review} on an async subscriber thread —
    * would be seen in {@code review} by this pass and have its stop replayed a second time,
@@ -222,7 +224,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   int rescueStrandedReviews(Set<String> handledThisSweep) {
     var rescued = 0;
-    for (var spec : specStore.list(REVIEW)) {
+    for (var spec : inReviewLoop()) {
       if (handledThisSweep.contains(spec.id())) {
         continue;
       }
@@ -242,6 +244,24 @@ public final class MissedStopReconciler implements AutoCloseable {
       }
     }
     return rescued;
+  }
+
+  /**
+   * The specs whose review loop may be stranded: every spec in {@code review}, and every {@code
+   * in_progress} spec whose newest loop run already served a review — one in its fix phase, where
+   * the build's stop was acted on long ago and only the review's rows say what is owed.
+   */
+  private List<SpecStore.SpecRow> inReviewLoop() {
+    return Stream.concat(
+            specStore.list(REVIEW).stream(),
+            specStore.list(IN_PROGRESS).stream()
+                .filter(
+                    spec ->
+                        sessionStore
+                            .latestLoopRun(spec.id())
+                            .filter(RunStore.RunRow::servesReview)
+                            .isPresent()))
+        .toList();
   }
 
   /**
@@ -404,12 +424,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * launch the container refused) — the design retries an errored attempt on the next stop, and no
    * further stop is coming. <em>Unserved review</em>: a review is {@code running} with an agent
    * stage to run and no run serving it — the daemon died between writing its rows and launching the
-   * reviewer. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
-   * pipeline kick off, retry, or go on from the stage rows. Each rescue key — the spec for a
-   * dropped kickoff, the review row otherwise — fires at most once per server lifetime, and the
-   * pipeline's errored-attempt budget escalates a persistent failure, so no shape can loop; an
-   * escalated review, or one waiting on a person or on a live run, is left alone, since a human or
-   * a working agent owns the spec then.
+   * reviewer. <em>Owed fix</em>: a review failed its gate with open findings and no fix agent was
+   * ever launched for it. Replaying the stop of the spec's newest loop run, whichever lane it ran
+   * in, lets the pipeline kick off, retry, go on from the stage rows, or launch the fix. Each
+   * rescue key — the spec for a dropped kickoff, the review row otherwise — fires at most once per
+   * server lifetime, and the pipeline's errored-attempt budget escalates a persistent failure, so
+   * no shape can loop; an escalated review, or one waiting on a person or on a live run, is left
+   * alone, since a human or a working agent owns the spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
     var rescue = rescueFor(spec);
@@ -451,33 +472,56 @@ public final class MissedStopReconciler implements AutoCloseable {
               + latest.error()
               + "); replaying the stop to retry the iteration");
     }
-    if ("running".equals(latest.status()) && unserved(latest.id())) {
+    if ("running".equals(latest.status()) && !waitsOnPerson(latest.id()) && settled(latest)) {
       return new Rescue(
           latest.id(),
           "review "
               + latest.id()
               + " is running with no run serving it; replaying the stop to go on from its stages");
     }
+    if ("failed".equals(latest.status()) && !latest.errored() && fixOwed(latest)) {
+      return new Rescue(
+          latest.id(),
+          "review "
+              + latest.id()
+              + " failed its gate and no fix agent was launched; replaying the stop to launch it");
+    }
     return null;
   }
 
+  private boolean waitsOnPerson(String reviewId) {
+    return reviewStore.stagesForReview(reviewId).stream()
+        .anyMatch(stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
+  }
+
   /**
-   * Whether a running review has an agent stage to run and nothing running it: no stage waits on a
-   * person, and every run that served the review finished longer ago than {@link #LAUNCH_GRACE} — a
-   * reviewer that only just ended has a stop the pipeline is still acting on.
+   * Whether nothing is running for {@code review} and nothing is about to: every run that served it
+   * finished longer ago than {@link #LAUNCH_GRACE} — a run that only just ended has a stop the
+   * pipeline is still acting on — or, with no run recorded yet, the review itself is older than
+   * that, so a sweep landing between its rows and its first launch leaves it alone.
    */
-  private boolean unserved(String reviewId) {
-    var waitsOnPerson =
-        reviewStore.stagesForReview(reviewId).stream()
-            .anyMatch(
-                stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
-    var settled = clock.get().minus(LAUNCH_GRACE);
-    return !waitsOnPerson
-        && sessionStore.forReview(reviewId).stream()
-            .allMatch(
-                run ->
-                    RunStatus.isTerminal(run.status())
-                        && MissedStops.parseOr(run.completedAt(), Instant.MAX).isBefore(settled));
+  private boolean settled(ReviewStore.ReviewRow review) {
+    var cutoff = clock.get().minus(LAUNCH_GRACE);
+    var serving = sessionStore.forReview(review.id());
+    if (serving.isEmpty()) {
+      return MissedStops.parseOr(review.createdAt(), Instant.MAX).isBefore(cutoff);
+    }
+    return serving.stream()
+        .allMatch(
+            run ->
+                RunStatus.isTerminal(run.status())
+                    && MissedStops.parseOr(run.completedAt(), Instant.MAX).isBefore(cutoff));
+  }
+
+  /**
+   * Whether a gate-failed review is still owed its fix agent: it holds open findings, every run
+   * that served it has settled, and none of them was a fix agent.
+   */
+  private boolean fixOwed(ReviewStore.ReviewRow review) {
+    return settled(review)
+        && !reviewStore.openFindingsForReview(review.id()).isEmpty()
+        && sessionStore.forReview(review.id()).stream()
+            .noneMatch(run -> Lane.FIX.matches(run.role()));
   }
 
   private boolean reviewStarted(String specId) {

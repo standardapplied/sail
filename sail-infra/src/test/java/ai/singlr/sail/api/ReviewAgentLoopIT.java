@@ -231,12 +231,12 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals("codex", reviewer.agent());
     assertEquals(AgentUnit.forRun(reviewer.id()).unitName(), reviewer.unit());
     assertEquals(reviewStore.latestReviewForSpec("auth").orElseThrow().id(), reviewer.reviewId());
-    assertTrue(
-        new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id())),
-        "the reviewer runs as its run's systemd unit, like a build");
     await(
         () -> logOf(reviewer).contains("review started"),
         "the reviewer's log streams to its own run directory while it runs");
+    assertTrue(
+        new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id())),
+        "the reviewer runs as its run's systemd unit, like a build");
 
     release();
     watcherObservesTheExitOf(reviewer);

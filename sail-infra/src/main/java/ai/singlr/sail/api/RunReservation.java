@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -96,12 +97,86 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
+    return claimed(
+        runId,
+        project,
+        specId,
+        role,
+        repos,
+        () ->
+            runStore.reserveDispatch(
+                runId,
+                project,
+                specId,
+                roomId,
+                boxHandle,
+                role,
+                repos,
+                agentType,
+                branch,
+                task,
+                unit.logPath(),
+                unit.unitName(),
+                configuredMaxDuration(config, role)));
+  }
+
+  /**
+   * Reserves a reviewer's or a fix agent's run, naming the review it serves, through the same gate
+   * a dispatch passes: the run claims its spec's repos, so it never starts beside a live build of
+   * its own spec, a full chat turn or another spec's run over them, and a conversation resumed over
+   * them yields as it does to a build.
+   */
+  public String reserveForReview(
+      String runId,
+      String reviewId,
+      String project,
+      String specId,
+      String boxHandle,
+      Lane lane,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      SailYaml config) {
+    return claimed(
+        runId,
+        project,
+        specId,
+        lane.wire(),
+        repos,
+        () ->
+            runStore.reserveForReview(
+                runId,
+                reviewId,
+                project,
+                specId,
+                boxHandle,
+                lane,
+                repos,
+                agentType,
+                branch,
+                task,
+                unit.logPath(),
+                unit.unitName(),
+                configuredMaxDuration(config, lane.wire())));
+  }
+
+  /**
+   * The one claim every lane makes: under the project's claim lock, the reservation is decided and
+   * its row written in one transaction, a refusal is thrown before anything launches, and the
+   * conversations the claim displaces yield.
+   */
+  private String claimed(
+      String runId,
+      String project,
+      String specId,
+      String role,
+      List<String> repos,
+      Supplier<RunStore.Reservation> claim) {
     String credential;
     try (var hold = sessionYield.lock(project)) {
-      credential =
-          claim(
-              runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
-              config);
+      credential = credentialOf(claim);
       yieldDisplacedSessions(runId, project, specId, role, repos);
     } catch (IOException e) {
       throw new ApiException(
@@ -111,36 +186,10 @@ public final class RunReservation {
     return credential;
   }
 
-  private String claim(
-      String runId,
-      String project,
-      String specId,
-      String roomId,
-      String boxHandle,
-      String role,
-      List<String> repos,
-      String agentType,
-      String branch,
-      String task,
-      AgentUnit unit,
-      SailYaml config) {
+  private String credentialOf(Supplier<RunStore.Reservation> claim) {
     RunStore.Reservation reservation;
     try {
-      reservation =
-          runStore.reserveDispatch(
-              runId,
-              project,
-              specId,
-              roomId,
-              boxHandle,
-              role,
-              repos,
-              agentType,
-              branch,
-              task,
-              unit.logPath(),
-              unit.unitName(),
-              configuredMaxDuration(config));
+      reservation = claim.get();
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
@@ -211,16 +260,24 @@ public final class RunReservation {
   }
 
   /**
-   * The run's configured hard lifetime, bounding its credential: {@code guardrails.max_duration},
-   * or null when unset — an unbounded run's credential is revoked by its verified finishers, never
-   * by a clock that could expire mid-work.
+   * The run's configured hard lifetime, bounding its credential: its lane's {@code max_duration},
+   * or null when none bounds it — an unbounded run's credential is revoked by its verified
+   * finishers, never by a clock that could expire mid-work. A reviewer and a fix agent are always
+   * bounded, by their lane's default when the project sets none; every other lane only by an {@code
+   * agent.guardrails} block the project wrote.
    */
-  private static Duration configuredMaxDuration(SailYaml config) {
+  private static Duration configuredMaxDuration(SailYaml config, String role) {
     var agent = config.agent();
-    if (agent == null || agent.guardrails() == null) {
+    if (agent == null) {
       return null;
     }
-    return Guardrails.parseDuration(agent.guardrails().maxDuration());
+    var lane = Lane.of(role).orElse(null);
+    if (lane != null && lane.servesReview()) {
+      return Guardrails.parseDuration(agent.guardrailsFor(lane).maxDuration());
+    }
+    return agent.guardrails() == null
+        ? null
+        : Guardrails.parseDuration(agent.guardrails().maxDuration());
   }
 
   private void pruneRuns(String project) {

@@ -452,6 +452,56 @@ class AgentWatchCommandTest {
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
   }
 
+  @Test
+  void aStopEndsTheRunTheWatcherWasStartedForWhateverTheSessionFileNames() {
+    var forged =
+        new AgentSession.ExitState(false, 0, "auth", "claude-code", "another-run", "review");
+
+    var addressed = AgentWatchCommand.addressedTo(RUN_ID, forged);
+
+    assertEquals(RUN_ID, addressed.runId(), "the session file is the agent's to write");
+    assertEquals(RUN_ID, AgentWatchCommand.stop("acme", addressed, null).data().get("run_id"));
+  }
+
+  @Test
+  void anAgentThatDiedBeforeItsWatcherAttachedHasItsStopPublishedWithTheCodeItsUnitHolds()
+      throws Exception {
+    var unit = AgentUnit.forRun(RUN_ID);
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "systemctl --user show " + unit.service(),
+                """
+                ActiveState=failed
+                ExecMainStatus=127
+                Environment=SAIL_SPEC_ID=auth SAIL_AGENT=codex SAIL_RUN_ID=%s SAIL_RUN_ROLE=fix
+                """
+                    .formatted(RUN_ID));
+    var published = new java.util.ArrayList<Event>();
+
+    var stopped =
+        AgentWatchCommand.stopIfAlreadyEnded(
+            "acme", RUN_ID, unit, new AgentSession(shell), published::add);
+
+    assertTrue(stopped);
+    assertEquals(127, published.getFirst().data().get("exit_code"));
+    assertEquals("fix", published.getFirst().data().get("run_role"));
+    assertEquals(RUN_ID, published.getFirst().data().get("run_id"));
+  }
+
+  @Test
+  void aWatcherStartedForARunThatNeverLaunchedPublishesNothing() throws Exception {
+    var unit = AgentUnit.forRun(RUN_ID);
+    var published = new java.util.ArrayList<Event>();
+
+    var stopped =
+        AgentWatchCommand.stopIfAlreadyEnded(
+            "acme", RUN_ID, unit, new AgentSession(new ScriptedShellExecutor()), published::add);
+
+    assertFalse(stopped, "no unit and no session file name this run");
+    assertTrue(published.isEmpty());
+  }
+
   private static int indexOf(ScriptedShellExecutor shell, String fragment) {
     var invocations = shell.invocations();
     for (var i = 0; i < invocations.size(); i++) {

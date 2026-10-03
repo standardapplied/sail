@@ -906,7 +906,15 @@ class MissedStopReconcilerTest {
     var review = runningReview("auth");
     var latch = new CountDownLatch(1);
     var replayed = captureStops(latch);
-    var rec = reconciler(new CountingProbe(false), Instant::now);
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(false), Instant::now).sweep(),
+        "a review only just written is about to get its reviewer: a sweep landing between its"
+            + " rows and its first launch leaves it alone");
+    var rec =
+        reconciler(
+            new CountingProbe(false),
+            () -> Instant.now().plus(MissedStopReconciler.LAUNCH_GRACE).plusSeconds(1));
 
     assertEquals(
         1,

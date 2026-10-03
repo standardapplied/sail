@@ -102,17 +102,30 @@ public final class RunTracker implements EventSubscriber {
   }
 
   private void completeOrRecord(RunStore.RunRow run, String status, Integer exitCode) {
-    if (runStore.transition(run.id(), "running", status, exitCode)) {
+    if (finish(runStore, run.id(), status, exitCode)) {
       syncScheduler.afterWrite();
-      return;
+    }
+  }
+
+  /**
+   * Finishes run {@code runId} as its stop says: {@code running → status} with the exit code, as
+   * one compare-and-set; a run something else already finished only gains an exit code it lacked.
+   * The one finish every reader of a stop shares — the tracker, and the review pipeline, which must
+   * see the run that stopped finished before it reserves the run that follows. Returns whether
+   * anything was written.
+   */
+  static boolean finish(RunStore runStore, String runId, String status, Integer exitCode) {
+    if (runStore.transition(runId, "running", status, exitCode)) {
+      return true;
     }
     if (exitCode == null) {
-      return;
+      return false;
     }
-    var current = runStore.findById(run.id()).orElse(null);
-    if (current != null && current.exitCode() == null) {
-      runStore.recordExitCode(run.id(), exitCode);
-      syncScheduler.afterWrite();
+    var current = runStore.findById(runId).orElse(null);
+    if (current == null || current.exitCode() != null) {
+      return false;
     }
+    runStore.recordExitCode(runId, exitCode);
+    return true;
   }
 }

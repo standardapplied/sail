@@ -19,6 +19,8 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Path;
@@ -74,7 +76,7 @@ class ReviewLanesTest {
                 .toList()));
   }
 
-  private void spec(String id) {
+  private void spec(String id, String repo) {
     Acting.as(
         null,
         () ->
@@ -95,7 +97,7 @@ class ReviewLanesTest {
                     "",
                     null,
                     List.of(),
-                    List.of("api"))));
+                    List.of(repo))));
   }
 
   private String build(String specId) {
@@ -132,7 +134,11 @@ class ReviewLanesTest {
 
   /** Dispatches {@code specId}'s build to its end: the spec's review starts. */
   private String built(String specId) {
-    spec(specId);
+    return built(specId, "api");
+  }
+
+  private String built(String specId, String repo) {
+    spec(specId, repo);
     var run = build(specId);
     loop.onEvent(buildStop(specId, run));
     return run;
@@ -395,8 +401,8 @@ class ReviewLanesTest {
   @Test
   void twoSpecsPipelinesInOneContainerEachAdvanceOnlyOnTheirOwnRunsStop() {
     loop = ReviewLoop.of(tempDir, stages("codex"));
-    built("auth");
-    built("billing");
+    built("auth", "api");
+    built("billing", "web");
 
     var live = loop.live();
     assertEquals(2, live.size());
@@ -593,5 +599,146 @@ class ReviewLanesTest {
 
     assertEquals("escalated", statusOf(reviewer.reviewId()));
     assertEquals(0, loop.reconciler(Instant::now).sweep(), "an escalated review is never retried");
+  }
+
+  @Test
+  void aReviewerNeverStartsBesideAnotherSpecsRunOverTheSameRepos() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth", "api");
+    var auth = onlyLive();
+
+    built("billing", "api");
+
+    assertEquals(auth.id(), onlyLive().id(), "billing's reviewer was refused the repos auth holds");
+    assertEquals("failed", statusOf(reviewOf("billing")));
+    assertTrue(
+        details("review_errored").getFirst().startsWith("reviewer could not start:"),
+        details("review_errored").toString());
+    assertEquals("running", statusOf(auth.reviewId()));
+  }
+
+  private Event replayedStop(RunStore.RunRow run) {
+    return MissedStopReconciler.stopEvent(loop.runs.findById(run.id()).orElseThrow(), 0);
+  }
+
+  @Test
+  void aReReviewWhoseReviewerNeverLaunchedGoesOnWhenItsFixAgentsStopIsReplayed() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    loop.finish(onlyLive().id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.exited(fix.id(), "fixed and pushed", 0);
+    var next =
+        Acting.system(
+            () -> {
+              loop.runs.complete(fix.id(), "stopped", 0);
+              var id = loop.reviews.createReview("auth", 2);
+              loop.reviews.updateReviewStatus(id, "running");
+              return id;
+            });
+
+    loop.onEvent(replayedStop(fix));
+
+    var reviewer = onlyLive();
+    assertEquals("review", reviewer.role());
+    assertEquals(
+        next,
+        reviewer.reviewId(),
+        "the daemon died between writing the re-review and launching its reviewer: the replay"
+            + " goes on from the review's rows instead of leaving it running forever");
+    assertEquals(1, loop.reviews.stagesForReview(next).size(), "its stage rows were completed");
+    assertEquals(2, loop.reviews.reviewsForSpec("auth").size());
+  }
+
+  @Test
+  void aStageWhoseReviewerNeverLaunchedIsNeverJudgedOnTheStageBeforeItsLog() {
+    loop = ReviewLoop.of(tempDir, stages("codex", "claude-code"));
+    built("auth");
+    var first = onlyLive();
+    var stages = loop.reviews.stagesForReview(first.reviewId());
+    loop.container.exited(first.id(), CLEAN_REVIEW, 0);
+    Acting.system(
+        () -> {
+          loop.runs.complete(first.id(), "stopped", 0);
+          loop.reviews.completeStage(stages.getFirst().id(), "passed");
+          loop.reviews.startStage(stages.getLast().id(), "claude-code");
+        });
+
+    loop.onEvent(replayedStop(first));
+
+    assertEquals(
+        "running",
+        statusOf(first.reviewId()),
+        "the second stage started after the first reviewer's run: its clean log is not that"
+            + " stage's verdict, and the review does not pass unreviewed");
+    var second = onlyLive();
+    assertEquals("claude-code", second.agent());
+    assertEquals(first.reviewId(), second.reviewId());
+
+    loop.finish(second.id(), CLEAN_REVIEW);
+
+    assertEquals("passed", statusOf(first.reviewId()));
+  }
+
+  @Test
+  void aGateFailedReviewWhoseFixAgentNeverLaunchedGetsItAtTheNextSweep() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    var stage = loop.reviews.stagesForReview(reviewer.reviewId()).getFirst();
+    loop.container.exited(reviewer.id(), CRITICAL, 0);
+    Acting.system(
+        () -> {
+          loop.runs.complete(reviewer.id(), "stopped", 0);
+          loop.reviews.addFinding(
+              stage.id(),
+              Finding.create(
+                  Finding.Severity.CRITICAL,
+                  Finding.Category.SECURITY,
+                  "a.java",
+                  1,
+                  1,
+                  "Bad",
+                  "Very bad",
+                  "trace",
+                  new Finding.Suggestion("a", "b", "c"),
+                  0.95));
+          loop.reviews.completeStage(stage.id(), "failed");
+          loop.reviews.updateReviewStatus(reviewer.reviewId(), "failed");
+          loop.specs.updateStatus("auth", SpecStatus.IN_PROGRESS);
+        });
+    var recorded = new SpecStoreAuditPersister(new EventStore(loop.db));
+    recorded.onEvent(loop.watcherStop(reviewer.id(), null).withId(901));
+    recorded.onEvent(
+        Event.of(PROJECT, "auth", "review_stage_failed", Event.SAIL_AGENT, "host").withId(902));
+
+    assertEquals(0, loop.reconciler(Instant::now).sweep(), "its reviewer only just ended");
+    assertEquals(1, loop.reconciler(LATER).sweep());
+    loop.settle();
+
+    var fix = onlyLive();
+    assertEquals(
+        "fix", fix.role(), "the review was owed a fix agent, and the sweep's replay got it");
+    assertEquals(reviewer.reviewId(), fix.reviewId());
+    assertEquals(0, loop.reconciler(LATER).sweep(), "a fix agent now serves the review");
+  }
+
+  @Test
+  void aReDispatchThatSupersedesTheReviewWhileTheFixIsRescuedGetsNoReReviewBesideItsBuild() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    loop.finish(onlyLive().id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.dirty("api", " M src/Fixed.java\n");
+    loop.container.beforeGit(() -> loop.reviews.supersedeForSpec("auth"));
+
+    loop.finish(fix.id(), "fixed");
+
+    assertEquals(
+        1,
+        loop.reviews.reviewsForSpec("auth").size(),
+        "the review was superseded while the fix agent's work was being committed: the new"
+            + " attempt owns the spec, and no re-review starts");
+    assertTrue(loop.live().isEmpty());
   }
 }

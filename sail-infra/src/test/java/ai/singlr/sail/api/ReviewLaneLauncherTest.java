@@ -108,6 +108,17 @@ class ReviewLaneLauncherTest {
   }
 
   @Test
+  void aLaunchPassesTheDispatchGateAndIsRefusedBesideARunOverTheSameRepos() {
+    var first = launch(invocation(Lane.REVIEW, List.of()));
+
+    var refused = assertThrows(ApiException.class, () -> launch(invocation(Lane.FIX, List.of())));
+
+    assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refused.failure().errorCode());
+    assertEquals(List.of(first), loop.runs.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of("api"), loop.runs.findById(first).orElseThrow().repos());
+  }
+
+  @Test
   void aRunsOutputIsItsOwnLogsFinalAnswerAndBlankWhenItWroteNone() throws Exception {
     var runId = launch(invocation(Lane.REVIEW, List.of()));
     var run = loop.runs.findById(runId).orElseThrow();
@@ -187,7 +198,9 @@ class ReviewLaneLauncherTest {
 
   @Test
   void onlyReviewersAndFixAgentsLaunchThroughTheseLanes() {
-    assertThrows(IllegalArgumentException.class, () -> launch(invocation(Lane.BUILD, List.of())));
+    var refused = assertThrows(ApiException.class, () -> launch(invocation(Lane.BUILD, List.of())));
+
+    assertTrue(refused.getCause().getMessage().contains("build"), refused.getCause().getMessage());
     assertEquals(
         List.of(), loop.runs.listForSpec("auth").stream().map(RunStore.RunRow::id).toList());
   }

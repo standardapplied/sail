@@ -830,6 +830,9 @@ production launch path, pipeline, tracker and bus over a fake container shell;
   *`aDaemonRestartWhileAReviewerRunsReArmsItsWatcherAndFailsNothing`,
   `aReviewerThatExitedWhileTheDaemonWasDownHasItsStopPublishedAtStart`,
   `aFixAgentThatExitsUnwatchedIsReconciledAsABuildIsAndTheLoopGoesOn`,
+  `aReReviewWhoseReviewerNeverLaunchedGoesOnWhenItsFixAgentsStopIsReplayed`,
+  `aStageWhoseReviewerNeverLaunchedIsNeverJudgedOnTheStageBeforeItsLog`,
+  `aGateFailedReviewWhoseFixAgentNeverLaunchedGetsItAtTheNextSweep`,
   `MissedStopReconcilerTest.aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce`.*
 - **P7. A reaped agent is dead.** After a trip there is no live agent process for that run in
   the container, nothing of a killed fix agent's is committed, and the room says why:
@@ -841,20 +844,34 @@ production launch path, pipeline, tracker and bus over a fake container shell;
   `ReviewAgentLoopIT.aKilledReviewerLeavesNoAgentProcessBehindAndItsReviewErrorsWithTheReason`.*
 
 A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
-replaced — changes nothing, with one exception that is the loop's retry: when the spec's
-latest review failed by infrastructure error and no run serves it, such a stop starts that
-iteration again, within `MAX_ERRORED_RETRIES`. An operator's `sail agent stop` on a reviewer
-or a fix agent is a person's decision about the loop, so the review escalates rather than
-retrying over it. A fix agent is told to verify locally, commit and push, and not to watch
-CI: the re-review judges the branch, and the pull request shows its checks to whoever merges.
+replaced — never repeats a step. While a run still serves the spec's latest review it changes
+nothing; otherwise the loop goes on from what the review's rows say is owed: an errored
+review is retried as the same iteration within `MAX_ERRORED_RETRIES`, a `running` one
+continues from its stages (a stage is judged only on the log of a reviewer recorded after the
+stage started), and a gate-failed one that never got its fix agent gets it. That one path is
+both the loop's retry and its crash recovery; the reconciler's replays drive it.
+
+A reviewer and a fix agent reserve their spec's repos through the dispatch gate, like a
+build, so neither starts beside a live build of its own spec, a full chat turn or another
+spec's run over the same repos: the launch is refused and the review errors (or the fix
+iteration fails) with the refusal as its reason. The pipeline finishes the run that stopped
+before it reserves the one that follows. The watcher addresses a stop to the run named on
+its own command line, never to one read back from the container, and a run that died before
+its watcher attached ends by a stop carrying the exit code its unit still holds. An
+operator's `sail agent stop` on a reviewer or a fix agent is a person's decision about the
+loop, so the review escalates rather than retrying over it. A fix agent is told to verify
+locally, commit and push, and not to watch CI: the re-review judges the branch, and the pull
+request shows its checks to whoever merges. A watcher re-armed after its own death takes the
+lane's limits as the project sets them at that moment.
 
 **Recovery without losing work.** The git branch is the durable record: every coding agent
 (build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
 discards it. So an FDE always recovers by returning to the branch. The loop recovers itself
 from a daemon restart or a dead watcher (P6): the missed-stop sweep publishes the stop of
 any loop run that ended unobserved, replays the newest loop stop once for a review that
-errored (the retry) or that is `running` with no run serving it and no person to wait on,
-and the pipeline goes on from the review's rows. When a spec is stuck: a guardrail-killed or
+errored (the retry), that is `running` with no run serving it and no person to wait on, or
+that failed its gate and never got its fix agent, and the pipeline goes on from the review's
+rows. When a spec is stuck: a guardrail-killed or
 failed dispatch leaves the work committed, so `sail spec dispatch --restart` resumes on the
 branch; an escalated review parks in `review` with its findings (in the review store), each
 reviewer's and fix agent's own run log, and every fix commit intact, so the FDE reads it with

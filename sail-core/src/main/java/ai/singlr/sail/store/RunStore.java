@@ -459,16 +459,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Records one invocation of the review pipeline — a reviewer or the fix agent that answers it —
-   * as its own run, naming the review it serves. Each invocation is a run like any other: its own
-   * id, unit, log and principal ({@code <agent>/review-<runId>}, {@code <agent>/fix-<runId>}), so
-   * its room posts are attributed to the lane that wrote them and its stop addresses it alone. It
-   * is stamped as every run this box executes is ({@link #stamp}), for {@code boxHandle}. Fails if
-   * an exclusive container lease (see {@link #acquireContainerLease}) is held — a review must never
-   * launch into a container mid-restore; the pipeline surfaces the error and the reconciler's
-   * rescue replay retries after the lease is released. Returns the run's plaintext credential,
-   * surfaced exactly once so the launched agent can act as the principal this row records; only the
-   * hash is at rest.
+   * Records a reviewer's or a fix agent's run as {@link #create} records a run: the row and its
+   * credential, with no gate. The pipeline reserves its runs through {@link #reserveForReview};
+   * this is the row alone, for a run whose claim is not in question.
    *
    * @param lane {@link Lane#REVIEW} or {@link Lane#FIX}
    */
@@ -484,10 +477,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String task,
       String logPath,
       String unit) {
-    if (!lane.servesReview()) {
-      throw new IllegalArgumentException(
-          "A run serves a review only in the review or fix lane, not " + lane.wire() + ".");
-    }
+    requireServesReview(lane);
     return createReturningCredential(
         id,
         project,
@@ -542,7 +532,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * restore): within a single {@code BEGIN IMMEDIATE} transaction, refuses if another lease is held
    * or any local run of the project is live ({@code running} or {@code stopping}, every role — even
    * a room wake loses its session when the container is rolled back), then inserts the lease. Every
-   * run insert — {@link #reserveDispatch}, {@link #create}, {@link #createForReview} — checks this
+   * run insert — {@link #reserveDispatch}, {@link #reserveForReview}, {@link #create} — checks this
    * lease inside its own transaction, so the two sides can never interleave: a restore is refused
    * over live work, and no run can start until {@link #releaseContainerLease} runs.
    */
@@ -742,6 +732,88 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit,
       Duration maxDuration) {
+    return reserve(
+        id,
+        project,
+        specId,
+        roomId,
+        null,
+        boxHandle,
+        role,
+        repos,
+        agent,
+        branch,
+        task,
+        logPath,
+        unit,
+        maxDuration);
+  }
+
+  /**
+   * Reserves one invocation of the review pipeline — a reviewer or the fix agent that answers it —
+   * as its own run naming the review it serves, through the same gate and the same transaction as a
+   * dispatch ({@link #reserveDispatch}): a reviewer or fix agent never starts beside a live build
+   * of its own spec, a full chat turn or another spec's run over the repos its spec works. Each
+   * invocation is a run like any other: its own id, unit, log and principal ({@code
+   * <agent>/review-<runId>}, {@code <agent>/fix-<runId>}), so its room posts are attributed to the
+   * lane that wrote them and its stop addresses it alone.
+   *
+   * @param lane {@link Lane#REVIEW} or {@link Lane#FIX}
+   */
+  public Reservation reserveForReview(
+      String id,
+      String reviewId,
+      String project,
+      String specId,
+      String boxHandle,
+      Lane lane,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit,
+      Duration maxDuration) {
+    requireServesReview(lane);
+    return reserve(
+        id,
+        project,
+        specId,
+        null,
+        Objects.requireNonNull(reviewId, "reviewId"),
+        boxHandle,
+        lane.wire(),
+        repos,
+        agent,
+        branch,
+        task,
+        logPath,
+        unit,
+        maxDuration);
+  }
+
+  private static void requireServesReview(Lane lane) {
+    if (!lane.servesReview()) {
+      throw new IllegalArgumentException(
+          "A run serves a review only in the review or fix lane, not " + lane.wire() + ".");
+    }
+  }
+
+  private Reservation reserve(
+      String id,
+      String project,
+      String specId,
+      String roomId,
+      String reviewId,
+      String boxHandle,
+      String role,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit,
+      Duration maxDuration) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
     var node = stamp(boxHandle);
     return db.transaction(
@@ -758,13 +830,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           db.execute(
               """
-              INSERT INTO runs (id, project, spec_id, room_id, node, role, agent, branch, task,
-                  status, started_at, log_path, unit, repos, principal, owner)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)""",
+              INSERT INTO runs (id, project, spec_id, room_id, review_id, node, role, agent,
+                  branch, task, status, started_at, log_path, unit, repos, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
               roomId,
+              reviewId,
               node,
               role,
               agent,

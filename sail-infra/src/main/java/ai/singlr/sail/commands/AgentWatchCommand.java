@@ -173,6 +173,9 @@ public final class AgentWatchCommand implements Runnable {
     var agentSession = new AgentSession(shell);
     var sessionInfo = agentSession.queryStatus(name, unit);
     if (sessionInfo == null || !sessionInfo.running()) {
+      if (stopIfAlreadyEnded(name, runId, unit, agentSession, resolvePublisher())) {
+        return;
+      }
       throw new IllegalStateException(
           "No agent session running. Launch one with: sail agent start "
               + name
@@ -200,6 +203,39 @@ public final class AgentWatchCommand implements Runnable {
           startedAt,
           publisher);
     }
+  }
+
+  /**
+   * Publishes the stop of a run that ended before its watcher attached — an agent that died at
+   * launch — with the exit code its unit still holds, so the run ends by a stop that says how
+   * rather than, minutes later, by a reconciled one that cannot. Returns false, publishing nothing,
+   * when the unit is not known to have ended or its session file does not name this run: a watcher
+   * started for a run that never launched has nothing to report.
+   */
+  static boolean stopIfAlreadyEnded(
+      String project,
+      String runId,
+      AgentUnit unit,
+      AgentSession agentSession,
+      StopPublisher publisher)
+      throws Exception {
+    var exit = agentSession.queryExitStatus(project, unit);
+    if (exit.active() || !runId.equals(exit.runId())) {
+      return false;
+    }
+    emitStop(publisher, project, exit, null);
+    return true;
+  }
+
+  /**
+   * The unit's exit state addressed to the run this watcher was started for. The unit's recorded
+   * environment is gone once a cleanly exited unit is collected, and what is read back then comes
+   * from the run's session file, which the agent can write: the run a stop ends is the one the
+   * watcher's own command line names, never one the container says.
+   */
+  static AgentSession.ExitState addressedTo(String runId, AgentSession.ExitState exit) {
+    return new AgentSession.ExitState(
+        exit.active(), exit.exitCode(), exit.specId(), exit.agentType(), runId, exit.role());
   }
 
   /** Sink for the watcher's synthetic stop. A seam so the loop is testable without the network. */
@@ -269,7 +305,7 @@ public final class AgentWatchCommand implements Runnable {
         continue;
       }
 
-      var exit = agentSession.queryExitStatus(name, unit);
+      var exit = addressedTo(runId, agentSession.queryExitStatus(name, unit));
       var decision =
           onTimeout(exit.active(), guardrailFired, !DateTimeUtils.now().isBefore(deadlineAt));
       if (decision == TimeoutDecision.SYNTHESIZE_STOP) {
