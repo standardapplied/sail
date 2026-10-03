@@ -217,13 +217,11 @@ public final class ReviewPipelineController implements EventSubscriber {
     if (!isAuthoritative(event)) {
       return;
     }
-    var run = runOf(event);
     if (Event.WellKnownTypes.AGENT_CANCELLED.equals(event.type())) {
-      run.filter(RunStore.RunRow::servesReview).ifPresent(this::operatorStopped);
+      runOf(event).filter(RunStore.RunRow::servesReview).ifPresent(this::operatorStopped);
       return;
     }
-    run.filter(stopped -> stopped.ownedBy(localHandle.get()))
-        .ifPresent(own -> finished(own, event));
+    var run = runOf(event).map(stopped -> finished(stopped, event));
     var role =
         run.map(RunStore.RunRow::role)
             .orElseGet(
@@ -245,13 +243,18 @@ public final class ReviewPipelineController implements EventSubscriber {
    * The run that stopped is finished before the loop acts on its stop, by the same write the run
    * tracker makes: the run that follows reserves through the dispatch gate, which would refuse it
    * beside a run of its own spec still recorded {@code running}, and the tracker hears the stop on
-   * a thread of its own.
+   * a thread of its own. Returns the row as it stands once that write is settled — the one the lane
+   * handlers judge, since only then is it known whether an operator's stop claimed the run first.
    */
-  private void finished(RunStore.RunRow run, Event event) {
+  private RunStore.RunRow finished(RunStore.RunRow run, Event event) {
+    if (!run.ownedBy(localHandle.get())) {
+      return run;
+    }
     if (RunTracker.finish(
         runStore, run.id(), "stopped", Event.WellKnownData.exitCode(event.data()))) {
       syncTrigger.run();
     }
+    return runStore.findById(run.id()).orElse(run);
   }
 
   private Optional<RunStore.RunRow> runOf(Event event) {
@@ -475,7 +478,8 @@ public final class ReviewPipelineController implements EventSubscriber {
    * one that ended cleanly is judged on the findings in its own log.
    */
   private void reviewerStopped(RunStore.RunRow run, Event event) {
-    if (beingStopped(run)) {
+    if (run.stoppedByOperator()) {
+      operatorStopped(run);
       return;
     }
     var review = awaited(run, "running");
@@ -543,16 +547,6 @@ public final class ReviewPipelineController implements EventSubscriber {
                     .findFirst()
                     .filter(newest -> newest.id().equals(run.id()))
                     .isPresent());
-  }
-
-  /**
-   * Whether an operator's stop holds {@code run}: its claim is recorded and its halt is under way.
-   * The unit dying under that halt is seen by the watcher too, whose stop would read as the run's
-   * own end — an error to retry, or a clean finish to build on. It is neither: the cancel the
-   * operator's stop publishes once the halt is verified decides what becomes of the review.
-   */
-  private static boolean beingStopped(RunStore.RunRow run) {
-    return RunStatus.STOPPING.wire().equals(run.status());
   }
 
   /**
@@ -914,7 +908,8 @@ public final class ReviewPipelineController implements EventSubscriber {
    * owns the spec, and no re-review starts beside its build.
    */
   private void fixStopped(RunStore.RunRow run, Event event) {
-    if (beingStopped(run)) {
+    if (run.stoppedByOperator()) {
+      operatorStopped(run);
       return;
     }
     var review = awaited(run, "failed").filter(failed -> !failed.errored());
@@ -984,13 +979,19 @@ public final class ReviewPipelineController implements EventSubscriber {
   /**
    * An operator stopped a reviewer or a fix agent. The stop was a person's decision about the loop,
    * so the loop does not retry over it: the review escalates, and the spec waits in {@code review}
-   * for that person. A reviewer's review may already have errored on the watcher's stop of the same
-   * halt, when that stop was published after the operator's claim was finalized; it escalates all
-   * the same, so the reconciler's retry never undoes the stop.
+   * for that person. Every stop of such a run lands here, whoever reports it and in whatever order
+   * — the operator's cancel, the watcher's stop of the unit that died under the halt, the
+   * reconciler's replay of either — because the unit's death would otherwise read as the run's own
+   * end: an error to retry, or a clean finish to build on. While the halt is still under way
+   * nothing is decided, since a halt that fails gives the run back; the first stop heard once it is
+   * verified escalates, and the rest find the review already escalated.
    */
   private void operatorStopped(RunStore.RunRow run) {
+    if (!RunStatus.isTerminal(run.status())) {
+      return;
+    }
     var reviewer = Lane.REVIEW.matches(run.role());
-    var review = reviewer ? awaited(run, "running", "failed") : awaited(run, "failed");
+    var review = awaited(run, reviewer ? "running" : "failed");
     if (review.isEmpty()) {
       return;
     }

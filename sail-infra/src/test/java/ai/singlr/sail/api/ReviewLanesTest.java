@@ -26,6 +26,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -540,7 +541,7 @@ class ReviewLanesTest {
     built("auth");
     var reviewer = onlyLive();
     loop.container.exited(reviewer.id(), "", 143);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", null));
+    Acting.system(() -> assertTrue(loop.runs.claimStop(reviewer.id(), "stopped", () -> {})));
 
     loop.onEvent(
         StopOperations.cancelEvent(
@@ -560,7 +561,7 @@ class ReviewLanesTest {
     built("auth");
     loop.finish(onlyLive().id(), CRITICAL);
     var fix = onlyLive();
-    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "running", "stopping")));
+    Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
     loop.container.exited(fix.id(), "half done", 0);
 
     loop.onEvent(loop.watcherStop(fix.id(), null));
@@ -570,6 +571,10 @@ class ReviewLanesTest {
         loop.reviews.reviewsForSpec("auth").size(),
         "the unit died under the operator's halt: its exit is not a finished fix to re-review");
     assertTrue(loop.container.commits().isEmpty());
+    assertEquals(
+        "failed",
+        statusOf(fix.reviewId()),
+        "nothing is decided while the halt is under way: one that fails gives the run back");
 
     Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
     loop.onEvent(
@@ -584,21 +589,141 @@ class ReviewLanesTest {
   }
 
   @Test
-  void anOperatorsStopStillEscalatesAReviewTheWatchersStopAlreadyErrored() {
+  void theWatchersStopHeardAfterAnOperatorsStopIsFinalizedNeverRestartsTheLoop() {
     loop = ReviewLoop.of(tempDir, stages("codex"));
     built("auth");
-    var reviewer = onlyLive();
-    loop.exit(reviewer.id(), "", 143);
-    assertEquals("failed", statusOf(reviewer.reviewId()));
+    loop.finish(onlyLive().id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.dirty("api", " M src/Half.java\n");
+    Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
+    loop.container.exited(fix.id(), "half done", 0);
+    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+
+    loop.onEvent(loop.watcherStop(fix.id(), null));
+
+    assertEquals(
+        1,
+        loop.reviews.reviewsForSpec("auth").size(),
+        "the unit a person halted reports exit 0: that is not a fix to commit and re-review");
+    assertTrue(loop.container.commits().isEmpty(), "nothing of a stopped fix agent's lands");
+    assertTrue(loop.live().isEmpty());
+    assertEquals("escalated", statusOf(fix.reviewId()), "the stop is the operator's, whoever says");
+    assertTrue(details("review_escalated").getFirst().contains("fix agent stopped by an operator"));
 
     loop.onEvent(
         StopOperations.cancelEvent(
-            loop.runs.findById(reviewer.id()).orElseThrow(),
+            loop.runs.findById(fix.id()).orElseThrow(),
             Event.WellKnownData.SOURCE_OPERATOR,
             "uday"));
 
+    assertEquals(1, details("review_escalated").size(), "the cancel finds it already escalated");
+    assertEquals(SpecStatus.REVIEW, specStatus("auth"));
+  }
+
+  @Test
+  void aReviewersStopHeardAfterAnOperatorsStopIsFinalizedIsNotAnErrorToRetry() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    Acting.system(() -> assertTrue(loop.runs.claimStop(reviewer.id(), "stopping", () -> {})));
+    loop.container.exited(reviewer.id(), "", 143);
+    Acting.system(() -> assertTrue(loop.runs.transition(reviewer.id(), "stopping", "stopped")));
+
+    loop.onEvent(loop.watcherStop(reviewer.id(), null));
+
     assertEquals("escalated", statusOf(reviewer.reviewId()));
-    assertEquals(0, loop.reconciler(Instant::now).sweep(), "an escalated review is never retried");
+    assertTrue(details("review_errored").isEmpty(), "a person's stop is not a reviewer's failure");
+    assertTrue(loop.live().isEmpty(), "and it is not retried over");
+    assertEquals(0, loop.reconciler(LATER).sweep(), "an escalated review is never retried");
+  }
+
+  @Test
+  void anOperatorsStopWhoseCancelWasLostWithTheDaemonStillEscalatesOnTheReconcilersReplay() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    loop.finish(onlyLive().id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.dirty("api", " M src/Half.java\n");
+    Acting.system(() -> assertTrue(loop.runs.claimStop(fix.id(), "stopping", () -> {})));
+    loop.container.exited(fix.id(), "half done", 0);
+    Acting.system(() -> assertTrue(loop.runs.transition(fix.id(), "stopping", "stopped")));
+    loop.restart();
+
+    assertEquals(1, loop.reconciler(LATER).sweep());
+    loop.settle();
+
+    assertEquals("escalated", statusOf(fix.reviewId()));
+    assertTrue(loop.container.commits().isEmpty());
+    assertTrue(loop.live().isEmpty());
+    assertEquals(0, loop.reconciler(LATER).sweep(), "the replay was acted on: none follows");
+  }
+
+  @Test
+  void aReplayedStopCarriesOnlyTheReasonAnAuthoritativeStopOfThatVeryRunRecorded() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    loop.finish(reviewer.id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.exited(fix.id(), "fixed and pushed", 0);
+    var recorded = new SpecStoreAuditPersister(new EventStore(loop.db));
+    var others =
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "auth",
+            "codex",
+            reviewer.id(),
+            "review",
+            null,
+            "stall (20m)");
+    var hooks = new LinkedHashMap<>(loop.watcherStop(fix.id(), "turn ended").data());
+    hooks.remove(Event.WellKnownData.SOURCE);
+    recorded.onEvent(others.withId(901));
+    recorded.onEvent(
+        Event.of(
+                PROJECT,
+                "auth",
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                "claude-code",
+                "host",
+                hooks)
+            .withId(902));
+    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 0));
+    loop.restart();
+
+    assertEquals(1, loop.reconciler(LATER).sweep());
+    loop.settle();
+
+    assertTrue(details("review_iteration_failed").isEmpty(), "this fix agent was not killed");
+    assertEquals("review", onlyLive().role(), "its work is re-reviewed, as a clean finish is");
+  }
+
+  @Test
+  void aKillTheWatcherRecordedIsStillAKillWhenTheReconcilerReplaysItAfterTheDaemonDied() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    loop.finish(onlyLive().id(), CRITICAL);
+    var fix = onlyLive();
+    loop.container.dirty("api", " M src/Half.java\n");
+    loop.container.exited(fix.id(), "half done", 0);
+    new SpecStoreAuditPersister(new EventStore(loop.db))
+        .onEvent(loop.watcherStop(fix.id(), "time limit (45m)").withId(901));
+    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", null));
+    loop.restart();
+
+    assertEquals(1, loop.reconciler(LATER).sweep());
+    loop.settle();
+
+    assertEquals(
+        List.of("fix agent killed: time limit (45m)"),
+        details("review_iteration_failed"),
+        "the replay says why the run ended, as the stop it replays did");
+    assertEquals("escalated", statusOf(fix.reviewId()));
+    assertTrue(
+        loop.container.commits().isEmpty(),
+        "a killed fix agent's half-done work is not committed, however its stop is heard");
+    assertTrue(loop.live().isEmpty(), "no re-review runs over the code the reviewer just failed");
   }
 
   @Test
@@ -618,7 +743,7 @@ class ReviewLanesTest {
   }
 
   private Event replayedStop(RunStore.RunRow run) {
-    return MissedStopReconciler.stopEvent(loop.runs.findById(run.id()).orElseThrow(), 0);
+    return MissedStopReconciler.stopEvent(loop.runs.findById(run.id()).orElseThrow(), 0, null);
   }
 
   @Test

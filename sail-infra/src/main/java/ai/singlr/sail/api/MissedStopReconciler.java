@@ -586,11 +586,29 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * One recorded stop as the sweep reads it: when it was recorded, whether it carries a {@code
-   * source}, the run it names (null for none) and the exit code it carried for that run. An
-   * unreadable row is an authoritative stop naming no run.
+   * Why the watcher ended {@code run}, as the stop it recorded said, or null when no recorded stop
+   * of this very run names a reason. A replay carries it, so a run killed for a limit is still a
+   * killed run to the pipeline when the daemon died between recording the kill and acting on it.
    */
-  private record RecordedStop(Instant at, boolean authoritative, String runId, Integer exitCode) {
+  private String recordedReason(RunStore.RunRow run) {
+    return eventStore
+        .forSpecAndType(run.specId(), Event.WellKnownTypes.AGENT_SESSION_STOPPED)
+        .stream()
+        .map(RecordedStop::of)
+        .filter(stop -> stop.authoritative() && run.id().equals(stop.runId()))
+        .map(RecordedStop::reason)
+        .filter(Strings::isNotBlank)
+        .findFirst()
+        .orElse(null);
+  }
+
+  /**
+   * One recorded stop as the sweep reads it: when it was recorded, whether it carries a {@code
+   * source}, the run it names (null for none), and the exit code and the watcher's reason it
+   * carried for that run. An unreadable row is an authoritative stop naming no run.
+   */
+  private record RecordedStop(
+      Instant at, boolean authoritative, String runId, Integer exitCode, String reason) {
 
     static RecordedStop of(EventStore.EventRow row) {
       try {
@@ -600,9 +618,10 @@ public final class MissedStopReconciler implements AutoCloseable {
             timestampOf(row),
             data.get(Event.WellKnownData.SOURCE) != null,
             runId,
-            runId == null ? null : Event.WellKnownData.exitCode(data));
+            runId == null ? null : Event.WellKnownData.exitCode(data),
+            Objects.toString(data.get(Event.WellKnownData.REASON), null));
       } catch (Exception e) {
-        return new RecordedStop(timestampOf(row), true, null, null);
+        return new RecordedStop(timestampOf(row), true, null, null, null);
       }
     }
 
@@ -648,14 +667,15 @@ public final class MissedStopReconciler implements AutoCloseable {
             + (exitCode != null ? exitCode : "unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(session, exitCode));
+    bus.publish(stopEvent(session, exitCode, recordedReason(session)));
   }
 
   /**
    * The stop of {@code run} as this box reconstructs it: addressed to the run and its lane, so the
-   * pipeline routes it as it would the watcher's own.
+   * pipeline routes it as it would the watcher's own, and carrying the {@code reason} the watcher
+   * recorded when it ended the run.
    */
-  static Event stopEvent(RunStore.RunRow run, Integer exitCode) {
+  static Event stopEvent(RunStore.RunRow run, Integer exitCode, String reason) {
     return RunStops.of(
         Event.WellKnownData.SOURCE_RECONCILE,
         run.project(),
@@ -664,7 +684,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         run.id(),
         run.role(),
         exitCode,
-        null);
+        reason);
   }
 
   @Override

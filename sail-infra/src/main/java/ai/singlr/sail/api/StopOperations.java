@@ -371,18 +371,18 @@ public final class StopOperations {
   }
 
   /**
-   * The one gated-cancel write both stop shapes share: run {@code running → status} and, when this
-   * run is still cancelable and its spec's latest build attempt, the spec cancel — one transaction,
-   * every check compare-and-set inside it. A lost run CAS means a concurrent transition consumed
-   * the resolved state first; the stop refuses with a conflict rather than committing over it.
-   * Returns whether the spec was cancelled.
+   * The one gated-cancel write both stop shapes share: run {@code running → status}, marked the
+   * operator's, and, when this run is still cancelable and its spec's latest build attempt, the
+   * spec cancel — one transaction, every check compare-and-set inside it. The mark is what keeps
+   * the watcher's stop of the same halt from reading as the run's own end, whenever it is heard. A
+   * lost run CAS means a concurrent transition consumed the resolved state first; the stop refuses
+   * with a conflict rather than committing over it. Returns whether the spec was cancelled.
    */
   private boolean transitionAndCancel(RunStore.RunRow run, SpecStore.SpecRow spec, String status) {
     var cancelled = new AtomicBoolean();
     var moved =
-        runStore.transition(
+        runStore.claimStop(
             run.id(),
-            "running",
             status,
             () -> {
               if (mayCancel(spec)) {
@@ -409,15 +409,13 @@ public final class StopOperations {
   }
 
   /**
-   * Restores a failed claim — run back to {@code running}, spec back to its pre-claim status — in
-   * one transaction, each side conditional on the claim still being held, so a finalization that
-   * won in between is never overwritten.
+   * Restores a failed claim — run back to {@code running} with the operator's mark cleared, spec
+   * back to its pre-claim status — in one transaction, each side conditional on the claim still
+   * being held, so a finalization that won in between is never overwritten.
    */
   private void abortStop(RunStore.RunRow run, SpecStore.SpecRow spec, boolean cancelled) {
-    runStore.transition(
+    runStore.releaseStop(
         run.id(),
-        STOPPING,
-        "running",
         () -> {
           if (cancelled) {
             specStore.compareAndSetStatus(spec.id(), SpecStatus.CANCELLED, spec.status());

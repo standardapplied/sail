@@ -1466,15 +1466,16 @@ public final class SailOperations implements HostOperations {
    * log address names exactly one execution, never whatever the shared per-container file currently
    * holds. The path is derived from the run's canonical UUID rather than the persisted {@code
    * log_path}: run rows replicate over sync, so a stored path is untrusted input that could point
-   * anywhere the container's dev user can read. The provenance guard already established the run is
-   * local.
+   * anywhere the container's dev user can read; the stored one only tells a pre-upgrade review's
+   * {@code review.log} from an {@code agent.log} ({@link AgentUnit#readableLogPath}). The
+   * provenance guard already established the run is local.
    */
   private RunLogResponse runLogValue(RunStore.RunRow run, int tail) {
     projects.requireExists(run.project());
     if (Strings.isBlank(run.logPath())) {
       return new RunLogResponse(run.id(), List.of(), "This run has no log file.");
     }
-    var logPath = AgentUnit.forRun(run.id()).logPath();
+    var logPath = AgentUnit.readableLogPath(run.id(), run.logPath());
     var cmd =
         ContainerExec.asDevUser(
             run.project(), List.of("tail", "-n", String.valueOf(tail), "--", logPath));

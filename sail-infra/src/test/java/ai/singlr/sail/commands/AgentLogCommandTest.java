@@ -21,6 +21,10 @@ class AgentLogCommandTest {
   private static final String RUN = "0195e0a0-1111-7abc-8def-0123456789ab";
 
   private static RunStore.RunRow run(String role) {
+    return run(role, "/a/path/sync/could/have/written");
+  }
+
+  private static RunStore.RunRow run(String role, String logPath) {
     return new RunStore.RunRow(
         RUN,
         "acme",
@@ -34,7 +38,7 @@ class AgentLogCommandTest {
         null,
         "running",
         null,
-        "/a/path/sync/could/have/written",
+        logPath,
         null,
         "t0",
         null,
@@ -68,6 +72,13 @@ class AgentLogCommandTest {
           AgentLogCommand.logPathFrom(Optional.of(run(role))),
           "a " + role + " run's log is derived from its id: one file shape for every lane");
     }
+  }
+
+  @Test
+  void aReviewRunRecordedBeforeTheUpgradeIsStillReadFromItsReviewLog() {
+    var legacy = "/home/dev/.sail/runs/" + RUN + "/review.log";
+
+    assertEquals(legacy, AgentLogCommand.logPathFrom(Optional.of(run("review", legacy))));
   }
 
   @Test

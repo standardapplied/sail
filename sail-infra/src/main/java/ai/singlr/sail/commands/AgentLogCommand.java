@@ -160,7 +160,7 @@ public final class AgentLogCommand implements Runnable {
 
   /** The run's own log path, derived from its id, or null when there is no run. */
   static String logPathFrom(Optional<RunStore.RunRow> run) {
-    return run.map(row -> AgentUnit.forRun(row.id()).logPath()).orElse(null);
+    return run.map(row -> AgentUnit.readableLogPath(row.id(), row.logPath())).orElse(null);
   }
 
   private void printNoLog() {

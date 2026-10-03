@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.Arrays;
 import org.junit.jupiter.api.Test;
 
 class AgentUnitTest {
@@ -64,5 +65,32 @@ class AgentUnitTest {
         unit.guardrailTriggerPath(),
         AgentUnit.forRun(RUN_B).guardrailTriggerPath(),
         "two runs in one container never share a trigger file");
+  }
+
+  @Test
+  void aReviewThatLoggedBeforeEveryLaneWasARunIsStillReadFromItsReviewLog() {
+    var legacy = AgentUnit.runDir(RUN_A) + "/review.log";
+
+    assertEquals(legacy, AgentUnit.readableLogPath(RUN_A, legacy));
+  }
+
+  @Test
+  void aRecordedLogPathOnlyEverChoosesBetweenTheRunsOwnTwoLogs() {
+    var own = AgentUnit.forRun(RUN_A).logPath();
+
+    for (var recorded :
+        Arrays.asList(
+            null,
+            "",
+            own,
+            "/home/dev/.ssh/id_ed25519",
+            AgentUnit.runDir(RUN_B) + "/review.log",
+            AgentUnit.runDir(RUN_A) + "/../" + RUN_B + "/review.log")) {
+      assertEquals(own, AgentUnit.readableLogPath(RUN_A, recorded), String.valueOf(recorded));
+    }
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            AgentUnit.readableLogPath("../escape", AgentUnit.runDir("../escape") + "/review.log"));
   }
 }

@@ -337,27 +337,73 @@ class RunStoreTest {
   }
 
   @Test
-  void transitionRunsAlongsideOnlyWhenItWinsAndRollsBackWithIt() {
+  void aStopClaimRunsAlongsideOnlyWhenItWinsAndRollsBackWithIt() {
     var id = newRun("backend", "auth");
     var ran = new AtomicBoolean();
 
-    assertFalse(store.transition(id, "stopping", "stopped", () -> ran.set(true)));
+    assertFalse(store.releaseStop(id, () -> ran.set(true)), "there is no claim to give back");
     assertFalse(ran.get(), "a lost transition must never run its alongside work");
 
     assertThrows(
         IllegalStateException.class,
         () ->
-            store.transition(
+            store.claimStop(
                 id,
-                "running",
                 "stopping",
                 () -> {
                   throw new IllegalStateException("conflict");
                 }));
-    assertEquals(
-        "running",
-        store.findById(id).orElseThrow().status(),
-        "an alongside failure rolls the transition back with it");
+    var untouched = store.findById(id).orElseThrow();
+    assertEquals("running", untouched.status(), "an alongside failure rolls the claim back");
+    assertFalse(untouched.stoppedByOperator(), "and the operator's mark with it");
+
+    store.transition(id, "running", "stopped");
+    assertFalse(store.claimStop(id, "stopping", () -> ran.set(true)), "the run ended first");
+    assertFalse(ran.get());
+    assertFalse(store.findById(id).orElseThrow().stoppedByOperator());
+  }
+
+  @Test
+  void aStopClaimMarksTheRunTheOperatorsThroughItsFinalizationAndTheMarkReplicates() {
+    var id = newRun("backend", "auth");
+    assertFalse(store.findById(id).orElseThrow().stoppedByOperator());
+    assertNull(store.comparableSnapshot(id).get("stop_source"));
+
+    assertTrue(store.claimStop(id, "stopping", () -> {}));
+
+    assertTrue(store.findById(id).orElseThrow().stoppedByOperator());
+    assertEquals("operator", store.comparableSnapshot(id).get("stop_source"));
+
+    assertTrue(store.transition(id, "stopping", "stopped"));
+
+    assertTrue(
+        store.findById(id).orElseThrow().stoppedByOperator(),
+        "a stop heard after the claim is finalized still reads as the operator's");
+    assertEquals("operator", store.comparableSnapshot(id).get("stop_source"));
+  }
+
+  @Test
+  void aStopClaimGivenBackClearsTheOperatorsMark() {
+    var id = newRun("backend", "auth");
+    store.claimStop(id, "stopping", () -> {});
+    var ran = new AtomicBoolean();
+
+    assertTrue(store.releaseStop(id, () -> ran.set(true)));
+
+    var restored = store.findById(id).orElseThrow();
+    assertEquals("running", restored.status());
+    assertFalse(restored.stoppedByOperator(), "the halt failed: the run may yet end on its own");
+    assertNull(store.comparableSnapshot(id).get("stop_source"));
+    assertTrue(ran.get());
+  }
+
+  @Test
+  void aRunThatEndsOnItsOwnIsNeverMarkedTheOperators() {
+    var id = newRun("backend", "auth");
+
+    store.transition(id, "running", "stopped", 0);
+
+    assertFalse(store.findById(id).orElseThrow().stoppedByOperator());
   }
 
   @Test

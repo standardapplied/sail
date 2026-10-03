@@ -82,6 +82,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * <p>{@code reviewId} is the review a reviewer's or a fix agent's run serves, stamped at creation
    * and never changed: the review pipeline reads it to know which review a stop advances. Null for
    * every other lane, and on a row an older box wrote.
+   *
+   * <p>{@code stopSource} is who ended the run when it did not end on its own: {@link
+   * #STOPPED_BY_OPERATOR} from the moment an operator's stop claims it ({@link #claimStop}), kept
+   * once that stop is finalized. Null on a run that ended itself or that the watcher ended.
    */
   public record RunRow(
       String id,
@@ -109,7 +113,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String transcriptPath,
       String lastActivityAt,
       String roomId,
-      String reviewId) {
+      String reviewId,
+      String stopSource) {
 
     /** The conversation this run serves — its spec's room, or the room itself when spec-less. */
     public String conversationId() {
@@ -169,6 +174,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           transcriptPath,
           lastActivityAt,
           roomId,
+          null,
           null);
     }
 
@@ -221,6 +227,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           sessionId,
           sessionSource,
           transcriptPath,
+          null,
           null,
           null,
           null);
@@ -337,6 +344,15 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
 
     /**
+     * Whether an operator's stop holds this run or ended it. The unit dying under that stop is seen
+     * by the watcher too, and this is what tells its stop from the run ending on its own, however
+     * late it arrives.
+     */
+    public boolean stoppedByOperator() {
+      return STOPPED_BY_OPERATOR.equals(stopSource);
+    }
+
+    /**
      * Whether this run belongs to the box whose handle is {@code localHandle} — the one predicate
      * for every run-ownership question (the read guard, the reaper, the reconciler, presence), so
      * they can never disagree about which box owns a run. A handled box owns the runs stamped with
@@ -356,11 +372,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     }
   }
 
+  /** The {@code stop_source} of a run an operator's stop claimed. */
+  public static final String STOPPED_BY_OPERATOR = "operator";
+
   private static final String COLUMNS =
       "id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid, status,"
           + " exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,"
           + " principal, owner, session_id, session_source, transcript_path, last_activity_at,"
-          + " room_id, review_id";
+          + " room_id, review_id, stop_source";
 
   /**
    * Records a new run in the {@code running} state, journaling a baseline revision so it
@@ -1488,26 +1507,62 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Status transition that commits only if the run still holds {@code expected}, running {@code
-   * alongside} inside the same immediate transaction once the transition has won — the seam a stop
-   * claim uses to move its spec terminal in the very same commit. Returns whether the transition
-   * happened; a false return wrote nothing and never ran {@code alongside}, and an {@code
-   * alongside} that throws rolls the transition back. A terminal target status stamps {@code
+   * Status transition that commits only if the run still holds {@code expected}. Returns whether
+   * the transition happened; a false return wrote nothing. A terminal target status stamps {@code
    * completed_at}; a non-terminal one clears it.
    */
-  public boolean transition(String id, String expected, String status, Runnable alongside) {
-    return transition(id, expected, status, null, alongside);
-  }
-
   public boolean transition(String id, String expected, String status) {
     return transition(id, expected, status, null, () -> {});
   }
 
   /**
-   * As {@link #transition(String, String, String, Runnable)}, also stamping {@code exitCode} (when
-   * non-null) in the same UPDATE, so a finisher that knows the process outcome commits the terminal
-   * status and its exit code as one atomic, single-revision write — a crash or a sync push can
-   * never observe the terminal status without its exit code.
+   * An operator's stop claim: {@code running → status} as {@link #transition(String, String,
+   * String)} commits it, marking in the same revision that an operator ended the run and running
+   * {@code alongside} inside the same immediate transaction once the claim has won — the seam a
+   * stop uses to move its spec terminal in the very same commit. A lost claim wrote nothing and
+   * never ran {@code alongside}, and an {@code alongside} that throws rolls the claim back. {@code
+   * status} is {@code stopping} while the halt is under way, or {@code stopped} for a run with no
+   * process left to halt. The mark outlives the claim's finalization, so a stop of the same run
+   * that arrives afterwards still reads as the operator's.
+   */
+  public boolean claimStop(String id, String status, Runnable alongside) {
+    return transition(
+        id,
+        "running",
+        status,
+        null,
+        () -> {
+          markStopSource(id, STOPPED_BY_OPERATOR);
+          alongside.run();
+        });
+  }
+
+  /**
+   * Gives back a stop claim whose halt failed: {@code stopping → running}, the operator's mark
+   * cleared in the same revision and {@code alongside} run in the same transaction, so the run is
+   * again one that may end on its own.
+   */
+  public boolean releaseStop(String id, Runnable alongside) {
+    return transition(
+        id,
+        "stopping",
+        "running",
+        null,
+        () -> {
+          markStopSource(id, null);
+          alongside.run();
+        });
+  }
+
+  private void markStopSource(String id, String stopSource) {
+    db.execute("UPDATE runs SET stop_source = ? WHERE id = ?", stopSource, id);
+  }
+
+  /**
+   * As {@link #transition(String, String, String)}, also stamping {@code exitCode} (when non-null)
+   * in the same UPDATE, so a finisher that knows the process outcome commits the terminal status
+   * and its exit code as one atomic, single-revision write — a crash or a sync push can never
+   * observe the terminal status without its exit code.
    */
   public boolean transition(String id, String expected, String status, Integer exitCode) {
     return transition(id, expected, status, exitCode, () -> {});
@@ -1740,8 +1795,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid, watcher_pid,
             status, exit_code, log_path, unit, started_at, completed_at, repos, pid_ticks,
             principal, owner, session_id, session_source, transcript_path, last_activity_at,
-            room_id, review_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            room_id, review_id, stop_source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET project = excluded.project, spec_id = excluded.spec_id,
             node = excluded.node, role = excluded.role, agent = excluded.agent,
             branch = excluded.branch, task = excluded.task, pid = excluded.pid,
@@ -1753,7 +1808,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             session_id = excluded.session_id, session_source = excluded.session_source,
             transcript_path = excluded.transcript_path,
             last_activity_at = excluded.last_activity_at, room_id = excluded.room_id,
-            review_id = excluded.review_id""",
+            review_id = excluded.review_id, stop_source = excluded.stop_source""",
         row.id(),
         row.project(),
         row.specId(),
@@ -1779,7 +1834,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.transcriptPath(),
         row.lastActivityAt(),
         row.roomId(),
-        row.reviewId());
+        row.reviewId(),
+        row.stopSource());
   }
 
   private static Map<String, Object> snapshotMap(RunRow run) {
@@ -1810,6 +1866,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     map.put("last_activity_at", run.lastActivityAt());
     map.put("room_id", run.roomId());
     map.put("review_id", run.reviewId());
+    map.put("stop_source", run.stopSource());
     return map;
   }
 
@@ -1844,6 +1901,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           "last_activity_at",
           "room_id",
           "review_id",
+          "stop_source",
           "principals");
 
   /**
@@ -1891,7 +1949,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "transcript_path"),
         Snapshots.text(snapshot, "last_activity_at"),
         Snapshots.text(snapshot, "room_id"),
-        Snapshots.text(snapshot, "review_id"));
+        Snapshots.text(snapshot, "review_id"),
+        Snapshots.text(snapshot, "stop_source"));
   }
 
   /** The run's store-specific half of the shared {@link RevisionJournal} sync protocol. */
@@ -1984,6 +2043,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         row.text(22),
         row.text(23),
         row.text(24),
-        row.text(25));
+        row.text(25),
+        row.text(26));
   }
 }

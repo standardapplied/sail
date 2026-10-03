@@ -859,7 +859,13 @@ before it reserves the one that follows. The watcher addresses a stop to the run
 its own command line, never to one read back from the container, and a run that died before
 its watcher attached ends by a stop carrying the exit code its unit still holds. An
 operator's `sail agent stop` on a reviewer or a fix agent is a person's decision about the
-loop, so the review escalates rather than retrying over it. A fix agent is told to verify
+loop, so the review escalates rather than retrying over it. The stop's claim marks the run
+the operator's (`runs.stop_source`) in the transaction that claims it, and the mark outlives
+the claim, so every stop of that run — the operator's cancel, the watcher's stop of the unit
+that died under the halt, a replay of either — escalates the review in whatever order they
+are heard, and none reads as the run's own end. A stop the reconciler replays carries the
+reason the watcher recorded when it killed the run, so a kill the daemon died before acting
+on is still a kill: nothing of that fix agent's is committed. A fix agent is told to verify
 locally, commit and push, and not to watch CI: the re-review judges the branch, and the pull
 request shows its checks to whoever merges. A watcher re-armed after its own death takes the
 lane's limits as the project sets them at that moment.

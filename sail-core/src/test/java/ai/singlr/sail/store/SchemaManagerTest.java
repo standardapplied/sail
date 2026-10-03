@@ -307,6 +307,9 @@ class SchemaManagerTest {
         runs.findById(review).orElseThrow().reviewId(),
         "a review run recorded before runs named their review ran under its review's own id");
     assertNull(runs.findById(build).orElseThrow().reviewId());
+    assertFalse(
+        runs.findById(build).orElseThrow().stoppedByOperator(),
+        "a run stopped before stops were marked is nobody's to escalate");
     assertEquals(
         "3-abc",
         db.queryOne("SELECT rev FROM runs WHERE id = ?", row -> row.text(0), review).orElseThrow(),

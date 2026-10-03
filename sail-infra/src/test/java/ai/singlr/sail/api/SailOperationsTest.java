@@ -1132,6 +1132,38 @@ class SailOperationsTest {
   }
 
   @Test
+  void runLogStillReadsTheReviewLogOfAReviewRunRecordedBeforeTheUpgrade() throws Exception {
+    var legacy = "/home/dev/.sail/runs/" + R1 + "/review.log";
+    var shell =
+        shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 -- " + legacy, "verdict\n");
+    var operations =
+        operationsWithStores(
+            baseYaml(),
+            shell,
+            null,
+            s -> {},
+            runs ->
+                runs.create(
+                    R1,
+                    "acme",
+                    "auth",
+                    "node-a",
+                    "review",
+                    "codex",
+                    "feat/auth",
+                    "review it",
+                    null,
+                    null,
+                    legacy,
+                    "sail-review-" + R1));
+
+    assertEquals(
+        List.of("verdict"),
+        get(Acting.by(ADMIN, () -> operations.runLog(R1, 2, "node-a")), "lines"),
+        "a review that ran before every lane logged to agent.log keeps its log after the upgrade");
+  }
+
+  @Test
   void runLogIgnoresAForgedPersistedLogPath() throws Exception {
     var shell =
         shell().on("incus list ^acme$", RUNNING_JSON).on("tail -n 2 -- " + RUN_LOG, "safe\n");

@@ -689,7 +689,8 @@ public final class SchemaManager {
               transcript_path TEXT,
               last_activity_at TEXT,
               room_id TEXT,
-              review_id TEXT
+              review_id TEXT,
+              stop_source TEXT
           )""",
           """
           INSERT INTO runs_v8 (id, project, spec_id, agent, branch, task, pid, status,

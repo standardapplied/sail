@@ -58,6 +58,18 @@ public record AgentUnit(
         dir + "/agent-task.txt");
   }
 
+  /**
+   * The log a reader of run {@code runId} opens: its {@code agent.log}, or the {@code review.log} a
+   * review wrote before every lane logged as a run of its own, when that is exactly what the run
+   * recorded. The recorded path only chooses between the two names under the run's own directory;
+   * the path itself is still derived from the canonical run id, so a stored value never selects a
+   * file.
+   */
+  public static String readableLogPath(String runId, String recordedLogPath) {
+    var legacy = runDir(Ids.requireUuid(runId)) + "/review.log";
+    return legacy.equals(recordedLogPath) ? legacy : forRun(runId).logPath();
+  }
+
   /** The systemd unit name with the {@code .service} suffix, as {@code systemctl} expects it. */
   public String service() {
     return unitName + ".service";

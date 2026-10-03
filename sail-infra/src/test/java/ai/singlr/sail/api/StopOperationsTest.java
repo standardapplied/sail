@@ -153,6 +153,9 @@ class StopOperationsTest {
     assertTrue(notRunning.mutated());
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertTrue(
+        runStore.findById(R1).orElseThrow().stoppedByOperator(),
+        "the dead run's own stop may still be on its way: it must read as the operator's");
     assertTrue(halts.isEmpty());
     assertEquals(1, events.size());
   }
@@ -902,6 +905,9 @@ class StopOperationsTest {
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertFalse(
+        runStore.findById(R1).orElseThrow().stoppedByOperator(),
+        "the stop did not happen: the run's own end is again its own");
     assertTrue(events.isEmpty());
   }
 
@@ -1254,6 +1260,10 @@ class StopOperationsTest {
         "a reviewer is not its spec's build attempt: stopping it cancels no spec, and the review"
             + " loop escalates the review it served");
     assertEquals("stopped", runStore.findById(R2).orElseThrow().status());
+    assertTrue(
+        runStore.findById(R2).orElseThrow().stoppedByOperator(),
+        "the mark outlives the finalized claim, so the watcher's stop of the halted unit never"
+            + " reads as the reviewer's own end");
     assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
     assertEquals(
         List.of(Event.WellKnownTypes.AGENT_CANCELLED), events.stream().map(Event::type).toList());
@@ -1366,9 +1376,8 @@ class StopOperationsTest {
 
   private void interruptStop() {
     assertTrue(
-        runStore.transition(
+        runStore.claimStop(
             R1,
-            "running",
             "stopping",
             () ->
                 specStore.compareAndSetStatus(

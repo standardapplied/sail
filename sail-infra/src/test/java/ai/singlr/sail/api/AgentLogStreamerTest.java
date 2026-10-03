@@ -237,7 +237,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandTailsTheRunScopedLogDerivedFromTheUuid() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, 0);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 0);
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
@@ -247,7 +247,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandPassesTheLogAsAPositionalArgNotShellSyntax() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, 0);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("touch -- \"$1\""), joined);
     assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
@@ -255,7 +255,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, 50);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 50);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("tail -n \"+$2\" -f"), joined);
     assertTrue(Arrays.asList(cmd).contains("50"), Arrays.toString(cmd));
@@ -263,7 +263,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandRunsAsTheDevUser() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, 0);
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, RUN_LOG, 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
@@ -275,7 +275,24 @@ class AgentLogStreamerTest {
         IllegalArgumentException.class,
         () ->
             AgentLogStreamer.buildTailCommand(
-                "proj", "/home/dev/.sail/runs/x; id > /tmp/pwned #", 0));
+                "proj", "/home/dev/.sail/runs/x; id > /tmp/pwned #", RUN_LOG, 0));
+  }
+
+  @Test
+  void buildTailCommandNeverTailsAForgedRecordedLogPath() {
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "/home/dev/.ssh/id_ed25519", 0);
+
+    assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
+    assertTrue(Arrays.stream(cmd).noneMatch(arg -> arg.contains("id_ed25519")));
+  }
+
+  @Test
+  void buildTailCommandTailsTheReviewLogOfAReviewRunRecordedBeforeTheUpgrade() {
+    var legacy = "/home/dev/.sail/runs/" + RUN_UUID + "/review.log";
+
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, legacy, 0);
+
+    assertTrue(Arrays.asList(cmd).contains(legacy), Arrays.toString(cmd));
   }
 
   @Test

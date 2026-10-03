@@ -1825,7 +1825,7 @@ class MissedStopReconcilerTest {
 
   @Test
   void stopEventCarriesExitCodeAndReconcileSource() {
-    var event = MissedStopReconciler.stopEvent(stoppedRun("codex", "fix"), 137);
+    var event = MissedStopReconciler.stopEvent(stoppedRun("codex", "fix"), 137, null);
 
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, event.type());
     assertEquals("test-project", event.project());
@@ -1839,7 +1839,7 @@ class MissedStopReconcilerTest {
 
   @Test
   void stopEventOmitsExitCodeWhenUnknown() {
-    var event = MissedStopReconciler.stopEvent(stoppedRun(null, "build"), null);
+    var event = MissedStopReconciler.stopEvent(stoppedRun(null, "build"), null, null);
 
     assertEquals(Event.SAIL_AGENT, event.agent());
     assertNull(event.data().get("exit_code"));
