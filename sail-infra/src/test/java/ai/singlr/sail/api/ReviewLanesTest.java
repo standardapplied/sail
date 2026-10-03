@@ -741,4 +741,24 @@ class ReviewLanesTest {
             + " attempt owns the spec, and no re-review starts");
     assertTrue(loop.live().isEmpty());
   }
+
+  @Test
+  void theRunThatStoppedIsFinishedBeforeTheRunThatFollowsReservesWhoeverHearsTheStopFirst() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    loop.container.exited(reviewer.id(), CRITICAL, 0);
+
+    loop.controller.onEvent(loop.watcherStop(reviewer.id(), null));
+    loop.settle();
+
+    var ended = loop.runs.findById(reviewer.id()).orElseThrow();
+    assertEquals("stopped", ended.status(), "the pipeline heard the stop before the run tracker");
+    assertEquals(0, ended.exitCode());
+    assertEquals(
+        "fix",
+        onlyLive().role(),
+        "the fix agent passed the gate: its reviewer no longer holds the spec's repos");
+    assertTrue(details("review_iteration_failed").isEmpty());
+  }
 }
