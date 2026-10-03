@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -83,9 +82,14 @@ class RunLauncherTest {
   }
 
   private static ShellExec runningShell() {
+    return runningShell(new ArrayList<>());
+  }
+
+  private static ShellExec runningShell(List<String> commands) {
     return shell(
         command -> {
           var joined = String.join(" ", command);
+          commands.add(joined);
           if (joined.contains("cat") && joined.contains("pid")) {
             return new ShellExec.Result(0, "12345\n", "");
           }
@@ -149,7 +153,7 @@ class RunLauncherTest {
   }
 
   @Test
-  void aRunCancelledMidLaunchTearsDownAndConflicts() {
+  void aRunWhoseRowIsGoneMidLaunchTearsDownAndConflicts() {
     var ex =
         assertThrows(
             ApiException.class,
@@ -157,27 +161,43 @@ class RunLauncherTest {
     assertEquals(
         ErrorCode.CONFLICT,
         ex.failure().errorCode(),
-        "no running row to update means the cancel already claimed the run");
+        "no row to stamp means the run was taken from under its launch");
   }
 
   @Test
-  void aRunWhoseRecordedProcessIsAlreadyGoneLaunchedAndEndedAndIsNotALostLaunch() {
-    var ended =
-        shell(
-            command -> {
-              var joined = String.join(" ", command);
-              return joined.contains("cat") && joined.contains("pid")
-                  ? new ShellExec.Result(0, "12345\n", "")
-                  : new ShellExec.Result(1, "", "");
-            });
+  void aRunAnOperatorStoppedMidLaunchTearsDownItsAgentAndConflicts() {
+    seedRunningRun();
+    Acting.system(() -> assertTrue(runStore.claimStop(RUN_ID, "stopped", () -> {})));
+    var commands = new ArrayList<String>();
 
-    var status = launcher(ended, runStore).finishLaunch(ctx(true), outcome());
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> launcher(runningShell(commands), runStore).finishLaunch(ctx(true), outcome()));
 
-    assertFalse(
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(
+        commands.stream().anyMatch(command -> command.contains("systemctl --user kill")),
+        "the agent the cancelled launch started is torn down: " + commands);
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aRunThatEndedBetweenItsStatusReadAndItsStampLaunchedAndEndedAndIsNotALostLaunch() {
+    seedRunningRun();
+    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped", 0)));
+    var commands = new ArrayList<String>();
+
+    var status = launcher(runningShell(commands), runStore).finishLaunch(ctx(true), outcome());
+
+    assertTrue(
         status.running(),
-        "its pid was recorded and the process is gone: the agent died at launch and its stop"
-            + " already finished the row, which is not a cancel to tear down and refuse");
-    assertTrue(events.isEmpty(), "no session is announced for an agent that is not running");
+        "the status was read while the agent still ran; its own stop then finished the row, which"
+            + " is not a cancel to tear down and refuse");
+    assertTrue(
+        commands.stream().noneMatch(command -> command.contains("systemctl --user kill")),
+        "nothing is torn down: " + commands);
+    assertTrue(events.isEmpty(), "no session is announced for a run that is already over");
   }
 
   @Test

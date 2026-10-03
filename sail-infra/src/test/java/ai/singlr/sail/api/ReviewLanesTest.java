@@ -888,6 +888,31 @@ class ReviewLanesTest {
   }
 
   @Test
+  void
+      anAgentWhoseStopFinishesItsRunBetweenTheLaunchersStatusReadAndItsStampIsNotACancelledLaunch() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    loop.onLaunch(runId -> assertTrue(loop.runs.transition(runId, "running", "stopped", 0)));
+
+    loop.finish(reviewer.id(), CRITICAL);
+
+    var fix = loop.runsIn("auth", "fix").getFirst();
+    assertTrue(
+        details("review_iteration_failed").isEmpty(),
+        "the launcher still read the agent as running when its stop finished the row: that is a"
+            + " run that launched and ended, not one cancelled under its launch: "
+            + details("review_iteration_failed"));
+    assertTrue(loop.container.alive(fix.id()), "and nothing tore it down");
+    loop.onLaunch(runId -> {});
+
+    loop.finish(fix.id(), "fixed and pushed");
+
+    assertEquals("review", onlyLive().role(), "its stop is judged as any fix agent's is");
+    assertEquals(2, loop.reviews.reviewsForSpec("auth").size());
+  }
+
+  @Test
   void anAgentThatEndsBeforeItsLaunchIsStampedIsJudgedOnItsStopNotLostAsACancelledLaunch() {
     loop = ReviewLoop.of(tempDir, stages("codex"));
     built("auth");

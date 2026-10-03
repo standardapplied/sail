@@ -141,7 +141,7 @@ class DispatchLaunchCancelRaceTest {
                       .findFirst()
                       .orElse(""));
               var run = runStore.running().getFirst();
-              assertTrue(runStore.transition(run.id(), "running", "stopped"));
+              assertTrue(runStore.claimStop(run.id(), "stopped", () -> {}));
               cancelled.set(run.id());
               return 0;
             },

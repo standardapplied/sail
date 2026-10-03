@@ -147,17 +147,17 @@ public final class RunLauncher {
    * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
    * lane can build its own response. Replaces four hand-copied copies of this sequence.
    *
-   * <p>A run whose row is already finished when its process is stamped was either cancelled while
-   * the launch was preparing — its agent may be running, and is torn down — or is known to have
-   * ended: its pid was recorded and that process is gone, an agent that died at launch, whose
-   * watcher's stop finished the row first. That one launched and is over; its stop says how it
-   * ended, and the launch is not a failure. A cancel's halt removes the pid file, so a cancelled
-   * launch never reads as one that ended.
+   * <p>A run whose row is no longer {@code running} when its process is stamped was either
+   * cancelled while the launch was preparing — its agent may be running, and is torn down — or
+   * ended on its own: an agent that finished at once, whose watcher's stop finished the row first.
+   * That one launched and is over; its stop says how it ended, and the launch is not a failure. The
+   * row tells the two apart, never the process: the status read above is from before the stamp, and
+   * an agent can end between the two.
    */
   AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
     var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
     if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
-      if (status != null && !status.running()) {
+      if (endedOnItsOwn(ctx.runId())) {
         return status;
       }
       throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
@@ -338,6 +338,15 @@ public final class RunLauncher {
    * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
    * halt that races the process's own exit is a no-op — and the conflict names what happened.
    */
+  /**
+   * Whether the finished run {@code runId} ended by its own stop rather than an operator's: its row
+   * is still held and no stop claim marked it. A row that is gone was erased under the launch, and
+   * is a cancel like any other.
+   */
+  private boolean endedOnItsOwn(String runId) {
+    return runStore.findById(runId).filter(run -> !run.stoppedByOperator()).isPresent();
+  }
+
   private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
     try {
       StopOperations.sessionHalter(shell).halt(project, unit);
