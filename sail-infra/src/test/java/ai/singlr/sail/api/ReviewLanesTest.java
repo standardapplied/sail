@@ -761,4 +761,30 @@ class ReviewLanesTest {
         "the fix agent passed the gate: its reviewer no longer holds the spec's repos");
     assertTrue(details("review_iteration_failed").isEmpty());
   }
+
+  @Test
+  void anAgentThatEndsBeforeItsLaunchIsStampedIsJudgedOnItsStopNotLostAsACancelledLaunch() {
+    loop = ReviewLoop.of(tempDir, stages("codex"));
+    built("auth");
+    var reviewer = onlyLive();
+    loop.onLaunch(
+        runId -> {
+          loop.container.exited(runId, "codex: command not found", 127);
+          assertTrue(loop.runs.transition(runId, "running", "stopped", 127));
+        });
+
+    loop.finish(reviewer.id(), CRITICAL);
+
+    var fix = loop.runsIn("auth", "fix").getFirst();
+    assertTrue(
+        details("review_iteration_failed").isEmpty(),
+        "the fix agent launched and died at once; its watcher's stop finished the run before the"
+            + " launcher stamped it, which is not a launch cancelled under it: "
+            + details("review_iteration_failed"));
+
+    loop.onEvent(loop.watcherStop(fix.id(), null));
+
+    assertEquals(List.of("fix agent failed: exit 127"), details("review_iteration_failed"));
+    assertEquals("escalated", statusOf(fix.reviewId()));
+  }
 }

@@ -6,8 +6,10 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.AgentUnit;
@@ -156,6 +158,26 @@ class RunLauncherTest {
         ErrorCode.CONFLICT,
         ex.failure().errorCode(),
         "no running row to update means the cancel already claimed the run");
+  }
+
+  @Test
+  void aRunWhoseRecordedProcessIsAlreadyGoneLaunchedAndEndedAndIsNotALostLaunch() {
+    var ended =
+        shell(
+            command -> {
+              var joined = String.join(" ", command);
+              return joined.contains("cat") && joined.contains("pid")
+                  ? new ShellExec.Result(0, "12345\n", "")
+                  : new ShellExec.Result(1, "", "");
+            });
+
+    var status = launcher(ended, runStore).finishLaunch(ctx(true), outcome());
+
+    assertFalse(
+        status.running(),
+        "its pid was recorded and the process is gone: the agent died at launch and its stop"
+            + " already finished the row, which is not a cancel to tear down and refuse");
+    assertTrue(events.isEmpty(), "no session is announced for an agent that is not running");
   }
 
   @Test

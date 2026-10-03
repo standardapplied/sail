@@ -146,10 +146,20 @@ public final class RunLauncher {
    * if a concurrent cancel already claimed the run, complete a foreground run, and — once the agent
    * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
    * lane can build its own response. Replaces four hand-copied copies of this sequence.
+   *
+   * <p>A run whose row is already finished when its process is stamped was either cancelled while
+   * the launch was preparing — its agent may be running, and is torn down — or is known to have
+   * ended: its pid was recorded and that process is gone, an agent that died at launch, whose
+   * watcher's stop finished the row first. That one launched and is over; its stop says how it
+   * ended, and the launch is not a failure. A cancel's halt removes the pid file, so a cancelled
+   * launch never reads as one that ended.
    */
   AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
     var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
     if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
+      if (status != null && !status.running()) {
+        return status;
+      }
       throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
     }
     if (!ctx.background()) {

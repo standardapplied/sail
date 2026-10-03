@@ -31,6 +31,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -88,6 +89,7 @@ final class ReviewLoop implements AutoCloseable {
   private final Condition idle = lock.newCondition();
   private volatile ScriptedAgent script;
   private volatile boolean refusing;
+  private volatile Consumer<String> launched = runId -> {};
 
   /** A loop whose pipeline and reviewer are resolved from {@code yaml}, as the server wires it. */
   static ReviewLoop wired(Path dir, String yaml) {
@@ -369,12 +371,19 @@ final class ReviewLoop implements AutoCloseable {
     this.refusing = true;
   }
 
+  /** Runs {@code hook} with the run id of every agent launched from now on, once it started. */
+  void onLaunch(Consumer<String> hook) {
+    this.launched = hook;
+  }
+
   private int launch(List<String> command) {
     if (refusing) {
       return 1;
     }
+    var runId = command.get(command.size() - 3);
     launchCommands.add(List.copyOf(command));
-    container.started(command.get(command.size() - 3));
+    container.started(runId);
+    launched.accept(runId);
     return 0;
   }
 
