@@ -29,7 +29,9 @@ public record Refusal(Kind kind, String message, String fix) {
     /** The revision changes a field that never changes after create. */
     FIXED,
     /** The work cannot be erased yet: not archived, cancelled or deleted, or still running. */
-    NOT_PRUNABLE
+    NOT_PRUNABLE,
+    /** The event is of a type no client, or no client on the actor's lane, may publish. */
+    NOT_PUBLISHABLE
   }
 
   public Refusal {

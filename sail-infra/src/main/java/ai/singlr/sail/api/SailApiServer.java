@@ -150,8 +150,7 @@ public final class SailApiServer implements AutoCloseable {
     if (eventBus != null) {
       sseHandler = new SseHandler(eventBus, auth);
       server.createContext("/v1/events/stream", rateLimits.wrap(sseHandler));
-      socketListener =
-          socketPath == null ? null : new LocalApiSocket(eventBus, operations, socketPath);
+      socketListener = socketPath == null ? null : new LocalApiSocket(operations, socketPath);
     } else {
       sseHandler = null;
       socketListener = null;

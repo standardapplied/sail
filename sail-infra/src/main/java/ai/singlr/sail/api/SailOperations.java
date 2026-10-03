@@ -89,6 +89,7 @@ public final class SailOperations implements HostOperations {
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
     this.syncOperations = Objects.requireNonNull(syncOperations, "syncOperations");
     this.pruner = new SpecPruner(db, eventBus, this::authoritative, DateTimeUtils::now);
+    this.door = new EventDoor(db, () -> box().handle());
     this.schema = new HostLanes.Schema(db, syncOperations);
     this.catalog =
         new HostLanes.Catalog(
@@ -323,6 +324,7 @@ public final class SailOperations implements HostOperations {
   private final SnapshotOperations snapshotOps;
   private final GlobalSpecOperations globalSpecOps;
   private SpecPruner pruner;
+  private EventDoor door;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
   private final StopOperations stopOps;
@@ -846,7 +848,7 @@ public final class SailOperations implements HostOperations {
       throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
     }
     var data = new LinkedHashMap<String, Object>();
-    data.put("message_id", row.id());
+    data.put(Event.WellKnownData.MESSAGE_ID, row.id());
     data.put("preview", preview(row.body()));
     if (row.question()) {
       data.put("question", true);
@@ -1559,6 +1561,10 @@ public final class SailOperations implements HostOperations {
           Event.WellKnownTypes.SPEC_STATUS_CHANGED,
           Event.WellKnownTypes.AGENT_SESSION_STOPPED);
 
+  /**
+   * Publishes a client's event through the one {@link EventDoor}: the bound actor must be allowed
+   * to drive what the event names, and the bus takes it as the server stamped it.
+   */
   @Override
   public Result<EventPublishResponse> publishEvent(Event event) {
     if (eventBus == null) {
@@ -1567,10 +1573,16 @@ public final class SailOperations implements HostOperations {
           "Event bus is not wired into this SailOperations instance.",
           "Use the SailOperations constructor that accepts an EventBus.");
     }
+    if (door == null) {
+      return Result.failure(
+          ErrorCode.INTERNAL,
+          "This SailOperations instance has no control-plane database to decide an event by.",
+          "Open it through OperationsFactory.");
+    }
     var result =
         safe(
             () -> {
-              var stamped = eventBus.publish(event);
+              var stamped = eventBus.publish(door.admit(event));
               return new EventPublishResponse(stamped.id(), stamped.toMap());
             });
     if (result instanceof Result.Success<EventPublishResponse>
@@ -1622,8 +1634,8 @@ public final class SailOperations implements HostOperations {
 
   /**
    * The wire view of a stored event row, matching the shape live SSE frames and {@code /recent}
-   * carry so one client-side decoder serves all three. A row whose data payload no longer parses is
-   * served without it — one damaged row must not take the whole history read down.
+   * carry so one client-side decoder serves all three. A row whose data payload or publisher no
+   * longer parses is served without it — one damaged row must not take the whole history read down.
    */
   private static Map<String, Object> eventRowMap(EventStore.EventRow row) {
     var map = new LinkedHashMap<String, Object>();
@@ -1637,17 +1649,23 @@ public final class SailOperations implements HostOperations {
     map.put("type", row.type());
     map.put("agent", row.agent());
     map.put("host", row.host());
-    if (Strings.isNotBlank(row.data())) {
-      try {
-        var data = YamlUtil.parseMap(row.data());
-        if (!data.isEmpty()) {
-          map.put("data", data);
-        }
-      } catch (RuntimeException e) {
-        ApiLog.unexpected("parsing stored event data for event " + row.id(), e);
-      }
-    }
+    putParsed(map, "data", row.data(), row.id());
+    putParsed(map, "publisher", row.publisher(), row.id());
     return map;
+  }
+
+  private static void putParsed(Map<String, Object> map, String key, String json, long eventId) {
+    if (Strings.isBlank(json)) {
+      return;
+    }
+    try {
+      var parsed = YamlUtil.parseMap(json);
+      if (!parsed.isEmpty()) {
+        map.put(key, parsed);
+      }
+    } catch (RuntimeException e) {
+      ApiLog.unexpected("parsing stored event " + key + " for event " + eventId, e);
+    }
   }
 
   @Override

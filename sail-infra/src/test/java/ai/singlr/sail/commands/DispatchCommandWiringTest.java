@@ -135,7 +135,7 @@ class DispatchCommandWiringTest {
         });
   }
 
-  private static StubShell shell() {
+  static StubShell shell() {
     return new StubShell()
         .on("incus list ^acme$", RUNNING_JSON)
         .on("mkdir -p /home/dev/.sail", "")
@@ -290,7 +290,7 @@ class DispatchCommandWiringTest {
         "a refused dispatch must not claim the spec");
   }
 
-  private static final class StubShell implements ShellExec {
+  static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
     /** Every launch reconciles the in-container sail helpers; answer as already installed. */

@@ -2434,12 +2434,31 @@ class SailOperationsTest {
   }
 
   @Test
+  void publishEventFailsWithNoControlPlaneToDecideItBy(@TempDir Path tmp) throws Exception {
+    try (var bus = new EventBus()) {
+      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, null);
+      var result =
+          Actor.call(
+              ADMIN,
+              () ->
+                  operations.publishEvent(
+                      Event.of("acme", null, "spec_dispatched", "sail", "host-01")));
+      assertError(ErrorCode.INTERNAL, result);
+      assertEquals(0L, bus.stats().published());
+    }
+  }
+
+  @Test
   void publishEventReturnsStampedIdWhenBusWired(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var operations = eventOperations(tmp, bus, persister);
       var result =
-          operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "host-01"));
+          Actor.call(
+              ADMIN,
+              () ->
+                  operations.publishEvent(
+                      Event.of("acme", null, "spec_dispatched", "sail", "host-01")));
       assertTrue(result.isSuccess());
       assertEquals(1L, get(result, "id"));
       assertNotNull(get(result, "event"));
@@ -2469,10 +2488,14 @@ class SailOperationsTest {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
       var latch = new CountDownLatch(2);
       bus.subscribe(BusTesting.latching(persister, latch));
-      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
+      var operations = eventOperations(tmp, bus, persister);
 
-      operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
-      operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
+      Actor.run(
+          ADMIN,
+          () -> {
+            operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
+            operations.publishEvent(Event.of("acme", null, "snapshot_created", "sail", "h"));
+          });
 
       BusTesting.awaitDelivery(latch);
       var result = operations.recentEvents(5);
@@ -2945,12 +2968,22 @@ class SailOperationsTest {
   void eventBusStatsReflectsBusState(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 16);
-      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, persister);
-      operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h"));
+      var operations = eventOperations(tmp, bus, persister);
+      Actor.run(
+          ADMIN,
+          () -> operations.publishEvent(Event.of("acme", null, "spec_dispatched", "sail", "h")));
       var result = operations.eventBusStats();
       assertTrue(result.isSuccess());
       assertEquals(1L, get(result, "published"));
     }
+  }
+
+  private SailOperations eventOperations(Path dir, EventBus bus, AuditPersister persister)
+      throws IOException {
+    var db = Sqlite.open(dir.resolve("events.db"));
+    new SchemaManager(db).migrate();
+    return TestControlPlane.standalone(
+        new SailOperations(shell(), baseYamlPath(dir).toString(), bus, persister), db, dir);
   }
 
   private Path baseYamlPath(Path dir) throws IOException {

@@ -28,16 +28,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.Predicate;
 import org.junit.jupiter.api.Test;
 
 class LocalApiRouterTest {
 
-  private final EventBus bus = new EventBus();
   private final RecordingOps ops = new RecordingOps();
-  private final LocalApiRouter router = new LocalApiRouter(bus, ops);
+  private final LocalApiRouter router = new LocalApiRouter(ops);
 
   private static Map<String, String> auth() {
     return Map.of("authorization", "Bearer " + TestOperations.RUN_CREDENTIAL);
@@ -88,7 +84,7 @@ class LocalApiRouterTest {
             return List.of();
           }
         };
-    var local = new LocalApiRouter(bus, operations);
+    var local = new LocalApiRouter(operations);
     assertEquals("main", local.handle(get("/v1/sync", Map.of())).body().get("main"));
     assertEquals(List.of(), local.handle(get("/v1/conflicts", Map.of())).body().get("conflicts"));
     assertEquals(405, local.handle(form("POST", "/v1/sync", "")).status());
@@ -118,7 +114,7 @@ class LocalApiRouterTest {
                 type == null ? ErrorCode.BAD_REQUEST : ErrorCode.CONFLICT, "refused " + id);
           }
         };
-    var local = new LocalApiRouter(bus, operations);
+    var local = new LocalApiRouter(operations);
     var body = "strategy=mine".getBytes(StandardCharsets.UTF_8);
 
     var stale =
@@ -145,7 +141,6 @@ class LocalApiRouterTest {
       var rev = box.specs.revOf("auth");
       var lane =
           new LocalApiRouter(
-              bus,
               new TestOperations() {
                 @Override
                 public String conflictMergeTemplate(String type, String id) {
@@ -276,29 +271,7 @@ class LocalApiRouterTest {
   }
 
   @Test
-  void postEventPublishesStampedWithThePrincipalAndReturns202() throws Exception {
-    var seen = new AtomicReference<Event>();
-    var latch = new CountDownLatch(1);
-    var subscription =
-        bus.subscribe(
-            BusTesting.latching(
-                new EventSubscriber() {
-                  @Override
-                  public String name() {
-                    return "capture";
-                  }
-
-                  @Override
-                  public Predicate<Event> filter() {
-                    return e -> true;
-                  }
-
-                  @Override
-                  public void onEvent(Event event) {
-                    seen.set(event);
-                  }
-                },
-                latch));
+  void postEventHandsTheDoorAnEventAboutTheAuthenticatedRunAndReturns202() {
     var event =
         Event.of(
             "light-grid",
@@ -309,51 +282,39 @@ class LocalApiRouterTest {
             Map.of("run_id", "run-victim", "source", "watcher", "exit_code", 0, "reason", "done"));
     var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
     assertEquals(202, response.status());
-    assertTrue(((Long) response.body().get("id")) > 0);
-    BusTesting.awaitDelivery(latch);
-    var stamped = seen.get();
+    assertEquals(1L, response.body().get("id"));
+    var offered = ops.lastEvent;
     assertEquals(
         TestOperations.PRINCIPAL,
-        stamped.agent(),
-        "the server stamps event authorship from the authenticated run, not the client body");
-    assertEquals("acme", stamped.project(), "the client-chosen project is overridden");
-    assertEquals("auth", stamped.spec(), "the client-chosen spec is overridden");
+        offered.agent(),
+        "the event names the authenticated run's principal, not the client's agent");
+    assertEquals("acme", offered.project(), "the client-chosen project is overridden");
+    assertEquals("auth", offered.spec(), "the client-chosen spec is overridden");
     assertEquals(
         "run-1",
-        stamped.data().get("run_id"),
+        offered.data().get("run_id"),
         "an event can only address the authenticated run, never another one");
     assertFalse(
-        stamped.data().containsKey("source"),
+        offered.data().containsKey("source"),
         "the agent lane can never mark its own stop authoritative");
-    assertFalse(stamped.data().containsKey("exit_code"), "exit codes come from the watcher only");
-    assertEquals("done", stamped.data().get("reason"), "benign payload fields pass through");
-    subscription.close();
+    assertFalse(offered.data().containsKey("exit_code"), "exit codes come from the watcher only");
+    assertEquals("done", offered.data().get("reason"), "benign payload fields pass through");
+    assertEquals(
+        TestOperations.PRINCIPAL,
+        ops.lastBound.handle(),
+        "the door is asked as the run's principal");
   }
 
   @Test
-  void eventsRejectsTypesOutsideTheAgentLane() {
-    for (var type : List.of("spec_dispatched", "agent_cancelled", "spec_status_changed")) {
-      var event = Event.of("acme", "auth", type, "claude-code", "host-01");
-      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
-      assertEquals(403, response.status(), type);
-      assertTrue(response.body().get("error").toString().contains(type), type);
-    }
-  }
+  void aRefusalFromTheEventDoorIsTheRoutesAnswer() {
+    ops.eventRefusal =
+        Result.failure(ErrorCode.FORBIDDEN, "Event type 'spec_dispatched' is not available.");
+    var event = Event.of("acme", "auth", "spec_dispatched", "claude-code", "host-01");
 
-  @Test
-  void eventsRejectsTerminalSessionTypesSoARunCannotFinishItself() {
-    for (var type :
-        List.of(
-            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
-            Event.WellKnownTypes.AGENT_SESSION_COMPLETED)) {
-      var event =
-          Event.of("acme", "auth", type, "claude-code", "host-01", Map.of("run_id", "run-1"));
-      var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
-      assertEquals(
-          403,
-          response.status(),
-          type + " must come from the watcher's verified exit, never the live agent");
-    }
+    var response = router.handle(form("POST", "/v1/events", event.toJsonLine()));
+
+    assertEquals(403, response.status());
+    assertEquals("Event type 'spec_dispatched' is not available.", response.body().get("error"));
   }
 
   @Test
@@ -825,7 +786,7 @@ class LocalApiRouterTest {
             return Optional.of(new Actor("impostor", Role.ADMIN, Actor.Lane.CLI));
           }
         };
-    var response = new LocalApiRouter(bus, greedy).handle(get("/v1/whoami", Map.of()));
+    var response = new LocalApiRouter(greedy).handle(get("/v1/whoami", Map.of()));
 
     assertEquals(TestOperations.PRINCIPAL, response.body().get("handle"));
     assertEquals("agent", response.body().get("lane"));
@@ -871,6 +832,15 @@ class LocalApiRouterTest {
     private String lastConversationAgent;
     private boolean emptyMessages;
     private boolean failMessages;
+    private Event lastEvent;
+    private Result<EventPublishResponse> eventRefusal;
+
+    @Override
+    public Result<EventPublishResponse> publishEvent(Event event) {
+      lastEvent = event;
+      lastBound = Actor.current();
+      return eventRefusal != null ? eventRefusal : super.publishEvent(event);
+    }
 
     @Override
     public Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter) {

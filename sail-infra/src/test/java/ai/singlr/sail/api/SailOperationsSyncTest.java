@@ -145,10 +145,14 @@ class SailOperationsSyncTest {
   void aSpecLifecycleEventPublishTriggersPropagation() throws Exception {
     var operations = operations(scheduler(), new EventBus(), plainShell(), store -> {});
 
-    operations.publishEvent(event(Event.WellKnownTypes.SPEC_DISPATCHED));
+    Acting.by(
+        Actor.cliOperator("uday"),
+        () -> operations.publishEvent(event(Event.WellKnownTypes.SPEC_DISPATCHED)));
     assertEquals(1, rounds.get());
 
-    operations.publishEvent(event(Event.WellKnownTypes.AGENT_LOG_CHUNK));
+    Acting.by(
+        Actor.cliOperator("uday"),
+        () -> operations.publishEvent(event(Event.WellKnownTypes.AGENT_TOOL_STARTED)));
     assertEquals(1, rounds.get());
   }
 
@@ -218,18 +222,21 @@ class SailOperationsSyncTest {
     new SchemaManager(db).migrate();
     var specStore = new SpecStore(db);
     seed.accept(specStore);
-    return new SailOperations(
-        shell,
-        yaml.toString(),
-        (command, logPath) -> 4242L,
-        bus,
-        null,
-        specStore,
-        null,
-        null,
-        null,
-        () -> new ConnectEnvironment("203.0.113.7", "uday", true),
-        scheduler);
+    return TestControlPlane.standalone(
+        new SailOperations(
+            shell,
+            yaml.toString(),
+            (command, logPath) -> 4242L,
+            bus,
+            null,
+            specStore,
+            null,
+            null,
+            null,
+            () -> new ConnectEnvironment("203.0.113.7", "uday", true),
+            scheduler),
+        db,
+        tempDir);
   }
 
   private static void seedReady(SpecStore store) {

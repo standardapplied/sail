@@ -82,6 +82,7 @@ class SessionReportDeliveryIT {
                 new FdeStore(db),
                 SessionYield.NONE)
             .useMessages(new MessageStore(db));
+    TestControlPlane.standalone(operations, db, root);
     runId = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
@@ -100,7 +101,7 @@ class SessionReportDeliveryIT {
                         "l",
                         "u"));
     credential = reservation.credential();
-    listener = new LocalApiSocket(bus, operations, root.resolve("api.sock"));
+    listener = new LocalApiSocket(operations, root.resolve("api.sock"));
     listener.start();
   }
 

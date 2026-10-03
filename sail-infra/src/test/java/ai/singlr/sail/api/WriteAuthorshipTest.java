@@ -129,7 +129,7 @@ class WriteAuthorshipTest {
                       "/tmp/review.log",
                       "sail-review-1"));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
-      var router = new LocalApiRouter(bus, operations);
+      var router = new LocalApiRouter(operations);
 
       var status = router.handle(put("/v1/specs/auth", credential, "status=pending"));
       assertEquals(200, status.status(), status.body().toString());

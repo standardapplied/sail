@@ -60,6 +60,13 @@ public interface LocalLaneOperations {
     return Optional.empty();
   }
 
+  /**
+   * Publishes a client's event as the bound actor, who must be allowed to drive what it names, and
+   * returns it as the server stamped it. The one way a client's event reaches the bus, from either
+   * door.
+   */
+  Result<EventPublishResponse> publishEvent(Event event);
+
   Result<GlobalSpecsListResponse> globalSpecs(SpecStore.SpecFilter filter);
 
   Result<GlobalSpecDetailResponse> globalSpec(String specId);

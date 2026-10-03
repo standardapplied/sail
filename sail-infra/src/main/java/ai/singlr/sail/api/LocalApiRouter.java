@@ -15,7 +15,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Routes requests arriving over the local Unix-domain socket to a deliberately small surface: event
@@ -42,18 +41,9 @@ final class LocalApiRouter implements LocalApiHandler {
   private static final String RUN_MESSAGES = "/v1/run/messages";
   private static final String RUN_SESSION = "/v1/run/session";
 
-  private static final Set<String> AGENT_EVENT_TYPES =
-      Set.of(
-          Event.WellKnownTypes.AGENT_SESSION_STARTED,
-          Event.WellKnownTypes.AGENT_STOP_NUDGED,
-          Event.WellKnownTypes.AGENT_TOOL_STARTED,
-          Event.WellKnownTypes.AGENT_TOOL_FINISHED);
-
-  private final EventBus bus;
   private final LocalLaneOperations operations;
 
-  LocalApiRouter(EventBus bus, LocalLaneOperations operations) {
-    this.bus = bus;
+  LocalApiRouter(LocalLaneOperations operations) {
     this.operations = operations;
   }
 
@@ -228,16 +218,18 @@ final class LocalApiRouter implements LocalApiHandler {
   }
 
   /**
-   * The credential, not the client body, decides what an event is about: the published event's
-   * project, spec, run id, and authorship all come from the authenticated run, so a run can never
-   * address another run's lifecycle or another spec's pipeline. Only the non-terminal agent-hook
-   * event types are accepted: operator, watcher, sync, and control-plane types carry authority this
-   * lane does not have, and the terminal session types ({@code agent_session_stopped}, {@code
-   * agent_session_completed}) are watcher-and-reconciler-only — they complete the run, revoke its
-   * credential, and release its repo reservation, so accepting them here would let a still-running
-   * agent finish itself and admit an overlapping dispatch beside its live process. The reserved
-   * authoritative-stop fields ({@code source}, {@code exit_code}, {@code watcher_pid}) are stripped
-   * as well, so nothing an agent publishes can impersonate the watcher's verified exit.
+   * The credential, not the client body, decides what an event is about: the published event names
+   * the authenticated run, and the one event door ({@link LocalLaneOperations#publishEvent}) takes
+   * its project and conversation from that run, so a run can never address another run's lifecycle
+   * or another spec's pipeline. Which types a run may narrate is the event rule's ({@code
+   * EventAuthority}): the non-terminal agent-hook types alone. Operator, watcher, sync, and
+   * control-plane types carry authority this lane does not have, and the terminal session types
+   * ({@code agent_session_stopped}, {@code agent_session_completed}) are
+   * watcher-and-reconciler-only — they complete the run, revoke its credential, and release its
+   * repo reservation, so accepting them here would let a still-running agent finish itself and
+   * admit an overlapping dispatch beside its live process. The reserved authoritative-stop fields
+   * ({@code source}, {@code exit_code}, {@code watcher_pid}) are stripped as well, so nothing an
+   * agent publishes can impersonate the watcher's verified exit.
    */
   private ApiResponse events(LocalApiRequest request, Caller caller) {
     if (!"POST".equals(request.method())) {
@@ -255,10 +247,6 @@ final class LocalApiRouter implements LocalApiHandler {
     } catch (RuntimeException malformed) {
       return problem(400, "malformed event");
     }
-    if (!AGENT_EVENT_TYPES.contains(event.type())) {
-      return problem(
-          403, "Event type '" + event.type() + "' is not available to agent principals.");
-    }
     var data = new LinkedHashMap<String, Object>(event.data());
     data.put(Event.WellKnownData.RUN_ID, run.id());
     data.remove(Event.WellKnownData.SOURCE);
@@ -275,8 +263,12 @@ final class LocalApiRouter implements LocalApiHandler {
             run.principal(),
             run.project(),
             data);
-    var stamped = bus.publish(scoped);
-    return new ApiResponse(202, Map.of("id", stamped.id()));
+    return switch (operations.publishEvent(scoped)) {
+      case Result.Success<EventPublishResponse> published ->
+          new ApiResponse(202, Map.of("id", published.value().id()));
+      case Result.Failure<EventPublishResponse> refused ->
+          problem(refused.code(), refused.errorMessage());
+    };
   }
 
   /**

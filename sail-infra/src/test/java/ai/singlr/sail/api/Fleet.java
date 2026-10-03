@@ -328,6 +328,7 @@ public final class Fleet implements AutoCloseable {
           main
               ? new SyncConfig("main", null, handle, handle + "-box")
               : new SyncConfig("node", "sail@mainbox", handle, handle + "-box");
+      TestControlPlane.on(operations, db, home, syncConfig);
       if (ServerStartCommand.narratesSlack(syncConfig)) {
         bus.subscribe(
             new SlackReactor(

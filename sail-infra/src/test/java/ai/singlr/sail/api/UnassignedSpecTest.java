@@ -139,7 +139,7 @@ class UnassignedSpecTest {
     assertEquals(403, byCreator.statusCode(), byCreator.body());
     assertTrue(byCreator.body().contains("only mady"), byCreator.body());
     var room = roomRunCredential("mady", "auth");
-    var router = new LocalApiRouter(new EventBus(), operations);
+    var router = new LocalApiRouter(operations);
     var answered = router.handle(form("POST", "/v1/specs/auth/messages", room, "body=on it"));
     assertEquals(201, answered.status(), answered.body().toString());
     var terminal = new HostAccess(db, new RoleRule(SyncConfig::unset, new FdeStore(db)));
@@ -252,7 +252,7 @@ class UnassignedSpecTest {
   void aRunCreatesItForTheFdeItActsForAndClaimsItForThatFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = runCredential("uday");
-    var router = new LocalApiRouter(new EventBus(), operations);
+    var router = new LocalApiRouter(operations);
 
     var created =
         router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));
@@ -273,7 +273,7 @@ class UnassignedSpecTest {
   void theBoxCredentialCreatesItForTheBoxFde() {
     new FdeStore(db).add("uday", null, null, "member");
     var credential = new BoxCredentialStore(db).replace("uday");
-    var router = new LocalApiRouter(new EventBus(), operations);
+    var router = new LocalApiRouter(operations);
 
     var created =
         router.handle(form("POST", "/v1/specs", credential, "id=draft&title=Draft&project=acme"));

@@ -30,16 +30,14 @@ import org.junit.jupiter.api.io.TempDir;
 class LocalApiSocketTest {
 
   private LocalApiSocket socket(Path dir) {
-    return new LocalApiSocket(new EventBus(), new TestOperations(), dir.resolve("api.sock"));
+    return new LocalApiSocket(new TestOperations(), dir.resolve("api.sock"));
   }
 
   @Test
   void rejectsNullHandlerAndNullPath(@TempDir Path dir) {
     assertThrows(
         NullPointerException.class, () -> new LocalApiSocket(null, dir.resolve("s.sock"), 4));
-    assertThrows(
-        NullPointerException.class,
-        () -> new LocalApiSocket(new EventBus(), new TestOperations(), null));
+    assertThrows(NullPointerException.class, () -> new LocalApiSocket(new TestOperations(), null));
   }
 
   @Test
@@ -161,8 +159,7 @@ class LocalApiSocketTest {
   void startCreatesTheSocketDirTraversableForUnprivilegedContainers(@TempDir Path dir)
       throws Exception {
     var runDir = dir.resolve("run");
-    try (var listener =
-        new LocalApiSocket(new EventBus(), new TestOperations(), runDir.resolve("api.sock"))) {
+    try (var listener = new LocalApiSocket(new TestOperations(), runDir.resolve("api.sock"))) {
       listener.start();
       assertTrue(Files.isDirectory(runDir), "the socket dir is created");
       assertEquals(

@@ -60,8 +60,8 @@ public final class LocalApiSocket implements AutoCloseable {
   private volatile Thread acceptLoop;
   private volatile boolean closed;
 
-  public LocalApiSocket(EventBus bus, LocalLaneOperations operations, Path socketPath) {
-    this(new LocalApiRouter(bus, operations), socketPath, DEFAULT_MAX_IN_FLIGHT);
+  public LocalApiSocket(LocalLaneOperations operations, Path socketPath) {
+    this(new LocalApiRouter(operations), socketPath, DEFAULT_MAX_IN_FLIGHT);
   }
 
   LocalApiSocket(LocalApiHandler handler, Path socketPath, int maxInFlight) {

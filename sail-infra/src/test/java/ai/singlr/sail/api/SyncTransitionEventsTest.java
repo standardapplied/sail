@@ -174,6 +174,10 @@ class SyncTransitionEventsTest {
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, events.get(0).type());
     assertEquals(Event.WellKnownTypes.AGENT_FAILED, events.get(1).type());
     assertEquals("exit 2", events.get(1).data().get("detail"));
+    assertEquals(
+        events.get(0).data().get(Event.WellKnownData.RUN_ID),
+        events.get(1).data().get(Event.WellKnownData.RUN_ID),
+        "the failure names the run its stop names, so the door decides both alike");
   }
 
   @Test

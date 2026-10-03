@@ -49,7 +49,8 @@ public final class SpecStoreAuditPersister implements EventSubscriber {
               event.spec(),
               event.agent(),
               event.host(),
-              YamlUtil.dumpJson(event.data())));
+              YamlUtil.dumpJson(event.data()),
+              event.publisher() == null ? null : YamlUtil.dumpJson(event.publisher().toMap())));
     } catch (Exception e) {
       System.err.println("sqlite-audit-persister: failed to persist event: " + e.getMessage());
     }

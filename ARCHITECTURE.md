@@ -183,7 +183,7 @@ and the spec that closes it.
 | I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps; never another box's run), `SyncConfigTest` (one handle), `HandleChangeTest`, `JoinCommandTest`, `HostConfigSetCommandTest`, `HostSyncCommandTest`, `RoomWakeLaunchTest` |
 | A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | `OneDecisionTest` (spec edits, posts); open for every door: `sail-journal-authority` |
 | A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
-| A3 | An event, hook or reactor never makes the machinery do what its sender could not. | socket: `LocalApiRouterTest`; open for HTTP: `sail-events-door-authority` |
+| A3 | An event, hook or reactor never makes the machinery do what its sender could not. | the rule: `EventAuthorityTest` (every listed type and rule; every unlisted type refused; a run decides what its event is about and its spec whose it is; only this box's FDE reports what this box observed); both doors with the real subscribers behind them: `EventDoorTest` (a member's stop, completion, failure and review evidence for another member's spec, run or room never reach the bus, so the spec stays, the run stays and the reconciler still rescues; a run a member pushed is no key to another member's spec; an owner is not taken at their word for what this box observed; an owner's retelling and an admin's report land; a run publishes only its hooks; the server's clock, publisher and stored message replace the sender's); every real publisher through its own code path: `EventPublishersTest` (the host CLI's dispatch, restart, ad-hoc run and stop, the watcher's stop, a node's sync announcement, main's sync bridge relaying as the FDE who pushed, and refusing a pushed run on another member's spec); the socket's scoping to the credential's run: `LocalApiRouterTest`, `AgentPrincipalLifecycleTest` |
 | A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest`, `EraseRequestTest`, `SpecPruneTest`; purge case open: `sail-journal-authority` |
 | T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest` (a revision main recorded with no author), `WireAuthorSyncTest`, `ConvergenceSyncTest` (a resolve holds main's revision under main's author, a deletion's included), `ConflictOperationsTest`, `MessageSyncTest` and `ReplyChainSyncTest` (a message under its poster), `ProjectSyncTest` (a rename's deletion under its deleter), `NativeFleetIT` (change-log heads) |
 | T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores), `ConvergenceSyncTest` (restored and re-created on another box), every sync test through `SyncBox.assertEqualToMain` |
@@ -794,6 +794,72 @@ reactors: audit persistence, the webhook reactor, and the spec lifecycle reactor
 advances a spec from `in_progress` to `review` when its agent session ends. A
 `board_updated` event after a sync that changed the board surfaces an updates-available
 banner in the CLI and in GUI clients.
+
+**What a client may publish.** The bus's subscribers act on every event as this box's
+machinery (`SYSTEM`), which the write rules let through, so the doors are where an event is
+held to what its sender may drive (A3). `POST /v1/events` and the in-container socket hand
+every event to one `EventDoor`, which asks one rule in sail-core, `EventAuthority`, as the
+bound actor. The rule is deny by default: a type it does not list is the server's own,
+emitted after the write it describes (`spec_status_changed`, the engagement and snapshot
+restore/delete types, presence, log chunks, pty facts, `agent_session_completed`,
+`guardrail_triggered`, `review_pipeline_error`, `spec_stranded`, the sync health pair), and
+is refused from every client, an admin included.
+
+Two kinds of sender speak about work. This box's FDE, whom the host token acts as, reports
+what this box did and observed: the host CLI and the watcher. Anyone else only *retells*
+what another box did, marking the event `source: sync`: that is main's sync server relaying a
+node's transitions, and it speaks as the FDE who pushed them, whose session the gateway hands
+it. A retold event starts no review, sends no webhook and finishes no run here. So a member is
+never taken at their word for what this box observed, and a run another box pushed is never a
+key to the spec it names: its pusher wrote that row, and only the spec's own owner speaks for
+the spec. Each listed type has one rule:
+
+| Rule | Who may publish | Types | Published by |
+|---|---|---|---|
+| `DRIVES` | an admin; this box's FDE, for a run this box executed (`RunRow.ownedBy`) or a spec or room it owns; retold, an actor who acts for the owner of the spec (`Ownership.ownerOf`) or room (`RoomStore.owners`) it names or that the run it names works — a run that works neither is its own owners' (`RunAuthority.owners`). Never a run's own principal | `agent_session_stopped`, `agent_cancelled`, `agent_failed`, `spec_dispatched`, `spec_restarted`, `review_iteration_started`, `review_stage_started`, `review_stage_passed`, `review_stage_failed`, `review_completed`, `review_errored`, `review_escalated` | the watcher (`agent_session_stopped`); the host CLI's dispatch (`spec_dispatched`, `spec_restarted`) and stop (`agent_cancelled`); main's sync bridge, retelling what a node's synced transition tells (`SyncTransitionEvents`) |
+| `NARRATES` | an admin; this box's FDE for a run this box executed; a run's own principal for that run alone | `agent_session_started`, `agent_stop_nudged`, `agent_tool_started`, `agent_tool_finished` | the in-container hooks over the socket; the host CLI's dispatch and `sail run` (`agent_session_started`) |
+| `ANNOUNCES` | an admin; this box's FDE; retold, an actor who acts for an owner of the conversation the message is in (`RoomStore.owners`), who may post there | `spec_message_posted` | a node's sync, for each message it pulled |
+| `BOX` | an admin, or this box's FDE | `snapshot_created`, `board_updated` | the host CLI's dispatch (`snapshot_created`); a node's sync, for a round that changed the board |
+
+The host token acts as the box's FDE: an admin on main or a standalone box, the synced
+roster role on a node. The socket's event route takes a run credential only; the box
+credential has no run to speak for. A member's own session on main's gateway is not the
+box's FDE, so lifecycle events from a `sail` command run through it are refused and the
+missed-stop reconciler finishes its run.
+
+Holding a relayed run to the owner of the spec it works, never to the FDE who pushed it,
+has one cost: a spec an admin reassigns while another FDE's box is still running it loses
+that run's relayed stop on main, since main cannot tell that run from one its pusher wrote
+against a spec they never owned. The run finishes on its own box; main records nothing of
+it, and since that box's move of the spec to review is denied on the sync lane for the same
+reason, the spec stays `in_progress` on both boxes until an admin moves it. A run create rule
+on the sync lane (`sail-journal-authority`) is where a pushed run comes to prove it works a
+spec its owner held when it was reserved.
+
+What each type drives, which is why its sender is checked: `SpecLifecycleReactor` moves a spec
+to `review` on `agent_session_stopped`; `ReviewPipelineController` starts a review on one this
+box observed; `RunTracker` finishes the run it names, revoking its credential and releasing
+its repos, on `agent_session_stopped` and `agent_session_completed`; `RoomWakeReactor`
+launches a wake on `spec_message_posted` and runs the room commit guard on a room run's stop;
+`RunActivityStamper` and the watcher's stall timer read the tool and log-chunk types as
+progress; `SlackReactor` and `WebhookReactor` notify on the dispatch, stop, failure, nudge,
+snapshot, guardrail, sync-health and review types; and the audit persisters record every
+event, where `MissedStopReconciler` reads `agent_session_stopped`, `agent_failed`,
+`review_stage_started`, `review_stage_failed`, `review_errored` and `review_escalated` as
+evidence that a stop was observed and acted on.
+
+The door then stamps what the server knows, so nothing a subscriber acts on or the log records
+rests on the sender's word. A run this box holds decides its event's conversation, so a sender
+cannot pair a run with another spec; a sender may leave the conversation out, as the hooks of
+a run that works only a room do. The spec or room, worked by the run or named directly, decides
+the project. `ts` is the server's clock. `publisher` (handle, role, lane) is the authenticated
+actor, stored with the event (`events.publisher`) and served on every read; an event the
+server emitted itself carries none, and `agent` is a label, never proof of who published. A
+`spec_message_posted` announcement names a message and nothing else: sync writes messages
+straight to the database and announces each, and the door decides it on the conversation that
+message is in, never on a run named beside it, and rebuilds the event whole from the stored row, as the messages route emits it
+for a local post, refusing a message this box does not hold. A refusal is a 403 through
+`Refusals`, naming the event type and what the sender may not drive.
 
 ## Security model
 
