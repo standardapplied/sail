@@ -111,12 +111,13 @@ public final class EventAuthority {
   }
 
   /**
-   * What an event is about, as this box knows it. A run this box holds decides its own project and
-   * conversation, so an event never pairs a run its sender owns with a spec it does not; otherwise
-   * the spec or room named decides the project, and {@code runId} is null. {@code owners} are whom
-   * a sender who is not this box's FDE must act for: the owners of the spec or room, named directly
-   * or worked by the run; for a run that works neither, the run's own; and none for work this box
-   * does not hold. {@code executedHere} is whether this box executed the run.
+   * What an event is about, as this box knows it. A run this box holds decides its conversation, so
+   * an event never pairs a run its sender owns with a spec it does not; the spec or room, worked by
+   * the run or named directly, decides the project, and a run that works neither its own. {@code
+   * runId} is null when no run this box holds is named. {@code owners} are whom a sender who is not
+   * this box's FDE must act for: the owners of the spec or room, named directly or worked by the
+   * run; for a run that works neither, the run's own; and none for work this box does not hold.
+   * {@code executedHere} is whether this box executed the run.
    */
   public record Subject(
       String project,
@@ -142,7 +143,7 @@ public final class EventAuthority {
     var held = run.get();
     var worked = about(held.project(), held.conversationId());
     return new Subject(
-        held.project(),
+        worked.project(),
         worked.conversation(),
         held.id(),
         worked.conversation() == null

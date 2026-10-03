@@ -12,7 +12,6 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -26,8 +25,9 @@ import java.util.function.Supplier;
  * <p>A message announcement is the one event about a row another process wrote: a sync round writes
  * the messages it carries straight to the database, then announces each so rooms wake and live
  * clients see it. The announcement names the message and nothing more; it is decided on the
- * conversation that message is in, and the event is rebuilt whole from the stored row, exactly as
- * the messages route emits it for a local post.
+ * conversation that message is in, never on a run or a room its sender names beside it, and the
+ * event is rebuilt whole from the stored row, exactly as the messages route emits it for a local
+ * post.
  */
 final class EventDoor {
 
@@ -47,38 +47,51 @@ final class EventDoor {
    * event type and what its sender may not drive.
    */
   Event admit(Event offered) {
-    var actor = Actor.current();
-    var announced =
-        Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(offered.type())
-            ? messages.findById(Objects.toString(offered.data().get(MESSAGE_ID), ""))
-            : Optional.<MessageStore.MessageRow>empty();
+    return Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(offered.type())
+        ? announcement(offered)
+        : about(offered);
+  }
+
+  private Event about(Event offered) {
     var subject =
         authority.subject(
             offered.project(),
-            announced.map(MessageStore.MessageRow::roomId).orElse(offered.spec()),
+            offered.spec(),
             Objects.toString(offered.data().get(Event.WellKnownData.RUN_ID), null));
-    var retold =
-        Event.WellKnownData.SOURCE_SYNC.equals(offered.data().get(Event.WellKnownData.SOURCE));
-    Refusals.enforce(authority.decide(actor, offered.type(), subject, retold));
-    var publisher = Event.Publisher.of(actor);
-    var now = DateTimeUtils.now();
-    if (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(offered.type())) {
-      var message = announced.orElseThrow(() -> unheld(offered));
-      return SyncTransitionEvents.messagePosted(
-              subject.project(),
-              message.roomId(),
-              message.id(),
-              message.author(),
-              message.body(),
-              message.question(),
-              offered.host())
-          .admitted(subject.project(), message.roomId(), publisher, now);
-    }
+    var publisher = admitted(offered, subject);
     return offered.admitted(
         subject.project(),
         Strings.isBlank(offered.spec()) ? null : subject.conversation(),
         publisher,
-        now);
+        DateTimeUtils.now());
+  }
+
+  private Event announcement(Event offered) {
+    var message = messages.findById(Objects.toString(offered.data().get(MESSAGE_ID), ""));
+    var subject =
+        authority.subject(
+            offered.project(),
+            message.map(MessageStore.MessageRow::roomId).orElse(offered.spec()),
+            null);
+    var publisher = admitted(offered, subject);
+    var held = message.orElseThrow(() -> unheld(offered));
+    return SyncTransitionEvents.messagePosted(
+            subject.project(),
+            held.roomId(),
+            held.id(),
+            held.author(),
+            held.body(),
+            held.question(),
+            offered.host())
+        .admitted(subject.project(), held.roomId(), publisher, DateTimeUtils.now());
+  }
+
+  private Event.Publisher admitted(Event offered, EventAuthority.Subject subject) {
+    var actor = Actor.current();
+    var retold =
+        Event.WellKnownData.SOURCE_SYNC.equals(offered.data().get(Event.WellKnownData.SOURCE));
+    Refusals.enforce(authority.decide(actor, offered.type(), subject, retold));
+    return Event.Publisher.of(actor);
   }
 
   private static ApiException unheld(Event offered) {

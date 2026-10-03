@@ -495,6 +495,14 @@ class EventAuthorityTest {
   }
 
   @Test
+  void aRunsSpecDecidesItsEventsProjectNotTheRowItsPusherWrote() {
+    board.db.execute("UPDATE runs SET project = 'elsewhere' WHERE id IN (?, ?)", OTHER_RUN, ADHOC);
+
+    assertEquals("acme", rule.subject("elsewhere", null, OTHER_RUN).project());
+    assertEquals("elsewhere", rule.subject("acme", null, ADHOC).project());
+  }
+
+  @Test
   void aRunOnASpecThisBoxDoesNotHoldIsNoOnes() {
     board.db.execute("DELETE FROM specs WHERE id = 'auth'");
 

@@ -840,15 +840,15 @@ event, where `MissedStopReconciler` reads `agent_session_stopped`, `agent_failed
 evidence that a stop was observed and acted on.
 
 The door then stamps what the server knows, so nothing a subscriber acts on or the log records
-rests on the sender's word. A run this box holds decides its event's project and conversation,
-so a sender cannot pair a run with another spec; a sender may leave the conversation out, as
-the hooks of a run that works only a room do. Otherwise the spec or room named decides the
-project. `ts` is the server's clock. `publisher` (handle, role, lane) is the authenticated
+rests on the sender's word. A run this box holds decides its event's conversation, so a sender
+cannot pair a run with another spec; a sender may leave the conversation out, as the hooks of
+a run that works only a room do. The spec or room, worked by the run or named directly, decides
+the project. `ts` is the server's clock. `publisher` (handle, role, lane) is the authenticated
 actor, stored with the event (`events.publisher`) and served on every read; an event the
 server emitted itself carries none, and `agent` is a label, never proof of who published. A
 `spec_message_posted` announcement names a message and nothing else: sync writes messages
 straight to the database and announces each, and the door decides it on the conversation that
-message is in and rebuilds the event whole from the stored row, as the messages route emits it
+message is in, never on a run named beside it, and rebuilds the event whole from the stored row, as the messages route emits it
 for a local post, refusing a message this box does not hold. A refusal is a 403 through
 `Refusals`, naming the event type and what the sender may not drive.
 

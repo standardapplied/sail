@@ -63,6 +63,8 @@ class EventDoorTest {
 
   private static final SyncConfig MAIN = new SyncConfig("main", null, "root", "main-box");
   private static final String STOPPED = Event.WellKnownTypes.AGENT_SESSION_STOPPED;
+  private static final Map<String, Object> RETOLD =
+      Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_SYNC);
 
   private static final ShellExec SHELL =
       new ShellExec() {
@@ -143,9 +145,11 @@ class EventDoorTest {
   void aMembersForgedStopDoesNotMoveAnotherMembersSpec() throws Exception {
     bus.subscribe(new SpecLifecycleReactor(specs));
 
-    var response = publish(adaToken, event("theirs", STOPPED, watcherStop(null)));
+    var observed = publish(adaToken, event("theirs", STOPPED, watcherStop(null)));
+    var retold = publish(adaToken, event("theirs", STOPPED, retoldStop(null)));
 
-    assertRefused(response, "forbidden_not_assignee", STOPPED, "'theirs' (owned by 'bob')");
+    assertRefused(observed, "forbidden_not_assignee", STOPPED, "'theirs' (owned by 'bob')");
+    assertRefused(retold, "forbidden_not_assignee", STOPPED, "'theirs' (owned by 'bob')");
     assertEquals(SpecStatus.IN_PROGRESS, specs.findById("theirs").orElseThrow().status());
   }
 
@@ -155,10 +159,12 @@ class EventDoorTest {
     bus.subscribe(new RunTracker(runs, SyncScheduler.disabled(), () -> "root"));
 
     var stop = publish(adaToken, event("theirs", STOPPED, watcherStop(run)));
+    var retold = publish(adaToken, event("theirs", STOPPED, retoldStop(run)));
     var completion =
         publish(adaToken, event("theirs", "agent_session_completed", Map.of("run_id", run)));
 
     assertRefused(stop, "forbidden_not_assignee", STOPPED, "run " + run + " of 'theirs'");
+    assertRefused(retold, "forbidden_not_assignee", STOPPED, "run " + run + " of 'theirs'");
     assertRefused(completion, "forbidden", "agent_session_completed", "not one a client may");
     assertEquals("running", runs.findById(run).orElseThrow().status());
   }
@@ -171,9 +177,11 @@ class EventDoorTest {
 
     var named = publish(adaToken, event("den", STOPPED, data));
     var unnamed = publish(adaToken, event("den", STOPPED, watcherStop(null)));
+    var retold = publish(adaToken, event("den", STOPPED, retoldStop(null)));
 
     assertRefused(named, "forbidden_not_assignee", STOPPED, "run " + run + " of 'den'");
     assertRefused(unnamed, "forbidden_not_assignee", STOPPED, "'den' (owned by 'bob')");
+    assertRefused(retold, "forbidden_not_assignee", STOPPED, "'den' (owned by 'bob')");
   }
 
   @ParameterizedTest
@@ -189,9 +197,11 @@ class EventDoorTest {
     var run = strandRootsSpec();
     bus.subscribe(new SpecStoreAuditPersister(new EventStore(db)));
 
-    var response = publish(adaToken, event("stranded", type, Map.of()));
+    var observed = publish(adaToken, event("stranded", type, Map.of()));
+    var retold = publish(adaToken, event("stranded", type, RETOLD));
 
-    assertRefused(response, "forbidden_not_assignee", type, "'stranded' (owned by 'root')");
+    assertRefused(observed, "forbidden_not_assignee", type, "'stranded' (owned by 'root')");
+    assertRefused(retold, "forbidden_not_assignee", type, "'stranded' (owned by 'root')");
     assertTrue(new EventStore(db).forSpecAndType("stranded", type).isEmpty());
     assertEquals(1, reconciler().sweep(), "stranded run " + run + " must still be rescued");
   }
@@ -199,17 +209,21 @@ class EventDoorTest {
   @Test
   void aMembersForgedNotificationTypesAreRefused() throws Exception {
     for (var type : List.of("spec_dispatched", "spec_restarted", "review_completed")) {
+      for (var data : List.of(Map.<String, Object>of(), RETOLD)) {
+        assertRefused(
+            publish(adaToken, event("theirs", type, data)),
+            "forbidden_not_assignee",
+            type,
+            "'theirs' (owned by 'bob')");
+      }
+    }
+    for (var type : List.of("snapshot_created", "board_updated")) {
       assertRefused(
-          publish(adaToken, event("theirs", type, Map.of())),
+          publish(adaToken, event(null, type, RETOLD)),
           "forbidden_not_assignee",
           type,
-          "'theirs' (owned by 'bob')");
+          "speaks for this box");
     }
-    assertRefused(
-        publish(adaToken, event(null, "snapshot_created", Map.of("label", "x"))),
-        "forbidden_not_assignee",
-        "snapshot_created",
-        "speaks for this box");
   }
 
   @Test
@@ -300,6 +314,19 @@ class EventDoorTest {
             message.id(),
             Event.WellKnownData.SOURCE,
             Event.WellKnownData.SOURCE_SYNC);
+
+    var response = publish(adaToken, event("mine", "spec_message_posted", announcement));
+
+    assertRefused(
+        response, "forbidden_not_assignee", "spec_message_posted", "'den' (owned by 'bob')");
+  }
+
+  @Test
+  void anAnnouncementIsDecidedOnItsMessagesConversationNotOnARunItsSenderNames() throws Exception {
+    var message = Acting.as("bob", () -> new MessageStore(db).append("den", "bob", "hi", null));
+    var announcement = new LinkedHashMap<String, Object>(RETOLD);
+    announcement.put("message_id", message.id());
+    announcement.put(Event.WellKnownData.RUN_ID, reserveOn("ada", "mine", null, "build"));
 
     var response = publish(adaToken, event("mine", "spec_message_posted", announcement));
 
