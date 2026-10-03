@@ -97,9 +97,6 @@ public interface Operations extends LocalLaneOperations {
   /** Stops a run, but only when it is executing on this box (same provenance guard as the log). */
   Result<StopRunResponse> stopRun(String runId, String localHandle);
 
-  /** Publishes an event onto the bus and returns the stamped copy. */
-  Result<EventPublishResponse> publishEvent(Event event);
-
   /** Returns up to {@code limit} most-recent events (oldest first). */
   Result<RecentEventsResponse> recentEvents(int limit);
 

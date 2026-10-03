@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
@@ -45,11 +47,16 @@ class SailEventPublisherTest {
 
   @Test
   void publishStampsAndReturnsEventThroughLiveServer(@TempDir Path tmp) throws Exception {
-    try (var bus = new EventBus()) {
+    try (var bus = new EventBus();
+        var db = Sqlite.open(tmp.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
       var persister = new AuditPersister(tmp.resolve("events.jsonl"), 32);
       var operations =
-          new SailOperations(
-              new ShellExecutor(true), tmp.resolve("sail.yaml").toString(), bus, persister);
+          TestControlPlane.standalone(
+              new SailOperations(
+                  new ShellExecutor(true), tmp.resolve("sail.yaml").toString(), bus, persister),
+              db,
+              tmp);
       try (var server =
           new SailApiServer(
               "127.0.0.1",
@@ -78,6 +85,7 @@ class SailEventPublisherTest {
         assertEquals("oauth-flow", stamped.spec());
         assertEquals(Event.WellKnownTypes.SPEC_DISPATCHED, stamped.type());
         assertEquals("background", stamped.data().get("mode"));
+        assertEquals(new Event.Publisher(null, "admin", "api"), stamped.publisher());
       }
     }
   }

@@ -9,9 +9,11 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
@@ -30,9 +32,14 @@ import java.util.Set;
  * @param project project / container name this event relates to (required)
  * @param spec spec id when the event is spec-scoped, otherwise {@code null}
  * @param type lifecycle marker — see {@link WellKnownTypes} (required)
- * @param agent who emitted the event ({@code sail} for orchestrator events; agent type otherwise)
+ * @param agent the agent the event concerns ({@code sail} for orchestrator events; agent type or
+ *     principal otherwise). A label its sender chose, never proof of who published it: that is
+ *     {@code publisher}
  * @param host machine that produced the event (bare-metal host or container hostname)
  * @param data type-specific payload; never {@code null}, but may be empty
+ * @param publisher who published the event through a door, stamped there from the authenticated
+ *     actor and never read from a client; {@code null} for an event this box's own machinery
+ *     emitted
  */
 public record Event(
     int v,
@@ -43,7 +50,45 @@ public record Event(
     String type,
     String agent,
     String host,
-    Map<String, Object> data) {
+    Map<String, Object> data,
+    Publisher publisher) {
+
+  /**
+   * Who published an event through a door: the acting {@code handle} (null for a machine credential
+   * that names no FDE), with the {@code role} and {@code lane} it acted on.
+   */
+  public record Publisher(String handle, String role, String lane) {
+
+    public Publisher {
+      Strings.requireNonBlank(role, "role");
+      Strings.requireNonBlank(lane, "lane");
+    }
+
+    /** {@code actor} as the publisher of what it sends. */
+    public static Publisher of(Actor actor) {
+      return new Publisher(
+          actor.handle(),
+          actor.role().name().toLowerCase(Locale.ROOT),
+          actor.lane().name().toLowerCase(Locale.ROOT));
+    }
+
+    /** Returns a map view suitable for JSON dumping. */
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      if (handle != null) {
+        map.put("handle", handle);
+      }
+      map.put("role", role);
+      map.put("lane", lane);
+      return map;
+    }
+
+    /** Builds a publisher from a parsed map. */
+    public static Publisher fromMap(Map<String, Object> map) {
+      return new Publisher(
+          optionalString(map.get("handle")), stringField(map, "role"), stringField(map, "lane"));
+    }
+  }
 
   public enum RetentionClass {
     RECORD,
@@ -274,6 +319,20 @@ public record Event(
     private WellKnownData() {}
   }
 
+  /** An event no door published: one this box's own machinery emits, or a client offers. */
+  public Event(
+      int v,
+      long id,
+      Instant ts,
+      String project,
+      String spec,
+      String type,
+      String agent,
+      String host,
+      Map<String, Object> data) {
+    this(v, id, ts, project, spec, type, agent, host, data, null);
+  }
+
   public Event {
     if (v <= 0) {
       throw new IllegalArgumentException("v must be positive, got " + v);
@@ -294,8 +353,7 @@ public record Event(
    * data payload. Convenient for the common case.
    */
   public static Event of(String project, String spec, String type, String agent, String host) {
-    return new Event(
-        CURRENT_VERSION, 0L, DateTimeUtils.now(), project, spec, type, agent, host, Map.of());
+    return of(project, spec, type, agent, host, Map.of());
   }
 
   /** As {@link #of(String, String, String, String, String)} but with a data payload. */
@@ -315,7 +373,15 @@ public record Event(
     if (stampedId <= 0) {
       throw new IllegalArgumentException("stampedId must be positive, got " + stampedId);
     }
-    return new Event(v, stampedId, ts, project, spec, type, agent, host, data);
+    return new Event(v, stampedId, ts, project, spec, type, agent, host, data, publisher);
+  }
+
+  /**
+   * This event as a door admits it: about {@code project} and {@code spec} as the server knows
+   * them, published by {@code publisher} at {@code ts} on the server's clock.
+   */
+  public Event admitted(String project, String spec, Publisher publisher, Instant ts) {
+    return new Event(v, 0L, ts, project, spec, type, agent, host, data, publisher);
   }
 
   /** Serializes this event as a single-line JSON object. */
@@ -340,6 +406,9 @@ public record Event(
     map.put("host", host);
     if (!data.isEmpty()) {
       map.put("data", data);
+    }
+    if (publisher != null) {
+      map.put("publisher", publisher.toMap());
     }
     return map;
   }
@@ -372,7 +441,11 @@ public record Event(
     var dataRaw = map.get("data");
     Map<String, Object> data =
         dataRaw instanceof Map<?, ?> m ? Map.copyOf((Map<String, Object>) m) : Map.of();
-    return new Event(version, id, ts, project, spec, type, agent, host, data);
+    var publisher =
+        map.get("publisher") instanceof Map<?, ?> p
+            ? Publisher.fromMap((Map<String, Object>) p)
+            : null;
+    return new Event(version, id, ts, project, spec, type, agent, host, data, publisher);
   }
 
   private static Instant parseTs(String raw) {

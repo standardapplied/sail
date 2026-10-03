@@ -320,7 +320,7 @@ class OneDecisionTest {
   }
 
   private ApiResponse socket(String method, String path, String credential, String form) {
-    return new LocalApiRouter(new EventBus(), operations)
+    return new LocalApiRouter(operations)
         .handle(
             new LocalApiRequest(
                 method,

@@ -25,6 +25,7 @@ final class Refusals {
       case NOT_AUTHOR -> ErrorCode.FORBIDDEN_NOT_AUTHOR;
       case FIXED -> ErrorCode.INVALID_REQUEST;
       case NOT_PRUNABLE -> ErrorCode.SPEC_NOT_PRUNABLE;
+      case NOT_PUBLISHABLE -> ErrorCode.FORBIDDEN;
     };
   }
 

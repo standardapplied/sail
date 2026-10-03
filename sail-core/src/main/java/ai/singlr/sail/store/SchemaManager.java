@@ -655,7 +655,8 @@ public final class SchemaManager {
               mode INTEGER NOT NULL,
               undecided INTEGER NOT NULL DEFAULT 0,
               PRIMARY KEY (id, content_hash, mode)
-          )""");
+          )""",
+          "ALTER TABLE events ADD COLUMN publisher TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

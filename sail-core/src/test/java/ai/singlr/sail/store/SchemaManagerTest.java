@@ -1181,6 +1181,43 @@ class SchemaManagerTest {
   }
 
   @Test
+  void anEventStoredBeforePublishersWereStampedSurvivesWithNone() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE events ADD COLUMN publisher");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO events (timestamp, type, project, spec_id, agent, host, data)"
+            + " VALUES ('t0', 'spec_dispatched', 'acme', 'auth', 'sail', 'box', '{}')");
+
+    new SchemaManager(db).migrate();
+
+    var events = new EventStore(db);
+    var before = events.forSpec("auth").getFirst();
+    assertEquals(
+        List.of("spec_dispatched", "sail", "{}"),
+        List.of(before.type(), before.agent(), before.data()));
+    assertNull(before.publisher());
+    events.insert(
+        new EventStore.EventRow(
+            0,
+            "t1",
+            "agent_session_stopped",
+            "acme",
+            "auth",
+            "claude",
+            "box",
+            "{}",
+            "{\"handle\":\"ada\"}"));
+    assertEquals("{\"handle\":\"ada\"}", events.forSpec("auth").getLast().publisher());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void theFindingsRebuildCarriesRowsAndSourceLinksForwardAndAdmitsDisputed() {
     stageAtBaseline();
     db.execute(

@@ -498,7 +498,7 @@ class SailOperationsSeamTest {
       box.conflicts.record(
           "spec", "auth", null, snapshot, snapshot, "9-main", "main", List.of("title"));
       var response =
-          new LocalApiRouter(bus, operations)
+          new LocalApiRouter(operations)
               .handle(
                   new LocalApiRequest(
                       "POST",
@@ -542,7 +542,7 @@ class SailOperationsSeamTest {
             }
           };
       var response =
-          new LocalApiRouter(bus, lane)
+          new LocalApiRouter(lane)
               .handle(
                   new LocalApiRequest(
                       "POST",

@@ -109,7 +109,7 @@ class RoomPrincipalAccessTest {
                 SessionYield.NONE)
             .useMessages(messageStore)
             .useRooms(new RoomStore(db));
-    router = new LocalApiRouter(bus, operations);
+    router = new LocalApiRouter(operations);
   }
 
   @AfterEach

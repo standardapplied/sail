@@ -83,6 +83,7 @@ class RoomRelayDeliveryIT {
                 new FdeStore(db),
                 SessionYield.NONE)
             .useMessages(messages);
+    TestControlPlane.standalone(operations, db, root);
     runId = DateTimeUtils.newId().toString();
     var reservation =
         (RunStore.Reservation.Reserved)
@@ -101,7 +102,7 @@ class RoomRelayDeliveryIT {
                         "l",
                         "u"));
     credential = reservation.credential();
-    listener = new LocalApiSocket(bus, operations, root.resolve("api.sock"));
+    listener = new LocalApiSocket(operations, root.resolve("api.sock"));
     listener.start();
   }
 

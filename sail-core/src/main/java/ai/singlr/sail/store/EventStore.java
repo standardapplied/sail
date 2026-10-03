@@ -21,6 +21,10 @@ public final class EventStore {
     this.db = db;
   }
 
+  /**
+   * One stored event. {@code publisher} is the JSON of who published it through a door, as the
+   * server stamped it; null for an event this box's own machinery emitted.
+   */
   public record EventRow(
       long id,
       String timestamp,
@@ -29,27 +33,43 @@ public final class EventStore {
       String specId,
       String agent,
       String host,
-      String data) {}
+      String data,
+      String publisher) {
+
+    /** A row no client published. */
+    public EventRow(
+        long id,
+        String timestamp,
+        String type,
+        String project,
+        String specId,
+        String agent,
+        String host,
+        String data) {
+      this(id, timestamp, type, project, specId, agent, host, data, null);
+    }
+  }
 
   public long insert(EventRow event) {
     db.execute(
         """
-        INSERT INTO events (timestamp, type, project, spec_id, agent, host, data)
-        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        INSERT INTO events (timestamp, type, project, spec_id, agent, host, data, publisher)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
         event.timestamp(),
         event.type(),
         event.project(),
         event.specId(),
         event.agent(),
         event.host(),
-        event.data());
+        event.data(),
+        event.publisher());
     return db.queryOne("SELECT last_insert_rowid()", row -> row.integer(0)).orElse(0L);
   }
 
   public List<EventRow> recent(int limit) {
     return db.query(
         """
-        SELECT id, timestamp, type, project, spec_id, agent, host, data
+        SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher
         FROM events ORDER BY id DESC LIMIT ?""",
         this::mapEvent,
         limit);
@@ -58,7 +78,7 @@ public final class EventStore {
   public List<EventRow> forSpec(String specId) {
     return db.query(
         """
-        SELECT id, timestamp, type, project, spec_id, agent, host, data
+        SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher
         FROM events WHERE spec_id = ? ORDER BY id ASC""",
         this::mapEvent,
         specId);
@@ -88,7 +108,7 @@ public final class EventStore {
     parameters.addAll(excludedTypes);
     parameters.add(limit);
     var sql =
-        "SELECT id, timestamp, type, project, spec_id, agent, host, data FROM events"
+        "SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher FROM events"
             + " WHERE spec_id = ?"
             + (afterId != null ? " AND id > ?" : "")
             + exclusion
@@ -102,7 +122,7 @@ public final class EventStore {
   public List<EventRow> forSpecAndType(String specId, String type) {
     return db.query(
         """
-        SELECT id, timestamp, type, project, spec_id, agent, host, data
+        SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher
         FROM events WHERE spec_id = ? AND type = ? ORDER BY id ASC""",
         this::mapEvent,
         specId,
@@ -112,7 +132,7 @@ public final class EventStore {
   public List<EventRow> since(long afterId, int limit) {
     return db.query(
         """
-        SELECT id, timestamp, type, project, spec_id, agent, host, data
+        SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher
         FROM events WHERE id > ? ORDER BY id ASC LIMIT ?""",
         this::mapEvent,
         afterId,
@@ -196,6 +216,7 @@ public final class EventStore {
         row.text(4),
         row.text(5),
         row.text(6),
-        row.text(7));
+        row.text(7),
+        row.text(8));
   }
 }
