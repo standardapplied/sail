@@ -963,7 +963,8 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce() throws Exception {
+  void aRunningReviewNoRunServesHasItsNewestLoopStopReplayedABoundedNumberOfTimes()
+      throws Exception {
     createReviewSpec("auth");
     var build = finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
@@ -989,7 +990,11 @@ class MissedStopReconcilerTest {
     BusTesting.awaitDelivery(latch);
     assertEquals(build, replayed.peek().data().get(Event.WellKnownData.RUN_ID));
     assertEquals("running", reviewStore.findReview(review).orElseThrow().status());
-    assertEquals(0, rec.sweep(), "once per server lifetime: the rescue never loops");
+    assertEquals(
+        MissedStopReconciler.WAITING_RESCUES - 1,
+        rec.sweep() + rec.sweep() + rec.sweep() + rec.sweep(),
+        "nothing says whether the replay's launch was refused its claim, so a review still"
+            + " unserved is tried again, a bounded number of times: the rescue never loops");
   }
 
   @Test

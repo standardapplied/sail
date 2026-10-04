@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -24,6 +25,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -31,7 +33,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -116,6 +120,35 @@ class ReviewLoopRecoveryTest {
             Lane.ROOM_FULL.wire(),
             0,
             null));
+  }
+
+  /** A spec whose build stopped and whose review row was written, with nothing launched for it. */
+  private String strandedReviewOf(String specId) {
+    loop.spec(specId, "api");
+    var build = loop.run(specId, "build");
+    Acting.system(
+        () -> {
+          loop.runs.complete(build, "stopped", 0);
+          loop.specs.updateStatus(specId, SpecStatus.REVIEW);
+          loop.reviews.createReview(specId, 1);
+        });
+    return build;
+  }
+
+  private long replaysOf(String runId) {
+    return loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+        .filter(stop -> "reconcile".equals(stop.data().get(Event.WellKnownData.SOURCE)))
+        .filter(stop -> runId.equals(stop.data().get(Event.WellKnownData.RUN_ID)))
+        .count();
+  }
+
+  private int sweeps(MissedStopReconciler reconciler, int times) {
+    var rescued = 0;
+    for (var sweep = 0; sweep < times; sweep++) {
+      rescued += reconciler.sweep();
+      loop.settle();
+    }
+    return rescued;
   }
 
   private long verdictsInTheRoom() {
@@ -535,14 +568,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aStageRescuedOnceIsRescuedAgainAfterARunThatHeldItUpEndsWithNoStop() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
-    loop.spec("auth", "api");
-    var build = loop.run("auth", "build");
-    Acting.system(
-        () -> {
-          loop.runs.complete(build, "stopped", 0);
-          loop.specs.updateStatus("auth", SpecStatus.REVIEW);
-          loop.reviews.createReview("auth", 1);
-        });
+    var build = strandedReviewOf("auth");
     var reconciler = loop.reconciler(LATER);
     assertEquals(1, reconciler.sweep(), "the review nothing serves is rescued, once");
     loop.settle();
@@ -572,14 +598,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aStageHeldUpByARunThatEndedBeforeAnySweepSawItIsStillRescued() {
     loop = ReviewLoop.staged(tempDir, "codex", "claude-code");
-    loop.spec("auth", "api");
-    var build = loop.run("auth", "build");
-    Acting.system(
-        () -> {
-          loop.runs.complete(build, "stopped", 0);
-          loop.specs.updateStatus("auth", SpecStatus.REVIEW);
-          loop.reviews.createReview("auth", 1);
-        });
+    var build = strandedReviewOf("auth");
     var reconciler = loop.reconciler(LATER);
     assertEquals(1, reconciler.sweep(), "the first stage is rescued");
     loop.settle();
@@ -598,6 +617,150 @@ class ReviewLoopRecoveryTest {
     loop.settle();
 
     assertEquals("claude-code", loop.onlyLive().agent());
+  }
+
+  @Test
+  void aRescueRefusedByARunNoSweepEverSawIsTriedAgainOnceTheClaimIsFree() {
+    var holder = new AtomicReference<String>();
+    var armed = new AtomicBoolean();
+    loop =
+        new ReviewLoop(
+            tempDir,
+            ReviewLoop.YAML,
+            project -> {
+              if (armed.compareAndSet(true, false)) {
+                holder.set(loop.run("auth", Lane.ROOM_FULL.wire()));
+                loop.container.started(holder.get());
+              }
+              return ReviewLoop.stages("codex");
+            },
+            project -> "codex");
+    strandedReviewOf("auth");
+    var reconciler = loop.reconciler(LATER);
+    armed.set(true);
+
+    assertEquals(1, reconciler.sweep(), "free when the sweep looked: rescued");
+    loop.settle();
+    assertEquals(
+        List.of(holder.get()),
+        loop.container.live(),
+        "a run took the repo before the pipeline's launch: the replay was refused");
+    loop.container.exited(holder.get(), "replied", 0);
+    Acting.system(() -> loop.runs.complete(holder.get(), "completed", 0));
+
+    assertEquals(
+        1,
+        sweeps(reconciler, 5),
+        "the holder ended with no stop and no sweep ever saw it: nothing else will wake the"
+            + " review, so its rescue is tried again, and once launched it is owed no more");
+    assertEquals("review", loop.onlyLive().role());
+  }
+
+  @Test
+  void aRescueThatChangesNothingIsTriedABoundedNumberOfTimesWhateverRunsComeAndGo() {
+    loop = ReviewLoop.staged(tempDir);
+    var build = strandedReviewOf("auth");
+    loop.spec("billing", "api");
+    var reconciler = loop.reconciler(LATER);
+
+    sweeps(reconciler, 6);
+    assertEquals(
+        MissedStopReconciler.WAITING_RESCUES,
+        replaysOf(build),
+        "the pipeline has no stage to run, so no replay moves this review: it is tried its few"
+            + " times and then left");
+
+    for (var turn = 1; turn <= 3; turn++) {
+      var holder = loop.run("billing", "build");
+      loop.container.started(holder);
+      sweeps(reconciler, 1);
+      loop.container.exited(holder, "done", 0);
+      loop.onEvent(ReviewLoop.buildStop("billing", holder));
+      sweeps(reconciler, 1);
+    }
+
+    assertEquals(
+        MissedStopReconciler.WAITING_RESCUES + 1,
+        replaysOf(build),
+        "a review with no stage rows is replayed once while a run holds the repo, since its"
+            + " first stage may claim nothing; runs that come and go after that buy it no more");
+  }
+
+  @Test
+  void aReviewWithNoStageRowsWhoseFirstStageIsAPersonsIsOpenedWhoeverHoldsTheRepo() {
+    loop =
+        ReviewLoop.of(
+            tempDir,
+            ReviewPipelineConfig.fromMap(
+                Map.of(
+                    "max_iterations",
+                    3,
+                    "stages",
+                    List.of(Map.<String, Object>of("name", "approve", "type", "human")))));
+    strandedReviewOf("auth");
+    loop.spec("billing", "api");
+    loop.container.started(loop.run("billing", "build"));
+    var reconciler = loop.reconciler(LATER);
+
+    assertEquals(
+        1,
+        sweeps(reconciler, 3),
+        "nothing says a review with no stage rows launches anything, and opening a person's"
+            + " stage claims no repo: it is not held up by another spec's build");
+    assertEquals(
+        List.of("running"),
+        loop.reviews.stagesForReview(loop.reviewOf("auth")).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList());
+  }
+
+  @Test
+  void aPersonsStageLeftUnopenedIsOpenedWhoeverHoldsTheRepo() {
+    loop =
+        ReviewLoop.of(
+            tempDir,
+            ReviewPipelineConfig.fromMap(
+                Map.of(
+                    "max_iterations",
+                    3,
+                    "stages",
+                    List.of(
+                        Map.<String, Object>of(
+                            "name",
+                            "codex",
+                            "type",
+                            "agent",
+                            "agent",
+                            "codex",
+                            "gate",
+                            "no_critical"),
+                        Map.<String, Object>of("name", "approve", "type", "human")))));
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.exitsUnheard(reviewer.id(), CLEAN_REVIEW, 0);
+    Acting.system(
+        () -> {
+          loop.runs.complete(reviewer.id(), "stopped", 0);
+          loop.reviews.completeStage(
+              loop.reviews.stagesForReview(reviewer.reviewId()).getFirst().id(), "passed");
+        });
+    loop.restart();
+    assertEquals("pending", loop.reviews.stagesForReview(reviewer.reviewId()).getLast().status());
+    loop.spec("billing", "api");
+    loop.container.started(loop.run("billing", "build"));
+
+    assertEquals(
+        1,
+        loop.reconciler(LATER).sweep(),
+        "the daemon died before the person's stage was opened, and opening it claims no repo");
+    loop.settle();
+
+    assertEquals(
+        List.of("passed", "running"),
+        loop.reviews.stagesForReview(reviewer.reviewId()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "the review now waits on its person, not on another spec's build");
   }
 
   @Test
@@ -771,7 +934,7 @@ class ReviewLoopRecoveryTest {
 
     loop.container.exited(chat, "replied", 0);
     assertEquals(1, reconciler.sweep(), "the dead chat turn is finished in place");
-    assertEquals(1, reconciler.sweep(), "seen held, now free: owed its rescue again");
+    assertEquals(1, reconciler.sweep(), "the claim is free: its rescue is tried again");
     loop.settle();
 
     var fix = loop.onlyLive();
@@ -783,14 +946,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aReviewWhoseStageRowsARescueWritesIsRescuedOnceNotOncePerKey() {
     loop = ReviewLoop.staged(tempDir, "codex");
-    loop.spec("auth", "api");
-    var build = loop.run("auth", "build");
-    Acting.system(
-        () -> {
-          loop.runs.complete(build, "stopped", 0);
-          loop.specs.updateStatus("auth", SpecStatus.REVIEW);
-          loop.reviews.createReview("auth", 1);
-        });
+    var build = strandedReviewOf("auth");
     var reconciler = loop.reconciler(LATER);
     loop.refuseLaunches();
 
@@ -809,6 +965,51 @@ class ReviewLoopRecoveryTest {
         loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
             .filter(stop -> "reconcile".equals(stop.data().get(Event.WellKnownData.SOURCE)))
             .count());
+  }
+
+  @Test
+  void aFixRefusedWhileHeldStillHasEveryFreeRescueOwedToIt() {
+    var holder = new AtomicReference<String>();
+    var races = new AtomicInteger();
+    loop =
+        new ReviewLoop(
+            tempDir,
+            ReviewLoop.YAML,
+            project -> {
+              if (races.getAndDecrement() > 0) {
+                holder.set(loop.run("auth", Lane.ROOM_FULL.wire()));
+                loop.container.started(holder.get());
+              }
+              return ReviewLoop.stages("codex");
+            },
+            project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
+    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    var chat = chatTurnTakesTheRepo();
+    loop.onEvent(loop.watcherStop(reviewer.id(), null));
+    var reconciler = loop.reconciler(LATER);
+    assertEquals(1, sweeps(reconciler, 2), "replayed once while held, and refused");
+    loop.container.exited(chat, "replied", 0);
+    Acting.system(() -> loop.runs.complete(chat, "completed", 0));
+
+    for (var race = 1; race < MissedStopReconciler.WAITING_RESCUES; race++) {
+      races.set(1);
+      assertEquals(1, reconciler.sweep(), "free when the sweep looked");
+      loop.settle();
+      assertEquals(List.of(holder.get()), loop.container.live(), "and refused all the same");
+      loop.container.exited(holder.get(), "replied", 0);
+      Acting.system(() -> loop.runs.complete(holder.get(), "completed", 0));
+    }
+    races.set(0);
+
+    assertEquals(
+        1,
+        sweeps(reconciler, 3),
+        "the replay made while the claim was held was certain to be refused: it cost the review"
+            + " none of the rescues it is owed once the claim is free");
+    assertEquals("fix", loop.onlyLive().role());
   }
 
   @Test

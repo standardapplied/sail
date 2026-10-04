@@ -432,6 +432,29 @@ class RunWatchTest {
   }
 
   @Test
+  void anAgentThatEndsItselfBeforeAnyKillWasTriedIsNotReportedKilled() throws Exception {
+    container.beforeHost("incus snapshot create", () -> container.managerDown(true));
+    feed.at(
+        Duration.ofMinutes(21),
+        () -> {
+          container.exited(RUN, "fixed and pushed", 0);
+          container.managerDown(false);
+        });
+
+    watch(new Guardrails(null, "20m", "snapshot-and-stop"));
+
+    assertEquals(0, kills(), "the manager never answered while the agent lived: no kill was sent");
+    assertEquals(1, published.size());
+    assertNull(
+        published.getFirst().data().get("reason"),
+        "a limit crossed and never enforced ended nothing: the agent exited on its own, and its"
+            + " work is its to keep");
+    assertEquals(0, published.getFirst().data().get("exit_code"));
+    assertNull(recordedTrigger());
+    assertEquals(List.of("exited"), told);
+  }
+
+  @Test
   void aLiveAgentWhoseUnitManagerDoesNotAnswerIsStillWatched() throws Exception {
     feed.at(Duration.ofMinutes(5), () -> container.managerDown(true));
     feed.at(Duration.ofMinutes(8), () -> container.managerDown(false));

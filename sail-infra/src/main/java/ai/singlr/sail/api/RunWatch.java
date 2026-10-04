@@ -38,8 +38,9 @@ import java.util.function.Supplier;
  * action is crossed: the unit's whole cgroup is killed, and only once the container itself answers
  * that the unit is gone is the trigger recorded beside the run and the stop published, carrying
  * why. A run is never reported ended while its agent can still push work: a unit that survives the
- * kill — or a container that does not answer, where no kill is even tried — is taken up again at
- * the next poll, and whenever the unit does end its stop still says it was ended for its limit.
+ * kill is killed again at the next poll, and whenever it does end its stop still says it was ended
+ * for its limit. No kill is tried while the container cannot say whether it worked; the limit is
+ * enforced once it answers, and an agent that ends before any kill was tried exited on its own.
  * Silence is never an agent's death: a container that does not answer is asked again. One found
  * stopped, or one that answers while the unit's manager and the agent's process are both gone, ends
  * the watch with no stop, since nothing there can say how the run ended; the missed-stop reconciler
@@ -150,11 +151,12 @@ public final class RunWatch {
     var lastProgressAt = clock.get();
     var polledAt = lastProgressAt;
     var notified = false;
-    Triggered surviving = null;
+    Triggered enforcing = null;
+    var killTried = false;
     var snapshot = "";
     while (true) {
       var limitAt =
-          notified || surviving != null
+          notified || enforcing != null
               ? Instant.MAX
               : earlier(wallDeadline, stallDeadline(lastProgressAt, maxIdle));
       var nextPollAt = polledAt.plus(LIVENESS_POLL);
@@ -187,20 +189,20 @@ public final class RunWatch {
       }
       var exit = addressedTo(runId, answered.get());
       if (!exit.active()) {
-        if (surviving == null) {
+        if (killTried) {
+          reaped(enforcing, exit, now, snapshot);
+        } else {
           emitStop(publisher, project, exit, null);
           narrator.exited();
-        } else {
-          reaped(surviving, exit, now, snapshot);
         }
         return;
       }
       var limit =
-          surviving != null ? surviving : crossed(now, lastProgressAt, notified).orElse(null);
+          enforcing != null ? enforcing : crossed(now, lastProgressAt, notified).orElse(null);
       if (limit == null) {
         continue;
       }
-      if (surviving == null) {
+      if (enforcing == null) {
         snapshot = snapshotBefore(limit);
         if (!limit.stops() || dryRun) {
           GuardrailTrigger.of(limit, now).write(shell, project, unit);
@@ -214,7 +216,7 @@ public final class RunWatch {
         }
         var beforeTheKill = session.answeredExitStatus(project, unit);
         if (beforeTheKill.isEmpty()) {
-          surviving = limit;
+          enforcing = limit;
           continue;
         }
         if (!beforeTheKill.get().active()) {
@@ -223,8 +225,9 @@ public final class RunWatch {
           return;
         }
       }
+      killTried = true;
       if (!kill()) {
-        surviving = limit;
+        enforcing = limit;
         System.err.println(
             "  [watch] "
                 + unit.unitName()

@@ -716,7 +716,8 @@ container itself answers that the unit is gone, records the trigger beside the r
 (`~/.sail/runs/<runId>/guardrail-triggered.yaml`) and publishes the run's stop carrying the
 reason (`time limit (45m)`, `stall (20m)`). Silence is never an agent's death: a unit that
 survives the kill is not reported ended and is killed again at the next poll, no kill is
-tried while the container cannot say whether it worked, and a watcher that finds its container stopped — or the unit's
+tried while the container cannot say whether it worked (an agent that ends before one was
+tried exited on its own, and its stop says so), and a watcher that finds its container stopped — or the unit's
 manager gone and the agent's process with it — ends its watch with no stop, since nothing
 there says how the run ended; the missed-stop reconciler speaks for that run. Rollback uses Incus
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
@@ -865,10 +866,15 @@ watcher):
   `ReviewLoopRecoveryTest.aReviewWaitingToLaunchIsNeverReplayedWhileARunHoldsItsClaim`,
   `ReviewLoopRecoveryTest.aStageHeldUpByARunThatEndedBeforeAnySweepSawItIsStillRescued`,
   `ReviewLoopRecoveryTest.aRescueThatNeedsNoClaimIsNotHeldUpByARunThatHoldsTheRepo`,
+  `ReviewLoopRecoveryTest.aRescueRefusedByARunNoSweepEverSawIsTriedAgainOnceTheClaimIsFree`,
+  `ReviewLoopRecoveryTest.aRescueThatChangesNothingIsTriedABoundedNumberOfTimesWhateverRunsComeAndGo`,
+  `ReviewLoopRecoveryTest.aReviewWithNoStageRowsWhoseFirstStageIsAPersonsIsOpenedWhoeverHoldsTheRepo`,
+  `ReviewLoopRecoveryTest.aPersonsStageLeftUnopenedIsOpenedWhoeverHoldsTheRepo`,
+  `ReviewLoopRecoveryTest.aFixRefusedWhileHeldStillHasEveryFreeRescueOwedToIt`,
   `ReviewLoopRecoveryTest.aStaleBuildStopStartsNoReviewBesideTheBuildThatReplacedIt`,
   `ReviewLoopRecoveryTest.aReviewRescuedOnceThatThenErrorsIsStillRetried`,
   `ReviewLoopRecoveryTest.aStopElsewhereNeverRelaunchesAReviewerWhoseOwnStopIsStillOnItsWay`,
-  `MissedStopReconcilerTest.aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce`.*
+  `MissedStopReconcilerTest.aRunningReviewNoRunServesHasItsNewestLoopStopReplayedABoundedNumberOfTimes`.*
 - **P7. A reaped agent is dead.** After a trip there is no live agent process for that run in
   the container, nothing of a killed fix agent's is committed, and the room says why:
   `review_errored` (`reviewer killed: time limit (45m)`, `reviewer failed: exit 1`) and
@@ -903,9 +909,14 @@ build, so neither starts beside a live build of its own spec, a full chat turn o
 spec's run over the same repos. A claim refused for a run in the way is not an error:
 nothing is started, no attempt is spent, and the review waits, owed the step it could not
 take; every stop in the project tries the waiting reviews again, since a stop is what frees
-a claim. The reconciler replays nothing for a review waiting to launch while a run still
-holds its claim, and rescues it when it finds the claim free, each stage in its own right,
-so a holder that ends without a stop on the bus still frees the review. A container
+a claim. The reconciler replays nothing for a review it knows is waiting to launch a
+reviewer while a run still holds its claim, and rescues it when it finds the claim free,
+each stage in its own right, so a holder that ends without a stop on the bus still frees
+the review. A step it cannot know to be a launch — a failed gate may be owed an escalation,
+a review with no stage rows a person's stage — is replayed once while the claim is held.
+Nothing tells it whether a replay was refused, so a step still waiting with its claim free
+is rescued again, three times in all: enough for a run that took the claim just ahead of the
+replay and ended silently, and a bound on a rescue that changes nothing. A container
 held by a snapshot restore is an error like any other: a reviewer's is retried within the
 errored budget, a fix agent's fails its iteration. The pipeline finishes the run that stopped before it
 reserves the one that follows. A launch that reports failure after its agent started — the
@@ -937,10 +948,11 @@ them at that moment, and anchors the wall clock to the session's recorded start.
 (build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
 discards it. So an FDE always recovers by returning to the branch. The loop recovers itself
 from a daemon restart or a dead watcher (P6): the missed-stop sweep publishes the stop of
-any loop run that ended with no watcher left to report it, replays the newest loop stop once
-for a review that errored (the retry), that is `running` with no run serving it and no
-person to wait on, that failed its gate and never got its fix agent, or whose fix agent
-ended with nothing coming of it, and the pipeline goes on from the review's rows. When a spec is stuck: a guardrail-killed or
+any loop run that ended with no watcher left to report it, and replays the newest loop stop
+for a review that errored (the retry) or whose fix agent ended with nothing coming of it,
+once, and for one that is `running` with no run serving it and no person to wait on or that
+failed its gate and never got its fix agent, the bounded number of times a step waiting on
+a claim is given, and the pipeline goes on from the review's rows. When a spec is stuck: a guardrail-killed or
 failed dispatch leaves the work committed, so `sail spec dispatch --restart` resumes on the
 branch; an escalated review parks in `review` with its findings (in the review store), each
 reviewer's and fix agent's own run log, and every fix commit intact, so the FDE reads it with
