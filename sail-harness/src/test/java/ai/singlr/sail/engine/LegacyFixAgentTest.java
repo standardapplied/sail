@@ -11,9 +11,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -40,38 +37,6 @@ class LegacyFixAgentTest {
     var process = builder.start();
     started.add(process);
     return process;
-  }
-
-  /**
-   * The container, as far as this script goes: the command after {@code incus exec ... --} runs on
-   * this machine, where the test's own processes are the ones an older server left behind.
-   */
-  private static class Here implements ShellExec {
-
-    private final List<List<String>> commands = new ArrayList<>();
-
-    @Override
-    public Result exec(List<String> command)
-        throws IOException, InterruptedException, TimeoutException {
-      commands.add(List.copyOf(command));
-      var process =
-          new ProcessBuilder(command.subList(command.indexOf("bash"), command.size()))
-              .redirectErrorStream(true)
-              .start();
-      var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      return new Result(process.waitFor(), output, "");
-    }
-
-    @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout)
-        throws IOException, InterruptedException, TimeoutException {
-      return exec(command);
-    }
-
-    @Override
-    public boolean isDryRun() {
-      return false;
-    }
   }
 
   private static boolean killed(Process process) throws InterruptedException {

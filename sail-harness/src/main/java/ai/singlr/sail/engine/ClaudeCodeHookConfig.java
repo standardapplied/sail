@@ -36,6 +36,11 @@ import java.util.concurrent.TimeoutException;
  *   <li>{@code PostToolUse} → {@code agent_tool_finished}, plus {@link SailRoomRelay} beside it in
  *       the same matcher group: the heartbeat prints nothing, so stdout stays the relay's for
  *       mid-run room delivery via {@code hookSpecificOutput.additionalContext}
+ *   <li>{@code PostToolUseFailure} → {@code agent_tool_finished}: Claude Code fires {@code
+ *       PostToolUse} only for a call that succeeded and this one for a call that failed — a command
+ *       that exits non-zero, a file that is not there — so both are a call's end, and the watcher,
+ *       which counts a run's calls in flight, is told when a call that ran is over. A call Claude
+ *       Code denies before running it fires neither
  *   <li>{@code Stop} → {@link SailStopGate}, which publishes {@code agent_session_stopped} when it
  *       allows the stop or {@code agent_stop_nudged} when it blocks a premature one. It must be the
  *       only {@code Stop} hook: hooks in a matcher group run in parallel, so a bare publisher
@@ -92,6 +97,7 @@ public final class ClaudeCodeHookConfig {
         List.of(matcherGroup("startup", sessionStart), matcherGroup(null, sessionReportCommand())));
     hooks.put("PreToolUse", List.of(matcherGroup(null, toolStarted)));
     hooks.put("PostToolUse", List.of(matcherGroup(null, toolFinished, roomRelayCommand())));
+    hooks.put("PostToolUseFailure", List.of(matcherGroup(null, toolFinished)));
     hooks.put("Stop", List.of(matcherGroup(null, stop)));
     hooks.put("SessionEnd", List.of(matcherGroup(null, sessionEnd)));
 

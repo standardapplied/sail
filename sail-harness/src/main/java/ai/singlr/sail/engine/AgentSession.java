@@ -264,9 +264,13 @@ public final class AgentSession {
    * — because the pid file names only the launch wrapper: signalling that single pid orphans the
    * agent's children inside the still-active unit. Only a unitless foreground session falls back to
    * pid-file surgery, where the wrapper {@code exec}'d into the agent and the pid names the whole
-   * story. The run's pid file is removed, and its unit reset, only once the agent is {@link
-   * Halt.Ended}: a run whose halt is {@link Halt.Survived} or {@link Halt.Unanswered} still probes
-   * as it did before, so nothing reads a live agent as gone.
+   * story: its signals and the question of whether the process is gone run as one script in the
+   * container, whose printed answer is the only thing believed — a pid file that could not be read,
+   * a signal that could not be delivered and an exec that came back with no answer are all {@link
+   * Halt.Unanswered}, never a process taken for gone because a command about it failed. The run's
+   * pid file is removed, and its unit reset, only once the agent is {@link Halt.Ended}: a run whose
+   * halt is {@link Halt.Survived} or {@link Halt.Unanswered} still probes as it did before, so
+   * nothing reads a live agent as gone.
    */
   public Halt killAgent(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -336,30 +340,45 @@ public final class AgentSession {
     return new Halt.Ended();
   }
 
+  /**
+   * Ends the process whose pid is its one argument and says what became of it, {@code gone} or
+   * {@code alive}, from inside the container: SIGTERM, a grace period, SIGKILL when it is still
+   * there. It says either only once its SIGTERM was delivered, so a run of it that printed neither
+   * — the signal refused, the exec lost on the way in or out — says nothing of the process.
+   */
+  private static final String HALT_PID_SCRIPT =
+      """
+      kill "$1" || exit 1
+      sleep 3
+      if test -d "/proc/$1"; then
+        kill -9 "$1"
+        sleep 1
+      fi
+      if test -d "/proc/$1"; then
+        printf alive
+      else
+        printf gone
+      fi
+      """;
+
   private Halt killByPidFile(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    try {
-      requireReachable(containerName);
-    } catch (IOException unreachable) {
-      return new Halt.Unanswered();
-    }
     var pidResult =
         shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
     var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
     if (pid == null) {
-      return new Halt.Ended();
+      return new Halt.Unanswered();
     }
-    var pidStr = String.valueOf(pid);
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", pidStr)));
-    pause(containerName, 3);
-    var aliveCmd = ContainerExec.asDevUser(containerName, List.of("kill", "-0", pidStr));
-    if (shell.exec(aliveCmd).ok()) {
-      shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
-      if (shell.exec(aliveCmd).ok()) {
-        return new Halt.Survived();
-      }
-    }
-    return ended(containerName, unit);
+    var halted =
+        shell.exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of("bash", "-c", HALT_PID_SCRIPT, "bash", String.valueOf(pid))));
+    return switch (halted.ok() ? halted.stdout().strip() : "") {
+      case "gone" -> ended(containerName, unit);
+      case "alive" -> new Halt.Survived();
+      default -> new Halt.Unanswered();
+    };
   }
 
   public static String launchWorkDir(String sshUser, List<SailYaml.Repo> targetRepos) {

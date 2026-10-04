@@ -42,7 +42,10 @@ import java.util.concurrent.TimeoutException;
  *       Codex's {@code PostToolUse} honors {@code hookSpecificOutput.additionalContext} exactly as
  *       Claude Code does (injected as a developer message before the next model call), so the one
  *       relay script gives both CLIs the same mid-run room delivery. Do not move the relay to
- *       {@code PreToolUse}: Codex parses but rejects {@code additionalContext} there.
+ *       {@code PreToolUse}: Codex parses but rejects {@code additionalContext} there. Codex fires
+ *       {@code PostToolUse} for a call that failed as for one that succeeded, so it needs no
+ *       counterpart of Claude Code's {@code PostToolUseFailure}: every call's end reaches the
+ *       watcher through this one hook.
  *   <li>{@code Stop} → {@link SailStopGate}, which publishes {@code agent_session_stopped} when it
  *       allows the stop or {@code agent_stop_nudged} when it blocks a premature one. It must be the
  *       only {@code Stop} hook: matching hooks run concurrently, so a bare publisher beside the

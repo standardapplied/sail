@@ -707,7 +707,12 @@ deadline out, so an agent that keeps calling tools is never killed for a stall a
 one is. A tool call in flight is work, not a stall: the watcher counts its run's calls that
 started and have not finished, and while one is in flight and a `max_duration` bounds the
 run there is no stall deadline; the window starts again when the last call in flight
-finishes. With no `max_duration` the stall window is the run's only bound, so it runs
+finishes. A call that ran is told finished whether it succeeded or failed: Claude Code fires
+`PostToolUse` only for a call that succeeded and `PostToolUseFailure` for one that failed (a
+command that exits non-zero), and both publish `agent_tool_finished`; Codex fires
+`PostToolUse` for both. A call Claude Code denies before running it fires neither, and stays
+counted until the run's `max_duration`; a run with full permissions is never denied one. With
+no `max_duration` the stall window is the run's only bound, so it runs
 through a tool call too. The stall window
 counts only time the watcher could see: a watcher outlives the daemon it listens to, and
 when its event stream ends with a daemon restart it opens the stream again at its next poll
@@ -725,7 +730,11 @@ reason (`time limit (45m)`, `stall (20m)`). The kill says what it did (`AgentSes
 `Survived` when both signals were sent and it answered that the unit is still active, and
 `Unanswered` when the signal could not be delivered or the unit's manager did not answer
 afterwards. Only on `Ended` is the unit reset and the run's pid file removed, so a run whose
-kill nothing answered for still probes as alive. Silence is never an agent's death: a unit that
+kill nothing answered for still probes as alive. A foreground session, which has no unit, is
+halted by its pid file the same way: its signals and the question of whether the process is
+gone run as one script in the container, and only what that script prints is believed, so a
+pid file that could not be read, a signal that could not be delivered and an exec that came
+back with no answer are each `Unanswered`. Silence is never an agent's death: a unit that
 survives the kill is not reported ended and is killed again at the next poll, no kill is
 tried while the container cannot say whether it worked, a kill counts as tried only on
 `Ended` or `Survived` (an agent no signal reached that then ends exited on its own, and its
@@ -955,6 +964,10 @@ class is named):
   `AgentSessionTest.aManagerThatDoesNotAnswerAfterTheSigtermIsUnansweredAndThePidFileIsKept`,
   `AgentSessionTest.aUnitStillActiveAfterBothSignalsSurvivedAndItsPidFileIsKept`,
   `AgentSessionTest.aUnitThatDiesInTheGraceIsEndedWithNoSigkillAndItsPidFileRemoved`,
+  `AgentSessionTest.aContainerLostAfterThePidWasReadIsUnansweredAndThePidFileIsKept`,
+  `AgentSessionTest.aPidFileThatCouldNotBeReadIsUnansweredNeverAnAgentTakenForGone`,
+  `AgentSessionTest.aProcessAlreadyGoneWhenTheSignalIsSentWasNotEndedByIt`,
+  `AgentSessionTest.aRealProcessThatIgnoresTheSigtermIsEndedByTheSigkill`,
   `StopOperationsTest.anOperatorsStopTheManagerDoesNotAnswerFailsAndKeepsTheClaimForARetryToFinish`,
   `StopOperationsTest.aHaltTheAgentSurvivedRestoresTheSpecAndLeavesTheRunReconcilable`.*
 - **C7. Every watcher ends** when its run's authoritative stop or cancel is published, by
@@ -973,6 +986,8 @@ class is named):
   `RunWatchTest.oneOfTwoToolCallsStillInFlightIsNotAStall`,
   `RunWatchTest.aRunThatCallsNoToolForItsStallWindowIsKilledForTheStall`,
   `RunWatchTest.aToolCallInFlightIsStillInFlightAfterTheFeedOpensAgain`,
+  `RunWatchTest.aToolCallThatFailedIsNoLongerInFlightAndTheSilenceAfterItIsAStall`,
+  `ClaudeCodeHookConfigTest.aToolCallThatFailedIsToldFinishedAsOneThatSucceededIs`,
   `ReviewAgentLoopIT.aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall`.*
 - **C10. Main says what the driving box said, and a replayed stop is not said again.** An
   escalation's reason rides the synced review row (`reviews.error`) into main's

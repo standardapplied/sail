@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ClaudeCodeHookConfig;
@@ -676,6 +677,36 @@ class RunWatchTest {
         elapsed().compareTo(Duration.ofMinutes(50)) < 0,
         "silent since the call finished at 30m, not since it started at 5m: " + elapsed());
     assertTrue(elapsed().compareTo(Duration.ofMinutes(51)) < 0, elapsed().toString());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void aToolCallThatFailedIsNoLongerInFlightAndTheSilenceAfterItIsAStall() throws Exception {
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(ClaudeCodeHookConfig.render()).get("hooks");
+    var onFailure = (List<Map<String, Object>>) hooks.get("PostToolUseFailure");
+    assertNotNull(onFailure, "Claude Code tells of a failed call through this hook alone");
+    var command =
+        (String)
+            ((List<Map<String, Object>>) onFailure.getFirst().get("hooks"))
+                .getFirst()
+                .get("command");
+    var saidOfAFailedCall = command.substring(command.lastIndexOf(' ') + 1);
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.said(saidOfAFailedCall, RUN, Map.of());
+        });
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "stall (20m)",
+        published.getFirst().data().get("reason"),
+        "a call that failed has ended: counted in flight it would hold the stall off until the"
+            + " time limit");
+    assertFalse(elapsed().compareTo(Duration.ofMinutes(25)) < 0, elapsed().toString());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(26)) < 0, elapsed().toString());
   }
 
   @Test
