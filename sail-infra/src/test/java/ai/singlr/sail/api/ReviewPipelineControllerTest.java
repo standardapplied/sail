@@ -1648,7 +1648,7 @@ class ReviewPipelineControllerTest {
   }
 
   @Test
-  void aRoomWriteFailureNeverFailsThePipeline() {
+  void aRoomThatCannotBeWrittenLeavesThePassUnwrittenNotAVerdictNobodyWasTold() {
     createSpec("auth", "in_progress");
     var brokenDb = Sqlite.open(tempDir.resolve("broken.db"));
     new SchemaManager(brokenDb).migrate();
@@ -1661,9 +1661,13 @@ class ReviewPipelineControllerTest {
     ctrl.onEvent(agentStoppedEvent("auth"));
 
     assertEquals(
-        SpecStatus.AWAITING_MERGE,
+        SpecStatus.REVIEW,
         specStore.findById("auth").orElseThrow().status(),
-        "narration is best-effort: a dead room store must not strand the verdict");
+        "a review's end is one write: its status, its spec's and the room line land together");
+    assertEquals(
+        "running",
+        reviewStore.latestReviewForSpec("auth").orElseThrow().status(),
+        "the review is still owed its end, and the next replay gives it");
   }
 
   @Test

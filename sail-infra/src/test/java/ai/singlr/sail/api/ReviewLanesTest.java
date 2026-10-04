@@ -22,10 +22,12 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -641,6 +643,75 @@ class ReviewLanesTest {
         loop.container.commits().isEmpty(),
         "a killed fix agent's half-done work is not committed, however its stop is heard");
     assertTrue(loop.live().isEmpty(), "no re-review runs over the code the reviewer just failed");
+  }
+
+  @Test
+  void aRunIsHeldToItsTimeLimitFromItsRowsStartWhateverItsSessionFileIsRewrittenToSay() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    var unit = AgentUnit.forRun(reviewer.id());
+    assertTrue(
+        loop.watcherCommandOf(reviewer.id()).contains("--started-at " + reviewer.startedAt()),
+        "the watcher is handed the run row's start: " + loop.watcherCommandOf(reviewer.id()));
+    loop.container.wroteFile(
+        unit.sessionPath(),
+        loop.container
+            .file(unit.sessionPath())
+            .replaceAll("\"started_at\": *\"[^\"]+\"", "\"started_at\": \"2099-01-01T00:00:00Z\""));
+    assertTrue(loop.container.file(unit.sessionPath()).contains("2099-01-01T00:00:00Z"));
+
+    loop.outlastsItsTimeLimit(reviewer.id());
+
+    var stop =
+        loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+            .filter(event -> reviewer.id().equals(event.data().get(Event.WellKnownData.RUN_ID)))
+            .findFirst()
+            .orElseThrow();
+    assertEquals("time limit (45m)", stop.data().get(Event.WellKnownData.REASON));
+    var held = Duration.between(Instant.parse(reviewer.startedAt()), loop.watchEndedAt());
+    assertFalse(held.compareTo(Duration.ofMinutes(45)) < 0, held.toString());
+    assertTrue(
+        held.compareTo(Duration.ofMinutes(46)) < 0,
+        "ended at its limit counted from the run row's start, not decades on: " + held);
+    assertFalse(loop.container.alive(reviewer.id()), "the agent's edit bought it no time");
+    assertEquals(List.of("reviewer killed: time limit (45m)"), loop.details("review_errored"));
+  }
+
+  @Test
+  void aFixAgentIsLaunchedOnlyAfterAnyAgentAnOlderServerLeftForItsReviewIsKilled() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var atUnitStart = new CopyOnWriteArrayList<String>();
+    loop.onLaunch(
+        runId ->
+            atUnitStart.add(
+                loop.runs.findById(runId).orElseThrow().role()
+                    + " after "
+                    + loop.container.commandsContaining("SAIL_RUN_ID=$1").size()
+                    + " legacy checks"));
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+
+    loop.finish(reviewer.id(), CRITICAL_FINDING);
+
+    var fix = loop.onlyLive();
+    assertEquals("fix", fix.role());
+    assertEquals(
+        List.of("review after 0 legacy checks", "fix after 1 legacy checks"),
+        atUnitStart,
+        "a reviewer shares no branch with a legacy fix agent; a fix agent's unit starts only once"
+            + " the check for one has run");
+    var check =
+        loop.container.commands().stream()
+            .filter(command -> String.join(" ", command).contains("SAIL_RUN_ID=$1"))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(
+        reviewer.reviewId(),
+        check.getLast(),
+        "the check names the review, which only an older server exported as a run id");
+    assertFalse(
+        check.contains(fix.id()), "never a run of this server's: those are not its to kill");
   }
 
   @Test

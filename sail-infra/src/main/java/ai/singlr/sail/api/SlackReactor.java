@@ -178,7 +178,9 @@ public final class SlackReactor implements EventSubscriber {
 
   /**
    * The in-container agent hook fires a stop at every turn end; only the watcher's poll-derived
-   * stop (which carries a {@code source}) is the real termination worth a thread reply.
+   * stop (which carries a {@code source}) is the real termination worth a thread reply — and only
+   * the first time it is said: a stop the reconciler replays for a run that had already ended
+   * ({@link Event.WellKnownData#REPLAY}) moves the loop and is not news.
    */
   private static boolean isTurnEndStop(Event event) {
     if (!Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(event.type())) {
@@ -187,7 +189,7 @@ public final class SlackReactor implements EventSubscriber {
     if (event.data().get(Event.WellKnownData.SOURCE) == null) {
       return true;
     }
-    return isCleanChatStop(event);
+    return Event.WellKnownData.replay(event.data()) || isCleanChatStop(event);
   }
 
   /**

@@ -295,11 +295,28 @@ class SyncTransitionEventsTest {
   }
 
   @Test
-  void anEscalatedReviewBecomesReviewEscalated() {
+  void anEscalatedReviewBecomesReviewEscalatedSayingWhyAsItsRowRecordsIt() {
+    var events =
+        map(
+            new SyncTransition(
+                "review",
+                "rev1",
+                "failed",
+                "escalated",
+                review("escalated", "fix agent stopped by an operator")));
+
+    assertEquals(1, events.size());
+    assertEquals("review_escalated", events.getFirst().type());
+    assertEquals("fix agent stopped by an operator", events.getFirst().data().get("detail"));
+  }
+
+  @Test
+  void anEscalatedReviewWhoseRowRecordsNoReasonStillBecomesReviewEscalated() {
     var events =
         map(new SyncTransition("review", "rev1", "failed", "escalated", review("escalated", null)));
 
     assertEquals("review_escalated", events.getFirst().type());
+    assertNull(events.getFirst().data().get("detail"), "a row from an older box names no reason");
   }
 
   @Test

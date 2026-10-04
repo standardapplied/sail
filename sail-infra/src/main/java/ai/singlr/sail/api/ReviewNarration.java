@@ -7,10 +7,12 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 
 /**
@@ -64,6 +66,25 @@ final class ReviewNarration {
     return "Automated review stages passed."
         + disputedLines(disputed)
         + "\nAwaiting human approval.";
+  }
+
+  /** The room line of a review handed to a person, saying why. */
+  static String escalated(String reason) {
+    return "Review escalated: " + reason + ".";
+  }
+
+  /**
+   * The room line of a review whose launch was refused its claim: the run it waits on, by its id,
+   * its lane and the spec it works.
+   */
+  static String waiting(RunStore.RunRow holder) {
+    return "Review is waiting for run `"
+        + holder.id()
+        + "` (`"
+        + holder.role()
+        + "` of `"
+        + Objects.toString(holder.specId(), "")
+        + "`) to finish.";
   }
 
   /** The room note for a reviewer's rulings on findings someone resolved while its stage ran. */

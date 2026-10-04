@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -62,7 +63,7 @@ class ReviewLaneLauncherTest {
   }
 
   private String launch(ReviewLanes.Invocation invocation) {
-    var launched = Acting.system(() -> lanes.launch(invocation, ReviewLoop.HANDLE));
+    var launched = Acting.system(() -> lanes.launch(invocation, ReviewLoop.HANDLE, () -> {}));
     return assertInstanceOf(ReviewLanes.Launch.Started.class, launched).runId();
   }
 
@@ -114,16 +115,74 @@ class ReviewLaneLauncherTest {
     var first = launch(invocation(Lane.REVIEW, List.of()));
 
     var second =
-        Acting.system(() -> lanes.launch(invocation(Lane.FIX, List.of()), ReviewLoop.HANDLE));
+        Acting.system(
+            () -> lanes.launch(invocation(Lane.FIX, List.of()), ReviewLoop.HANDLE, () -> {}));
 
     var deferred = assertInstanceOf(ReviewLanes.Launch.Deferred.class, second);
-    assertTrue(deferred.why().contains(first), "the refusal names the run in the way: " + deferred);
+    assertEquals(first, deferred.holderRunId(), "the refusal names the run in the way");
+    assertEquals(
+        "Agent run " + first + " is already working spec 'auth' in this container.",
+        deferred.why());
     assertEquals(
         List.of(first),
         loop.container.launched(),
         "nothing is started, and no run recorded, for a claim the gate refused");
     assertEquals(List.of(first), loop.runs.running().stream().map(RunStore.RunRow::id).toList());
     assertEquals(List.of("api"), loop.runs.findById(first).orElseThrow().repos());
+  }
+
+  @Test
+  void whatMustHoldOnlyWhileARunServesTheReviewIsWrittenOnceTheClaimLandedAndBeforeTheUnitStarts() {
+    var order = new CopyOnWriteArrayList<String>();
+    loop.onLaunch(runId -> order.add("unit started"));
+    var invocation = invocation(Lane.REVIEW, List.of());
+
+    Acting.system(
+        () ->
+            lanes.launch(
+                invocation,
+                ReviewLoop.HANDLE,
+                () ->
+                    order.add(
+                        "claimed with "
+                            + loop.runs.forReview(invocation.reviewId()).size()
+                            + " run recorded")));
+
+    assertEquals(List.of("claimed with 1 run recorded", "unit started"), order);
+  }
+
+  @Test
+  void aClaimTheGateRefusesWritesNothingOfTheLaunchThatDidNotHappen() {
+    launch(invocation(Lane.REVIEW, List.of()));
+    var claimed = new CopyOnWriteArrayList<String>();
+
+    var refused =
+        Acting.system(
+            () ->
+                lanes.launch(
+                    invocation(Lane.REVIEW, List.of()),
+                    ReviewLoop.HANDLE,
+                    () -> claimed.add("claimed")));
+
+    assertInstanceOf(ReviewLanes.Launch.Deferred.class, refused);
+    assertTrue(claimed.isEmpty(), "nothing is true of a review whose run does not exist");
+  }
+
+  @Test
+  void aFixLaunchWhoseLegacyCheckTheContainerWillNotRunFailsAndLeavesNoRunRunning() {
+    var invocation = invocation(Lane.FIX, List.of());
+    loop.container.failing("SAIL_RUN_ID=$1", "Error: websocket: close 1006");
+
+    var failure = assertThrows(ApiException.class, () -> launch(invocation));
+
+    assertEquals(ErrorCode.AGENT_LAUNCH_FAILED, failure.failure().errorCode());
+    assertTrue(failure.getCause().getMessage().contains("older server"), failure.toString());
+    assertTrue(
+        loop.container.launched().isEmpty(),
+        "no fix agent starts while nothing says whether an older one still works the branch");
+    assertEquals(
+        List.of("failed"),
+        loop.runs.forReview(invocation.reviewId()).stream().map(RunStore.RunRow::status).toList());
   }
 
   @Test

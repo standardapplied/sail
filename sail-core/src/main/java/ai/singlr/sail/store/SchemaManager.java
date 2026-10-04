@@ -707,7 +707,8 @@ public final class SchemaManager {
           "CREATE INDEX idx_runs_project ON runs(project)",
           "CREATE INDEX idx_runs_spec ON runs(spec_id)",
           "CREATE INDEX idx_runs_room ON runs(room_id)",
-          "CREATE INDEX idx_runs_review ON runs(review_id)");
+          "CREATE INDEX idx_runs_review ON runs(review_id)",
+          "ALTER TABLE reviews ADD COLUMN waiting_on TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

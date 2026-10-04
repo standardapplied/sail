@@ -7,13 +7,16 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Guardrails;
+import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.GuardrailChecker;
+import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -23,8 +26,10 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncTransitions;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
@@ -84,6 +89,7 @@ final class ReviewLoop implements AutoCloseable {
   private static final Pattern MAX_DURATION = Pattern.compile("--max-duration (\\S+)");
   private static final Pattern MAX_IDLE = Pattern.compile("--max-idle (\\S+)");
   private static final Pattern ACTION = Pattern.compile("--action (\\S+)");
+  private static final Pattern STARTED_AT = Pattern.compile("--started-at (\\S+)");
 
   final Sqlite db;
   final SpecStore specs;
@@ -108,6 +114,7 @@ final class ReviewLoop implements AutoCloseable {
   private volatile ScriptedAgent script;
   private volatile boolean refusing;
   private volatile Consumer<String> launched = runId -> {};
+  private volatile Instant watchEndedAt;
 
   /** A loop whose pipeline and reviewer are resolved from {@code yaml}, as the server wires it. */
   static ReviewLoop wired(Path dir, String yaml) {
@@ -362,9 +369,85 @@ final class ReviewLoop implements AutoCloseable {
     return specs.findById(specId).orElseThrow().status();
   }
 
+  /** The run {@code reviewId} recorded that it waits on, or null when it waits on none. */
+  String waitingOn(String reviewId) {
+    return reviews.findReview(reviewId).orElseThrow().waitingOn();
+  }
+
+  /** What sail said in {@code specId}'s room that starts with {@code prefix}, oldest first. */
+  List<String> roomLines(String specId, String prefix) {
+    return messages.list(specId, null, 100).stream()
+        .map(MessageStore.MessageRow::body)
+        .filter(body -> body.startsWith(prefix))
+        .toList();
+  }
+
+  /**
+   * The events main derives from {@code reviewId}'s row as it crosses the wire, first seen: what
+   * main says of a review this box drives.
+   */
+  List<Event> narratedOnMain(String reviewId) {
+    return SyncTransitions.detect("review", reviewId, null, reviews.comparableSnapshot(reviewId))
+        .stream()
+        .flatMap(
+            transition ->
+                SyncTransitionEvents.eventsFor(transition, spec -> PROJECT, spec -> null, "main")
+                    .stream())
+        .toList();
+  }
+
   /** The detail of every event of {@code type} published so far, oldest first. */
   List<String> details(String type) {
     return events(type).stream().map(event -> (String) event.data().get("detail")).toList();
+  }
+
+  /** What this server's Slack and webhook reactors posted, as they posted it. */
+  static final class Narrated {
+
+    private final List<String> slack = new CopyOnWriteArrayList<>();
+    private final List<String> webhooks = new CopyOnWriteArrayList<>();
+
+    /** Every text posted to Slack, oldest first. */
+    List<String> slack() {
+      return slack;
+    }
+
+    /** How many times an agent's stop was said in Slack. */
+    long stopsInSlack() {
+      return slack.stream().filter(text -> text.contains(" stopped")).count();
+    }
+
+    /** How many times an agent's stop was sent to the project's webhook. */
+    long stopsToWebhooks() {
+      return webhooks.stream().filter(Event.WellKnownTypes.AGENT_SESSION_STOPPED::equals).count();
+    }
+  }
+
+  /**
+   * Subscribes the real Slack and webhook reactors to this server's bus, for a project that
+   * configures both, and returns what they post from now on: only Slack itself and the webhook
+   * endpoint are stood in for.
+   */
+  Narrated narrating() {
+    var narrated = new Narrated();
+    var notifications =
+        new Notifications("https://ntfy.sh/sail", null, new SlackNotifications("#sail"));
+    bus.subscribe(
+        counted(
+            new SlackReactor(
+                project -> notifications,
+                new SlackThreadStore(db),
+                SlackReactor.specLookup(specs),
+                post -> {
+                  narrated.slack.add(post.text());
+                  return new SlackPoster.Result(post.channel(), "1");
+                })));
+    bus.subscribe(
+        counted(
+            new WebhookReactor(
+                project -> notifications,
+                url -> (event, project, title, message) -> narrated.webhooks.add(event))));
+    return narrated;
   }
 
   /** The stop executor this server would run, halting agents through {@code halter}. */
@@ -514,7 +597,7 @@ final class ReviewLoop implements AutoCloseable {
   private void watch(String runId, boolean working, RunWatch.StopPublisher publisher) {
     var run = runs.findById(runId).orElseThrow();
     var spawned = watcherCommandsOf(runId).getLast();
-    var time = new AtomicReference<>(Instant.parse(run.startedAt()));
+    var time = new AtomicReference<>(Instant.parse(group(STARTED_AT, spawned)));
     try {
       new RunWatch(
               PROJECT,
@@ -533,8 +616,14 @@ final class ReviewLoop implements AutoCloseable {
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+    watchEndedAt = time.get();
     container.watcherGone(runId);
     played();
+  }
+
+  /** When, on the watch's own clock, the last watch run here ended. */
+  Instant watchEndedAt() {
+    return watchEndedAt;
   }
 
   private static final RunWatch.Narrator QUIET =

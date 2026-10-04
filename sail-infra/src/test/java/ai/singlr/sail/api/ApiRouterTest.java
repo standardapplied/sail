@@ -1349,7 +1349,7 @@ class ApiRouterTest {
     assertEquals("codex", map.get("reviewer"));
 
     var reviewRow =
-        new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null);
+        new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null, null);
     var reviewView = ReviewView.from(reviewRow, List.of(stageView));
     assertEquals(1, reviewView.iteration());
     var rmap = reviewView.toMap();

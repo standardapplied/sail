@@ -26,10 +26,10 @@ import java.util.function.Supplier;
 /**
  * The watch over one agent run, whichever lane launched it: the loop {@code sail agent watch} runs
  * until the run ends, and the one place a run is ended for a limit. It holds the run to its
- * guardrails — a wall-clock ceiling ({@code max_duration}) anchored to the session's start, and a
- * stall window ({@code max_idle}) measured from the run's last progress event — and publishes the
- * authoritative {@code agent_session_stopped} that finishes the run and that the review pipeline
- * advances on.
+ * guardrails — a wall-clock ceiling ({@code max_duration}) anchored to when the run's row says it
+ * started, and a stall window ({@code max_idle}) measured from the run's last progress event — and
+ * publishes the authoritative {@code agent_session_stopped} that finishes the run and that the
+ * review pipeline advances on.
  *
  * <p>The loop wakes for an event, for a limit, and at least every {@link #LIVENESS_POLL} to ask the
  * container whether the unit is still active — on the clock, not on a quiet feed, so another run's
@@ -40,17 +40,27 @@ import java.util.function.Supplier;
  * why. A run is never reported ended while its agent can still push work: a unit that survives the
  * kill is killed again at the next poll, and whenever it does end its stop still says it was ended
  * for its limit. No kill is tried while the container cannot say whether it worked; the limit is
- * enforced once it answers, and an agent that ends before any kill was tried exited on its own.
- * Silence is never an agent's death: a container that does not answer is asked again. One found
- * stopped, or one that answers while the unit's manager and the agent's process are both gone, ends
- * the watch with no stop, since nothing there can say how the run ended; the missed-stop reconciler
- * speaks for that run.
+ * enforced once it answers. A kill counts as tried only once a signal was delivered and the
+ * container answered what it did ({@link AgentSession.Halt}): an agent no signal reached, or whose
+ * halt nothing answered for, that then ends exited on its own, and its stop says so. Silence is
+ * never an agent's death: a container that does not answer is asked again. One found stopped, or
+ * one that answers while the unit's manager and the agent's process are both gone, ends the watch
+ * with no stop, since nothing there can say how the run ended; the missed-stop reconciler speaks
+ * for that run.
+ *
+ * <p>The watch ends with its run. Whoever publishes the run's authoritative stop or its cancel — an
+ * operator's stop, the reconciler speaking for a run whose manager went silent for good — ends the
+ * watch too: it returns, publishing nothing and recording no trigger. The agent's own turn-end
+ * stop, which carries no {@code source}, is not the run's end.
  *
  * <p>The stall window counts only time the watcher could see. It starts when the watch does —
  * idleness the watcher never observed is not idleness — and it stands still while the event feed is
  * down: a watcher outlives the daemon it listens to, and a feed that ended with a daemon restart is
- * opened again at the next poll, the stall window starting afresh. The wall clock runs on
- * regardless.
+ * opened again at the next poll, the stall window starting afresh. And a run with a tool call in
+ * flight is working, not stalled: while a call the run started has not finished and a wall-clock
+ * limit bounds the run, there is no stall deadline, and the window starts again when the last call
+ * in flight finishes. With no wall-clock limit the stall window alone bounds the run, so it runs
+ * through a tool call too. The wall clock runs on regardless.
  */
 public final class RunWatch {
 
@@ -110,8 +120,9 @@ public final class RunWatch {
    * @param unit the unit the run was launched as, as recorded on the run
    * @param guardrails the limits of the run's lane, as the project set them when the watcher was
    *     spawned
-   * @param startedAt when the run's session started: the anchor of its wall-clock limit, so a
-   *     watcher armed onto a run already under way holds it to what is left of its budget
+   * @param startedAt when the run started, as its run row records it: the anchor of its wall-clock
+   *     limit, so a watcher armed onto a run already under way holds it to what is left of its
+   *     budget, and nothing the agent can write moves it
    * @param publisher where the stop goes, or null to publish none
    */
   public RunWatch(
@@ -142,8 +153,9 @@ public final class RunWatch {
 
   /**
    * Watches the run until it ends, by its own exit or for a limit, and its stop is published — or
-   * until its container is found stopped, or its unit's manager gone with its process, where
-   * nothing can be read of how the run ended and it is left to the missed-stop reconciler.
+   * until someone else publishes its stop or its cancel, or its container is found stopped, or its
+   * unit's manager gone with its process, where nothing can be read of how the run ended and it is
+   * left to the missed-stop reconciler.
    */
   public void run() throws Exception {
     var maxIdle = Guardrails.parseDuration(guardrails.maxIdle());
@@ -154,17 +166,31 @@ public final class RunWatch {
     Triggered enforcing = null;
     var killTried = false;
     var snapshot = "";
+    var toolCalls = 0;
     while (true) {
       var limitAt =
           notified || enforcing != null
               ? Instant.MAX
-              : earlier(wallDeadline, stallDeadline(lastProgressAt, maxIdle));
+              : earlier(wallDeadline, stallDeadline(lastProgressAt, maxIdle, toolCalls));
       var nextPollAt = polledAt.plus(LIVENESS_POLL);
       var wait = until(limitAt.isAfter(polledAt) ? earlier(nextPollAt, past(limitAt)) : nextPollAt);
       var event = wait.isZero() ? null : feed.poll(wait);
       if (event != null) {
-        if (isProgressEvent(event) && matchesRun(event, runId)) {
+        if (!matchesRun(event, runId)) {
+          continue;
+        }
+        if (endsTheRun(event)) {
+          System.err.println(
+              "  [watch] run "
+                  + runId
+                  + " was ended by its "
+                  + event.type()
+                  + "; the watch ends with it, publishing nothing");
+          return;
+        }
+        if (isProgressEvent(event)) {
           lastProgressAt = clock.get();
+          toolCalls = toolCallsInFlight(toolCalls, event.type());
         }
         continue;
       }
@@ -198,7 +224,9 @@ public final class RunWatch {
         return;
       }
       var limit =
-          enforcing != null ? enforcing : crossed(now, lastProgressAt, notified).orElse(null);
+          enforcing != null
+              ? enforcing
+              : crossed(now, lastProgressAt, notified, toolCalls).orElse(null);
       if (limit == null) {
         continue;
       }
@@ -225,13 +253,16 @@ public final class RunWatch {
           return;
         }
       }
-      killTried = true;
-      if (!kill()) {
+      var halt = session.killAgent(project, unit);
+      killTried |= !(halt instanceof AgentSession.Halt.Unanswered);
+      if (!(halt instanceof AgentSession.Halt.Ended)) {
         enforcing = limit;
         System.err.println(
             "  [watch] "
                 + unit.unitName()
-                + " survived the kill for "
+                + (halt instanceof AgentSession.Halt.Survived
+                    ? " survived the kill for "
+                    : " gave no answer to the kill for ")
                 + limit.cause()
                 + "; no stop published, trying again at the next poll");
         continue;
@@ -245,8 +276,8 @@ public final class RunWatch {
    * Whether the agent's process is gone from a container that answers, asked only when the unit's
    * own manager did not: a user manager that died took the unit with it, and nothing will ever say
    * how that unit ended. Only a process the run's pid file names and the container reports dead is
-   * gone: a container that does not answer says nothing either way, and neither does a run whose
-   * pid file a kill attempt already removed.
+   * gone: a container that does not answer says nothing either way. The pid file is still there to
+   * ask about — a kill removes it only once the agent is known gone.
    */
   private boolean agentGone() throws Exception {
     try {
@@ -285,7 +316,8 @@ public final class RunWatch {
    * first, then the stall window — which is judged only while the feed is live, since progress a
    * dead feed could not deliver is not a stall. A limit that only notifies says so once.
    */
-  private Optional<Triggered> crossed(Instant now, Instant lastProgressAt, boolean notified) {
+  private Optional<Triggered> crossed(
+      Instant now, Instant lastProgressAt, boolean notified, int toolCalls) {
     if (notified) {
       return Optional.empty();
     }
@@ -293,6 +325,7 @@ public final class RunWatch {
       return Optional.of(late);
     }
     if (feed.live()
+        && !working(toolCalls)
         && GuardrailChecker.checkStall(lastProgressAt, now, guardrails)
             instanceof Triggered stalled) {
       return Optional.of(stalled);
@@ -300,8 +333,42 @@ public final class RunWatch {
     return Optional.empty();
   }
 
-  private static Instant stallDeadline(Instant lastProgressAt, Duration maxIdle) {
-    return maxIdle == null ? Instant.MAX : lastProgressAt.plus(maxIdle);
+  private Instant stallDeadline(Instant lastProgressAt, Duration maxIdle, int toolCalls) {
+    return maxIdle == null || working(toolCalls) ? Instant.MAX : lastProgressAt.plus(maxIdle);
+  }
+
+  /**
+   * Whether the run is known to be working through {@code toolCalls} calls in flight, and so is not
+   * stalled however long they take: only while a wall-clock limit bounds it, since a call that
+   * never returns must still end somewhere.
+   */
+  private boolean working(int toolCalls) {
+    return toolCalls > 0 && guardrails.maxDuration() != null;
+  }
+
+  /**
+   * The run's tool calls in flight after an event of {@code type}: one more for a call that
+   * started, one fewer — never below none — for one that finished.
+   */
+  static int toolCallsInFlight(int toolCalls, String type) {
+    return switch (type) {
+      case Event.WellKnownTypes.AGENT_TOOL_STARTED -> toolCalls + 1;
+      case Event.WellKnownTypes.AGENT_TOOL_FINISHED -> Math.max(0, toolCalls - 1);
+      default -> toolCalls;
+    };
+  }
+
+  /**
+   * Whether {@code event}, one of the watched run's own, says the run is over: its cancel, or its
+   * authoritative stop. A stop with no {@code source} is the agent's turn-end hook, not its end.
+   */
+  static boolean endsTheRun(Event event) {
+    return switch (event.type()) {
+      case Event.WellKnownTypes.AGENT_CANCELLED -> true;
+      case Event.WellKnownTypes.AGENT_SESSION_STOPPED ->
+          event.data().get(Event.WellKnownData.SOURCE) != null;
+      default -> false;
+    };
   }
 
   /**
@@ -316,21 +383,6 @@ public final class RunWatch {
   private Duration until(Instant wakeAt) {
     var remaining = Duration.between(clock.get(), wakeAt);
     return remaining.isNegative() ? Duration.ZERO : remaining;
-  }
-
-  /**
-   * Kills the unit in the container — its whole cgroup, so no child of the agent outlives it — and
-   * returns whether it is gone. Only the container's own answer says so: a kill it refused, or a
-   * container that did not answer afterwards, is a unit that survived.
-   */
-  private boolean kill() throws Exception {
-    try {
-      session.killAgent(project, unit);
-    } catch (IOException refused) {
-      System.err.println("  [watch] " + refused.getMessage());
-      return false;
-    }
-    return session.answeredExitStatus(project, unit).filter(exit -> !exit.active()).isPresent();
   }
 
   /**

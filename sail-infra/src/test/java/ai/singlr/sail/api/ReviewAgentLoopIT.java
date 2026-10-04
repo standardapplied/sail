@@ -7,8 +7,12 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
@@ -16,10 +20,12 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -62,7 +68,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
    * A stand-in for the agent CLI binary. A review prompt yields scripted findings — a critical
    * issue the first time, clean once the fix has supposedly landed (tracked by a counter file) —
    * and any other prompt (a fix task) is acknowledged. While {@code review-hold} exists it waits,
-   * so a test can look at a run that is still running. Deterministic, offline, no model.
+   * so a test can look at a run that is still running, and with {@code slow-tool} present it first
+   * runs one command for that many seconds, as an agent's long tool call does. Deterministic,
+   * offline, no model.
    */
   private static final String FAKE_AGENT =
       """
@@ -71,6 +79,9 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         printf 'review started\n'
         touch "$HOME/.sail/review-started"
         while [ -f "$HOME/.sail/review-hold" ]; do sleep 0.1; done
+      fi
+      if [ -f "$HOME/.sail/slow-tool" ]; then
+        sleep "$(cat "$HOME/.sail/slow-tool")"
       fi
       case "$*" in
         *"Review the changes on branch"*)
@@ -178,21 +189,27 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     bus.subscribe(listener());
     bus.subscribe(
         new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            runStore,
-            project -> config,
-            project -> "codex",
-            dispatch.reviewLanes(),
-            bus,
-            () -> {},
-            () -> HANDLE));
+                specStore,
+                reviewStore,
+                runStore,
+                project -> config,
+                project -> "codex",
+                dispatch.reviewLanes(),
+                bus,
+                () -> {},
+                () -> HANDLE)
+            .useMessages(new MessageStore(db)));
+    spec("auth");
+  }
+
+  /** Records spec {@code id}, in progress under {@code codex}, working the whole container. */
+  private void spec(String id) {
     Acting.as(
         null,
         () ->
             specStore.create(
                 new SpecStore.SpecRow(
-                    "auth",
+                    id,
                     CONTAINER,
                     "T",
                     SpecStatus.IN_PROGRESS,
@@ -276,8 +293,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var session = new AgentSession(shell);
     awaitInContainer(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
 
-    session.killAgent(CONTAINER, unit);
+    var halt = session.killAgent(CONTAINER, unit);
 
+    assertInstanceOf(
+        AgentSession.Halt.Ended.class, halt, "a signal was delivered and the unit answered gone");
     assertFalse(session.unitActive(CONTAINER, unit), "the unit is gone");
     var survivors =
         shell.exec(
@@ -305,9 +324,223 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals("stopped", runStore.findById(reviewer.id()).orElseThrow().status());
   }
 
+  @Test
+  void aReviewerRefusedTheRepoARealRunHoldsWaitsOnItAndStartsWhenItStops() throws Exception {
+    inContainer("printf 1 > \"$HOME/.sail/review-count\"");
+    spec("billing");
+    hold();
+    bus.publish(buildStop("billing"));
+    var holder = launched("billing", "review", "review_stage_started");
+    awaitInContainer(() -> logOf(holder).contains("review started"), "billing's reviewer runs");
+
+    bus.publish(stopOfABuildRunOf("auth"));
+
+    awaitInContainer(
+        () ->
+            reviewStore
+                .latestReviewForSpec("auth")
+                .filter(review -> review.waitingOn() != null)
+                .isPresent(),
+        "auth's review records the run it waits on");
+    var waiting = reviewStore.latestReviewForSpec("auth").orElseThrow();
+    assertEquals(holder.id(), waiting.waitingOn(), "the wait names the run that holds the repo");
+    assertEquals("running", waiting.status());
+    assertEquals(
+        List.of("pending"),
+        reviewStore.stagesForReview(waiting.id()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "no stage is running for a reviewer that does not exist");
+    assertTrue(runStore.forReview(waiting.id()).isEmpty(), "nothing was started for auth");
+    assertEquals(
+        List.of(
+            "Review is waiting for run `" + holder.id() + "` (`review` of `billing`) to finish."),
+        new MessageStore(db)
+            .list("auth", null, 20).stream().map(MessageStore.MessageRow::body).toList());
+
+    release();
+    watcherObservesTheExitOf(holder);
+
+    awaitEvent("review_completed");
+    var reviewer = launched("auth", "review", "review_stage_started");
+    assertEquals(waiting.id(), reviewer.reviewId(), "the holder's stop launched the reviewer");
+    assertNull(reviewStore.findReview(waiting.id()).orElseThrow().waitingOn());
+    assertTrue(
+        new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id()))
+            || !logOf(reviewer).isBlank(),
+        "the reviewer runs as its own unit");
+    watcherObservesTheExitOf(reviewer);
+    awaitEvent("review_completed");
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall() throws Exception {
+    inContainer("printf 1 > \"$HOME/.sail/review-count\"; printf 8 > \"$HOME/.sail/slow-tool\"");
+    bus.publish(buildStop("auth"));
+    var reviewer = launched("auth", "review", "review_stage_started");
+    var feed = new LinkedBlockingQueue<Event>();
+    feed.add(
+        Event.of(
+            CONTAINER,
+            "auth",
+            Event.WellKnownTypes.AGENT_TOOL_STARTED,
+            "codex",
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, reviewer.id())));
+
+    new RunWatch(
+            CONTAINER,
+            reviewer.id(),
+            AgentUnit.forRun(reviewer.id()),
+            new Guardrails("5m", "2s", "stop"),
+            Instant.parse(reviewer.startedAt()),
+            false,
+            shell,
+            new RunWatch.Feed() {
+              @Override
+              public Event poll(Duration wait) throws InterruptedException {
+                return feed.poll(wait.toMillis(), TimeUnit.MILLISECONDS);
+              }
+
+              @Override
+              public boolean live() {
+                return true;
+              }
+
+              @Override
+              public boolean reopen() {
+                return true;
+              }
+            },
+            bus::publish,
+            new RunWatch.Narrator() {
+              @Override
+              public void tripped(
+                  GuardrailChecker.GuardrailResult.Triggered limit,
+                  Duration elapsed,
+                  String snapshot) {}
+
+              @Override
+              public void exited() {}
+
+              @Override
+              public void ended() {}
+            },
+            Instant::now)
+        .run();
+
+    var stop = stopOf(reviewer);
+    assertNull(
+        stop.data().get(Event.WellKnownData.REASON),
+        "eight seconds inside one command, four stall windows long, is work: the watcher killed"
+            + " nothing");
+    assertEquals(0, Event.WellKnownData.exitCode(stop.data()));
+    awaitEvent("review_completed");
+    assertEquals("stopped", runStore.findById(reviewer.id()).orElseThrow().status());
+    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aFixAgentAnOlderServerLeftRunningForTheReviewIsKilledBeforeTheFixRunStarts()
+      throws Exception {
+    hold();
+    bus.publish(buildStop("auth"));
+    var reviewer = launched("auth", "review", "review_stage_started");
+    awaitInContainer(() -> logOf(reviewer).contains("review started"), "the reviewer is running");
+    var legacy = processWithRunId(reviewer.reviewId());
+    var otherRun = processWithRunId(reviewer.id());
+    assertTrue(alive(legacy) && alive(otherRun), "both stand-in processes are running");
+
+    release();
+    var exit = exitOf(reviewer);
+    hold();
+    publishStop(exit);
+
+    var fix = launched("auth", "fix", "review_iteration_started");
+    assertEquals(reviewer.reviewId(), fix.reviewId());
+    awaitInContainer(
+        () -> new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(fix.id())),
+        "the fix agent's unit is running");
+    assertFalse(
+        alive(legacy),
+        "the process an older server started for this review, exporting the review id as its run"
+            + " id, was killed before the fix run's unit started");
+    assertTrue(alive(otherRun), "a process of a run this server started is not its to kill");
+
+    release();
+    watcherObservesTheExitOf(fix);
+    awaitEvent("review_stage_started");
+  }
+
+  /** Starts a long-lived process as the dev user whose environment holds SAIL_RUN_ID=runId. */
+  private String processWithRunId(String runId) throws Exception {
+    var started =
+        shell.exec(
+            ContainerExec.asDevUser(
+                CONTAINER,
+                List.of(
+                    "bash",
+                    "-c",
+                    "SAIL_RUN_ID=\"$1\" sleep 600 </dev/null >/dev/null 2>&1 & echo $!",
+                    "bash",
+                    runId)));
+    assertTrue(started.ok(), started.stderr());
+    return started.stdout().strip();
+  }
+
+  private boolean alive(String pid) throws Exception {
+    return shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("kill", "-0", pid))).ok();
+  }
+
+  private void inContainer(String script) throws Exception {
+    var ran = shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("bash", "-c", script)));
+    assertTrue(ran.ok(), ran.stderr());
+  }
+
+  /** The authoritative stop published for {@code run}, once it has been. */
+  private Event stopOf(RunStore.RunRow run) throws InterruptedException {
+    while (true) {
+      var stop = awaitEvent(Event.WellKnownTypes.AGENT_SESSION_STOPPED);
+      if (run.id().equals(stop.data().get(Event.WellKnownData.RUN_ID))) {
+        return stop;
+      }
+    }
+  }
+
   private Event buildStop() {
+    return buildStop("auth");
+  }
+
+  /**
+   * Records a build run of {@code specId} that this box executed, and returns the stop its watcher
+   * publishes: the run that makes this box the one that drives the spec's loop.
+   */
+  private Event stopOfABuildRunOf(String specId) {
+    var id = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.forRun(id);
+    Acting.system(
+        () ->
+            runStore.create(
+                id,
+                CONTAINER,
+                specId,
+                HANDLE,
+                "build",
+                "codex",
+                "feat/test",
+                "work",
+                null,
+                null,
+                unit.logPath(),
+                unit.unitName()));
     return RunStops.of(
-        Event.WellKnownData.SOURCE_WATCHER, CONTAINER, "auth", "codex", null, "build", 0, null);
+        Event.WellKnownData.SOURCE_WATCHER, CONTAINER, specId, "codex", id, "build", 0, null);
+  }
+
+  private Event buildStop(String specId) {
+    return RunStops.of(
+        Event.WellKnownData.SOURCE_WATCHER, CONTAINER, specId, "codex", null, "build", 0, null);
   }
 
   private void hold() throws Exception {
@@ -344,6 +577,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
    * like the watcher, this waits for it.
    */
   private void watcherObservesTheExitOf(RunStore.RunRow run) throws Exception {
+    publishStop(exitOf(run));
+  }
+
+  /** Waits for {@code run}'s unit to go inactive and reads its exit as the watcher reads it. */
+  private AgentSession.ExitState exitOf(RunStore.RunRow run) throws Exception {
     var session = new AgentSession(shell);
     var unit = AgentUnit.forRun(run.id());
     var ended = new AtomicReference<AgentSession.ExitState>();
@@ -356,6 +594,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         "the " + run.role() + " unit exits");
     var exit = ended.get();
     assertEquals(run.role(), exit.role(), "the stop names the lane of the run it ends");
+    return exit;
+  }
+
+  /** Publishes the stop the watcher would for a run that exited on its own. */
+  private void publishStop(AgentSession.ExitState exit) {
     bus.publish(
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
@@ -415,12 +658,18 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
 
   /** The run the loop launched in lane {@code role}, once it has announced it with {@code type}. */
   private RunStore.RunRow launched(String role, String type) throws InterruptedException {
+    return launched("auth", role, type);
+  }
+
+  /** The run the loop launched for {@code specId} in lane {@code role}, once announced. */
+  private RunStore.RunRow launched(String specId, String role, String type)
+      throws InterruptedException {
     awaitEvent(type);
     return runStore
-        .latestLoopRun("auth")
+        .latestLoopRun(specId)
         .filter(run -> role.equals(run.role()))
         .orElseThrow(
-            () -> new AssertionError("no " + role + " run; runs: " + runStore.listForSpec("auth")));
+            () -> new AssertionError("no " + role + " run; runs: " + runStore.listForSpec(specId)));
   }
 
   /** Something that is true of the container, or not yet. */

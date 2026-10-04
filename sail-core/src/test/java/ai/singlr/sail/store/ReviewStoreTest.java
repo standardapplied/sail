@@ -431,6 +431,112 @@ class ReviewStoreTest {
     assertNotNull(review.completedAt());
   }
 
+  private static final String HOLDER = "01a0ecdf-0000-7000-8000-0000000000b1";
+
+  @Test
+  void aWaitIsRecordedOnceAndIsThisBoxsOwnNeverJournaledOrSynced() {
+    var id = store.createReview("auth", 1);
+    var rev = store.latestRev(id);
+    var synced = store.comparableSnapshot(id);
+
+    assertTrue(store.waitOn(id, HOLDER), "a new wait changes what the review waits on");
+    assertFalse(store.waitOn(id, HOLDER), "the same wait again changes nothing");
+
+    assertEquals(HOLDER, store.findReview(id).orElseThrow().waitingOn());
+    assertEquals(HOLDER, store.latestReviewForSpec("auth").orElseThrow().waitingOn());
+    assertEquals(HOLDER, store.reviewsForSpec("auth").getFirst().waitingOn());
+    assertEquals(rev, store.latestRev(id), "no revision names a version main never holds");
+    assertEquals(synced, store.comparableSnapshot(id));
+    assertFalse(store.comparableSnapshot(id).containsKey("waiting_on"));
+    assertTrue(store.dirtyIds().isEmpty() || !store.currentForSync(id).containsKey("waiting_on"));
+    assertTrue(store.waitOn(id, null), "clearing a wait is a change");
+    assertFalse(store.waitOn(id, null));
+    assertNull(store.findReview(id).orElseThrow().waitingOn());
+  }
+
+  @Test
+  void aReviewThatChangesStatusWaitsOnNoRunAnyMore() {
+    var moved = store.createReview("auth", 1);
+    var errored = store.createReview("auth", 2);
+    store.waitOn(moved, HOLDER);
+    store.waitOn(errored, HOLDER);
+
+    store.updateReviewStatus(moved, "failed");
+    store.failReviewWithError(errored, "reviewer could not start");
+
+    assertNull(store.findReview(moved).orElseThrow().waitingOn());
+    assertNull(store.findReview(errored).orElseThrow().waitingOn());
+  }
+
+  @Test
+  void adoptingMainsRevisionKeepsTheRunThisBoxWaitsOn() {
+    var id = store.createReview("auth", 1);
+    var mains = new LinkedHashMap<>(store.comparableSnapshot(id));
+    mains.put("decided_by", "ada");
+    mains.put("waiting_on", "01a0ecdf-0000-7000-8000-00000000dead");
+    store.waitOn(id, HOLDER);
+
+    store.applyRevision(id, mains, "7-main");
+
+    var adopted = store.findReview(id).orElseThrow();
+    assertEquals("ada", adopted.decidedBy(), "main's version was adopted");
+    assertEquals(
+        HOLDER,
+        adopted.waitingOn(),
+        "the wait is local: an adoption never touches it, whatever the snapshot names");
+  }
+
+  @Test
+  void finishingAReviewWritesItsStatusItsReasonAndWhatEndsBesideItAsOne() {
+    createSpec("billing");
+    var passed = store.createReview("auth", 1);
+    var escalated = store.createReview("billing", 1);
+    store.waitOn(escalated, HOLDER);
+
+    store.finish(
+        passed, "passed", "ignored", () -> specStore.updateStatus("auth", SpecStatus.REVIEW));
+    store.finish(escalated, "escalated", "fix agent stopped by an operator", () -> {});
+
+    var pass = store.findReview(passed).orElseThrow();
+    assertEquals("passed", pass.status());
+    assertNotNull(pass.completedAt());
+    assertNull(pass.error(), "only an escalation records a reason");
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    var handed = store.findReview(escalated).orElseThrow();
+    assertEquals("escalated", handed.status());
+    assertEquals("fix agent stopped by an operator", handed.error());
+    assertNull(handed.waitingOn());
+    assertEquals(
+        "fix agent stopped by an operator",
+        store.comparableSnapshot(escalated).get("error"),
+        "the reason rides the synced row, so every box says why");
+  }
+
+  @Test
+  void aFinishWhoseCompanionWriteFailsLeavesTheReviewAsItWas() {
+    var id = store.createReview("auth", 1);
+    var rev = store.latestRev(id);
+
+    assertThrows(
+        IllegalStateException.class,
+        () ->
+            store.finish(
+                id,
+                "escalated",
+                "why",
+                () -> {
+                  specStore.updateStatus("auth", SpecStatus.REVIEW);
+                  throw new IllegalStateException("the room is down");
+                }));
+
+    var review = store.findReview(id).orElseThrow();
+    assertEquals("running", review.status(), "the status write rolled back");
+    assertNull(review.error());
+    assertNull(review.completedAt());
+    assertEquals(rev, store.latestRev(id), "and so did its revision");
+    assertNotEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+  }
+
   @Test
   void updateReviewStatusRunningDoesNotSetCompletedAt() {
     var id = store.createReview("auth", 1);

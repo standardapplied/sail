@@ -40,16 +40,23 @@ final class ReviewLoopState {
     record Retry(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
-     * The review is running and no reviewer was ever launched for the stage it is in: the launch
-     * was cut short, or the gate refused its claim. It goes on from its stage rows.
+     * The review is running, no reviewer was ever launched for the stage it is in, and no wait is
+     * recorded: the launch was cut short before the gate answered. It goes on from its stage rows.
      */
     record Advance(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
-     * The review failed its gate and no fix agent ever served it: its findings go to one, or the
-     * spec escalates.
+     * The review failed its gate, no fix agent ever served it, and no wait is recorded: its
+     * findings go to one, or the spec escalates.
      */
     record Fix(ReviewStore.ReviewRow review) implements Owed {}
+
+    /**
+     * The gate refused the review's last launch — a reviewer for a running review, a fix agent for
+     * one that failed its gate — and the review recorded the run that held the claim. It takes that
+     * step again once {@code holderRunId} has ended.
+     */
+    record Waiting(ReviewStore.ReviewRow review, String holderRunId) implements Owed {}
 
     /**
      * The run the review waited on — the reviewer of its running stage, or the fix agent that
@@ -90,16 +97,21 @@ final class ReviewLoopState {
 
   /**
    * The stage of {@code reviewId} that {@code run} reviewed, or empty when no stage waits on it:
-   * the agent stage that is {@code running} and was started no later than the run was recorded. A
-   * stage started after the run is another reviewer's to judge — one whose launch never happened,
-   * or still waits for its claim — and reading this run's log for it would pass a stage nobody
-   * reviewed.
+   * the agent stage that is {@code running} and was started while the run was live — a stage starts
+   * once its reviewer's claim has landed, and before that reviewer's unit does. A stage started
+   * before the run was recorded, or after it ended, is another reviewer's to judge, and reading
+   * this run's log for it would pass a stage nobody reviewed.
    */
   Optional<ReviewStore.StageRow> stageReviewedBy(String reviewId, RunStore.RunRow run) {
-    var recorded = MissedStops.parseOr(run.startedAt(), Instant.MIN);
+    var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
+    var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
     return reviews.stagesForReview(reviewId).stream()
         .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
-        .filter(stage -> !MissedStops.parseOr(stage.startedAt(), Instant.MAX).isAfter(recorded))
+        .filter(
+            stage -> {
+              var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
+              return !started.isBefore(recorded) && !started.isAfter(ended);
+            })
         .findFirst();
   }
 
@@ -111,7 +123,7 @@ final class ReviewLoopState {
     }
     var newest = serving(latest.id()).stream().findFirst();
     return switch (latest.status()) {
-      case "running" -> whileRunning(latest, newest);
+      case "pending", "running" -> whileRunning(latest, newest);
       case "failed" -> latest.errored() ? new Owed.Retry(latest) : afterGateFailure(latest, newest);
       default -> new Owed.Nothing();
     };
@@ -125,7 +137,7 @@ final class ReviewLoopState {
         .filter(run -> Lane.REVIEW.matches(run.role()))
         .filter(reviewer -> stageReviewedBy(review.id(), reviewer).isPresent())
         .<Owed>map(reviewer -> new Owed.Stop(review, reviewer))
-        .orElseGet(() -> new Owed.Advance(review));
+        .orElseGet(() -> unserved(review, new Owed.Advance(review)));
   }
 
   private static Owed afterGateFailure(
@@ -133,7 +145,12 @@ final class ReviewLoopState {
     return newest
         .filter(run -> Lane.FIX.matches(run.role()))
         .<Owed>map(fix -> new Owed.Stop(review, fix))
-        .orElseGet(() -> new Owed.Fix(review));
+        .orElseGet(() -> unserved(review, new Owed.Fix(review)));
+  }
+
+  /** What a review no run serves is owed: its recorded wait, or else the step never tried. */
+  private static Owed unserved(ReviewStore.ReviewRow review, Owed untried) {
+    return review.waitingOn() == null ? untried : new Owed.Waiting(review, review.waitingOn());
   }
 
   private boolean waitsOnPerson(String reviewId) {

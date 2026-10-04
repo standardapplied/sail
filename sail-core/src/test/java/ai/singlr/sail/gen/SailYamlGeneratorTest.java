@@ -486,6 +486,74 @@ class SailYamlGeneratorTest {
   }
 
   @Test
+  void anAgentWithEveryFieldSetComesBackFromGenerateThenParseAsItWent() {
+    var agent =
+        SailYaml.Agent.fromMap(
+            YamlUtil.parseMap(
+                """
+                type: claude-code
+                auto_branch: true
+                branch_prefix: "agent/"
+                auto_snapshot: true
+                install: [claude-code, codex]
+                config:
+                  model: "claude-opus: latest"
+                guardrails:
+                  max_duration: 3h
+                  max_idle: 25m
+                  action: snapshot-and-stop
+                notifications:
+                  url: "https://ntfy.sh/sail#team"
+                  events: [agent_session_stopped, guardrail_triggered]
+                  slack:
+                    channel: "#eng-sail"
+                methodology:
+                  approach: tdd
+                  verify: "mvn clean verify"
+                  lint: "mvn spotless:check"
+                review_pipeline:
+                  max_iterations: 4
+                  max_finding_age: 2
+                  guardrails:
+                    max_duration: 50m
+                    max_idle: 15m
+                    action: stop
+                  stages:
+                    - name: correctness
+                      type: agent
+                      agent: codex
+                      categories: [correctness, security]
+                      gate: no_critical
+                    - name: sign-off
+                      type: human
+                """));
+    var config =
+        new SailYaml(
+            "round-trip",
+            null,
+            new SailYaml.Resources(2, "8GB", "50GB"),
+            "ubuntu/24.04",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            agent,
+            null,
+            null);
+
+    var yaml = SailYamlGenerator.generate(config);
+
+    assertEquals(agent, SailYaml.fromMap(YamlUtil.parseMap(yaml)).agent());
+    assertEquals("25m", agent.guardrails().maxIdle());
+    assertEquals(2, agent.reviewPipeline().stages().size());
+    assertEquals("15m", agent.reviewPipeline().guardrails().maxIdle());
+    assertTrue(yaml.contains("# AI coding agent configuration.\n"), "the comments stay above it");
+    assertTrue(yaml.endsWith("\n\n"), "and the block still ends with a blank line");
+  }
+
+  @Test
   void generatedYamlRoundTripsViaSailYaml() {
     var services = new LinkedHashMap<String, SailYaml.Service>();
     services.put("postgres", new SailYaml.Service("postgres:16", List.of(5432), null, null, null));

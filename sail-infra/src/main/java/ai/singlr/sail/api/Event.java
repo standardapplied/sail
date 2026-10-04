@@ -281,6 +281,19 @@ public record Event(
      */
     public static final String REASON = "reason";
 
+    /**
+     * Carried, as {@code true}, on an authoritative stop the missed-stop reconciler published for a
+     * run whose row had already ended: the stop was said before, or the run was finished without
+     * one, and it is published again only so the loop goes on from it. The review pipeline routes
+     * it like any stop; whoever narrates stops to people says nothing for it.
+     */
+    public static final String REPLAY = "replay";
+
+    /** Whether a stop's {@code data} marks it a {@link #REPLAY}. */
+    public static boolean replay(Map<String, Object> data) {
+      return Boolean.parseBoolean(Objects.toString(data.get(REPLAY), null));
+    }
+
     /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
     public static final String WATCHER_PID = "watcher_pid";
 

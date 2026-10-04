@@ -50,9 +50,11 @@ import picocli.CommandLine.Spec;
  * watcher ({@code --max-duration}, {@code --max-idle}, {@code --action}); the watcher never reads a
  * project's guardrails itself. A limit left off is not enforced.
  *
- * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises and
- * {@code --unit} the systemd unit that run was launched as (recorded on the run, never re-derived
- * here).
+ * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises, {@code
+ * --unit} the systemd unit that run was launched as (recorded on the run, never re-derived here),
+ * and {@code --started-at} when the run's row says it started — the anchor of its wall clock,
+ * handed over by whoever spawned the watcher and never read from the run's session file, which the
+ * agent can write.
  */
 @Command(
     name = "watch",
@@ -78,6 +80,14 @@ public final class AgentWatchCommand implements Runnable {
           "Systemd unit the run was launched as, as recorded on the run (default: derived from"
               + " --run).")
   private String unitName;
+
+  @Option(
+      names = "--started-at",
+      required = true,
+      description =
+          "When the run started, as recorded on its run row (ISO-8601 instant); anchors"
+              + " --max-duration.")
+  private String startedAt;
 
   @Option(
       names = "--max-duration",
@@ -134,6 +144,7 @@ public final class AgentWatchCommand implements Runnable {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
     var guardrails = Guardrails.of(maxDuration, maxIdle, action);
+    var started = parseStartedAt(startedAt);
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
 
@@ -154,8 +165,7 @@ public final class AgentWatchCommand implements Runnable {
               + name
               + " --background --task '...'");
     }
-    var startedAt = parseStartedAt(sessionInfo.startedAt());
-    announceStart(guardrails, RunWatch.deadline(startedAt, guardrails.maxDuration()));
+    announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
 
     try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
       new RunWatch(
@@ -163,7 +173,7 @@ public final class AgentWatchCommand implements Runnable {
               runId,
               unit,
               guardrails,
-              startedAt,
+              started,
               dryRun,
               shell,
               feed,
@@ -271,13 +281,14 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   static Instant parseStartedAt(String iso) {
-    if (Strings.isBlank(iso)) {
-      return DateTimeUtils.now();
-    }
     try {
-      return Instant.parse(iso);
+      return Instant.parse(Objects.toString(iso, ""));
     } catch (DateTimeParseException e) {
-      return DateTimeUtils.now();
+      throw new IllegalArgumentException(
+          "--started-at '"
+              + iso
+              + "' is not an ISO-8601 instant; pass the run row's started_at, e.g."
+              + " 2026-10-04T12:00:00Z.");
     }
   }
 

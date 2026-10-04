@@ -236,102 +236,130 @@ public final class AgentSession {
   }
 
   /**
-   * Kills the given role's running agent inside the container. SIGTERM first, then SIGKILL. A
-   * SIGKILL that fails against a still-live process throws instead of returning normally, so a
-   * caller can never record a successful stop for an agent that survived the signal.
+   * What a halt did to the agent it was sent to end. Only {@link Ended} says the agent is gone:
+   * whoever reports a run ended for a limit, or finalizes an operator's stop, does so on that
+   * answer alone.
    */
+  public sealed interface Halt {
+
+    /** A signal was delivered and the container answered that the agent is gone. */
+    record Ended() implements Halt {}
+
+    /** Every signal was sent and the container answered that the agent is still running. */
+    record Survived() implements Halt {}
+
+    /**
+     * Nothing is known: the signal could not be delivered, or the container did not answer whether
+     * the agent is gone. Nothing was removed or reset, so the run still reads as it did.
+     */
+    record Unanswered() implements Halt {}
+  }
+
+  /** How many times a unit that was sent SIGKILL is asked whether it is gone, a second apart. */
+  private static final int KILL_SETTLE_ASKS = 5;
+
   /**
-   * Halts a session. A run that owns a systemd unit is killed through the unit's whole cgroup —
-   * SIGTERM to every member, a grace period, then SIGKILL to every member — because the pid file
-   * names only the launch wrapper: signalling that single pid orphans the agent's children inside
-   * the still-active unit, which is exactly the incomplete halt the verified stop then correctly
-   * refuses. Only a unitless foreground session falls back to pid-file surgery, where the wrapper
-   * {@code exec}'d into the agent and the pid names the whole story.
+   * Halts a session and reports what the halt did. A run that owns a systemd unit is killed through
+   * the unit's whole cgroup — SIGTERM to every member, a grace period, then SIGKILL to every member
+   * — because the pid file names only the launch wrapper: signalling that single pid orphans the
+   * agent's children inside the still-active unit. Only a unitless foreground session falls back to
+   * pid-file surgery, where the wrapper {@code exec}'d into the agent and the pid names the whole
+   * story. The run's pid file is removed, and its unit reset, only once the agent is {@link
+   * Halt.Ended}: a run whose halt is {@link Halt.Survived} or {@link Halt.Unanswered} still probes
+   * as it did before, so nothing reads a live agent as gone.
    */
-  public void killAgent(String containerName, AgentUnit unit)
+  public Halt killAgent(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    return Strings.isBlank(unit.unitName())
+        ? killByPidFile(containerName, unit)
+        : killUnit(containerName, unit);
+  }
+
+  private Halt killUnit(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    if (!signalUnit(containerName, unit, "SIGTERM")) {
+      return new Halt.Unanswered();
+    }
+    pause(containerName, 3);
+    var afterTerm = answeredExitStatus(containerName, unit);
+    if (afterTerm.isEmpty()) {
+      return new Halt.Unanswered();
+    }
+    if (!afterTerm.get().active()) {
+      return ended(containerName, unit);
+    }
+    signalUnit(containerName, unit, "SIGKILL");
+    for (var ask = 1; ; ask++) {
+      var afterKill = answeredExitStatus(containerName, unit);
+      if (afterKill.isEmpty()) {
+        return new Halt.Unanswered();
+      }
+      if (!afterKill.get().active()) {
+        return ended(containerName, unit);
+      }
+      if (ask == KILL_SETTLE_ASKS) {
+        return new Halt.Survived();
+      }
+      pause(containerName, 1);
+    }
+  }
+
+  private boolean signalUnit(String containerName, AgentUnit unit, String signal)
+      throws IOException, InterruptedException, TimeoutException {
+    return shell
+        .exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of(
+                    "systemctl",
+                    "--user",
+                    "kill",
+                    "--kill-who=all",
+                    "--signal=" + signal,
+                    unit.service())))
+        .ok();
+  }
+
+  private void pause(String containerName, int seconds)
+      throws IOException, InterruptedException, TimeoutException {
+    shell.exec(ContainerExec.asDevUser(containerName, List.of("sleep", String.valueOf(seconds))));
+  }
+
+  private Halt ended(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     if (!Strings.isBlank(unit.unitName())) {
-      killUnit(containerName, unit);
-      return;
+      shell.exec(
+          ContainerExec.asDevUser(
+              containerName, List.of("systemctl", "--user", "reset-failed", unit.service())));
     }
-    killByPidFile(containerName, unit);
-  }
-
-  private void killUnit(String containerName, AgentUnit unit)
-      throws IOException, InterruptedException, TimeoutException {
-    var service = unit.service();
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName,
-            List.of("systemctl", "--user", "kill", "--kill-who=all", "--signal=SIGTERM", service)));
-
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("sleep", "3")));
-
-    if (unitActive(containerName, unit)) {
-      var kill =
-          shell.exec(
-              ContainerExec.asDevUser(
-                  containerName,
-                  List.of(
-                      "systemctl",
-                      "--user",
-                      "kill",
-                      "--kill-who=all",
-                      "--signal=SIGKILL",
-                      service)));
-      if (!kill.ok() && unitActive(containerName, unit)) {
-        throw new IOException(
-            "SIGKILL for unit "
-                + service
-                + " in "
-                + containerName
-                + " failed: "
-                + kill.stderr().trim()
-                + ". Check the unit in the container and retry the stop.");
-      }
-    }
-
-    shell.exec(
-        ContainerExec.asDevUser(
-            containerName, List.of("systemctl", "--user", "reset-failed", service)));
     shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
+    return new Halt.Ended();
   }
 
-  private void killByPidFile(String containerName, AgentUnit unit)
+  private Halt killByPidFile(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
-    var pidResult = shell.exec(pidCmd);
-    if (!pidResult.ok() || pidResult.stdout().isBlank()) {
-      return;
-    }
-
-    var pidStr = pidResult.stdout().trim();
     try {
-      Integer.parseInt(pidStr);
-    } catch (NumberFormatException e) {
-      return;
+      requireReachable(containerName);
+    } catch (IOException unreachable) {
+      return new Halt.Unanswered();
     }
-
+    var pidResult =
+        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath())));
+    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    if (pid == null) {
+      return new Halt.Ended();
+    }
+    var pidStr = String.valueOf(pid);
     shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", pidStr)));
-
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("sleep", "3")));
-
+    pause(containerName, 3);
     var aliveCmd = ContainerExec.asDevUser(containerName, List.of("kill", "-0", pidStr));
     if (shell.exec(aliveCmd).ok()) {
-      var kill = shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
-      if (!kill.ok() && shell.exec(aliveCmd).ok()) {
-        throw new IOException(
-            "SIGKILL for agent PID "
-                + pidStr
-                + " in "
-                + containerName
-                + " failed: "
-                + kill.stderr().trim()
-                + ". Check the process in the container and retry the stop.");
+      shell.exec(ContainerExec.asDevUser(containerName, List.of("kill", "-9", pidStr)));
+      if (shell.exec(aliveCmd).ok()) {
+        return new Halt.Survived();
       }
     }
-
-    shell.exec(ContainerExec.asDevUser(containerName, List.of("rm", "-f", unit.pidPath())));
+    return ended(containerName, unit);
   }
 
   public static String launchWorkDir(String sshUser, List<SailYaml.Repo> targetRepos) {

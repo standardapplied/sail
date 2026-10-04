@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,7 +16,6 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
-import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
@@ -28,8 +26,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -91,12 +89,6 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   public static final Duration LAUNCH_GRACE = Duration.ofMinutes(2);
 
-  /**
-   * How many times one step of a review waiting on a claim — a stage, or its fix — is rescued while
-   * that claim is free, in a server's lifetime.
-   */
-  static final int WAITING_RESCUES = 3;
-
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
@@ -136,7 +128,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<Instant> clock;
   private final ReviewLoopState loop;
   private final PeriodicPass pass;
-  private final Map<String, Integer> rescues = new ConcurrentHashMap<>();
+  private final Set<String> rescued = ConcurrentHashMap.newKeySet();
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -491,25 +483,29 @@ public final class MissedStopReconciler implements AutoCloseable {
    * review</em>: its last attempt failed by infrastructure (a reviewer the watcher killed,
    * unparseable output, a launch the container refused) — the design retries an errored attempt on
    * the next stop, and no further stop is coming. <em>Unserved review</em>: a review is {@code
-   * running} with an agent stage to run and no run serving it — the daemon died between writing its
-   * rows and launching the reviewer, or the gate refused the reviewer's claim and nothing in the
-   * project has stopped since. <em>Owed fix</em>: a review failed its gate with open findings and
-   * no fix agent was ever launched for it. <em>Unheard stop</em>: the reviewer of a review's
-   * running stage, or the fix agent answering its gate failure, ended and nothing came of it — that
-   * run's stop was never acted on. Replaying the stop of the spec's newest loop run, whichever lane
-   * it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch the fix, or
-   * judge the run's work. Rescues are counted per key — the spec for a dropped kickoff, the review
-   * row and its shape otherwise, so a rescue that leaves the same review owed something else is
-   * still rescued. A key fires at most once per server lifetime, except that of a review waiting on
-   * a claim, which fires up to {@link #WAITING_RESCUES} times while the claim is free ({@link
-   * #waiting}); with the pipeline's errored-attempt budget escalating a persistent failure, no
-   * shape can loop. A running review is rescued per stage. A rescue counts only once its stop is
-   * published. An escalated review, or one waiting on a person or on a live run, is left alone,
-   * since a human or a working agent owns the spec then.
+   * running} with an agent stage to run, no run serving it and no wait recorded — the daemon died
+   * between writing its rows and its reviewer's claim. <em>Owed fix</em>: a review failed its gate
+   * and neither a fix agent nor a wait was ever recorded for it. <em>Waiting review</em>: the gate
+   * refused the review's launch, the review recorded the run that held the claim, and that run has
+   * ended with no stop on the bus to wake the review — finished in place, a foreground session
+   * completing, a launch that failed after reserving. <em>Unheard stop</em>: the reviewer of a
+   * review's running stage, or the fix agent answering its gate failure, ended and nothing came of
+   * it — that run's stop was never acted on. Replaying the stop of the spec's newest loop run,
+   * whichever lane it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch
+   * the fix, or judge the run's work.
+   *
+   * <p>Every rescue is one-shot: keyed by the spec for a dropped kickoff, and by the review row and
+   * its shape otherwise — a running review per stage, a waiting one per run it waits on — so a
+   * rescue that leaves the same review owed something else is still rescued, and a rescue whose
+   * launch is refused again is rescued again only for the new run it then waits on. Nothing is
+   * sampled and nothing is retried: a wait is a recorded fact, and with the pipeline's
+   * errored-attempt budget escalating a persistent failure, no shape can loop. A rescue counts only
+   * once its stop is published. An escalated review, or one waiting on a person or on a live run,
+   * is left alone, since a human or a working agent owns the spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
     var rescue = rescueFor(spec).orElse(null);
-    if (rescue == null || rescues.getOrDefault(rescue.key(), 0) >= rescue.tries()) {
+    if (rescue == null || rescued.contains(rescue.key())) {
       return false;
     }
     var node = localHandle.get();
@@ -522,84 +518,16 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     publishStop(latest.get(), latest.get().exitCode(), rescue.why());
-    rescues.merge(rescue.key(), 1, Integer::sum);
+    rescued.add(rescue.key());
     return true;
   }
 
-  /**
-   * A stranded review's rescue: the key it is counted under, why it is owed, and how many times it
-   * may be tried in a server's lifetime.
-   */
-  private record Rescue(String key, String why, int tries) {
-
-    Rescue(String key, String why) {
-      this(key, why, 1);
-    }
+  /** A stranded review's rescue: the key it is spent under, and why it is owed. */
+  private record Rescue(String key, String why) {
 
     static Rescue of(ReviewStore.ReviewRow review, String shape, String why) {
       return new Rescue(review.id() + ":" + shape, "review " + review.id() + " " + why);
     }
-
-    Rescue upTo(int tries) {
-      return new Rescue(key, why, tries);
-    }
-  }
-
-  /**
-   * The rescue of a review whose next step may be a launch — a reviewer or a fix agent, in {@code
-   * lane}, that the dispatch gate may refuse. Nothing tells the reconciler whether a replay was
-   * refused: a run can take the claim between the sweep that finds it free and the pipeline's
-   * launch, and end with no stop on the bus — finished in place, a foreground session completing, a
-   * launch that failed after reserving — so nothing else wakes the review. A waiting review whose
-   * claim is free is therefore rescued up to {@link #WAITING_RESCUES} times, which bounds a rescue
-   * that changes nothing; a replay there is what any stop in the project would have done. While a
-   * run holds the claim, a step known to be a launch ({@code launches}) is not rescued: the replay
-   * would only be refused, and the holder's own stop, or the next free sweep, is what moves the
-   * review. A step not known to be one — a failed gate may be owed an escalation, a review with no
-   * stage rows a person's stage — is rescued once while held, under a key of its own, so that
-   * replay costs the review none of its free ones.
-   */
-  private Optional<Rescue> waiting(
-      ReviewStore.ReviewRow review, Lane lane, boolean launches, String shape, String why) {
-    if (!claimHeld(review, lane)) {
-      return Optional.of(Rescue.of(review, shape, why).upTo(WAITING_RESCUES));
-    }
-    return launches ? Optional.empty() : Optional.of(Rescue.of(review, shape + ":held", why));
-  }
-
-  /**
-   * The stage a running review is in: how many of its stages have passed, and whether the one after
-   * them is a reviewer's to launch. A review is rescued per stage, so one rescued at a stage is not
-   * out of rescues at the next; the count holds still while the stage's rows are written, as an id
-   * would not. A review with no stage rows yet is not known to launch anything: its first stage may
-   * be a person's, and the rescue that writes its rows claims nothing.
-   */
-  private record Stage(long passed, boolean launches) {}
-
-  private Stage stageOf(ReviewStore.ReviewRow review) {
-    var stages = reviewStore.stagesForReview(review.id());
-    var passed = stages.stream().takeWhile(stage -> "passed".equals(stage.status())).count();
-    var launches =
-        stages.stream()
-            .skip(passed)
-            .findFirst()
-            .filter(stage -> !"human".equals(stage.stageType()))
-            .isPresent();
-    return new Stage(passed, launches);
-  }
-
-  /** Whether the dispatch gate would refuse {@code review}'s next run in {@code lane} right now. */
-  private boolean claimHeld(ReviewStore.ReviewRow review, Lane lane) {
-    return specStore
-        .findById(review.specId())
-        .flatMap(
-            spec ->
-                DispatchGate.decide(
-                    spec.id(),
-                    lane.wire(),
-                    spec.repos(),
-                    sessionStore.runningOnNode(spec.project(), localHandle.get())))
-        .isPresent();
   }
 
   private Optional<Rescue> rescueFor(SpecStore.SpecRow spec) {
@@ -619,18 +547,35 @@ public final class MissedStopReconciler implements AutoCloseable {
                       + retry.review().error()
                       + "); replaying the stop to retry the iteration"));
       case ReviewLoopState.Owed.Advance advance ->
-          settled(advance.review()).flatMap(this::unserved);
+          settled(advance.review())
+              .map(
+                  review ->
+                      Rescue.of(
+                          review,
+                          "unserved:" + passedStages(review),
+                          "is running with no run serving it; replaying the stop to go on from"
+                              + " its stages"));
       case ReviewLoopState.Owed.Fix fix ->
           settled(fix.review())
-              .flatMap(
+              .map(
                   review ->
-                      waiting(
+                      Rescue.of(
                           review,
-                          Lane.FIX,
-                          false,
                           "fix-owed",
                           "failed its gate and no fix agent was launched; replaying the stop to"
                               + " launch it"));
+      case ReviewLoopState.Owed.Waiting waiting ->
+          Optional.of(waiting)
+              .filter(wait -> ended(wait.holderRunId()))
+              .map(
+                  wait ->
+                      Rescue.of(
+                          wait.review(),
+                          "waiting:" + wait.holderRunId(),
+                          "waited on run "
+                              + wait.holderRunId()
+                              + ", which ended with no stop; replaying the stop to take the step"
+                              + " it held up"));
       case ReviewLoopState.Owed.Stop unheard ->
           settled(unheard.review())
               .map(
@@ -645,14 +590,31 @@ public final class MissedStopReconciler implements AutoCloseable {
     };
   }
 
-  private Optional<Rescue> unserved(ReviewStore.ReviewRow review) {
-    var stage = stageOf(review);
-    return waiting(
-        review,
-        Lane.REVIEW,
-        stage.launches(),
-        "unserved:" + stage.passed(),
-        "is running with no run serving it; replaying the stop to go on from its stages");
+  /**
+   * How many of a running review's stages have passed: a review is rescued per stage, so one
+   * rescued at a stage is not out of rescues at the next. The count holds still while the stage's
+   * rows are written, as an id would not.
+   */
+  private long passedStages(ReviewStore.ReviewRow review) {
+    return reviewStore.stagesForReview(review.id()).stream()
+        .takeWhile(stage -> "passed".equals(stage.status()))
+        .count();
+  }
+
+  /**
+   * Whether the run a review waits on has ended and its own stop, had it published one, is past:
+   * its row is gone, or terminal for longer than {@link #LAUNCH_GRACE}. A holder that only just
+   * ended may still have its stop on the way, and that stop is what wakes the review.
+   */
+  private boolean ended(String holderRunId) {
+    var cutoff = clock.get().minus(LAUNCH_GRACE);
+    return sessionStore
+        .findById(holderRunId)
+        .map(
+            holder ->
+                RunStatus.isTerminal(holder.status())
+                    && MissedStops.parseOr(holder.completedAt(), Instant.MAX).isBefore(cutoff))
+        .orElse(true);
   }
 
   /**
@@ -805,9 +767,12 @@ public final class MissedStopReconciler implements AutoCloseable {
    * Publishes the stop of {@code session}, a run that is gone, saying everything still known of how
    * it ended: the exit code its row recorded, else the one its failed unit still holds, and the
    * limit its watcher ended it for — as a recorded stop of this run said, else as the watcher
-   * recorded beside the run before a stop that never reached this box.
+   * recorded beside the run before a stop that never reached this box. The stop of a run whose row
+   * had already ended is a replay and says so, so whoever narrates stops does not say it twice; the
+   * stop of a run still recorded {@code running} is that run's first.
    */
   private void publishStop(RunStore.RunRow session, Integer exitCode, String why) {
+    var replay = RunStatus.isTerminal(session.status());
     var ending = endingOf(session);
     var code = exitCode != null ? exitCode : ending.exitCode();
     var reason = recordedReason(session).orElse(ending.reason());
@@ -824,7 +789,18 @@ public final class MissedStopReconciler implements AutoCloseable {
             + (reason != null ? reason : code != null ? "exit " + code : "exit unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(session, code, reason));
+    var stop = stopEvent(session, code, reason);
+    bus.publish(replay ? replayed(stop) : stop);
+  }
+
+  /**
+   * {@code stop} marked as said before ({@link Event.WellKnownData#REPLAY}): the stop of a run
+   * whose row had already ended, published again only so the loop goes on from it.
+   */
+  private static Event replayed(Event stop) {
+    var data = new LinkedHashMap<>(stop.data());
+    data.put(Event.WellKnownData.REPLAY, true);
+    return Event.of(stop.project(), stop.spec(), stop.type(), stop.agent(), stop.host(), data);
   }
 
   /**

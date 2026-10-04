@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -37,12 +36,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * claim writes are compare-and-set from the freshly resolved states, so a lifecycle transition that
  * lands first fails the claim with a conflict instead of being silently overwritten. The rest of
  * the terminal intent — run {@code stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event
- * — is finalized only once the halt is verified to have left no live process on the run's unit: a
- * kill that fails throws, restoring the claim when the agent is verified still running, and a crash
- * mid-stop — or a failed kill whose agent is gone or unprobeable — leaves the explicit {@code
- * stopping} claim — resumed by the next stop of the same target, finalized by the reconciler's
- * interrupted-stop pass once the unit is gone — so the database never claims a live agent is
- * terminal in a state no reconciler owns, and never hands back as its own a run a stop killed.
+ * — is finalized only once the halt itself reports the agent ended ({@link AgentSession.Halt}): a
+ * signal was delivered and the container answered that the agent is gone. A halt the agent survived
+ * throws and restores the claim; one nothing answered for throws and keeps it, as a crash mid-stop
+ * does — the explicit {@code stopping} claim is resumed by the next stop of the same target, or
+ * finalized by the reconciler's interrupted-stop pass once the unit is gone — so the database never
+ * claims a live agent is terminal in a state no reconciler owns, never takes silence for a halt,
+ * and never hands back as its own a run a stop killed.
  *
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
@@ -118,13 +118,13 @@ public final class StopOperations {
   /** The run and its spec are already terminal — a repeated stop, a pure no-op. */
   public record AlreadyTerminal(String runId, String specId, String runStatus) implements Outcome {}
 
-  /** How the kill runs — the only side effect that differs from a store write. */
+  /** How the kill runs — the only side effect that differs from a store write — and what it did. */
   @FunctionalInterface
   public interface AgentHalter {
-    void halt(String project, AgentUnit unit) throws Exception;
+    AgentSession.Halt halt(String project, AgentUnit unit) throws Exception;
   }
 
-  /** The real halter: {@link AgentSession#killAgent} — SIGTERM, wait, SIGKILL, pid-file cleanup. */
+  /** The real halter: {@link AgentSession#killAgent} — SIGTERM, wait, SIGKILL, and its answer. */
   public static AgentHalter sessionHalter(ShellExec shell) {
     var session = new AgentSession(shell);
     return session::killAgent;
@@ -161,12 +161,6 @@ public final class StopOperations {
   private final AgentHalter halter;
   private final Listener listener;
 
-  private static final Duration HALT_VERIFY_DEADLINE = Duration.ofSeconds(10);
-  private static final Duration HALT_VERIFY_PACE = Duration.ofMillis(250);
-
-  private final Duration haltVerifyDeadline;
-  private final Duration haltVerifyPace;
-
   public StopOperations(
       ShellExec shell,
       String file,
@@ -175,28 +169,6 @@ public final class StopOperations {
       DispatchOperations.EventSink events,
       AgentHalter halter,
       Listener listener) {
-    this(
-        shell,
-        file,
-        specStore,
-        runStore,
-        events,
-        halter,
-        listener,
-        HALT_VERIFY_DEADLINE,
-        HALT_VERIFY_PACE);
-  }
-
-  StopOperations(
-      ShellExec shell,
-      String file,
-      SpecStore specStore,
-      RunStore runStore,
-      DispatchOperations.EventSink events,
-      AgentHalter halter,
-      Listener listener,
-      Duration haltVerifyDeadline,
-      Duration haltVerifyPace) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.projects = new ProjectLoader(shell, Objects.requireNonNull(file, "file"));
     this.specStore = Objects.requireNonNull(specStore, "specStore");
@@ -204,8 +176,6 @@ public final class StopOperations {
     this.events = Objects.requireNonNull(events, "events");
     this.halter = Objects.requireNonNull(halter, "halter");
     this.listener = Objects.requireNonNull(listener, "listener");
-    this.haltVerifyDeadline = Objects.requireNonNull(haltVerifyDeadline, "haltVerifyDeadline");
-    this.haltVerifyPace = Objects.requireNonNull(haltVerifyPace, "haltVerifyPace");
   }
 
   /**
@@ -308,39 +278,26 @@ public final class StopOperations {
    * intent atomically — run {@code running → stopping}, spec {@code → cancelled}, both
    * compare-and-set — so the cancel wins the race with the watcher's own stop while the signal is
    * in flight, and an interruption at any later point leaves the explicit claim rather than a
-   * cancelled spec over a run still recorded {@code running}. A verified halt finalizes the claim
-   * ({@code stopping → stopped}) and publishes the operator event. A halt that fails throws either
-   * way, and what becomes of the claim depends on the agent: one verified still running is given
-   * back — the run is again {@code running}, its own to end, and reconcilable — while one that is
-   * gone, or that cannot be probed, keeps the claim. A signal that landed before the halt reported
-   * failure killed that agent, and giving the run back would let its death read as the run ending
-   * on its own; the claim instead waits, as an interrupted stop does, for the operator's retry or
-   * the reconciler's interrupted-stop pass to finalize it.
+   * cancelled spec over a run still recorded {@code running}. What becomes of the claim is what the
+   * halt says it did. {@link AgentSession.Halt.Ended}: a signal was delivered and the container
+   * answered that the agent is gone, so the claim is finalized ({@code stopping → stopped}) and the
+   * operator event published. {@link AgentSession.Halt.Survived}: the agent is verified still
+   * running, so the claim is given back — the run is again {@code running}, its own to end, and
+   * reconcilable — and the stop fails. {@link AgentSession.Halt.Unanswered}, or a halt that threw:
+   * nothing says whether the agent is gone, so the stop fails and the claim is kept. A signal may
+   * have landed, and giving the run back would let its death read as the run ending on its own; the
+   * claim instead waits, as an interrupted stop does, for the operator's retry or the reconciler's
+   * interrupted-stop pass to finalize it.
    */
   private Outcome killVerified(
       RunStore.RunRow run, SpecStore.SpecRow spec, AgentUnit unit, int pid) {
     var cancelled = claimStop(run, spec);
-    try {
-      halt(run.project(), unit);
-      verifyHalted(run.project(), unit);
-    } catch (RuntimeException failure) {
-      if (survived(run.project(), unit)) {
-        abortStop(run, spec, cancelled);
-      }
-      throw failure;
+    if (halt(run.project(), unit) instanceof AgentSession.Halt.Survived) {
+      abortStop(run, spec, cancelled);
+      throw survivedTheStop(pid);
     }
     finishStop(run);
     return new Stopped(run.id(), specIdOf(run), pid, cancelled);
-  }
-
-  /** Whether the agent is verified still running after a halt that failed. */
-  private boolean survived(String project, AgentUnit unit) {
-    try {
-      var remaining = probe(project, unit);
-      return remaining != null && remaining.running();
-    } catch (RuntimeException unknown) {
-      return false;
-    }
   }
 
   /**
@@ -349,8 +306,9 @@ public final class StopOperations {
    * process side remains: a dead unit just finalizes the claim and publishes the withheld operator
    * event, a live one is halted, verified, and then finalized. The same pid identity guard as the
    * first stop applies — a durable claim is never authority to kill a different process that later
-   * occupies the unit. A failure leaves the claim in place for the next retry or the reconciler's
-   * interrupted-stop pass — never restored, because the original operator intent still stands.
+   * occupies the unit. A halt that does not report the agent ended leaves the claim in place for
+   * the next retry or the reconciler's interrupted-stop pass — never restored, because the original
+   * operator intent still stands.
    */
   private Outcome resumeStop(RunStore.RunRow run, boolean dryRun) {
     var unit = runUnit(run);
@@ -366,8 +324,9 @@ public final class StopOperations {
     if (dryRun) {
       return new Stopped(run.id(), specIdOf(run), info.pid(), false);
     }
-    halt(run.project(), unit);
-    verifyHalted(run.project(), unit);
+    if (halt(run.project(), unit) instanceof AgentSession.Halt.Survived) {
+      throw survivedTheStop(info.pid());
+    }
     finishStop(run);
     return new Stopped(run.id(), specIdOf(run), info.pid(), false);
   }
@@ -495,44 +454,6 @@ public final class StopOperations {
           .equals(new AgentSession(shell).readProcessStartTicks(run.project(), livePid));
     } catch (Exception e) {
       return true;
-    }
-  }
-
-  /**
-   * A verified halt leaves no live process on the addressed unit. Rejecting <em>any</em> running
-   * result — not only the original pid — keeps a replacement process (a unit restart, a pid reused
-   * mid-halt) from being mistaken for a successful termination.
-   *
-   * <p>Verification polls to a deadline because termination is asynchronous on three fronts —
-   * signal delivery, the parent reaping the zombie, and systemd observing the exit — so a single
-   * instantaneous probe misreads an in-flight halt as failure. That misread happened in the field:
-   * a spurious "still running after the stop signal" that rolled the claim back on a stop that had
-   * in fact landed. Any running result at the deadline still fails loud.
-   */
-  private void verifyHalted(String project, AgentUnit unit) {
-    var deadline = System.nanoTime() + haltVerifyDeadline.toNanos();
-    var remaining = probe(project, unit);
-    while (remaining != null && remaining.running()) {
-      if (System.nanoTime() >= deadline) {
-        throw new ApiException(
-            ErrorCode.AGENT_STOP_FAILED,
-            "Agent PID " + remaining.pid() + " is still running after the stop signal.",
-            "Retry the stop.");
-      }
-      pace();
-      remaining = probe(project, unit);
-    }
-  }
-
-  private void pace() {
-    try {
-      Thread.sleep(haltVerifyPace.toMillis());
-    } catch (InterruptedException interrupted) {
-      Thread.currentThread().interrupt();
-      throw new ApiException(
-          ErrorCode.AGENT_STOP_FAILED,
-          "Interrupted while verifying the agent halt.",
-          "Retry the stop.");
     }
   }
 
@@ -690,11 +611,32 @@ public final class StopOperations {
     }
   }
 
-  private void halt(String project, AgentUnit unit) {
+  /**
+   * Halts the agent and answers {@link AgentSession.Halt.Ended} or {@link
+   * AgentSession.Halt.Survived} — the two things a container can say of it. A halt nothing answered
+   * for, or one that threw, is a stop that failed with nothing known: an unanswered question is
+   * never an answer, so it finalizes nothing.
+   */
+  private AgentSession.Halt halt(String project, AgentUnit unit) {
+    AgentSession.Halt halt;
     try {
-      halter.halt(project, unit);
+      halt = halter.halt(project, unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
     }
+    if (halt instanceof AgentSession.Halt.Unanswered) {
+      throw new ApiException(
+          ErrorCode.AGENT_STOP_FAILED,
+          "The container did not answer whether the agent stopped.",
+          "Check that the container is running and reachable, then retry the stop.");
+    }
+    return halt;
+  }
+
+  private static ApiException survivedTheStop(int pid) {
+    return new ApiException(
+        ErrorCode.AGENT_STOP_FAILED,
+        "Agent PID " + pid + " is still running after the stop signal.",
+        "Retry the stop.");
   }
 }

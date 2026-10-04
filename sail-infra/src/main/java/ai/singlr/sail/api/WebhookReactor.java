@@ -70,7 +70,7 @@ public final class WebhookReactor implements EventSubscriber {
 
   @Override
   public void onEvent(Event event) {
-    if (isSyncDerived(event)) {
+    if (isSyncDerived(event) || isReplayedStop(event)) {
       return;
     }
     var notifications = resolver.resolve(event.project());
@@ -87,6 +87,16 @@ public final class WebhookReactor implements EventSubscriber {
 
   private WebhookSender senderFor(String url) {
     return senders.computeIfAbsent(url, senderFactory);
+  }
+
+  /**
+   * A stop the reconciler replays for a run that had already ended ({@link
+   * Event.WellKnownData#REPLAY}) was notified when the run ended; it is published again only to
+   * move the review loop.
+   */
+  private static boolean isReplayedStop(Event event) {
+    return Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(event.type())
+        && Event.WellKnownData.replay(event.data());
   }
 
   /**

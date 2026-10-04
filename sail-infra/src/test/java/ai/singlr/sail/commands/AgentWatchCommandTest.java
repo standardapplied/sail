@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.PrintWriter;
@@ -19,6 +20,7 @@ import picocli.CommandLine;
 class AgentWatchCommandTest {
 
   private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String STARTED_AT = "2026-10-04T12:00:00Z";
 
   @Test
   void helpTextIncludes() {
@@ -56,23 +58,39 @@ class AgentWatchCommandTest {
   }
 
   @Test
-  void parseStartedAtFallsBackToNowOnNullOrBlank() {
-    var before = Instant.now();
-    var parsedNull = AgentWatchCommand.parseStartedAt(null);
-    var parsedBlank = AgentWatchCommand.parseStartedAt("  ");
-    var after = Instant.now();
+  void aStartThatIsNotAnInstantIsRefusedNamingWhatToPassNeverGuessedAsNow() {
+    for (var garbage : new String[] {null, "  ", "not-a-timestamp"}) {
+      var refusal =
+          assertThrows(
+              IllegalArgumentException.class, () -> AgentWatchCommand.parseStartedAt(garbage));
 
-    assertFalse(parsedNull.isBefore(before));
-    assertFalse(parsedNull.isAfter(after));
-    assertFalse(parsedBlank.isBefore(before));
-    assertFalse(parsedBlank.isAfter(after));
+      assertTrue(refusal.getMessage().contains("--started-at"), refusal.getMessage());
+      assertTrue(refusal.getMessage().contains("the run row's started_at"), refusal.getMessage());
+    }
   }
 
   @Test
-  void parseStartedAtFallsBackToNowOnGarbage() {
-    var parsed = AgentWatchCommand.parseStartedAt("not-a-timestamp");
+  void refusesToStartWithoutTheRunRowsStart() {
+    var cmd = new CommandLine(new AgentWatchCommand());
+    var err = new StringWriter();
+    cmd.setErr(new PrintWriter(err));
 
-    assertTrue(parsed.isAfter(Instant.EPOCH));
+    var exitCode = cmd.execute("acme", "--run", RUN_ID);
+
+    assertNotEquals(0, exitCode);
+    assertTrue(err.toString().contains("--started-at"), err.toString());
+  }
+
+  @Test
+  void aStartThatIsNotAnInstantIsRefusedBeforeAnythingIsWatched() {
+    var cmd = new CommandLine(new AgentWatchCommand());
+    var err = new StringWriter();
+    cmd.setErr(new PrintWriter(err));
+
+    var exitCode = cmd.execute("acme", "--run", RUN_ID, "--started-at", "yesterday");
+
+    assertNotEquals(0, exitCode);
+    assertTrue(err.toString().contains("'yesterday' is not an ISO-8601 instant"), err.toString());
   }
 
   @Test
@@ -81,7 +99,9 @@ class AgentWatchCommandTest {
     var err = new StringWriter();
     cmd.setErr(new PrintWriter(err));
 
-    var exitCode = cmd.execute("acme", "--run", RUN_ID, "--max-duration", "45 minutes");
+    var exitCode =
+        cmd.execute(
+            "acme", "--run", RUN_ID, "--started-at", STARTED_AT, "--max-duration", "45 minutes");
 
     assertNotEquals(0, exitCode);
     assertTrue(err.toString().contains("45 minutes"), err.toString());
@@ -95,7 +115,8 @@ class AgentWatchCommandTest {
     var err = new StringWriter();
     cmd.setErr(new PrintWriter(err));
 
-    var exitCode = cmd.execute("acme", "--run", RUN_ID, "--max-idle", "0m");
+    var exitCode =
+        cmd.execute("acme", "--run", RUN_ID, "--started-at", STARTED_AT, "--max-idle", "0m");
 
     assertNotEquals(0, exitCode);
     assertTrue(err.toString().contains("greater than zero"), err.toString());
@@ -107,7 +128,8 @@ class AgentWatchCommandTest {
     var err = new StringWriter();
     cmd.setErr(new PrintWriter(err));
 
-    var exitCode = cmd.execute("acme", "--run", RUN_ID, "--action", "restart");
+    var exitCode =
+        cmd.execute("acme", "--run", RUN_ID, "--started-at", STARTED_AT, "--action", "restart");
 
     assertNotEquals(0, exitCode);
     assertTrue(err.toString().contains("stop, snapshot-and-stop, notify"), err.toString());

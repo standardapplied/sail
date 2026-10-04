@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
@@ -265,7 +266,8 @@ public final class RunLauncher {
    * supervision is on by default, under the limits of the run's lane ({@link
    * SailYaml.Agent#guardrailsFor}) as the project sets them at this launch, and the watcher is also
    * the authoritative stop observer the review pipeline advances on. One watcher per run,
-   * supervising exactly this run's unit.
+   * supervising exactly this run's unit, its wall clock anchored to the run row's {@code
+   * started_at}.
    */
   private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(LaunchSpec s) throws IOException {
     var agent = s.config().agent();
@@ -278,7 +280,19 @@ public final class RunLauncher {
             SailPaths.resolveSailYaml(s.project(), file).toAbsolutePath(),
             s.runId(),
             s.unit().unitName(),
+            startedAt(s.runId()),
             agent.guardrailsFor(Lane.of(s.role()).orElse(null))));
+  }
+
+  /**
+   * When the run's row says it started. Every launch reserves its row before it starts; one nothing
+   * recorded starts now, at its launch.
+   */
+  private String startedAt(String runId) {
+    return Optional.ofNullable(runStore)
+        .flatMap(runs -> runs.findById(runId))
+        .map(RunStore.RunRow::startedAt)
+        .orElseGet(() -> DateTimeUtils.now().toString());
   }
 
   /**

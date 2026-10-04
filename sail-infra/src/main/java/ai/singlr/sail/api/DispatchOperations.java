@@ -316,9 +316,9 @@ public final class DispatchOperations {
    * restart mid-run), addressed at the run's recorded unit and holding it to its lane's limits as
    * the project sets them now. Unit-or-nothing: the relaunch never falls back to a plain process,
    * so a doubled watcher is unrepresentable on this path — empty means the project declares no
-   * agent block or no systemd scope accepted the unit. The relaunched {@code sail agent watch}
-   * recomputes its deadlines from the session's original {@code started_at} inside the container,
-   * so a re-armed agent keeps its remaining budget rather than getting a fresh one.
+   * agent block or no systemd scope accepted the unit. The relaunched {@code sail agent watch} is
+   * handed the run row's {@code started_at}, the same anchor its first watcher had, so a re-armed
+   * agent keeps its remaining budget rather than getting a fresh one.
    */
   public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
     var agent = projects.load(run.project()).config().agent();
@@ -330,6 +330,7 @@ public final class DispatchOperations {
         SailPaths.resolveSailYaml(run.project(), file).toAbsolutePath(),
         run.id(),
         run.unit(),
+        run.startedAt(),
         agent.guardrailsFor(run.lane().orElse(null)));
   }
 

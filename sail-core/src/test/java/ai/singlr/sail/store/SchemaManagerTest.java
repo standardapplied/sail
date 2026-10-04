@@ -331,6 +331,37 @@ class SchemaManagerTest {
   }
 
   @Test
+  void reviewsLearnTheRunTheyWaitOnKeepingEveryRowAndItsRevision() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE reviews ADD COLUMN waiting_on");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        """
+        INSERT INTO reviews (id, spec_id, iteration, status, created_at, rev, base_rev)
+        VALUES ('r1', 'auth', 1, 'running', '2026-09-01T00:00:00Z', '2-abc', '2-abc')""");
+
+    new SchemaManager(db).migrate();
+
+    var reviews = new ReviewStore(db);
+    assertNull(
+        reviews.findReview("r1").orElseThrow().waitingOn(),
+        "a review recorded before waits were is waiting on no run");
+    assertEquals(
+        "2-abc",
+        db.queryOne("SELECT rev FROM reviews WHERE id = 'r1'", row -> row.text(0)).orElseThrow(),
+        "the column is this box's own bookkeeping: nothing is journaled or offered to main");
+    assertTrue(reviews.waitOn("r1", "01a0ecdf-0000-7000-8000-0000000000b1"));
+    assertEquals(
+        "01a0ecdf-0000-7000-8000-0000000000b1", reviews.findReview("r1").orElseThrow().waitingOn());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void aConflictParkedBeforeConflictsKeptMainsRevisionMigratesNamingNone() {
     stageAtBaseline();
     var prior = migrationIndex("ALTER TABLE sync_conflicts ADD COLUMN remote_rev");

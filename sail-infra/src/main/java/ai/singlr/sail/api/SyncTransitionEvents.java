@@ -170,10 +170,16 @@ public final class SyncTransitionEvents {
     }
     return switch (transition.to()) {
       case "passed" -> List.of(located.event("review_completed", Map.of(), host));
-      case "escalated" -> List.of(located.event("review_escalated", Map.of(), host));
+      case "escalated" -> List.of(located.event("review_escalated", detail(transition), host));
       case "failed" -> reviewErrored(transition, located, host);
       default -> List.of();
     };
+  }
+
+  /** Why the review ended as it did, as its synced row records it: the event's {@code detail}. */
+  private static Map<String, Object> detail(SyncTransition transition) {
+    var error = text(transition.snapshot(), "error");
+    return error == null ? Map.of() : Map.of("detail", error);
   }
 
   /**
@@ -182,11 +188,8 @@ public final class SyncTransitionEvents {
    */
   private static List<Event> reviewErrored(
       SyncTransition transition, Located located, String host) {
-    var error = text(transition.snapshot(), "error");
-    if (error == null) {
-      return List.of();
-    }
-    return List.of(located.event("review_errored", Map.of("detail", error), host));
+    var detail = detail(transition);
+    return detail.isEmpty() ? List.of() : List.of(located.event("review_errored", detail, host));
   }
 
   private static List<Event> stageEvents(
