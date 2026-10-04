@@ -14,8 +14,10 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
@@ -28,6 +30,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
@@ -59,11 +62,18 @@ import java.util.stream.Stream;
  * finished once its process probes gone. Every session — background or foreground — records its
  * run-scoped identity, and the probe reads the pid file before the systemd unit, so foreground
  * sessions reconcile the same way; only a legacy row with no recorded unit is skipped, because its
- * blocking launcher owned its completion. The synthesized stop carries <em>no exit code</em>: the
- * transient unit is garbage-collected on exit, so the real code is unrecoverable, and the replay
- * path makes the same choice for a terminal session that never recorded one — the pipeline treats
- * the absent code as not-a-failure and judges the run on the work it left. Every replayed stop
- * carries {@code source=reconcile} so the event log shows it was reconstructed, not observed.
+ * blocking launcher owned its completion.
+ *
+ * <p>A run's end is its watcher's to report: the watcher alone saw the exit code, or holds the
+ * limit it ended the run for. So a run that is gone while a live watcher still covers it ({@link
+ * WatcherCoverage}) is left to that watcher — a sweep that lands between a watcher's kill and its
+ * stop, or before its next liveness poll, never gets in first with a stop that says less. Only for
+ * a run no watcher covers does the sweep speak, and then it says what is still known ({@link
+ * UnitProbe#ending}): the non-zero exit code a failed unit still holds, and the limit the watcher
+ * recorded beside the run before a stop that never arrived. A run nothing says ended badly carries
+ * neither — a cleanly exited transient unit is collected, so there is no code to read — and the
+ * pipeline judges it on the work it left. Every replayed stop carries {@code source=reconcile} so
+ * the event log shows it was reconstructed, not observed.
  *
  * <p>Best-effort by design: a failing spec is logged and skipped, a failing pass is logged and
  * retried on the next tick, and passes never overlap. Run after the bus subscribers are wired.
@@ -86,10 +96,26 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
 
-  /** Answers whether a run's recorded agent identity is still active. */
+  /** What a run's recorded agent identity still says: whether it is active, and how it ended. */
   @FunctionalInterface
   public interface UnitProbe {
     boolean active(String project, String runId, String unit) throws Exception;
+
+    /** How the run ended, as far as its container still says; nothing, by default. */
+    default Ending ending(String project, String runId, String unit) throws Exception {
+      return Ending.UNKNOWN;
+    }
+  }
+
+  /**
+   * How a run that is gone ended, as far as anything still says.
+   *
+   * @param exitCode the non-zero code its failed unit still holds, or null: a cleanly exited unit
+   *     is collected and holds none
+   * @param reason the limit its watcher ended it for, as recorded beside the run, or null
+   */
+  public record Ending(Integer exitCode, String reason) {
+    static final Ending UNKNOWN = new Ending(null, null);
   }
 
   private final SpecStore specStore;
@@ -98,10 +124,13 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final ReviewStore reviewStore;
   private final EventBus bus;
   private final UnitProbe unitProbe;
+  private final WatcherCoverage coverage;
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
+  private final ReviewLoopState loop;
   private final PeriodicPass pass;
   private final Set<String> reviewRescueAttempted = ConcurrentHashMap.newKeySet();
+  private final Set<String> heldUp = ConcurrentHashMap.newKeySet();
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -110,6 +139,7 @@ public final class MissedStopReconciler implements AutoCloseable {
       ReviewStore reviewStore,
       EventBus bus,
       UnitProbe unitProbe,
+      WatcherCoverage coverage,
       Supplier<String> localHandle,
       Supplier<Instant> clock) {
     this.specStore = specStore;
@@ -118,8 +148,10 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.reviewStore = reviewStore;
     this.bus = bus;
     this.unitProbe = unitProbe;
+    this.coverage = coverage;
     this.localHandle = localHandle;
     this.clock = clock;
+    this.loop = new ReviewLoopState(reviewStore, sessionStore, localHandle);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
 
@@ -135,22 +167,41 @@ public final class MissedStopReconciler implements AutoCloseable {
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
     var containers = new ContainerManager(shell);
-    return (project, runId, unit) -> {
-      var recorded = AgentUnit.recorded(runId, unit);
-      if (running(agentSession.queryStatus(project, recorded))) {
-        return true;
-      }
-      return switch (containers.queryState(project)) {
-        case ContainerState.Stopped stopped -> false;
-        case ContainerState.NotCreated gone -> false;
-        case ContainerState.Running running -> {
-          agentSession.requireReachable(project);
-          yield running(agentSession.queryStatus(project, recorded));
+    return new UnitProbe() {
+      @Override
+      public boolean active(String project, String runId, String unit) throws Exception {
+        var recorded = AgentUnit.recorded(runId, unit);
+        if (running(agentSession.queryStatus(project, recorded))) {
+          return true;
         }
-        case ContainerState.Error unknown ->
-            throw new IOException(
-                "Container '" + project + "' could not be read: " + unknown.message());
-      };
+        return switch (containers.queryState(project)) {
+          case ContainerState.Stopped stopped -> false;
+          case ContainerState.NotCreated gone -> false;
+          case ContainerState.Running running -> {
+            agentSession.requireReachable(project);
+            yield running(agentSession.queryStatus(project, recorded));
+          }
+          case ContainerState.Error unknown ->
+              throw new IOException(
+                  "Container '" + project + "' could not be read: " + unknown.message());
+        };
+      }
+
+      /**
+       * Reads what the watcher itself would have: the exit code the unit holds — kept only by a
+       * unit that failed, so a zero is no code at all — and the trigger the watcher recorded beside
+       * the run when it ended it for a limit. A trigger that only notified ended nothing.
+       */
+      @Override
+      public Ending ending(String project, String runId, String unit) throws Exception {
+        var recorded = AgentUnit.recorded(runId, unit);
+        var exit = agentSession.queryExitStatus(project, recorded);
+        var limit =
+            GuardrailTrigger.read(shell, project, recorded)
+                .filter(GuardrailTrigger::stops)
+                .map(GuardrailTrigger::cause);
+        return new Ending(exit.exitCode() == 0 ? null : exit.exitCode(), limit.orElse(null));
+      }
     };
   }
 
@@ -275,7 +326,8 @@ public final class MissedStopReconciler implements AutoCloseable {
    * finishes a row whose recorded stop reached no finisher. Only a run older than {@link
    * #LAUNCH_GRACE} is touched, so a run still inside a healthy launch window is never disturbed,
    * and a run is ended only once it is {@linkplain #gone gone} — a reservation must never be freed
-   * under a working agent.
+   * under a working agent — and no live watcher covers it, whose stop says more than this sweep
+   * can.
    *
    * <p>How a dead run ends depends on whether anything waits on its stop. A reviewer or a fix agent
    * whose stop was never recorded has a review waiting on it, so its stop is published — the same
@@ -296,7 +348,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         continue;
       }
       try {
-        if (gone(run) && end(run)) {
+        if (unwatchedAndGone(run) && end(run)) {
           released++;
         }
       } catch (Exception e) {
@@ -310,12 +362,12 @@ public final class MissedStopReconciler implements AutoCloseable {
     if (Strings.isBlank(run.specId())) {
       return finish(run, null, "session with no spec whose recorded process is gone");
     }
-    var coverage = stopCoverage(run.specId(), run);
-    if (run.servesReview() && coverage.observedAt() == null) {
+    var recorded = stopCoverage(run.specId(), run);
+    if (run.servesReview() && recorded.observedAt() == null) {
       publishStop(run, null, "its review waits on a stop nobody observed");
       return true;
     }
-    return finish(run, coverage.exitCode(), "running with its recorded process gone");
+    return finish(run, recorded.exitCode(), "running with its recorded process gone");
   }
 
   /**
@@ -367,6 +419,15 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
+   * Whether a {@code running} run is this sweep's to end: its process is gone and no live watcher
+   * covers it. A covered run's end is its watcher's to report — it is mid-kill, or its next
+   * liveness poll is seconds away — and the sweep comes back to it.
+   */
+  private boolean unwatchedAndGone(RunStore.RunRow run) throws Exception {
+    return gone(run) && !coverage.watching(run);
+  }
+
+  /**
    * Finalizes stop claims interrupted before their verified finish: a run left {@code stopping} —
    * its spec already cancelled by the claim — whose recorded unit is now dead is released as {@code
    * stopped} and its withheld {@code agent_cancelled} event published, so a crash between a stop's
@@ -415,25 +476,33 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Rescues a spec stranded in {@code review}, in any of the shapes that leave it parked with
+   * Rescues a spec stranded in its review loop, in any of the shapes that leave it parked with
    * nothing coming to move it. <em>Dropped kickoff</em>: an out-of-band status write (a manual
    * edit, or a sync revision from another box) moved the spec to {@code review} while its agent was
    * still running here, so the authoritative stop hit the pipeline's guard against a non-{@code
-   * in_progress} spec and no review was created. <em>Errored review</em>: the pipeline ran but its
-   * last attempt failed by infrastructure (a reviewer the watcher killed, unparseable output, a
-   * launch the container refused) — the design retries an errored attempt on the next stop, and no
-   * further stop is coming. <em>Unserved review</em>: a review is {@code running} with an agent
-   * stage to run and no run serving it — the daemon died between writing its rows and launching the
-   * reviewer. <em>Owed fix</em>: a review failed its gate with open findings and no fix agent was
-   * ever launched for it. Replaying the stop of the spec's newest loop run, whichever lane it ran
-   * in, lets the pipeline kick off, retry, go on from the stage rows, or launch the fix. Each
-   * rescue key — the spec for a dropped kickoff, the review row otherwise — fires at most once per
-   * server lifetime, and the pipeline's errored-attempt budget escalates a persistent failure, so
-   * no shape can loop; an escalated review, or one waiting on a person or on a live run, is left
-   * alone, since a human or a working agent owns the spec then.
+   * in_progress} spec and no review was created. The rest are what the review's rows say it is owed
+   * ({@link ReviewLoopState#owed}, the reading the pipeline itself acts on). <em>Errored
+   * review</em>: its last attempt failed by infrastructure (a reviewer the watcher killed,
+   * unparseable output, a launch the container refused) — the design retries an errored attempt on
+   * the next stop, and no further stop is coming. <em>Unserved review</em>: a review is {@code
+   * running} with an agent stage to run and no run serving it — the daemon died between writing its
+   * rows and launching the reviewer, or the gate refused the reviewer's claim and nothing in the
+   * project has stopped since. <em>Owed fix</em>: a review failed its gate with open findings and
+   * no fix agent was ever launched for it. <em>Unheard stop</em>: the reviewer of a review's
+   * running stage, or the fix agent answering its gate failure, ended and nothing came of it — that
+   * run's stop was never acted on. Replaying the stop of the spec's newest loop run, whichever lane
+   * it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch the fix, or
+   * judge the run's work. Each rescue key — the spec for a dropped kickoff, the review row and its
+   * shape otherwise, so a rescue that leaves the same review owed something else is still rescued —
+   * fires at most once per server lifetime, and the pipeline's errored-attempt budget escalates a
+   * persistent failure, so no shape can loop. A running review is rescued per stage; one whose next
+   * step is a launch is not rescued while a run holds its claim, and one whose spent rescue left it
+   * waiting is rescued once more each time it is seen held and then found free ({@link #waiting}).
+   * A key is spent only once its stop is published. An escalated review, or one waiting on a person
+   * or on a live run, is left alone, since a human or a working agent owns the spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
-    var rescue = rescueFor(spec);
+    var rescue = rescueFor(spec).orElse(null);
     if (rescue == null || reviewRescueAttempted.contains(rescue.key())) {
       return false;
     }
@@ -446,86 +515,146 @@ public final class MissedStopReconciler implements AutoCloseable {
     if (latest.isEmpty() || !gone(latest.get())) {
       return false;
     }
-    reviewRescueAttempted.add(rescue.key());
     publishStop(latest.get(), latest.get().exitCode(), rescue.why());
+    reviewRescueAttempted.add(rescue.key());
     return true;
   }
 
-  private record Rescue(String key, String why) {}
+  private record Rescue(String key, String why) {
 
-  private Rescue rescueFor(SpecStore.SpecRow spec) {
-    if (!reviewStarted(spec.id())) {
-      return new Rescue(
-          spec.id(),
-          "stranded in review with no review started; replaying the stop to kick it off");
+    static Rescue of(ReviewStore.ReviewRow review, String shape, String why) {
+      return new Rescue(review.id() + ":" + shape, "review " + review.id() + " " + why);
     }
-    var latest = reviewStore.latestReviewForSpec(spec.id()).orElse(null);
-    if (latest == null) {
-      return null;
-    }
-    if (latest.errored() && "failed".equals(latest.status())) {
-      return new Rescue(
-          latest.id(),
-          "review "
-              + latest.id()
-              + " errored ("
-              + latest.error()
-              + "); replaying the stop to retry the iteration");
-    }
-    if ("running".equals(latest.status()) && !waitsOnPerson(latest.id()) && settled(latest)) {
-      return new Rescue(
-          latest.id(),
-          "review "
-              + latest.id()
-              + " is running with no run serving it; replaying the stop to go on from its stages");
-    }
-    if ("failed".equals(latest.status()) && !latest.errored() && fixOwed(latest)) {
-      return new Rescue(
-          latest.id(),
-          "review "
-              + latest.id()
-              + " failed its gate and no fix agent was launched; replaying the stop to launch it");
-    }
-    return null;
-  }
-
-  private boolean waitsOnPerson(String reviewId) {
-    return reviewStore.stagesForReview(reviewId).stream()
-        .anyMatch(stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
   }
 
   /**
-   * Whether nothing is running for {@code review} and nothing is about to: every run that served it
-   * finished longer ago than {@link #LAUNCH_GRACE} — a run that only just ended has a stop the
+   * The rescue of a review whose next step may be a launch — a reviewer or a fix agent, in {@code
+   * lane}, that the dispatch gate may refuse. Every sweep notes whether a run holds that claim. A
+   * step known to be a launch ({@code launches}) is not rescued while one does: the replay would
+   * only be refused again, and that run's own stop is what frees the review. A rescue already spent
+   * is owed again once the review was seen held up and is then found free: its holder ended with no
+   * stop on the bus — finished in place, a foreground session completing — and nothing else will
+   * wake it.
+   */
+  private Optional<Rescue> waiting(
+      ReviewStore.ReviewRow review, Lane lane, boolean launches, String shape, String why) {
+    var rescue = Rescue.of(review, shape, why);
+    var held = claimHeld(review, lane);
+    if (held) {
+      heldUp.add(rescue.key());
+    } else if (heldUp.remove(rescue.key())) {
+      reviewRescueAttempted.remove(rescue.key());
+    }
+    return held && launches ? Optional.empty() : Optional.of(rescue);
+  }
+
+  /**
+   * The stage a running review is in: how many of its stages have passed, and whether the one after
+   * them is a reviewer's to launch. A review is rescued per stage, so one rescued at a stage is not
+   * out of rescues at the next; the count holds still while the stage's rows are written, as an id
+   * would not. A review with no stage rows yet is at its first stage, taken for a launch.
+   */
+  private record Stage(long passed, boolean launches) {}
+
+  private Stage stageOf(ReviewStore.ReviewRow review) {
+    var stages = reviewStore.stagesForReview(review.id());
+    var passed = stages.stream().takeWhile(stage -> "passed".equals(stage.status())).count();
+    var launches =
+        stages.isEmpty()
+            || stages.stream()
+                .skip(passed)
+                .findFirst()
+                .filter(stage -> !"human".equals(stage.stageType()))
+                .isPresent();
+    return new Stage(passed, launches);
+  }
+
+  /** Whether the dispatch gate would refuse {@code review}'s next run in {@code lane} right now. */
+  private boolean claimHeld(ReviewStore.ReviewRow review, Lane lane) {
+    return specStore
+        .findById(review.specId())
+        .flatMap(
+            spec ->
+                DispatchGate.decide(
+                    spec.id(),
+                    lane.wire(),
+                    spec.repos(),
+                    sessionStore.runningOnNode(spec.project(), localHandle.get())))
+        .isPresent();
+  }
+
+  private Optional<Rescue> rescueFor(SpecStore.SpecRow spec) {
+    if (reviewStore.latestReviewForSpec(spec.id()).isEmpty()) {
+      return Optional.of(
+          new Rescue(
+              spec.id(),
+              "stranded in review with no review started; replaying the stop to kick it off"));
+    }
+    return switch (loop.owed(spec.id())) {
+      case ReviewLoopState.Owed.Retry retry ->
+          Optional.of(
+              Rescue.of(
+                  retry.review(),
+                  "errored",
+                  "errored ("
+                      + retry.review().error()
+                      + "); replaying the stop to retry the iteration"));
+      case ReviewLoopState.Owed.Advance advance ->
+          settled(advance.review()).flatMap(this::unserved);
+      case ReviewLoopState.Owed.Fix fix ->
+          settled(fix.review())
+              .flatMap(
+                  review ->
+                      waiting(
+                          review,
+                          Lane.FIX,
+                          false,
+                          "fix-owed",
+                          "failed its gate and no fix agent was launched; replaying the stop to"
+                              + " launch it"));
+      case ReviewLoopState.Owed.Stop unheard ->
+          settled(unheard.review())
+              .map(
+                  review ->
+                      Rescue.of(
+                          review,
+                          "stop-unheard",
+                          "waits on run "
+                              + unheard.run().id()
+                              + ", which ended; replaying that stop"));
+      case ReviewLoopState.Owed.Nothing nothing -> Optional.empty();
+    };
+  }
+
+  private Optional<Rescue> unserved(ReviewStore.ReviewRow review) {
+    var stage = stageOf(review);
+    return waiting(
+        review,
+        Lane.REVIEW,
+        stage.launches(),
+        "unserved:" + stage.passed(),
+        "is running with no run serving it; replaying the stop to go on from its stages");
+  }
+
+  /**
+   * {@code review}, once nothing is running for it and nothing is about to: every run that served
+   * it finished longer ago than {@link #LAUNCH_GRACE} — a run that only just ended has a stop the
    * pipeline is still acting on — or, with no run recorded yet, the review itself is older than
    * that, so a sweep landing between its rows and its first launch leaves it alone.
    */
-  private boolean settled(ReviewStore.ReviewRow review) {
+  private Optional<ReviewStore.ReviewRow> settled(ReviewStore.ReviewRow review) {
     var cutoff = clock.get().minus(LAUNCH_GRACE);
-    var serving = sessionStore.forReview(review.id());
-    if (serving.isEmpty()) {
-      return MissedStops.parseOr(review.createdAt(), Instant.MAX).isBefore(cutoff);
-    }
-    return serving.stream()
-        .allMatch(
-            run ->
-                RunStatus.isTerminal(run.status())
-                    && MissedStops.parseOr(run.completedAt(), Instant.MAX).isBefore(cutoff));
-  }
-
-  /**
-   * Whether a gate-failed review is still owed its fix agent: it holds open findings, every run
-   * that served it has settled, and none of them was a fix agent.
-   */
-  private boolean fixOwed(ReviewStore.ReviewRow review) {
-    return settled(review)
-        && !reviewStore.openFindingsForReview(review.id()).isEmpty()
-        && sessionStore.forReview(review.id()).stream()
-            .noneMatch(run -> Lane.FIX.matches(run.role()));
-  }
-
-  private boolean reviewStarted(String specId) {
-    return !eventStore.forSpecAndType(specId, "review_stage_started").isEmpty();
+    var serving = loop.serving(review.id());
+    var settled =
+        serving.isEmpty()
+            ? MissedStops.parseOr(review.createdAt(), Instant.MAX).isBefore(cutoff)
+            : serving.stream()
+                .allMatch(
+                    run ->
+                        RunStatus.isTerminal(run.status())
+                            && MissedStops.parseOr(run.completedAt(), Instant.MAX)
+                                .isBefore(cutoff));
+    return settled ? Optional.of(review) : Optional.empty();
   }
 
   private boolean reconcile(SpecStore.SpecRow spec) throws Exception {
@@ -546,7 +675,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         yield true;
       }
       case MissedStops.Outcome.ProbeUnit probe -> {
-        if (Strings.isBlank(session.unit()) || !gone(session)) {
+        if (Strings.isBlank(session.unit()) || !unwatchedAndGone(session)) {
           yield false;
         }
         publishStop(session, null, "unit inactive or gone; " + probe.why());
@@ -586,20 +715,20 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Why the watcher ended {@code run}, as the stop it recorded said, or null when no recorded stop
-   * of this very run names a reason. A replay carries it, so a run killed for a limit is still a
-   * killed run to the pipeline when the daemon died between recording the kill and acting on it.
+   * Why the watcher ended {@code run}, as the newest stop recorded for this very run said, or empty
+   * when none names a reason. A replay carries it, so a run killed for a limit is still a killed
+   * run to the pipeline when the daemon died between recording the kill and acting on it. Another
+   * run's stop, or one that names no run, never speaks for this one.
    */
-  private String recordedReason(RunStore.RunRow run) {
+  private Optional<String> recordedReason(RunStore.RunRow run) {
     return eventStore
         .forSpecAndType(run.specId(), Event.WellKnownTypes.AGENT_SESSION_STOPPED)
         .stream()
         .map(RecordedStop::of)
         .filter(stop -> stop.authoritative() && run.id().equals(stop.runId()))
-        .map(RecordedStop::reason)
-        .filter(Strings::isNotBlank)
-        .findFirst()
-        .orElse(null);
+        .filter(stop -> Strings.isNotBlank(stop.reason()))
+        .max(Comparator.comparing(RecordedStop::at))
+        .map(RecordedStop::reason);
   }
 
   /**
@@ -653,7 +782,16 @@ public final class MissedStopReconciler implements AutoCloseable {
     return MissedStops.parseOr(row.timestamp(), Instant.MAX);
   }
 
+  /**
+   * Publishes the stop of {@code session}, a run that is gone, saying everything still known of how
+   * it ended: the exit code its row recorded, else the one its failed unit still holds, and the
+   * limit its watcher ended it for — as a recorded stop of this run said, else as the watcher
+   * recorded beside the run before a stop that never reached this box.
+   */
   private void publishStop(RunStore.RunRow session, Integer exitCode, String why) {
+    var ending = endingOf(session);
+    var code = exitCode != null ? exitCode : ending.exitCode();
+    var reason = recordedReason(session).orElse(ending.reason());
     System.err.println(
         "  [reconcile] replaying missed stop for "
             + session.project()
@@ -663,11 +801,31 @@ public final class MissedStopReconciler implements AutoCloseable {
             + session.role()
             + " session "
             + session.id()
-            + ", exit "
-            + (exitCode != null ? exitCode : "unknown")
+            + ", "
+            + (reason != null ? reason : code != null ? "exit " + code : "exit unknown")
             + "): "
             + why);
-    bus.publish(stopEvent(session, exitCode, recordedReason(session)));
+    bus.publish(stopEvent(session, code, reason));
+  }
+
+  /**
+   * What the container still says of how {@code run} ended, or nothing when it cannot be read: the
+   * stop is owed either way, and a run whose ending is unreadable is one nothing says ended badly.
+   */
+  private Ending endingOf(RunStore.RunRow run) {
+    try {
+      return unitProbe.ending(run.project(), run.id(), Objects.toString(run.unit(), ""));
+    } catch (Exception unreadable) {
+      if (unreadable instanceof InterruptedException) {
+        Thread.currentThread().interrupt();
+      }
+      System.err.println(
+          "  [reconcile] could not read how run "
+              + run.id()
+              + " ended: "
+              + unreadable.getMessage());
+      return Ending.UNKNOWN;
+    }
   }
 
   /**

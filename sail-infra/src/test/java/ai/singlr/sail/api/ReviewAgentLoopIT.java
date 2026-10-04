@@ -29,11 +29,14 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Supplier;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -96,7 +99,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   private ReviewStore reviewStore;
   private RunStore runStore;
   private EventBus bus;
-  private final Set<String> seen = new HashSet<>();
+  private final BlockingQueue<Event> heard = new LinkedBlockingQueue<>();
 
   @BeforeEach
   void provision() throws Exception {
@@ -172,6 +175,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                         "gate",
                         "no_critical"))));
     bus.subscribe(new RunTracker(runStore, SyncScheduler.disabled(), () -> HANDLE));
+    bus.subscribe(listener());
     bus.subscribe(
         new ReviewPipelineController(
             specStore,
@@ -225,13 +229,13 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     hold();
     bus.publish(buildStop());
 
-    var reviewer = awaitRunning("review");
+    var reviewer = launched("review", "review_stage_started");
     assertEquals("auth", reviewer.specId());
     assertEquals(HANDLE, reviewer.node());
     assertEquals("codex", reviewer.agent());
     assertEquals(AgentUnit.forRun(reviewer.id()).unitName(), reviewer.unit());
     assertEquals(reviewStore.latestReviewForSpec("auth").orElseThrow().id(), reviewer.reviewId());
-    await(
+    awaitInContainer(
         () -> logOf(reviewer).contains("review started"),
         "the reviewer's log streams to its own run directory while it runs");
     assertTrue(
@@ -241,16 +245,18 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     release();
     watcherObservesTheExitOf(reviewer);
 
-    var fix = awaitRunning("fix");
+    var fix = launched("fix", "review_iteration_started");
     assertEquals(reviewer.reviewId(), fix.reviewId(), "the fix run serves the failed review");
     assertEquals(1, reviewStore.findingsForReview(reviewer.reviewId()).size());
     watcherObservesTheExitOf(fix);
 
-    var second = awaitRunning("review");
+    var second = launched("review", "review_stage_started");
     watcherObservesTheExitOf(second);
 
-    await(
-        () -> specStore.findById("auth").orElseThrow().status() == SpecStatus.AWAITING_MERGE,
+    awaitEvent("review_completed");
+    assertEquals(
+        SpecStatus.AWAITING_MERGE,
+        specStore.findById("auth").orElseThrow().status(),
         "the re-review passes and the spec awaits merge");
     assertEquals(2, reviewStore.reviewsForSpec("auth").size());
     for (var run : List.of(reviewer, fix, second)) {
@@ -265,10 +271,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   void aKilledReviewerLeavesNoAgentProcessBehindAndItsReviewErrorsWithTheReason() throws Exception {
     hold();
     bus.publish(buildStop());
-    var reviewer = awaitRunning("review");
+    var reviewer = launched("review", "review_stage_started");
     var unit = AgentUnit.forRun(reviewer.id());
     var session = new AgentSession(shell);
-    await(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
+    awaitInContainer(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
 
     session.killAgent(CONTAINER, unit);
 
@@ -292,9 +298,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             exit.exitCode(),
             "time limit (45m)"));
 
-    await(
-        () -> reviewStore.findReview(reviewer.reviewId()).orElseThrow().errored(),
-        "the review errors on the reaped reviewer's stop");
+    awaitEvent("review_errored");
     assertEquals(
         "reviewer killed: time limit (45m)",
         reviewStore.findReview(reviewer.reviewId()).orElseThrow().error());
@@ -342,55 +346,102 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   private void watcherObservesTheExitOf(RunStore.RunRow run) throws Exception {
     var session = new AgentSession(shell);
     var unit = AgentUnit.forRun(run.id());
+    var ended = new AtomicReference<AgentSession.ExitState>();
+    awaitInContainer(
+        () -> {
+          var exit = session.queryExitStatus(CONTAINER, unit);
+          ended.set(exit);
+          return !exit.active() && run.id().equals(exit.runId());
+        },
+        "the " + run.role() + " unit exits");
+    var exit = ended.get();
+    assertEquals(run.role(), exit.role(), "the stop names the lane of the run it ends");
+    bus.publish(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            CONTAINER,
+            exit.specId(),
+            exit.agentType(),
+            exit.runId(),
+            exit.role(),
+            exit.exitCode(),
+            null));
+  }
+
+  /** Records every event the loop publishes, in order, for {@link #awaitEvent}. */
+  private EventSubscriber listener() {
+    return new EventSubscriber() {
+      @Override
+      public String name() {
+        return "review-agent-loop-it";
+      }
+
+      @Override
+      public Predicate<Event> filter() {
+        return event -> true;
+      }
+
+      @Override
+      public void onEvent(Event event) {
+        heard.add(event);
+      }
+    };
+  }
+
+  /**
+   * Blocks until the loop publishes an event of {@code type}, passing over what it published before
+   * it: the loop says what it did after it did it, so its rows are there to read on return.
+   */
+  private Event awaitEvent(String type) throws InterruptedException {
+    var deadline = System.nanoTime() + PATIENCE.toNanos();
+    var passed = new ArrayList<String>();
+    while (true) {
+      var event = heard.poll(deadline - System.nanoTime(), TimeUnit.NANOSECONDS);
+      if (event == null) {
+        throw new AssertionError(
+            "the loop never published "
+                + type
+                + "; it published "
+                + passed
+                + "; runs: "
+                + runStore.listForSpec("auth"));
+      }
+      if (type.equals(event.type())) {
+        return event;
+      }
+      passed.add(event.type());
+    }
+  }
+
+  /** The run the loop launched in lane {@code role}, once it has announced it with {@code type}. */
+  private RunStore.RunRow launched(String role, String type) throws InterruptedException {
+    awaitEvent(type);
+    return runStore
+        .latestLoopRun("auth")
+        .filter(run -> role.equals(run.role()))
+        .orElseThrow(
+            () -> new AssertionError("no " + role + " run; runs: " + runStore.listForSpec("auth")));
+  }
+
+  /** Something that is true of the container, or not yet. */
+  @FunctionalInterface
+  private interface ContainerState {
+    boolean holds() throws Exception;
+  }
+
+  /**
+   * Waits for something to become true inside the container. The container is another machine's
+   * state: it publishes nothing this test could wait on, so it is asked again until it says so.
+   */
+  private static void awaitInContainer(ContainerState state, String what) throws Exception {
     var deadline = Instant.now().plus(PATIENCE);
     while (Instant.now().isBefore(deadline)) {
-      var exit = session.queryExitStatus(CONTAINER, unit);
-      if (!exit.active() && run.id().equals(exit.runId())) {
-        assertEquals(run.role(), exit.role(), "the stop names the lane of the run it ends");
-        bus.publish(
-            RunStops.of(
-                Event.WellKnownData.SOURCE_WATCHER,
-                CONTAINER,
-                exit.specId(),
-                exit.agentType(),
-                exit.runId(),
-                exit.role(),
-                exit.exitCode(),
-                null));
+      if (state.holds()) {
         return;
       }
       Thread.sleep(Duration.ofMillis(200));
     }
-    throw new AssertionError("the " + run.role() + " unit never exited: " + logOf(run));
-  }
-
-  private RunStore.RunRow awaitRunning(String role) throws Exception {
-    var deadline = Instant.now().plus(PATIENCE);
-    while (Instant.now().isBefore(deadline)) {
-      var next =
-          runStore.listForSpec("auth").stream()
-              .filter(run -> role.equals(run.role()) && "running".equals(run.status()))
-              .filter(run -> !seen.contains(run.id()))
-              .findFirst();
-      if (next.isPresent()) {
-        seen.add(next.get().id());
-        return next.get();
-      }
-      Thread.sleep(Duration.ofMillis(100));
-    }
-    throw new AssertionError(
-        "no running " + role + " run appeared; runs: " + runStore.listForSpec("auth"));
-  }
-
-  private static void await(Supplier<Boolean> condition, String what) throws Exception {
-    var deadline = Instant.now().plus(PATIENCE);
-    while (Instant.now().isBefore(deadline)) {
-      if (condition.get()) {
-        return;
-      }
-      Thread.sleep(Duration.ofMillis(100));
-    }
-    throw new AssertionError("never happened: " + what);
+    throw new AssertionError("never happened in the container: " + what);
   }
 
   /**
@@ -417,14 +468,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   }
 
   private void awaitUserManager() throws Exception {
-    var deadline = Instant.now().plus(PATIENCE);
-    while (Instant.now().isBefore(deadline)) {
-      var probe = exec(CONTAINER, List.of("test", "-S", "/run/user/1000/bus"));
-      if (probe.ok()) {
-        return;
-      }
-      Thread.sleep(Duration.ofSeconds(1));
-    }
-    throw new AssertionError("dev user's systemd manager (bus) never came up in " + CONTAINER);
+    awaitInContainer(
+        () -> exec(CONTAINER, List.of("test", "-S", "/run/user/1000/bus")).ok(),
+        "the dev user's systemd manager (bus) comes up");
   }
 }

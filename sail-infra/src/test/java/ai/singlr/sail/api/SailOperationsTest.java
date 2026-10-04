@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ShellExec;
@@ -26,6 +27,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -1393,44 +1395,10 @@ class SailOperationsTest {
             null,
             s2 -> {},
             runs -> {
-              runs.create(
-                  R1,
-                  "acme",
-                  "auth",
-                  "node-a",
-                  "build",
-                  "claude-code",
-                  "feat/auth",
-                  "do it",
-                  123,
-                  null,
-                  RUN_LOG,
-                  "sail-agent-" + R1);
-              runs.create(
-                  R2,
-                  "acme",
-                  "billing",
-                  "node-a",
-                  "build",
-                  "claude-code",
-                  "feat/billing",
-                  "do it",
-                  456,
-                  null,
-                  R2_LOG,
-                  "sail-agent-" + R2);
-              runs.createForReview(
-                  R3,
-                  R3,
-                  "acme",
-                  "auth",
-                  "node-a",
-                  Lane.REVIEW,
-                  "codex",
-                  "feat/auth",
-                  "review it",
-                  "/home/dev/.sail/runs/" + R3 + "/review.log",
-                  "sail-review-" + R3);
+              reserveBuild(runs, R1, "auth", "api", 123);
+              reserveBuild(runs, R2, "billing", "web", 456);
+              ReviewRuns.reserve(
+                  runs, R3, R3, "acme", "search", "node-a", Lane.REVIEW, "codex", List.of("docs"));
             });
 
     var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
@@ -1440,22 +1408,24 @@ class SailOperationsTest {
         shell.invocations().stream().anyMatch(cmd -> cmd.contains("runs/" + R1 + "/agent.pid")),
         "the stop reads the run's own pid file");
     assertTrue(
-        shell.invocations().stream().noneMatch(cmd -> cmd.contains(R2)),
-        "the concurrent run's unit and files are untouched");
+        shell.invocations().stream().noneMatch(cmd -> cmd.contains(R2) || cmd.contains(R3)),
+        "the concurrent build's and the concurrent reviewer's units and files are untouched");
     assertTrue(
         shell.invocations().stream().noneMatch(cmd -> cmd.contains("kill 456")),
         "the concurrent run's agent is never signalled");
   }
 
   @Test
-  void agentStatusListsEveryLocalRunningRunProbedOnItsOwnUnit() throws Exception {
+  void agentStatusListsEveryLocalRunningRunWhicheverItsLaneProbedOnItsOwnUnit() throws Exception {
     var shell =
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("runs/" + R1 + "/agent.pid", "123")
             .on("kill -0 123", "")
             .on("runs/" + R2 + "/agent.pid", "456")
-            .on("kill -0 456", new ShellExec.Result(1, "", "gone"));
+            .on("kill -0 456", new ShellExec.Result(1, "", "gone"))
+            .on("runs/" + R3 + "/agent.pid", "789")
+            .on("kill -0 789", "");
     var operations =
         operationsWithStores(
             baseYaml(),
@@ -1463,42 +1433,41 @@ class SailOperationsTest {
             null,
             s2 -> {},
             runs -> {
-              runs.create(
-                  R1,
-                  "acme",
-                  "auth",
-                  "node-a",
-                  "build",
-                  "claude-code",
-                  "feat/auth",
-                  "do it",
-                  123,
-                  null,
-                  RUN_LOG,
-                  "sail-agent-" + R1);
-              runs.create(
-                  R2,
-                  "acme",
-                  "billing",
-                  "node-a",
-                  "build",
-                  "claude-code",
-                  "feat/billing",
-                  "do it",
-                  456,
-                  null,
-                  R2_LOG,
-                  "sail-agent-" + R2);
+              reserveBuild(runs, R1, "auth", "api", 123);
+              reserveBuild(runs, R2, "billing", "web", 456);
+              ReviewRuns.reserve(
+                  runs, R3, R3, "acme", "search", "node-a", Lane.REVIEW, "codex", List.of("docs"));
             });
 
     var result = operations.agentStatus("acme", "node-a");
 
     assertEquals(true, get(result, "agent_running"));
     var runs = (List<?>) get(result, "runs");
-    assertEquals(2, runs.size(), "every local running run is listed");
+    assertEquals(3, runs.size(), "every local running run is listed");
     var encoded = ApiJson.withSchema(result.orThrow()).toString();
     assertTrue(encoded.contains(R1) && encoded.contains(R2), encoded);
-    assertFalse(encoded.contains("review.log"), "build agent status excludes review executions");
+    assertTrue(
+        encoded.contains(AgentUnit.forRun(R3).logPath()),
+        "a reviewer is a run like a build: listed, under its own run-scoped log");
+    assertTrue(
+        shell.invocations().stream().anyMatch(cmd -> cmd.contains("runs/" + R3 + "/agent.pid")),
+        "and probed on its own unit's files");
+  }
+
+  private static void reserveBuild(RunStore runs, String id, String specId, String repo, int pid) {
+    runs.reserveDispatch(
+        id,
+        "acme",
+        specId,
+        "node-a",
+        "build",
+        List.of(repo),
+        "claude-code",
+        "feat/" + specId,
+        "do it",
+        AgentUnit.forRun(id).logPath(),
+        AgentUnit.forRun(id).unitName());
+    runs.updateProcess(id, pid, null, null);
   }
 
   @Test
@@ -1573,9 +1542,15 @@ class SailOperationsTest {
     assertEquals(1, recorded.size(), "a background dispatch records its run in the aggregate");
     assertEquals("running", recorded.getFirst().status());
     assertEquals(4242, recorded.getFirst().pid(), "the launched agent's pid is stamped on the run");
+    var ownFiles = AgentUnit.runDir(recorded.getFirst().id());
+    var runFileCommands =
+        shell.invocations().stream()
+            .filter(command -> command.contains(AgentUnit.RUNS_DIR + "/"))
+            .toList();
+    assertFalse(runFileCommands.isEmpty(), "the launch writes its run's files");
     assertTrue(
-        shell.invocations().stream().noneMatch(command -> command.contains("review.log")),
-        "dispatch must never touch a review's log: a concurrent pipeline may be mid-review");
+        runFileCommands.stream().allMatch(command -> command.contains(ownFiles)),
+        "a dispatch touches no run's files but its own: a reviewer may be at work beside it");
   }
 
   @Test

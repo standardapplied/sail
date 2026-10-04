@@ -12,9 +12,12 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * A project container, and the host's systemd beside it, as the launch, watch and stop machinery
@@ -26,6 +29,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 final class FakeContainer implements ShellExec {
 
   private static final String SERVICE_SUFFIX = ".service";
+  private static final String WATCH_UNIT_PREFIX = "sail-watch-";
 
   private final String project;
   private final Map<String, String> files = new ConcurrentHashMap<>();
@@ -34,13 +38,20 @@ final class FakeContainer implements ShellExec {
   private final List<List<String>> commands = new CopyOnWriteArrayList<>();
   private final Map<String, String> dirty = new ConcurrentHashMap<>();
   private final List<String> commits = new CopyOnWriteArrayList<>();
+  private final Set<String> watchers = ConcurrentHashMap.newKeySet();
   private final AtomicInteger pids = new AtomicInteger(1000);
   private volatile String branch = "feat/test";
   private volatile boolean running = true;
   private volatile boolean survivesKill;
+  private volatile boolean unreachable;
+  private volatile boolean refusesKill;
+  private volatile boolean managerDown;
   private volatile String gitFailure;
   private volatile String gitFailingVerb;
   private volatile Runnable beforeGit = () -> {};
+  private volatile String hostFragment = "";
+  private volatile Runnable beforeHost = () -> {};
+  private final AtomicReference<Runnable> afterAliveProbe = new AtomicReference<>();
 
   private static final class Agent {
     private final int pid;
@@ -75,6 +86,16 @@ final class FakeContainer implements ShellExec {
   /** The agent of {@code runId} wrote {@code log} and is still running. */
   void wrote(String runId, String log) {
     files.put(AgentUnit.forRun(runId).logPath(), log);
+  }
+
+  /** Whether a watcher process for {@code runId} is running on the host. */
+  boolean watched(String runId) {
+    return watchers.contains(runId);
+  }
+
+  /** The watcher of {@code runId} is gone: its watch ended, or it died. */
+  void watcherGone(String runId) {
+    watchers.remove(runId);
   }
 
   boolean alive(String runId) {
@@ -133,13 +154,43 @@ final class FakeContainer implements ShellExec {
     this.beforeGit = hook;
   }
 
+  /** The container is stopped: incus lists it so, and nothing inside it answers. */
   void stopped() {
     this.running = false;
   }
 
-  /** A kill leaves the agent running, as a unit that ignores its signals would. */
-  void survivesKill() {
-    this.survivesKill = true;
+  /** Whether commands into the container fail while incus still lists it running. */
+  void unreachable(boolean unreachable) {
+    this.unreachable = unreachable;
+  }
+
+  /** Whether a kill leaves the agent running, as a unit that ignores its signals would. */
+  void survivesKill(boolean survives) {
+    this.survivesKill = survives;
+  }
+
+  /**
+   * Runs {@code hook} once, right after the next probe of whether an agent's process is alive has
+   * been answered: what happens between a status read and whatever acts on it.
+   */
+  void afterAliveProbe(Runnable hook) {
+    afterAliveProbe.set(hook);
+  }
+
+  /** Whether the dev user's systemd manager is gone: every question about a unit fails. */
+  void managerDown(boolean down) {
+    this.managerDown = down;
+  }
+
+  /** Whether the container refuses to kill an agent's unit: the signal fails, and says so. */
+  void refusesKill(boolean refuses) {
+    this.refusesKill = refuses;
+  }
+
+  /** Runs {@code hook} before every host command that names {@code fragment}. */
+  void beforeHost(String fragment, Runnable hook) {
+    this.hostFragment = fragment;
+    this.beforeHost = hook;
   }
 
   List<String> commits() {
@@ -158,12 +209,15 @@ final class FakeContainer implements ShellExec {
     if (!"incus".equals(command.get(0)) || !"exec".equals(command.get(1)) || boundary < 0) {
       return host(command);
     }
+    if (!running || unreachable) {
+      return fail("Error: Instance is not running");
+    }
     var inner = command.subList(boundary + 1, command.size());
     return switch (inner.get(0)) {
       case "cat" -> cat(inner.get(1));
       case "kill" -> kill(inner);
       case "bash" -> bash(inner);
-      case "systemctl" -> systemctl(inner);
+      case "systemctl" -> managerDown ? fail("Failed to connect to bus") : systemctl(inner);
       case "git" -> git(inner);
       case "rm" -> {
         files.remove(inner.get(inner.size() - 1));
@@ -183,11 +237,29 @@ final class FakeContainer implements ShellExec {
     return false;
   }
 
-  /** Host-side commands: a watcher unit launches, and none is found already running. */
-  private static Result host(List<String> command) {
+  /**
+   * Host-side commands: a watcher launched as a unit runs until its watch ends, and is found by its
+   * process and by its unit while it does.
+   */
+  private Result host(List<String> command) {
+    if (!hostFragment.isEmpty() && String.join(" ", command).contains(hostFragment)) {
+      beforeHost.run();
+    }
     return switch (command.get(0)) {
-      case "pgrep" -> fail("");
-      case "systemctl" -> command.contains("is-active") ? fail("") : ok("");
+      case "pgrep" ->
+          command.getLast().startsWith("agent watch ")
+                  && watched(command.getLast().substring(command.getLast().indexOf("--run ") + 6))
+              ? ok("")
+              : fail("");
+      case "systemctl" ->
+          !command.contains("is-active")
+                  || watched(command.getLast().replace(WATCH_UNIT_PREFIX, ""))
+              ? ok("")
+              : fail("");
+      case "systemd-run" -> {
+        watchers.add(command.get(command.indexOf("--run") + 1));
+        yield ok("");
+      }
       default -> ok("");
     };
   }
@@ -207,7 +279,9 @@ final class FakeContainer implements ShellExec {
     var pid = Integer.parseInt(inner.get(inner.size() - 1));
     var agent = agents.values().stream().filter(a -> a.pid == pid).findFirst().orElse(null);
     if (inner.contains("-0")) {
-      return agent != null && agent.alive ? ok("") : fail("no such process");
+      var answer = agent != null && agent.alive ? ok("") : fail("no such process");
+      Optional.ofNullable(afterAliveProbe.getAndSet(null)).ifPresent(Runnable::run);
+      return answer;
     }
     end(agent);
     return ok("");
@@ -231,7 +305,9 @@ final class FakeContainer implements ShellExec {
     }
     if (inner.contains("kill")) {
       end(agent);
-      return ok("");
+      return refusesKill && inner.contains("--signal=SIGKILL")
+          ? fail("Failed to kill unit: permission denied")
+          : ok("");
     }
     if (inner.contains("--property=MainPID")) {
       return ok(alive ? String.valueOf(agent.pid) : "0");
@@ -245,7 +321,7 @@ final class FakeContainer implements ShellExec {
   }
 
   private void end(Agent agent) {
-    if (agent != null && !survivesKill) {
+    if (agent != null && !survivesKill && !refusesKill) {
       agent.alive = false;
     }
   }

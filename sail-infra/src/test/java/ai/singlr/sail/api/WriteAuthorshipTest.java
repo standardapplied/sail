@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -119,7 +120,8 @@ class WriteAuthorshipTest {
       var credential =
           Acting.system(
               () ->
-                  runs.createForReview(
+                  ReviewRuns.reserve(
+                      runs,
                       "review-1",
                       "review-1",
                       "acme",
@@ -127,10 +129,7 @@ class WriteAuthorshipTest {
                       "uday",
                       Lane.REVIEW,
                       "claude-code",
-                      "main",
-                      "review it",
-                      "/tmp/review.log",
-                      "sail-review-1"));
+                      List.of()));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
       var router = new LocalApiRouter(operations);
 

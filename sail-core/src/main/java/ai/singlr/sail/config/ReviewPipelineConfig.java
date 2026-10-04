@@ -7,7 +7,9 @@ package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.store.Finding;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 
@@ -57,6 +59,21 @@ public record ReviewPipelineConfig(
               : List.<String>of();
       var gate = Gate.parse((String) map.getOrDefault("gate", "no_critical"));
       return new StageConfig(name, type, agent, categories, gate);
+    }
+
+    /** This stage as one entry of {@code review_pipeline.stages}, as {@link #fromMap} reads it. */
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("name", name);
+      map.put("type", type.name().toLowerCase(Locale.ROOT));
+      if (agent != null) {
+        map.put("agent", agent);
+      }
+      if (!categories.isEmpty()) {
+        map.put("categories", categories);
+      }
+      map.put("gate", gate.name().toLowerCase(Locale.ROOT));
+      return map;
     }
   }
 
@@ -117,8 +134,13 @@ public record ReviewPipelineConfig(
                 Gate.NO_CRITICAL)));
   }
 
-  @SuppressWarnings("unchecked")
+  /** Parses an {@code agent.review_pipeline} block of {@code sail.yaml}. */
   public static ReviewPipelineConfig fromMap(Map<String, Object> map) {
+    return fromMap(map, "sail.yaml");
+  }
+
+  @SuppressWarnings("unchecked")
+  static ReviewPipelineConfig fromMap(Map<String, Object> map, String descriptor) {
     var maxIterations =
         map.containsKey("max_iterations") ? ((Number) map.get("max_iterations")).intValue() : 3;
     var maxFindingAge =
@@ -126,19 +148,19 @@ public record ReviewPipelineConfig(
     var stagesList = (List<Map<String, Object>>) map.getOrDefault("stages", List.of());
     var stages = stagesList.stream().map(StageConfig::fromMap).toList();
     var guardrails =
-        map.get("guardrails") instanceof Map<?, ?> limits
-            ? Guardrails.fromMap((Map<String, Object>) limits)
-            : Guardrails.reviewDefaults();
+        Guardrails.fromBlock(map.get("guardrails"), Guardrails.REVIEW_BLOCK, descriptor)
+            .orElseGet(Guardrails::reviewDefaults);
     return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages, guardrails);
   }
 
-  /** This pipeline as its {@code review_pipeline} block. */
+  /** This pipeline as its {@code review_pipeline} block, as {@link #fromMap} reads it. */
   public Map<String, Object> toMap() {
-    return Map.of(
-        "max_iterations", maxIterations,
-        "max_finding_age", maxFindingAge,
-        "stages", stages,
-        "guardrails", guardrails.toMap());
+    var map = new LinkedHashMap<String, Object>();
+    map.put("max_iterations", maxIterations);
+    map.put("max_finding_age", maxFindingAge);
+    map.put("guardrails", guardrails.toMap());
+    map.put("stages", stages.stream().map(StageConfig::toMap).toList());
+    return map;
   }
 
   public List<StageConfig> agentStages() {

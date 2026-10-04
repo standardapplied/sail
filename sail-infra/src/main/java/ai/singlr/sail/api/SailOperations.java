@@ -137,7 +137,7 @@ public final class SailOperations implements HostOperations {
 
   @Override
   public HostDispatching dispatching() {
-    return new HostLanes.Dispatching(dispatchOps, stopOps, runStore, reviewStore, shell);
+    return new HostLanes.Dispatching(dispatchOps, stopOps, runStore, shell);
   }
 
   @Override

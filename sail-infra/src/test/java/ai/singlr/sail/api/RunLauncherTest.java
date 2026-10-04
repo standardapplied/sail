@@ -25,6 +25,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,6 +93,23 @@ class RunLauncherTest {
           commands.add(joined);
           if (joined.contains("cat") && joined.contains("pid")) {
             return new ShellExec.Result(0, "12345\n", "");
+          }
+          return new ShellExec.Result(0, "", "");
+        });
+  }
+
+  /** The agent answers its first liveness probe and is gone at every one after. */
+  private static ShellExec endingShell(List<String> commands) {
+    var probes = new AtomicInteger();
+    return shell(
+        command -> {
+          var joined = String.join(" ", command);
+          commands.add(joined);
+          if (joined.contains("cat") && joined.contains("pid")) {
+            return new ShellExec.Result(0, "12345\n", "");
+          }
+          if (joined.contains("kill -0")) {
+            return new ShellExec.Result(probes.getAndIncrement() == 0 ? 0 : 1, "", "");
           }
           return new ShellExec.Result(0, "", "");
         });
@@ -188,7 +206,7 @@ class RunLauncherTest {
     Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped", 0)));
     var commands = new ArrayList<String>();
 
-    var status = launcher(runningShell(commands), runStore).finishLaunch(ctx(true), outcome());
+    var status = launcher(endingShell(commands), runStore).finishLaunch(ctx(true), outcome());
 
     assertTrue(
         status.running(),
@@ -198,6 +216,26 @@ class RunLauncherTest {
         commands.stream().noneMatch(command -> command.contains("systemctl --user kill")),
         "nothing is torn down: " + commands);
     assertTrue(events.isEmpty(), "no session is announced for a run that is already over");
+  }
+
+  @Test
+  void aRunFinishedUnderItsLaunchWhoseAgentIsStillRunningIsTornDownAndConflicts() {
+    seedRunningRun();
+    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped")));
+    var commands = new ArrayList<String>();
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> launcher(runningShell(commands), runStore).finishLaunch(ctx(true), outcome()));
+
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("was ended while its launch was preparing"));
+    assertTrue(
+        commands.stream().anyMatch(command -> command.contains("systemctl --user kill")),
+        "an agent still running against a row that says it is over did not end itself, and must"
+            + " not run on unrecorded with its reservation freed: "
+            + commands);
   }
 
   @Test

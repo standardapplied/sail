@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -153,23 +154,13 @@ class BoxRunsSyncTest {
     finish(ada, build);
     var finishedAdhoc = reserve(ada, null, null, "adhoc");
     finish(ada, finishedAdhoc);
-    var liveAdhoc = reserve(ada, null, null, "adhoc");
     var review = DateTimeUtils.newId().toString();
     Acting.system(
         () ->
-            runs(ada)
-                .createForReview(
-                    review,
-                    review,
-                    "acme",
-                    "mine",
-                    null,
-                    Lane.REVIEW,
-                    "codex",
-                    "b",
-                    "t",
-                    "/l",
-                    "u"));
+            ReviewRuns.reserve(
+                runs(ada), review, review, "acme", "mine", null, Lane.REVIEW, "codex", List.of()));
+    finish(ada, review);
+    var liveAdhoc = reserve(ada, null, null, "adhoc");
     var agent = agentOf(ada, build);
     var posted =
         Acting.by(
@@ -485,19 +476,8 @@ class BoxRunsSyncTest {
     var review = Acting.system(() -> reviews.createReview("mine", 1));
     Acting.system(
         () ->
-            runs(ada)
-                .createForReview(
-                    review,
-                    review,
-                    "acme",
-                    "mine",
-                    "ada",
-                    Lane.REVIEW,
-                    "codex",
-                    "b",
-                    "t",
-                    "/l",
-                    "u"));
+            ReviewRuns.reserve(
+                runs(ada), review, review, "acme", "mine", "ada", Lane.REVIEW, "codex", List.of()));
     Acting.system(() -> reviews.updateReviewStatus(review, "running"));
     Acting.system(() -> reviews.createStage(review, "sign-off", "human"));
     finish(ada, review);
@@ -519,19 +499,16 @@ class BoxRunsSyncTest {
       var review = Acting.system(() -> reviews.createReview("theirs", 1));
       Acting.system(
           () ->
-              runs(bob)
-                  .createForReview(
-                      review,
-                      review,
-                      "acme",
-                      "theirs",
-                      "bob",
-                      Lane.REVIEW,
-                      "codex",
-                      "b",
-                      "t",
-                      "/l",
-                      "u"));
+              ReviewRuns.reserve(
+                  runs(bob),
+                  review,
+                  review,
+                  "acme",
+                  "theirs",
+                  "bob",
+                  Lane.REVIEW,
+                  "codex",
+                  List.of()));
       Acting.system(() -> reviews.updateReviewStatus(review, "running"));
       SyncBox.quiesce(main, bob, ada);
 

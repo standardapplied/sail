@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -34,6 +35,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
@@ -101,7 +103,15 @@ class MissedStopReconcilerTest {
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
     return new MissedStopReconciler(
-        specStore, sessionStore, eventStore, reviewStore, bus, probe, localHandle, clock);
+        specStore,
+        sessionStore,
+        eventStore,
+        reviewStore,
+        bus,
+        probe,
+        new WatcherCoverage(watched::contains, pid -> false),
+        localHandle,
+        clock);
   }
 
   private void createInProgressSpec(String id) {
@@ -709,9 +719,9 @@ class MissedStopReconcilerTest {
             p -> "codex",
             new ReviewLanes() {
               @Override
-              public String launch(Invocation invocation, String boxHandle) {
+              public Launch launch(Invocation invocation, String boxHandle) {
                 reviewersLaunched.add(invocation);
-                return DateTimeUtils.newId().toString();
+                return new Launch.Started(reviewerOf(invocation.reviewId(), invocation.specId()));
               }
 
               @Override
@@ -732,6 +742,7 @@ class MissedStopReconcilerTest {
   }
 
   private final List<ReviewLanes.Invocation> reviewersLaunched = new CopyOnWriteArrayList<>();
+  private final Set<String> watched = ConcurrentHashMap.newKeySet();
 
   @Test
   void replaysACleanMissedStopAndStartsTheSpecsReview() throws Exception {
@@ -770,6 +781,60 @@ class MissedStopReconcilerTest {
   }
 
   @Test
+  void aStopWhoseEndingCannotBeReadIsStillPublishedAndItsRescueIsSpentOnlyThen() throws Exception {
+    createReviewSpec("auth");
+    var run = finishedSession("auth", "stopped", null);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+              throws IOException {
+            throw new IOException("incus exec: connection reset");
+          }
+        };
+    var latch = new CountDownLatch(1);
+    var stops = captureStops(latch);
+    var reconciler = reconciler(probe, Instant::now);
+
+    assertEquals(1, reconciler.sweep(), "the stop is owed whatever can be read of how it ended");
+    BusTesting.awaitDelivery(latch);
+
+    var stop = stops.peek();
+    assertEquals(run, stop.data().get(Event.WellKnownData.RUN_ID));
+    assertNull(stop.data().get(Event.WellKnownData.REASON));
+    assertNull(stop.data().get(Event.WellKnownData.EXIT_CODE));
+    assertEquals(0, reconciler.sweep(), "published once: the rescue is spent");
+  }
+
+  @Test
+  void aSweepInterruptedWhileReadingHowARunEndedKeepsItsInterrupt() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", null);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+              throws InterruptedException {
+            throw new InterruptedException("shutting down");
+          }
+        };
+
+    assertEquals(1, reconciler(probe, Instant::now).sweep());
+
+    assertTrue(Thread.interrupted(), "the sweep's thread is still told it was interrupted");
+  }
+
+  @Test
   void aSpecStrandedInReviewWithNoReviewStartedGetsItsStopReplayed() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
@@ -780,14 +845,15 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aReviewSpecWhoseReviewActuallyStartedIsNotRescued() {
+  void aReviewSpecWhoseReviewPassedIsNotRescued() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    Acting.system(
+        () -> reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "passed"));
 
-    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
-    assertEquals(0, replayed, "a review that ran is not stranded");
+    assertEquals(0, replayed, "a review that ran to its verdict is not stranded");
   }
 
   @Test
@@ -869,7 +935,8 @@ class MissedStopReconcilerTest {
     var id = DateTimeUtils.newId().toString();
     Acting.system(
         () ->
-            sessionStore.createForReview(
+            ReviewRuns.reserve(
+                sessionStore,
                 id,
                 reviewId,
                 "test-project",
@@ -877,10 +944,7 @@ class MissedStopReconcilerTest {
                 "node-a",
                 Lane.REVIEW,
                 "codex",
-                "feat/test",
-                "review it",
-                "/l",
-                "sail-agent-" + id));
+                List.of()));
     return id;
   }
 

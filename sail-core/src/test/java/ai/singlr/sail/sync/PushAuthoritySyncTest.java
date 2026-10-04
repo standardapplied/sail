@@ -239,7 +239,7 @@ class PushAuthoritySyncTest {
             });
     assertEquals(List.of(review), denied(push(ada, ADA, "review")));
 
-    assertEquals("pending", reviews.findReview(review).orElseThrow().status());
+    assertEquals("running", reviews.findReview(review).orElseThrow().status());
     assertEquals(
         List.of(),
         reviews.findingsForReview(review),
@@ -247,7 +247,7 @@ class PushAuthoritySyncTest {
     assertTrue(
         findingKeptInChangeLog(ada, review, finding.id()),
         "the denied revision keeps the findings in the change log");
-    assertEquals("pending", new ReviewStore(main.db).findReview(review).orElseThrow().status());
+    assertEquals("running", new ReviewStore(main.db).findReview(review).orElseThrow().status());
     assertEquals(List.of(), new ReviewStore(main.db).findingsForReview(review));
     assertEveryBoxConverged(ADA);
   }

@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 /**
  * Lane is the canonical run-lane vocabulary: its {@code wire()} strings are the exact role values
  * stored and matched today, and its classifications ({@code triggersReview}, {@code isChat}, {@code
- * isSession}, {@code readOnly}) are the single source the reactors and stores consult — so the
+ * servesReview}, {@code readOnly}) are the single source the reactors and stores consult — so the
  * "does this lane trigger review?" decision can no longer drift between two hand-maintained copies.
  */
 class LaneTest {

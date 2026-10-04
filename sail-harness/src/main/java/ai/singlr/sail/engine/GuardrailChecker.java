@@ -45,7 +45,12 @@ public final class GuardrailChecker {
        * Why the run was ended, as a person reads it: {@code time limit (45m)}, {@code stall (20m)}.
        */
       public String cause() {
-        return (STALL.equals(reason) ? "stall" : "time limit") + " (" + limit + ")";
+        return (STALL.equals(reason) ? STALL : "time limit") + " (" + limit + ")";
+      }
+
+      /** Whether crossing this limit ends the run, as every action but {@code notify} does. */
+      public boolean stops() {
+        return GuardrailTrigger.stops(action);
       }
     }
   }

@@ -21,44 +21,22 @@ public final class ReviewPromptBuilder {
   private ReviewPromptBuilder() {}
 
   /**
-   * @param repos the spec's target repository directory names inside the workspace — the actual
-   *     checkouts to review, never the project name (a multi-repo workspace root contains several
-   *     repos, and a wrong name sends the reviewer into an unrelated codebase)
-   */
-  public static String build(String branch, List<String> repos, List<String> categories) {
-    return build(branch, repos, categories, List.of(), List.of());
-  }
-
-  public static String build(
-      String branch,
-      List<String> repos,
-      List<String> categories,
-      List<MessageStore.MessageRow> messages) {
-    return build(branch, repos, categories, messages, List.of());
-  }
-
-  /**
-   * @param carried the previous review's still-open findings, which the reviewer must rule on: one
-   *     verdict per carried finding, alongside (not instead of) any new findings
-   */
-  public static String build(
-      String branch,
-      List<String> repos,
-      List<String> categories,
-      List<MessageStore.MessageRow> messages,
-      List<Finding> carried) {
-    return compose(branch, repos, categories, messages, carried).prompt();
-  }
-
-  /**
    * A built review prompt and the room messages it rendered in full — the exact set the caller may
    * acknowledge as delivered at the reviewer's launch. Delivery derives from presentation: a
    * message the budget truncated or omitted is absent here and stays owed a full delivery.
    */
   public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
 
-  /** As {@link #build}, with the messages the prompt rendered in full. */
-  public static Built compose(
+  /**
+   * @param repos the spec's target repository directory names inside the workspace — the actual
+   *     checkouts to review, never the project name (a multi-repo workspace root contains several
+   *     repos, and a wrong name sends the reviewer into an unrelated codebase)
+   * @param messages the room's recent conversation, of which the newest that fit the prompt budget
+   *     are rendered
+   * @param carried the previous review's still-open findings, which the reviewer must rule on: one
+   *     verdict per carried finding, alongside (not instead of) any new findings
+   */
+  public static Built build(
       String branch,
       List<String> repos,
       List<String> categories,

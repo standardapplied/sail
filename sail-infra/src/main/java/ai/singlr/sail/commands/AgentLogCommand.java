@@ -131,12 +131,15 @@ public final class AgentLogCommand implements Runnable {
     }
   }
 
-  /** The lane {@code --review} or {@code --fix} asks for, or null for the latest run of any. */
-  private Lane lane() {
+  /** The lane {@code --review} or {@code --fix} asks for; empty for the latest run of any. */
+  private Optional<Lane> lane() {
     if (review && fix) {
       throw new IllegalArgumentException("Pass --review or --fix, not both.");
     }
-    return review ? Lane.REVIEW : fix ? Lane.FIX : null;
+    if (review) {
+      return Optional.of(Lane.REVIEW);
+    }
+    return fix ? Optional.of(Lane.FIX) : Optional.empty();
   }
 
   /**
@@ -145,14 +148,13 @@ public final class AgentLogCommand implements Runnable {
    * log ({@code ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a
    * lane only selects which run, never another file shape.
    */
-  private String resolveLogPath(String project, Lane lane) {
+  private String resolveLogPath(String project, Optional<Lane> lane) {
     try (var operations = OperationsFactory.open()) {
       var dispatching = operations.dispatching();
       var node = NodeIdentity.handle();
       return logPathFrom(
-          lane == null
-              ? dispatching.latestRun(project, node)
-              : dispatching.latestRunInLane(project, node, lane));
+          lane.map(asked -> dispatching.latestRunInLane(project, node, asked))
+              .orElseGet(() -> dispatching.latestRun(project, node)));
     } catch (RuntimeException e) {
       return null;
     }

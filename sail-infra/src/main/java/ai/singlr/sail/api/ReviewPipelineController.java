@@ -18,12 +18,10 @@ import ai.singlr.sail.engine.ReviewPromptBuilder;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
-import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.net.InetAddress;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -34,7 +32,7 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Drives the review loop one stop at a time. Every agent the loop uses — the build, each reviewer,
@@ -61,11 +59,17 @@ import java.util.stream.Collectors;
  * <p>A stop that is not the one the loop is waiting on — a duplicate, a replay, the stop of a run a
  * newer one has replaced — never repeats a step. While a run still serves the spec's latest review
  * it changes nothing; otherwise the loop goes on from what the review's rows say is owed ({@link
- * #resume}): an errored review is retried as the same iteration, a running one continues from its
- * stages, a gate-failed one that never got its fix agent gets it. That is both the loop's retry and
- * its crash recovery, and the reconciler's replays are what drive it. A pass parks the spec in
- * {@code awaiting_merge} — the PR is open but unmerged, and only the human who merges it marks the
- * spec {@code done}.
+ * #resume}, read by {@link ReviewLoopState}): an errored review is retried as the same iteration, a
+ * running one continues from its stages, a gate-failed one that never got its fix agent gets it.
+ * That is both the loop's retry and its crash recovery, and the reconciler's replays are what drive
+ * it. A pass parks the spec in {@code awaiting_merge} — the PR is open but unmerged, and only the
+ * human who merges it marks the spec {@code done}.
+ *
+ * <p>A reviewer or a fix agent claims its spec's repos through the dispatch gate, and between one
+ * run's stop and the next run's claim another run may take them — a chat turn in the spec's room,
+ * another spec's build. A refused claim is not an error: the review waits, owed the step it could
+ * not take, and every stop in the project tries the waiting reviews again, since a stop is what
+ * frees a claim.
  *
  * <p>Events are delivered one at a time on the subscriber's own drain thread, so two stops never
  * race each other through the loop.
@@ -92,6 +96,7 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final EventBus eventBus;
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
+  private final ReviewLoopState loop;
   private MessageStore messageStore;
 
   /**
@@ -124,6 +129,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     this.eventBus = eventBus;
     this.syncTrigger = Objects.requireNonNull(syncTrigger, "syncTrigger");
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
+    this.loop = new ReviewLoopState(reviewStore, runStore, localHandle);
   }
 
   public ReviewPipelineController useMessages(MessageStore messages) {
@@ -212,16 +218,33 @@ public final class ReviewPipelineController implements EventSubscriber {
    * in_progress} both while its build runs and while its fix agent does, and only the lane tells a
    * late build stop from the fix agent's. A role this box does not know is a build's, as a
    * role-less stop always was; a retired invite's is ignored.
+   *
+   * <p>A run an operator stopped is never routed by its lane, whoever reports its end and in
+   * whatever order — the operator's cancel, the watcher's stop of the unit that died under the
+   * halt, the reconciler's replay of either: the unit's death would otherwise read as the run's own
+   * end, a build to review, an error to retry, or a clean finish to build on.
    */
   private void route(Event event) {
     if (!isAuthoritative(event)) {
       return;
     }
-    if (Event.WellKnownTypes.AGENT_CANCELLED.equals(event.type())) {
-      runOf(event).filter(RunStore.RunRow::servesReview).ifPresent(this::operatorStopped);
+    try {
+      if (Event.WellKnownTypes.AGENT_CANCELLED.equals(event.type())) {
+        runOf(event).ifPresent(this::operatorStopped);
+      } else {
+        routeStop(event);
+      }
+    } finally {
+      resumeWaiting(event.project());
+    }
+  }
+
+  private void routeStop(Event event) {
+    var run = runOf(event).map(stopped -> finished(stopped, event));
+    if (run.filter(RunStore.RunRow::stoppedByOperator).isPresent()) {
+      operatorStopped(run.get());
       return;
     }
-    var run = runOf(event).map(stopped -> finished(stopped, event));
     var role =
         run.map(RunStore.RunRow::role)
             .orElseGet(
@@ -243,8 +266,8 @@ public final class ReviewPipelineController implements EventSubscriber {
    * The run that stopped is finished before the loop acts on its stop, by the same write the run
    * tracker makes: the run that follows reserves through the dispatch gate, which would refuse it
    * beside a run of its own spec still recorded {@code running}, and the tracker hears the stop on
-   * a thread of its own. Returns the row as it stands once that write is settled — the one the lane
-   * handlers judge, since only then is it known whether an operator's stop claimed the run first.
+   * a thread of its own. Returns the row as it stands once that write is settled — the one the
+   * router judges, since only then is it known whether an operator's stop claimed the run first.
    */
   private RunStore.RunRow finished(RunStore.RunRow run, Event event) {
     if (!run.ownedBy(localHandle.get())) {
@@ -263,9 +286,54 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
+   * A stop frees whatever its run held, so every review of the project that a refused claim left
+   * waiting takes its step now ({@link ReviewLanes.Launch.Deferred}) — of the specs whose loop this
+   * box drives. Only a waiting step is taken here, a reviewer or a fix agent the gate would not
+   * admit: an errored review keeps to the reconciler's pace, so a broken reviewer is not retried
+   * three times in one breath, and a review whose run has ended waits for that run's own stop,
+   * which may be the very next event.
+   */
+  private void resumeWaiting(String project) {
+    try {
+      Stream.of(SpecStatus.REVIEW, SpecStatus.IN_PROGRESS)
+          .map(status -> new SpecStore.SpecFilter(project, status.wire(), null, null, null))
+          .flatMap(filter -> specStore.list(filter).stream())
+          .map(SpecStore.SpecRow::id)
+          .forEach(specId -> resumeIfWaiting(project, specId));
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not look for waiting reviews in " + project + ": " + e);
+    }
+  }
+
+  /**
+   * One spec's waiting step, when this box drives its loop. Its failure is its own: it never costs
+   * the specs after it theirs, nor replaces the failure of the stop that was being routed.
+   */
+  private void resumeIfWaiting(String project, String specId) {
+    try {
+      if (loop.drivenHere(specId) && waitsOnAClaim(loop.owed(specId))) {
+        resume(project, specId);
+      }
+    } catch (RuntimeException e) {
+      System.err.println(
+          "review-pipeline: could not resume waiting spec " + specId + ": " + e.getMessage());
+    }
+  }
+
+  private static boolean waitsOnAClaim(ReviewLoopState.Owed owed) {
+    return owed instanceof ReviewLoopState.Owed.Advance || owed instanceof ReviewLoopState.Owed.Fix;
+  }
+
+  /**
    * A build ended: a non-zero exit is the agent's failure, surfaced and left for triage; anything
    * else — a clean exit, or a run the watcher or the reconciler ended without an exit code — hands
-   * the spec to review, which judges the work the build left.
+   * the spec to review, which judges the work the build left. A dispatch supersedes the reviews
+   * before it, so a build's own stop finds none and starts the first. A stop that finds one, or
+   * that a newer run of the spec's loop has replaced — a build whose spec was re-dispatched before
+   * its stop was heard — is late or replayed, and the loop only goes on from what the spec's review
+   * is owed: never a second review beside a working fix agent, a spec its fix agent is working
+   * pulled back into {@code review}, nor a review started beside the build that replaced this one.
    */
   private void buildStopped(Event event) {
     var specId = event.spec();
@@ -276,94 +344,65 @@ public final class ReviewPipelineController implements EventSubscriber {
     if (spec.isEmpty() || !reviewable(spec.get().status())) {
       return;
     }
+    if (runOf(event).filter(this::replaced).isPresent()) {
+      resume(event.project(), specId);
+      return;
+    }
     var exitCode = Event.WellKnownData.exitCode(event.data());
     if (exitCode != null && exitCode != 0) {
-      publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, "exit " + exitCode);
+      publishEvent(event.project(), specId, Event.WellKnownTypes.AGENT_FAILED, exit(exitCode));
       return;
     }
-    startIteration(event.project(), specId);
+    if (reviewStore.latestReviewForSpec(specId).isPresent()) {
+      resume(event.project(), specId);
+      return;
+    }
+    startReview(event.project(), specId, 1);
+  }
+
+  /** Whether a newer run of its spec's loop has come after {@code run}. */
+  private boolean replaced(RunStore.RunRow run) {
+    return runStore
+        .latestLoopRun(run.specId())
+        .filter(newest -> !newest.id().equals(run.id()))
+        .isPresent();
   }
 
   /**
-   * Starts the review the spec is due, or goes on with the one it is in. A review a live run serves
-   * — a reviewer still judging, or a fix agent still answering it — is left to that run's own stop,
-   * whatever stop asked, and the spec is not moved: this is what keeps a build's late or replayed
-   * stop from starting a second review beside a working fix agent, or from pulling a spec its fix
-   * agent is working back into {@code review}. Otherwise the spec is in review. A running review no
-   * run serves is one whose launch never happened or whose daemon died mid-step, and it goes on
-   * from its stage rows. Otherwise the next iteration starts: the same one again after an
-   * infrastructure error, within its retry budget, and the next after a verdict, within {@code
-   * max_iterations}.
-   */
-  private void startIteration(String project, String specId) {
-    var existing = reviewStore.latestReviewForSpec(specId);
-    if (existing.isPresent() && served(existing.get())) {
-      System.err.println(
-          "review-pipeline: not starting a review for spec "
-              + specId
-              + " — a run still serves review "
-              + existing.get().id());
-      return;
-    }
-    advanceSpec(specId, SpecStatus.REVIEW);
-    var config = configResolver.apply(project);
-    if (config == null || config.stages().isEmpty()) {
-      return;
-    }
-    if (existing.isPresent() && "running".equals(existing.get().status())) {
-      advance(existing.get().id(), config, project, specId);
-      return;
-    }
-
-    var iteration = existing.map(ReviewPipelineController::nextIteration).orElse(1);
-    if (iteration > config.maxIterations()) {
-      var reason =
-          "review iterations exhausted ("
-              + config.maxIterations()
-              + "); re-dispatch with --restart to start a fresh attempt";
-      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
-      escalate(project, specId, existing.get().id(), reason);
-      return;
-    }
-
-    if (existing.isPresent()
-        && existing.get().errored()
-        && erroredAttempts(specId, iteration) >= MAX_ERRORED_RETRIES) {
-      var reason =
-          MAX_ERRORED_RETRIES
-              + " review attempts errored in a row at iteration "
-              + iteration
-              + "; fix the reviewer, then re-dispatch with --restart";
-      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
-      escalate(project, specId, existing.get().id(), reason);
-      return;
-    }
-
-    advance(createReview(specId, iteration), config, project, specId);
-  }
-
-  /** Whether a run that serves {@code review} — a reviewer or its fix agent — has yet to finish. */
-  private boolean served(ReviewStore.ReviewRow review) {
-    return runStore.forReview(review.id()).stream()
-        .anyMatch(run -> !RunStatus.isTerminal(run.status()));
-  }
-
-  /**
-   * Whether an authoritative stop for a spec in this status should kick off a review. Both {@code
+   * Whether an authoritative stop for a spec in this status moves its review loop. Both {@code
    * in_progress} (the normal path) and {@code review} qualify: a spec can be moved to {@code
    * review} out of band — a manual edit, or a sync revision from another box — while its agent is
    * still running here, and the old {@code == IN_PROGRESS} guard then dropped the real stop and
-   * stranded the spec in {@code review} with no review ever created. Terminal and pre-dispatch
-   * states ({@code done}, {@code awaiting_merge}, {@code archived}, {@code draft}, {@code pending})
-   * are not reviewable, so their stops are ignored.
+   * stranded the spec in {@code review} with no review ever created. Every other status — {@code
+   * cancelled} above all, and {@code done}, {@code awaiting_merge}, {@code archived}, {@code
+   * draft}, {@code pending} — is someone's decision the loop never acts over, so stops for it are
+   * ignored: no review starts, no stage is judged, no fix agent launches.
    */
   private static boolean reviewable(SpecStatus status) {
     return status == SpecStatus.IN_PROGRESS || status == SpecStatus.REVIEW;
   }
 
+  private boolean reviewable(String specId) {
+    return specId != null
+        && specStore.findById(specId).filter(spec -> reviewable(spec.status())).isPresent();
+  }
+
+  /**
+   * Starts iteration {@code iteration} of the spec's review: the spec is in review, the review row
+   * is written {@code running}, and its first stage begins. A project with no pipeline parks the
+   * spec in {@code review} for a person.
+   */
+  private void startReview(String project, String specId, int iteration) {
+    advanceSpec(specId, SpecStatus.REVIEW);
+    var config = configResolver.apply(project);
+    if (config == null || config.stages().isEmpty()) {
+      return;
+    }
+    advance(createReview(specId, iteration), config, project, specId);
+  }
+
   private String createReview(String specId, int iteration) {
     var reviewId = reviewStore.createReview(specId, iteration);
-    reviewStore.updateReviewStatus(reviewId, "running");
     syncTrigger.run();
     return reviewId;
   }
@@ -411,7 +450,14 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
     reviewStore.updateReviewStatus(reviewId, "passed");
     advanceSpec(specId, SpecStatus.AWAITING_MERGE);
-    postRoom(specId, passedVerdict(reviewId, specId));
+    postRoom(
+        specId,
+        ReviewNarration.passed(
+            reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::iteration).orElse(0),
+            reviewStore.findingsForReview(reviewId).stream()
+                .filter(finding -> finding.resolution() == Finding.Resolution.OPEN)
+                .toList(),
+            reviewStore.disputedFindings(specId)));
     publishEvent(project, specId, "review_completed", null);
   }
 
@@ -421,54 +467,120 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
     reviewStore.startStage(stage.id(), "human");
     publishEvent(project, specId, "review_stage_started", stage.name());
-    postRoom(specId, humanVerdict(specId));
+    postRoom(specId, ReviewNarration.awaitingHuman(reviewStore.disputedFindings(specId)));
     syncTrigger.run();
   }
 
   /**
-   * Starts an agent stage: the stage row turns {@code running} and its reviewer launches as a run
-   * that serves the review. A stage that cannot start — no reviewer to resolve, a container that
-   * will not take the launch — is an infrastructure error like any other.
+   * Starts an agent stage: the stage row turns {@code running}, then its reviewer launches as a run
+   * that serves the review — in that order, so the reviewer a stage waits on is always a run
+   * recorded after the stage started ({@link ReviewLoopState#stageReviewedBy}). A claim the gate
+   * refuses leaves the stage started with no reviewer, for the next stop in the project to try
+   * again, and a stage already started is not started again; this box announces the stage started
+   * only once a reviewer is running for it. A stage that cannot start — no reviewer to resolve, a
+   * container that will not take the launch — is an infrastructure error like any other.
    */
   private void launchReviewer(
       ReviewStore.StageRow stage, StageConfig stageConfig, String project, String specId) {
     var agent = stageConfig.agent() != null ? stageConfig.agent() : reviewerResolver.apply(project);
     if (agent == null) {
-      var message = "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml";
-      reviewStore.completeStage(stage.id(), "failed", message);
-      handleStageError(stage.reviewId(), project, specId, stage.name(), message);
+      stageCouldNotStart(
+          stage,
+          project,
+          specId,
+          "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml");
       return;
     }
-    reviewStore.startStage(stage.id(), agent);
-    publishEvent(project, specId, "review_stage_started", stage.name());
-    try {
-      var spec = specStore.findById(specId);
-      var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
-      var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
-      var carried = reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
-      var built =
-          ReviewPromptBuilder.compose(
-              branch, repos, stageConfig.categories(), roomMessages(specId), carried);
-      lanes.launch(
-          new ReviewLanes.Invocation(
-              Lane.REVIEW,
-              stage.reviewId(),
-              project,
-              specId,
-              agent,
-              built.prompt(),
-              branch,
-              repos,
-              null,
-              spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null),
-              built.renderedMessages().stream().map(MessageStore.MessageRow::id).toList()),
-          localHandle.get());
+    var spec = specStore.findById(specId);
+    var branch = spec.map(SpecStore.SpecRow::branch).orElse("main");
+    var repos = spec.map(SpecStore.SpecRow::repos).orElse(List.of());
+    if (!"running".equals(stage.status())) {
+      reviewStore.startStage(stage.id(), agent);
       syncTrigger.run();
+    }
+    var launched =
+        launch(
+            () -> {
+              var carried =
+                  reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
+              var built =
+                  ReviewPromptBuilder.build(
+                      branch, repos, stageConfig.categories(), roomMessages(specId), carried);
+              return new ReviewLanes.Invocation(
+                  Lane.REVIEW,
+                  stage.reviewId(),
+                  project,
+                  specId,
+                  agent,
+                  built.prompt(),
+                  branch,
+                  repos,
+                  null,
+                  spec.map(SpecStore.SpecRow::reasoningEffort).orElse(null),
+                  built.renderedMessages().stream().map(MessageStore.MessageRow::id).toList());
+            },
+            stage.reviewId());
+    switch (launched) {
+      case Launched.Serving serving ->
+          publishEvent(project, specId, "review_stage_started", stage.name());
+      case Launched.Waiting waiting -> {}
+      case Launched.Failed failed ->
+          stageCouldNotStart(
+              stage, project, specId, noun(Lane.REVIEW) + " could not start: " + failed.why());
+    }
+  }
+
+  private void stageCouldNotStart(
+      ReviewStore.StageRow stage, String project, String specId, String why) {
+    System.err.println("review-pipeline: agent stage '" + stage.name() + "': " + why);
+    reviewStore.completeStage(stage.id(), "failed", why);
+    handleStageError(stage.reviewId(), project, specId, stage.name(), why);
+  }
+
+  /** How a launch left the review it serves. */
+  private sealed interface Launched {
+
+    /** A run now serves the review, and the loop waits for its stop. */
+    record Serving() implements Launched {}
+
+    /** The gate refused the claim: the review waits for a stop in the project to free it. */
+    record Waiting() implements Launched {}
+
+    /** Nothing was started, and nothing will be: an infrastructure error naming why. */
+    record Failed(String why) implements Launched {}
+  }
+
+  /**
+   * Launches the run {@code invocation} describes for review {@code reviewId}. A launch that fails
+   * after its agent started — the launch command or the status read failing over a live unit —
+   * still left a run serving the review, and the loop waits for that run's stop rather than call a
+   * working agent a failure and act over it.
+   */
+  private Launched launch(Supplier<ReviewLanes.Invocation> invocation, String reviewId) {
+    try {
+      return switch (lanes.launch(invocation.get(), localHandle.get())) {
+        case ReviewLanes.Launch.Started started -> {
+          syncTrigger.run();
+          yield new Launched.Serving();
+        }
+        case ReviewLanes.Launch.Deferred deferred -> {
+          System.err.println(
+              "review-pipeline: review " + reviewId + " waits for its claim — " + deferred.why());
+          yield new Launched.Waiting();
+        }
+      };
     } catch (Exception e) {
-      var why = "reviewer could not start: " + reasonOf(e);
-      System.err.println("review-pipeline: agent stage '" + stage.name() + "': " + why);
-      reviewStore.completeStage(stage.id(), "failed", why);
-      handleStageError(stage.reviewId(), project, specId, stage.name(), why);
+      if (!loop.served(reviewId)) {
+        return new Launched.Failed(reasonOf(e));
+      }
+      System.err.println(
+          "review-pipeline: a launch for review "
+              + reviewId
+              + " reported a failure after its agent started ("
+              + reasonOf(e)
+              + "); waiting for that run's stop");
+      syncTrigger.run();
+      return new Launched.Serving();
     }
   }
 
@@ -478,145 +590,155 @@ public final class ReviewPipelineController implements EventSubscriber {
    * one that ended cleanly is judged on the findings in its own log.
    */
   private void reviewerStopped(RunStore.RunRow run, Event event) {
-    if (run.stoppedByOperator()) {
-      operatorStopped(run);
-      return;
-    }
-    var review = awaited(run, "running");
     var config = configResolver.apply(run.project());
-    var index = review.map(awaitedReview -> stageServedBy(awaitedReview.id(), run, config));
-    if (index.isEmpty() || index.get() < 0) {
+    var served =
+        awaited(run, "running")
+            .flatMap(review -> loop.stageReviewedBy(review.id(), run))
+            .flatMap(stage -> served(stage, config))
+            .orElse(null);
+    if (served == null) {
       resume(run.project(), run.specId());
       return;
     }
-    var reviewId = review.get().id();
-    var stage = reviewStore.stagesForReview(reviewId).get(index.get());
-    var stageConfig = config.stages().get(index.get());
-    var failure = failureOf(event);
+    var stage = served.stage();
+    var reviewId = stage.reviewId();
     var outcome =
-        failure == null
-            ? resolveStage(stage, stageConfig, run)
-            : errored(stage, "reviewer " + failure);
+        failureOf(event)
+            .map(failure -> errored(stage, noun(Lane.REVIEW) + " " + failure))
+            .orElseGet(() -> resolveStage(stage, served.config(), run));
     syncTrigger.run();
     switch (outcome) {
       case StageOutcome.Errored errored ->
           handleStageError(reviewId, run.project(), run.specId(), stage.name(), errored.message());
       case StageOutcome.GateFailed failed ->
-          handleStageFailure(
-              reviewId, config, stage.id(), stageConfig.gate(), run.project(), run.specId());
+          gateFailed(reviewId, config, served, run.project(), run.specId());
       case StageOutcome.Passed passed -> advance(reviewId, config, run.project(), run.specId());
     }
   }
 
-  /**
-   * The index of the stage {@code run} reviewed, or -1 when no stage is waiting on it: the agent
-   * stage of the review that is {@code running} and was started no later than the run was recorded.
-   * A stage started after the run is another reviewer's to judge — one whose launch never happened
-   * — and reading this run's log for it would pass a stage nobody reviewed.
-   */
-  private int stageServedBy(String reviewId, RunStore.RunRow run, ReviewPipelineConfig config) {
-    var stages = reviewStore.stagesForReview(reviewId);
-    var recorded = MissedStops.parseOr(run.startedAt(), Instant.MIN);
-    for (var i = 0; i < stages.size() && i < config.stages().size(); i++) {
-      var stage = stages.get(i);
-      if ("running".equals(stage.status())
-          && config.stages().get(i).type() != StageType.HUMAN
-          && !MissedStops.parseOr(stage.startedAt(), Instant.MAX).isAfter(recorded)) {
-        return i;
-      }
-    }
-    return -1;
+  /** A stage row and the configuration it runs under. */
+  private record ServedStage(ReviewStore.StageRow stage, StageConfig config) {}
+
+  /** The stage with the configuration of its name; empty for one the project no longer names. */
+  private static Optional<ServedStage> served(
+      ReviewStore.StageRow stage, ReviewPipelineConfig config) {
+    return config.stages().stream()
+        .filter(stageConfig -> stageConfig.name().equals(stage.name()))
+        .findFirst()
+        .map(stageConfig -> new ServedStage(stage, stageConfig));
   }
 
   /**
-   * The review {@code run} serves, when the loop is waiting on this very run: the review is this
-   * box's to drive, is the spec's latest and not superseded, is in one of {@code statuses}, and no
-   * newer run serves it. Anything else is a stop the loop has already moved past.
+   * The review {@code run} serves, when the loop is waiting on this very run: the run is this box's
+   * and the newest of its spec's loop — no reviewer, fix agent or re-dispatched build has come
+   * after it — its spec is still the loop's to move, and its review is the spec's latest in this
+   * dispatch attempt and in one of {@code statuses}. Anything else is a stop the loop has already
+   * moved past, or one it must not act over.
    */
   private Optional<ReviewStore.ReviewRow> awaited(RunStore.RunRow run, String... statuses) {
-    if (!run.ownedBy(localHandle.get()) || run.reviewId() == null) {
+    if (!run.ownedBy(localHandle.get()) || run.reviewId() == null || !reviewable(run.specId())) {
+      return Optional.empty();
+    }
+    if (replaced(run)) {
       return Optional.empty();
     }
     return reviewStore
         .latestReviewForSpec(run.specId())
         .filter(review -> review.id().equals(run.reviewId()))
-        .filter(review -> !review.superseded() && List.of(statuses).contains(review.status()))
-        .filter(
-            review ->
-                runStore.forReview(review.id()).stream()
-                    .findFirst()
-                    .filter(newest -> newest.id().equals(run.id()))
-                    .isPresent());
+        .filter(review -> List.of(statuses).contains(review.status()));
   }
 
   /**
-   * Why a run did not end well, or null when it did: the guardrail the watcher ended it for ({@code
-   * killed: time limit (45m)}, {@code killed: stall (20m)}), else its non-zero exit ({@code failed:
-   * exit 1}). A stop that names neither — a clean exit, or a reconciled stop whose exit code is
-   * unrecoverable — is no failure, and the run's work is judged on what it left.
+   * Why a run did not end well, or empty when it did: the guardrail the watcher ended it for
+   * ({@code killed: time limit (45m)}, {@code killed: stall (20m)}), else its non-zero exit ({@code
+   * failed: exit 1}). A stop that names neither — a clean exit, or a reconciled stop of a run
+   * nothing is known to have ended — is no failure, and the run's work is judged on what it left.
    */
-  private static String failureOf(Event event) {
+  private static Optional<String> failureOf(Event event) {
     var reason = Objects.toString(event.data().get(Event.WellKnownData.REASON), null);
     if (Strings.isNotBlank(reason)) {
-      return "killed: " + reason;
+      return Optional.of("killed: " + reason);
     }
     var exitCode = Event.WellKnownData.exitCode(event.data());
-    return exitCode != null && exitCode != 0 ? "failed: exit " + exitCode : null;
+    return exitCode != null && exitCode != 0
+        ? Optional.of("failed: " + exit(exitCode))
+        : Optional.empty();
+  }
+
+  private static String exit(int exitCode) {
+    return "exit " + exitCode;
+  }
+
+  /** What the loop calls the agent of a review lane when it says how that agent ended. */
+  private static String noun(Lane lane) {
+    return lane == Lane.FIX ? "fix agent" : "reviewer";
   }
 
   /**
    * Goes on from the rows when a stop arrives that the loop is not waiting on — a duplicate, a
-   * replay, the stop of a run whose step a crash cut short. Nothing is done while a run still
-   * serves the spec's latest review. Otherwise what the review's rows say is owed is done: a review
-   * that failed by infrastructure error is retried as the same iteration, within its budget (the
-   * loop's retry: the reconciler replays a stop for every errored review, once); a {@code running}
-   * review goes on from its stages; and a review that failed its gate and never got its fix agent —
-   * the newest run that served it is still its reviewer — gets it. A passed or escalated review is
-   * left as it is.
+   * replay, the stop of a run whose step a crash cut short, a stop that freed a claim a review was
+   * waiting for. What the spec's latest review is owed is done ({@link ReviewLoopState#owed}): a
+   * review that failed by infrastructure error is retried as the same iteration, within its budget
+   * (the loop's retry: the reconciler replays a stop for every errored review, once); a {@code
+   * running} review whose stage has no reviewer goes on from its stages; and a review that failed
+   * its gate and never got its fix agent gets it. A review a run still serves, one that passed or
+   * escalated, and one whose reviewer or fix agent has ended — whose own stop is the only word on
+   * what its work is worth — are left as they are.
    */
   private void resume(String project, String specId) {
-    if (specId == null
-        || specStore.findById(specId).filter(spec -> reviewable(spec.status())).isEmpty()) {
+    if (!reviewable(specId)) {
       return;
     }
-    var latest = reviewStore.latestReviewForSpec(specId).filter(review -> !review.superseded());
-    if (latest.isEmpty() || served(latest.get())) {
-      return;
-    }
-    var review = latest.get();
-    if ("running".equals(review.status())
-        || ("failed".equals(review.status()) && review.errored())) {
-      startIteration(project, specId);
-    } else if ("failed".equals(review.status())) {
-      owedFix(review, project, specId);
+    switch (loop.owed(specId)) {
+      case ReviewLoopState.Owed.Retry retry -> retry(retry.review(), project, specId);
+      case ReviewLoopState.Owed.Advance advance -> goOn(advance.review(), project, specId);
+      case ReviewLoopState.Owed.Fix fix -> owedFix(fix.review(), project);
+      case ReviewLoopState.Owed.Stop awaitsItsStop -> {}
+      case ReviewLoopState.Owed.Nothing nothing -> {}
     }
   }
 
   /**
-   * Hands a gate-failed review to its fix agent when none was ever launched for it: the review was
-   * marked failed and the loop was cut short before the fix run was recorded. A review a fix run
-   * already served is that run's stop to move.
+   * Runs an errored review's iteration again — an infrastructure error burns no iteration — until
+   * {@link #MAX_ERRORED_RETRIES} attempts of it have errored in a row, when the spec escalates.
    */
-  private void owedFix(ReviewStore.ReviewRow review, String project, String specId) {
-    var fixed =
-        runStore.forReview(review.id()).stream().anyMatch(run -> Lane.FIX.matches(run.role()));
-    if (fixed) {
+  private void retry(ReviewStore.ReviewRow errored, String project, String specId) {
+    if (erroredAttempts(specId, errored.iteration()) >= MAX_ERRORED_RETRIES) {
+      var reason =
+          MAX_ERRORED_RETRIES
+              + " review attempts errored in a row at iteration "
+              + errored.iteration()
+              + "; fix the reviewer, then re-dispatch with --restart";
+      System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
+      escalate(project, specId, errored.id(), reason);
       return;
     }
+    startReview(project, specId, errored.iteration());
+  }
+
+  /** Goes on with a running review no run serves, from its stage rows. */
+  private void goOn(ReviewStore.ReviewRow review, String project, String specId) {
+    advanceSpec(specId, SpecStatus.REVIEW);
     var config = configResolver.apply(project);
-    var stages = reviewStore.stagesForReview(review.id());
-    for (var i = 0; i < stages.size() && i < config.stages().size(); i++) {
-      if ("failed".equals(stages.get(i).status())) {
-        handleStageFailure(
-            review.id(),
-            config,
-            stages.get(i).id(),
-            config.stages().get(i).gate(),
-            project,
-            specId);
-        return;
-      }
+    if (config == null || config.stages().isEmpty()) {
+      return;
     }
+    advance(review.id(), config, project, specId);
+  }
+
+  /**
+   * Hands a gate-failed review to its fix agent when none was ever launched for it: the loop was
+   * cut short, or the gate refused the fix agent's claim, before the fix run was recorded. The
+   * verdict was said when the gate failed and is not said again.
+   */
+  private void owedFix(ReviewStore.ReviewRow review, String project) {
+    var config = configResolver.apply(project);
+    var failed =
+        reviewStore.stagesForReview(review.id()).stream()
+            .filter(stage -> "failed".equals(stage.status()))
+            .findFirst()
+            .flatMap(stage -> served(stage, config));
+    fixOrEscalate(review, config, failed, project);
   }
 
   /** How an agent stage ended: gate verdicts are review outcomes; errors are infrastructure. */
@@ -659,7 +781,7 @@ public final class ReviewPipelineController implements EventSubscriber {
           run.specId(),
           passed ? "review_stage_passed" : "review_stage_failed",
           stage.name(),
-          severityCounts(findings));
+          ReviewNarration.severityCounts(findings));
 
       return passed ? new StageOutcome.Passed() : new StageOutcome.GateFailed();
     } catch (Exception e) {
@@ -693,7 +815,7 @@ public final class ReviewPipelineController implements EventSubscriber {
         reconciled.unmatchedVerdictIds().stream().filter(this::resolvedFinding).count();
     var misaddressed = reconciled.unmatchedVerdictIds().size() - resolvedMeanwhile;
     if (misaddressed > 0) {
-      postRoom(specId, misaddressedVerdictNote((int) misaddressed));
+      postRoom(specId, ReviewNarration.misaddressedVerdicts((int) misaddressed));
     }
     var rulings =
         carried.stream()
@@ -708,7 +830,7 @@ public final class ReviewPipelineController implements EventSubscriber {
         reviewStore.applyStageResult(stageId, rulings, parsed.findings()).size()
             + (int) resolvedMeanwhile;
     if (setAside > 0) {
-      postRoom(specId, alreadyResolvedNote(setAside));
+      postRoom(specId, ReviewNarration.alreadyResolved(setAside));
     }
   }
 
@@ -723,37 +845,12 @@ public final class ReviewPipelineController implements EventSubscriber {
         .isPresent();
   }
 
-  private static String alreadyResolvedNote(int count) {
-    return "Note: the reviewer ruled on "
-        + count
-        + " finding"
-        + (count == 1 ? "" : "s")
-        + " someone resolved while the stage ran; that resolution stands and the reviewer's ruling"
-        + " on it was set aside.";
-  }
-
   private static Finding.Resolution resolutionOf(FindingParser.Ruling ruling) {
     return switch (ruling) {
       case FIXED -> Finding.Resolution.FIXED;
       case DISPUTED -> Finding.Resolution.DISPUTED;
       case STILL_OPEN -> Finding.Resolution.OPEN;
     };
-  }
-
-  /**
-   * The room note for a reviewer that ruled on a finding id no carried finding holds — the
-   * mis-transcribed-id signature. The verdict was dropped fail-closed and the real finding shows
-   * still-open, which reads as unresolved; this says plainly that it may in fact have been
-   * addressed, so a human checks the review log rather than trusting the open count. Kept off the
-   * pass/fail verdict lines so it fires only when the ambiguity is real.
-   */
-  private static String misaddressedVerdictNote(int count) {
-    return "Note: the reviewer ruled on "
-        + count
-        + " finding id"
-        + (count == 1 ? "" : "s")
-        + " that match no open finding on this spec (a mis-transcribed id). A finding shown"
-        + " still-open below may already be addressed — check the review log before acting on it.";
   }
 
   private static void warn(List<String> warnings) {
@@ -764,11 +861,12 @@ public final class ReviewPipelineController implements EventSubscriber {
    * An errored stage is an infrastructure failure, not a review verdict: record why on the review,
    * say so loudly, and stop — without a fix iteration (there are no findings to fix) and without
    * counting against {@code max_iterations} (the next stop retries the same iteration; see {@link
-   * #nextIteration}).
+   * #retry}).
    */
   private void handleStageError(
       String reviewId, String project, String specId, String stageName, String message) {
     reviewStore.failReviewWithError(reviewId, message);
+    syncTrigger.run();
     System.err.println(
         "review-pipeline: review "
             + reviewId
@@ -781,56 +879,73 @@ public final class ReviewPipelineController implements EventSubscriber {
     publishEvent(project, specId, "review_errored", message);
   }
 
-  /** The iteration the next review runs as: errored iterations are retried, not burned. */
-  private static int nextIteration(ReviewStore.ReviewRow latest) {
-    return latest.errored() ? latest.iteration() : latest.iteration() + 1;
-  }
-
-  private void handleStageFailure(
+  /**
+   * A stage failed its gate: the review has failed, the room is told what it found, and its
+   * findings go to a fix agent — or the spec escalates ({@link #fixOrEscalate}).
+   */
+  private void gateFailed(
       String reviewId,
       ReviewPipelineConfig config,
-      String failedStageId,
-      ReviewPipelineConfig.Gate gate,
+      ServedStage failedStage,
       String project,
       String specId) {
     reviewStore.updateReviewStatus(reviewId, "failed");
-
     var review = reviewStore.findReview(reviewId);
-    if (review.isEmpty()) return;
-
-    var openFindings = reviewStore.openFindingsForReview(reviewId);
+    if (review.isEmpty()) {
+      return;
+    }
     postRoom(
         specId,
-        failedVerdict(
-            review.get().iteration(), openFindings, reviewStore.disputedFindings(specId)));
+        ReviewNarration.failed(
+            review.get().iteration(),
+            reviewStore.openFindingsForReview(reviewId),
+            reviewStore.disputedFindings(specId)));
+    fixOrEscalate(review.get(), config, Optional.of(failedStage), project);
+  }
 
+  /**
+   * What follows a gate failure: the spec escalates when a finding of the failed stage is stuck or
+   * the iterations are spent, and otherwise the review's open findings go to a fix agent.
+   */
+  private void fixOrEscalate(
+      ReviewStore.ReviewRow review,
+      ReviewPipelineConfig config,
+      Optional<ServedStage> failedStage,
+      String project) {
+    var specId = review.specId();
     var stuck =
-        stuckFinding(gate, reviewStore.findingsForStage(failedStageId), config.maxFindingAge());
-    if (stuck != null) {
+        failedStage.flatMap(
+            failed ->
+                stuckFinding(
+                    failed.config().gate(),
+                    reviewStore.findingsForStage(failed.stage().id()),
+                    config.maxFindingAge()));
+    if (stuck.isPresent()) {
       escalate(
           project,
           specId,
-          reviewId,
+          review.id(),
           "finding \""
-              + stuck.title()
+              + stuck.get().title()
               + "\" survived "
-              + reviewStore.findingAge(stuck.id())
+              + reviewStore.findingAge(stuck.get().id())
               + " fix iterations; the loop is stuck on it — fix or dismiss it, then re-dispatch");
       return;
     }
-
-    if (review.get().iteration() >= config.maxIterations()) {
+    if (review.iteration() >= config.maxIterations()) {
       escalate(
           project,
           specId,
-          reviewId,
-          "review iterations exhausted (" + config.maxIterations() + ")");
+          review.id(),
+          "review iterations exhausted ("
+              + config.maxIterations()
+              + "); re-dispatch with --restart to start a fresh attempt");
       return;
     }
-
-    if (openFindings.isEmpty()) return;
-
-    launchFix(reviewId, specId, openFindings, project);
+    var openFindings = reviewStore.openFindingsForReview(review.id());
+    if (!openFindings.isEmpty()) {
+      launchFix(review.id(), specId, openFindings, project);
+    }
   }
 
   /**
@@ -841,47 +956,56 @@ public final class ReviewPipelineController implements EventSubscriber {
    * failed stage's own findings: a finding is gate-blocking only under the gate of the stage that
    * owns it, so an aged finding another stage's gate permits never counts as this stage's blocker.
    */
-  private Finding stuckFinding(
+  private Optional<Finding> stuckFinding(
       ReviewPipelineConfig.Gate gate, List<Finding> stageFindings, int maxFindingAge) {
     return stageFindings.stream()
         .filter(gate::blocks)
         .filter(finding -> reviewStore.findingAge(finding.id()) >= maxFindingAge)
-        .findFirst()
-        .orElse(null);
+        .findFirst();
   }
 
   /**
    * Hands a failed review's findings to the spec's own agent as a fix run that serves that review.
    * The run acts as itself — principal {@code <agent>/fix-<runId>} — so the room's audit trail
    * attributes its posts to the fix lane, never to the reviewer, and it runs with the stop gate
-   * asking for a committed, pushed tree. The loop then waits for its stop.
+   * asking for a committed, pushed tree. Once the run exists the spec is back {@code in_progress}
+   * and the room is told a fix iteration started; the loop then waits for its stop. A claim the
+   * gate refuses changes nothing: the fix is still owed, and the next stop in the project tries it
+   * again.
    */
   private void launchFix(String reviewId, String specId, List<Finding> findings, String project) {
-    var spec = specStore.findById(specId);
-    if (spec.isEmpty()) {
+    var spec = specStore.findById(specId).orElse(null);
+    if (spec == null) {
       return;
     }
-    var built = FixTaskBuilder.build(specId, spec.get().title(), findings, roomMessages(specId));
-    advanceSpec(specId, SpecStatus.IN_PROGRESS);
-    publishEvent(project, specId, "review_iteration_started", null);
-    try {
-      lanes.launch(
-          new ReviewLanes.Invocation(
-              Lane.FIX,
-              reviewId,
-              project,
-              specId,
-              spec.get().agent() != null ? spec.get().agent() : "claude-code",
-              built.task(),
-              spec.get().branch(),
-              spec.get().repos(),
-              spec.get().model(),
-              spec.get().reasoningEffort(),
-              built.renderedMessages().stream().map(MessageStore.MessageRow::id).toList()),
-          localHandle.get());
-      syncTrigger.run();
-    } catch (Exception e) {
-      fixFailed(reviewId, project, specId, "fix agent could not start: " + reasonOf(e));
+    var launched =
+        launch(
+            () -> {
+              var built =
+                  FixTaskBuilder.build(specId, spec.title(), findings, roomMessages(specId));
+              return new ReviewLanes.Invocation(
+                  Lane.FIX,
+                  reviewId,
+                  project,
+                  specId,
+                  spec.agent() != null ? spec.agent() : "claude-code",
+                  built.task(),
+                  spec.branch(),
+                  spec.repos(),
+                  spec.model(),
+                  spec.reasoningEffort(),
+                  built.renderedMessages().stream().map(MessageStore.MessageRow::id).toList());
+            },
+            reviewId);
+    switch (launched) {
+      case Launched.Serving serving -> {
+        advanceSpec(specId, SpecStatus.IN_PROGRESS);
+        publishEvent(project, specId, "review_iteration_started", null);
+      }
+      case Launched.Waiting waiting -> {}
+      case Launched.Failed failed ->
+          fixFailed(
+              reviewId, project, specId, noun(Lane.FIX) + " could not start: " + failed.why());
     }
   }
 
@@ -905,13 +1029,10 @@ public final class ReviewPipelineController implements EventSubscriber {
    * the watcher killed or that exited non-zero did not address the findings: nothing of its is
    * committed, the branch still holds the code the reviewer just failed, and the spec escalates.
    * The review is read again once the rescue is done: a re-dispatch that superseded it meanwhile
-   * owns the spec, and no re-review starts beside its build.
+   * owns the spec, and no re-review starts beside its build. The re-review's row is written before
+   * the spec moves, so no crash leaves a spec in {@code review} with nothing owed.
    */
   private void fixStopped(RunStore.RunRow run, Event event) {
-    if (run.stoppedByOperator()) {
-      operatorStopped(run);
-      return;
-    }
     var review = awaited(run, "failed").filter(failed -> !failed.errored());
     var spec = specStore.findById(run.specId());
     if (review.isEmpty() || spec.isEmpty()) {
@@ -920,8 +1041,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
     var reviewId = review.get().id();
     var failure = failureOf(event);
-    if (failure != null) {
-      fixFailed(reviewId, run.project(), run.specId(), "fix agent " + failure);
+    if (failure.isPresent()) {
+      fixFailed(reviewId, run.project(), run.specId(), noun(Lane.FIX) + " " + failure.get());
       return;
     }
     try {
@@ -935,7 +1056,7 @@ public final class ReviewPipelineController implements EventSubscriber {
         publishGuardrail(
             run.project(),
             run.specId(),
-            "fix agent left uncommitted changes in " + describeRescues(rescued),
+            "fix agent left uncommitted changes in " + ReviewNarration.rescues(rescued),
             "committed and pushed them to " + spec.get().branch());
       }
     } catch (Exception e) {
@@ -950,12 +1071,9 @@ public final class ReviewPipelineController implements EventSubscriber {
       return;
     }
     var config = configResolver.apply(run.project());
+    var reReview = createReview(run.specId(), review.get().iteration() + 1);
     advanceSpec(run.specId(), SpecStatus.REVIEW);
-    advance(
-        createReview(run.specId(), review.get().iteration() + 1),
-        config,
-        run.project(),
-        run.specId());
+    advance(reReview, config, run.project(), run.specId());
   }
 
   /**
@@ -977,33 +1095,32 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
-   * An operator stopped a reviewer or a fix agent. The stop was a person's decision about the loop,
-   * so the loop does not retry over it: the review escalates, and the spec waits in {@code review}
-   * for that person. Every stop of such a run lands here, whoever reports it and in whatever order
-   * — the operator's cancel, the watcher's stop of the unit that died under the halt, the
-   * reconciler's replay of either — because the unit's death would otherwise read as the run's own
-   * end: an error to retry, or a clean finish to build on. While the halt is still under way
-   * nothing is decided, since a halt that fails gives the run back; the first stop heard once it is
-   * verified escalates, and the rest find the review already escalated.
+   * An operator stopped a run. For a reviewer or a fix agent the stop was a person's decision about
+   * the loop, so the loop does not retry over it: the review escalates, and the spec waits in
+   * {@code review} for that person — also when the stop landed while the run was still launching
+   * and the failed launch already errored the review. A build an operator stopped has no review to
+   * escalate and starts none: its spec is whoever owns it to move. While the halt is still under
+   * way nothing is decided, since a halt that fails gives the run back; the first stop heard once
+   * it is verified escalates, and the rest find the review already escalated.
    */
   private void operatorStopped(RunStore.RunRow run) {
     if (!RunStatus.isTerminal(run.status())) {
       return;
     }
-    var reviewer = Lane.REVIEW.matches(run.role());
-    var review = awaited(run, reviewer ? "running" : "failed");
+    var review = awaited(run, "running", "failed");
     if (review.isEmpty()) {
       return;
     }
-    var why = (reviewer ? "reviewer" : "fix agent") + " stopped by an operator";
-    reviewStore.stagesForReview(review.get().id()).stream()
-        .filter(stage -> "running".equals(stage.status()))
-        .forEach(stage -> reviewStore.completeStage(stage.id(), "failed", why));
+    var why = noun(run.lane().orElse(Lane.REVIEW)) + " stopped by an operator";
     escalate(
         run.project(),
         run.specId(),
         review.get().id(),
         why + "; re-dispatch with --restart to start a fresh attempt");
+    reviewStore.stagesForReview(review.get().id()).stream()
+        .filter(stage -> "running".equals(stage.status()))
+        .forEach(stage -> reviewStore.completeStage(stage.id(), "failed", why));
+    syncTrigger.run();
   }
 
   /** Errored attempts of this iteration in the current dispatch attempt — the retry budget. */
@@ -1053,129 +1170,6 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
   }
 
-  private static String failedVerdict(
-      int iteration, List<Finding> findings, List<Finding> disputed) {
-    return "Review failed (iteration "
-        + iteration
-        + "): "
-        + severitySummary(findings)
-        + "."
-        + findingLines(findings)
-        + disputedLines(disputed);
-  }
-
-  private String passedVerdict(String reviewId, String specId) {
-    var iteration =
-        reviewStore.findReview(reviewId).map(ReviewStore.ReviewRow::iteration).orElse(0);
-    var open =
-        reviewStore.findingsForReview(reviewId).stream()
-            .filter(f -> f.resolution() == Finding.Resolution.OPEN)
-            .toList();
-    var disputed = disputedLines(reviewStore.disputedFindings(specId));
-    if (open.isEmpty()) {
-      return "Review passed (iteration " + iteration + ")." + disputed + "\nAwaiting merge.";
-    }
-    return "Review passed (iteration "
-        + iteration
-        + ") with "
-        + severitySummary(open)
-        + " below the gate — worth a look before merge."
-        + findingLines(open)
-        + disputed
-        + "\nAwaiting merge.";
-  }
-
-  /**
-   * The room verdict a human stage opens with: the automated stages before it passed, and every
-   * disputed finding the gate excluded is surfaced — argument included — before the human rules.
-   * Deliberately not the passed verdict: the pipeline has not passed, so no "Awaiting merge".
-   */
-  private String humanVerdict(String specId) {
-    return "Automated review stages passed."
-        + disputedLines(reviewStore.disputedFindings(specId))
-        + "\nAwaiting human approval.";
-  }
-
-  /**
-   * The disputed findings section of a room verdict: excluded from the gate by a reviewer-ruled
-   * argument, so every one is surfaced — argument included, never truncated — for the human to
-   * confirm or overrule. An agent can silence a finding only by arguing it in the open, never by
-   * omission, and a dispute the human cannot see is an omission.
-   */
-  private static String disputedLines(List<Finding> disputed) {
-    if (disputed.isEmpty()) {
-      return "";
-    }
-    var shown =
-        disputed.stream()
-            .map(
-                f ->
-                    "- ["
-                        + f.severity()
-                        + "] "
-                        + f.title()
-                        + (f.file() == null ? "" : " (" + f.file() + ":" + f.lineStart() + ")")
-                        + (Strings.isBlank(f.resolutionEvidence())
-                            ? ""
-                            : " — " + f.resolutionEvidence()))
-            .collect(Collectors.joining("\n"));
-    return "\nDisputed (excluded from the gate — needs your ruling):\n" + shown;
-  }
-
-  /** {@code "2 high, 1 low"} in severity order, or {@code "no findings"}. */
-  private static String severitySummary(List<Finding> findings) {
-    var summary =
-        severityCounts(findings).entrySet().stream()
-            .map(e -> e.getValue() + " " + e.getKey())
-            .reduce((a, b) -> a + ", " + b)
-            .orElse("");
-    return summary.isEmpty() ? "no findings" : summary;
-  }
-
-  /** One line per finding, capped so a noisy review stays one readable room message. */
-  private static String findingLines(List<Finding> findings) {
-    if (findings.isEmpty()) {
-      return "";
-    }
-    var shown =
-        findings.stream()
-            .limit(10)
-            .map(
-                f ->
-                    "- ["
-                        + f.severity()
-                        + "] "
-                        + f.title()
-                        + (f.file() == null ? "" : " (" + f.file() + ":" + f.lineStart() + ")"))
-            .reduce((a, b) -> a + "\n" + b)
-            .orElse("");
-    var more = findings.size() - Math.min(findings.size(), 10);
-    return "\n" + shown + (more > 0 ? "\n- +" + more + " more" : "");
-  }
-
-  /**
-   * Names what each rescue swept — {@code "api (3 files: A.java, B.java, C.java)"} — capped so a
-   * large sweep stays one readable notification line while still revealing debris immediately.
-   */
-  private static String describeRescues(List<ReviewLanes.Rescue> rescued) {
-    return rescued.stream()
-        .map(
-            rescue -> {
-              var files = rescue.files();
-              var shown = files.stream().limit(5).toList();
-              var suffix = files.size() > shown.size() ? ", +" + (files.size() - shown.size()) : "";
-              return "%s (%d file%s: %s%s)"
-                  .formatted(
-                      rescue.repo(),
-                      files.size(),
-                      files.size() == 1 ? "" : "s",
-                      String.join(", ", shown),
-                      suffix);
-            })
-        .reduce((a, b) -> a + ", " + b)
-        .orElse("");
-  }
-
   private void publishGuardrail(String project, String specId, String reason, String action) {
     if (eventBus == null) return;
     eventBus.publish(
@@ -1210,18 +1204,6 @@ public final class ReviewPipelineController implements EventSubscriber {
       data.put("findings", findings);
     }
     eventBus.publish(Event.of(project, specId, type, Event.SAIL_AGENT, hostname(), data));
-  }
-
-  /** Finding counts keyed by lowercase severity, omitting zero severities — for event payloads. */
-  private static Map<String, Object> severityCounts(List<Finding> findings) {
-    var counts = new LinkedHashMap<String, Object>();
-    for (var severity : Finding.Severity.values()) {
-      var count = findings.stream().filter(f -> f.severity() == severity).count();
-      if (count > 0) {
-        counts.put(severity.name().toLowerCase(Locale.ROOT), (int) count);
-      }
-    }
-    return counts;
   }
 
   /**

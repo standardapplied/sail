@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
+import static ai.singlr.sail.api.ReviewScripts.CRITICAL_FINDING;
 import static ai.singlr.sail.api.ReviewScripts.fixAllCarried;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,15 +77,6 @@ class ReviewLoopIntegrationTest {
             "stages",
             List.of(Map.of("name", "security", "type", "agent", "agent", "codex", "gate", gate))));
   }
-
-  private static final String CRITICAL_FINDING =
-      """
-      ```json
-      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-        "line_start": 1, "line_end": 1, "title": "Bad",
-        "description": "Very bad", "confidence": 0.95}]}
-      ```
-      """;
 
   /**
    * Agents that play a real review cycle: a reviewer returns the scripted findings in order, then

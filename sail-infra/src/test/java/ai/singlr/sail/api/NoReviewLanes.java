@@ -12,7 +12,7 @@ import java.util.List;
 final class NoReviewLanes implements ReviewLanes {
 
   @Override
-  public String launch(Invocation invocation, String boxHandle) {
+  public Launch launch(Invocation invocation, String boxHandle) {
     throw new AssertionError("this test launches no " + invocation.lane().wire() + " run");
   }
 

@@ -48,6 +48,9 @@ public final class WatcherSpawner {
 
   static final String UNIT_PREFIX = "sail-watch-";
 
+  /** The verb a watcher runs under, as its process shows it: what tells it from any other. */
+  private static final String WATCH_VERB = "agent watch";
+
   private static final List<String> FORWARDED_ENV =
       List.of("SAIL_TOKEN", "SAIL_TOKEN_FILE", "SAIL_SERVER", "SAIL_DATA_DIR");
 
@@ -203,10 +206,12 @@ public final class WatcherSpawner {
    * Whether any {@code sail agent watch} process for the given run is running on this host —
    * unit-spawned in any user's manager, fallback-spawned, or run by hand. Process visibility is
    * global where unit visibility is scoped to one systemd view, so this is the coverage probe the
-   * re-armer trusts: a watcher it cannot address is still a watcher it must not double.
+   * re-armer trusts: a watcher it cannot address is still a watcher it must not double. Only a
+   * watcher matches: another command that names the run ({@code sail agent stream --run}) is not
+   * one.
    */
   public boolean watcherProcessRunningForRun(String runId) {
-    return execOk(List.of("pgrep", "-f", "--", "--run " + Ids.requireUuid(runId)));
+    return execOk(List.of("pgrep", "-f", "--", WATCH_VERB + " .*--run " + Ids.requireUuid(runId)));
   }
 
   private Optional<Unit> launch(String unit, List<String> argv, Path watchLog) {

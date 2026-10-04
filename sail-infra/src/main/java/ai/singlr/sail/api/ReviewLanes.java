@@ -52,12 +52,29 @@ public interface ReviewLanes {
     }
   }
 
+  /** How a launch left the review it serves. */
+  sealed interface Launch {
+
+    /** The agent is running as run {@code runId}; the pipeline hears how it ends from its stop. */
+    record Started(String runId) implements Launch {}
+
+    /**
+     * Nothing was started: another run holds what this one would claim. Not a failure — the claim
+     * is tried again when a run in the project stops.
+     *
+     * @param why the run that holds the claim, as the gate said it
+     */
+    record Deferred(String why) implements Launch {}
+  }
+
   /**
    * Launches {@code invocation} as a run this box executes for the FDE whose handle is {@code
-   * boxHandle}, and returns the run's id. A failure to start throws, and leaves no run {@code
-   * running}.
+   * boxHandle}. A claim the dispatch gate refuses is {@link Launch.Deferred}; a launch that fails
+   * throws. A failure before the agent exists leaves no run {@code running}; one after it — the
+   * launch command or the status read failing over a unit that did start — leaves the run {@code
+   * running} with its agent, whose stop still reaches the pipeline.
    */
-  String launch(Invocation invocation, String boxHandle);
+  Launch launch(Invocation invocation, String boxHandle);
 
   /**
    * What {@code run}'s agent said last: the final answer of a streamed log, or the whole log of an

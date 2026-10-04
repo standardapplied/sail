@@ -42,7 +42,9 @@ class GuardrailsTest {
     var refusal =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Guardrails.fromMap(Map.of("idle_timeout", "90m"), "acme/sail.yaml"));
+            () ->
+                Guardrails.fromMap(
+                    Map.of("idle_timeout", "90m"), Guardrails.BUILD_BLOCK, "acme/sail.yaml"));
 
     assertEquals(
         "Unknown guardrail key `idle_timeout` in acme/sail.yaml; rename `idle_timeout` to"
@@ -55,7 +57,9 @@ class GuardrailsTest {
     var refusal =
         assertThrows(
             IllegalArgumentException.class,
-            () -> Guardrails.fromMap(Map.of("commit_burst", 20), "acme/sail.yaml"));
+            () ->
+                Guardrails.fromMap(
+                    Map.of("commit_burst", 20), Guardrails.BUILD_BLOCK, "acme/sail.yaml"));
 
     assertEquals(
         "Unknown guardrail key `commit_burst` in acme/sail.yaml; rename `commit_burst` to"
@@ -166,8 +170,9 @@ class GuardrailsTest {
             IllegalArgumentException.class,
             () -> Guardrails.fromMap(Map.of("max_duration", "45 minutes")));
 
-    assertTrue(refused.getMessage().contains("`max_duration`"), refused.getMessage());
-    assertTrue(refused.getMessage().contains("sail.yaml"), refused.getMessage());
+    assertTrue(
+        refused.getMessage().startsWith("Invalid `agent.guardrails.max_duration` in sail.yaml: "),
+        refused.getMessage());
     assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
   }
 
@@ -177,7 +182,7 @@ class GuardrailsTest {
         assertThrows(
             IllegalArgumentException.class, () -> Guardrails.fromMap(Map.of("max_idle", 20)));
 
-    assertTrue(refused.getMessage().contains("`max_idle`"), refused.getMessage());
+    assertTrue(refused.getMessage().contains("`agent.guardrails.max_idle`"), refused.getMessage());
   }
 
   @Test

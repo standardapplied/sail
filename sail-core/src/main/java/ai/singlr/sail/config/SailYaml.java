@@ -6,6 +6,7 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.engine.NameValidator;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -351,7 +352,6 @@ public record SailYaml(
                 + descriptor
                 + " because specs live in the Sail database.");
       }
-      var guardrailsRaw = (Map<String, Object>) map.get("guardrails");
       var notificationsRaw = (Map<String, Object>) map.get("notifications");
       var methodologyRaw = (Map<String, Object>) map.get("methodology");
       var reviewPipelineRaw = (Map<String, Object>) map.get("review_pipeline");
@@ -362,10 +362,13 @@ public record SailYaml(
           Boolean.TRUE.equals(map.get("auto_snapshot")),
           (List<String>) map.get("install"),
           (Map<String, String>) map.get("config"),
-          guardrailsRaw != null ? Guardrails.fromMap(guardrailsRaw, descriptor) : null,
+          Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK, descriptor)
+              .orElse(null),
           notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
           methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null,
-          reviewPipelineRaw != null ? ReviewPipelineConfig.fromMap(reviewPipelineRaw) : null);
+          reviewPipelineRaw != null
+              ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
+              : null);
     }
 
     public Map<String, Object> toMap() {
@@ -393,6 +396,18 @@ public record SailYaml(
         return reviewPipeline != null ? reviewPipeline.guardrails() : Guardrails.reviewDefaults();
       }
       return guardrails != null ? guardrails : Guardrails.defaults();
+    }
+
+    /**
+     * The hard lifetime the project sets for a run in {@code lane}, which bounds that run's
+     * credential, or null when none does. A reviewer and a fix agent have their lane's — its
+     * default when the project writes no block — and every other lane one only from an {@code
+     * agent.guardrails} block the project wrote; a block that names no {@code max_duration} sets
+     * none. A run nothing bounds must not lose its credential to a clock mid-work.
+     */
+    public Duration lifetimeFor(Lane lane) {
+      var bounded = guardrails != null || (lane != null && lane.servesReview());
+      return bounded ? Guardrails.parseDuration(guardrailsFor(lane).maxDuration()) : null;
     }
   }
 

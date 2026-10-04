@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
@@ -91,7 +92,11 @@ class WatcherRearmerTest {
       LongPredicate watcherAlive,
       WatcherRearmer.WatcherRelauncher relauncher) {
     return new WatcherRearmer(
-        sessionStore, agentUnitActive, watcherUnitActive, watcherAlive, () -> "node-a", relauncher);
+        sessionStore,
+        agentUnitActive,
+        new WatcherCoverage(watcherUnitActive, watcherAlive),
+        () -> "node-a",
+        relauncher);
   }
 
   @Test
@@ -132,8 +137,7 @@ class WatcherRearmerTest {
         new WatcherRearmer(
             sessionStore,
             (project, runId, unit) -> true,
-            NO_UNIT,
-            DEAD,
+            new WatcherCoverage(NO_UNIT, DEAD),
             () -> "node-b",
             run -> {
               relaunches.incrementAndGet();
@@ -371,11 +375,11 @@ class WatcherRearmerTest {
   }
 
   @Test
-  void livingProcessSeesThisJvmAliveAndANonexistentPidDead() {
-    var alive = WatcherRearmer.livingProcess();
+  void thisHostsCoverageSeesThisJvmAliveAndANonexistentPidDead() {
+    var alive = WatcherCoverage.of(new WatcherSpawner(new ScriptedShellExecutor(), null));
 
-    assertTrue(alive.test(ProcessHandle.current().pid()));
-    assertFalse(alive.test(999_999_999L));
+    assertTrue(alive.watcherAlive().test(ProcessHandle.current().pid()));
+    assertFalse(alive.watcherAlive().test(999_999_999L));
   }
 
   @Test

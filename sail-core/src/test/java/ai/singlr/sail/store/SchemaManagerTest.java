@@ -317,8 +317,8 @@ class SchemaManagerTest {
     var fix = "01a0ecdf-0000-7000-8000-0000000000f1";
     Acting.system(
         () ->
-            runs.createForReview(
-                fix, review, "acme", "auth", "ada", Lane.FIX, "claude-code", "b", "t", "/l", "u"));
+            ReviewRuns.reserve(
+                runs, fix, review, "acme", "auth", "ada", Lane.FIX, "claude-code", List.of()));
     assertEquals("fix", runs.findById(fix).orElseThrow().role());
     assertEquals(List.of(fix, review), runs.forReview(review).stream().map(r -> r.id()).toList());
     assertEquals(

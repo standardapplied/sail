@@ -5,12 +5,17 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -24,11 +29,14 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
@@ -41,15 +49,22 @@ import java.util.regex.Pattern;
  * The review loop as the server runs it, over a {@link FakeContainer}: the real stores, the real
  * bus with the real {@link ReviewPipelineController} and {@link RunTracker} subscribed, and the
  * real launch path ({@link DispatchOperations}'s review lanes over {@link RunLauncher} and {@link
- * WatcherSpawner}). Only the container shell is fake. A run ends here the one way it ends in
- * production — an authoritative stop on the bus, built from what the watcher would read off the
- * container — and {@link #settle} returns once every subscriber has handled everything published,
+ * WatcherSpawner}). Only the container shell and the clock are fake. A run ends here the one way it
+ * ends in production — the authoritative stop its watcher publishes: the real {@link RunWatch},
+ * under the limits the launch handed it on its command line, reading the container as it does in
+ * the field — and {@link #settle} returns once every subscriber has handled everything published,
  * so a test reads the loop's rows without sleeping or polling.
  */
 final class ReviewLoop implements AutoCloseable {
 
   static final String PROJECT = "test-project";
   static final String HANDLE = "node-a";
+
+  /** Longer than any limit a test sets: a watch still polling past it will never end. */
+  private static final Duration WATCH_HORIZON = Duration.ofHours(12);
+
+  /** A clock an hour ahead: past every grace window a sweep waits out. */
+  static final Supplier<Instant> LATER = () -> Instant.now().plus(Duration.ofHours(1));
 
   static final String YAML =
       """
@@ -66,6 +81,9 @@ final class ReviewLoop implements AutoCloseable {
 
   private static final Pattern MODEL = Pattern.compile("--model (\\S+)");
   private static final Pattern EFFORT = Pattern.compile("model_reasoning_effort='\"(\\w+)\"'");
+  private static final Pattern MAX_DURATION = Pattern.compile("--max-duration (\\S+)");
+  private static final Pattern MAX_IDLE = Pattern.compile("--max-idle (\\S+)");
+  private static final Pattern ACTION = Pattern.compile("--action (\\S+)");
 
   final Sqlite db;
   final SpecStore specs;
@@ -94,6 +112,11 @@ final class ReviewLoop implements AutoCloseable {
   /** A loop whose pipeline and reviewer are resolved from {@code yaml}, as the server wires it. */
   static ReviewLoop wired(Path dir, String yaml) {
     return new ReviewLoop(dir, yaml, null, null);
+  }
+
+  /** A loop whose pipeline is one agent stage per name ({@link #stages}). */
+  static ReviewLoop staged(Path dir, String... names) {
+    return of(dir, stages(names));
   }
 
   /** A loop under {@code config}, reviewed by {@code codex}. */
@@ -181,8 +204,13 @@ final class ReviewLoop implements AutoCloseable {
         reviews,
         bus,
         MissedStopReconciler.systemdUnitProbe(container),
+        watchers(),
         () -> HANDLE,
         clock);
+  }
+
+  private WatcherCoverage watchers() {
+    return WatcherCoverage.of(new WatcherSpawner(container, null));
   }
 
   /** The watcher re-armer this server would run, probing the container and the host. */
@@ -190,8 +218,7 @@ final class ReviewLoop implements AutoCloseable {
     return new WatcherRearmer(
         runs,
         WatcherRearmer.systemdUnitActiveProbe(container),
-        new WatcherSpawner(container, null)::watcherProcessRunningForRun,
-        WatcherRearmer.livingProcess(),
+        watchers(),
         () -> HANDLE,
         operations::relaunchWatcher);
   }
@@ -213,6 +240,145 @@ final class ReviewLoop implements AutoCloseable {
     }
   }
 
+  /** One agent stage per name, each reviewed by the agent of that name, gated on no critical. */
+  static ReviewPipelineConfig stages(String... names) {
+    return ReviewPipelineConfig.fromMap(
+        Map.of(
+            "max_iterations",
+            3,
+            "stages",
+            List.of(names).stream()
+                .map(
+                    name ->
+                        Map.<String, Object>of(
+                            "name", name, "type", "agent", "agent", name, "gate", "no_critical"))
+                .toList()));
+  }
+
+  /** Records spec {@code id} of this loop's project as a dispatch left it. */
+  void spec(
+      String id,
+      SpecStatus status,
+      String agent,
+      String model,
+      String reasoningEffort,
+      List<String> repos) {
+    Acting.as(
+        null,
+        () ->
+            specs.create(
+                new SpecStore.SpecRow(
+                    id,
+                    PROJECT,
+                    "Test spec",
+                    status,
+                    null,
+                    agent,
+                    model,
+                    reasoningEffort,
+                    "feat/test",
+                    0,
+                    null,
+                    "",
+                    "",
+                    null,
+                    List.of(),
+                    repos)));
+  }
+
+  /** Spec {@code id}, in progress under {@code claude-code}, working {@code repo}. */
+  void spec(String id, String repo) {
+    spec(id, SpecStatus.IN_PROGRESS, "claude-code", null, null, List.of(repo));
+  }
+
+  /**
+   * Records a run of {@code specId} (null for none) in lane {@code role}, with no agent started.
+   */
+  String run(String specId, String role) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            runs.create(
+                id,
+                PROJECT,
+                specId,
+                HANDLE,
+                role,
+                "claude-code",
+                "feat/test",
+                "work",
+                null,
+                null,
+                AgentUnit.forRun(id).logPath(),
+                AgentUnit.forRun(id).unitName()));
+    return id;
+  }
+
+  /** The clean stop a watcher publishes for the run {@code runId} of {@code specId}'s build. */
+  static Event buildStop(String specId, String runId) {
+    return RunStops.of(
+        Event.WellKnownData.SOURCE_WATCHER,
+        PROJECT,
+        specId,
+        "claude-code",
+        runId,
+        "build",
+        0,
+        null);
+  }
+
+  /** Dispatches {@code specId}'s build over {@code api} to its end: the spec's review starts. */
+  String built(String specId) {
+    return built(specId, "api");
+  }
+
+  /** Dispatches {@code specId}'s build over {@code repo} to its end: the spec's review starts. */
+  String built(String specId, String repo) {
+    spec(specId, repo);
+    var build = run(specId, "build");
+    onEvent(buildStop(specId, build));
+    return build;
+  }
+
+  /** The one agent running in the container; a test that expects one fails on any other count. */
+  RunStore.RunRow onlyLive() {
+    var live = live();
+    if (live.size() != 1) {
+      throw new AssertionError("exactly one agent is running: " + live);
+    }
+    return live.getFirst();
+  }
+
+  /** The id of the latest review of {@code specId}'s current dispatch attempt. */
+  String reviewOf(String specId) {
+    return reviews.latestReviewForSpec(specId).orElseThrow().id();
+  }
+
+  String statusOf(String reviewId) {
+    return reviews.findReview(reviewId).orElseThrow().status();
+  }
+
+  SpecStatus specStatus(String specId) {
+    return specs.findById(specId).orElseThrow().status();
+  }
+
+  /** The detail of every event of {@code type} published so far, oldest first. */
+  List<String> details(String type) {
+    return events(type).stream().map(event -> (String) event.data().get("detail")).toList();
+  }
+
+  /** The stop executor this server would run, halting agents through {@code halter}. */
+  StopOperations stops(StopOperations.AgentHalter halter) {
+    return new StopOperations(
+        container,
+        yaml.toString(),
+        specs,
+        runs,
+        bus::publish,
+        halter,
+        StopOperations.Listener.NONE);
+  }
+
   /** Every agent this loop launches from now on says what {@code script} says, then exits. */
   ReviewLoop scripted(ScriptedAgent script) {
     this.script = script;
@@ -225,6 +391,10 @@ final class ReviewLoop implements AutoCloseable {
    */
   void onEvent(Event event) {
     bus.publish(event);
+    played();
+  }
+
+  private void played() {
     settle();
     while (script != null && !container.live().isEmpty()) {
       play(runs.findById(container.live().getFirst()).orElseThrow());
@@ -295,36 +465,134 @@ final class ReviewLoop implements AutoCloseable {
   /** The run's agent exits with {@code exitCode}; its watcher publishes the stop. */
   void exit(String runId, String log, int exitCode) {
     container.exited(runId, log, exitCode);
-    stopped(runId, null);
+    watch(runId, false, bus::publish);
   }
 
-  /** The run's watcher kills it for {@code reason} and publishes the stop that says so. */
-  void kill(String runId, String reason) {
+  /**
+   * The run's agent exits with nothing there to hear it: its watcher sees the exit, cannot publish
+   * the stop — the daemon is down — and ends its watch, or had died before the agent did.
+   */
+  void exitsUnheard(String runId, String log, int exitCode) {
+    container.exited(runId, log, exitCode);
+    container.watcherGone(runId);
+  }
+
+  /**
+   * The run's agent works on, calling tools, until its watcher ends it for its time limit and
+   * publishes the stop that says so.
+   */
+  void outlastsItsTimeLimit(String runId) {
+    watch(runId, true, bus::publish);
+  }
+
+  /**
+   * The run's agent goes quiet — alive, and calling no tool — until its watcher ends it for the
+   * stall and publishes the stop that says so.
+   */
+  void stalls(String runId) {
+    watch(runId, false, bus::publish);
+  }
+
+  /**
+   * The run's agent goes quiet until its watcher ends it for the stall, with no daemon there to
+   * take the stop: the kill and its trigger land in the container, and the stop is lost.
+   */
+  void stallsUnheard(String runId) {
+    watch(
+        runId,
+        false,
+        event -> {
+          throw new IOException("connection refused");
+        });
+  }
+
+  /**
+   * Runs the run's watcher to the end of its watch: the real {@link RunWatch}, under the limits its
+   * spawn command carried, over this container and a clock that passes as the watch waits. With
+   * {@code working} the agent calls a tool between every two polls; otherwise the feed is silent.
+   */
+  private void watch(String runId, boolean working, RunWatch.StopPublisher publisher) {
+    var run = runs.findById(runId).orElseThrow();
+    var spawned = watcherCommandsOf(runId).getLast();
+    var time = new AtomicReference<>(Instant.parse(run.startedAt()));
     try {
-      new AgentSession(container).killAgent(PROJECT, AgentUnit.forRun(runId));
+      new RunWatch(
+              PROJECT,
+              runId,
+              AgentUnit.forRun(runId),
+              Guardrails.of(
+                  group(MAX_DURATION, spawned), group(MAX_IDLE, spawned), group(ACTION, spawned)),
+              time.get(),
+              false,
+              container,
+              feed(runId, time, working),
+              publisher,
+              QUIET,
+              time::get)
+          .run();
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
-    stopped(runId, reason);
+    container.watcherGone(runId);
+    played();
   }
 
-  private void stopped(String runId, String reason) {
-    onEvent(watcherStop(runId, reason));
+  private static final RunWatch.Narrator QUIET =
+      new RunWatch.Narrator() {
+        @Override
+        public void tripped(
+            GuardrailChecker.GuardrailResult.Triggered limit, Duration elapsed, String snapshot) {}
+
+        @Override
+        public void exited() {}
+
+        @Override
+        public void ended() {}
+      };
+
+  /**
+   * A feed over a clock that passes as the watch waits on it: a silent one lets every wait run out;
+   * a working one hands the watch one of the run's own tool calls halfway through each wait.
+   */
+  private static RunWatch.Feed feed(String runId, AtomicReference<Instant> time, boolean working) {
+    var started = time.get();
+    return new RunWatch.Feed() {
+      @Override
+      public Event poll(Duration wait) {
+        if (Duration.between(started, time.get()).compareTo(WATCH_HORIZON) > 0) {
+          throw new AssertionError("the watch of run " + runId + " never ended");
+        }
+        if (!working || wait.compareTo(Duration.ofSeconds(1)) < 0) {
+          time.updateAndGet(now -> now.plus(wait));
+          return null;
+        }
+        time.updateAndGet(now -> now.plus(wait.dividedBy(2)));
+        return Event.of(
+            PROJECT,
+            null,
+            Event.WellKnownTypes.AGENT_TOOL_STARTED,
+            "claude-code",
+            "host",
+            Map.of(Event.WellKnownData.RUN_ID, runId));
+      }
+
+      @Override
+      public boolean live() {
+        return true;
+      }
+
+      @Override
+      public boolean reopen() {
+        return true;
+      }
+    };
   }
 
   /** The stop the run's watcher publishes, read off the container as the watcher reads it. */
   Event watcherStop(String runId, String reason) {
     try {
       var exit = new AgentSession(container).queryExitStatus(PROJECT, AgentUnit.forRun(runId));
-      return RunStops.of(
-          Event.WellKnownData.SOURCE_WATCHER,
-          PROJECT,
-          exit.specId(),
-          exit.agentType(),
-          exit.runId(),
-          exit.role(),
-          exit.exitCode(),
-          reason);
+      return RunWatch.stop(PROJECT, RunWatch.addressedTo(runId, exit), reason);
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }

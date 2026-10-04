@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentSession;
@@ -260,24 +259,13 @@ public final class RunReservation {
   }
 
   /**
-   * The run's configured hard lifetime, bounding its credential: its lane's {@code max_duration},
-   * or null when none bounds it — an unbounded run's credential is revoked by its verified
-   * finishers, never by a clock that could expire mid-work. A reviewer and a fix agent are always
-   * bounded, by their lane's default when the project sets none; every other lane only by an {@code
-   * agent.guardrails} block the project wrote.
+   * The run's configured hard lifetime, bounding its credential ({@link
+   * SailYaml.Agent#lifetimeFor}), or null when none bounds it — an unbounded run's credential is
+   * revoked by its verified finishers.
    */
   private static Duration configuredMaxDuration(SailYaml config, String role) {
     var agent = config.agent();
-    if (agent == null) {
-      return null;
-    }
-    var lane = Lane.of(role).orElse(null);
-    if (lane != null && lane.servesReview()) {
-      return Guardrails.parseDuration(agent.guardrailsFor(lane).maxDuration());
-    }
-    return agent.guardrails() == null
-        ? null
-        : Guardrails.parseDuration(agent.guardrails().maxDuration());
+    return agent == null ? null : agent.lifetimeFor(Lane.of(role).orElse(null));
   }
 
   private void pruneRuns(String project) {
@@ -353,6 +341,15 @@ public final class RunReservation {
         ErrorCode.AGENT_ALREADY_RUNNING,
         occupied + ".",
         "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
+  }
+
+  /**
+   * Whether {@code failure} is the gate refusing a claim for a run that holds what it needs ({@link
+   * #overlapRefusal}). That refusal clears when the run in the way stops, and a stop is an event;
+   * any other failure of a claim does not announce its end.
+   */
+  static boolean heldByARun(ApiException failure) {
+    return failure.failure().errorCode() == ErrorCode.AGENT_ALREADY_RUNNING;
   }
 
   /**

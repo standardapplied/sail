@@ -23,6 +23,7 @@ import ai.singlr.sail.api.SpecStoreAuditPersister;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TokenAuth;
+import ai.singlr.sail.api.WatcherCoverage;
 import ai.singlr.sail.api.WatcherRearmer;
 import ai.singlr.sail.api.WebauthnAuthHandler;
 import ai.singlr.sail.auth.EnrollmentService;
@@ -285,6 +286,7 @@ public final class ServerStartCommand implements Runnable {
             dbPath, StuckSpecReconciler.DEFAULT_THRESHOLD, stranded -> surface(bus, stranded));
     var reconcileShell = new ShellExecutor(false);
     var unitProbe = MissedStopReconciler.systemdUnitProbe(reconcileShell);
+    var watchers = WatcherCoverage.of(new WatcherSpawner(reconcileShell, null));
     var missedStops =
         new MissedStopReconciler(
             specStore,
@@ -293,15 +295,14 @@ public final class ServerStartCommand implements Runnable {
             reviewStore,
             bus,
             unitProbe,
+            watchers,
             NodeIdentity::handle,
             DateTimeUtils::now);
-    var watcherSpawner = new WatcherSpawner(reconcileShell, null);
     var rearmer =
         new WatcherRearmer(
             runStore,
             WatcherRearmer.systemdUnitActiveProbe(reconcileShell),
-            watcherSpawner::watcherProcessRunningForRun,
-            WatcherRearmer.livingProcess(),
+            watchers,
             NodeIdentity::handle,
             operations::relaunchWatcher);
     var presenceEmitter =

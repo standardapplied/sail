@@ -191,7 +191,7 @@ and the spec that closes it.
 | L2 | Main refuses, rather than decides, only while what it needs will arrive by sync order. | `LivenessAuditTest` (a reply whose parent main has not taken is refused with it, never denied), `DeniedSyncTest`, `MessageSyncTest`, `SpecAuthorityTest`/`MessageAuthorityTest` (main's `Decidability` reads pending, never denies) |
 | L3 | A node holds back what main cannot decide yet instead of failing the round. | `LivenessAuditTest` (a born-in spec behind its room is withheld, not refused; an agent's spec, room, file and review land in the round its run does), `DeniedSyncTest`, `PushAuthoritySyncTest` |
 | L4 | Main's version, by denial, pull or merge, never removes or rewrites a run or review still running here. | `BoxRunsSyncTest` (pulls, converged versions, merges, lost answers, another box's run and review), `DeniedSyncTest`, `PushAuthoritySyncTest` |
-| L5 | A run whose process is gone is finished on the box that ran it within one reconciler pass. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; review and fix runs, which die only with the server, at its start (`RunStore.failRunningReviewsOnNode`) |
+| L5 | A run whose process is gone is finished on the box that ran it: by its watcher's stop, or within one reconciler pass of no watcher being left. | `MissedStopReconcilerTest`, `MissedStopsTest`; re-stamped runs: `RunTrackerTest`, `StopOperationsTest`, `AgentLogStreamerTest`, `WatcherRearmerTest`, `RunPresenceEmitterTest`; reviewer and fix runs, reconciled as a build is once no watcher is left to report them: `ReviewLanesTest` (a reviewer that exited while the daemon was down; a fix agent that exits unwatched), `ReviewLoopRecoveryTest` (a run its watcher still covers is left to it; a run whose container stopped) |
 | L6 | Offers main committed in a round that then failed converge next round, with no conflict and no second revision. | lost answers, merged offers and deletions included: `LostAnswerSyncTest`, `ProjectSyncTest`, `BoxRunsSyncTest`; a refused batch: `LivenessAuditTest` |
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); reviews with their findings: `ReviewFindingsSyncTest` (two iterations, a dispute and a resolution reach main and every box alike; a denied review adopted as main's exactly), `ReviewSyncTest`, `PushAuthoritySyncTest` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | reviews hold no such state: a review's findings and its follow-up links are its synced content, so adopting main's version loses nothing (`ReviewFindingsSyncTest`: a follow-up's links survive its spec's delete and restore on every box; `ReviewStoreTest`: the projection is written only from the adopted content) |
@@ -697,17 +697,28 @@ window, and an action (`snapshot-and-stop`, `stop`, or `notify`), and each lane 
 own: `agent.guardrails` bounds a build, an ad-hoc run and a chat turn (default `4h` / `20m`
 / `stop`), `agent.review_pipeline.guardrails` a reviewer and a fix agent (default `45m` /
 `20m` / `stop`). Both parse through the one `Guardrails` record, which refuses an invalid
-duration or action where the descriptor is read, naming the accepted forms. An event-driven
-watcher (`sail agent watch`, started with every run) merges the wall-clock deadline with the
-stall deadline and with agent-exit events off the SSE stream. Progress events (tool calls and
-log chunks) push the stall deadline out, so a working agent is never killed and a silent one
-is. The watcher is handed its run's limits on its command line when it is spawned
-(`--max-duration`, `--max-idle`, `--action`) and never reads the project's guardrails itself,
-so an edit applies to the next run. On a trip with a stopping action it kills the unit's
-whole cgroup in the container, records the trigger beside the run
-(`~/.sail/runs/<runId>/guardrail-triggered.yaml`), and, once the unit is verified gone,
-publishes the run's stop carrying the reason (`time limit (45m)`, `stall (20m)`); a unit that
-survives the kill is not reported ended, and the watcher tries again. Rollback uses Incus
+duration, a zero limit or an unknown action where the descriptor is read, naming the block,
+the key and the accepted forms. A watcher (`sail agent watch`, started with every run; the
+loop is `RunWatch`) waits on the project's event stream for the sooner of the wall-clock
+deadline and the stall deadline, and asks the container whether the unit is still active at
+least every 15 seconds, on the clock, so a busy project never delays noticing that a run
+ended. Progress events of its own run (its tool calls starting and finishing) push the stall
+deadline out, so an agent that keeps calling tools is never killed for a stall and a silent
+one is; one tool call that runs longer than `max_idle` still trips it. The stall window
+counts only time the watcher could see: a watcher outlives the daemon it listens to, and
+when its event stream ends with a daemon restart it opens the stream again at its next poll
+and starts the window afresh, while the wall clock runs on (a daemon that accepts the
+connection and does not answer is given a few seconds, not the watch). The watcher is handed its run's
+limits on its command line when it is spawned (`--max-duration`, `--max-idle`, `--action`)
+and never reads the project's guardrails itself, so an edit applies to the next run. On a
+trip with a stopping action it kills the unit's whole cgroup in the container and, once the
+container itself answers that the unit is gone, records the trigger beside the run
+(`~/.sail/runs/<runId>/guardrail-triggered.yaml`) and publishes the run's stop carrying the
+reason (`time limit (45m)`, `stall (20m)`). Silence is never an agent's death: a unit that
+survives the kill is not reported ended and is killed again at the next poll, no kill is
+tried while the container cannot say whether it worked, and a watcher that finds its container stopped — or the unit's
+manager gone and the agent's process with it — ends its watch with no stop, since nothing
+there says how the run ended; the missed-stop reconciler speaks for that run. Rollback uses Incus
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
 snapshot is the restore point.
 
@@ -772,9 +783,11 @@ unmerged work.
 process — a headless coding agent in the project container — and sail runs them one way. The
 lane (`Lane`: `build`, `adhoc`, `review`, `fix`, `room`, `room-full`) is data: it names what
 the run's stop means to the loop and whose limits bound it, never how the run launches or
-ends. The contract, each row with the tests that prove it (`ReviewLanesTest` drives the
-production launch path, pipeline, tracker and bus over a fake container shell;
-`ReviewAgentLoopIT` runs the same loop against a real container):
+ends. The contract, each row with the tests that prove it (`ReviewLanesTest` and
+`ReviewLoopRecoveryTest` drive the production launch path, watcher loop, pipeline, tracker,
+reconciler and bus over a fake container shell and clock; `ReviewAgentLoopIT` runs the launch
+path, the units, the pipeline and the tracker against a real container, standing in for the
+watcher):
 
 - **P1. One run per invocation, one launch.** Every agent sail starts is its own run row with
   its own `AgentUnit.forRun(runId)` (unit `sail-agent-<runId>`, session, task, pid and log
@@ -790,10 +803,18 @@ production launch path, pipeline, tracker and bus over a fake container shell;
   spawned the way the build lane spawns it, enforcing that run's lane's guardrails. A trip
   kills the unit in the container, records the trigger beside the run, then publishes the
   authoritative `agent_session_stopped` with `run_id`, `run_role` and `reason`. No host
-  process waits on an agent.
-  *`AgentWatchCommandTest.aTrippedRunIsKilledThenItsTriggerRecordedBesideItThenItsStopPublishedWithTheReason`,
-  `AgentWatchCommandTest.aRunThatSurvivesTheKillIsNeverReportedEnded`,
-  `aDaemonRestartWhileAReviewerRunsReArmsItsWatcherAndFailsNothing`.*
+  process waits on an agent. A run's end is its watcher's to report: the reconciler never
+  publishes a stop for a run while a `sail agent watch` process for it is running on the host
+  (`WatcherCoverage.watching`; the re-armer asks the same record whether to arm one).
+  *`RunWatchTest.aRunPastItsTimeLimitIsKilledThenItsTriggerRecordedThenItsStopPublishedWithTheReason`,
+  `RunWatchTest.aRunThatSurvivesTheKillIsNeverReportedEndedAndIsKilledAgainAtTheNextPoll`,
+  `RunWatchTest.aBusyProjectNeverDelaysNoticingThatTheRunEnded`,
+  `RunWatchTest.aFeedThatEndedIsOpenedAgainAndItsSilenceIsNeverCountedAsAStall`,
+  `RunWatchTest.aContainerThatDoesNotAnswerIsNeverTakenForAKilledAgent`,
+  `RunWatchTest.aStoppedContainerEndsTheWatchWithNoStopSinceNothingSaysHowTheRunEnded`,
+  `RunWatchTest.aRunWhoseUnitManagerDiedWithItsAgentEndsTheWatchWithNoStop`,
+  `ReviewLoopRecoveryTest.aSweepNeverSpeaksForARunItsWatcherStillCovers`,
+  `aDaemonRestartWhileAReviewerRunsFailsNothingAndReArmsAWatcherThatDiedWithIt`.*
 - **P3. One stop, one router.** A run ends exactly one way: the watcher's, or the
   reconciler's, authoritative stop (`RunStops`). `RunTracker` finishes the row as it does for
   a build, and `ReviewPipelineController` routes the stop by the lane of the run that
@@ -817,67 +838,109 @@ production launch path, pipeline, tracker and bus over a fake container shell;
   environment asserted in P1's first test.*
 - **P5. One guardrails record, per-lane values.** `Guardrails` is the only limits type,
   parsed one way; `SailYaml.Agent.guardrailsFor(lane)` is the one place a lane is mapped to
-  its block and its defaults. The watcher receives its run's limits at spawn.
+  its block and its defaults, and `lifetimeFor(lane)` beside it bounds the run's credential.
+  The watcher receives its run's limits at spawn.
   *`aReviewLanesLimitsDefaultTo45MinutesAndAnEditAppliesToTheNextRunOnly`,
   `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
+  `SailYamlTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
+  `SailYamlTest.aReviewLaneGuardrailsValueThatIsNoBlockIsRefusedRatherThanReadAsTheDefaults`,
   `GuardrailsTest.anInvalidDurationIsRefusedWhereTheBlockIsParsedNamingItsKeyAndTheAcceptedForms`.*
 - **P6. The loop's state is rows that already exist.** Which stage a review is in is its
   stage rows' statuses; which iteration, the review row's `iteration`; which run it waits on,
-  the newest live run that names it. Nothing is held on a thread across an agent's lifetime,
-  and nothing at daemon start marks a running review failed: a run still going is re-armed
-  with a watcher (`WatcherRearmer`), and one that ended unobserved has its stop published by
-  `MissedStopReconciler`, which reconciles a reviewer and a fix agent as it does a build.
-  *`aDaemonRestartWhileAReviewerRunsReArmsItsWatcherAndFailsNothing`,
+  the newest live run of this box that names it. What a review is owed next is one reading of
+  those rows (`ReviewLoopState.owed`) that the pipeline acts on and the reconciler rescues
+  by, so the two never disagree. Nothing is held on a thread across an agent's lifetime, and
+  nothing at daemon start marks a running review failed: a run still going whose watcher
+  died is re-armed with one (`WatcherRearmer`), and one that ended unobserved has its stop
+  published by `MissedStopReconciler`, which reconciles a reviewer and a fix agent as it does
+  a build.
+  *`aDaemonRestartWhileAReviewerRunsFailsNothingAndReArmsAWatcherThatDiedWithIt`,
   `aReviewerThatExitedWhileTheDaemonWasDownHasItsStopPublishedAtStart`,
   `aFixAgentThatExitsUnwatchedIsReconciledAsABuildIsAndTheLoopGoesOn`,
   `aReReviewWhoseReviewerNeverLaunchedGoesOnWhenItsFixAgentsStopIsReplayed`,
   `aStageWhoseReviewerNeverLaunchedIsNeverJudgedOnTheStageBeforeItsLog`,
   `aGateFailedReviewWhoseFixAgentNeverLaunchedGetsItAtTheNextSweep`,
+  `ReviewLoopRecoveryTest.aFinishedFixWhoseReReviewWasNeverWrittenIsRescued`,
+  `ReviewLoopRecoveryTest.aWaitingReviewIsRescuedOnceItsHolderEndsWithNoStopOnTheBus`,
+  `ReviewLoopRecoveryTest.aReviewWaitingToLaunchIsNeverReplayedWhileARunHoldsItsClaim`,
+  `ReviewLoopRecoveryTest.aStageHeldUpByARunThatEndedBeforeAnySweepSawItIsStillRescued`,
+  `ReviewLoopRecoveryTest.aRescueThatNeedsNoClaimIsNotHeldUpByARunThatHoldsTheRepo`,
+  `ReviewLoopRecoveryTest.aStaleBuildStopStartsNoReviewBesideTheBuildThatReplacedIt`,
+  `ReviewLoopRecoveryTest.aReviewRescuedOnceThatThenErrorsIsStillRetried`,
+  `ReviewLoopRecoveryTest.aStopElsewhereNeverRelaunchesAReviewerWhoseOwnStopIsStillOnItsWay`,
   `MissedStopReconcilerTest.aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce`.*
 - **P7. A reaped agent is dead.** After a trip there is no live agent process for that run in
   the container, nothing of a killed fix agent's is committed, and the room says why:
   `review_errored` (`reviewer killed: time limit (45m)`, `reviewer failed: exit 1`) and
   `review_iteration_failed` (`fix agent killed: stall (20m)`), both narrated in Slack and in
-  Mast's room.
+  Mast's room. That holds however the stop is heard: the watcher's own, a replay of one it
+  recorded, or — when the kill's stop never reached the daemon — the reconciler's, which
+  reads the trigger the watcher left beside the run and the exit code a failed unit still
+  holds.
   *`aReviewerPastItsTimeLimitIsKilledAndItsReviewErrorsWithTheReasonWithinTheRetryBudget`,
-  `aFixAgentPastItsTimeLimitIsKilledNothingOfItsLandsAndTheRoomIsToldWhy`,
+  `aFixAgentPastItsTimeLimitIsKilledNothingOfItsLandsAndTheRoomIsToldWhy` (both run the real
+  watcher loop to its trip), `ReviewLoopRecoveryTest.aKillWhoseStopNeverReachedTheDaemonIsStillAKill`,
+  `ReviewLoopRecoveryTest.aKilledReviewersHalfWrittenVerdictNeverPassesItsReview`,
+  `ReviewLoopRecoveryTest.aCrashedFixAgentNoWatcherCoversIsReconciledWithTheExitCodeItsUnitStillHolds`,
   `ReviewAgentLoopIT.aKilledReviewerLeavesNoAgentProcessBehindAndItsReviewErrorsWithTheReason`.*
 
 A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
-replaced — never repeats a step. While a run still serves the spec's latest review it changes
-nothing; otherwise the loop goes on from what the review's rows say is owed: an errored
-review is retried as the same iteration within `MAX_ERRORED_RETRIES`, a `running` one
-continues from its stages (a stage is judged only on the log of a reviewer recorded after the
-stage started), and a gate-failed one that never got its fix agent gets it. That one path is
-both the loop's retry and its crash recovery; the reconciler's replays drive it.
+replaced, including a re-dispatched build — never repeats a step. While a run still serves
+the spec's latest review it changes nothing; otherwise the loop goes on from what the
+review's rows say is owed: an errored review is retried as the same iteration within
+`MAX_ERRORED_RETRIES`, a `running` one continues from its stages (a stage is judged only on
+the log of a reviewer recorded after the stage started), and a gate-failed one that never
+got its fix agent gets it. That one path is both the loop's retry and its crash recovery;
+the reconciler's replays drive it. A review whose reviewer or fix agent has ended is owed
+that run's own stop and nothing else: no other stop relaunches over a verdict about to be
+heard. The loop acts only on a spec that is still `in_progress` or `review` — a cancelled
+spec gets no fix agent — and counts only the runs this box executed as serving a review, so
+a run row another box pushed that names this box's review never holds it; unasked, a box
+moves only the loops whose newest run it executed.
 
 A reviewer and a fix agent reserve their spec's repos through the dispatch gate, like a
 build, so neither starts beside a live build of its own spec, a full chat turn or another
-spec's run over the same repos: the launch is refused and the review errors (or the fix
-iteration fails) with the refusal as its reason. The pipeline finishes the run that stopped
-before it reserves the one that follows. The watcher addresses a stop to the run named on
-its own command line, never to one read back from the container, and a run that died before
-its watcher attached ends by a stop carrying the exit code its unit still holds. An
-operator's `sail agent stop` on a reviewer or a fix agent is a person's decision about the
-loop, so the review escalates rather than retrying over it. The stop's claim marks the run
-the operator's (`runs.stop_source`) in the transaction that claims it, and the mark outlives
-the claim, so every stop of that run — the operator's cancel, the watcher's stop of the unit
-that died under the halt, a replay of either — escalates the review in whatever order they
-are heard, and none reads as the run's own end. A stop the reconciler replays carries the
-reason the watcher recorded when it killed the run, so a kill the daemon died before acting
-on is still a kill: nothing of that fix agent's is committed. A fix agent is told to verify
-locally, commit and push, and not to watch CI: the re-review judges the branch, and the pull
-request shows its checks to whoever merges. A watcher re-armed after its own death takes the
-lane's limits as the project sets them at that moment.
+spec's run over the same repos. A claim refused for a run in the way is not an error:
+nothing is started, no attempt is spent, and the review waits, owed the step it could not
+take; every stop in the project tries the waiting reviews again, since a stop is what frees
+a claim. The reconciler replays nothing for a review waiting to launch while a run still
+holds its claim, and rescues it when it finds the claim free, each stage in its own right,
+so a holder that ends without a stop on the bus still frees the review. A container
+held by a snapshot restore is an error like any other: a reviewer's is retried within the
+errored budget, a fix agent's fails its iteration. The pipeline finishes the run that stopped before it
+reserves the one that follows. A launch that reports failure after its agent started — the
+launch command or the status read failing over a live unit — leaves a run serving the
+review, and the loop waits for that run's stop rather than escalate over a working agent; a
+launch whose row was finished under it (an operator's cancel, or a sweep that outran a
+launch slower than its grace) tears its agent down unless the agent has ended. The
+watcher addresses a stop to the run named on its own command line, never to one read back
+from the container, and a run that died before its watcher attached ends by a stop carrying
+the exit code its unit still holds.
+
+An operator's `sail agent stop` on a reviewer or a fix agent is a person's decision about
+the loop, so the review escalates rather than retrying over it. The stop's claim marks the
+run the operator's (`runs.stop_source`) in the transaction that claims it, and the mark
+outlives the claim, so every stop of that run — the operator's cancel, the watcher's stop of
+the unit that died under the halt, a replay of either — escalates the review in whatever
+order they are heard, also when the stop landed while the run was still launching, and none
+reads as the run's own end. A build an operator stopped starts no review. A halt that fails
+gives the run back only when its agent is verified still running; one that failed over an
+agent that is gone or cannot be probed keeps the claim for the operator's retry or the
+reconciler's interrupted-stop pass, so a signal that landed is never mistaken for the run
+ending on its own. A stop the reconciler replays carries the reason the watcher recorded
+when it killed the run. A fix agent is told to verify locally, commit and push, and not to
+watch CI: the re-review judges the branch, and the pull request shows its checks to whoever
+merges. A watcher re-armed after its own death takes the lane's limits as the project sets
+them at that moment, and anchors the wall clock to the session's recorded start.
 
 **Recovery without losing work.** The git branch is the durable record: every coding agent
 (build and fix) commits before it stops, and neither a guardrail stop nor an escalation ever
 discards it. So an FDE always recovers by returning to the branch. The loop recovers itself
 from a daemon restart or a dead watcher (P6): the missed-stop sweep publishes the stop of
-any loop run that ended unobserved, replays the newest loop stop once for a review that
-errored (the retry), that is `running` with no run serving it and no person to wait on, or
-that failed its gate and never got its fix agent, and the pipeline goes on from the review's
-rows. When a spec is stuck: a guardrail-killed or
+any loop run that ended with no watcher left to report it, replays the newest loop stop once
+for a review that errored (the retry), that is `running` with no run serving it and no
+person to wait on, that failed its gate and never got its fix agent, or whose fix agent
+ended with nothing coming of it, and the pipeline goes on from the review's rows. When a spec is stuck: a guardrail-killed or
 failed dispatch leaves the work committed, so `sail spec dispatch --restart` resumes on the
 branch; an escalated review parks in `review` with its findings (in the review store), each
 reviewer's and fix agent's own run log, and every fix commit intact, so the FDE reads it with

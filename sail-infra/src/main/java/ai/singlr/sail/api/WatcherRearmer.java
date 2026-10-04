@@ -13,8 +13,6 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.store.RunStore;
 import java.time.Duration;
 import java.util.Optional;
-import java.util.function.LongPredicate;
-import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -28,19 +26,16 @@ import java.util.function.Supplier;
  * are considered — a synced foreign run is its executing node's to guard, and arming a local
  * watcher against it would eventually enforce a foreign deadline on this box's container.
  *
- * <p>Coverage is probed, not bookkept — and probed at the process level: a recorded watcher pid
- * that is still alive (free, in-process check) or any {@code sail agent watch} process for the run
- * ({@link WatcherSpawner#watcherProcessRunningForRun}, which sees every systemd scope, every user's
- * manager, and plain fallback processes alike) means covered. Unit-name probes alone would be blind
- * to a watcher armed in another user's manager and re-arm a double whose guardrail actions fire
- * twice. The agent probe is deliberately systemd-strict ({@link #systemdUnitActiveProbe}): a
- * watcher supervises a unit, and only background sessions run as one — a foreground session writes
- * the same run-scoped pid file but its blocking launcher owns its lifecycle, so a pid-file-based
- * probe would arm guardrails over a session that was never meant to have them. Relaunching is
- * unit-or-nothing ({@link WatcherSpawner#spawnUnitForRun}); where systemd is unavailable the
- * relaunch is empty and the missed-stop sweep still replays the stop when the agent ends. A session
- * whose agent unit is already dead is that sweep's job, not this one's, and a legacy row with no
- * recorded unit has nothing to supervise.
+ * <p>Coverage is probed, not bookkept ({@link WatcherCoverage}): re-arming a run a watcher this
+ * pass could not address still covers would double it, and its guardrail actions would fire twice.
+ * The agent probe is deliberately systemd-strict ({@link #systemdUnitActiveProbe}): a watcher
+ * supervises a unit, and only background sessions run as one — a foreground session writes the same
+ * run-scoped pid file but its blocking launcher owns its lifecycle, so a pid-file-based probe would
+ * arm guardrails over a session that was never meant to have them. Relaunching is unit-or-nothing
+ * ({@link WatcherSpawner#spawnUnitForRun}); where systemd is unavailable the relaunch is empty and
+ * the missed-stop sweep still replays the stop when the agent ends. A session whose agent unit is
+ * already dead is that sweep's job, not this one's, and a legacy row with no recorded unit has
+ * nothing to supervise.
  */
 public final class WatcherRearmer implements AutoCloseable {
 
@@ -55,8 +50,7 @@ public final class WatcherRearmer implements AutoCloseable {
 
   private final RunStore sessionStore;
   private final MissedStopReconciler.UnitProbe agentUnitActive;
-  private final Predicate<String> watcherRunning;
-  private final LongPredicate watcherAlive;
+  private final WatcherCoverage coverage;
   private final Supplier<String> localHandle;
   private final WatcherRelauncher relauncher;
   private final PeriodicPass pass;
@@ -64,22 +58,15 @@ public final class WatcherRearmer implements AutoCloseable {
   public WatcherRearmer(
       RunStore sessionStore,
       MissedStopReconciler.UnitProbe agentUnitActive,
-      Predicate<String> watcherRunning,
-      LongPredicate watcherAlive,
+      WatcherCoverage coverage,
       Supplier<String> localHandle,
       WatcherRelauncher relauncher) {
     this.sessionStore = sessionStore;
     this.agentUnitActive = agentUnitActive;
-    this.watcherRunning = watcherRunning;
-    this.watcherAlive = watcherAlive;
+    this.coverage = coverage;
     this.localHandle = localHandle;
     this.relauncher = relauncher;
     this.pass = new PeriodicPass("rearm", this::rearm);
-  }
-
-  /** Liveness of a host process by pid — how recorded watcher pids are checked in production. */
-  public static LongPredicate livingProcess() {
-    return pid -> ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
   }
 
   /**
@@ -138,10 +125,7 @@ public final class WatcherRearmer implements AutoCloseable {
   }
 
   private boolean rearm(RunStore.RunRow session) throws Exception {
-    if (session.watcherPid() != null && watcherAlive.test(session.watcherPid())) {
-      return false;
-    }
-    if (watcherRunning.test(session.id())) {
+    if (coverage.covers(session)) {
       return false;
     }
     if (!agentUnitActive.active(session.project(), session.id(), session.unit())) {

@@ -21,6 +21,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.PushOutcome;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -110,8 +111,7 @@ class MessageSyncTest {
     var runId = "019fee00-0000-7000-8000-0000000000bb";
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createForReview(
-        runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", "b", "t", "/log", "unit");
+    ReviewRuns.reserve(runs, runId, runId, "acme", "room", "node", Lane.REVIEW, "codex", List.of());
     var principal = runs.findById(runId).orElseThrow().principal();
     var question = node.messages.append("room", principal, "Which flow?", null, true);
     var engine = new SyncEngine();
@@ -180,7 +180,8 @@ class MessageSyncTest {
   void thePipelineNarratorSyncsFromTheBoxThatRanTheReview() {
     main.db.execute("UPDATE rooms SET assignee = 'node' WHERE id = 'room'");
     var runs = new RunStore(main.db);
-    runs.createForReview(
+    ReviewRuns.reserve(
+        runs,
         "019fee00-0000-7000-8000-0000000000bb",
         "019fee00-0000-7000-8000-0000000000bb",
         "acme",
@@ -188,10 +189,7 @@ class MessageSyncTest {
         "node",
         Lane.REVIEW,
         "codex",
-        "b",
-        "t",
-        "/log",
-        "unit");
+        List.of());
 
     var accepted =
         Actor.call(

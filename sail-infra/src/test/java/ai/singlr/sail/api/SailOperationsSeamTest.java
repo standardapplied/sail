@@ -37,6 +37,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -1439,10 +1440,12 @@ class SailOperationsSeamTest {
       assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
       assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
       assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).isEmpty());
+      Acting.system(() -> runs.complete(id, "completed", 0));
       var reviewer = DateTimeUtils.newId().toString();
       Acting.system(
           () ->
-              runs.createForReview(
+              ReviewRuns.reserve(
+                  runs,
                   reviewer,
                   DateTimeUtils.newId().toString(),
                   "proj",
@@ -1450,10 +1453,7 @@ class SailOperationsSeamTest {
                   "node",
                   Lane.REVIEW,
                   "codex",
-                  "branch",
-                  "review",
-                  "/log",
-                  "unit"));
+                  List.of()));
       assertEquals(
           reviewer,
           operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).orElseThrow().id());

@@ -90,12 +90,17 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       String completedAt,
       String error) {}
 
+  /**
+   * Records iteration {@code iteration} of the spec's review, {@code running} from its one write: a
+   * review exists only because the loop started it, so no crash leaves one waiting to be started
+   * that nothing drives. Returns its id.
+   */
   public String createReview(String specId, int iteration) {
     var id = DateTimeUtils.newId().toString();
     db.transaction(
         () -> {
           db.execute(
-              "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+              "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'running', ?)",
               id,
               specId,
               iteration,

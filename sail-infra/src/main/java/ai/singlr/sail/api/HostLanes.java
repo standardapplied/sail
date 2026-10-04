@@ -28,7 +28,6 @@ import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
-import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -47,11 +46,7 @@ final class HostLanes {
   private HostLanes() {}
 
   record Dispatching(
-      DispatchOperations dispatchOps,
-      StopOperations stopOps,
-      RunStore runs,
-      ReviewStore reviews,
-      ShellExec shell)
+      DispatchOperations dispatchOps, StopOperations stopOps, RunStore runs, ShellExec shell)
       implements HostDispatching {
     @Override
     public DispatchOperations.Outcome dispatch(

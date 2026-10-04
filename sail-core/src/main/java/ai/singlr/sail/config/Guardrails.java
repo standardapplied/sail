@@ -10,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
@@ -53,14 +54,14 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
   }
 
   /**
-   * The limits named by their three values, each checked: a duration in a form {@link
-   * #parseDuration} accepts or null, and an action sail knows.
+   * The limits named by their three values, each checked: a duration greater than zero in a form
+   * {@link #parseDuration} accepts, or null for no limit, and an action sail knows.
    *
    * @throws IllegalArgumentException naming the accepted forms when a value is not one
    */
   public static Guardrails of(String maxDuration, String maxIdle, String action) {
-    parseDuration(maxDuration);
-    parseDuration(maxIdle);
+    requireLimit(maxDuration);
+    requireLimit(maxIdle);
     var chosen = Objects.requireNonNullElse(action, "stop");
     if (!VALID_ACTIONS.contains(chosen)) {
       throw new IllegalArgumentException(
@@ -72,31 +73,82 @@ public record Guardrails(String maxDuration, String maxIdle, String action) {
     return new Guardrails(maxDuration, maxIdle, chosen);
   }
 
-  /** Parses a Guardrails record from a YAML map. */
-  public static Guardrails fromMap(Map<String, Object> map) {
-    return fromMap(map, "sail.yaml");
+  /**
+   * Refuses a limit sail cannot hold a run to: a form {@link #parseDuration} does not read, or a
+   * zero, which would end every run the moment it starts.
+   */
+  private static void requireLimit(String value) {
+    var limit = parseDuration(value);
+    if (limit != null && limit.isZero()) {
+      throw new IllegalArgumentException(
+          "Invalid duration: '"
+              + value
+              + "'. A limit must be greater than zero; leave the key out for no limit.");
+    }
   }
 
-  static Guardrails fromMap(Map<String, Object> map, String descriptor) {
+  /** The build lane's block, {@code agent.guardrails}, as error messages name it. */
+  static final String BUILD_BLOCK = "agent.guardrails";
+
+  /** The review lanes' block, {@code agent.review_pipeline.guardrails}. */
+  static final String REVIEW_BLOCK = "agent.review_pipeline.guardrails";
+
+  /** Parses an {@code agent.guardrails} block of {@code sail.yaml}. */
+  public static Guardrails fromMap(Map<String, Object> map) {
+    return fromMap(map, BUILD_BLOCK, "sail.yaml");
+  }
+
+  /**
+   * Parses the guardrails block {@code block} of {@code descriptor}, so a refused value names the
+   * key to fix and the file it is in.
+   */
+  static Guardrails fromMap(Map<String, Object> map, String block, String descriptor) {
     rejectRetiredKey(map, "idle_timeout", "max_idle", descriptor);
     rejectRetiredKey(map, "commit_burst", "max_idle", descriptor);
-    return of(
-        duration(map, "max_duration", descriptor),
-        duration(map, "max_idle", descriptor),
-        (String) map.get("action"));
+    var maxDuration = duration(map, "max_duration", block, descriptor);
+    var maxIdle = duration(map, "max_idle", block, descriptor);
+    try {
+      return of(maxDuration, maxIdle, Objects.toString(map.get("action"), null));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          "Invalid `" + block + ".action` in " + descriptor + ": " + e.getMessage(), e);
+    }
   }
 
-  private static String duration(Map<String, Object> map, String key, String descriptor) {
+  /**
+   * The guardrails block {@code raw} holds under {@code block}: empty when the descriptor names
+   * none, parsed when it is a block, and refused when it is anything else — a scalar or a list
+   * there is a mistake, and must not run an agent under limits nobody wrote.
+   */
+  @SuppressWarnings("unchecked")
+  static Optional<Guardrails> fromBlock(Object raw, String block, String descriptor) {
+    return switch (raw) {
+      case null -> Optional.empty();
+      case Map<?, ?> limits ->
+          Optional.of(fromMap((Map<String, Object>) limits, block, descriptor));
+      default ->
+          throw new IllegalArgumentException(
+              "Invalid `"
+                  + block
+                  + "` in "
+                  + descriptor
+                  + ": expected a block with max_duration, max_idle and action, e.g."
+                  + " `guardrails: {max_duration: 45m, max_idle: 20m, action: stop}`.");
+    };
+  }
+
+  private static String duration(
+      Map<String, Object> map, String key, String block, String descriptor) {
     var raw = map.get(key);
     if (raw == null) {
       return null;
     }
     var value = raw.toString().strip();
     try {
-      parseDuration(value);
+      requireLimit(value);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(
-          "Invalid guardrail `" + key + "` in " + descriptor + ": " + e.getMessage(), e);
+          "Invalid `" + block + "." + key + "` in " + descriptor + ": " + e.getMessage(), e);
     }
     return value;
   }

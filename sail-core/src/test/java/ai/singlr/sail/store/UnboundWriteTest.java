@@ -89,22 +89,19 @@ class UnboundWriteTest {
   }
 
   @Test
-  void aRunWrittenByNoOneIsRefused() {
+  void aRunReservedByNoOneIsRefused() {
     assertRefused(
         () ->
-            new RunStore(db)
-                .createForReview(
-                    "review-1",
-                    "review-1",
-                    "acme",
-                    "auth",
-                    "node-a",
-                    Lane.REVIEW,
-                    "claude-code",
-                    "main",
-                    "review it",
-                    "/tmp/log",
-                    "unit"),
+            ReviewRuns.reserve(
+                new RunStore(db),
+                "review-1",
+                "review-1",
+                "acme",
+                "auth",
+                "node-a",
+                Lane.REVIEW,
+                "claude-code",
+                List.of()),
         "runs",
         "run");
   }

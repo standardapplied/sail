@@ -421,6 +421,7 @@ public final class Fleet implements AutoCloseable {
               reviews,
               bus,
               (project, runId, unit) -> false,
+              new WatcherCoverage(runId -> false, pid -> false),
               () -> handle,
               () -> Instant.now().plus(Duration.ofHours(1)));
       return reconciler.sweep();

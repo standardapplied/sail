@@ -21,8 +21,8 @@ import java.util.List;
  * RunLauncher} as that run's systemd unit with the one hook set and environment a build runs with,
  * and watched under the project's {@code agent.review_pipeline.guardrails}. The run reserves its
  * spec's repos through the gate a dispatch passes ({@link RunReservation#reserveForReview}), so a
- * refusal — a live build of the same spec, a full chat turn over the same repos — is a launch that
- * fails before anything starts. Nothing waits on the agent: the run's stop reaches the pipeline
+ * refusal — a live build of the same spec, a full chat turn over the same repos — is a launch
+ * deferred before anything starts. Nothing waits on the agent: the run's stop reaches the pipeline
  * over the bus.
  */
 final class ReviewLaneLauncher implements ReviewLanes {
@@ -47,26 +47,34 @@ final class ReviewLaneLauncher implements ReviewLanes {
   }
 
   @Override
-  public String launch(Invocation invocation, String boxHandle) {
+  public Launch launch(Invocation invocation, String boxHandle) {
     var project = invocation.project();
     var config = projects.loadRunning(project).config();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var role = invocation.lane().wire();
-    var credential =
-        runReservation.reserveForReview(
-            runId,
-            invocation.reviewId(),
-            project,
-            invocation.specId(),
-            boxHandle,
-            invocation.lane(),
-            invocation.repos(),
-            invocation.agent(),
-            invocation.branch(),
-            invocation.task(),
-            unit,
-            config);
+    String credential;
+    try {
+      credential =
+          runReservation.reserveForReview(
+              runId,
+              invocation.reviewId(),
+              project,
+              invocation.specId(),
+              boxHandle,
+              invocation.lane(),
+              invocation.repos(),
+              invocation.agent(),
+              invocation.branch(),
+              invocation.task(),
+              unit,
+              config);
+    } catch (ApiException refused) {
+      if (RunReservation.heldByARun(refused)) {
+        return new Launch.Deferred(refused.getMessage());
+      }
+      throw refused;
+    }
     try {
       if (!invocation.shown().isEmpty()) {
         runStore.markDelivered(runId, invocation.shown());
@@ -94,7 +102,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
           new RunLauncher.RunContext(
               project, unit, runId, invocation.specId(), invocation.agent(), role, true),
           launch);
-      return runId;
+      return new Launch.Started(runId);
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
@@ -106,7 +114,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
     var log =
         shell.exec(
             ContainerExec.asDevUser(
-                run.project(), List.of("cat", AgentUnit.forRun(run.id()).logPath())));
+                run.project(), List.of("cat", AgentUnit.readableLogPath(run.id(), run.logPath()))));
     return log.ok() ? StreamJsonResult.extract(log.stdout()) : "";
   }
 

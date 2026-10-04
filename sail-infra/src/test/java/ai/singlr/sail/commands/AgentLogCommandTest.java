@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,7 +43,7 @@ class AgentLogCommandTest {
         null,
         "t0",
         null,
-        java.util.List.of(),
+        List.of(),
         null,
         null,
         null);
@@ -66,7 +67,7 @@ class AgentLogCommandTest {
 
   @Test
   void aRunsLogIsItsOwnRunScopedFileWhicheverLaneItRanIn() {
-    for (var role : java.util.List.of("build", "review", "fix", "room")) {
+    for (var role : List.of("build", "review", "fix", "room")) {
       assertEquals(
           "/home/dev/.sail/runs/" + RUN + "/agent.log",
           AgentLogCommand.logPathFrom(Optional.of(run(role))),

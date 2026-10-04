@@ -134,7 +134,9 @@ class TestOperations implements Operations {
         null,
         null,
         null,
-        "lounge");
+        "lounge",
+        null,
+        null);
   }
 
   @Override

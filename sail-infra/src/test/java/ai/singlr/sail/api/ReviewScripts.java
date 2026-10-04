@@ -19,6 +19,16 @@ final class ReviewScripts {
 
   static final String CLEAN_REVIEW = "{\"verdicts\": [], \"findings\": []}";
 
+  /** A review that finds one critical problem and rules on nothing carried. */
+  static final String CRITICAL_FINDING =
+      """
+      ```json
+      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
+        "line_start": 1, "line_end": 1, "title": "Bad",
+        "description": "Very bad", "confidence": 0.95}]}
+      ```
+      """;
+
   private ReviewScripts() {}
 
   /** The carried findings listed in a review prompt, id → title, in listed order. */

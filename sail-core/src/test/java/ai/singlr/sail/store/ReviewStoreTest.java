@@ -393,7 +393,10 @@ class ReviewStoreTest {
     assertTrue(review.isPresent());
     assertEquals("auth", review.get().specId());
     assertEquals(1, review.get().iteration());
-    assertEquals("pending", review.get().status());
+    assertEquals(
+        "running",
+        review.get().status(),
+        "a review is written running: no crash leaves one waiting to be started");
   }
 
   @Test
@@ -1226,8 +1229,8 @@ class ReviewStoreTest {
     assertTrue(store.live(review, "ada"), "begun here, before its first run is recorded");
 
     var reviewer = DateTimeUtils.newId().toString();
-    runs.createForReview(
-        reviewer, review, "acme", "auth", "ada", Lane.REVIEW, "codex", "b", "t", "/l", "u");
+    ReviewRuns.reserve(
+        runs, reviewer, review, "acme", "auth", "ada", Lane.REVIEW, "codex", List.of());
     assertTrue(store.live(review, "ada"));
     assertFalse(store.live(review, "bob"), "a review another box runs is never live here");
 
@@ -1238,8 +1241,7 @@ class ReviewStoreTest {
             + " reaches it");
 
     var next = DateTimeUtils.newId().toString();
-    runs.createForReview(
-        next, review, "acme", "auth", "ada", Lane.REVIEW, "codex", "b", "t", "/l", "u");
+    ReviewRuns.reserve(runs, next, review, "acme", "auth", "ada", Lane.REVIEW, "codex", List.of());
     assertTrue(store.live(review, "ada"), "the next stage's reviewer serves the same review");
 
     store.updateReviewStatus(review, "passed");

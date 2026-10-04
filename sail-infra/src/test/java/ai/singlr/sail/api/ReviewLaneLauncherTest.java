@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -61,7 +62,8 @@ class ReviewLaneLauncherTest {
   }
 
   private String launch(ReviewLanes.Invocation invocation) {
-    return Acting.system(() -> lanes.launch(invocation, ReviewLoop.HANDLE));
+    var launched = Acting.system(() -> lanes.launch(invocation, ReviewLoop.HANDLE));
+    return assertInstanceOf(ReviewLanes.Launch.Started.class, launched).runId();
   }
 
   @Test
@@ -108,12 +110,18 @@ class ReviewLaneLauncherTest {
   }
 
   @Test
-  void aLaunchPassesTheDispatchGateAndIsRefusedBesideARunOverTheSameRepos() {
+  void aLaunchPassesTheDispatchGateAndIsDeferredBesideARunOverTheSameRepos() {
     var first = launch(invocation(Lane.REVIEW, List.of()));
 
-    var refused = assertThrows(ApiException.class, () -> launch(invocation(Lane.FIX, List.of())));
+    var second =
+        Acting.system(() -> lanes.launch(invocation(Lane.FIX, List.of()), ReviewLoop.HANDLE));
 
-    assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refused.failure().errorCode());
+    var deferred = assertInstanceOf(ReviewLanes.Launch.Deferred.class, second);
+    assertTrue(deferred.why().contains(first), "the refusal names the run in the way: " + deferred);
+    assertEquals(
+        List.of(first),
+        loop.container.launched(),
+        "nothing is started, and no run recorded, for a claim the gate refused");
     assertEquals(List.of(first), loop.runs.running().stream().map(RunStore.RunRow::id).toList());
     assertEquals(List.of("api"), loop.runs.findById(first).orElseThrow().repos());
   }

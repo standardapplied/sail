@@ -86,7 +86,7 @@ class AgentLogStreamerTest {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
 
     streamer(
-            id -> Optional.of(run("node-a", "review", "/review.log")),
+            id -> Optional.of(run("node-a", "review", "/home/dev/.sail/runs/r1/agent.log")),
             id -> Optional.of("uday"),
             "node-a")
         .handle(out);
@@ -132,7 +132,10 @@ class AgentLogStreamerTest {
   void foreignReviewRunUsesTheSameProvenanceGuard() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream");
 
-    streamer(id -> Optional.of(run("node-b", "review", "/review.log")), "node-a").handle(out);
+    streamer(
+            id -> Optional.of(run("node-b", "review", "/home/dev/.sail/runs/r1/agent.log")),
+            "node-a")
+        .handle(out);
 
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());

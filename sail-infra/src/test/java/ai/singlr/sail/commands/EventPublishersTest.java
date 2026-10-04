@@ -16,6 +16,7 @@ import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RunTracker;
+import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.SailOperations;
@@ -182,7 +183,7 @@ class EventPublishersTest {
     bus.subscribe(
         BusTesting.latching(new RunTracker(runs, SyncScheduler.disabled(), () -> ME), tracked));
 
-    AgentWatchCommand.emitStop(
+    RunWatch.emitStop(
         publisher::publish,
         "acme",
         new AgentSession.ExitState(false, 0, "auth", "claude-code", run, "build"),

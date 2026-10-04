@@ -227,7 +227,7 @@ class WatcherSpawnerTest {
 
   @Test
   void watcherProcessRunningForRunProbesByRunIdPattern() {
-    var shell = new FakeShell().on("pgrep -f -- --run " + RUN_ID, ok());
+    var shell = new FakeShell().on("pgrep -f -- agent watch .*--run " + RUN_ID, ok());
 
     assertTrue(new WatcherSpawner(shell, null).watcherProcessRunningForRun(RUN_ID));
     assertFalse(new WatcherSpawner(new FakeShell(), null).watcherProcessRunningForRun(RUN_ID));

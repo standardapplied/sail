@@ -121,63 +121,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       return specId != null ? specId : roomId;
     }
 
-    /** A row that serves no review — every lane but the reviewer's and the fix agent's. */
-    public RunRow(
-        String id,
-        String project,
-        String specId,
-        String node,
-        String role,
-        String agent,
-        String branch,
-        String task,
-        Integer pid,
-        Integer watcherPid,
-        String status,
-        Integer exitCode,
-        String logPath,
-        String unit,
-        String startedAt,
-        String completedAt,
-        List<String> repos,
-        Long pidTicks,
-        String principal,
-        String owner,
-        String sessionId,
-        String sessionSource,
-        String transcriptPath,
-        String lastActivityAt,
-        String roomId) {
-      this(
-          id,
-          project,
-          specId,
-          node,
-          role,
-          agent,
-          branch,
-          task,
-          pid,
-          watcherPid,
-          status,
-          exitCode,
-          logPath,
-          unit,
-          startedAt,
-          completedAt,
-          repos,
-          pidTicks,
-          principal,
-          owner,
-          sessionId,
-          sessionSource,
-          transcriptPath,
-          lastActivityAt,
-          roomId,
-          null,
-          null);
-    }
-
     /** A row without activity — the shape every run has until its first progress stamp. */
     public RunRow(
         String id,
@@ -404,37 +347,6 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       Integer watcherPid,
       String logPath,
       String unit) {
-    createReturningCredential(
-        id,
-        project,
-        specId,
-        null,
-        boxHandle,
-        role,
-        agent,
-        branch,
-        task,
-        pid,
-        watcherPid,
-        logPath,
-        unit);
-    return id;
-  }
-
-  private String createReturningCredential(
-      String id,
-      String project,
-      String specId,
-      String reviewId,
-      String boxHandle,
-      String role,
-      String agent,
-      String branch,
-      String task,
-      Integer pid,
-      Integer watcherPid,
-      String logPath,
-      String unit) {
     var node = stamp(boxHandle);
     return db.transaction(
         () -> {
@@ -451,13 +363,12 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           }
           db.execute(
               """
-              INSERT INTO runs (id, project, spec_id, review_id, node, role, agent, branch, task,
-                  pid, watcher_pid, status, started_at, log_path, unit, principal, owner)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)""",
+              INSERT INTO runs (id, project, spec_id, node, role, agent, branch, task, pid,
+                  watcher_pid, status, started_at, log_path, unit, principal, owner)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?, ?)""",
               id,
               project,
               specId,
-              reviewId,
               node,
               role,
               agent,
@@ -471,46 +382,10 @@ public final class RunStore implements ConflictResolver, SyncedStore {
               principalHandle(agent, role, id),
               node);
           recordPrincipal(id, principalHandle(agent, role, id));
-          var credential = mintCredential(id, null);
+          mintCredential(id, null);
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
-          return credential;
+          return id;
         });
-  }
-
-  /**
-   * Records a reviewer's or a fix agent's run as {@link #create} records a run: the row and its
-   * credential, with no gate. The pipeline reserves its runs through {@link #reserveForReview};
-   * this is the row alone, for a run whose claim is not in question.
-   *
-   * @param lane {@link Lane#REVIEW} or {@link Lane#FIX}
-   */
-  public String createForReview(
-      String id,
-      String reviewId,
-      String project,
-      String specId,
-      String boxHandle,
-      Lane lane,
-      String agent,
-      String branch,
-      String task,
-      String logPath,
-      String unit) {
-    requireServesReview(lane);
-    return createReturningCredential(
-        id,
-        project,
-        specId,
-        Objects.requireNonNull(reviewId, "reviewId"),
-        boxHandle,
-        lane.wire(),
-        agent,
-        branch,
-        task,
-        null,
-        null,
-        logPath,
-        unit);
   }
 
   /**
@@ -1457,7 +1332,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * The newest run of {@code specId} among {@code lanes}, or empty when it has none. Ties on {@code
    * started_at} break on the UUIDv7 id, which orders by mint time.
    */
-  public Optional<RunRow> latestInLanes(String specId, Lane... lanes) {
+  private Optional<RunRow> latestInLanes(String specId, Lane... lanes) {
     var parameters = new ArrayList<Object>();
     parameters.add(specId);
     Arrays.stream(lanes).map(Lane::wire).forEach(parameters::add);

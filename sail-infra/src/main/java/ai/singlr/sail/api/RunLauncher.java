@@ -147,17 +147,17 @@ public final class RunLauncher {
    * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
    * lane can build its own response. Replaces four hand-copied copies of this sequence.
    *
-   * <p>A run whose row is no longer {@code running} when its process is stamped was either
-   * cancelled while the launch was preparing — its agent may be running, and is torn down — or
-   * ended on its own: an agent that finished at once, whose watcher's stop finished the row first.
-   * That one launched and is over; its stop says how it ended, and the launch is not a failure. The
-   * row tells the two apart, never the process: the status read above is from before the stamp, and
-   * an agent can end between the two.
+   * <p>A run whose row is no longer {@code running} when its process is stamped was either ended
+   * under the launch — an operator's cancel, or a reconciler that found no unit yet for a launch
+   * slower than its grace — or ended on its own: an agent that finished at once, whose watcher's
+   * stop finished the row first. The first may have an agent running against a row that says it is
+   * over, and it is torn down. The second launched and is over; its stop says how it ended, and the
+   * launch is not a failure ({@link #endedOnItsOwn}).
    */
   AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
     var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
     if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
-      if (endedOnItsOwn(ctx.runId())) {
+      if (endedOnItsOwn(ctx)) {
         return status;
       }
       throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
@@ -333,20 +333,30 @@ public final class RunLauncher {
   }
 
   /**
-   * Tears down a launch whose run was cancelled during preparation: the operator's stop already
-   * recorded the terminal outcome, so the just-started agent must die rather than run unrecorded
-   * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
-   * halt that races the process's own exit is a no-op — and the conflict names what happened.
+   * Whether a run whose row finished under its launch ended by its own stop: the row is still held,
+   * no operator's stop claim marked it, and its agent is not running now. The agent is probed after
+   * the stamp was refused, not before: the status the launch read first is from before the stamp,
+   * and an agent can end between the two. An agent still running against a finished row did not end
+   * itself — something else finished the row under it — and a row that is gone was erased under the
+   * launch; both are a launch that lost its run.
    */
-  /**
-   * Whether the finished run {@code runId} ended by its own stop rather than an operator's: its row
-   * is still held and no stop claim marked it. A row that is gone was erased under the launch, and
-   * is a cancel like any other.
-   */
-  private boolean endedOnItsOwn(String runId) {
-    return runStore.findById(runId).filter(run -> !run.stoppedByOperator()).isPresent();
+  private boolean endedOnItsOwn(RunContext ctx) {
+    var unmarked =
+        runStore.findById(ctx.runId()).filter(run -> !run.stoppedByOperator()).isPresent();
+    if (!unmarked) {
+      return false;
+    }
+    var now = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
+    return now == null || !now.running();
   }
 
+  /**
+   * Tears down a launch whose run was ended during preparation: the run's terminal outcome is
+   * already recorded — by an operator's stop, or by a reconciler that outran a slow launch — so the
+   * just-started agent must die rather than run unrecorded against a released claim. Halting is
+   * best-effort — the unit is transient and run-scoped, so a halt that races the process's own exit
+   * is a no-op — and the conflict names what happened.
+   */
   private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
     try {
       StopOperations.sessionHalter(shell).halt(project, unit);
@@ -356,8 +366,8 @@ public final class RunLauncher {
     }
     return new ApiException(
         ErrorCode.CONFLICT,
-        "Run " + runId + " was cancelled while its launch was preparing; the agent was torn down.",
-        "The cancel already recorded the run's outcome; no retry is needed.");
+        "Run " + runId + " was ended while its launch was preparing; the agent was torn down.",
+        "The run's outcome is already recorded; dispatch again if the work is still wanted.");
   }
 
   /**
@@ -370,16 +380,7 @@ public final class RunLauncher {
   private void completeForegroundRun(String runId, int exitCode) {
     runBookkeeping(
         "complete run " + runId,
-        () -> {
-          if (runStore.transition(
-              runId, "running", exitCode == 0 ? "completed" : "failed", exitCode)) {
-            return;
-          }
-          var current = runStore.findById(runId).orElse(null);
-          if (current != null && current.exitCode() == null) {
-            runStore.recordExitCode(runId, exitCode);
-          }
-        });
+        () -> RunTracker.finish(runStore, runId, exitCode == 0 ? "completed" : "failed", exitCode));
   }
 
   /**

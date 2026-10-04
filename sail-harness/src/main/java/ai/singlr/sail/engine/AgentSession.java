@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -602,9 +603,22 @@ public final class AgentSession {
    * Reads the given role's unit terminal state from systemd in a single call: liveness, exit code,
    * and the spec/agent it was launched for (parsed from the unit's recorded environment). Lets the
    * watcher detect an exit and synthesize a reliable stop signal even when the agent's own hook
-   * never fired.
+   * never fired. A container that does not answer reads as an active unit: a run nobody could see
+   * end has not ended.
    */
   public ExitState queryExitStatus(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var answered = answeredExitStatus(containerName, unit);
+    return answered.isPresent() ? answered.get() : exitState(containerName, unit, "");
+  }
+
+  /**
+   * As {@link #queryExitStatus}, or empty when the question was not answered — the container is
+   * stopped, incus could not reach it, or the user's systemd manager is not there to ask. Only an
+   * answer says a unit is gone: whoever is about to report a run ended asks here, so silence is
+   * never taken for an agent's death.
+   */
+  public Optional<ExitState> answeredExitStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var cmd =
         ContainerExec.asDevUser(
@@ -618,7 +632,14 @@ public final class AgentSession {
                 "--property=ExecMainStatus",
                 "--property=Environment"));
     var result = shell.exec(cmd);
-    var state = parseExitState(result.ok() ? result.stdout() : "");
+    return result.ok()
+        ? Optional.of(exitState(containerName, unit, result.stdout()))
+        : Optional.empty();
+  }
+
+  private ExitState exitState(String containerName, AgentUnit unit, String show)
+      throws IOException, InterruptedException, TimeoutException {
+    var state = parseExitState(show);
     if (!state.specId().isBlank() && !state.runId().isBlank() && !state.role().isBlank()) {
       return state;
     }
