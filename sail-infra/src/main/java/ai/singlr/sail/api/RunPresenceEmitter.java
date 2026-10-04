@@ -73,7 +73,7 @@ public final class RunPresenceEmitter implements AutoCloseable {
     var now = clock.get();
     var live = new HashSet<String>();
     var emitted = 0;
-    for (var run : runStore.runningForPresence()) {
+    for (var run : runStore.running()) {
       if (!run.ownedBy(node)) {
         continue;
       }

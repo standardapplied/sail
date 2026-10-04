@@ -134,7 +134,9 @@ class TestOperations implements Operations {
         null,
         null,
         null,
-        "lounge");
+        "lounge",
+        null,
+        null);
   }
 
   @Override
@@ -328,6 +330,7 @@ class TestOperations implements Operations {
                 null,
                 null,
                 "/home/dev/.sail/runs/" + runId + "/agent.log",
+                null,
                 null,
                 null,
                 null,

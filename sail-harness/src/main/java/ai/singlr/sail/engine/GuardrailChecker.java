@@ -20,6 +20,8 @@ import java.util.concurrent.TimeoutException;
  */
 public final class GuardrailChecker {
 
+  private static final String STALL = "stall";
+
   private final ShellExec shell;
 
   public GuardrailChecker(ShellExec shell) {
@@ -30,7 +32,27 @@ public final class GuardrailChecker {
   public sealed interface GuardrailResult {
     record Ok() implements GuardrailResult {}
 
-    record Triggered(String reason, String detail, String action) implements GuardrailResult {}
+    /**
+     * @param reason which limit was crossed: {@code max_duration} or {@code stall}
+     * @param detail what was measured against it
+     * @param action what the project's guardrails say to do about it
+     * @param limit the configured limit that was crossed, as the project wrote it (e.g. "45m")
+     */
+    record Triggered(String reason, String detail, String action, String limit)
+        implements GuardrailResult {
+
+      /**
+       * Why the run was ended, as a person reads it: {@code time limit (45m)}, {@code stall (20m)}.
+       */
+      public String cause() {
+        return (STALL.equals(reason) ? STALL : "time limit") + " (" + limit + ")";
+      }
+
+      /** Whether crossing this limit ends the run, as every action but {@code notify} does. */
+      public boolean stops() {
+        return GuardrailTrigger.stops(action);
+      }
+    }
   }
 
   /** Git activity snapshot for a single repo. Used by status and report, not by guardrails. */
@@ -66,7 +88,8 @@ public final class GuardrailChecker {
                 + " (limit: "
                 + guardrails.maxDuration()
                 + ")",
-            guardrails.action());
+            guardrails.action(),
+            guardrails.maxDuration());
       }
     }
     return new GuardrailResult.Ok();
@@ -93,9 +116,10 @@ public final class GuardrailChecker {
     var idle = Duration.between(lastProgressAt, now);
     if (idle.compareTo(maxIdle) > 0) {
       return new GuardrailResult.Triggered(
-          "stall",
+          STALL,
           "No progress for " + formatDuration(idle) + " (limit: " + guardrails.maxIdle() + ")",
-          guardrails.action());
+          guardrails.action(),
+          guardrails.maxIdle());
     }
     return new GuardrailResult.Ok();
   }

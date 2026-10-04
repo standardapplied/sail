@@ -10,6 +10,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -19,6 +20,7 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.io.IOException;
 import java.time.Duration;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -165,6 +167,7 @@ public final class DispatchOperations {
   private final RunReservation runReservation;
   private final AdhocRunner adhocRunner;
   private final RoomWakeLauncher roomWakeLauncher;
+  private final ReviewLanes reviewLanes;
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
@@ -227,6 +230,8 @@ public final class DispatchOperations {
             runReservation,
             runLauncher,
             roomCommitGuard);
+    this.reviewLanes =
+        new ReviewLaneLauncher(projects, runStore, runReservation, runLauncher, shell);
     this.buildDispatch =
         new BuildDispatch(
             projects,
@@ -304,6 +309,36 @@ public final class DispatchOperations {
    */
   public String startRoomRun(String project, String specId, String localHandle) {
     return roomWakeLauncher.wake(project, specId, localHandle);
+  }
+
+  /**
+   * Relaunches the guardrail watcher for a run whose original watcher died (e.g. with a daemon
+   * restart mid-run), addressed at the run's recorded unit and holding it to its lane's limits as
+   * the project sets them now. Unit-or-nothing: the relaunch never falls back to a plain process,
+   * so a doubled watcher is unrepresentable on this path — empty means the project declares no
+   * agent block or no systemd scope accepted the unit. The relaunched {@code sail agent watch}
+   * recomputes its deadlines from the session's original {@code started_at} inside the container,
+   * so a re-armed agent keeps its remaining budget rather than getting a fresh one.
+   */
+  public Optional<WatcherSpawner.Unit> relaunchWatcher(RunStore.RunRow run) throws IOException {
+    var agent = projects.load(run.project()).config().agent();
+    if (agent == null) {
+      return Optional.empty();
+    }
+    return watcherSpawner.spawnUnitForRun(
+        run.project(),
+        SailPaths.resolveSailYaml(run.project(), file).toAbsolutePath(),
+        run.id(),
+        run.unit(),
+        agent.guardrailsFor(run.lane().orElse(null)));
+  }
+
+  /**
+   * The review and fix lanes — the review pipeline's reviewers and fix agents, each launched as its
+   * own run through the same launcher, watcher and stop as a dispatch.
+   */
+  public ReviewLanes reviewLanes() {
+    return reviewLanes;
   }
 
   /**

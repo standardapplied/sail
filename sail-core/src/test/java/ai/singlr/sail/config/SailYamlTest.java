@@ -12,7 +12,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 
 class SailYamlTest {
@@ -776,5 +778,185 @@ class SailYamlTest {
     assertEquals(List.of("claude-code"), updated.agent().install());
     assertEquals("claude-code", updated.agent().type());
     assertTrue(updated.agent().autoBranch());
+  }
+
+  @Test
+  void eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults() {
+    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var configured =
+        SailYaml.Agent.fromMap(
+            Map.of(
+                "type",
+                "claude-code",
+                "guardrails",
+                Map.of("max_duration", "6h"),
+                "review_pipeline",
+                Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m"))));
+
+    for (var lane : Lane.values()) {
+      var review = lane == Lane.REVIEW || lane == Lane.FIX;
+      assertEquals(
+          review ? Guardrails.reviewDefaults() : Guardrails.defaults(),
+          bare.guardrailsFor(lane),
+          lane + " with no block");
+      assertEquals(
+          review ? new Guardrails("90m", "30m", "stop") : new Guardrails("6h", null, "stop"),
+          configured.guardrailsFor(lane),
+          lane + " with both blocks");
+    }
+    assertEquals(Guardrails.defaults(), bare.guardrailsFor(null), "an unknown lane is a build's");
+  }
+
+  @Test
+  void aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone() {
+    var bare = SailYaml.Agent.fromMap(Map.of("type", "claude-code"));
+    var configured =
+        SailYaml.Agent.fromMap(
+            Map.of(
+                "type",
+                "claude-code",
+                "guardrails",
+                Map.of("max_duration", "6h"),
+                "review_pipeline",
+                Map.of("guardrails", Map.of("max_duration", "90m"))));
+    var unlimited =
+        SailYaml.Agent.fromMap(
+            Map.of(
+                "type",
+                "claude-code",
+                "guardrails",
+                Map.of("max_idle", "30m"),
+                "review_pipeline",
+                Map.of("guardrails", Map.of("max_idle", "30m"))));
+
+    for (var lane : Lane.values()) {
+      var review = lane == Lane.REVIEW || lane == Lane.FIX;
+      assertEquals(
+          review ? Duration.ofMinutes(45) : null, bare.lifetimeFor(lane), lane + " with no block");
+      assertEquals(
+          review ? Duration.ofMinutes(90) : Duration.ofHours(6),
+          configured.lifetimeFor(lane),
+          lane + " with both blocks");
+      assertNull(unlimited.lifetimeFor(lane), lane + " under a block that names no time limit");
+    }
+    assertNull(bare.lifetimeFor(null), "an unknown lane is a build's");
+  }
+
+  @Test
+  void anInvalidReviewLaneGuardrailFailsTheDescriptorWhereItIsValidated() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SailYaml.Agent.fromMap(
+                    Map.of(
+                        "type",
+                        "claude-code",
+                        "review_pipeline",
+                        Map.of("guardrails", Map.of("max_duration", "1 hour"))),
+                    "acme/sail.yaml"));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "Invalid `agent.review_pipeline.guardrails.max_duration` in acme/sail.yaml: "),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+  }
+
+  @Test
+  void aReviewLaneGuardrailsValueThatIsNoBlockIsRefusedRatherThanReadAsTheDefaults() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SailYaml.Agent.fromMap(
+                    Map.of("type", "claude-code", "review_pipeline", Map.of("guardrails", "90m")),
+                    "acme/sail.yaml"));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("Invalid `agent.review_pipeline.guardrails` in acme/sail.yaml: "),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("max_duration: 45m"), refused.getMessage());
+  }
+
+  @Test
+  void aBuildLaneGuardrailsValueThatIsNoBlockIsRefusedNamingTheBlock() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SailYaml.Agent.fromMap(
+                    Map.of("type", "claude-code", "guardrails", "4h"), "acme/sail.yaml"));
+
+    assertTrue(
+        refused.getMessage().startsWith("Invalid `agent.guardrails` in acme/sail.yaml: "),
+        refused.getMessage());
+  }
+
+  @Test
+  void anActionSailDoesNotKnowIsRefusedNamingItsBlockItsFileAndTheOnesItDoes() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                SailYaml.Agent.fromMap(
+                    Map.of(
+                        "type",
+                        "claude-code",
+                        "review_pipeline",
+                        Map.of("guardrails", Map.of("action", "halt"))),
+                    "acme/sail.yaml"));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("Invalid `agent.review_pipeline.guardrails.action` in acme/sail.yaml: "),
+        refused.getMessage());
+    assertTrue(
+        refused.getMessage().contains("stop, snapshot-and-stop, notify"), refused.getMessage());
+  }
+
+  @Test
+  void theReviewPipelineSurvivesAnAgentRoundTripAndAnInstallListChange() {
+    var agent =
+        SailYaml.Agent.fromMap(
+            Map.of(
+                "type",
+                "claude-code",
+                "review_pipeline",
+                Map.of(
+                    "guardrails",
+                    Map.of("max_duration", "90m"),
+                    "stages",
+                    List.of(
+                        Map.of(
+                            "name",
+                            "security",
+                            "agent",
+                            "codex",
+                            "categories",
+                            List.of("security"),
+                            "gate",
+                            "no_critical_or_high"),
+                        Map.of("name", "sign-off", "type", "human")))));
+
+    @SuppressWarnings("unchecked")
+    var pipeline = (Map<String, Object>) agent.toMap().get("review_pipeline");
+    var reparsed = SailYaml.fromMap(Map.of("name", "acme", "agent", agent.toMap()));
+    var reinstalled = reparsed.withAgentInstall(List.of("claude-code", "codex"));
+
+    assertEquals(Map.of("max_duration", "90m", "action", "stop"), pipeline.get("guardrails"));
+    assertEquals(
+        agent.reviewPipeline(),
+        reparsed.agent().reviewPipeline(),
+        "the block a pipeline writes parses back to the same pipeline, stages included");
+    assertEquals(
+        agent.reviewPipeline(),
+        reinstalled.agent().reviewPipeline(),
+        "changing the install list keeps the pipeline, its stages and its limits");
   }
 }

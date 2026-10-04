@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
+import static ai.singlr.sail.api.ReviewScripts.CRITICAL_FINDING;
 import static ai.singlr.sail.api.ReviewScripts.fixAllCarried;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -13,56 +14,38 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Exercises the dispatch→stop→review loop through the real wiring: an {@link EventBus} with a
- * subscribed {@link ReviewPipelineController} over real stores. The controller's pipeline runs on a
- * same-thread executor, and the test awaits delivery via a latch ({@link BusTesting#latching}), so
- * a published {@code agent_session_stopped} drives the spec to its final state deterministically —
- * no sleep, no race. This is the integration the per-unit tests do not cover: that an event
- * actually reaches the subscribed controller and advances the spec through the database.
+ * Exercises the dispatch→stop→review loop through the real wiring ({@link ReviewLoop}): a published
+ * {@code agent_session_stopped} reaches the subscribed {@link ReviewPipelineController}, which
+ * launches each reviewer and fix agent as its own run, and each of those runs ends with its own
+ * stop on the same bus. The loop settles on handled events, so a spec is driven to its final state
+ * deterministically — no sleep, no race.
  */
 class ReviewLoopIntegrationTest {
 
   @TempDir Path tempDir;
-  private Sqlite db;
-  private SpecStore specStore;
-  private ReviewStore reviewStore;
-  private EventBus bus;
-
-  @BeforeEach
-  void setUp() {
-    db = Sqlite.open(tempDir.resolve("loop.db"));
-    new SchemaManager(db).migrate();
-    specStore = new SpecStore(db);
-    reviewStore = new ReviewStore(db);
-    bus = new EventBus();
-  }
+  private ReviewLoop loop;
 
   @AfterEach
   void tearDown() {
-    bus.close();
-    if (db != null) db.close();
+    loop.close();
   }
 
   private void createSpec(String id) {
     Acting.as(
         null,
         () ->
-            specStore.create(
+            loop.specs.create(
                 new SpecStore.SpecRow(
                     id,
                     "test-project",
@@ -95,21 +78,12 @@ class ReviewLoopIntegrationTest {
             List.of(Map.of("name", "security", "type", "agent", "agent", "codex", "gate", gate))));
   }
 
-  private static final String CRITICAL_FINDING =
-      """
-      ```json
-      {"verdicts": [], "findings": [{"severity": "CRITICAL", "category": "SECURITY", "file": "a.java",
-        "line_start": 1, "line_end": 1, "title": "Bad",
-        "description": "Very bad", "confidence": 0.95}]}
-      ```
-      """;
-
   /**
-   * A runner that plays a real review cycle: it tells a review prompt from a fix prompt by content,
-   * so review calls return findings (scripted) and fix calls just acknowledge — letting a test
-   * drive the review→fix→re-review loop.
+   * Agents that play a real review cycle: a reviewer returns the scripted findings in order, then
+   * rules every carried finding fixed; a fix agent just acknowledges — letting a test drive the
+   * review→fix→re-review loop.
    */
-  private static ReviewAgentRunner cyclingRunner(java.util.List<String> reviewOutputs) {
+  private static ScriptedAgent cycling(List<String> reviewOutputs) {
     var reviewCall = new AtomicInteger();
     return (project, agent, prompt, reviewId, credential) -> {
       if (prompt.contains("Review the changes on branch")) {
@@ -120,19 +94,8 @@ class ReviewLoopIntegrationTest {
     };
   }
 
-  private void subscribe(
-      ReviewPipelineConfig config, ReviewAgentRunner runner, CountDownLatch latch) {
-    var controller =
-        new ReviewPipelineController(
-            specStore,
-            reviewStore,
-            p -> config,
-            p -> "codex",
-            runner,
-            bus,
-            () -> {},
-            new DirectExecutorService());
-    bus.subscribe(BusTesting.latching(controller, latch));
+  private void start(ReviewPipelineConfig config, ScriptedAgent agents) {
+    loop = ReviewLoop.of(tempDir, config).scripted(agents);
   }
 
   private Event stop(String specId) {
@@ -165,73 +128,64 @@ class ReviewLoopIntegrationTest {
   }
 
   @Test
-  void aCleanStopPublishedToTheBusAdvancesTheSpecToAwaitingMerge() throws Exception {
+  void aCleanStopPublishedToTheBusAdvancesTheSpecToAwaitingMerge() {
+    start(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     createSpec("auth");
-    var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
-    bus.publish(stop("auth"));
+    loop.onEvent(stop("auth"));
 
-    BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
-    assertEquals("passed", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specs.findById("auth").orElseThrow().status());
+    assertEquals("passed", loop.reviews.latestReviewForSpec("auth").orElseThrow().status());
   }
 
   @Test
-  void aHookTurnEndStopThroughTheBusDoesNotTriggerReview() throws Exception {
+  void aHookTurnEndStopThroughTheBusDoesNotTriggerReview() {
+    start(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     createSpec("auth");
-    var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
-    bus.publish(hookTurnEndStop("auth"));
+    loop.onEvent(hookTurnEndStop("auth"));
 
-    BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
-    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specs.findById("auth").orElseThrow().status());
+    assertTrue(loop.reviews.reviewsForSpec("auth").isEmpty());
   }
 
   @Test
-  void theReviewFixReReviewLoopReachesAwaitingMergeWhenAFixResolvesTheFindings() throws Exception {
+  void theReviewFixReReviewLoopReachesAwaitingMergeWhenAFixResolvesTheFindings() {
+    start(singleStage("no_critical"), cycling(List.of(CRITICAL_FINDING)));
     createSpec("auth");
-    var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), cyclingRunner(List.of(CRITICAL_FINDING)), latch);
 
-    bus.publish(stop("auth"));
+    loop.onEvent(stop("auth"));
 
-    BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specs.findById("auth").orElseThrow().status());
     assertEquals(
         2,
-        reviewStore.reviewsForSpec("auth").size(),
+        loop.reviews.reviewsForSpec("auth").size(),
         "one failed review, then a passing re-review after the fix");
+    assertEquals(
+        List.of("review", "fix", "review"),
+        loop.runs.listForSpec("auth").reversed().stream().map(RunStore.RunRow::role).toList(),
+        "each reviewer and the fix agent between them ran as its own run");
   }
 
   @Test
-  void unresolvedFindingsEscalateAfterTheIterationBudget() throws Exception {
+  void unresolvedFindingsEscalateAfterTheIterationBudget() {
+    start(singleStage("no_critical", 2), cycling(List.of(CRITICAL_FINDING, CRITICAL_FINDING)));
     createSpec("auth");
-    var latch = new CountDownLatch(1);
-    subscribe(
-        singleStage("no_critical", 2),
-        cyclingRunner(List.of(CRITICAL_FINDING, CRITICAL_FINDING)),
-        latch);
 
-    bus.publish(stop("auth"));
+    loop.onEvent(stop("auth"));
 
-    BusTesting.awaitDelivery(latch);
-    assertEquals("escalated", reviewStore.latestReviewForSpec("auth").orElseThrow().status());
-    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    assertEquals("escalated", loop.reviews.latestReviewForSpec("auth").orElseThrow().status());
+    assertEquals(SpecStatus.REVIEW, loop.specs.findById("auth").orElseThrow().status());
   }
 
   @Test
-  void aNonZeroExitPublishedToTheBusSkipsReview() throws Exception {
+  void aNonZeroExitPublishedToTheBusSkipsReview() {
+    start(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
     createSpec("auth");
-    var latch = new CountDownLatch(1);
-    subscribe(singleStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW, latch);
 
-    bus.publish(stop("auth", 137));
+    loop.onEvent(stop("auth", 137));
 
-    BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
-    assertTrue(reviewStore.reviewsForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specs.findById("auth").orElseThrow().status());
+    assertTrue(loop.reviews.reviewsForSpec("auth").isEmpty());
   }
 }

@@ -86,7 +86,7 @@ class AgentLogStreamerTest {
     var out = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
 
     streamer(
-            id -> Optional.of(run("node-a", "review", "/review.log")),
+            id -> Optional.of(run("node-a", "review", "/home/dev/.sail/runs/r1/agent.log")),
             id -> Optional.of("uday"),
             "node-a")
         .handle(out);
@@ -132,7 +132,10 @@ class AgentLogStreamerTest {
   void foreignReviewRunUsesTheSameProvenanceGuard() throws Exception {
     var out = new CapturingExchange("/v1/runs/r1/stream");
 
-    streamer(id -> Optional.of(run("node-b", "review", "/review.log")), "node-a").handle(out);
+    streamer(
+            id -> Optional.of(run("node-b", "review", "/home/dev/.sail/runs/r1/agent.log")),
+            "node-a")
+        .handle(out);
 
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());
@@ -237,7 +240,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandTailsTheRunScopedLogDerivedFromTheUuid() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 0);
     assertEquals("incus", cmd[0]);
     assertEquals("exec", cmd[1]);
     assertEquals("backend", cmd[2]);
@@ -246,15 +249,8 @@ class AgentLogStreamerTest {
   }
 
   @Test
-  void buildTailCommandUsesTheReviewersRunScopedLog() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "review", 0);
-
-    assertTrue(Arrays.asList(cmd).contains("/home/dev/.sail/runs/" + RUN_UUID + "/review.log"));
-  }
-
-  @Test
   void buildTailCommandPassesTheLogAsAPositionalArgNotShellSyntax() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("touch -- \"$1\""), joined);
     assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
@@ -262,7 +258,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandWithSince() {
-    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, "build", 50);
+    var cmd = AgentLogStreamer.buildTailCommand("backend", RUN_UUID, RUN_LOG, 50);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("tail -n \"+$2\" -f"), joined);
     assertTrue(Arrays.asList(cmd).contains("50"), Arrays.toString(cmd));
@@ -270,7 +266,7 @@ class AgentLogStreamerTest {
 
   @Test
   void buildTailCommandRunsAsTheDevUser() {
-    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "build", 0);
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, RUN_LOG, 0);
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("--user 1000"));
     assertTrue(joined.contains("--group 1000"));
@@ -282,14 +278,24 @@ class AgentLogStreamerTest {
         IllegalArgumentException.class,
         () ->
             AgentLogStreamer.buildTailCommand(
-                "proj", "/home/dev/.sail/runs/x; id > /tmp/pwned #", "build", 0));
+                "proj", "/home/dev/.sail/runs/x; id > /tmp/pwned #", RUN_LOG, 0));
   }
 
   @Test
-  void buildTailCommandRejectsAnUnknownRole() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "../../etc", 0));
+  void buildTailCommandNeverTailsAForgedRecordedLogPath() {
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, "/home/dev/.ssh/id_ed25519", 0);
+
+    assertTrue(Arrays.asList(cmd).contains(RUN_LOG), Arrays.toString(cmd));
+    assertTrue(Arrays.stream(cmd).noneMatch(arg -> arg.contains("id_ed25519")));
+  }
+
+  @Test
+  void buildTailCommandTailsTheReviewLogOfAReviewRunRecordedBeforeTheUpgrade() {
+    var legacy = "/home/dev/.sail/runs/" + RUN_UUID + "/review.log";
+
+    var cmd = AgentLogStreamer.buildTailCommand("proj", RUN_UUID, legacy, 0);
+
+    assertTrue(Arrays.asList(cmd).contains(legacy), Arrays.toString(cmd));
   }
 
   @Test

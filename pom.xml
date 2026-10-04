@@ -215,15 +215,14 @@
                                         <include>ai.singlr.sail.api.ReviewPipelineController</include>
                                     </includes>
                                     <!--
-                                        The review orchestrator: every method is exercised (METHOD
-                                        1.0) and the pipeline runs synchronously under a same-thread
-                                        executor in tests, so line coverage is deterministic across
-                                        runs (no virtual-thread scheduling race). The handful of
-                                        uncovered lines are defensive-only — the awaitCompletion
-                                        timeout and close-interrupt handlers, the executePipeline
-                                        outer catch, and the hostname UnknownHostException fallback —
-                                        none reachable without mock-level fault injection. Floored just
-                                        under the actual.
+                                        The review loop's stop router: every method is exercised
+                                        (METHOD 1.0) through the real bus, and the tests settle on
+                                        handled events, so line coverage is deterministic across
+                                        runs. The uncovered lines are defensive-only — a publish
+                                        that throws while reporting a handler's own failure, and
+                                        the hostname UnknownHostException fallback — none reachable
+                                        without mock-level fault injection. Floored just under the
+                                        actual.
                                     -->
                                     <limits>
                                         <limit>

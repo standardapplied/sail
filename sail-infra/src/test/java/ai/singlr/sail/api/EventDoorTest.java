@@ -677,6 +677,7 @@ class EventDoorTest {
         new ReviewStore(db),
         new EventBus(),
         (project, run, unit) -> false,
+        new WatcherCoverage(run -> false, pid -> false),
         () -> "root",
         () -> Instant.now().plus(Duration.ofMinutes(10)));
   }

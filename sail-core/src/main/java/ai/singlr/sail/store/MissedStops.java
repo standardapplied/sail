@@ -90,6 +90,11 @@ public final class MissedStops {
    * recent session — superseded sessions from restarts are never replayed — and the {@link
    * StopCoverage} of authoritative stops recorded since the session started.
    *
+   * <p>A build an operator stopped is left alone: the stop was a person's decision, the pipeline
+   * starts no review over it, and replaying its stop would only say so again every sweep. A
+   * reviewer or fix agent an operator stopped is assessed like any run — its replayed stop is what
+   * escalates its review when the operator's own cancel was lost.
+   *
    * <p>{@code grace} shields two windows: the dispatch launch window (dispatch claims the spec
    * seconds before the systemd unit exists, so a young running session is never probed) and the
    * consumption window (a just-observed stop may still be in flight through the review pipeline, so
@@ -97,6 +102,9 @@ public final class MissedStops {
    */
   public static Outcome assess(
       RunStore.RunRow session, StopCoverage coverage, Instant now, Duration grace) {
+    if (session.stoppedByOperator() && !session.servesReview()) {
+      return new Outcome.Skip("an operator stopped this run; its spec is its owner's to move");
+    }
     if (coverage.observedAt() != null) {
       var inFlight = Duration.between(coverage.observedAt(), now).compareTo(grace) < 0;
       if ("running".equals(session.status())) {

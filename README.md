@@ -134,7 +134,9 @@ services:
 agent:
   type: claude-code
   methodology: { approach: spec-driven, verify: "mvn clean test" }
-  guardrails:  { max_duration: 4h, action: snapshot-and-stop }
+  guardrails:  { max_duration: 4h, max_idle: 20m, action: snapshot-and-stop }   # builds
+  review_pipeline:
+    guardrails: { max_duration: 45m, max_idle: 20m, action: stop }              # reviewers, fix agents
 ssh:
   authorized_keys: [ ${SSH_PUBLIC_KEY} ]            # per-developer, never synced
 ```
@@ -161,9 +163,13 @@ Sail is agent-agnostic across claude-code and codex, so one agent can implement 
 can review: configure `agent.review_pipeline` in `sail.yaml` and when the coder stops, a
 reviewer checks the branch, a fix agent addresses its findings, and the loop repeats up to
 `max_iterations` before escalating to a human. `sail agent review <project>` shows every
-attempt's iterations and findings; `sail agent log <project> --review` follows the
-negotiation live. Guardrails combine a `max_duration` and an action, so a runaway agent is
-stopped and rolled back to the pre-launch snapshot. A passing review parks the spec in
+attempt's iterations and findings; `sail agent log <project> --review` (or `--fix`) follows
+the latest reviewer's (or fix agent's) run live. Every agent sail starts is held to its
+lane's guardrails: a wall-clock `max_duration`, a `max_idle` stall window and an action.
+`agent.guardrails` bounds builds, ad-hoc runs and chat turns (default `4h` / `20m` / `stop`);
+`agent.review_pipeline.guardrails` bounds reviewers and fix agents (default `45m` / `20m` /
+`stop`). An agent past a limit is killed in its container, and the room says why. A fix agent
+verifies locally, commits and pushes; it does not wait for CI. A passing review parks the spec in
 `awaiting_merge` — sail never talks to the forge, so you merge the PR there and close the
 loop with `sail spec update <id> --status done`.
 

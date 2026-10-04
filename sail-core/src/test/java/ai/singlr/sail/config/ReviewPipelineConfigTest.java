@@ -316,4 +316,112 @@ class ReviewPipelineConfigTest {
     assertNull(stage.agent());
     assertEquals(ReviewPipelineConfig.Gate.NO_CRITICAL, stage.gate());
   }
+
+  @Test
+  void aPipelineThatNamesNoGuardrailsRunsItsLanesUnderTheReviewDefaults() {
+    var parsed = ReviewPipelineConfig.fromMap(Map.of("stages", List.of()));
+
+    assertEquals(new Guardrails("45m", "20m", "stop"), parsed.guardrails());
+    assertEquals(Guardrails.reviewDefaults(), ReviewPipelineConfig.mandatoryDefault().guardrails());
+  }
+
+  @Test
+  void aPipelinesGuardrailsParseAsAnAgentsDoAndSerializeWithIt() {
+    var parsed =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "stages",
+                List.of(),
+                "guardrails",
+                Map.of("max_duration", "90m", "action", "snapshot-and-stop")));
+
+    assertEquals(new Guardrails("90m", null, "snapshot-and-stop"), parsed.guardrails());
+    assertEquals(
+        Map.of("max_duration", "90m", "action", "snapshot-and-stop"),
+        parsed.toMap().get("guardrails"));
+    assertEquals(
+        parsed.guardrails(),
+        ReviewPipelineConfig.fromMap(
+                Map.of("stages", List.of(), "guardrails", parsed.toMap().get("guardrails")))
+            .guardrails());
+  }
+
+  @Test
+  void anInvalidPipelineGuardrailIsRefusedAtParseNamingTheAcceptedForms() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ReviewPipelineConfig.fromMap(
+                    Map.of("stages", List.of(), "guardrails", Map.of("max_idle", "forever"))));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("Invalid `agent.review_pipeline.guardrails.max_idle` in sail.yaml: "),
+        refused.getMessage());
+    assertTrue(refused.getMessage().contains("4h, 90m, 30s"), refused.getMessage());
+  }
+
+  @Test
+  void aStagedPipelineIsTheBlockItParsesBackFrom() {
+    var pipeline =
+        ReviewPipelineConfig.fromMap(
+            Map.of(
+                "max_iterations",
+                2,
+                "max_finding_age",
+                3,
+                "guardrails",
+                Map.of("max_duration", "1h", "max_idle", "10m", "action", "notify"),
+                "stages",
+                List.of(
+                    Map.of(
+                        "name",
+                        "security",
+                        "agent",
+                        "codex",
+                        "categories",
+                        List.of("security", "injection"),
+                        "gate",
+                        "all_clear"),
+                    Map.of("name", "style", "agent", "codex"),
+                    Map.of("name", "sign-off", "type", "human"))));
+
+    var written = YamlUtil.dumpToString(pipeline.toMap());
+
+    assertEquals(pipeline, ReviewPipelineConfig.fromMap(pipeline.toMap()));
+    assertEquals(
+        pipeline,
+        ReviewPipelineConfig.fromMap(YamlUtil.parseMap(written)),
+        "the block is plain data a descriptor can be written from");
+    assertEquals(
+        List.of("max_iterations", "max_finding_age", "guardrails", "stages"),
+        List.copyOf(pipeline.toMap().keySet()),
+        "in one order, so a rewritten descriptor does not shuffle");
+    assertFalse(
+        written.contains("&") || written.contains("*"),
+        "and with no anchors: stages that name no categories share nothing in the file: "
+            + written);
+  }
+
+  @Test
+  void aLimitOfZeroAndAnActionThatIsNoWordAreRefusedNamingWhatIsAccepted() {
+    var zero =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ReviewPipelineConfig.fromMap(
+                    Map.of("stages", List.of(), "guardrails", Map.of("max_duration", "0m"))));
+    var number =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ReviewPipelineConfig.fromMap(
+                    Map.of("stages", List.of(), "guardrails", Map.of("action", 5))));
+
+    assertTrue(zero.getMessage().contains("greater than zero"), zero.getMessage());
+    assertTrue(
+        number.getMessage().contains("stop, snapshot-and-stop, notify"), number.getMessage());
+  }
 }

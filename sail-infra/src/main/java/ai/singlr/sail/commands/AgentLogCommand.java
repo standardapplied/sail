@@ -6,7 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentLogRenderer;
 import ai.singlr.sail.engine.AgentUnit;
@@ -16,7 +16,6 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -56,8 +55,13 @@ public final class AgentLogCommand implements Runnable {
 
   @Option(
       names = "--review",
-      description = "Show the review/fix negotiation log instead of the build log.")
+      description = "Show the latest reviewer run's log instead of the latest run's.")
   private boolean review;
+
+  @Option(
+      names = "--fix",
+      description = "Show the latest fix run's log instead of the latest run's.")
+  private boolean fix;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -78,7 +82,7 @@ public final class AgentLogCommand implements Runnable {
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var logPath = resolveLogPath(name, review);
+    var logPath = resolveLogPath(name, lane());
     if (logPath == null) {
       printNoLog();
       return;
@@ -127,40 +131,38 @@ public final class AgentLogCommand implements Runnable {
     }
   }
 
+  /** The lane {@code --review} or {@code --fix} asks for; empty for the latest run of any. */
+  private Optional<Lane> lane() {
+    if (review && fix) {
+      throw new IllegalArgumentException("Pass --review or --fix, not both.");
+    }
+    if (review) {
+      return Optional.of(Lane.REVIEW);
+    }
+    return fix ? Optional.of(Lane.FIX) : Optional.empty();
+  }
+
   /**
-   * The log file to tail, or null when the project has no session to show. With {@code --review},
-   * the latest review's own negotiation log ({@code ~/.sail/runs/<reviewId>/review.log}) — each
-   * review owns its files so concurrent pipelines never interleave — resolved through the latest
-   * <em>build</em> run, since only a spec's dispatch has reviews. Otherwise the latest session
-   * run's own run-scoped log ({@code ~/.sail/runs/<id>/agent.log}), dispatched and ad-hoc alike:
-   * every agent session is a run, so no run row means no log.
+   * The log file to tail, or null when the project has no run to show: the newest run this box
+   * executed, in {@code lane} when one is asked for. Every agent sail starts is a run with its own
+   * log ({@code ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a
+   * lane only selects which run, never another file shape.
    */
-  private String resolveLogPath(String project, boolean review) {
+  private String resolveLogPath(String project, Optional<Lane> lane) {
     try (var operations = OperationsFactory.open()) {
-      if (review) {
-        return operations.dispatching().reviewLog(project, NodeIdentity.handle());
-      }
-      return logPathFrom(operations.dispatching().latestRun(project, NodeIdentity.handle()));
+      var dispatching = operations.dispatching();
+      var node = NodeIdentity.handle();
+      return logPathFrom(
+          lane.map(asked -> dispatching.latestRunInLane(project, node, asked))
+              .orElseGet(() -> dispatching.latestRun(project, node)));
     } catch (RuntimeException e) {
       return null;
     }
   }
 
-  /** The latest local session run's run-scoped log path, or null when there is none. */
-  static String logPathFrom(Optional<RunStore.RunRow> latestRun) {
-    return latestRun.map(RunStore.RunRow::logPath).filter(Strings::isNotBlank).orElse(null);
-  }
-
-  /**
-   * The latest build run's spec's latest review log, per-review under the review's own directory,
-   * or the fixed foreground-review log when the current dispatch attempt has no review yet.
-   */
-  static String reviewLogPathFrom(Optional<RunStore.RunRow> latestRun, ReviewStore reviews) {
-    return latestRun
-        .map(RunStore.RunRow::specId)
-        .flatMap(reviews::latestReviewForSpec)
-        .map(review -> AgentUnit.forReview(review.id()).logPath())
-        .orElseGet(AgentUnit.REVIEW::logPath);
+  /** The run's own log path, derived from its id, or null when there is no run. */
+  static String logPathFrom(Optional<RunStore.RunRow> run) {
+    return run.map(row -> AgentUnit.readableLogPath(row.id(), row.logPath())).orElse(null);
   }
 
   private void printNoLog() {

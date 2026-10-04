@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class MissedStopsTest {
@@ -36,7 +37,7 @@ class MissedStopsTest {
         "sail-agent-run",
         startedAt,
         null,
-        java.util.List.of(),
+        List.of(),
         null,
         null,
         null);
@@ -50,10 +51,59 @@ class MissedStopsTest {
     return MissedStops.assess(session, coverage, NOW, GRACE);
   }
 
-  private static MissedStops.Outcome assessDropped(
-      RunStore.RunRow session, java.time.Instant observedAt) {
+  private static MissedStops.Outcome assessDropped(RunStore.RunRow session, Instant observedAt) {
     return MissedStops.assess(
         session, new MissedStops.StopCoverage(observedAt, null, false), NOW, GRACE);
+  }
+
+  private static RunStore.RunRow operatorStopped(String role, String reviewId) {
+    return new RunStore.RunRow(
+        "s-auth",
+        "acme",
+        "auth",
+        "node-a",
+        role,
+        "claude-code",
+        null,
+        null,
+        null,
+        null,
+        "stopped",
+        null,
+        null,
+        "sail-agent-run",
+        "2026-07-06T11:00:00Z",
+        "2026-07-06T11:30:00Z",
+        List.of(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        reviewId,
+        RunStore.STOPPED_BY_OPERATOR);
+  }
+
+  @Test
+  void aBuildAnOperatorStoppedIsLeftAloneWhateverItsStopsSay() {
+    var build = operatorStopped("build", null);
+
+    assertInstanceOf(MissedStops.Outcome.Skip.class, assess(build, false));
+    assertInstanceOf(
+        MissedStops.Outcome.Skip.class,
+        assessDropped(build, NOW.minus(GRACE).minusSeconds(1)),
+        "a stop recorded and never acted on is what an operator's stop of a build looks like:"
+            + " replaying it would say so again at every sweep");
+  }
+
+  @Test
+  void aFixAgentAnOperatorStoppedIsReplayedSoItsReviewEscalatesWhenTheCancelWasLost() {
+    var fix = operatorStopped("fix", "review-1");
+
+    assertInstanceOf(MissedStops.Outcome.ReplayStop.class, assess(fix, false));
   }
 
   @Test

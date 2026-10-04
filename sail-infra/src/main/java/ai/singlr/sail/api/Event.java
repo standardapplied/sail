@@ -274,6 +274,13 @@ public record Event(
       };
     }
 
+    /**
+     * Why the watcher ended a run it did not see exit on its own: the guardrail it enforced, as a
+     * person reads it ({@code time limit (45m)}, {@code stall (20m)}). A stop that carries one
+     * carries no {@link #EXIT_CODE}: the run did not end itself, so it has none of its own.
+     */
+    public static final String REASON = "reason";
+
     /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
     public static final String WATCHER_PID = "watcher_pid";
 
@@ -288,9 +295,10 @@ public record Event(
     public static final String MESSAGE_ID = "message_id";
 
     /**
-     * The stopped run's lane ({@code build}, {@code adhoc}, {@code fix}, {@code room}), carried on
-     * stop signals so lane-aware reactors decide without a store lookup — above all the review
-     * pipeline, which must ignore a {@link #RUN_ROLE_ROOM} stop even on a spec parked in review.
+     * The stopped run's lane ({@code build}, {@code adhoc}, {@code review}, {@code fix}, {@code
+     * room}), carried on stop signals so lane-aware reactors decide without a store lookup — above
+     * all the review pipeline, which routes a stop by it: a build's starts a review, a reviewer's
+     * or a fix agent's advances the review it serves, a {@link #RUN_ROLE_ROOM} stop is ignored.
      */
     public static final String RUN_ROLE = "run_role";
 
@@ -303,19 +311,19 @@ public record Event(
      */
     public static final String RUN_ROLE_ROOM_FULL = Lane.ROOM_FULL.wire();
 
-    /** {@link #RUN_ROLE} value: a reviewer run — its own stop must never re-enter the pipeline. */
+    /** {@link #RUN_ROLE} value: a reviewer run — its stop resolves the stage it ran. */
     public static final String RUN_ROLE_REVIEW = Lane.REVIEW.wire();
 
-    /** {@link #RUN_ROLE} value: a fix run — its own stop must never re-enter the pipeline. */
+    /** {@link #RUN_ROLE} value: a fix run — its stop starts the re-review. */
     public static final String RUN_ROLE_FIX = Lane.FIX.wire();
 
     /**
-     * Whether a run role names a lane whose own stop must never drive the review pipeline — every
-     * lane except a dispatch build and an ad-hoc run. Reactors on {@code agent_session_stopped}
-     * drop such stops by role so the loop can never re-enter on its own agents. Null (a role-less
-     * stop), like an unrecognized role, is treated as a normal triggering stop; a retired invite
-     * role never triggers. Delegates to {@link Lane} so this classification and {@code RunRow}'s
-     * share one source.
+     * Whether a run role names a lane whose stop does not hand its spec to review — every lane
+     * except a dispatch build and an ad-hoc run. Reactors on {@code agent_session_stopped} that
+     * move a spec or narrate a build drop such stops by role. Null (a role-less stop), like an
+     * unrecognized role, is treated as a normal triggering stop; a retired invite role never
+     * triggers. Delegates to {@link Lane} so this classification and {@code RunRow}'s share one
+     * source.
      */
     public static boolean nonTriggeringLane(String role) {
       return !Lane.triggersReview(role);

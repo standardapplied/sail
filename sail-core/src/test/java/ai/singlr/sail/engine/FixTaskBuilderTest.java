@@ -352,4 +352,28 @@ class FixTaskBuilderTest {
     var silent = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of()).task();
     assertFalse(silent.contains("Conversation on this spec"), "a silent room renders no section");
   }
+
+  @Test
+  void theTaskEndsAtAPushedCommitAndTellsTheAgentNotToWatchCi() {
+    var finding =
+        Finding.create(
+            Finding.Severity.HIGH,
+            Finding.Category.LOGIC,
+            "src/Auth.java",
+            1,
+            1,
+            "Bad",
+            "Very bad",
+            "trace",
+            new Finding.Suggestion("a", "b", "c"),
+            0.9);
+    var task = FixTaskBuilder.build("auth", "Auth", List.of(finding), List.of()).task();
+
+    var closing = task.substring(task.lastIndexOf("When every finding is addressed"));
+    var said = closing.replaceAll("\\s+", " ");
+    assertTrue(said.contains("run the project's verification locally"), said);
+    assertTrue(said.contains("push, and end your turn"), said);
+    assertTrue(said.contains("Do not wait for or watch CI"), said);
+    assertTrue(said.contains("Never leave uncommitted work"), said);
+  }
 }

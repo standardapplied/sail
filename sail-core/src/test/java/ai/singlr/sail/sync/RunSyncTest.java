@@ -11,8 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -119,16 +121,8 @@ class RunSyncTest {
   @Test
   void aReviewRunReplicatesAsMetadataButRemainsOwnedByItsExecutingNode() {
     var id = DateTimeUtils.newId().toString();
-    node.runs.createReview(
-        id,
-        "backend",
-        "auth",
-        "node",
-        "codex",
-        "feat/auth",
-        "review it",
-        "/home/dev/.sail/runs/" + id + "/review.log",
-        "sail-review-" + id);
+    ReviewRuns.reserve(
+        node.runs, id, id, "backend", "auth", "node", Lane.REVIEW, "codex", List.of());
 
     sync(node);
     sync(other);

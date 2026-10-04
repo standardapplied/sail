@@ -18,6 +18,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -134,6 +135,22 @@ public final class AgentReporter {
   }
 
   /**
+   * The guardrail the run's watcher recorded beside it, or empty when none tripped, the project has
+   * no session, or the container will not say.
+   */
+  private Optional<GuardrailTrigger> guardrailTrigger(
+      String containerName, RunStore.RunRow session) {
+    if (session == null) {
+      return Optional.empty();
+    }
+    try {
+      return GuardrailTrigger.read(shell, containerName, unitOf(session));
+    } catch (Exception unreadable) {
+      return Optional.empty();
+    }
+  }
+
+  /**
    * Generates a full report with an explicit state directory (enables testing without /etc/sail).
    * Specs come from the control-plane database. When {@code session} is present it is the source of
    * truth for the run's start and end times — so the duration is the agent's real run-time, not
@@ -178,22 +195,10 @@ public final class AgentReporter {
       }
     }
 
-    var guardrailTriggered = false;
-    String guardrailReason = null;
-    String guardrailAction = null;
-    try {
-      var triggerCmd =
-          ContainerExec.asDevUser(
-              containerName, List.of("cat", "/home/dev/guardrail-triggered.yaml"));
-      var triggerResult = shell.exec(triggerCmd);
-      if (triggerResult.ok() && !triggerResult.stdout().isBlank()) {
-        var triggerMap = YamlUtil.parseMap(triggerResult.stdout());
-        guardrailTriggered = true;
-        guardrailReason = Objects.toString(triggerMap.get("reason"), null);
-        guardrailAction = Objects.toString(triggerMap.get("action"), null);
-      }
-    } catch (Exception ignored) {
-    }
+    var trigger = guardrailTrigger(containerName, session);
+    var guardrailTriggered = trigger.isPresent();
+    var guardrailReason = trigger.map(GuardrailTrigger::reason).orElse(null);
+    var guardrailAction = trigger.map(GuardrailTrigger::action).orElse(null);
 
     var rolledBack = false;
     String rollbackSnapshot = null;

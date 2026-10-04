@@ -49,6 +49,8 @@ final class SlackMessage {
               + " journal.";
       case "review_errored" -> "Review errored: " + detailOr(event, "unknown error");
       case "review_iteration_started" -> "Fix iteration started.";
+      case "review_iteration_failed" ->
+          "Fix iteration failed: " + detailOr(event, "the fix agent did not finish") + ".";
       case "review_escalated" ->
           "Escalated: "
               + detailOr(event, "review iterations exhausted")
@@ -79,6 +81,10 @@ final class SlackMessage {
     var exitCode = event.data().get(Event.WellKnownData.EXIT_CODE);
     if (exitCode != null) {
       sb.append(" (exit ").append(exitCode).append(")");
+    }
+    var reason = stringFromData(event, Event.WellKnownData.REASON);
+    if (!reason.isBlank()) {
+      sb.append(" (").append(reason).append(")");
     }
     var note = stringFromData(event, "note");
     if (!note.isBlank()) {

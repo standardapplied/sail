@@ -194,7 +194,7 @@ class ReviewFindingsSyncTest {
     var denied = round(ada);
 
     assertEquals(List.of(review), deniedReviews(denied), "the denial is announced");
-    assertEquals("pending", reviews.findReview(review).orElseThrow().status());
+    assertEquals("running", reviews.findReview(review).orElseThrow().status());
     assertEquals(List.of(), findings(ada, review), "ada holds main's findings: none");
     assertEquals(List.of(), reviews.stagesForReview(review));
     assertTrue(findingKeptInChangeLog(ada, review, found.id()), "the finding is recoverable");

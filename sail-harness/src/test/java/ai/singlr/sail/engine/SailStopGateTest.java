@@ -416,6 +416,73 @@ class SailStopGateTest {
   }
 
   @Test
+  void aFixRunIsAskedToCommitAndPushAndNeverToWatchCi() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("fix");
+
+    var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
+
+    assertTrue(reason.contains("commit your work in api"), reason);
+    assertTrue(reason.contains("Commit and push the fix before ending the turn"), reason);
+    assertTrue(reason.contains("do not wait for CI"), reason);
+    assertFalse(
+        reason.contains("watch its checks to green"),
+        "the fix lane's time limit is not spent polling CI: " + reason);
+  }
+
+  @Test
+  void aFixRunIsNotAskedToOpenAPullRequest() throws Exception {
+    var repo = repo("sail");
+    git(repo, "checkout", "-q", "-b", "agent/stop-gate");
+    pushToFreshOrigin(repo, "agent/stop-gate");
+    var bin = fakeGh("no pull requests found for branch agent/stop-gate", 1);
+    writeSessionRole("fix");
+
+    var result = runGate(STOP_INPUT, RUN_ID, bin);
+
+    assertEquals(
+        "",
+        result.stdout(),
+        "a fix agent's branch is clean and pushed: the pull request is its build's to have opened");
+    assertEquals(List.of("agent_session_stopped"), events());
+  }
+
+  @Test
+  void aBuildIsStillToldToWatchItsChecksToGreen() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("build");
+
+    var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
+
+    assertTrue(reason.contains("watch its checks to green"), reason);
+  }
+
+  @Test
+  void aReviewerIsNeverBlockedByADirtyTreeNorByTheRoom() throws Exception {
+    var repo = repo("api");
+    Files.writeString(repo.resolve("dirty.txt"), "wip");
+    writeSessionRole("review");
+    inbox(
+        """
+        {"run_id": "run-1", "spec_id": "auth", "messages": [
+          {"id": "m1", "author": "uday", "body": "one more thing"}]}""");
+    try (var bound = bind()) {
+      var result = runGate(STOP_INPUT, RUN_ID, fakeRoomCurl(), "sailrun_test");
+
+      assertEquals(
+          "",
+          result.stdout(),
+          "a reviewer's last message is the verdict the pipeline parses: a nudge that drew another"
+              + " turn would replace the findings with a reply");
+      assertEquals(List.of("agent_session_stopped"), events());
+      assertFalse(Files.exists(marker()));
+      assertFalse(Files.exists(roomMarker()), "the message stays undelivered for whoever is next");
+    }
+  }
+
+  @Test
   void aBuildRoleSessionFileKeepsTheGitProtocol() throws Exception {
     var repo = repo("api");
     Files.writeString(repo.resolve("dirty.txt"), "wip");

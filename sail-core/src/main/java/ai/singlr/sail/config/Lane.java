@@ -5,27 +5,28 @@
 
 package ai.singlr.sail.config;
 
-import java.util.Arrays;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
-import java.util.stream.Stream;
 
 /**
  * The lane a run executes in — the canonical type behind what the {@code runs.role} column stores
  * and every reactor, gate, and store once matched as a bare string. Each constant owns its wire
  * form and the classifications that used to live as hand-copied string checks: whether a lane's
- * stop triggers the review pipeline, whether it is a chat turn, whether it is an agent session (as
- * opposed to a review execution), and whether it runs under the read-only room contract. One
- * source, so the two classifications that once drifted with no compiler help cannot.
+ * stop triggers the review pipeline, whether it is a chat turn, which limits bound it, and whether
+ * it runs under the read-only room contract. One source, so the classifications that once drifted
+ * with no compiler help cannot.
+ *
+ * <p>Every lane is an agent session: one run row, one systemd unit, one watcher, one stop. The
+ * lanes differ in what their stop means to the review loop and in whose limits bound them, never in
+ * how they launch or end.
  *
  * <p>The static classifiers take the stored role string and cover what the enum cannot name: the
  * retired invite lane. Older releases wrote {@code invite} and {@code invite-full} rows and the
  * {@code runs} CHECK still admits them, so a run launched before the upgrade may still be running
  * after it. No constant exists to launch one, but such a row keeps the contract it was minted under
- * — viewer-tier for a plain invite, never review-triggering, session-managed so stop and the reaper
- * still address it — instead of falling to the unknown-role defaults, which would upgrade its
- * credential and let its stop push a spec whose build is still running into review.
+ * — viewer-tier for a plain invite, never review-triggering — instead of falling to the
+ * unknown-role defaults, which would upgrade its credential and let its stop push a spec whose
+ * build is still running into review.
  */
 public enum Lane {
   BUILD("build"),
@@ -72,24 +73,9 @@ public enum Lane {
     return of(role).map(Lane::triggersReview).orElse(!retired(role));
   }
 
-  /**
-   * Whether the stored {@code role} is a session the run-scoped machinery owns, live or retired.
-   */
-  public static boolean isSession(String role) {
-    return of(role).map(Lane::isSession).orElse(retired(role));
-  }
-
   /** Whether the stored {@code role} runs under the read-only contract, live or retired. */
   public static boolean readOnly(String role) {
     return of(role).map(Lane::readOnly).orElse(RETIRED_READ_ONLY_ROLE.equals(role));
-  }
-
-  /** Every stored role {@link #isSession(String)} admits, live lanes first, in a stable order. */
-  public static List<String> sessionRoles() {
-    return Stream.concat(
-            Arrays.stream(values()).filter(Lane::isSession).map(Lane::wire),
-            RETIRED_ROLES.stream().sorted())
-        .toList();
   }
 
   /**
@@ -101,7 +87,8 @@ public enum Lane {
 
   /**
    * Whether a stop in this lane hands the spec to the review pipeline. Only a dispatch build and an
-   * ad-hoc run do; every chat and review execution stays out of the loop.
+   * ad-hoc run do: a chat turn's stop is ignored, and a reviewer's or fix agent's stop advances the
+   * review it serves rather than starting one.
    */
   public boolean triggersReview() {
     return this == BUILD || this == ADHOC;
@@ -113,12 +100,12 @@ public enum Lane {
   }
 
   /**
-   * An agent session the run-scoped machinery owns — a build, ad-hoc, or chat — as opposed to a
-   * pipeline-driven review execution. These are the rows the stop, status, log, reaper, and
-   * missed-stop lanes address.
+   * Whether this lane is one of the review pipeline's own — a reviewer or the fix agent that
+   * answers it. Their runs name the review they serve, their stops advance it, and the project's
+   * {@code agent.review_pipeline.guardrails} bound them.
    */
-  public boolean isSession() {
-    return this == BUILD || this == ADHOC || isChat();
+  public boolean servesReview() {
+    return this == REVIEW || this == FIX;
   }
 
   /**

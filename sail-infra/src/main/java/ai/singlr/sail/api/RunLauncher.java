@@ -26,11 +26,12 @@ import java.util.Optional;
 
 /**
  * The one run-launch engine every lane shares: stage the run-scoped task and session files, build
- * and run the launch command for the run's own systemd unit, and — once the process is confirmed —
- * verify it against a concurrent cancel and publish {@code agent_session_started}. The build,
- * ad-hoc, and room lanes differ only in the {@link LaunchSpec} they fill and the {@link RunContext}
- * they finish with; keeping the sequence here means the reserve→launch→verify→publish shape has a
- * single definition rather than a copy per lane.
+ * and run the launch command for the run's own systemd unit, spawn the watcher that holds the run
+ * to its lane's limits, and — once the process is confirmed — verify it against a concurrent cancel
+ * and publish {@code agent_session_started}. The build, ad-hoc, room, review and fix lanes differ
+ * only in the {@link LaunchSpec} they fill and the {@link RunContext} they finish with; keeping the
+ * sequence here means the reserve→launch→verify→publish shape has a single definition rather than a
+ * copy per lane.
  */
 public final class RunLauncher {
 
@@ -63,11 +64,12 @@ public final class RunLauncher {
 
   /**
    * Everything one agent launch needs, in one value so the launch seam is a single parameter rather
-   * than the 16-way signature the lanes used to spread by hand. The build, ad-hoc, and room lanes
-   * differ only in the fields they fill: a build carries a spec id, model, and reasoning effort; an
-   * ad-hoc a blank spec id; a room a viewer role and no repo reservation. {@code task}, {@code
-   * branch}, and {@code repoPaths} stage the session file and so are unused when only the launch
-   * command is built.
+   * than the 16-way signature the lanes used to spread by hand. The lanes differ only in the fields
+   * they fill: a build carries a spec id, model, and reasoning effort; an ad-hoc a blank spec id; a
+   * room a viewer role and no repo reservation; a reviewer and a fix agent the spec they serve.
+   * {@code task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused
+   * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
+   * {@code runId}: one shape for every lane, so no launch names its own.
    */
   record LaunchSpec(
       String project,
@@ -82,11 +84,15 @@ public final class RunLauncher {
       String branch,
       List<String> repoPaths,
       boolean background,
-      AgentUnit unit,
       String runId,
       String runCredential,
       String role,
-      String resumeSessionId) {}
+      String resumeSessionId) {
+
+    AgentUnit unit() {
+      return AgentUnit.forRun(runId);
+    }
+  }
 
   /**
    * The run identity the post-launch tail needs to verify the process, complete a foreground run,
@@ -113,7 +119,6 @@ public final class RunLauncher {
       boolean background,
       Spec spec,
       String agentType,
-      AgentUnit unit,
       String runId,
       String runCredential) {
     return launchSession(
@@ -130,7 +135,6 @@ public final class RunLauncher {
             branch,
             targetRepos.stream().map(SailYaml.Repo::path).toList(),
             background,
-            unit,
             runId,
             runCredential,
             Lane.BUILD.wire(),
@@ -142,10 +146,20 @@ public final class RunLauncher {
    * if a concurrent cancel already claimed the run, complete a foreground run, and — once the agent
    * is confirmed live — publish {@code agent_session_started}. Returns the queried status so the
    * lane can build its own response. Replaces four hand-copied copies of this sequence.
+   *
+   * <p>A run whose row is no longer {@code running} when its process is stamped was either ended
+   * under the launch — an operator's cancel, or a reconciler that found no unit yet for a launch
+   * slower than its grace — or ended on its own: an agent that finished at once, whose watcher's
+   * stop finished the row first. The first may have an agent running against a row that says it is
+   * over, and it is torn down. The second launched and is over; its stop says how it ended, and the
+   * launch is not a failure ({@link #endedOnItsOwn}).
    */
   AgentSession.SessionInfo finishLaunch(RunContext ctx, LaunchOutcome launch) {
     var status = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
     if (!updateRunProcess(ctx.runId(), ctx.project(), status, launch.watcher())) {
+      if (endedOnItsOwn(ctx)) {
+        return status;
+      }
       throw launchLostToCancel(ctx.runId(), ctx.project(), ctx.unit());
     }
     if (!ctx.background()) {
@@ -187,8 +201,7 @@ public final class RunLauncher {
         if (exitCode != 0) {
           throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.");
         }
-        return new LaunchOutcome(
-            exitCode, launchWatcherIfAgent(s.project(), s.config(), s.runId(), s.unit()));
+        return new LaunchOutcome(exitCode, launchWatcherIfAgent(s));
       }
       return new LaunchOutcome(exitCode, Optional.empty());
     } catch (ApiException e) {
@@ -249,21 +262,23 @@ public final class RunLauncher {
 
   /**
    * Spawns the detached run-addressed watcher whenever the project declares an agent block —
-   * supervision is on by default, with {@code Guardrails.defaults()} applying when none are
-   * declared, and the watcher is also the authoritative stop observer the review pipeline depends
-   * on. One watcher per dispatch, supervising exactly this run's recorded unit.
+   * supervision is on by default, under the limits of the run's lane ({@link
+   * SailYaml.Agent#guardrailsFor}) as the project sets them at this launch, and the watcher is also
+   * the authoritative stop observer the review pipeline advances on. One watcher per run,
+   * supervising exactly this run's unit.
    */
-  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(
-      String project, SailYaml config, String runId, AgentUnit unit) throws IOException {
-    if (config.agent() == null) {
+  private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(LaunchSpec s) throws IOException {
+    var agent = s.config().agent();
+    if (agent == null) {
       return Optional.empty();
     }
     return Optional.of(
         watcherSpawner.spawnForRun(
-            project,
-            SailPaths.resolveSailYaml(project, file).toAbsolutePath(),
-            runId,
-            unit.unitName()));
+            s.project(),
+            SailPaths.resolveSailYaml(s.project(), file).toAbsolutePath(),
+            s.runId(),
+            s.unit().unitName(),
+            agent.guardrailsFor(Lane.of(s.role()).orElse(null))));
   }
 
   /**
@@ -318,10 +333,29 @@ public final class RunLauncher {
   }
 
   /**
-   * Tears down a launch whose run was cancelled during preparation: the operator's stop already
-   * recorded the terminal outcome, so the just-started agent must die rather than run unrecorded
-   * against a released claim. Halting is best-effort — the unit is transient and run-scoped, so a
-   * halt that races the process's own exit is a no-op — and the conflict names what happened.
+   * Whether a run whose row finished under its launch ended by its own stop: the row is still held,
+   * no operator's stop claim marked it, and its agent is not running now. The agent is probed after
+   * the stamp was refused, not before: the status the launch read first is from before the stamp,
+   * and an agent can end between the two. An agent still running against a finished row did not end
+   * itself — something else finished the row under it — and a row that is gone was erased under the
+   * launch; both are a launch that lost its run.
+   */
+  private boolean endedOnItsOwn(RunContext ctx) {
+    var unmarked =
+        runStore.findById(ctx.runId()).filter(run -> !run.stoppedByOperator()).isPresent();
+    if (!unmarked) {
+      return false;
+    }
+    var now = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
+    return now == null || !now.running();
+  }
+
+  /**
+   * Tears down a launch whose run was ended during preparation: the run's terminal outcome is
+   * already recorded — by an operator's stop, or by a reconciler that outran a slow launch — so the
+   * just-started agent must die rather than run unrecorded against a released claim. Halting is
+   * best-effort — the unit is transient and run-scoped, so a halt that races the process's own exit
+   * is a no-op — and the conflict names what happened.
    */
   private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
     try {
@@ -332,8 +366,8 @@ public final class RunLauncher {
     }
     return new ApiException(
         ErrorCode.CONFLICT,
-        "Run " + runId + " was cancelled while its launch was preparing; the agent was torn down.",
-        "The cancel already recorded the run's outcome; no retry is needed.");
+        "Run " + runId + " was ended while its launch was preparing; the agent was torn down.",
+        "The run's outcome is already recorded; dispatch again if the work is still wanted.");
   }
 
   /**
@@ -346,16 +380,7 @@ public final class RunLauncher {
   private void completeForegroundRun(String runId, int exitCode) {
     runBookkeeping(
         "complete run " + runId,
-        () -> {
-          if (runStore.transition(
-              runId, "running", exitCode == 0 ? "completed" : "failed", exitCode)) {
-            return;
-          }
-          var current = runStore.findById(runId).orElse(null);
-          if (current != null && current.exitCode() == null) {
-            runStore.recordExitCode(runId, exitCode);
-          }
-        });
+        () -> RunTracker.finish(runStore, runId, exitCode == 0 ? "completed" : "failed", exitCode));
   }
 
   /**

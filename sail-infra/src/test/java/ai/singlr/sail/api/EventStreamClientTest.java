@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.nio.file.Path;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -99,8 +101,11 @@ class EventStreamClientTest {
         server.start();
         var queue = new LinkedBlockingQueue<Event>();
         var client = EventStreamClient.subscribe("127.0.0.1", server.port(), "tok", "any", queue);
+        assertFalse(client.ended(), "a live subscription is not over");
+
         client.close();
 
+        assertTrue(client.ended(), "a watcher that finds its stream over subscribes again");
         bus.publish(
             Event.of(
                 "any", null, Event.WellKnownTypes.AGENT_SESSION_STOPPED, "claude-code", "host"));
@@ -108,6 +113,40 @@ class EventStreamClientTest {
 
         assertNull(received, "no events should arrive after close()");
       }
+    }
+  }
+
+  @Test
+  void subscribeGivesUpOnAServerThatAcceptsTheConnectionAndNeverAnswers() throws Exception {
+    try (var silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      var queue = new LinkedBlockingQueue<Event>();
+
+      var ex =
+          assertThrows(
+              IOException.class,
+              () ->
+                  EventStreamClient.subscribe(
+                      "127.0.0.1", silent.getLocalPort(), "tok", "any", queue));
+
+      assertTrue(
+          ex.getMessage().startsWith("No response from "),
+          "a watcher that reopens its stream is never held by a daemon that will not answer: "
+              + ex);
+    }
+  }
+
+  @Test
+  void subscribeInterruptedWhileItWaitsGivesUpAtOnce() throws Exception {
+    try (var silent = new ServerSocket(0, 1, InetAddress.getLoopbackAddress())) {
+      var queue = new LinkedBlockingQueue<Event>();
+      Thread.currentThread().interrupt();
+
+      assertThrows(
+          InterruptedException.class,
+          () ->
+              EventStreamClient.subscribe("127.0.0.1", silent.getLocalPort(), "tok", "any", queue));
+    } finally {
+      Thread.interrupted();
     }
   }
 

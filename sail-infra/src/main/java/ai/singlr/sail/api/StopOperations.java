@@ -38,10 +38,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * lands first fails the claim with a conflict instead of being silently overwritten. The rest of
  * the terminal intent — run {@code stopped}, an {@link Event.WellKnownTypes#AGENT_CANCELLED} event
  * — is finalized only once the halt is verified to have left no live process on the run's unit: a
- * kill that fails restores the claim and throws, and a crash mid-stop leaves the explicit {@code
+ * kill that fails throws, restoring the claim when the agent is verified still running, and a crash
+ * mid-stop — or a failed kill whose agent is gone or unprobeable — leaves the explicit {@code
  * stopping} claim — resumed by the next stop of the same target, finalized by the reconciler's
  * interrupted-stop pass once the unit is gone — so the database never claims a live agent is
- * terminal in a state no reconciler owns.
+ * terminal in a state no reconciler owns, and never hands back as its own a run a stop killed.
  *
  * <p>The lane is also the clean way out of a stranded spec, not only a process kill: a resolved run
  * whose agent already died still gets its intent recorded atomically (spec cancelled, a
@@ -235,17 +236,6 @@ public final class StopOperations {
           "Run " + run.id() + " executed on " + node + "; only its executing box can stop it.",
           "Stop it from " + node + "'s box.");
     }
-    if (!run.sessionRole()) {
-      throw new ApiException(
-          ErrorCode.INVALID_ROLE,
-          "Run "
-              + run.id()
-              + " is a "
-              + run.role()
-              + " run driven by the review pipeline, not a"
-              + " stoppable agent session.",
-          "Stop the spec's build run instead, or let the pipeline finish.");
-    }
     authorize(run, dryRun);
     projects.requireExists(run.project());
     return stopResolved(run, dryRun);
@@ -319,9 +309,13 @@ public final class StopOperations {
    * compare-and-set — so the cancel wins the race with the watcher's own stop while the signal is
    * in flight, and an interruption at any later point leaves the explicit claim rather than a
    * cancelled spec over a run still recorded {@code running}. A verified halt finalizes the claim
-   * ({@code stopping → stopped}) and publishes the operator event; a kill that fails or leaves a
-   * live process on the unit restores the claim and throws, so the run is again {@code running} and
-   * reconcilable.
+   * ({@code stopping → stopped}) and publishes the operator event. A halt that fails throws either
+   * way, and what becomes of the claim depends on the agent: one verified still running is given
+   * back — the run is again {@code running}, its own to end, and reconcilable — while one that is
+   * gone, or that cannot be probed, keeps the claim. A signal that landed before the halt reported
+   * failure killed that agent, and giving the run back would let its death read as the run ending
+   * on its own; the claim instead waits, as an interrupted stop does, for the operator's retry or
+   * the reconciler's interrupted-stop pass to finalize it.
    */
   private Outcome killVerified(
       RunStore.RunRow run, SpecStore.SpecRow spec, AgentUnit unit, int pid) {
@@ -330,11 +324,23 @@ public final class StopOperations {
       halt(run.project(), unit);
       verifyHalted(run.project(), unit);
     } catch (RuntimeException failure) {
-      abortStop(run, spec, cancelled);
+      if (survived(run.project(), unit)) {
+        abortStop(run, spec, cancelled);
+      }
       throw failure;
     }
     finishStop(run);
     return new Stopped(run.id(), specIdOf(run), pid, cancelled);
+  }
+
+  /** Whether the agent is verified still running after a halt that failed. */
+  private boolean survived(String project, AgentUnit unit) {
+    try {
+      var remaining = probe(project, unit);
+      return remaining != null && remaining.running();
+    } catch (RuntimeException unknown) {
+      return false;
+    }
   }
 
   /**
@@ -382,18 +388,18 @@ public final class StopOperations {
   }
 
   /**
-   * The one gated-cancel write both stop shapes share: run {@code running → status} and, when this
-   * run is still cancelable and its spec's latest build attempt, the spec cancel — one transaction,
-   * every check compare-and-set inside it. A lost run CAS means a concurrent transition consumed
-   * the resolved state first; the stop refuses with a conflict rather than committing over it.
-   * Returns whether the spec was cancelled.
+   * The one gated-cancel write both stop shapes share: run {@code running → status}, marked the
+   * operator's, and, when this run is still cancelable and its spec's latest build attempt, the
+   * spec cancel — one transaction, every check compare-and-set inside it. The mark is what keeps
+   * the watcher's stop of the same halt from reading as the run's own end, whenever it is heard. A
+   * lost run CAS means a concurrent transition consumed the resolved state first; the stop refuses
+   * with a conflict rather than committing over it. Returns whether the spec was cancelled.
    */
   private boolean transitionAndCancel(RunStore.RunRow run, SpecStore.SpecRow spec, String status) {
     var cancelled = new AtomicBoolean();
     var moved =
-        runStore.transition(
+        runStore.claimStop(
             run.id(),
-            "running",
             status,
             () -> {
               if (mayCancel(spec)) {
@@ -420,15 +426,13 @@ public final class StopOperations {
   }
 
   /**
-   * Restores a failed claim — run back to {@code running}, spec back to its pre-claim status — in
-   * one transaction, each side conditional on the claim still being held, so a finalization that
-   * won in between is never overwritten.
+   * Restores a failed claim — run back to {@code running} with the operator's mark cleared, spec
+   * back to its pre-claim status — in one transaction, each side conditional on the claim still
+   * being held, so a finalization that won in between is never overwritten.
    */
   private void abortStop(RunStore.RunRow run, SpecStore.SpecRow spec, boolean cancelled) {
-    runStore.transition(
+    runStore.releaseStop(
         run.id(),
-        STOPPING,
-        "running",
         () -> {
           if (cancelled) {
             specStore.compareAndSetStatus(spec.id(), SpecStatus.CANCELLED, spec.status());

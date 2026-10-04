@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
@@ -14,29 +15,41 @@ import org.junit.jupiter.api.Test;
 
 class ReviewPromptBuilderTest {
 
+  private static String prompt(String branch, List<String> repos, List<String> categories) {
+    return prompt(branch, repos, categories, List.of(), List.of());
+  }
+
+  private static String prompt(
+      String branch,
+      List<String> repos,
+      List<String> categories,
+      List<MessageStore.MessageRow> messages,
+      List<Finding> carried) {
+    return ReviewPromptBuilder.build(branch, repos, categories, messages, carried).prompt();
+  }
+
   @Test
   void includesBranchAndRepo() {
-    var prompt = ReviewPromptBuilder.build("feat/auth", List.of("backend"), List.of());
+    var prompt = prompt("feat/auth", List.of("backend"), List.of());
     assertTrue(prompt.contains("feat/auth"));
     assertTrue(prompt.contains("backend"));
   }
 
   @Test
   void includesCategories() {
-    var prompt =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of("security", "injection"));
+    var prompt = prompt("main", List.of("app"), List.of("security", "injection"));
     assertTrue(prompt.contains("security, injection"));
   }
 
   @Test
   void emptyCategoriesToDefaultsToAny() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("any relevant category"));
   }
 
   @Test
   void instructsTheVerdictEnvelopeFromIterationOne() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("```json"));
     assertTrue(prompt.contains("\"verdicts\""));
     assertTrue(prompt.contains("\"findings\""));
@@ -60,8 +73,7 @@ class ReviewPromptBuilderTest {
             null,
             0.9);
 
-    var prompt =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+    var prompt = prompt("main", List.of("app"), List.of(), List.of(), List.of(carried));
 
     assertTrue(prompt.contains("finding_id " + carried.id()), prompt);
     assertTrue(prompt.contains("[HIGH] Non-atomic target selection"), prompt);
@@ -89,8 +101,7 @@ class ReviewPromptBuilderTest {
                 0.9)
             .carriedCopy("the seed window still races between reserve and claim");
 
-    var prompt =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+    var prompt = prompt("main", List.of("app"), List.of(), List.of(), List.of(carried));
 
     assertTrue(
         prompt.contains(
@@ -114,15 +125,14 @@ class ReviewPromptBuilderTest {
             null,
             0.9);
 
-    var prompt =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+    var prompt = prompt("main", List.of("app"), List.of(), List.of(), List.of(carried));
 
     assertTrue(!prompt.contains("Prior ruling's evidence"), prompt);
   }
 
   @Test
   void asksForTheResidualScenarioOnStillOpenVerdicts() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("For still_open, describe the exact scenario"));
     assertTrue(prompt.contains("reproduction target"));
   }
@@ -142,21 +152,20 @@ class ReviewPromptBuilderTest {
             null,
             0.4);
 
-    var prompt =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(), List.of(carried));
+    var prompt = prompt("main", List.of("app"), List.of(), List.of(), List.of(carried));
 
     assertTrue(prompt.contains("[LOW] Contract drift\n"), prompt);
   }
 
   @Test
   void noCarriedFindingsRendersNoCarrySection() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(!prompt.contains("The previous review left these findings open"));
   }
 
   @Test
   void demandsEvidenceForFixedAndDisputedVerdicts() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("required for fixed"));
     assertTrue(prompt.contains("for disputed"));
     assertTrue(prompt.contains("without evidence is treated as still_open"));
@@ -164,14 +173,14 @@ class ReviewPromptBuilderTest {
 
   @Test
   void requiresEvidenceInFindings() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("evidence"));
     assertTrue(prompt.contains("If you cannot prove it, do not report it"));
   }
 
   @Test
   void includesSeverityLevels() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("CRITICAL"));
     assertTrue(prompt.contains("HIGH"));
     assertTrue(prompt.contains("MEDIUM"));
@@ -180,7 +189,7 @@ class ReviewPromptBuilderTest {
 
   @Test
   void includesSuggestionFormat() {
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of());
+    var prompt = prompt("main", List.of("app"), List.of());
     assertTrue(prompt.contains("suggestion"));
     assertTrue(prompt.contains("before"));
     assertTrue(prompt.contains("after"));
@@ -189,7 +198,7 @@ class ReviewPromptBuilderTest {
 
   @Test
   void namesTheSpecReposNotTheProjectAndCoversTheMissingBranchCase() {
-    var prompt = ReviewPromptBuilder.build("agent/x", List.of("sail", "mast"), List.of());
+    var prompt = prompt("agent/x", List.of("sail", "mast"), List.of());
 
     assertTrue(prompt.contains("directories inside this\nworkspace: sail, mast"), prompt);
     assertTrue(
@@ -212,9 +221,12 @@ class ReviewPromptBuilderTest {
             null,
             false);
 
-    var prompt = ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(message));
+    var built =
+        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(message), List.of());
 
-    assertTrue(prompt.startsWith("Conversation on this spec:"));
-    assertTrue(prompt.indexOf("token decision") < prompt.indexOf("Review the changes"));
+    assertTrue(built.prompt().startsWith("Conversation on this spec:"));
+    assertTrue(
+        built.prompt().indexOf("token decision") < built.prompt().indexOf("Review the changes"));
+    assertEquals(List.of(message), built.renderedMessages());
   }
 }

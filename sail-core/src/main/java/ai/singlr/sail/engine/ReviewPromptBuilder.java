@@ -21,38 +21,43 @@ public final class ReviewPromptBuilder {
   private ReviewPromptBuilder() {}
 
   /**
+   * A built review prompt and the room messages it rendered in full — the exact set the caller may
+   * acknowledge as delivered at the reviewer's launch. Delivery derives from presentation: a
+   * message the budget truncated or omitted is absent here and stays owed a full delivery.
+   */
+  public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
+
+  /**
    * @param repos the spec's target repository directory names inside the workspace — the actual
    *     checkouts to review, never the project name (a multi-repo workspace root contains several
    *     repos, and a wrong name sends the reviewer into an unrelated codebase)
-   */
-  public static String build(String branch, List<String> repos, List<String> categories) {
-    return build(branch, repos, categories, List.of(), List.of());
-  }
-
-  public static String build(
-      String branch,
-      List<String> repos,
-      List<String> categories,
-      List<MessageStore.MessageRow> messages) {
-    return build(branch, repos, categories, messages, List.of());
-  }
-
-  /**
+   * @param messages the room's recent conversation, of which the newest that fit the prompt budget
+   *     are rendered
    * @param carried the previous review's still-open findings, which the reviewer must rule on: one
    *     verdict per carried finding, alongside (not instead of) any new findings
    */
-  public static String build(
+  public static Built build(
       String branch,
       List<String> repos,
       List<String> categories,
       List<MessageStore.MessageRow> messages,
       List<Finding> carried) {
+    var conversation =
+        PromptConversation.renderNewest(
+            messages, message -> message.author() + ": " + message.body() + "\n\n");
+    return new Built(
+        (messages.isEmpty() ? "" : "Conversation on this spec:\n\n" + conversation.text())
+            + instructions(branch, repos, categories, carried),
+        conversation.fullyRendered());
+  }
+
+  private static String instructions(
+      String branch, List<String> repos, List<String> categories, List<Finding> carried) {
     var categoryList =
         categories.isEmpty() ? "any relevant category" : String.join(", ", categories);
     var repoList = repos.isEmpty() ? "the repository in the workspace" : String.join(", ", repos);
 
-    return conversation(messages)
-        + """
+    return """
         Review the changes on branch %s in the following repository director%s inside this
         workspace: %s. Review only those checkouts — ignore any other repositories present.
         If that branch no longer exists, review the spec's changes as merged on the default
@@ -143,15 +148,5 @@ public final class ReviewPromptBuilder {
     }
     var span = f.lineEnd() != f.lineStart() ? "-" + f.lineEnd() : "";
     return " (" + f.file() + ":" + f.lineStart() + span + ")";
-  }
-
-  private static String conversation(List<MessageStore.MessageRow> messages) {
-    if (messages.isEmpty()) {
-      return "";
-    }
-    return "Conversation on this spec:\n\n"
-        + PromptConversation.renderNewest(
-                messages, message -> message.author() + ": " + message.body() + "\n\n")
-            .text();
   }
 }

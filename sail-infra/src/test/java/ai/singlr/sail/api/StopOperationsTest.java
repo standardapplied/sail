@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -20,6 +21,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -152,6 +154,9 @@ class StopOperationsTest {
     assertTrue(notRunning.mutated());
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
     assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertTrue(
+        runStore.findById(R1).orElseThrow().stoppedByOperator(),
+        "the dead run's own stop may still be on its way: it must read as the operator's");
     assertTrue(halts.isEmpty());
     assertEquals(1, events.size());
   }
@@ -901,7 +906,72 @@ class StopOperationsTest {
     assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
     assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
     assertEquals("running", runStore.findById(R1).orElseThrow().status());
+    assertFalse(
+        runStore.findById(R1).orElseThrow().stoppedByOperator(),
+        "the stop did not happen: the run's own end is again its own");
     assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void aHaltThatFailedOverAnAgentThatIsGoneKeepsTheClaimRatherThanHandTheRunBack()
+      throws Exception {
+    var shell = liveAgentShell();
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {
+              shell.on("kill -0 123", new ShellExec.Result(1, "", "no such process"));
+              throw new IOException("incus exec: websocket closed after the signal landed");
+            },
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.AGENT_STOP_FAILED, refusal.failure().errorCode());
+    var claimed = runStore.findById(R1).orElseThrow();
+    assertEquals(
+        StopOperations.STOPPING,
+        claimed.status(),
+        "the signal landed before the halt reported failure: a run given back now would have its"
+            + " agent's death read as the run ending on its own");
+    assertTrue(claimed.stoppedByOperator());
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+    assertTrue(events.isEmpty(), "the cancel is announced once the stop is finalized");
+  }
+
+  @Test
+  void aHaltThatFailedOverAnAgentNobodyCanProbeKeepsTheClaim() throws Exception {
+    var shell = liveAgentShell();
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> {
+              shell.throwOn("cat " + RUN_PID_FILE, new IOException("incus is restarting"));
+              throw new IOException("incus exec: connection reset");
+            },
+            StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    assertThrows(
+        ApiException.class,
+        () ->
+            Actor.call(
+                ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+
+    assertEquals(
+        StopOperations.STOPPING,
+        runStore.findById(R1).orElseThrow().status(),
+        "an agent that cannot be seen is not known to have survived: the claim waits for a retry"
+            + " or the reconciler, as an interrupted stop does");
+    assertTrue(runStore.findById(R1).orElseThrow().stoppedByOperator());
   }
 
   @Test
@@ -1214,38 +1284,60 @@ class StopOperationsTest {
 
   @Test
   void aNewerReviewRowDoesNotBlockTheOperatorCancel() throws Exception {
-    var shell = liveAgentShell();
-    var ops = stopOps(shell, killingHalter(shell), StopOperations.Listener.NONE);
+    var ops =
+        stopOps(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            failingHalter(),
+            StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
     seedRun(123, UNIT);
+    runStore.complete(R1, "completed", 0);
     seedReviewRun();
 
     var outcome =
         Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
 
-    assertTrue(assertInstanceOf(StopOperations.Stopped.class, outcome).specCancelled());
+    assertTrue(
+        assertInstanceOf(StopOperations.NotRunning.class, outcome).specCancelled(),
+        "the reviewer that came after is not a newer attempt: the build is still the spec's to"
+            + " cancel through");
     assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
-    assertEquals("stopped", runStore.findById(R1).orElseThrow().status());
+    assertEquals("completed", runStore.findById(R1).orElseThrow().status());
   }
 
   @Test
-  void stoppingAReviewRunIsRefusedWithInvalidRole() throws Exception {
-    var ops = stopOps(liveAgentShell(), failingHalter(), StopOperations.Listener.NONE);
+  void stoppingAReviewerRunHaltsItLikeAnySessionAndLeavesItsSpecToTheLoop() throws Exception {
+    var shell =
+        shell()
+            .on("incus list ^acme$", RUNNING_JSON)
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent.pid", "456")
+            .on("kill -0 456", "")
+            .on("cat /home/dev/.sail/runs/" + R2 + "/agent-session.json", "{\"task\": \"review\"}");
+    var ops =
+        stopOps(
+            shell,
+            (project, unit) -> shell.on("kill -0 456", new ShellExec.Result(1, "", "")),
+            StopOperations.Listener.NONE);
     seedSpec("auth", SpecStatus.REVIEW, LOCAL_HANDLE);
-    seedRun(123, UNIT);
     seedReviewRun();
 
-    var refusal =
-        assertThrows(
-            ApiException.class,
-            () ->
-                Actor.call(
-                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, false)));
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R2), LOCAL_HANDLE, false));
 
-    assertEquals(ErrorCode.INVALID_ROLE, refusal.failure().errorCode());
-    assertEquals("running", runStore.findById(R2).orElseThrow().status());
+    var stopped = assertInstanceOf(StopOperations.Stopped.class, outcome);
+    assertFalse(
+        stopped.specCancelled(),
+        "a reviewer is not its spec's build attempt: stopping it cancels no spec, and the review"
+            + " loop escalates the review it served");
+    assertEquals("stopped", runStore.findById(R2).orElseThrow().status());
+    assertTrue(
+        runStore.findById(R2).orElseThrow().stoppedByOperator(),
+        "the mark outlives the finalized claim, so the watcher's stop of the halted unit never"
+            + " reads as the reviewer's own end");
     assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
-    assertTrue(events.isEmpty());
+    assertEquals(
+        List.of(Event.WellKnownTypes.AGENT_CANCELLED), events.stream().map(Event::type).toList());
+    assertEquals(R2, events.getFirst().data().get(Event.WellKnownData.RUN_ID));
   }
 
   @Test
@@ -1354,9 +1446,8 @@ class StopOperationsTest {
 
   private void interruptStop() {
     assertTrue(
-        runStore.transition(
+        runStore.claimStop(
             R1,
-            "running",
             "stopping",
             () ->
                 specStore.compareAndSetStatus(
@@ -1503,16 +1594,8 @@ class StopOperationsTest {
   }
 
   private void seedReviewRun() {
-    runStore.createReview(
-        R2,
-        "acme",
-        "auth",
-        LOCAL_HANDLE,
-        "codex",
-        "feat/auth",
-        "review",
-        RUN_LOG,
-        "sail-review-" + R2);
+    ReviewRuns.reserve(
+        runStore, R2, R2, "acme", "auth", LOCAL_HANDLE, Lane.REVIEW, "codex", List.of());
   }
 
   private void seedNewerRun() {

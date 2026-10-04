@@ -8,13 +8,9 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
-import ai.singlr.sail.identity.Acting;
-import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SchemaManager;
-import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -23,13 +19,19 @@ class AgentLogCommandTest {
 
   @TempDir Path tempDir;
 
-  private static RunStore.RunRow run(String logPath) {
+  private static final String RUN = "0195e0a0-1111-7abc-8def-0123456789ab";
+
+  private static RunStore.RunRow run(String role) {
+    return run(role, "/a/path/sync/could/have/written");
+  }
+
+  private static RunStore.RunRow run(String role, String logPath) {
     return new RunStore.RunRow(
-        "r1",
+        RUN,
         "acme",
         "auth",
         "node-a",
-        "build",
+        role,
         "claude-code",
         "feat/x",
         "do it",
@@ -41,7 +43,7 @@ class AgentLogCommandTest {
         null,
         "t0",
         null,
-        java.util.List.of(),
+        List.of(),
         null,
         null,
         null);
@@ -64,63 +66,26 @@ class AgentLogCommandTest {
   }
 
   @Test
-  void buildLogFollowsTheLatestRunsRunScopedLog() {
-    assertEquals(
-        "/home/dev/.sail/runs/r1/agent.log",
-        AgentLogCommand.logPathFrom(Optional.of(run("/home/dev/.sail/runs/r1/agent.log"))),
-        "a dispatched run's log lives under its own run dir, not the shared agent.log");
+  void aRunsLogIsItsOwnRunScopedFileWhicheverLaneItRanIn() {
+    for (var role : List.of("build", "review", "fix", "room")) {
+      assertEquals(
+          "/home/dev/.sail/runs/" + RUN + "/agent.log",
+          AgentLogCommand.logPathFrom(Optional.of(run(role))),
+          "a " + role + " run's log is derived from its id: one file shape for every lane");
+    }
   }
 
   @Test
-  void noRunRowMeansNoBuildLog() {
+  void aReviewRunRecordedBeforeTheUpgradeIsStillReadFromItsReviewLog() {
+    var legacy = "/home/dev/.sail/runs/" + RUN + "/review.log";
+
+    assertEquals(legacy, AgentLogCommand.logPathFrom(Optional.of(run("review", legacy))));
+  }
+
+  @Test
+  void noRunMeansNoLog() {
     assertNull(
         AgentLogCommand.logPathFrom(Optional.empty()),
-        "every session is a run, so without a run there is no log to fall back to");
-  }
-
-  @Test
-  void aRunWithoutARecordedLogPathMeansNoBuildLog() {
-    assertNull(AgentLogCommand.logPathFrom(Optional.of(run(""))));
-  }
-
-  @Test
-  void reviewLogFollowsTheLatestReviewsOwnLog() {
-    try (var db = Sqlite.open(tempDir.resolve("log.db"))) {
-      new SchemaManager(db).migrate();
-      var specs = new SpecStore(db);
-      Acting.as(
-          null,
-          () ->
-              specs.create(
-                  new SpecStore.SpecRow(
-                      "auth",
-                      "acme",
-                      "Add auth",
-                      ai.singlr.sail.config.SpecStatus.REVIEW,
-                      null,
-                      null,
-                      null,
-                      null,
-                      null,
-                      0,
-                      null,
-                      "",
-                      "",
-                      null,
-                      java.util.List.of(),
-                      java.util.List.of())));
-      var reviews = new ReviewStore(db);
-      var reviewId = Acting.system(() -> reviews.createReview("auth", 1));
-
-      assertEquals(
-          "/home/dev/.sail/runs/" + reviewId + "/review.log",
-          AgentLogCommand.reviewLogPathFrom(Optional.of(run("x")), reviews),
-          "--review follows the live review's per-review log, where the negotiation actually"
-              + " lands");
-      assertEquals(
-          "/home/dev/.sail/review.log",
-          AgentLogCommand.reviewLogPathFrom(Optional.empty(), reviews),
-          "no run resolves to the fixed legacy path");
-    }
+        "every agent session is a run, so a lane with no run has no log to show");
   }
 }

@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import static ai.singlr.sail.api.ReviewScripts.CLEAN_REVIEW;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -13,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -34,7 +35,9 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -100,7 +103,15 @@ class MissedStopReconcilerTest {
   private MissedStopReconciler reconciler(
       MissedStopReconciler.UnitProbe probe, Supplier<String> localHandle, Supplier<Instant> clock) {
     return new MissedStopReconciler(
-        specStore, sessionStore, eventStore, reviewStore, bus, probe, localHandle, clock);
+        specStore,
+        sessionStore,
+        eventStore,
+        reviewStore,
+        bus,
+        probe,
+        new WatcherCoverage(watched::contains, pid -> false),
+        localHandle,
+        clock);
   }
 
   private void createInProgressSpec(String id) {
@@ -703,17 +714,38 @@ class MissedStopReconcilerTest {
         new ReviewPipelineController(
             specStore,
             reviewStore,
+            sessionStore,
             p -> config,
             p -> "codex",
-            (p, a, pr, rid, cred) -> CLEAN_REVIEW,
+            new ReviewLanes() {
+              @Override
+              public Launch launch(Invocation invocation, String boxHandle) {
+                reviewersLaunched.add(invocation);
+                return new Launch.Started(reviewerOf(invocation.reviewId(), invocation.specId()));
+              }
+
+              @Override
+              public String output(RunStore.RunRow run) {
+                return "";
+              }
+
+              @Override
+              public List<Rescue> ensureCommitted(
+                  String project, List<String> repos, String branch, String commitMessage) {
+                return List.of();
+              }
+            },
             bus,
             () -> {},
-            new DirectExecutorService());
+            () -> "node-a");
     bus.subscribe(BusTesting.latching(controller, latch));
   }
 
+  private final List<ReviewLanes.Invocation> reviewersLaunched = new CopyOnWriteArrayList<>();
+  private final Set<String> watched = ConcurrentHashMap.newKeySet();
+
   @Test
-  void replaysACleanMissedStopAndDrivesTheSpecToAwaitingMerge() throws Exception {
+  void replaysACleanMissedStopAndStartsTheSpecsReview() throws Exception {
     createInProgressSpec("auth");
     finishedSession("auth", "stopped", 0);
     var latch = new CountDownLatch(1);
@@ -723,11 +755,15 @@ class MissedStopReconcilerTest {
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        List.of("auth"),
+        reviewersLaunched.stream().map(ReviewLanes.Invocation::specId).toList(),
+        "the replayed stop reaches the pipeline, which launches the spec's reviewer");
   }
 
   @Test
-  void replaysAMissedStopWithNoRecordedExitCode() throws Exception {
+  void replaysAMissedStopWithNoRecordedExitCodeAndStartsTheSpecsReview() throws Exception {
     createInProgressSpec("auth");
     finishedSession("auth", "completed", null);
     var latch = new CountDownLatch(1);
@@ -737,7 +773,65 @@ class MissedStopReconcilerTest {
 
     assertEquals(1, replayed);
     BusTesting.awaitDelivery(latch);
-    assertEquals(SpecStatus.AWAITING_MERGE, specStore.findById("auth").orElseThrow().status());
+    assertEquals(SpecStatus.REVIEW, specStore.findById("auth").orElseThrow().status());
+    assertEquals(
+        List.of("auth"),
+        reviewersLaunched.stream().map(ReviewLanes.Invocation::specId).toList(),
+        "the replayed stop reaches the pipeline, which launches the spec's reviewer");
+  }
+
+  @Test
+  void aStopWhoseEndingCannotBeReadIsStillPublishedAndItsRescueIsSpentOnlyThen() throws Exception {
+    createReviewSpec("auth");
+    var run = finishedSession("auth", "stopped", null);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+              throws IOException {
+            throw new IOException("incus exec: connection reset");
+          }
+        };
+    var latch = new CountDownLatch(1);
+    var stops = captureStops(latch);
+    var reconciler = reconciler(probe, Instant::now);
+
+    assertEquals(1, reconciler.sweep(), "the stop is owed whatever can be read of how it ended");
+    BusTesting.awaitDelivery(latch);
+
+    var stop = stops.peek();
+    assertEquals(run, stop.data().get(Event.WellKnownData.RUN_ID));
+    assertNull(stop.data().get(Event.WellKnownData.REASON));
+    assertNull(stop.data().get(Event.WellKnownData.EXIT_CODE));
+    assertEquals(0, reconciler.sweep(), "published once: the rescue is spent");
+  }
+
+  @Test
+  void aSweepInterruptedWhileReadingHowARunEndedKeepsItsInterrupt() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", null);
+    var probe =
+        new MissedStopReconciler.UnitProbe() {
+          @Override
+          public boolean active(String project, String runId, String unit) {
+            return false;
+          }
+
+          @Override
+          public MissedStopReconciler.Ending ending(String project, String runId, String unit)
+              throws InterruptedException {
+            throw new InterruptedException("shutting down");
+          }
+        };
+
+    assertEquals(1, reconciler(probe, Instant::now).sweep());
+
+    assertTrue(Thread.interrupted(), "the sweep's thread is still told it was interrupted");
   }
 
   @Test
@@ -751,14 +845,15 @@ class MissedStopReconcilerTest {
   }
 
   @Test
-  void aReviewSpecWhoseReviewActuallyStartedIsNotRescued() {
+  void aReviewSpecWhoseReviewPassedIsNotRescued() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
-    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    Acting.system(
+        () -> reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "passed"));
 
-    var replayed = reconciler(new CountingProbe(false), Instant::now).sweep();
+    var replayed = reconciler(new CountingProbe(false), PAST_GRACE).sweep();
 
-    assertEquals(0, replayed, "a review that ran is not stranded");
+    assertEquals(0, replayed, "a review that ran to its verdict is not stranded");
   }
 
   @Test
@@ -826,19 +921,111 @@ class MissedStopReconcilerTest {
         "escalation parks the spec for a human; the sweep must not resurrect it");
   }
 
+  private String runningReview(String specId) {
+    return Acting.system(
+        () -> {
+          var id = reviewStore.createReview(specId, 1);
+          reviewStore.updateReviewStatus(id, "running");
+          reviewStore.createStage(id, "security", "agent");
+          return id;
+        });
+  }
+
+  private String reviewerOf(String reviewId, String specId) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            ReviewRuns.reserve(
+                sessionStore,
+                id,
+                reviewId,
+                "test-project",
+                specId,
+                "node-a",
+                Lane.REVIEW,
+                "codex",
+                List.of()));
+    return id;
+  }
+
   @Test
-  void aRunningRetryReviewIsLeftAlone() {
+  void aRunningReviewALiveReviewerServesIsLeftAlone() {
     createReviewSpec("auth");
     finishedSession("auth", "stopped", 0);
     recordEvent("auth", "review_stage_started", Instant.now().toString());
     erroredReview("auth");
+    reviewerOf(runningReview("auth"), "auth");
+
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(true), Instant::now).sweep(),
+        "the errored attempt already got its retry; its reviewer owns the spec now");
+  }
+
+  @Test
+  void aRunningReviewNoRunServesHasItsNewestLoopStopReplayedOnce() throws Exception {
+    createReviewSpec("auth");
+    var build = finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    var review = runningReview("auth");
+    var latch = new CountDownLatch(1);
+    var replayed = captureStops(latch);
+    assertEquals(
+        0,
+        reconciler(new CountingProbe(false), Instant::now).sweep(),
+        "a review only just written is about to get its reviewer: a sweep landing between its"
+            + " rows and its first launch leaves it alone");
+    var rec =
+        reconciler(
+            new CountingProbe(false),
+            () -> Instant.now().plus(MissedStopReconciler.LAUNCH_GRACE).plusSeconds(1));
+
+    assertEquals(
+        1,
+        rec.sweep(),
+        "a review left running with nothing running it — the daemon died between writing its rows"
+            + " and launching its reviewer — goes on when the newest loop stop is replayed");
+
+    BusTesting.awaitDelivery(latch);
+    assertEquals(build, replayed.peek().data().get(Event.WellKnownData.RUN_ID));
+    assertEquals("running", reviewStore.findReview(review).orElseThrow().status());
+    assertEquals(0, rec.sweep(), "once per server lifetime: the rescue never loops");
+  }
+
+  @Test
+  void aReviewWhoseReviewerOnlyJustEndedIsNotRescuedWhileItsStopIsStillBeingActedOn() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
+    var reviewer = reviewerOf(runningReview("auth"), "auth");
+    Acting.system(() -> sessionStore.complete(reviewer, "stopped", 0));
+
+    assertEquals(0, reconciler(new CountingProbe(false), Instant::now).sweep());
+    assertEquals(
+        1,
+        reconciler(
+                new CountingProbe(false),
+                () -> Instant.now().plus(MissedStopReconciler.LAUNCH_GRACE).plusSeconds(1))
+            .sweep(),
+        "past the grace window nothing is coming: the reviewer's own stop is replayed");
+  }
+
+  @Test
+  void aReviewWaitingOnAPersonIsNeverRescued() {
+    createReviewSpec("auth");
+    finishedSession("auth", "stopped", 0);
+    recordEvent("auth", "review_stage_started", Instant.now().toString());
     Acting.system(
-        () -> reviewStore.updateReviewStatus(reviewStore.createReview("auth", 1), "running"));
+        () -> {
+          var id = reviewStore.createReview("auth", 1);
+          reviewStore.updateReviewStatus(id, "running");
+          reviewStore.startStage(reviewStore.createStage(id, "sign-off", "human"), "human");
+        });
 
     assertEquals(
         0,
         reconciler(new CountingProbe(false), Instant::now).sweep(),
-        "the errored attempt already got its retry; a running review owns the spec now");
+        "a human stage is a person's to end, however long it takes");
   }
 
   private String erroredReview(String specId) {
@@ -1676,63 +1863,51 @@ class MissedStopReconcilerTest {
     };
   }
 
+  private static RunStore.RunRow stoppedRun(String agent, String role) {
+    return new RunStore.RunRow(
+        "run-7",
+        "test-project",
+        "auth",
+        "node-a",
+        role,
+        agent,
+        null,
+        "t",
+        null,
+        null,
+        "stopped",
+        null,
+        null,
+        "u",
+        "t0",
+        null,
+        List.of(),
+        null,
+        null,
+        null);
+  }
+
   @Test
   void stopEventCarriesExitCodeAndReconcileSource() {
-    var spec =
-        new SpecStore.SpecRow(
-            "auth",
-            "test-project",
-            "T",
-            SpecStatus.IN_PROGRESS,
-            null,
-            "codex",
-            null,
-            null,
-            null,
-            0,
-            null,
-            null,
-            null,
-            null,
-            List.of(),
-            List.of());
-
-    var event = MissedStopReconciler.stopEvent(spec, "run-7", "build", 137);
+    var event = MissedStopReconciler.stopEvent(stoppedRun("codex", "fix"), 137, null);
 
     assertEquals(Event.WellKnownTypes.AGENT_SESSION_STOPPED, event.type());
+    assertEquals("test-project", event.project());
     assertEquals("auth", event.spec());
     assertEquals("codex", event.agent());
     assertEquals(137, event.data().get("exit_code"));
     assertEquals("reconcile", event.data().get("source"));
     assertEquals("run-7", event.data().get("run_id"));
-    assertEquals("build", event.data().get("run_role"));
+    assertEquals("fix", event.data().get("run_role"), "the pipeline routes the replay by lane");
   }
 
   @Test
   void stopEventOmitsExitCodeWhenUnknown() {
-    var spec =
-        new SpecStore.SpecRow(
-            "auth",
-            "test-project",
-            "T",
-            SpecStatus.IN_PROGRESS,
-            null,
-            null,
-            null,
-            null,
-            null,
-            0,
-            null,
-            null,
-            null,
-            null,
-            List.of(),
-            List.of());
-
-    var event = MissedStopReconciler.stopEvent(spec, "run-7", "build", null);
+    var event = MissedStopReconciler.stopEvent(stoppedRun(null, "build"), null, null);
 
     assertEquals(Event.SAIL_AGENT, event.agent());
     assertNull(event.data().get("exit_code"));
+    assertNull(event.data().get("reason"));
     assertEquals("reconcile", event.data().get("source"));
     assertEquals("run-7", event.data().get("run_id"));
   }

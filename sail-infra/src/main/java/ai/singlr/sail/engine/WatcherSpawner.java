@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.engine.SystemdServiceInstaller.Mode;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -24,7 +25,9 @@ import java.util.Optional;
  * can address it.
  *
  * <p>Every watcher is run-addressed: unit {@code sail-watch-<runId>}, watching exactly the agent
- * unit recorded on the run, logging to the run's own host-side file {@code
+ * unit recorded on the run under the limits of that run's lane, which the spawner hands it on its
+ * command line — a watcher never reads a project's guardrails itself, so the limits a run launched
+ * under are the ones it is held to — and logging to the run's own host-side file {@code
  * <project-dir>/runs/<runId>/watch.log} so concurrent watchers never interleave one file. Per-run
  * unit names cannot collide, so a fresh launch never needs to stop a previous watcher — and must
  * not: a watcher still active from another run owns that run's agent and is left to drain it.
@@ -44,6 +47,9 @@ import java.util.Optional;
 public final class WatcherSpawner {
 
   static final String UNIT_PREFIX = "sail-watch-";
+
+  /** The verb a watcher runs under, as its process shows it: what tells it from any other. */
+  private static final String WATCH_VERB = "agent watch";
 
   private static final List<String> FORWARDED_ENV =
       List.of("SAIL_TOKEN", "SAIL_TOKEN_FILE", "SAIL_SERVER", "SAIL_DATA_DIR");
@@ -90,22 +96,34 @@ public final class WatcherSpawner {
 
   /**
    * The run-addressed watcher argv: the watcher supervises exactly one run, probing the agent unit
-   * the run was launched with (recorded on the run row, never re-derived) and filtering heartbeats
-   * by the run id.
+   * the run was launched with (recorded on the run row, never re-derived), filtering heartbeats by
+   * the run id, and enforcing {@code guardrails} — the limits of the run's lane, as the project set
+   * them when the watcher was spawned. A limit the lane does not set is left off, and unlimited.
    */
   public static List<String> watchCommandForRun(
-      String project, Path sailYaml, String runId, String agentUnit) {
-    return List.of(
-        SailPaths.binaryPath().toString(),
-        "agent",
-        "watch",
-        project,
-        "--run",
-        Ids.requireUuid(runId),
-        "--unit",
-        agentUnit,
-        "-f",
-        sailYaml.toAbsolutePath().toString());
+      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails) {
+    var command =
+        new ArrayList<>(
+            List.of(
+                SailPaths.binaryPath().toString(),
+                "agent",
+                "watch",
+                project,
+                "--run",
+                Ids.requireUuid(runId),
+                "--unit",
+                agentUnit,
+                "-f",
+                sailYaml.toAbsolutePath().toString(),
+                "--action",
+                guardrails.action()));
+    if (guardrails.maxDuration() != null) {
+      command.addAll(List.of("--max-duration", guardrails.maxDuration()));
+    }
+    if (guardrails.maxIdle() != null) {
+      command.addAll(List.of("--max-idle", guardrails.maxIdle()));
+    }
+    return List.copyOf(command);
   }
 
   /** Starts a detached process, mirroring the historic fallback spawn. */
@@ -124,11 +142,12 @@ public final class WatcherSpawner {
    * no systemd scope accepts and a fallback was supplied; throws when every rung failed or the
    * thread was interrupted mid-ladder, which the caller treats as a launch failure.
    */
-  public Spawned spawnForRun(String project, Path sailYaml, String runId, String agentUnit)
+  public Spawned spawnForRun(
+      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails)
       throws IOException {
     return spawnFresh(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit),
+        watchCommandForRun(project, sailYaml, runId, agentUnit, guardrails),
         watchLogForRun(project, runId));
   }
 
@@ -162,10 +181,11 @@ public final class WatcherSpawner {
    * back to a plain process. Empty means no systemd scope is available.
    */
   public Optional<Unit> spawnUnitForRun(
-      String project, Path sailYaml, String runId, String agentUnit) throws IOException {
+      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails)
+      throws IOException {
     return spawnUnit(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit),
+        watchCommandForRun(project, sailYaml, runId, agentUnit, guardrails),
         watchLogForRun(project, runId));
   }
 
@@ -186,10 +206,12 @@ public final class WatcherSpawner {
    * Whether any {@code sail agent watch} process for the given run is running on this host —
    * unit-spawned in any user's manager, fallback-spawned, or run by hand. Process visibility is
    * global where unit visibility is scoped to one systemd view, so this is the coverage probe the
-   * re-armer trusts: a watcher it cannot address is still a watcher it must not double.
+   * re-armer trusts: a watcher it cannot address is still a watcher it must not double. Only a
+   * watcher matches: another command that names the run ({@code sail agent stream --run}) is not
+   * one.
    */
   public boolean watcherProcessRunningForRun(String runId) {
-    return execOk(List.of("pgrep", "-f", "--", "--run " + Ids.requireUuid(runId)));
+    return execOk(List.of("pgrep", "-f", "--", WATCH_VERB + " .*--run " + Ids.requireUuid(runId)));
   }
 
   private Optional<Unit> launch(String unit, List<String> argv, Path watchLog) {

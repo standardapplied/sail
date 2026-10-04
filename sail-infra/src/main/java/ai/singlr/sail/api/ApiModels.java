@@ -1693,7 +1693,8 @@ record RunView(
     String sessionId,
     String sessionSource,
     String lastActivityAt,
-    String presence)
+    String presence,
+    String reviewId)
     implements Mappable {
   static RunView from(RunStore.RunRow row) {
     return new RunView(
@@ -1715,7 +1716,8 @@ record RunView(
         row.sessionId(),
         row.sessionSource(),
         row.lastActivityAt(),
-        RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()));
+        RunPresence.of(row.status(), row.lastActivityAt(), DateTimeUtils.now()),
+        row.reviewId());
   }
 
   @Override
@@ -1740,6 +1742,7 @@ record RunView(
     if (sessionSource != null) m.put("session_source", sessionSource);
     if (lastActivityAt != null) m.put("last_activity_at", lastActivityAt);
     if (presence != null) m.put("presence", presence);
+    if (reviewId != null) m.put("review_id", reviewId);
     return m;
   }
 }

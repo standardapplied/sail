@@ -95,7 +95,7 @@ class AgentReporterTest {
                     + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "18\n")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
@@ -132,7 +132,7 @@ class AgentReporterTest {
                     + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", lastCommit + "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "5\n")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
@@ -161,7 +161,7 @@ class AgentReporterTest {
                     + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file");
 
     var report =
         new AgentReporter(shell).generate(CONTAINER, buildConfig(), List.of(), session, stateDir);
@@ -188,7 +188,7 @@ class AgentReporterTest {
                     + RUN_UNIT.logPath()
                     + "\"}")
             .onOk(
-                "cat /home/dev/guardrail-triggered.yaml",
+                "cat " + RUN_UNIT.guardrailTriggerPath(),
                 "reason: max_duration\naction: snapshot-and-stop\n")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "0\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "45\n");
@@ -208,7 +208,7 @@ class AgentReporterTest {
   void noSessionReturnsMinimalReport(@TempDir java.nio.file.Path stateDir) throws Exception {
     var shell =
         new ScriptedShellExecutor()
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
@@ -247,7 +247,7 @@ class AgentReporterTest {
                     + "\",\"branch\":\"sail/snap\",\"log_path\":\""
                     + RUN_UNIT.logPath()
                     + "\"}")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "10\n");
 
@@ -304,7 +304,7 @@ class AgentReporterTest {
                     + "\"}")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "8\n")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file");
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file");
 
     var config = buildConfig();
     var reporter = new AgentReporter(shell);
@@ -325,7 +325,7 @@ class AgentReporterTest {
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat " + RUN_UNIT.pidPath(), "No such file")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 
@@ -345,7 +345,7 @@ class AgentReporterTest {
     var shell =
         new ScriptedShellExecutor()
             .onFail("cat " + RUN_UNIT.pidPath(), "No such file")
-            .onFail("cat /home/dev/guardrail-triggered.yaml", "No such file")
+            .onFail("cat " + RUN_UNIT.guardrailTriggerPath(), "No such file")
             .onOk("git -C /home/dev/workspace log -1 --format=%ct", "\n")
             .onOk("git -C /home/dev/workspace rev-list --count", "0\n");
 

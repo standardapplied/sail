@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -18,6 +19,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -118,16 +120,16 @@ class WriteAuthorshipTest {
       var credential =
           Acting.system(
               () ->
-                  runs.createReview(
+                  ReviewRuns.reserve(
+                      runs,
+                      "review-1",
                       "review-1",
                       "acme",
                       "auth",
                       "uday",
+                      Lane.REVIEW,
                       "claude-code",
-                      "main",
-                      "review it",
-                      "/tmp/review.log",
-                      "sail-review-1"));
+                      List.of()));
       var principal = runs.findByCredential(credential).orElseThrow().principal();
       var router = new LocalApiRouter(operations);
 

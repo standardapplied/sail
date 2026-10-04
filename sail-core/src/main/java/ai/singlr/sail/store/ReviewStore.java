@@ -90,12 +90,17 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       String completedAt,
       String error) {}
 
+  /**
+   * Records iteration {@code iteration} of the spec's review, {@code running} from its one write: a
+   * review exists only because the loop started it, so no crash leaves one waiting to be started
+   * that nothing drives. Returns its id.
+   */
   public String createReview(String specId, int iteration) {
     var id = DateTimeUtils.newId().toString();
     db.transaction(
         () -> {
           db.execute(
-              "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'pending', ?)",
+              "INSERT INTO reviews (id, spec_id, iteration, status, created_at) VALUES (?, ?, ?, 'running', ?)",
               id,
               specId,
               iteration,
@@ -108,21 +113,21 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   /**
    * A running review this box executes is live here: the pipeline writes its stages and findings
    * through its row, so main's version never rewrites or removes it mid-run. This box executes it
-   * while the run of the same id is live on the box whose FDE handle is {@code handle}, or — only
-   * before that run is recorded — when its first revision began here. A review whose run has
-   * finished is not live, even while it waits for a person's approval, so main's approval reaches
-   * it. Another box's review is never live here. Once it finishes, main's version settles it like
-   * any other.
+   * while a run that serves it is live on the box whose FDE handle is {@code handle}, or — only
+   * before its first run is recorded — when its first revision began here. A review none of whose
+   * runs is live is not live, even while it waits for a person's approval, so main's approval
+   * reaches it. Another box's review is never live here. Once it finishes, main's version settles
+   * it like any other.
    */
   @Override
   public boolean live(String id, String handle) {
     if (findReview(id).filter(review -> "running".equals(review.status())).isEmpty()) {
       return false;
     }
-    return new RunStore(db)
-        .findById(id)
-        .map(run -> run.liveOn(handle))
-        .orElseGet(() -> changeLog.begunHere(ENTITY, id));
+    var serving = new RunStore(db).forReview(id);
+    return serving.isEmpty()
+        ? changeLog.begunHere(ENTITY, id)
+        : serving.stream().anyMatch(run -> run.liveOn(handle));
   }
 
   /** Who may write a review on this box: the rule every door and main's commit decide by. */
@@ -200,42 +205,6 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
               DateTimeUtils.now().toString(),
               specId);
           affected.forEach(this::journal);
-          return affected.size();
-        });
-  }
-
-  /**
-   * Marks every {@code running} review this box executed {@code failed}, returning how many were
-   * swept. A review's execution lives only in the controller's memory, so after a server restart a
-   * {@code running} row this box ran is an orphan of an interrupted run; left in place it silently
-   * blocks every future review for its spec (the pipeline skips a spec whose latest review is
-   * running). A review another box runs is that box's to finish, so it is left alone: this box ran
-   * a review whose run was stamped with its handle, {@code localHandle}, or — before the review's
-   * run was recorded — one its own first revision began here. Called once at server start, before
-   * missed stops are replayed.
-   */
-  public int failOrphanedRunning(String localHandle) {
-    return db.transaction(
-        () -> {
-          var affected =
-              db.query(
-                  """
-                  SELECT r.id FROM reviews r WHERE r.status = 'running'
-                  AND CASE WHEN EXISTS (SELECT 1 FROM runs WHERE id = r.id)
-                      THEN EXISTS (SELECT 1 FROM runs WHERE id = r.id AND IFNULL(node, '') = ?)
-                      ELSE (SELECT peer IS NULL FROM change_log
-                          WHERE entity_type = 'review' AND entity_id = r.id
-                          ORDER BY seq LIMIT 1) END""",
-                  row -> row.text(0),
-                  Objects.toString(localHandle, ""));
-          affected.forEach(
-              id -> {
-                db.execute(
-                    "UPDATE reviews SET status = 'failed', completed_at = ? WHERE id = ?",
-                    DateTimeUtils.now().toString(),
-                    id);
-                journal(id);
-              });
           return affected.size();
         });
   }

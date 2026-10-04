@@ -8,7 +8,6 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.AgentRoster;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -29,39 +28,27 @@ public final class ReviewWiring {
 
   /**
    * Assembles the production review pipeline controller: the two roster-aware resolvers over {@code
-   * projectLoader}, and a {@link ContainerReviewAgentRunner} that launches reviewers in the
-   * container over {@code shell}.
+   * projectLoader}, launching its reviewers and fix agents through {@code lanes} — the same
+   * launcher, watcher and stop every other lane runs on.
    */
   public static ReviewPipelineController controller(
       SpecStore specStore,
       ReviewStore reviewStore,
-      EventBus eventBus,
-      Function<String, SailYaml> projectLoader,
-      ShellExec shell,
-      Runnable syncTrigger) {
-    return controller(
-        specStore, reviewStore, eventBus, projectLoader, shell, syncTrigger, null, null);
-  }
-
-  public static ReviewPipelineController controller(
-      SpecStore specStore,
-      ReviewStore reviewStore,
-      EventBus eventBus,
-      Function<String, SailYaml> projectLoader,
-      ShellExec shell,
-      Runnable syncTrigger,
       RunStore runStore,
+      EventBus eventBus,
+      Function<String, SailYaml> projectLoader,
+      ReviewLanes lanes,
+      Runnable syncTrigger,
       Supplier<String> localHandle) {
     return new ReviewPipelineController(
         specStore,
         reviewStore,
+        runStore,
         configResolver(projectLoader),
         reviewerResolver(projectLoader),
-        new ContainerReviewAgentRunner(shell),
+        lanes,
         eventBus,
         syncTrigger,
-        java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor(),
-        runStore,
         localHandle);
   }
 

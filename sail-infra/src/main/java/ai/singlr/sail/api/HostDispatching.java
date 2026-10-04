@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
@@ -35,5 +36,6 @@ public interface HostDispatching {
 
   AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
 
-  String reviewLog(String project, String node);
+  /** The newest run of {@code project} this box executed in {@code lane}, or empty. */
+  Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane);
 }

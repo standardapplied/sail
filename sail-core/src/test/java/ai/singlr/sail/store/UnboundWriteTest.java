@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import java.io.ByteArrayInputStream;
@@ -88,20 +89,19 @@ class UnboundWriteTest {
   }
 
   @Test
-  void aRunWrittenByNoOneIsRefused() {
+  void aRunReservedByNoOneIsRefused() {
     assertRefused(
         () ->
-            new RunStore(db)
-                .createReview(
-                    "review-1",
-                    "acme",
-                    "auth",
-                    "node-a",
-                    "claude-code",
-                    "main",
-                    "review it",
-                    "/tmp/log",
-                    "unit"),
+            ReviewRuns.reserve(
+                new RunStore(db),
+                "review-1",
+                "review-1",
+                "acme",
+                "auth",
+                "node-a",
+                Lane.REVIEW,
+                "claude-code",
+                List.of()),
         "runs",
         "run");
   }

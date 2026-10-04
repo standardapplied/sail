@@ -18,7 +18,9 @@ import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.stream.Stream;
 
 /**
@@ -33,8 +35,9 @@ import java.util.stream.Stream;
  *
  * <p>Close the client to stop the reader thread and release the underlying HTTP body stream.
  * Failures inside the reader (stream closed by server, parse errors, etc.) are logged to stderr and
- * end the thread quietly — the queue simply stops receiving new events, and the main loop is
- * expected to notice via its own timeout.
+ * end the thread quietly — the queue simply stops receiving new events. A stream that ended says so
+ * ({@link #ended}), so a caller that outlives the server it listens to — a watcher across a daemon
+ * restart — subscribes again instead of waiting on a queue nothing will ever fill.
  */
 public final class EventStreamClient implements AutoCloseable {
 
@@ -76,7 +79,7 @@ public final class EventStreamClient implements AutoCloseable {
             .timeout(Duration.ofHours(24))
             .GET()
             .build();
-    var response = client.send(request, HttpResponse.BodyHandlers.ofLines());
+    var response = answer(client, request);
     if (response.statusCode() != 200) {
       throw new IOException(
           "Event stream request returned HTTP " + response.statusCode() + " from " + request.uri());
@@ -91,6 +94,31 @@ public final class EventStreamClient implements AutoCloseable {
               + SUBSCRIBED_TIMEOUT);
     }
     return stream;
+  }
+
+  /**
+   * The response to {@code request}, waited for no longer than the subscribed hello is. The
+   * request's own timeout spans the whole stream, so it cannot bound this: a server that accepts
+   * the connection and never answers would otherwise hold its caller for as long as a stream may
+   * last.
+   */
+  private static HttpResponse<Stream<String>> answer(HttpClient client, HttpRequest request)
+      throws IOException, InterruptedException {
+    var pending = client.sendAsync(request, HttpResponse.BodyHandlers.ofLines());
+    try {
+      return pending.get(SUBSCRIBED_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
+    } catch (TimeoutException unanswered) {
+      pending.cancel(true);
+      throw new IOException(
+          "No response from " + request.uri() + " within " + SUBSCRIBED_TIMEOUT + ".");
+    } catch (InterruptedException interrupted) {
+      pending.cancel(true);
+      throw interrupted;
+    } catch (ExecutionException failed) {
+      throw new IOException(
+          "Event stream request to " + request.uri() + " failed: " + failed.getCause(),
+          failed.getCause());
+    }
   }
 
   private void readLoop(BlockingQueue<Event> queue) {
@@ -108,8 +136,7 @@ public final class EventStreamClient implements AutoCloseable {
               throw new StopReadingException();
             }
           });
-    } catch (StopReadingException ignored) {
-      // close() was called or thread was interrupted; expected.
+    } catch (StopReadingException closed) {
     } catch (Exception e) {
       if (!stopped) {
         System.err.println("  [event-stream] Stream ended: " + e.getMessage());
@@ -139,13 +166,17 @@ public final class EventStreamClient implements AutoCloseable {
     }
   }
 
+  /** Whether the stream is over: the server closed it, the connection broke, or it was closed. */
+  public boolean ended() {
+    return stopped || !reader.isAlive();
+  }
+
   @Override
   public void close() {
     stopped = true;
     try {
       lineStream.close();
     } catch (Exception ignored) {
-      // best effort
     }
     reader.interrupt();
   }

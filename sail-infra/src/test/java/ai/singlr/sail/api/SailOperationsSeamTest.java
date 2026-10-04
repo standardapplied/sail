@@ -15,9 +15,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ProjectFileFixtures;
 import ai.singlr.sail.engine.ShellExec;
@@ -37,6 +37,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -1438,12 +1439,29 @@ class SailOperationsSeamTest {
       assertTrue(operations.dispatching().activeRun("proj", "other").isEmpty());
       assertTrue(operations.dispatching().latestRun("proj", "other").isEmpty());
       assertEquals(1, operations.dispatching().runningRuns("proj", "node").size());
-      var fallback = operations.dispatching().reviewLog("proj", "node");
-      var review = Acting.system(() -> new ReviewStore(box.db).createReview("auth", 1));
+      assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).isEmpty());
+      Acting.system(() -> runs.complete(id, "completed", 0));
+      var reviewer = DateTimeUtils.newId().toString();
+      Acting.system(
+          () ->
+              ReviewRuns.reserve(
+                  runs,
+                  reviewer,
+                  DateTimeUtils.newId().toString(),
+                  "proj",
+                  "auth",
+                  "node",
+                  Lane.REVIEW,
+                  "codex",
+                  List.of()));
       assertEquals(
-          AgentUnit.forReview(review).logPath(),
-          operations.dispatching().reviewLog("proj", "node"));
-      assertEquals(fallback, operations.dispatching().reviewLog("proj", "other"));
+          reviewer,
+          operations.dispatching().latestRunInLane("proj", "node", Lane.REVIEW).orElseThrow().id());
+      assertEquals(
+          id,
+          operations.dispatching().latestRunInLane("proj", "node", Lane.BUILD).orElseThrow().id());
+      assertTrue(operations.dispatching().latestRunInLane("proj", "node", Lane.FIX).isEmpty());
+      assertTrue(operations.dispatching().latestRunInLane("proj", "other", Lane.REVIEW).isEmpty());
     }
   }
 

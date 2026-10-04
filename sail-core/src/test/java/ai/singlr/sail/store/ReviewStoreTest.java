@@ -6,12 +6,15 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
@@ -390,7 +393,10 @@ class ReviewStoreTest {
     assertTrue(review.isPresent());
     assertEquals("auth", review.get().specId());
     assertEquals(1, review.get().iteration());
-    assertEquals("pending", review.get().status());
+    assertEquals(
+        "running",
+        review.get().status(),
+        "a review is written running: no crash leaves one waiting to be started");
   }
 
   @Test
@@ -1216,45 +1222,29 @@ class ReviewStoreTest {
   }
 
   @Test
-  void failOrphanedRunningSweepsInterruptedReviewsSoTheyCannotWedgeTheSpec() {
-    var interrupted = store.createReview("auth", 1);
-    store.updateReviewStatus(interrupted, "running");
-    var finished = store.createReview("auth", 2);
-    store.updateReviewStatus(finished, "passed");
-
-    var swept = store.failOrphanedRunning("ada");
-
-    assertEquals(1, swept, "exactly the interrupted review is swept");
-    assertEquals(
-        "failed",
-        store.findReview(interrupted).orElseThrow().status(),
-        "a 'running' review cannot survive a restart; left as-is it silently blocks every"
-            + " future review for the spec");
-    assertEquals(
-        "passed", store.findReview(finished).orElseThrow().status(), "terminal rows untouched");
-    assertEquals(0, store.failOrphanedRunning("ada"), "idempotent: a second sweep finds nothing");
-  }
-
-  @Test
-  void failOrphanedRunningLeavesAReviewAnotherBoxRunsToThatBox() {
+  void aRunningReviewIsLiveOnlyWhileARunThatServesItIsLiveOnThisBox() {
     var runs = new RunStore(db);
-    var mine = store.createReview("auth", 1);
-    store.updateReviewStatus(mine, "running");
-    runs.createReview(mine, "acme", "auth", "ada", "claude-code", "b", "t", "/l", "u");
-    var theirs = store.createReview("auth", 2);
-    store.updateReviewStatus(theirs, "running");
-    runs.createReview(theirs, "acme", "auth", "bob", "claude-code", "b", "t", "/l", "u");
-    var synced = "019fee00-0000-7000-8000-0000000000c1";
-    var snapshot = new LinkedHashMap<>(store.comparableSnapshot(theirs));
-    Actor.run(Actor.main(), () -> store.applyRevision(synced, snapshot, "1-synced"));
+    var review = store.createReview("auth", 1);
+    store.updateReviewStatus(review, "running");
+    assertTrue(store.live(review, "ada"), "begun here, before its first run is recorded");
 
-    assertEquals(1, store.failOrphanedRunning("ada"));
+    var reviewer = DateTimeUtils.newId().toString();
+    ReviewRuns.reserve(
+        runs, reviewer, review, "acme", "auth", "ada", Lane.REVIEW, "codex", List.of());
+    assertTrue(store.live(review, "ada"));
+    assertFalse(store.live(review, "bob"), "a review another box runs is never live here");
 
-    assertEquals("failed", store.findReview(mine).orElseThrow().status());
-    assertEquals("running", store.findReview(theirs).orElseThrow().status());
-    assertEquals(
-        "running",
-        store.findReview(synced).orElseThrow().status(),
-        "a review this box only adopted, whose run has not arrived, is its executor's to finish");
+    runs.complete(reviewer, "stopped", 0);
+    assertFalse(
+        store.live(review, "ada"),
+        "with no run serving it — between stages, or waiting on a person — main's version"
+            + " reaches it");
+
+    var next = DateTimeUtils.newId().toString();
+    ReviewRuns.reserve(runs, next, review, "acme", "auth", "ada", Lane.REVIEW, "codex", List.of());
+    assertTrue(store.live(review, "ada"), "the next stage's reviewer serves the same review");
+
+    store.updateReviewStatus(review, "passed");
+    assertFalse(store.live(review, "ada"), "a finished review is settled like any other");
   }
 }

@@ -11,8 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import java.nio.file.Path;
 import java.util.List;
@@ -261,6 +263,70 @@ class SchemaManagerTest {
     assertTrue(boxes.claim("ada", "ada-box").isEmpty());
     assertEquals("ada-box", boxes.claim("ada", "laptop").orElseThrow());
     assertTrue(new RunStore(db).findById("01a0ecdf-0000-7000-8000-000000000001").isPresent());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
+  void runsLearnTheFixLaneAndTheReviewTheyServeKeepingEveryRowAndItsRevision() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE runs_v8");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    var review = "01a0ecdf-0000-7000-8000-0000000000a1";
+    var build = "01a0ecdf-0000-7000-8000-0000000000b1";
+    db.execute(
+        """
+        INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, owner,
+            rev, base_rev, room_id)
+        VALUES (?, 'acme', 'auth', 'ada', 'review', 'codex', 'completed',
+            '2026-09-01T00:00:00Z', 'ada', '3-abc', '3-abc', NULL)""",
+        review);
+    db.execute(
+        """
+        INSERT INTO runs (id, project, spec_id, node, role, agent, status, started_at, owner)
+        VALUES (?, 'acme', 'auth', 'ada', 'build', 'claude-code', 'stopped', 't0', 'ada')""",
+        build);
+    assertThrows(
+        RuntimeException.class,
+        () ->
+            db.execute(
+                """
+                INSERT INTO runs (id, project, role, agent, status, started_at)
+                VALUES ('f', 'acme', 'fix', 'claude-code', 'running', 't0')"""),
+        "before the migration the runs table admits no fix lane");
+
+    new SchemaManager(db).migrate();
+
+    var runs = new RunStore(db);
+    assertEquals(
+        review,
+        runs.findById(review).orElseThrow().reviewId(),
+        "a review run recorded before runs named their review ran under its review's own id");
+    assertNull(runs.findById(build).orElseThrow().reviewId());
+    assertFalse(
+        runs.findById(build).orElseThrow().stoppedByOperator(),
+        "a run stopped before stops were marked is nobody's to escalate");
+    assertEquals(
+        "3-abc",
+        db.queryOne("SELECT rev FROM runs WHERE id = ?", row -> row.text(0), review).orElseThrow(),
+        "the rebuild journals nothing: no revision changes, so nothing is offered to main");
+    var fix = "01a0ecdf-0000-7000-8000-0000000000f1";
+    Acting.system(
+        () ->
+            ReviewRuns.reserve(
+                runs, fix, review, "acme", "auth", "ada", Lane.FIX, "claude-code", List.of()));
+    assertEquals("fix", runs.findById(fix).orElseThrow().role());
+    assertEquals(List.of(fix, review), runs.forReview(review).stream().map(r -> r.id()).toList());
+    assertEquals(
+        List.of("idx_runs_project", "idx_runs_review", "idx_runs_room", "idx_runs_spec"),
+        db.query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'runs'"
+                + " AND name LIKE 'idx_%' ORDER BY name",
+            row -> row.text(0)));
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 

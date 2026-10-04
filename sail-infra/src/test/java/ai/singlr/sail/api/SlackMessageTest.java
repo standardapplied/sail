@@ -280,6 +280,28 @@ class SlackMessageTest {
   }
 
   @Test
+  void aStopTheWatcherCausedSaysWhyInPlaceOfAnExitCode() {
+    var text =
+        SlackMessage.forEvent(
+            event("agent_session_stopped", Map.of("reason", "time limit (4h)")), null);
+
+    assertEquals("Agent sail stopped (time limit (4h)).", text);
+  }
+
+  @Test
+  void aFailedFixIterationSaysWhy() {
+    assertEquals(
+        "Fix iteration failed: fix agent killed: time limit (45m).",
+        SlackMessage.forEvent(
+            event(
+                "review_iteration_failed", Map.of("detail", "fix agent killed: time limit (45m)")),
+            null));
+    assertEquals(
+        "Fix iteration failed: the fix agent did not finish.",
+        SlackMessage.forEvent(event("review_iteration_failed"), null));
+  }
+
+  @Test
   void fixIterationStarted() {
     var text = SlackMessage.forEvent(event("review_iteration_started"), null);
 

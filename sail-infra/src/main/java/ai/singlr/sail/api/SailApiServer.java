@@ -24,7 +24,6 @@ public final class SailApiServer implements AutoCloseable {
   private final EventBus.Subscription webhookSubscription;
   private final EventBus.Subscription specLifecycleSubscription;
   private final EventBus.Subscription reviewSubscription;
-  private final ReviewPipelineController reviewController;
   private final SseHandler sseHandler;
   private final LocalApiSocket socketListener;
 
@@ -130,7 +129,6 @@ public final class SailApiServer implements AutoCloseable {
         eventBus != null && auditSubscriber != null ? eventBus.subscribe(auditSubscriber) : null;
     this.webhookSubscription =
         eventBus != null ? eventBus.subscribe(WebhookReactor.withDefaultResolver()) : null;
-    this.reviewController = reviewController;
     this.reviewSubscription =
         eventBus != null && reviewController != null ? eventBus.subscribe(reviewController) : null;
     this.specLifecycleSubscription =
@@ -196,9 +194,6 @@ public final class SailApiServer implements AutoCloseable {
     }
     if (reviewSubscription != null) {
       reviewSubscription.close();
-    }
-    if (reviewController != null) {
-      reviewController.close();
     }
     if (specLifecycleSubscription != null) {
       specLifecycleSubscription.close();
