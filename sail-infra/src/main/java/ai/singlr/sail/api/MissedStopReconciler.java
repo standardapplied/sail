@@ -29,6 +29,7 @@ import java.time.Instant;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -90,6 +91,12 @@ public final class MissedStopReconciler implements AutoCloseable {
    */
   public static final Duration LAUNCH_GRACE = Duration.ofMinutes(2);
 
+  /**
+   * How many times one step of a review waiting on a claim — a stage, or its fix — is rescued while
+   * that claim is free, in a server's lifetime.
+   */
+  static final int WAITING_RESCUES = 3;
+
   private static final SpecStore.SpecFilter IN_PROGRESS =
       new SpecStore.SpecFilter(null, "in_progress", null, null, null);
 
@@ -129,8 +136,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<Instant> clock;
   private final ReviewLoopState loop;
   private final PeriodicPass pass;
-  private final Set<String> reviewRescueAttempted = ConcurrentHashMap.newKeySet();
-  private final Set<String> heldUp = ConcurrentHashMap.newKeySet();
+  private final Map<String, Integer> rescues = new ConcurrentHashMap<>();
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -492,18 +498,18 @@ public final class MissedStopReconciler implements AutoCloseable {
    * running stage, or the fix agent answering its gate failure, ended and nothing came of it — that
    * run's stop was never acted on. Replaying the stop of the spec's newest loop run, whichever lane
    * it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch the fix, or
-   * judge the run's work. Each rescue key — the spec for a dropped kickoff, the review row and its
-   * shape otherwise, so a rescue that leaves the same review owed something else is still rescued —
-   * fires at most once per server lifetime, and the pipeline's errored-attempt budget escalates a
-   * persistent failure, so no shape can loop. A running review is rescued per stage; one whose next
-   * step is a launch is not rescued while a run holds its claim, and one whose spent rescue left it
-   * waiting is rescued once more each time it is seen held and then found free ({@link #waiting}).
-   * A key is spent only once its stop is published. An escalated review, or one waiting on a person
-   * or on a live run, is left alone, since a human or a working agent owns the spec then.
+   * judge the run's work. Rescues are counted per key — the spec for a dropped kickoff, the review
+   * row and its shape otherwise, so a rescue that leaves the same review owed something else is
+   * still rescued. A key fires at most once per server lifetime, except that of a review waiting on
+   * a claim, which fires up to {@link #WAITING_RESCUES} times while the claim is free ({@link
+   * #waiting}); with the pipeline's errored-attempt budget escalating a persistent failure, no
+   * shape can loop. A running review is rescued per stage. A rescue counts only once its stop is
+   * published. An escalated review, or one waiting on a person or on a live run, is left alone,
+   * since a human or a working agent owns the spec then.
    */
   private boolean rescueStrandedReview(SpecStore.SpecRow spec) throws Exception {
     var rescue = rescueFor(spec).orElse(null);
-    if (rescue == null || reviewRescueAttempted.contains(rescue.key())) {
+    if (rescue == null || rescues.getOrDefault(rescue.key(), 0) >= rescue.tries()) {
       return false;
     }
     var node = localHandle.get();
@@ -516,43 +522,57 @@ public final class MissedStopReconciler implements AutoCloseable {
       return false;
     }
     publishStop(latest.get(), latest.get().exitCode(), rescue.why());
-    reviewRescueAttempted.add(rescue.key());
+    rescues.merge(rescue.key(), 1, Integer::sum);
     return true;
   }
 
-  private record Rescue(String key, String why) {
+  /**
+   * A stranded review's rescue: the key it is counted under, why it is owed, and how many times it
+   * may be tried in a server's lifetime.
+   */
+  private record Rescue(String key, String why, int tries) {
+
+    Rescue(String key, String why) {
+      this(key, why, 1);
+    }
 
     static Rescue of(ReviewStore.ReviewRow review, String shape, String why) {
       return new Rescue(review.id() + ":" + shape, "review " + review.id() + " " + why);
+    }
+
+    Rescue upTo(int tries) {
+      return new Rescue(key, why, tries);
     }
   }
 
   /**
    * The rescue of a review whose next step may be a launch — a reviewer or a fix agent, in {@code
-   * lane}, that the dispatch gate may refuse. Every sweep notes whether a run holds that claim. A
-   * step known to be a launch ({@code launches}) is not rescued while one does: the replay would
-   * only be refused again, and that run's own stop is what frees the review. A rescue already spent
-   * is owed again once the review was seen held up and is then found free: its holder ended with no
-   * stop on the bus — finished in place, a foreground session completing — and nothing else will
-   * wake it.
+   * lane}, that the dispatch gate may refuse. Nothing tells the reconciler whether a replay was
+   * refused: a run can take the claim between the sweep that finds it free and the pipeline's
+   * launch, and end with no stop on the bus — finished in place, a foreground session completing, a
+   * launch that failed after reserving — so nothing else wakes the review. A waiting review whose
+   * claim is free is therefore rescued up to {@link #WAITING_RESCUES} times, which bounds a rescue
+   * that changes nothing; a replay there is what any stop in the project would have done. While a
+   * run holds the claim, a step known to be a launch ({@code launches}) is not rescued: the replay
+   * would only be refused, and the holder's own stop, or the next free sweep, is what moves the
+   * review. A step not known to be one — a failed gate may be owed an escalation, a review with no
+   * stage rows a person's stage — is rescued once while held, under a key of its own, so that
+   * replay costs the review none of its free ones.
    */
   private Optional<Rescue> waiting(
       ReviewStore.ReviewRow review, Lane lane, boolean launches, String shape, String why) {
-    var rescue = Rescue.of(review, shape, why);
-    var held = claimHeld(review, lane);
-    if (held) {
-      heldUp.add(rescue.key());
-    } else if (heldUp.remove(rescue.key())) {
-      reviewRescueAttempted.remove(rescue.key());
+    if (!claimHeld(review, lane)) {
+      return Optional.of(Rescue.of(review, shape, why).upTo(WAITING_RESCUES));
     }
-    return held && launches ? Optional.empty() : Optional.of(rescue);
+    return launches ? Optional.empty() : Optional.of(Rescue.of(review, shape + ":held", why));
   }
 
   /**
    * The stage a running review is in: how many of its stages have passed, and whether the one after
    * them is a reviewer's to launch. A review is rescued per stage, so one rescued at a stage is not
    * out of rescues at the next; the count holds still while the stage's rows are written, as an id
-   * would not. A review with no stage rows yet is at its first stage, taken for a launch.
+   * would not. A review with no stage rows yet is not known to launch anything: its first stage may
+   * be a person's, and the rescue that writes its rows claims nothing.
    */
   private record Stage(long passed, boolean launches) {}
 
@@ -560,12 +580,11 @@ public final class MissedStopReconciler implements AutoCloseable {
     var stages = reviewStore.stagesForReview(review.id());
     var passed = stages.stream().takeWhile(stage -> "passed".equals(stage.status())).count();
     var launches =
-        stages.isEmpty()
-            || stages.stream()
-                .skip(passed)
-                .findFirst()
-                .filter(stage -> !"human".equals(stage.stageType()))
-                .isPresent();
+        stages.stream()
+            .skip(passed)
+            .findFirst()
+            .filter(stage -> !"human".equals(stage.stageType()))
+            .isPresent();
     return new Stage(passed, launches);
   }
 
