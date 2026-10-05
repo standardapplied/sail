@@ -1085,12 +1085,15 @@ class MissedStopReconcilerTest {
     assertEquals(
         0,
         reconciler(new CountingProbe(false), Instant::now)
+            .strandedReviews
             .rescueStrandedReviews(new HashSet<>(Set.of("auth"))),
         "a spec whose stop was replayed earlier this sweep — which flips it into review on an async"
             + " subscriber thread — must not have its stop replayed a second time by the review pass");
     assertEquals(
         1,
-        reconciler(new CountingProbe(false), Instant::now).rescueStrandedReviews(new HashSet<>()),
+        reconciler(new CountingProbe(false), Instant::now)
+            .strandedReviews
+            .rescueStrandedReviews(new HashSet<>()),
         "the same genuinely stranded review spec IS rescued when nothing handled it this sweep");
   }
 
