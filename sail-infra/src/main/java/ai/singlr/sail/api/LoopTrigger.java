@@ -19,11 +19,10 @@ import java.util.Optional;
 sealed interface LoopTrigger {
 
   /**
-   * Why the run a stop tells of did not end well, or empty when it did: the guardrail the watcher
-   * ended it for ({@code killed: time limit (45m)}, {@code killed: stall (20m)}), else its non-zero
-   * exit ({@code failed: exit 1}). A stop that names neither — a clean exit, or a reconciled stop
-   * of a run nothing is known to have ended — is no failure, and the run's work is judged on what
-   * it left.
+   * Why the run a stop tells of did not end well: the guardrail the watcher ended it for ({@code
+   * killed: time limit (45m)}), else its non-zero exit ({@code failed: exit 1}). A stop that names
+   * neither — a clean exit, or a reconciled stop of a run nothing is known to have ended — is no
+   * failure, and the run's work is judged on what it left.
    */
   static Optional<String> failureOf(Map<String, Object> stop) {
     var reason = Objects.toString(stop.get(Event.WellKnownData.REASON), null);
@@ -36,10 +35,7 @@ sealed interface LoopTrigger {
         : Optional.empty();
   }
 
-  /**
-   * A build or an ad-hoc run ended, or a run of no known lane: {@code runId} when this box holds
-   * its row, else null, and the exit code its stop carried, or null.
-   */
+  /** A build, an ad-hoc run or a run of no known lane ended; no {@code runId} for no row here. */
   record BuildEnded(String runId, Integer exitCode) implements LoopTrigger {}
 
   /** A reviewer ended; {@code failure} is how it ended badly ({@link #failureOf}), if it did. */
@@ -62,10 +58,7 @@ sealed interface LoopTrigger {
   /** A step judged the stage in place {@code stage} of the pipeline. */
   record StageJudged(int stage, StageVerdicts.StageOutcome outcome) implements LoopTrigger {}
 
-  /**
-   * A launch threw — building its prompt or its task included — and no live run serves the review.
-   * {@code stage} is the place of the stage a reviewer was for, unread for a fix agent.
-   */
+  /** A launch threw — building its prompt or task included — and no live run serves the review. */
   record LaunchFailed(Lane lane, int stage, String why) implements LoopTrigger {}
 
   /** What fix agent {@code run} left uncommitted, if anything, is committed and pushed. */

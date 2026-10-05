@@ -19,25 +19,21 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.stream.IntStream;
 
 /**
  * Everything a decision of the review loop reads about one spec, as the rows stood at one moment
- * ({@link LoopFactsReader#read}). What the rows say the loop owes the spec's review ({@link #owed})
- * is the one reading of them the pipeline and the missed-stop reconciler share, so the step the
- * pipeline takes when a stop arrives is always the step the reconciler replayed that stop for.
+ * ({@link LoopFactsReader}). What they say the loop owes the spec's review ({@link #owed}) is the
+ * one reading the pipeline and the missed-stop reconciler share, so the step the pipeline takes
+ * when a stop arrives is always the step the reconciler replayed that stop for.
  *
- * <p>Only the runs this box executed count as serving a review: a run row another box pushed can
- * name any review, and one that did would otherwise hold this box's loop waiting on a stop that is
- * never coming here. And a box moves a spec's loop unasked only when it executed the spec's newest
- * loop run ({@link #drivenHere}): a review it merely holds a copy of is its executing box's.
+ * <p>Only the runs this box ({@code node}) executed count as serving a review: a run row another
+ * box pushed can name any review, and would otherwise hold this box's loop waiting on a stop that
+ * is never coming here. And a box moves a spec's loop unasked only when it executed the spec's
+ * newest loop run ({@link #drivenHere}): a review it merely holds a copy of is its executing box's.
  *
- * @param node this box's FDE handle
- * @param review the latest review of the spec's current dispatch attempt
- * @param stages that review's stage rows, in order
+ * @param review the latest review of the spec's current dispatch attempt, with its {@code stages}
  * @param serving the runs this box executed that serve the review, newest first
  * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
- * @param openFindings the review's open findings
  * @param failedStageFindings the open findings of the review's first failed stage, with their ages
  * @param erroredAttempts how many attempts of the review's iteration failed by infrastructure error
  * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
@@ -61,11 +57,8 @@ record LoopFacts(
   sealed interface Pipeline {
 
     /**
-     * The project's pipeline, with stages for a review to run.
-     *
-     * @param rosterReviewer the project's default reviewer agent, for a stage that names none — the
-     *     installed agent that is not the coder, else the coder for self-review ({@code
-     *     AgentRoster.reviewer}); null when the project installs none or no stage needs it
+     * The project's pipeline, with stages for a review to run, and the project's default reviewer
+     * ({@code AgentRoster.reviewer}) for a stage that names none: null when it installs no agent.
      */
     record Staged(ReviewPipelineConfig config, String rosterReviewer) implements Pipeline {
 
@@ -78,10 +71,7 @@ record LoopFacts(
     /** The project has no pipeline with stages. */
     record None() implements Pipeline {}
 
-    /**
-     * The project's descriptor is there and could not be read, for {@code why}: nothing is known of
-     * its pipeline, least of all that it has none or that it changed.
-     */
+    /** The descriptor could not be read: nothing is known of the pipeline, not even its absence. */
     record Unreadable(String why) implements Pipeline {}
   }
 
@@ -91,10 +81,7 @@ record LoopFacts(
   /** The step a review's rows say comes next. */
   sealed interface Owed {
 
-    /**
-     * No step: the spec has no review, a run still serves it, it waits on a person, or it ended —
-     * passed, or escalated to a human.
-     */
+    /** No step: no review, a run still serves it, it waits on a person, or it ended. */
     record Nothing() implements Owed {}
 
     /** The review failed by infrastructure error: its iteration runs again, within its budget. */
@@ -102,28 +89,22 @@ record LoopFacts(
 
     /**
      * The review is running, no reviewer was ever launched for the stage it is in, and no wait is
-     * recorded: the launch was cut short before the gate answered. It goes on from its stage rows.
+     * recorded: the launch was cut short before the gate answered.
      */
     record Advance(ReviewStore.ReviewRow review) implements Owed {}
 
-    /**
-     * The review failed its gate, no fix agent ever served it, and no wait is recorded: its
-     * findings go to one, or the spec escalates.
-     */
+    /** The review failed its gate, and neither a fix agent nor a wait was recorded for it. */
     record Fix(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
      * The gate refused the review's last launch, and the review recorded the run that held the
-     * claim ({@link ReviewStore.ReviewRow#waitingOn}). It is owed {@code step} — the {@link
-     * Advance} or {@link Fix} it was refused — and whoever takes it does so only once that run has
-     * ended ({@link LoopFacts#holderEnded}).
+     * claim. It is owed the {@link Advance} or {@link Fix} it was refused, once that run has ended.
      */
     record Waiting(ReviewStore.ReviewRow review, Owed step) implements Owed {}
 
     /**
-     * The run the review waited on — the reviewer of its running stage, or the fix agent that
-     * answered its gate failure — has ended, and nothing has come of it yet: only that run's own
-     * stop says how it ended and what its work is worth. The stop is in flight, or was lost.
+     * The run the review waited on — its running stage's reviewer, or its fix agent — has ended,
+     * and nothing has come of it yet: only that run's own stop says what its work is worth.
      */
     record Stop(ReviewStore.ReviewRow review, RunStore.RunRow run) implements Owed {}
   }
@@ -139,12 +120,9 @@ record LoopFacts(
   }
 
   /**
-   * Whether an authoritative stop for a spec in this status moves its review loop. Both {@code
-   * in_progress} (the normal path) and {@code review} qualify: a spec can be moved to {@code
-   * review} out of band — a manual edit, or a sync revision from another box — while its agent is
-   * still running here. Every other status — {@code cancelled} above all, and {@code done}, {@code
-   * awaiting_merge}, {@code archived}, {@code draft}, {@code pending} — is someone's decision the
-   * loop never acts over: no review starts, no stage is judged, no fix agent launches.
+   * Whether the spec is the loop's to move: {@code in_progress}, or {@code review} — a spec can be
+   * moved there out of band while its agent still runs here. Every other status, {@code cancelled}
+   * above all, is someone's decision the loop never acts over.
    */
   boolean loops() {
     return spec.map(SpecStore.SpecRow::status)
@@ -152,19 +130,15 @@ record LoopFacts(
         .isPresent();
   }
 
-  /**
-   * The project's pipeline when it has stages; a decision asks only once {@link #unfit} is empty.
-   */
+  /** The pipeline, for a decision that has found the review fit to run under it. */
   Pipeline.Staged staged() {
     return (Pipeline.Staged) pipeline;
   }
 
   /**
-   * Why the review cannot run under the project's pipeline, or empty when it can. A review the
-   * pipeline can no longer judge — it cannot be read, the project has no stages left, or a stage
-   * the review holds is not the pipeline's stage in that place any more, by name and by kind — is a
-   * person's. A pipeline that cannot be read is never compared with the review: it says nothing of
-   * what the pipeline is.
+   * Why the review cannot run under the project's pipeline, or empty when it can: the pipeline
+   * cannot be read, has no stages left, or a stage the review holds is not the pipeline's stage in
+   * that place any more, by name and by kind. Such a review is a person's.
    */
   Optional<String> unfit() {
     return switch (pipeline) {
@@ -193,27 +167,23 @@ record LoopFacts(
   }
 
   /**
-   * The place of the stage of the review that {@code run} reviewed, or empty when no stage waits on
-   * it: the agent stage that is {@code running} and was started while the run was live — a stage
-   * starts once its reviewer's claim has landed, and before that reviewer's unit does. A stage
-   * started before the run was recorded, or after it ended, is another reviewer's to judge, and
-   * reading this run's log for it would pass a stage nobody reviewed.
+   * The place of the stage {@code run} reviewed, or empty when no stage waits on it: the agent
+   * stage that is {@code running} and was started while the run was live — a stage starts once its
+   * reviewer's claim has landed, and before that reviewer's unit does. A stage started before the
+   * run was recorded, or after it ended, is another reviewer's to judge.
    */
   Optional<Integer> stageReviewedBy(RunStore.RunRow run) {
     var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
     var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
-    return IntStream.range(0, stages.size())
-        .boxed()
+    return stages.stream()
+        .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
         .filter(
-            place -> {
-              var stage = stages.get(place);
+            stage -> {
               var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
-              return "running".equals(stage.status())
-                  && !"human".equals(stage.stageType())
-                  && !started.isBefore(recorded)
-                  && !started.isAfter(ended);
+              return !started.isBefore(recorded) && !started.isAfter(ended);
             })
-        .findFirst();
+        .findFirst()
+        .map(stages::indexOf);
   }
 
   /** Whether a newer run of the spec's loop has come after run {@code runId}. */
@@ -223,10 +193,8 @@ record LoopFacts(
 
   /**
    * The review {@code run} serves, when the loop is waiting on this very run: the run is this box's
-   * and the newest of its spec's loop — no reviewer, fix agent or re-dispatched build has come
-   * after it — its spec is still the loop's to move, and its review is the spec's latest in this
-   * dispatch attempt and in one of {@code statuses}. Anything else is a stop the loop has already
-   * moved past, or one it must not act over.
+   * and the newest of its spec's loop, its spec is still the loop's to move, and its review is the
+   * spec's latest and in one of {@code statuses}. Any other stop is past, or not the loop's.
    */
   Optional<ReviewStore.ReviewRow> awaited(RunStore.RunRow run, String... statuses) {
     if (!run.ownedBy(node) || run.reviewId() == null || !loops() || replaced(run.id())) {

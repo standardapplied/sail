@@ -81,12 +81,10 @@ final class StageVerdicts {
    * enforced by {@link FindingParser#reconcile}) resolve the predecessor row with the evidence
    * recorded; everything else — {@code still_open}, a missing verdict, a ruling without evidence —
    * re-attaches the finding to this stage as a carried row, so it keeps aging and keeps facing the
-   * gate. A reviewer that stops mentioning last iteration's finding launders nothing. A finding a
-   * human resolved while the stage ran keeps that resolution, and the room is told the ruling on it
-   * was set aside — whether it was resolved before the reviewer's run ended, and so is no longer
-   * among the findings this stage carries, or in the moment between. Atomicity: if any new finding
-   * fails to insert, the resolutions roll back too, so an errored stage retries with every carried
-   * finding still {@code OPEN} instead of silently retired.
+   * gate. A finding a human resolved while the stage ran keeps that resolution, and the room is
+   * told the ruling on it was set aside. Atomicity: if any new finding fails to insert, the
+   * resolutions roll back too, so an errored stage retries with every carried finding still {@code
+   * OPEN} instead of silently retired.
    */
   private void applyStageResult(
       String specId,

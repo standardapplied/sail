@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.RunStatus;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.MissedStops;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -19,26 +20,15 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-/**
- * The missed-stop sweep's rescue of a review that is owed something nothing is coming to give it:
- * the stop of the spec's newest loop run is replayed, once per thing owed, and the pipeline goes on
- * from the review's rows.
- */
+/** The missed-stop sweep's rescue of a review owed something nothing is coming to give it. */
 final class StrandedReviewRescue {
 
-  private static final SpecStore.SpecFilter IN_PROGRESS =
-      new SpecStore.SpecFilter(null, "in_progress", null, null, null);
-
-  private static final SpecStore.SpecFilter REVIEW =
-      new SpecStore.SpecFilter(null, "review", null, null, null);
-
-  /** Whether a run's recorded process is gone; a probe that cannot tell throws. */
+  /** The sweep's own reading of whether a run is gone, and its publishing of a run's stop. */
   @FunctionalInterface
   interface Gone {
     boolean test(RunStore.RunRow run) throws Exception;
   }
 
-  /** Publishes the stop of a run that is gone, with the exit code its row recorded, saying why. */
   @FunctionalInterface
   interface StopPublisher {
     void publish(RunStore.RunRow run, Integer exitCode, String why);
@@ -114,8 +104,8 @@ final class StrandedReviewRescue {
    */
   private List<SpecStore.SpecRow> inReviewLoop() {
     return Stream.concat(
-            specStore.list(REVIEW).stream(),
-            specStore.list(IN_PROGRESS).stream()
+            in(SpecStatus.REVIEW).stream(),
+            in(SpecStatus.IN_PROGRESS).stream()
                 .filter(
                     spec ->
                         sessionStore
@@ -123,6 +113,10 @@ final class StrandedReviewRescue {
                             .filter(RunStore.RunRow::servesReview)
                             .isPresent()))
         .toList();
+  }
+
+  private List<SpecStore.SpecRow> in(SpecStatus status) {
+    return specStore.list(new SpecStore.SpecFilter(null, status.wire(), null, null, null));
   }
 
   /**

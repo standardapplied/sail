@@ -13,10 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/**
- * Says what the review loop did: on the bus, and in the spec's room. {@link ReviewNarration} keeps
- * the words.
- */
+/** Says what the review loop did, on the bus and in the room; {@link ReviewNarration} words it. */
 final class LoopNarrator {
 
   private final SpecStore specStore;
@@ -35,10 +32,8 @@ final class LoopNarrator {
   }
 
   /**
-   * A failure in this handler used to be one journal line and a silently stranded spec — the review
-   * never started and nothing downstream noticed (the field incident: a raced SQLite statement
-   * killed the kickoff twice in one week). Publish it loudly so Slack shows the failure, and rely
-   * on {@link MissedStopReconciler}'s replay to deliver the stop again on a later sweep. Publishing
+   * A failure in the pipeline used to be one journal line and a silently stranded spec. Published,
+   * Slack shows it, and {@link MissedStopReconciler} replays the stop on a later sweep. Publishing
    * must never mask the original failure.
    */
   void publishPipelineError(String project, String specId, Exception failure) {
@@ -57,11 +52,7 @@ final class LoopNarrator {
     return specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
   }
 
-  /**
-   * The room's recent messages for the reviewer's prompt and the fix task. Best-effort: the
-   * conversation enriches the prompt, it is not a precondition — a room that cannot be read must
-   * degrade the review, never error it.
-   */
+  /** The room's recent messages, for a prompt. A room that cannot be read degrades it only. */
   List<MessageStore.MessageRow> roomMessages(String specId) {
     if (messageStore == null) {
       return List.of();
@@ -76,11 +67,11 @@ final class LoopNarrator {
   }
 
   /**
-   * Posts the pipeline's own narration to the spec's room: the findings themselves, which events
-   * cannot carry. This is also the loop's cross-iteration memory: the reviewer's prompt includes
-   * the room's recent messages, so the next pass sees the previous verdict. Best-effort — a line
-   * that tells of work still under way must never fail that work. The lines that end a review, or
-   * record its wait, are written with what they tell of instead ({@link #appendRoom}).
+   * Posts the pipeline's narration to the spec's room: the findings themselves, which events cannot
+   * carry, and the loop's cross-iteration memory, since the reviewer's prompt includes the room's
+   * recent messages. Best-effort — a line that tells of work still under way must never fail that
+   * work. The lines that end a review, or record its wait, are written with it ({@link
+   * #appendRoom}).
    */
   void postRoom(String specId, String body) {
     try {
@@ -94,8 +85,7 @@ final class LoopNarrator {
 
   /**
    * Writes one line to the spec's room, cut to what a room message can hold ({@link
-   * MessageStore#fitted}): a verdict or a reason is as long as its findings and its error text, and
-   * a line too long to write must never undo the review's end it is written with.
+   * MessageStore#fitted}): a line too long to write must never undo the review's end.
    */
   void appendRoom(String specId, String body) {
     if (messageStore != null) {

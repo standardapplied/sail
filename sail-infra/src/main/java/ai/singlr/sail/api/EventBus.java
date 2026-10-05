@@ -28,9 +28,7 @@ public final class EventBus implements AutoCloseable {
   /** Default per-subscriber queue capacity. */
   public static final int DEFAULT_CAPACITY = 1024;
 
-  /**
-   * What a closing subscription puts on its own queue to wake its drain thread; never delivered.
-   */
+  /** What a closing subscription queues to wake its drain thread; never delivered. */
   private static final Event CLOSED =
       Event.of("sail", null, "subscription_closed", Event.SAIL_AGENT, "local");
 
@@ -202,9 +200,7 @@ public final class EventBus implements AutoCloseable {
 
     /**
      * Stops delivery and wakes the drain thread, which exits at once: the events still queued are
-     * dropped, and the one being handled is finished. Whatever the thread takes next finds the
-     * subscription closed, so a queue a racing publisher filled wakes it as well as {@link
-     * #CLOSED}.
+     * dropped, and the one being handled is finished. Whatever it takes next finds it closed.
      */
     @Override
     public void close() {

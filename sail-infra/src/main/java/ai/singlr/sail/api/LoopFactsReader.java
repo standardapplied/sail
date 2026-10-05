@@ -28,12 +28,7 @@ final class LoopFactsReader {
   private final Function<String, String> reviewerResolver;
   private final Supplier<String> localHandle;
 
-  /**
-   * @param configResolver a project's review pipeline, null for none; it throws for a descriptor
-   *     that is there and cannot be read
-   * @param reviewerResolver a project's default reviewer agent, for a stage that names none
-   * @param localHandle this box's FDE handle: only the runs this box executed serve a review here
-   */
+  /** {@code configResolver} answers null for no pipeline, and throws for an unreadable one. */
   LoopFactsReader(
       SpecStore specs,
       ReviewStore reviews,
@@ -54,10 +49,7 @@ final class LoopFactsReader {
     return read(project, specId, pipeline(project));
   }
 
-  /**
-   * A reader for one event: each project's pipeline is resolved once, at the first read of one of
-   * its specs, and serves every read after it.
-   */
+  /** A reader for one event: a project's pipeline is resolved at its first read, once. */
   BiFunction<String, String, LoopFacts> forOneEvent() {
     var pipelines = new HashMap<String, LoopFacts.Pipeline>();
     return (project, specId) ->
@@ -87,10 +79,7 @@ final class LoopFactsReader {
         review.map(ReviewStore.ReviewRow::waitingOn).filter(this::ended).isPresent());
   }
 
-  /**
-   * What {@code project}'s review pipeline is, with the reviewer its unnamed agent stages resolve
-   * to. A descriptor that cannot be read is never taken for a project with no pipeline.
-   */
+  /** A descriptor that cannot be read is never taken for a project with no pipeline. */
   LoopFacts.Pipeline pipeline(String project) {
     try {
       var config = configResolver.apply(project);
@@ -113,17 +102,12 @@ final class LoopFactsReader {
     return runs.forReview(reviewId).stream().filter(run -> run.ownedBy(node)).toList();
   }
 
-  /**
-   * Whether a run that serves {@code reviewId} — a reviewer or its fix agent — is yet to finish.
-   */
+  /** Whether a run that serves {@code reviewId} is yet to finish, as the rows stand now. */
   boolean served(String reviewId) {
     return serving(reviewId).stream().anyMatch(run -> !RunStatus.isTerminal(run.status()));
   }
 
-  /**
-   * Whether the run a waiting review waits on holds nothing any more: its row is terminal, or this
-   * box holds no row of it — erased since — and a run with no row holds no claim.
-   */
+  /** Whether a run holds nothing any more: its row is terminal, or erased, and holds no claim. */
   boolean ended(String runId) {
     return runs.findById(runId).filter(run -> !RunStatus.isTerminal(run.status())).isEmpty();
   }

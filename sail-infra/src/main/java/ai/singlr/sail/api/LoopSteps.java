@@ -24,10 +24,8 @@ import java.util.function.Supplier;
 /**
  * Carries out the steps of the review loop, one method a step: the only place the loop writes a
  * review, a stage or a spec's status, and the only one that launches its agents. The writes that
- * end a review commit together, and what a step says on the bus is said after the commit.
- *
- * <p>Nothing waits on an agent. A launch returns once the run is started ({@link ReviewLanes}), and
- * the loop hears how the run ended from its stop.
+ * end a review commit together, and what a step says on the bus is said after the commit. Nothing
+ * waits on an agent: a launch returns once the run is started, and its stop says how it ended.
  */
 final class LoopSteps {
 
@@ -40,10 +38,6 @@ final class LoopSteps {
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
 
-  /**
-   * @param syncTrigger fired after every state change the loop makes, so it reaches main at once
-   * @param localHandle this box's FDE handle, under which the loop's runs are launched
-   */
   LoopSteps(
       SpecStore specStore,
       ReviewStore reviewStore,
@@ -119,10 +113,7 @@ final class LoopSteps {
     return Optional.of(new LoopTrigger.ReviewRunning());
   }
 
-  /**
-   * Advances a spec's status and signals sync so the transition reaches main, when the spec is
-   * still the loop's to move ({@link SpecStore#moveFromLoop}).
-   */
+  /** Moves the spec when it is still the loop's to move, and signals sync when it did. */
   private void advanceSpec(String specId, SpecStatus status) {
     if (moveSpec(specId, status)) {
       syncTrigger.run();
@@ -146,10 +137,9 @@ final class LoopSteps {
   }
 
   /**
-   * The review's stage rows, one per configured stage, in order — created here for every stage the
-   * review does not hold yet. A review is written as a row and then its stages, so one a crash
-   * caught in between holds too few; it is completed before anything reads it as a review whose
-   * every stage has passed.
+   * The review's stage rows, one per configured stage, created here for every stage it does not
+   * hold yet: a review a crash caught between its row and its stages holds too few, and is
+   * completed before anything reads it as passed.
    */
   private List<StageRow> stagesOf(LoopFacts facts, ReviewRow review) {
     var configured = facts.staged().config().stages();
@@ -165,12 +155,9 @@ final class LoopSteps {
   }
 
   /**
-   * The review passed: its status, its spec parked in {@code awaiting_merge} and the verdict in the
-   * room are one write ({@link ReviewStore#pass}), and only then is it announced. A failure
-   * anywhere leaves none of them written, so no crash leaves a finished review beside a spec
-   * nothing will move, or a verdict nobody was told. The spec's own write stays compare-and-set
-   * from the statuses the pipeline owns: a spec someone moved meanwhile keeps their status, and the
-   * review still ends.
+   * The review's status, its spec parked in {@code awaiting_merge} and the verdict in the room are
+   * one write ({@link ReviewStore#pass}), announced only then: no crash leaves a finished review
+   * beside a spec nothing will move. A spec someone moved meanwhile keeps their status.
    */
   private Optional<LoopTrigger> pass(LoopFacts facts, LoopStep.Pass step) {
     var review = step.review();
@@ -203,12 +190,10 @@ final class LoopSteps {
   }
 
   /**
-   * Starts an agent stage: its reviewer claims the spec's repos as a run that serves the review,
-   * and only once that claim has landed does the stage row turn {@code running}, before the
-   * reviewer's unit starts — so a stage is {@code running} only while a run exists for it, and the
-   * reviewer a stage waits on is the run that was live when it started ({@link
-   * LoopFacts#stageReviewedBy}). A claim the gate refuses writes nothing of the stage. This box
-   * announces the stage started only once a reviewer is running for it.
+   * The stage row turns {@code running} only once its reviewer's claim has landed, before that
+   * reviewer's unit starts — so a stage is {@code running} only while a run exists for it ({@link
+   * LoopFacts#stageReviewedBy}). A claim the gate refuses writes nothing of the stage, and the
+   * stage is announced started only once a reviewer is running for it.
    */
   private Optional<LoopTrigger> launchReviewer(LoopFacts facts, LoopStep.LaunchReviewer step) {
     var stage = stagesOf(facts, step.review()).get(step.stage());
@@ -245,14 +230,11 @@ final class LoopSteps {
   }
 
   /**
-   * Launches the run {@code invocation} describes for {@code review}, running {@code claimed} once
-   * its claim has landed and {@code started} once a run serves the review. A run that started is
-   * what the review waits on now, so any wait it recorded is cleared. A claim the gate refused is
-   * recorded as the run that holds it, and the room is told in the same write, so once per run
-   * waited on. A launch that fails after its agent started — the launch command or the status read
-   * failing over a live unit — still left a run serving the review, and the loop waits for that
-   * run's stop rather than call a working agent a failure and act over it. Nothing started, and
-   * nothing that will be, is {@code failed}, saying why.
+   * Launches {@code invocation} for {@code review}, running {@code claimed} once its claim has
+   * landed and {@code started} once a run serves the review, when any wait it recorded is cleared.
+   * A claim the gate refused is recorded as the run that holds it, and the room is told in the same
+   * write, so once per run waited on. A launch that fails after its agent started still left a run
+   * serving the review, and the loop waits for that run's stop rather than act over it.
    */
   private Optional<LoopTrigger> launch(
       Supplier<ReviewLanes.Invocation> invocation,
@@ -296,11 +278,7 @@ final class LoopSteps {
     return true;
   }
 
-  /**
-   * Why a launch failed, as far down as it is said: a launch error wraps what refused it — an agent
-   * sail does not know, a container that will not answer — and the wrapper alone says only that the
-   * launch failed.
-   */
+  /** A launch error wraps what refused it, and the wrapper alone says only that it failed. */
   private static String reasonOf(Exception failure) {
     var cause = failure.getCause();
     return cause == null || Strings.isBlank(cause.getMessage())
@@ -308,10 +286,6 @@ final class LoopSteps {
         : failure.getMessage() + " " + cause.getMessage();
   }
 
-  /**
-   * Judges the stage a reviewer ran: one that did not end well is an infrastructure error saying
-   * how it ended, and one that ended cleanly is judged on the findings in its own log.
-   */
   private Optional<LoopTrigger> readVerdict(LoopFacts facts, LoopStep.ReadVerdict step) {
     var stage = facts.stages().get(step.stage());
     var stageConfig = facts.staged().config().stages().get(step.stage());
@@ -323,13 +297,7 @@ final class LoopSteps {
     return Optional.of(new LoopTrigger.StageJudged(step.stage(), outcome));
   }
 
-  /**
-   * An errored stage is an infrastructure failure, not a review verdict: record why on the review,
-   * say so loudly, and stop — without a fix iteration (there are no findings to fix) and without
-   * counting against {@code max_iterations} (the next stop retries the same iteration). A stage
-   * that could not start — no reviewer to resolve, a container that will not take the launch — is
-   * closed for that reason first.
-   */
+  /** An infrastructure failure, not a verdict: no fix iteration, and no iteration is burned. */
   private Optional<LoopTrigger> errorReview(LoopFacts facts, LoopStep.ErrorReview step) {
     var stage = stagesOf(facts, step.review()).get(step.stage());
     var why = step.why();
@@ -360,12 +328,9 @@ final class LoopSteps {
   }
 
   /**
-   * Hands a failed review's findings to the spec's own agent as a fix run that serves that review.
-   * The run acts as itself — principal {@code <agent>/fix-<runId>} — so the room's audit trail
-   * attributes its posts to the fix lane, never to the reviewer, and it runs with the stop gate
-   * asking for a committed, pushed tree. Once the run exists the spec is back {@code in_progress}
-   * and the room is told a fix iteration started. A claim the gate refuses changes nothing but the
-   * run the review waits on: the fix is still owed, and is launched once that run has ended.
+   * The findings go to the spec's own agent as a fix run that serves the review and acts as itself
+   * ({@code <agent>/fix-<runId>}), so the room attributes its posts to the fix lane. A refused
+   * claim changes nothing but the run the review waits on: the fix is still owed.
    */
   private Optional<LoopTrigger> launchFix(LoopFacts facts, LoopStep.LaunchFix step) {
     var spec = facts.spec().orElseThrow();
@@ -397,9 +362,8 @@ final class LoopSteps {
   }
 
   /**
-   * Commits and pushes whatever the fix agent left uncommitted on the spec's branch — the gate is a
-   * nudge, not a jail, and otherwise the re-review judges a branch without the fixes and the shared
-   * clone carries the leftovers into the next dispatch.
+   * The stop gate is a nudge, not a jail: without this the re-review judges a branch without the
+   * fixes, and the shared clone carries the leftovers into the next dispatch.
    */
   private Optional<LoopTrigger> commitFixLeftovers(
       LoopFacts facts, LoopStep.CommitFixLeftovers step) {
@@ -421,11 +385,7 @@ final class LoopSteps {
     }
   }
 
-  /**
-   * A fix iteration that did not address the findings: said so loudly, with why, as {@code
-   * review_iteration_failed} (parallel to {@code review_errored}), and escalated — there is no
-   * re-review to run, because the branch still holds the code the reviewer just failed.
-   */
+  /** There is no re-review to run: the branch still holds the code the reviewer just failed. */
   private Optional<LoopTrigger> failFix(LoopFacts facts, LoopStep.FailFix step) {
     var reviewId = step.review().id();
     System.err.println(
@@ -436,14 +396,12 @@ final class LoopSteps {
   }
 
   /**
-   * Hands the review to a person: its status, the reason recorded on its row, its stages closed,
-   * its spec in {@code review} and the room line are one write ({@link ReviewStore#escalate}). The
-   * reason rides the synced row, so main says what this box says, and travels as the event detail,
-   * so Slack says why — not a one-size-fits-all line.
+   * The review's status, its reason, its stages closed, its spec in {@code review} and the room
+   * line are one write ({@link ReviewStore#escalate}). The reason rides the synced row, so main
+   * says what this box says, and travels as the event detail, so Slack says why.
    */
   private Optional<LoopTrigger> escalate(LoopFacts facts, String reviewId, String reason) {
     var specId = facts.specId();
-    System.err.println("review-pipeline: spec " + specId + " escalated — " + reason);
     reviewStore.escalate(
         reviewId,
         reason,

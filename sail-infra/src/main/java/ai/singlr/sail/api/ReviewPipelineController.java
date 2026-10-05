@@ -34,15 +34,12 @@ import java.util.stream.Stream;
  * spec's {@link LoopFacts} and names the one {@link LoopStep} to take; {@link LoopSteps} carries it
  * out, and what it came to is the next trigger, until a step leaves nothing to follow.
  *
- * <p>Nothing waits on an agent, and the loop's state between stops is rows that already exist:
- * which stage a review is in is its stage rows' statuses, which iteration its {@code iteration},
- * and which run it waits on the newest live run that serves it. So a daemon restart loses nothing:
- * a run still going is re-armed with a watcher, one that ended unobserved has its stop published by
- * the missed-stop reconciler, and either way the stop lands here and the loop goes on from the
- * rows.
+ * <p>Nothing waits on an agent, and the loop's state between stops is rows that already exist. So a
+ * daemon restart loses nothing: a run still going is re-armed with a watcher, one that ended
+ * unobserved has its stop published by the missed-stop reconciler, and either way the stop lands
+ * here and the loop goes on from the rows.
  *
- * <p>Events are delivered one at a time on the subscriber's own drain thread, so two stops never
- * race each other through the loop.
+ * <p>Events are delivered one at a time on the subscriber's drain thread, so two stops never race.
  */
 public final class ReviewPipelineController implements EventSubscriber {
 
@@ -50,9 +47,8 @@ public final class ReviewPipelineController implements EventSubscriber {
       Set.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_CANCELLED);
 
   /**
-   * How many errored (infrastructure-failed) attempts of one iteration may accumulate before the
-   * spec escalates. They retry without burning an iteration, and the reconciler replays a stop for
-   * each: bounded, a transient failure self-heals and a persistent one surfaces to a human.
+   * How many errored attempts of one iteration may accumulate before the spec escalates. Each is
+   * retried on a replayed stop: bounded, a transient failure heals and a persistent one surfaces.
    */
   static final int MAX_ERRORED_RETRIES = 3;
 
@@ -76,8 +72,7 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final LoopSteps steps;
 
   /**
-   * @param reviewerResolver a project's default reviewer agent ({@code AgentRoster.reviewer}), for
-   *     stages that name none
+   * @param reviewerResolver a project's default reviewer, for stages that name none
    * @param syncTrigger fired after every state change the loop makes, so main, the notification
    *     authority, sees the loop advance at once. A no-op on main and standalone boxes
    * @param localHandle this box's FDE handle: the loop acts only on runs this box executed
@@ -140,8 +135,7 @@ public final class ReviewPipelineController implements EventSubscriber {
 
   /**
    * The loop's only entry: the stop's own loop is driven, and then, whatever came of that, every
-   * review of the project the stop may have freed. One reading of the project's pipeline serves the
-   * whole event.
+   * review of the project the stop may have freed, all under one reading of the pipeline.
    */
   private void route(Event event) {
     if (!isAuthoritative(event)) {
@@ -162,8 +156,7 @@ public final class ReviewPipelineController implements EventSubscriber {
    * role this box does not know is a build's, as a role-less stop always was; a retired invite's is
    * ignored, and so is a room run's: a chat is not work the loop judges. A run an operator stopped
    * is never routed by its lane, whoever reports its end and in whatever order — their cancel, the
-   * watcher's stop of the unit that died under the halt, a replay of either: the unit's death would
-   * otherwise read as the run's own end.
+   * watcher's stop of the unit that died under the halt, a replay of either: none is its own end.
    */
   private Optional<Routed> routed(Event event) {
     var cancelled = Event.WellKnownTypes.AGENT_CANCELLED.equals(event.type());
@@ -192,11 +185,10 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
-   * The run that stopped is finished before the loop acts on its stop, by the same write the run
-   * tracker makes: the run that follows reserves through the dispatch gate, which would refuse it
-   * beside a run of its own spec still recorded {@code running}, and the tracker hears the stop on
-   * a thread of its own. Returns the row as it stands once that write is settled — the one the
-   * router judges, since only then is it known whether an operator's stop claimed the run first.
+   * The run that stopped is finished before the loop acts on its stop, by the write the run tracker
+   * makes on a thread of its own: the dispatch gate would refuse the run that follows beside a run
+   * of its own spec still recorded {@code running}. Returns the row once that write is settled,
+   * since only then is it known whether an operator's stop claimed the run first.
    */
   private RunRow finished(RunRow run, Event event) {
     if (!run.ownedBy(localHandle.get())) {
@@ -215,11 +207,10 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
-   * A stop frees whatever its run held, so every review of the project that recorded a wait ({@link
-   * LoopFacts.Owed.Waiting}) takes its step now, once the run it waits on has ended — of the specs
-   * whose loop this box drives. Only a recorded wait is acted on here: an errored review keeps to
-   * the reconciler's pace, a review whose launch was cut short is the reconciler's to rescue, and a
-   * review whose run has ended waits for that run's own stop, which may be the very next event.
+   * A stop frees whatever its run held, so every review this box drives that recorded a wait takes
+   * its step now, once the run it waits on has ended. Only a recorded wait is acted on here: an
+   * errored review keeps to the reconciler's pace, one whose launch was cut short is the
+   * reconciler's to rescue, and one whose run has ended waits for that run's own stop.
    */
   private void resumeWaiting(String project, BiFunction<String, String, LoopFacts> read) {
     try {
@@ -233,10 +224,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     }
   }
 
-  /**
-   * One spec's waiting step, when this box drives its loop. Its failure is its own: it never costs
-   * the specs after it theirs, nor replaces the failure of the stop that was being routed.
-   */
+  /** A failure here never costs the specs after it theirs, nor replaces the routed stop's. */
   private void resumeIfWaiting(
       String project, String specId, BiFunction<String, String, LoopFacts> read) {
     try {
@@ -284,11 +272,10 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
-   * Whether this stop is the real termination, not a mid-run turn-end: the in-container hook fires
-   * {@code Stop} when a turn ends, before the process exits and with no exit code, so the loop
-   * waits for the watcher's stop, which carries a {@code source}. A sync-derived stop is narration,
-   * not execution: it describes an agent that ran on another box, whose own controller drives the
-   * review there — acting on it here would review the wrong box's checkout.
+   * Whether this stop is the real termination, not a turn's end: the in-container hook fires {@code
+   * Stop} before the process exits, so the loop waits for the watcher's stop, which carries a
+   * {@code source}. A sync-derived stop tells of an agent that ran on another box, whose own
+   * controller drives the review there: acting on it here would review the wrong box's checkout.
    */
   private static boolean isAuthoritative(Event event) {
     return Event.WellKnownData.authoritative(event.data())

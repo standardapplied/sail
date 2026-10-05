@@ -22,16 +22,17 @@ import java.util.function.Supplier;
  * {@link LoopFacts}. Pure — no store, no clock, no bus, no container — so every row of the loop's
  * table (ARCHITECTURE.md, "The loop machine") is a case of {@code LoopDecisionTest}.
  *
- * <p>A stop that is not the one the loop is waiting on — a duplicate, a replay, the stop of a run a
- * newer one has replaced — never repeats a step: the loop goes on from what the review's rows say
- * it is owed ({@link LoopFacts#owed}), which is both its retry and its crash recovery. And before
- * any step on an existing review, one the project's pipeline can no longer judge ({@link
- * LoopFacts#unfit}) is handed to a person saying why.
+ * <p>A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
+ * replaced — never repeats a step: the loop goes on from what the review's rows say it is owed
+ * ({@link LoopFacts#owed}), which is both its retry and its crash recovery. And before any step on
+ * an existing review, one the pipeline can no longer judge ({@link LoopFacts#unfit}) is escalated.
  */
 final class LoopDecision {
 
   static final String NO_REVIEWER =
       "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml";
+
+  private static final String NOT_COMMITTED = "fix agent's work could not be committed: ";
 
   private LoopDecision() {}
 
@@ -61,18 +62,16 @@ final class LoopDecision {
               .map(review -> fit(facts, () -> new LoopStep.StartReview(review.iteration() + 1)))
               .orElseGet(LoopStep.Nothing::new);
       case LoopTrigger.FixNotCommitted failed ->
-          onReview(facts, review -> new LoopStep.FailFix(review, uncommitted(failed.why())));
+          onReview(facts, review -> new LoopStep.FailFix(review, NOT_COMMITTED + failed.why()));
     };
   }
 
   /**
-   * A build ended: a non-zero exit is the agent's failure, surfaced and left for triage; anything
-   * else — a clean exit, or a run ended without an exit code — hands the spec to review, which
-   * judges the work the build left. A dispatch supersedes the reviews before it, so a build's own
-   * stop finds none and starts the first. A stop that finds one, or that a newer run of the spec's
-   * loop has replaced — a build re-dispatched before its stop was heard — is late or replayed, and
-   * the loop only goes on from what the review is owed: never a second review beside a working fix
-   * agent, nor one beside the build that replaced this one.
+   * A non-zero exit is the agent's failure, left for triage; anything else — a clean exit, or a run
+   * ended without an exit code — hands the spec to review. A dispatch supersedes the reviews before
+   * it, so a build's own stop finds none and starts the first. A stop that finds one, or that a
+   * newer run of the spec's loop has replaced, is late or replayed: never a second review beside a
+   * working fix agent, nor one beside the build that replaced this one.
    */
   private static LoopStep buildEnded(LoopFacts facts, LoopTrigger.BuildEnded build) {
     if (!facts.loops()) {
@@ -95,11 +94,7 @@ final class LoopDecision {
     };
   }
 
-  /**
-   * A reviewer ended. When it is the run its review waits on, the stage it ran is judged: on the
-   * findings in its own log, or — for one the watcher killed or that exited non-zero — as an
-   * infrastructure error naming why.
-   */
+  /** The reviewer its review waits on has its stage judged; any other reviewer's stop is late. */
   private static LoopStep reviewerEnded(LoopFacts facts, LoopTrigger.ReviewerEnded ended) {
     var review = facts.awaited(ended.run(), "pending", "running").orElse(null);
     var stage = facts.stageReviewedBy(ended.run()).orElse(null);
@@ -116,10 +111,9 @@ final class LoopDecision {
   }
 
   /**
-   * A fix agent ended. When it is the run its review waits on and it ended well, what it left
-   * uncommitted is committed and pushed before the branch is judged again. One the watcher killed
-   * or that exited non-zero did not address the findings: nothing of its is committed, the branch
-   * still holds the code the reviewer just failed, and the spec escalates.
+   * A fix agent that ended well has what it left uncommitted committed before the branch is judged
+   * again. One the watcher killed or that exited non-zero did not address the findings: nothing of
+   * its is committed, the branch still holds the code the reviewer failed, and the spec escalates.
    */
   private static LoopStep fixEnded(LoopFacts facts, LoopTrigger.FixEnded ended) {
     var review = facts.awaited(ended.run(), "failed").filter(failed -> !failed.errored());
@@ -133,11 +127,10 @@ final class LoopDecision {
   }
 
   /**
-   * An operator stopped a run. For a reviewer or a fix agent the stop was a person's decision about
-   * the loop, so the loop does not retry over it: the review escalates — also when the stop landed
-   * while the run was still launching and the failed launch already errored the review. A build an
-   * operator stopped has no review to escalate and starts none. While the halt is still under way
-   * nothing is decided, since a halt that fails gives the run back.
+   * An operator's stop of a reviewer or a fix agent is a person's decision about the loop, so the
+   * loop does not retry over it: the review escalates — also when the stop landed while the run was
+   * still launching and the failed launch already errored the review. A build they stopped has no
+   * review to escalate. While the halt is under way nothing is decided: a failed one gives it back.
    */
   private static LoopStep operatorStopped(LoopFacts facts, RunRow run) {
     var reason = ReviewNarration.stoppedByAnOperator(noun(run.lane().orElse(Lane.REVIEW)));
@@ -153,12 +146,9 @@ final class LoopDecision {
   }
 
   /**
-   * The step a review is owed. An errored review runs its iteration again — an infrastructure error
-   * burns none — until {@link ReviewPipelineController#MAX_ERRORED_RETRIES} attempts of it have
-   * errored, when the spec escalates. A review a run still serves, one that passed or escalated,
-   * and one whose reviewer or fix agent has ended — whose own stop is the only word on what its
-   * work is worth — are left as they are, and one that recorded a wait takes the step the gate
-   * refused it only once the run it waits on has ended.
+   * An errored review runs its iteration again — an infrastructure error burns none — within its
+   * budget. One whose reviewer or fix agent has ended is left to that run's own stop, the only word
+   * on what its work is worth, and a wait holds its step until the run it waits on has ended.
    */
   private static LoopStep owed(LoopFacts facts, Owed owed) {
     var retries = ReviewPipelineController.MAX_ERRORED_RETRIES;
@@ -176,10 +166,9 @@ final class LoopDecision {
   }
 
   /**
-   * The step of a running review, from its stages: the first configured stage whose row has not
-   * passed — or is not written yet — is the one the review is in. A human stage opens and waits for
-   * a person; an agent stage gets its reviewer launched, and one with no reviewer to resolve is an
-   * infrastructure error like any other. With every stage passed the review has.
+   * The step of a running review: the first configured stage whose row has not passed, or is not
+   * written yet, is the one it is in. An agent stage with no reviewer to resolve is an
+   * infrastructure error like any other, and with every stage passed the review has.
    */
   private static LoopStep inItsStages(LoopFacts facts) {
     return fit(facts, () -> stageStep(facts, facts.review().orElseThrow()));
@@ -209,16 +198,12 @@ final class LoopDecision {
   }
 
   /**
-   * What follows a gate failure: the spec escalates when a finding of the failed stage is stuck or
-   * the iterations are spent, and otherwise the review's open findings go to a fix agent. With none
-   * left open — a person resolved them before the fix launched — there is nothing to fix and the
-   * branch is judged again as the next iteration.
+   * What follows a gate failure. With no finding left open — a person resolved them before the fix
+   * launched — there is nothing to fix and the branch is judged again as the next iteration.
    *
-   * <p>The convergence check: a gate-blocking finding whose {@code carried_from} chain shows it has
-   * already survived {@code maxFindingAge} fix iterations. Sub-gate findings may age freely — they
-   * do not drive the loop — and a loop resolving old blockers while new ones surface never trips
-   * this. Scoped to the failed stage's own findings: a finding is gate-blocking only under the gate
-   * of the stage that owns it.
+   * <p>The convergence check: a gate-blocking finding that has already survived {@code
+   * maxFindingAge} fix iterations. Sub-gate findings may age freely, and a loop resolving old
+   * blockers while new ones surface never trips this. Only the failed stage's own are weighed.
    */
   private static LoopStep fix(LoopFacts facts, ReviewRow review) {
     var config = facts.staged().config();
@@ -254,10 +239,6 @@ final class LoopDecision {
     return failed.lane() == Lane.FIX
         ? new LoopStep.FailFix(review, why)
         : new LoopStep.ErrorReview(review, failed.stage(), why, false);
-  }
-
-  private static String uncommitted(String why) {
-    return "fix agent's work could not be committed: " + why;
   }
 
   /** {@code step}, unless the project's pipeline can no longer judge the spec's review. */
