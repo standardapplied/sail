@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
@@ -66,9 +67,6 @@ public final class ProjectInitCommand implements Runnable {
     }
 
     var outputPath = output != null ? Path.of(output) : defaultOutputPath(config.name());
-    if (outputPath.getParent() != null) {
-      Files.createDirectories(outputPath.getParent());
-    }
 
     if (Files.exists(outputPath)) {
       if (!ConsoleHelper.confirm(outputPath + " already exists. Overwrite?")) {
@@ -78,7 +76,7 @@ public final class ProjectInitCommand implements Runnable {
     }
 
     var yamlContent = SailYamlGenerator.generate(config);
-    Files.writeString(outputPath, yamlContent);
+    ProjectDefinitions.write(outputPath, yamlContent);
 
     out.println();
     out.println(ansi.string("  @|bold,green \u2713 Created|@ " + outputPath));

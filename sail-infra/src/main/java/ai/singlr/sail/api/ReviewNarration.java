@@ -110,15 +110,16 @@ final class ReviewNarration {
 
   /**
    * Why a review whose project's pipeline cannot be read is a person's: {@code why}, which names
-   * the project and the fault, as one line — a parser tells where and what over several, and the
-   * last of them is the one that says what is wrong — and what to do about it.
+   * the project and the fault, as one line — a parser tells where and what over several, the last
+   * of them the one that says what is wrong, with a line that only points under each — and what to
+   * do about it.
    */
   static String pipelineUnreadable(String why) {
     var fault =
         Stream.ofNullable(why)
             .flatMap(String::lines)
             .map(String::strip)
-            .filter(line -> !line.isEmpty())
+            .filter(line -> !line.isEmpty() && !line.equals("^"))
             .collect(Collectors.joining(" "));
     return (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
         + "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"

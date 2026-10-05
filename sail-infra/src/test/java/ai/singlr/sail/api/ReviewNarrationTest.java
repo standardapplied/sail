@@ -6,13 +6,18 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ReviewNarrationTest {
 
@@ -172,19 +177,27 @@ class ReviewNarrationTest {
   }
 
   @Test
-  void anUnreadablePipelineIsSaidInOneLineWithAllOfWhatWentWrongAndWhatToDo() {
-    var parse =
-        ReviewNarration.pipelineUnreadable(
-            "sail.yaml of project 'acme' could not be read: while parsing a flow sequence\n"
-                + " in 'reader', line 3, column 9:\n\n"
-                + "expected ',' or ']', but got <stream end>\n");
+  void anUnreadablePipelineIsSaidInOneLineWithAllOfWhatTheParserSaidAndWhatToDo(@TempDir Path dir)
+      throws Exception {
+    var descriptor = Files.writeString(dir.resolve("sail.yaml"), "agent: [unterminated\n");
+    var unreadable =
+        assertThrows(
+            IllegalStateException.class, () -> ReviewWiring.descriptor("acme", descriptor));
 
-    assertEquals(
-        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence in"
-            + " 'reader', line 3, column 9: expected ',' or ']', but got <stream end>; fix the"
-            + " project's sail.yaml with `sail project edit`, then re-dispatch with --restart",
-        parse,
-        "a parser's message runs over lines and its last says what is wrong: all of it, as one");
+    var reason = ReviewNarration.pipelineUnreadable(unreadable.getMessage());
+
+    assertTrue(unreadable.getMessage().lines().count() > 1, "a parser's message runs over lines");
+    assertEquals(1, reason.lines().count(), reason);
+    assertTrue(reason.startsWith("sail.yaml of project 'acme' could not be read: while"), reason);
+    assertTrue(
+        reason.contains("expected ',' or ']'"),
+        "what is wrong is on the parser's later lines, and is kept: " + reason);
+    assertFalse(reason.contains("^"), "a line that only points under another says nothing");
+    assertTrue(
+        reason.endsWith(
+            "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
+                + " --restart"),
+        reason);
     for (var nothingSaid : new String[] {null, "", " \n "}) {
       assertTrue(
           ReviewNarration.pipelineUnreadable(nothingSaid)
