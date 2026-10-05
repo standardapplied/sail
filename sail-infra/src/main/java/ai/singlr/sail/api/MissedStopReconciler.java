@@ -131,7 +131,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final WatcherCoverage coverage;
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
-  private final ReviewLoopState loop;
+  private final LoopFactsReader loop;
   private final PeriodicPass pass;
   private final Set<String> rescued = ConcurrentHashMap.newKeySet();
 
@@ -154,7 +154,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.coverage = coverage;
     this.localHandle = localHandle;
     this.clock = clock;
-    this.loop = new ReviewLoopState(reviewStore, sessionStore, localHandle);
+    this.loop =
+        new LoopFactsReader(specStore, reviewStore, sessionStore, project -> null, localHandle);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
 
@@ -473,20 +474,19 @@ public final class MissedStopReconciler implements AutoCloseable {
    * edit, or a sync revision from another box) moved the spec to {@code review} while its agent was
    * still running here, so the authoritative stop hit the pipeline's guard against a non-{@code
    * in_progress} spec and no review was created. The rest are what the review's rows say it is owed
-   * ({@link ReviewLoopState#owed}, the reading the pipeline itself acts on). <em>Errored
-   * review</em>: its last attempt failed by infrastructure (a reviewer the watcher killed,
-   * unparseable output, a launch the container refused) — the design retries an errored attempt on
-   * the next stop, and no further stop is coming. <em>Unserved review</em>: a review is {@code
-   * running} with an agent stage to run, no run serving it and no wait recorded — the daemon died
-   * between writing its rows and its reviewer's claim. <em>Owed fix</em>: a review failed its gate
-   * and neither a fix agent nor a wait was ever recorded for it. <em>Waiting review</em>: the gate
-   * refused the review's launch, the review recorded the run that held the claim, and that run has
-   * ended with no stop on the bus to wake the review — finished in place, a foreground session
-   * completing, a launch that failed after reserving. <em>Unheard stop</em>: the reviewer of a
-   * review's running stage, or the fix agent answering its gate failure, ended and nothing came of
-   * it — that run's stop was never acted on. Replaying the stop of the spec's newest loop run,
-   * whichever lane it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch
-   * the fix, or judge the run's work.
+   * ({@link LoopFacts#owed}, the reading the pipeline itself acts on). <em>Errored review</em>: its
+   * last attempt failed by infrastructure (a reviewer the watcher killed, unparseable output, a
+   * launch the container refused) — the design retries an errored attempt on the next stop, and no
+   * further stop is coming. <em>Unserved review</em>: a review is {@code running} with an agent
+   * stage to run, no run serving it and no wait recorded — the daemon died between writing its rows
+   * and its reviewer's claim. <em>Owed fix</em>: a review failed its gate and neither a fix agent
+   * nor a wait was ever recorded for it. <em>Waiting review</em>: the gate refused the review's
+   * launch, the review recorded the run that held the claim, and that run has ended with no stop on
+   * the bus to wake the review — finished in place, a foreground session completing, a launch that
+   * failed after reserving. <em>Unheard stop</em>: the reviewer of a review's running stage, or the
+   * fix agent answering its gate failure, ended and nothing came of it — that run's stop was never
+   * acted on. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
+   * pipeline kick off, retry, go on from the stage rows, launch the fix, or judge the run's work.
    *
    * <p>Every rescue is one-shot: keyed by the spec for a dropped kickoff, and by the review row and
    * its shape otherwise — a running review per stage, a waiting one per run it waits on — so a
@@ -531,8 +531,8 @@ public final class MissedStopReconciler implements AutoCloseable {
               spec.id(),
               "stranded in review with no review started; replaying the stop to kick it off"));
     }
-    return switch (loop.owed(spec.id())) {
-      case ReviewLoopState.Owed.Retry retry ->
+    return switch (loop.read(spec.project(), spec.id()).owed()) {
+      case LoopFacts.Owed.Retry retry ->
           Optional.of(
               Rescue.of(
                   retry.review(),
@@ -540,7 +540,7 @@ public final class MissedStopReconciler implements AutoCloseable {
                   "errored ("
                       + retry.review().error()
                       + "); replaying the stop to retry the iteration"));
-      case ReviewLoopState.Owed.Advance advance ->
+      case LoopFacts.Owed.Advance advance ->
           settled(advance.review())
               .map(
                   review ->
@@ -549,7 +549,7 @@ public final class MissedStopReconciler implements AutoCloseable {
                           "unserved:" + passedStages(review),
                           "is running with no run serving it; replaying the stop to go on from"
                               + " its stages"));
-      case ReviewLoopState.Owed.Fix fix ->
+      case LoopFacts.Owed.Fix fix ->
           settled(fix.review())
               .map(
                   review ->
@@ -558,7 +558,7 @@ public final class MissedStopReconciler implements AutoCloseable {
                           "fix-owed",
                           "failed its gate and no fix agent was launched; replaying the stop to"
                               + " launch it"));
-      case ReviewLoopState.Owed.Waiting waiting ->
+      case LoopFacts.Owed.Waiting waiting ->
           Optional.of(waiting.review())
               .filter(review -> endedAWhileAgo(review.waitingOn()))
               .map(
@@ -570,7 +570,7 @@ public final class MissedStopReconciler implements AutoCloseable {
                               + review.waitingOn()
                               + ", which ended with no stop; replaying the stop to take the step"
                               + " it held up"));
-      case ReviewLoopState.Owed.Stop unheard ->
+      case LoopFacts.Owed.Stop unheard ->
           settled(unheard.review())
               .map(
                   review ->
@@ -580,7 +580,7 @@ public final class MissedStopReconciler implements AutoCloseable {
                           "waits on run "
                               + unheard.run().id()
                               + ", which ended; replaying that stop"));
-      case ReviewLoopState.Owed.Nothing nothing -> Optional.empty();
+      case LoopFacts.Owed.Nothing nothing -> Optional.empty();
     };
   }
 

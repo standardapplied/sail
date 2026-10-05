@@ -240,7 +240,7 @@ class ReviewLoopEveryStateTest {
    */
   private Optional<String> endOf(String spec, ReviewShape before) {
     var review = loop.reviews.latestReviewForSpec(spec).orElseThrow();
-    var state = new ReviewLoopState(loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
+    var state = reader();
     var status = loop.specStatus(spec);
     if ("passed".equals(review.status())) {
       return Optional.of("passed");
@@ -270,13 +270,22 @@ class ReviewLoopEveryStateTest {
         : Optional.empty();
   }
 
+  private LoopFactsReader reader() {
+    return new LoopFactsReader(
+        loop.specs,
+        loop.reviews,
+        loop.runs,
+        project -> AN_AGENT_THEN_A_PERSON,
+        () -> ReviewLoop.HANDLE);
+  }
+
   @ParameterizedTest(name = "review {0}, spec {1}")
   @MethodSource("reviewAndSpecStates")
   void everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated(
       ReviewShape shape, SpecStatus specStatus) {
     loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
     loop.spec(STATE, "api");
-    var read = new ReviewLoopState(loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
+    var read = reader();
     var deadEnds = new ArrayList<String>();
     var blamedOnThePipeline = new ArrayList<String>();
     var states = 0;
@@ -286,7 +295,7 @@ class ReviewLoopEveryStateTest {
           for (var wait : Wait.values()) {
             states++;
             state(shape, specStatus, stages, pipeline, serving, wait);
-            var owed = read.owed(STATE).getClass().getSimpleName();
+            var owed = read.read(PROJECT, STATE).owed().getClass().getSimpleName();
 
             step(STATE);
 

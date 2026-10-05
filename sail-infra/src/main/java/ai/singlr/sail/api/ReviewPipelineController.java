@@ -22,9 +22,9 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.net.InetAddress;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,7 +60,7 @@ import java.util.stream.Stream;
  * <p>A stop that is not the one the loop is waiting on — a duplicate, a replay, the stop of a run a
  * newer one has replaced — never repeats a step. While a run still serves the spec's latest review
  * it changes nothing; otherwise the loop goes on from what the review's rows say is owed ({@link
- * #resume}, read by {@link ReviewLoopState}): an errored review is retried as the same iteration, a
+ * #resume}, read by {@link LoopFacts#owed}): an errored review is retried as the same iteration, a
  * running one continues from its stages, a gate-failed one that never got its fix agent gets it.
  * That is both the loop's retry and its crash recovery, and the reconciler's replays are what drive
  * it. A pass parks the spec in {@code awaiting_merge} — the PR is open but unmerged, and only the
@@ -102,7 +102,8 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final EventBus eventBus;
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
-  private final ReviewLoopState loop;
+  private final LoopFactsReader reader;
+  private final Map<String, LoopFacts.Pipeline> pipelines = new HashMap<>();
   private MessageStore messageStore;
 
   /**
@@ -135,7 +136,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     this.eventBus = eventBus;
     this.syncTrigger = Objects.requireNonNull(syncTrigger, "syncTrigger");
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
-    this.loop = new ReviewLoopState(reviewStore, runStore, localHandle);
+    this.reader =
+        new LoopFactsReader(specStore, reviewStore, runStore, configResolver, localHandle);
   }
 
   public ReviewPipelineController useMessages(MessageStore messages) {
@@ -235,6 +237,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     if (!isAuthoritative(event)) {
       return;
     }
+    pipelines.clear();
     try {
       if (Event.WellKnownTypes.AGENT_CANCELLED.equals(event.type())) {
         runOf(event).ifPresent(this::operatorStopped);
@@ -294,11 +297,11 @@ public final class ReviewPipelineController implements EventSubscriber {
 
   /**
    * A stop frees whatever its run held, so every review of the project that recorded a wait on a
-   * run that has since ended takes its step now ({@link ReviewLoopState.Owed.Waiting}) — of the
-   * specs whose loop this box drives. Only a recorded wait is acted on here: an errored review
-   * keeps to the reconciler's pace, so a broken reviewer is not retried three times in one breath,
-   * a review whose launch was cut short is the reconciler's to rescue, and a review whose run has
-   * ended waits for that run's own stop, which may be the very next event.
+   * run that has since ended takes its step now ({@link LoopFacts.Owed.Waiting}) — of the specs
+   * whose loop this box drives. Only a recorded wait is acted on here: an errored review keeps to
+   * the reconciler's pace, so a broken reviewer is not retried three times in one breath, a review
+   * whose launch was cut short is the reconciler's to rescue, and a review whose run has ended
+   * waits for that run's own stop, which may be the very next event.
    */
   private void resumeWaiting(String project) {
     try {
@@ -319,7 +322,8 @@ public final class ReviewPipelineController implements EventSubscriber {
    */
   private void resumeIfWaiting(String project, String specId) {
     try {
-      if (loop.drivenHere(specId) && loop.owed(specId) instanceof ReviewLoopState.Owed.Waiting) {
+      var facts = facts(project, specId);
+      if (facts.drivenHere() && facts.owed() instanceof LoopFacts.Owed.Waiting) {
         resume(project, specId);
       }
     } catch (RuntimeException e) {
@@ -396,10 +400,10 @@ public final class ReviewPipelineController implements EventSubscriber {
    * spec in {@code review} for a person.
    */
   private void startReview(String project, String specId, int iteration) {
-    switch (pipelineOf(project)) {
-      case Pipeline.Staged staged -> begin(staged.config(), project, specId, iteration);
-      case Pipeline.None none -> advanceSpec(specId, SpecStatus.REVIEW);
-      case Pipeline.Unreadable unreadable ->
+    switch (pipeline(project)) {
+      case LoopFacts.Pipeline.Staged staged -> begin(staged.config(), project, specId, iteration);
+      case LoopFacts.Pipeline.None none -> advanceSpec(specId, SpecStatus.REVIEW);
+      case LoopFacts.Pipeline.Unreadable unreadable ->
           escalate(
               project,
               specId,
@@ -418,79 +422,31 @@ public final class ReviewPipelineController implements EventSubscriber {
     advance(reviewId, config, project, specId);
   }
 
-  /** What a project's review pipeline is, as far as it can be read. */
-  private sealed interface Pipeline {
-
-    /** The project's pipeline, with stages for a review to run. */
-    record Staged(ReviewPipelineConfig config) implements Pipeline {}
-
-    /** The project has no pipeline with stages. */
-    record None() implements Pipeline {}
-
-    /**
-     * The project's descriptor is there and could not be read, for {@code why}: nothing is known of
-     * its pipeline, least of all that it has none or that it changed.
-     */
-    record Unreadable(String why) implements Pipeline {}
-  }
-
-  private Pipeline pipelineOf(String project) {
-    try {
-      return Optional.ofNullable(configResolver.apply(project))
-          .filter(config -> !config.stages().isEmpty())
-          .<Pipeline>map(Pipeline.Staged::new)
-          .orElseGet(Pipeline.None::new);
-    } catch (RuntimeException unreadable) {
-      return new Pipeline.Unreadable(unreadable.getMessage());
-    }
-  }
-
   /**
    * Takes {@code step} for {@code review} under the project's pipeline. A review the pipeline can
-   * no longer judge — it cannot be read, the project has no stages left, or a stage the review
-   * holds is not the pipeline's stage in that place any more — is a person's: it is escalated
-   * saying which, never left as it is, and the step is not taken. A pipeline that cannot be read is
-   * never compared with the review: it says nothing of what the pipeline is.
+   * no longer judge ({@link LoopFacts#unfit}) is a person's: it is escalated saying why, never left
+   * as it is, and the step is not taken.
    */
   private void under(
       ReviewStore.ReviewRow review, String project, Consumer<ReviewPipelineConfig> step) {
-    switch (pipelineOf(project)) {
-      case Pipeline.Staged staged ->
-          changedUnder(review, staged.config())
-              .ifPresentOrElse(
-                  changed -> escalate(project, review.specId(), review.id(), changed),
-                  () -> step.accept(staged.config()));
-      case Pipeline.None none ->
-          escalate(project, review.specId(), review.id(), ReviewNarration.noStages());
-      case Pipeline.Unreadable unreadable ->
-          escalate(
-              project,
-              review.specId(),
-              review.id(),
-              ReviewNarration.pipelineUnreadable(unreadable.why()));
-    }
+    var facts = facts(project, review.specId());
+    facts
+        .unfit()
+        .ifPresentOrElse(
+            unfit -> escalate(project, review.specId(), review.id(), unfit),
+            () -> step.accept(facts.staged()));
   }
 
   /**
-   * Why {@code config} is not the pipeline {@code review}'s stage rows were written under, or empty
-   * when it still is: each row is the configured stage in its place, by name and by kind.
+   * The project's pipeline, resolved once for the event being routed: one configuration serves a
+   * whole stop, every follow-up step and every waiting review it wakes.
    */
-  private Optional<String> changedUnder(ReviewStore.ReviewRow review, ReviewPipelineConfig config) {
-    var rows = reviewStore.stagesForReview(review.id());
-    var configured = config.stages();
-    for (var place = 0; place < rows.size(); place++) {
-      var row = rows.get(place);
-      if (place >= configured.size()
-          || !configured.get(place).name().equals(row.name())
-          || !stageType(configured.get(place)).equals(row.stageType())) {
-        return Optional.of(ReviewNarration.pipelineChanged(row.name()));
-      }
-    }
-    return Optional.empty();
+  private LoopFacts.Pipeline pipeline(String project) {
+    return pipelines.computeIfAbsent(project, reader::pipeline);
   }
 
-  private static String stageType(StageConfig stage) {
-    return stage.type().name().toLowerCase(Locale.ROOT);
+  private LoopFacts facts(String project, String specId) {
+    return reader.read(project, specId, pipeline(project));
   }
 
   private String createReview(String specId, int iteration) {
@@ -511,7 +467,7 @@ public final class ReviewPipelineController implements EventSubscriber {
       return reviewStore.stagesForReview(reviewId);
     }
     for (var stageConfig : config.stages().subList(held, config.stages().size())) {
-      reviewStore.createStage(reviewId, stageConfig.name(), stageType(stageConfig));
+      reviewStore.createStage(reviewId, stageConfig.name(), LoopFacts.stageType(stageConfig));
     }
     syncTrigger.run();
     return reviewStore.stagesForReview(reviewId);
@@ -581,10 +537,10 @@ public final class ReviewPipelineController implements EventSubscriber {
    * and only once that claim has landed does the stage row turn {@code running}, before the
    * reviewer's unit starts — so a stage is {@code running} only while a run exists for it, and the
    * reviewer a stage waits on is the run that was live when it started ({@link
-   * ReviewLoopState#stageReviewedBy}). A claim the gate refuses writes nothing of the stage: it
-   * stays as it was, and the review records the run it waits on. This box announces the stage
-   * started only once a reviewer is running for it. A stage that cannot start — no reviewer to
-   * resolve, a container that will not take the launch — is an infrastructure error like any other.
+   * LoopFacts#stageReviewedBy}). A claim the gate refuses writes nothing of the stage: it stays as
+   * it was, and the review records the run it waits on. This box announces the stage started only
+   * once a reviewer is running for it. A stage that cannot start — no reviewer to resolve, a
+   * container that will not take the launch — is an infrastructure error like any other.
    */
   private void launchReviewer(
       ReviewStore.StageRow stage, StageConfig stageConfig, String project, String specId) {
@@ -680,7 +636,7 @@ public final class ReviewPipelineController implements EventSubscriber {
         }
       };
     } catch (Exception e) {
-      if (!loop.served(reviewId)) {
+      if (!reader.served(reviewId)) {
         return new Launched.Failed(reasonOf(e));
       }
       System.err.println(
@@ -716,7 +672,10 @@ public final class ReviewPipelineController implements EventSubscriber {
   private void judge(
       ReviewStore.ReviewRow review, ReviewPipelineConfig config, RunStore.RunRow run, Event event) {
     var served =
-        loop.stageReviewedBy(review.id(), run).flatMap(stage -> served(stage, config)).orElse(null);
+        facts(run.project(), run.specId())
+            .stageReviewedBy(run)
+            .flatMap(stage -> served(stage, config))
+            .orElse(null);
     if (served == null) {
       resume(run.project(), run.specId());
       return;
@@ -798,34 +757,34 @@ public final class ReviewPipelineController implements EventSubscriber {
   /**
    * Goes on from the rows when a stop arrives that the loop is not waiting on — a duplicate, a
    * replay, the stop of a run whose step a crash cut short, a stop that freed a claim a review was
-   * waiting for. What the spec's latest review is owed is done ({@link ReviewLoopState#owed}): a
-   * review that failed by infrastructure error is retried as the same iteration, within its budget
-   * (the loop's retry: the reconciler replays a stop for every errored review, once); a {@code
-   * running} review whose stage has no reviewer goes on from its stages; a review that failed its
-   * gate and never got its fix agent gets it; and a review that recorded a wait takes the step the
-   * gate refused it. A review a run still serves, one that passed or escalated, and one whose
-   * reviewer or fix agent has ended — whose own stop is the only word on what its work is worth —
-   * are left as they are.
+   * waiting for. What the spec's latest review is owed is done ({@link LoopFacts#owed}): a review
+   * that failed by infrastructure error is retried as the same iteration, within its budget (the
+   * loop's retry: the reconciler replays a stop for every errored review, once); a {@code running}
+   * review whose stage has no reviewer goes on from its stages; a review that failed its gate and
+   * never got its fix agent gets it; and a review that recorded a wait takes the step the gate
+   * refused it. A review a run still serves, one that passed or escalated, and one whose reviewer
+   * or fix agent has ended — whose own stop is the only word on what its work is worth — are left
+   * as they are.
    */
   private void resume(String project, String specId) {
     if (!reviewable(specId)) {
       return;
     }
-    take(loop.owed(specId), project, specId);
+    take(facts(project, specId).owed(), project, specId);
   }
 
-  private void take(ReviewLoopState.Owed owed, String project, String specId) {
+  private void take(LoopFacts.Owed owed, String project, String specId) {
     switch (owed) {
-      case ReviewLoopState.Owed.Retry retry -> retry(retry.review(), project, specId);
-      case ReviewLoopState.Owed.Advance advance -> goOn(advance.review(), project, specId);
-      case ReviewLoopState.Owed.Fix fix -> owedFix(fix.review(), project);
-      case ReviewLoopState.Owed.Waiting waiting -> {
-        if (loop.ended(waiting.review().waitingOn())) {
+      case LoopFacts.Owed.Retry retry -> retry(retry.review(), project, specId);
+      case LoopFacts.Owed.Advance advance -> goOn(advance.review(), project, specId);
+      case LoopFacts.Owed.Fix fix -> owedFix(fix.review(), project);
+      case LoopFacts.Owed.Waiting waiting -> {
+        if (reader.ended(waiting.review().waitingOn())) {
           take(waiting.step(), project, specId);
         }
       }
-      case ReviewLoopState.Owed.Stop awaitsItsStop -> {}
-      case ReviewLoopState.Owed.Nothing nothing -> {}
+      case LoopFacts.Owed.Stop awaitsItsStop -> {}
+      case LoopFacts.Owed.Nothing nothing -> {}
     }
   }
 
