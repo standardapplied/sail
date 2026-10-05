@@ -109,9 +109,9 @@ final class ReviewNarration {
   }
 
   /**
-   * Why a review whose project's pipeline cannot be read is a person's: the first line of {@code
-   * why} that says anything, which names the project and the fault — a parser's message runs on for
-   * lines, and the rest of it is the descriptor's to show — and what to do about it.
+   * Why a review whose project's pipeline cannot be read is a person's: {@code why}, which names
+   * the project and the fault, as one line — a parser tells where and what over several, and the
+   * last of them is the one that says what is wrong — and what to do about it.
    */
   static String pipelineUnreadable(String why) {
     var fault =
@@ -119,9 +119,8 @@ final class ReviewNarration {
             .flatMap(String::lines)
             .map(String::strip)
             .filter(line -> !line.isEmpty())
-            .findFirst()
-            .orElse("the project's review pipeline could not be read");
-    return fault
+            .collect(Collectors.joining(" "));
+    return (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
         + "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
         + " --restart";
   }

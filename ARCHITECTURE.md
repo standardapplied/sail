@@ -970,7 +970,7 @@ class is named):
   descriptor cannot be read — which is never taken for a project with no pipeline. A build
   that ends while the descriptor cannot be read gets its review written and escalated for
   that reason, not a review under the default pipeline and not a stop replayed until the
-  file heals. Every writer of a descriptor replaces it in one move
+  file heals. Every writer of a project's canonical descriptor replaces it in one move
   (`ProjectDefinitions.write`), so a reader never sees half of one. An escalation closes
   any stage still `running`.
   *`ReviewLoopEveryStateTest.everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated`

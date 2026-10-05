@@ -172,21 +172,19 @@ class ReviewNarrationTest {
   }
 
   @Test
-  void anUnreadablePipelineIsSaidByTheFirstLineOfWhatWentWrongAndWhatToDo() {
+  void anUnreadablePipelineIsSaidInOneLineWithAllOfWhatWentWrongAndWhatToDo() {
     var parse =
         ReviewNarration.pipelineUnreadable(
             "sail.yaml of project 'acme' could not be read: while parsing a flow sequence\n"
-                + " in 'reader', line 3, column 9:\n    agent: [unterminated\n");
+                + " in 'reader', line 3, column 9:\n\n"
+                + "expected ',' or ']', but got <stream end>\n");
 
     assertEquals(
-        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence; fix the"
+        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence in"
+            + " 'reader', line 3, column 9: expected ',' or ']', but got <stream end>; fix the"
             + " project's sail.yaml with `sail project edit`, then re-dispatch with --restart",
         parse,
-        "a parser's message runs on for lines; a reason is one sentence");
-    assertTrue(
-        ReviewNarration.pipelineUnreadable("\n  guardrails.max_idle is not a duration\n")
-            .startsWith("guardrails.max_idle is not a duration; fix"),
-        "the first line that says anything");
+        "a parser's message runs over lines and its last says what is wrong: all of it, as one");
     for (var nothingSaid : new String[] {null, "", " \n "}) {
       assertTrue(
           ReviewNarration.pipelineUnreadable(nothingSaid)
