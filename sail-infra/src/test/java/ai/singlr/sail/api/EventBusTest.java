@@ -10,10 +10,13 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Actor;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -213,6 +216,50 @@ class EventBusTest {
       BusTesting.awaitDelivery(delivered);
       assertEquals(0, seen.get(), "a closed subscription must not deliver");
     }
+  }
+
+  @Test
+  void aClosedSubscriptionsDrainThreadEndsAtOnceAndWhatWasQueuedIsDropped() throws Exception {
+    var bus = new EventBus(1);
+    var handling = new CountDownLatch(1);
+    var release = new CountDownLatch(1);
+    var seen = new AtomicInteger();
+    var sub =
+        bus.subscribe(
+            subscriber(
+                "busy",
+                EventSubscriber.all(),
+                e -> {
+                  seen.incrementAndGet();
+                  handling.countDown();
+                  try {
+                    release.await();
+                  } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                  }
+                }),
+            1);
+    bus.publish(Event.of("p", null, "t", "a", "h"));
+    BusTesting.awaitDelivery(handling);
+    bus.publish(Event.of("p", null, "t", "a", "h"));
+
+    sub.close();
+    release.countDown();
+
+    assertTimeoutPreemptively(
+        Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS),
+        bus::close,
+        "the drain thread ends on the close itself: nothing else is coming to wake it");
+    assertEquals(1, seen.get(), "the event in flight was finished and the one queued was dropped");
+  }
+
+  @Test
+  void anIdleSubscriptionsDrainThreadEndsWhenTheBusCloses() {
+    var bus = new EventBus();
+    bus.subscribe(subscriber("idle", EventSubscriber.all(), e -> {}));
+
+    assertTimeoutPreemptively(Duration.ofSeconds(BusTesting.DELIVERY_TIMEOUT_SECONDS), bus::close);
+    assertEquals(List.of(), bus.stats().subscribers());
   }
 
   @Test
