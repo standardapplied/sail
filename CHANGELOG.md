@@ -57,6 +57,7 @@
   - The upgrade leaves a review whose spec main pruned — held here only until its own erasure pages in — unfolded and reported, instead of failing the whole upgrade on it.
   - The upgrade folds each box's existing finding rows into one revision per review, which a node's next sync pushes; if the spec is no longer that box's FDE's, main denies it and the node keeps the revision in its change log.
   - The fleet floor is 0.46.4: an older node would push a review back without its findings.
+- **The review loop decides in one place and acts in one place.** Every step from a build's stop to `awaiting_merge` is one row of one pure function (`LoopDecision.next`, tabled in ARCHITECTURE.md under "The loop machine") that `LoopSteps` carries out. What the loop does for a stop is unchanged, with three exceptions: a review a re-dispatch replaced while one of its steps ran (a reviewer's log being read, a launch, a fix agent's leftovers being committed) is left alone where that step used to finish on it, nothing more is started or escalated for a spec someone moved out of the loop while a step ran (no next reviewer, no person's stage, no fix agent after a failed gate, no escalation of a fix whose leftovers could not be committed), and a failed fix iteration is announced (`review_iteration_failed`) once its review's end is written, not before. The server's event bus now shuts down without waiting out a 200 ms poll per subscriber.
 
 ## 0.46.3
 

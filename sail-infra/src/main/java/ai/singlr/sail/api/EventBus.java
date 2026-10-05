@@ -11,7 +11,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.LongAdder;
 
@@ -28,6 +27,10 @@ public final class EventBus implements AutoCloseable {
 
   /** Default per-subscriber queue capacity. */
   public static final int DEFAULT_CAPACITY = 1024;
+
+  /** What a closing subscription queues to wake its drain thread; never delivered. */
+  private static final Event CLOSED =
+      Event.of("sail", null, "subscription_closed", Event.SAIL_AGENT, "local");
 
   private final CopyOnWriteArrayList<SubscriptionImpl> subscriptions = new CopyOnWriteArrayList<>();
   private final AtomicLong sequence = new AtomicLong();
@@ -163,13 +166,13 @@ public final class EventBus implements AutoCloseable {
       while (active) {
         Event event;
         try {
-          event = queue.poll(200, TimeUnit.MILLISECONDS);
+          event = queue.take();
         } catch (InterruptedException e) {
           Thread.currentThread().interrupt();
           return;
         }
-        if (event == null) {
-          continue;
+        if (event == CLOSED) {
+          return;
         }
         try {
           subscriber.onEvent(event);
@@ -195,10 +198,16 @@ public final class EventBus implements AutoCloseable {
       return dropped.sum();
     }
 
+    /**
+     * Stops delivery and wakes the drain thread, which exits at once: the events still queued are
+     * dropped, and one already taken is delivered, as it was before the close could wake a thread.
+     */
     @Override
     public void close() {
       active = false;
       subscriptions.remove(this);
+      queue.clear();
+      queue.offer(CLOSED);
     }
   }
 }

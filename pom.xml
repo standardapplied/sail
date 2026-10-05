@@ -187,7 +187,6 @@
                                         <exclude>ai.singlr.sail.api.DispatchOperations</exclude>
                                         <exclude>ai.singlr.sail.api.DispatchOperations.*</exclude>
                                         <exclude>ai.singlr.sail.api.SailApiClient</exclude>
-                                        <exclude>ai.singlr.sail.api.ReviewPipelineController</exclude>
                                         <exclude>ai.singlr.sail.api.RunLauncher</exclude>
                                         <exclude>ai.singlr.sail.api.RunLauncher.*</exclude>
                                         <exclude>ai.singlr.sail.api.RunReservation</exclude>
@@ -201,34 +200,6 @@
                                             <counter>LINE</counter>
                                             <value>COVEREDRATIO</value>
                                             <minimum>1.0</minimum>
-                                        </limit>
-                                        <limit>
-                                            <counter>METHOD</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>1.0</minimum>
-                                        </limit>
-                                    </limits>
-                                </rule>
-                                <rule>
-                                    <element>CLASS</element>
-                                    <includes>
-                                        <include>ai.singlr.sail.api.ReviewPipelineController</include>
-                                    </includes>
-                                    <!--
-                                        The review loop's stop router: every method is exercised
-                                        (METHOD 1.0) through the real bus, and the tests settle on
-                                        handled events, so line coverage is deterministic across
-                                        runs. The uncovered lines are defensive-only — a publish
-                                        that throws while reporting a handler's own failure, and
-                                        the hostname UnknownHostException fallback — none reachable
-                                        without mock-level fault injection. Floored just under the
-                                        actual.
-                                    -->
-                                    <limits>
-                                        <limit>
-                                            <counter>LINE</counter>
-                                            <value>COVEREDRATIO</value>
-                                            <minimum>0.93</minimum>
                                         </limit>
                                         <limit>
                                             <counter>METHOD</counter>

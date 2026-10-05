@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
@@ -28,11 +29,13 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -1727,6 +1730,54 @@ class ReviewPipelineControllerTest {
 
   private static String detailOf(Event event) {
     return Objects.toString(event.data().get("detail"), "");
+  }
+
+  @Test
+  void aLoopThatWouldTakeMoreStepsThanItsTableAllowsIsAFaultNamingTheStepsItTook() {
+    var unserved = LoopRows.facts().review(LoopRows.review("running"), List.of()).build();
+
+    var fault =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                ReviewPipelineController.drive(
+                    "auth",
+                    () -> unserved,
+                    new LoopTrigger.GoOn(),
+                    (facts, step) -> Optional.of(new LoopTrigger.GoOn())));
+
+    assertEquals(
+        "the review loop of spec auth took more than 8 steps for one event: "
+            + String.join(", ", Collections.nCopies(9, "Resume")),
+        fault.getMessage());
+  }
+
+  @Test
+  void aStopOfARunAnotherBoxExecutedFinishesNothingHere() {
+    createSpec("auth", "in_progress");
+    var foreign = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            runStore.create(
+                foreign,
+                "test-project",
+                "auth",
+                "node-b",
+                "build",
+                "claude-code",
+                "feat/test",
+                "work",
+                null,
+                null,
+                AgentUnit.forRun(foreign).logPath(),
+                AgentUnit.forRun(foreign).unitName()));
+
+    loop.onEvent(ReviewLoop.buildStop("auth", foreign));
+
+    assertEquals(
+        "running",
+        runStore.findById(foreign).orElseThrow().status(),
+        "its executing box finishes it: this box only holds a copy of its row");
   }
 
   @Test

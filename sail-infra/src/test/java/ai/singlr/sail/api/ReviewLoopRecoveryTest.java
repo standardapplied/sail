@@ -554,7 +554,7 @@ class ReviewLoopRecoveryTest {
     assertEquals("running", loop.statusOf(reReview), "the re-review waits for the repo");
     assertEquals(List.of(chat.get()), loop.container.live());
     var reconciler = loop.reconciler(LATER);
-    for (var sweep = 1; sweep <= ReviewPipelineController.MAX_ERRORED_RETRIES; sweep++) {
+    for (var sweep = 1; sweep <= LoopDecision.MAX_ERRORED_RETRIES; sweep++) {
       reconciler.sweep();
       loop.settle();
     }
@@ -759,6 +759,36 @@ class ReviewLoopRecoveryTest {
         "the holder ended inside the grace window: its stop may be the very next event");
     assertEquals(0, replaysOf(build));
     assertEquals(1, sweeps(loop.reconciler(LATER), 2), "past it, nothing is coming");
+  }
+
+  @Test
+  void aSpecWhoseRowsCannotBeReadCostsTheWaitingReviewsOfItsProjectNothing() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var holder = holderOf("billing", "build");
+    loop.built("auth");
+    var review = loop.reviewOf("auth");
+    assertEquals(holder, loop.waitingOn(review));
+    loop.spec("broken", SpecStatus.REVIEW, "claude-code", null, null, List.of("web"));
+    var stage =
+        Acting.system(
+            () ->
+                loop.reviews.createStage(loop.reviews.createReview("broken", 1), "codex", "agent"));
+    loop.db.execute(
+        """
+        INSERT INTO review_findings (id, stage_id, severity, category, title, description)
+        VALUES ('unreadable', ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
+        stage);
+    loop.db.execute("UPDATE reviews SET status = 'failed' WHERE spec_id = 'broken'");
+    loop.container.exited(holder, "done", 0);
+
+    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+
+    var reviewer = loop.onlyLive();
+    assertEquals("review", reviewer.role(), "the stop that freed the claim launched auth's step");
+    assertEquals(review, reviewer.reviewId());
+    assertTrue(
+        loop.events("review_pipeline_error").isEmpty(),
+        "and the spec that could not be read is logged, never published as the stop's failure");
   }
 
   @Test
@@ -1784,5 +1814,256 @@ class ReviewLoopRecoveryTest {
         "a stop here frees this box's claims; a review another box runs is that box's to drive");
     assertEquals(0, loop.reconciler(LATER).sweep());
     assertEquals("running", loop.statusOf(synced));
+  }
+
+  /** One finding of {@code specId}'s latest review can no longer be read. */
+  private void aFindingCannotBeRead(String specId) {
+    loop.db.execute(
+        """
+        UPDATE review_findings SET severity = 'NO_SEVERITY'
+        WHERE stage_id IN (
+            SELECT s.id FROM review_stages s JOIN reviews r ON r.id = s.review_id
+            WHERE r.spec_id = ?)""",
+        specId);
+  }
+
+  /** Spec {@code id} over {@code api}, whose review failed its gate on a finding nothing reads. */
+  private void failedOnAFindingNothingCanRead(String id) {
+    loop.spec(id, SpecStatus.IN_PROGRESS, "claude-code", null, null, List.of("api"));
+    var stage =
+        Acting.system(
+            () -> loop.reviews.createStage(loop.reviews.createReview(id, 1), "codex", "agent"));
+    loop.db.execute(
+        """
+        INSERT INTO review_findings (id, stage_id, severity, category, title, description)
+        VALUES (?, ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
+        "unreadable-" + id,
+        stage);
+    loop.db.execute("UPDATE review_stages SET status = 'failed' WHERE id = ?", stage);
+    loop.db.execute("UPDATE reviews SET status = 'failed' WHERE spec_id = ?", id);
+  }
+
+  @Test
+  void aKilledFixAgentEscalatesItsReviewThoughAFindingOfItCannotBeRead() {
+    var fix = fixing();
+    aFindingCannotBeRead("auth");
+
+    loop.outlastsItsTimeLimit(fix.id());
+
+    assertEquals(List.of(), loop.details("review_pipeline_error"));
+    assertEquals(
+        "escalated",
+        loop.statusOf(fix.reviewId()),
+        "how a fix agent ended is decided without weighing a finding, so none is read for it");
+  }
+
+  @Test
+  void anUnheardFixStopIsReplayedThoughAFindingOfItsReviewCannotBeRead() {
+    var fix = fixing();
+    loop.container.exited(fix.id(), "gave up", 1);
+    Acting.system(() -> loop.runs.complete(fix.id(), "stopped", 1));
+    aFindingCannotBeRead("auth");
+    loop.db.execute("UPDATE specs SET status = 'review' WHERE id = 'auth'");
+
+    assertEquals(1, loop.reconciler(LATER).sweep(), "the rescue reads what the rows owe, alone");
+    loop.settle();
+
+    assertEquals("escalated", loop.statusOf(fix.reviewId()));
+  }
+
+  @Test
+  void aReviewOwedItsFixHasItsStopReplayedThoughAFindingOfItCannotBeRead() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    failedOnAFindingNothingCanRead("broken");
+    loop.db.execute("UPDATE specs SET status = 'review' WHERE id = 'broken'");
+    var build = holderOf("broken", "build");
+    endsWithNoStop(build);
+
+    assertEquals(1, loop.reconciler(LATER).sweep(), "what the rows owe is read without a finding");
+    loop.settle();
+
+    assertEquals(
+        1,
+        loop.events("review_pipeline_error").size(),
+        "and the fix that cannot be decided without them fails loudly, on the replayed stop");
+  }
+
+  @Test
+  void aStopThatFreesTheRepoTwoReviewsWaitForWakesTheSpecInReviewBeforeTheOneInProgress() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var holder = holderOf("billing", "build");
+    loop.built("auth");
+    loop.built("search");
+    loop.db.execute("UPDATE specs SET status = 'in_progress' WHERE id = 'search'");
+    assertEquals(holder, loop.waitingOn(loop.reviewOf("auth")));
+    assertEquals(holder, loop.waitingOn(loop.reviewOf("search")));
+    loop.container.exited(holder, "done", 0);
+
+    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+
+    var reviewer = loop.onlyLive();
+    assertEquals(loop.reviewOf("auth"), reviewer.reviewId(), "the spec in review goes first");
+    assertEquals(
+        reviewer.id(),
+        loop.waitingOn(loop.reviewOf("search")),
+        "and the spec in progress is woken too: it took its step, and waits on that reviewer now");
+  }
+
+  @Test
+  void aStopWhoseOwnLoopCannotBeDrivenStillWakesTheReviewItFreed() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var holder = holderOf("broken", "build");
+    loop.built("auth");
+    var review = loop.reviewOf("auth");
+    assertEquals(holder, loop.waitingOn(review));
+    failedOnAFindingNothingCanRead("broken");
+    loop.container.exited(holder, "done", 0);
+
+    loop.onEvent(ReviewLoop.buildStop("broken", holder));
+
+    assertEquals(1, loop.events("review_pipeline_error").size(), "the stop's own loop failed");
+    assertEquals(
+        review,
+        loop.onlyLive().reviewId(),
+        "and the review that waited on its run took its step all the same");
+  }
+
+  @Test
+  void aSpecThatCannotBeDrivenCostsTheWaitingReviewListedAfterItNothing() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    failedOnAFindingNothingCanRead("broken");
+    loop.db.execute(
+        "UPDATE specs SET status = 'review', created_at = '2026-01-01T00:00:00Z' WHERE id = 'broken'");
+    var holder = holderOf("billing", "build");
+    loop.built("auth");
+    var review = loop.reviewOf("auth");
+    assertEquals(holder, loop.waitingOn(review));
+    loop.container.exited(holder, "done", 0);
+
+    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+
+    assertEquals(
+        review,
+        loop.onlyLive().reviewId(),
+        "the spec told before it could not be read, and that is that spec's failure alone");
+    assertTrue(loop.events("review_pipeline_error").isEmpty());
+  }
+
+  @Test
+  void aPipelineErrorNamesTheSpecOfTheRunWhenItsStopNamesNone() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    failedOnAFindingNothingCanRead("broken");
+    var reviewer = loop.run("broken", "review");
+    var stop =
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            null,
+            "codex",
+            reviewer,
+            "review",
+            0,
+            null);
+
+    loop.onEvent(stop);
+
+    assertEquals(
+        List.of("broken"),
+        loop.events("review_pipeline_error").stream().map(Event::spec).toList(),
+        "the failure is told of the spec whose loop the stop moves");
+  }
+
+  @Test
+  void anOperatorsCancelOfARunNoStopHasClaimedDecidesNothingAndFinishesNoRun() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+
+    loop.onEvent(cancelOf(reviewer.id()));
+
+    assertEquals(
+        "running",
+        loop.runs.findById(reviewer.id()).orElseThrow().status(),
+        "a cancel is never a run's own end: only its stop finishes its row");
+    assertEquals("running", loop.statusOf(reviewer.reviewId()), "and its review is not judged");
+    assertEquals(List.of(), loop.details("review_escalated"));
+    assertEquals(List.of(), loop.details("review_errored"));
+  }
+
+  @Test
+  void aStopThatNamesNoSpecMovesNoLoopAndReadsNoPipeline() {
+    var pipelinesRead = new AtomicInteger();
+    loop =
+        new ReviewLoop(
+            tempDir,
+            ReviewLoop.YAML,
+            project -> {
+              pipelinesRead.incrementAndGet();
+              return ReviewLoop.stages("codex");
+            },
+            project -> "codex");
+    var stop =
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            null,
+            "claude-code",
+            DateTimeUtils.newId().toString(),
+            "build",
+            0,
+            null);
+
+    loop.onEvent(stop);
+
+    assertEquals(0, pipelinesRead.get(), "with no spec to move there are no facts to read");
+    assertEquals(List.of(), loop.events("review_pipeline_error"));
+  }
+
+  @Test
+  void theStopOfARetiredInvitesRunStartsNoReview() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var stop =
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "auth",
+            "claude-code",
+            DateTimeUtils.newId().toString(),
+            "invite",
+            0,
+            null);
+
+    loop.onEvent(stop);
+
+    assertTrue(loop.reviews.latestReviewForSpec("auth").isEmpty());
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"));
+  }
+
+  @Test
+  void theStoppedRunIsFinishedAndMainToldOfItOnlyWhenTheRouterWroteIt() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("auth", "api");
+    var chat = holderOf("auth", Lane.ROOM.wire());
+    loop.container.exited(chat, "replied", 0);
+    var stop =
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "auth",
+            "claude-code",
+            chat,
+            Lane.ROOM.wire(),
+            0,
+            null);
+
+    loop.controller.onEvent(stop);
+
+    assertEquals("stopped", loop.runs.findById(chat).orElseThrow().status());
+    assertEquals(1, loop.syncs.get(), "main is told the run ended");
+
+    loop.controller.onEvent(stop);
+
+    assertEquals(1, loop.syncs.get(), "a replay finds the row finished and writes nothing");
   }
 }
