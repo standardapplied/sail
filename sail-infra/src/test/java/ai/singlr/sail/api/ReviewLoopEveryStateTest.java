@@ -276,6 +276,7 @@ class ReviewLoopEveryStateTest {
         loop.reviews,
         loop.runs,
         project -> AN_AGENT_THEN_A_PERSON,
+        project -> "codex",
         () -> ReviewLoop.HANDLE);
   }
 

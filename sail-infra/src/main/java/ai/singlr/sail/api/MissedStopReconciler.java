@@ -155,7 +155,8 @@ public final class MissedStopReconciler implements AutoCloseable {
     this.localHandle = localHandle;
     this.clock = clock;
     this.loop =
-        new LoopFactsReader(specStore, reviewStore, sessionStore, project -> null, localHandle);
+        new LoopFactsReader(
+            specStore, reviewStore, sessionStore, project -> null, project -> null, localHandle);
     this.pass = new PeriodicPass("reconcile", this::sweep);
   }
 

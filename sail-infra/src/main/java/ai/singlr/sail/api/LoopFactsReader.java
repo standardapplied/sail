@@ -6,13 +6,13 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
+import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -23,11 +23,13 @@ final class LoopFactsReader {
   private final ReviewStore reviews;
   private final RunStore runs;
   private final Function<String, ReviewPipelineConfig> configResolver;
+  private final Function<String, String> reviewerResolver;
   private final Supplier<String> localHandle;
 
   /**
    * @param configResolver a project's review pipeline, null for none; it throws for a descriptor
    *     that is there and cannot be read
+   * @param reviewerResolver a project's default reviewer agent, for a stage that names none
    * @param localHandle this box's FDE handle: only the runs this box executed serve a review here
    */
   LoopFactsReader(
@@ -35,11 +37,13 @@ final class LoopFactsReader {
       ReviewStore reviews,
       RunStore runs,
       Function<String, ReviewPipelineConfig> configResolver,
+      Function<String, String> reviewerResolver,
       Supplier<String> localHandle) {
     this.specs = specs;
     this.reviews = reviews;
     this.runs = runs;
     this.configResolver = configResolver;
+    this.reviewerResolver = reviewerResolver;
     this.localHandle = localHandle;
   }
 
@@ -72,12 +76,21 @@ final class LoopFactsReader {
         review.map(ReviewStore.ReviewRow::waitingOn).filter(this::ended).isPresent());
   }
 
+  /**
+   * What {@code project}'s review pipeline is, with the reviewer its unnamed agent stages resolve
+   * to. A descriptor that cannot be read is never taken for a project with no pipeline.
+   */
   LoopFacts.Pipeline pipeline(String project) {
     try {
-      return Optional.ofNullable(configResolver.apply(project))
-          .filter(config -> !config.stages().isEmpty())
-          .<LoopFacts.Pipeline>map(LoopFacts.Pipeline.Staged::new)
-          .orElseGet(LoopFacts.Pipeline.None::new);
+      var config = configResolver.apply(project);
+      if (config == null || config.stages().isEmpty()) {
+        return new LoopFacts.Pipeline.None();
+      }
+      var unnamed =
+          config.stages().stream()
+              .anyMatch(stage -> stage.type() == StageType.AGENT && stage.agent() == null);
+      return new LoopFacts.Pipeline.Staged(
+          config, unnamed ? reviewerResolver.apply(project) : null);
     } catch (RuntimeException unreadable) {
       return new LoopFacts.Pipeline.Unreadable(unreadable.getMessage());
     }

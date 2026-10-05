@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.stream.IntStream;
 
 /**
  * Everything a decision of the review loop reads about one spec, as the rows stood at one moment
@@ -59,8 +60,20 @@ record LoopFacts(
   /** What a project's review pipeline is, as far as it can be read. */
   sealed interface Pipeline {
 
-    /** The project's pipeline, with stages for a review to run. */
-    record Staged(ReviewPipelineConfig config) implements Pipeline {}
+    /**
+     * The project's pipeline, with stages for a review to run.
+     *
+     * @param rosterReviewer the project's default reviewer agent, for a stage that names none — the
+     *     installed agent that is not the coder, else the coder for self-review ({@code
+     *     AgentRoster.reviewer}); null when the project installs none or no stage needs it
+     */
+    record Staged(ReviewPipelineConfig config, String rosterReviewer) implements Pipeline {
+
+      /** The agent that reviews {@code stage}, or empty when none resolves. */
+      Optional<String> reviewer(StageConfig stage) {
+        return Optional.ofNullable(stage.agent() != null ? stage.agent() : rosterReviewer);
+      }
+    }
 
     /** The project has no pipeline with stages. */
     record None() implements Pipeline {}
@@ -142,8 +155,8 @@ record LoopFacts(
   /**
    * The project's pipeline when it has stages; a decision asks only once {@link #unfit} is empty.
    */
-  ReviewPipelineConfig staged() {
-    return ((Pipeline.Staged) pipeline).config();
+  Pipeline.Staged staged() {
+    return (Pipeline.Staged) pipeline;
   }
 
   /**
@@ -180,23 +193,48 @@ record LoopFacts(
   }
 
   /**
-   * The stage of the review that {@code run} reviewed, or empty when no stage waits on it: the
-   * agent stage that is {@code running} and was started while the run was live — a stage starts
-   * once its reviewer's claim has landed, and before that reviewer's unit does. A stage started
-   * before the run was recorded, or after it ended, is another reviewer's to judge, and reading
-   * this run's log for it would pass a stage nobody reviewed.
+   * The place of the stage of the review that {@code run} reviewed, or empty when no stage waits on
+   * it: the agent stage that is {@code running} and was started while the run was live — a stage
+   * starts once its reviewer's claim has landed, and before that reviewer's unit does. A stage
+   * started before the run was recorded, or after it ended, is another reviewer's to judge, and
+   * reading this run's log for it would pass a stage nobody reviewed.
    */
-  Optional<ReviewStore.StageRow> stageReviewedBy(RunStore.RunRow run) {
+  Optional<Integer> stageReviewedBy(RunStore.RunRow run) {
     var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
     var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
-    return stages.stream()
-        .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
+    return IntStream.range(0, stages.size())
+        .boxed()
         .filter(
-            stage -> {
+            place -> {
+              var stage = stages.get(place);
               var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
-              return !started.isBefore(recorded) && !started.isAfter(ended);
+              return "running".equals(stage.status())
+                  && !"human".equals(stage.stageType())
+                  && !started.isBefore(recorded)
+                  && !started.isAfter(ended);
             })
         .findFirst();
+  }
+
+  /** Whether a newer run of the spec's loop has come after run {@code runId}. */
+  boolean replaced(String runId) {
+    return newestLoopRun.filter(newest -> !newest.id().equals(runId)).isPresent();
+  }
+
+  /**
+   * The review {@code run} serves, when the loop is waiting on this very run: the run is this box's
+   * and the newest of its spec's loop — no reviewer, fix agent or re-dispatched build has come
+   * after it — its spec is still the loop's to move, and its review is the spec's latest in this
+   * dispatch attempt and in one of {@code statuses}. Anything else is a stop the loop has already
+   * moved past, or one it must not act over.
+   */
+  Optional<ReviewStore.ReviewRow> awaited(RunStore.RunRow run, String... statuses) {
+    if (!run.ownedBy(node) || run.reviewId() == null || !loops() || replaced(run.id())) {
+      return Optional.empty();
+    }
+    return review
+        .filter(latest -> latest.id().equals(run.reviewId()))
+        .filter(latest -> List.of(statuses).contains(latest.status()));
   }
 
   /** What the latest review of the spec's current dispatch attempt is owed. */
