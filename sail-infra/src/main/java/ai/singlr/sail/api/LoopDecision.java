@@ -7,7 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.api.LoopFacts.Owed;
 import ai.singlr.sail.api.LoopFacts.Pipeline;
-import ai.singlr.sail.api.LoopSteps.StageOutcome;
+import ai.singlr.sail.api.StageVerdicts.StageOutcome;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig.StageType;
 import ai.singlr.sail.config.RunStatus;

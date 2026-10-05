@@ -72,6 +72,7 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
   private final LoopFactsReader reader;
+  private final LoopNarrator narrator;
   private final LoopSteps steps;
 
   /**
@@ -102,12 +103,13 @@ public final class ReviewPipelineController implements EventSubscriber {
     this.reader =
         new LoopFactsReader(
             specStore, reviewStore, runStore, configResolver, reviewerResolver, localHandle);
+    this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
     this.steps =
-        new LoopSteps(specStore, reviewStore, lanes, reader, eventBus, syncTrigger, localHandle);
+        new LoopSteps(specStore, reviewStore, lanes, reader, narrator, syncTrigger, localHandle);
   }
 
   public ReviewPipelineController useMessages(MessageStore messages) {
-    steps.useMessages(Objects.requireNonNull(messages, "messages"));
+    narrator.useMessages(Objects.requireNonNull(messages, "messages"));
     return this;
   }
 
@@ -132,7 +134,7 @@ public final class ReviewPipelineController implements EventSubscriber {
       System.err.println(
           "review-pipeline: failed to process %s for spec %s: %s"
               .formatted(event.type(), specId, e.getMessage()));
-      steps.publishPipelineError(event.project(), specId, e);
+      narrator.publishPipelineError(event.project(), specId, e);
     }
   }
 

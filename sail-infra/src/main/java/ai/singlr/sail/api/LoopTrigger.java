@@ -60,7 +60,7 @@ sealed interface LoopTrigger {
   record ReviewRunning() implements LoopTrigger {}
 
   /** A step judged the stage in place {@code stage} of the pipeline. */
-  record StageJudged(int stage, LoopSteps.StageOutcome outcome) implements LoopTrigger {}
+  record StageJudged(int stage, StageVerdicts.StageOutcome outcome) implements LoopTrigger {}
 
   /**
    * A launch threw — building its prompt or its task included — and no live run serves the review.
