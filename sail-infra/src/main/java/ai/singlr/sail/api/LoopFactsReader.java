@@ -12,7 +12,9 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.HashMap;
 import java.util.List;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -52,8 +54,17 @@ final class LoopFactsReader {
     return read(project, specId, pipeline(project));
   }
 
-  /** The facts of {@code specId} under {@code pipeline}, resolved once for a whole event. */
-  LoopFacts read(String project, String specId, LoopFacts.Pipeline pipeline) {
+  /**
+   * A reader for one event: each project's pipeline is resolved once, at the first read of one of
+   * its specs, and serves every read after it.
+   */
+  BiFunction<String, String, LoopFacts> forOneEvent() {
+    var pipelines = new HashMap<String, LoopFacts.Pipeline>();
+    return (project, specId) ->
+        read(project, specId, pipelines.computeIfAbsent(project, this::pipeline));
+  }
+
+  private LoopFacts read(String project, String specId, LoopFacts.Pipeline pipeline) {
     var review = reviews.latestReviewForSpec(specId);
     var stages = review.map(latest -> reviews.stagesForReview(latest.id())).orElse(List.of());
     return new LoopFacts(

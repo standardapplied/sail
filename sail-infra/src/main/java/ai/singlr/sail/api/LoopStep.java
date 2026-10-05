@@ -14,8 +14,8 @@ import java.util.Optional;
 
 /**
  * One step of a spec's review loop: what to do, decided by {@link LoopDecision#next} and carried
- * out by {@link ReviewPipelineController}. A stage is named by its place in the project's pipeline,
- * which is its row's place in the review.
+ * out by {@link LoopSteps}. A stage is named by its place in the project's pipeline, which is its
+ * row's place in the review.
  */
 sealed interface LoopStep {
 
