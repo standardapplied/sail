@@ -762,6 +762,35 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
+  void aSpecWhoseRowsCannotBeReadCostsTheWaitingReviewsOfItsProjectNothing() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var holder = holderOf("billing", "build");
+    loop.built("auth");
+    var review = loop.reviewOf("auth");
+    assertEquals(holder, loop.waitingOn(review));
+    loop.spec("broken", SpecStatus.REVIEW, "claude-code", null, null, List.of("web"));
+    var stage =
+        Acting.system(
+            () ->
+                loop.reviews.createStage(loop.reviews.createReview("broken", 1), "codex", "agent"));
+    loop.db.execute(
+        """
+        INSERT INTO review_findings (id, stage_id, severity, category, title, description)
+        VALUES ('unreadable', ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
+        stage);
+    loop.container.exited(holder, "done", 0);
+
+    loop.onEvent(ReviewLoop.buildStop("billing", holder));
+
+    var reviewer = loop.onlyLive();
+    assertEquals("review", reviewer.role(), "the stop that freed the claim launched auth's step");
+    assertEquals(review, reviewer.reviewId());
+    assertTrue(
+        loop.events("review_pipeline_error").isEmpty(),
+        "and the spec that could not be read is logged, never published as the stop's failure");
+  }
+
+  @Test
   void aReviewRefusedThreeTimesRunningByRunsThatEndWithNoStopWaitsOnEachAndIsReplayedOncePerWait() {
     var holders = new CopyOnWriteArrayList<String>();
     var races = new AtomicInteger(3);

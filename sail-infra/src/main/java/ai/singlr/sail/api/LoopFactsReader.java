@@ -24,36 +24,31 @@ final class LoopFactsReader {
   private final SpecStore specs;
   private final ReviewStore reviews;
   private final RunStore runs;
-  private final Function<String, ReviewPipelineConfig> configResolver;
-  private final Function<String, String> reviewerResolver;
+  private final Function<String, LoopFacts.Pipeline> pipelines;
   private final Supplier<String> localHandle;
 
-  /** {@code configResolver} answers null for no pipeline, and throws for an unreadable one. */
   LoopFactsReader(
       SpecStore specs,
       ReviewStore reviews,
       RunStore runs,
-      Function<String, ReviewPipelineConfig> configResolver,
-      Function<String, String> reviewerResolver,
+      Function<String, LoopFacts.Pipeline> pipelines,
       Supplier<String> localHandle) {
     this.specs = specs;
     this.reviews = reviews;
     this.runs = runs;
-    this.configResolver = configResolver;
-    this.reviewerResolver = reviewerResolver;
+    this.pipelines = pipelines;
     this.localHandle = localHandle;
   }
 
   /** The facts of {@code specId} under its project's pipeline as it reads now. */
   LoopFacts read(String project, String specId) {
-    return read(project, specId, pipeline(project));
+    return read(project, specId, pipelines.apply(project));
   }
 
   /** A reader for one event: a project's pipeline is resolved at its first read, once. */
   BiFunction<String, String, LoopFacts> forOneEvent() {
-    var pipelines = new HashMap<String, LoopFacts.Pipeline>();
-    return (project, specId) ->
-        read(project, specId, pipelines.computeIfAbsent(project, this::pipeline));
+    var resolved = new HashMap<String, LoopFacts.Pipeline>();
+    return (project, specId) -> read(project, specId, resolved.computeIfAbsent(project, pipelines));
   }
 
   private LoopFacts read(String project, String specId, LoopFacts.Pipeline pipeline) {
@@ -79,21 +74,28 @@ final class LoopFactsReader {
         review.map(ReviewStore.ReviewRow::waitingOn).filter(this::ended).isPresent());
   }
 
-  /** A descriptor that cannot be read is never taken for a project with no pipeline. */
-  LoopFacts.Pipeline pipeline(String project) {
-    try {
-      var config = configResolver.apply(project);
-      if (config == null || config.stages().isEmpty()) {
-        return new LoopFacts.Pipeline.None();
+  /**
+   * What a project's review pipeline is: {@code configResolver} answers null for none, and throws
+   * for a descriptor that cannot be read, which is never taken for a project with no pipeline.
+   */
+  static Function<String, LoopFacts.Pipeline> pipelines(
+      Function<String, ReviewPipelineConfig> configResolver,
+      Function<String, String> reviewerResolver) {
+    return project -> {
+      try {
+        var config = configResolver.apply(project);
+        if (config == null || config.stages().isEmpty()) {
+          return new LoopFacts.Pipeline.None();
+        }
+        var unnamed =
+            config.stages().stream()
+                .anyMatch(stage -> stage.type() == StageType.AGENT && stage.agent() == null);
+        return new LoopFacts.Pipeline.Staged(
+            config, unnamed ? reviewerResolver.apply(project) : null);
+      } catch (RuntimeException unreadable) {
+        return new LoopFacts.Pipeline.Unreadable(unreadable.getMessage());
       }
-      var unnamed =
-          config.stages().stream()
-              .anyMatch(stage -> stage.type() == StageType.AGENT && stage.agent() == null);
-      return new LoopFacts.Pipeline.Staged(
-          config, unnamed ? reviewerResolver.apply(project) : null);
-    } catch (RuntimeException unreadable) {
-      return new LoopFacts.Pipeline.Unreadable(unreadable.getMessage());
-    }
+    };
   }
 
   /** The runs this box executed that serve {@code reviewId}, newest first. */

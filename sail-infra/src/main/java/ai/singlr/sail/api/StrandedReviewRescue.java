@@ -55,9 +55,9 @@ final class StrandedReviewRescue {
       StopPublisher publishStop) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
+    var unread = new LoopFacts.Pipeline.None();
     this.loop =
-        new LoopFactsReader(
-            specStore, reviewStore, sessionStore, project -> null, project -> null, localHandle);
+        new LoopFactsReader(specStore, reviewStore, sessionStore, project -> unread, localHandle);
     this.localHandle = localHandle;
     this.clock = clock;
     this.launchGrace = launchGrace;

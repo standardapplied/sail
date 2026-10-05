@@ -95,9 +95,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     Objects.requireNonNull(configResolver, "configResolver");
     Objects.requireNonNull(reviewerResolver, "reviewerResolver");
     Objects.requireNonNull(lanes, "lanes");
-    this.reader =
-        new LoopFactsReader(
-            specStore, reviewStore, runStore, configResolver, reviewerResolver, localHandle);
+    var pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
+    this.reader = new LoopFactsReader(specStore, reviewStore, runStore, pipelines, localHandle);
     this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
     this.steps =
         new LoopSteps(specStore, reviewStore, lanes, reader, narrator, syncTrigger, localHandle);
@@ -124,8 +123,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     try {
       Actor.run(Actor.system(), () -> route(event));
     } catch (Exception e) {
-      var named = Optional.ofNullable(event.spec()).filter(Strings::isNotBlank);
-      var specId = named.or(() -> runOf(event).map(RunRow::specId)).orElse(null);
+      var named = Strings.isNotBlank(event.spec());
+      var specId = named ? event.spec() : runOf(event).map(RunRow::specId).orElse(null);
       System.err.println(
           "review-pipeline: failed to process %s for spec %s: %s"
               .formatted(event.type(), specId, e.getMessage()));
