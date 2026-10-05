@@ -131,11 +131,11 @@ public final class ProjectDefinitions {
   /**
    * Writes a project's descriptor at {@code path} the way the one the server reads is always
    * written — a file an engineer names with {@code -f} is theirs, and {@link #persist} writes that
-   * in place: replaced in a single move, so whoever reads it while it is rewritten — the review
-   * loop resolves a project's pipeline at every step — reads the definition before or the one
-   * after, never a file that is half of either. The new file keeps the mode of the one it replaces,
-   * or is readable by all like any descriptor written for the first time; a descriptor that is a
-   * link is written where it points.
+   * in place, also when it names this same file: replaced in a single move, so whoever reads it
+   * while it is rewritten — the review loop resolves a project's pipeline at every step — reads the
+   * definition before or the one after, never a file that is half of either. The new file keeps the
+   * mode of the one it replaces, or is readable by all like any descriptor written for the first
+   * time; a descriptor that is a link is written where it points.
    */
   public static void write(Path path, String definition) throws IOException {
     Files.createDirectories(path.toAbsolutePath().getParent());
