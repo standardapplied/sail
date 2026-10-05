@@ -23,12 +23,13 @@ import java.util.stream.Stream;
 /** The missed-stop sweep's rescue of a review owed something nothing is coming to give it. */
 final class StrandedReviewRescue {
 
-  /** The sweep's own reading of whether a run is gone, and its publishing of a run's stop. */
+  /** The sweep's own reading of whether a run is gone. */
   @FunctionalInterface
   interface Gone {
     boolean test(RunStore.RunRow run) throws Exception;
   }
 
+  /** The sweep's own publishing of a run's stop, for {@code why} it is replayed. */
   @FunctionalInterface
   interface StopPublisher {
     void publish(RunStore.RunRow run, Integer exitCode, String why);
@@ -55,9 +56,7 @@ final class StrandedReviewRescue {
       StopPublisher publishStop) {
     this.specStore = specStore;
     this.sessionStore = sessionStore;
-    var unread = new LoopFacts.Pipeline.None();
-    this.loop =
-        new LoopFactsReader(specStore, reviewStore, sessionStore, project -> unread, localHandle);
+    this.loop = new LoopFactsReader(specStore, reviewStore, sessionStore, localHandle);
     this.localHandle = localHandle;
     this.clock = clock;
     this.launchGrace = launchGrace;
@@ -121,23 +120,23 @@ final class StrandedReviewRescue {
 
   /**
    * Rescues a spec stranded in its review loop, in any of the shapes that leave it parked with
-   * nothing coming to move it. <em>Dropped kickoff</em>: an out-of-band status write (a manual
-   * edit, or a sync revision from another box) moved the spec to {@code review} while its agent was
-   * still running here, so the authoritative stop hit the pipeline's guard against a non-{@code
-   * in_progress} spec and no review was created. The rest are what the review's rows say it is owed
-   * ({@link LoopFacts#owed}, the reading the pipeline itself acts on). <em>Errored review</em>: its
-   * last attempt failed by infrastructure (a reviewer the watcher killed, unparseable output, a
-   * launch the container refused) — the design retries an errored attempt on the next stop, and no
-   * further stop is coming. <em>Unserved review</em>: a review is {@code running} with an agent
-   * stage to run, no run serving it and no wait recorded — the daemon died between writing its rows
-   * and its reviewer's claim. <em>Owed fix</em>: a review failed its gate and neither a fix agent
-   * nor a wait was ever recorded for it. <em>Waiting review</em>: the gate refused the review's
-   * launch, the review recorded the run that held the claim, and that run has ended with no stop on
-   * the bus to wake the review — finished in place, a foreground session completing, a launch that
-   * failed after reserving. <em>Unheard stop</em>: the reviewer of a review's running stage, or the
-   * fix agent answering its gate failure, ended and nothing came of it — that run's stop was never
-   * acted on. Replaying the stop of the spec's newest loop run, whichever lane it ran in, lets the
-   * pipeline kick off, retry, go on from the stage rows, launch the fix, or judge the run's work.
+   * nothing coming to move it. <em>Dropped kickoff</em>: the spec is in {@code review} with no
+   * review started — its build's stop never reached the pipeline, or an out-of-band status write (a
+   * manual edit, a sync revision from another box) put it there. The rest are what the review's
+   * rows say it is owed ({@link LoopFacts.Rows#owed}, the reading the pipeline itself acts on).
+   * <em>Errored review</em>: its last attempt failed by infrastructure (a reviewer the watcher
+   * killed, unparseable output, a launch the container refused) — the design retries an errored
+   * attempt on the next stop, and no further stop is coming. <em>Unserved review</em>: a review is
+   * {@code running} with an agent stage to run, no run serving it and no wait recorded — the daemon
+   * died between writing its rows and its reviewer's claim. <em>Owed fix</em>: a review failed its
+   * gate and neither a fix agent nor a wait was ever recorded for it. <em>Waiting review</em>: the
+   * gate refused the review's launch, the review recorded the run that held the claim, and that run
+   * has ended with no stop on the bus to wake the review — finished in place, a foreground session
+   * completing, a launch that failed after reserving. <em>Unheard stop</em>: the reviewer of a
+   * review's running stage, or the fix agent answering its gate failure, ended and nothing came of
+   * it — that run's stop was never acted on. Replaying the stop of the spec's newest loop run,
+   * whichever lane it ran in, lets the pipeline kick off, retry, go on from the stage rows, launch
+   * the fix, or judge the run's work.
    *
    * <p>Every rescue is one-shot: keyed by the spec for a dropped kickoff, and by the review row and
    * its shape otherwise — a running review per stage, a waiting one per run it waits on — so a
@@ -176,14 +175,14 @@ final class StrandedReviewRescue {
   }
 
   private Optional<Rescue> rescueFor(SpecStore.SpecRow spec) {
-    var facts = loop.read(spec.project(), spec.id());
-    if (facts.review().isEmpty()) {
+    var rows = loop.rows(spec.id());
+    if (rows.review().isEmpty()) {
       return Optional.of(
           new Rescue(
               spec.id(),
               "stranded in review with no review started; replaying the stop to kick it off"));
     }
-    return switch (facts.owed()) {
+    return switch (rows.owed()) {
       case LoopFacts.Owed.Retry retry ->
           Optional.of(
               Rescue.of(
@@ -193,16 +192,16 @@ final class StrandedReviewRescue {
                       + retry.review().error()
                       + "); replaying the stop to retry the iteration"));
       case LoopFacts.Owed.Advance advance ->
-          settled(facts, advance.review())
+          settled(rows, advance.review())
               .map(
                   review ->
                       Rescue.of(
                           review,
-                          "unserved:" + passedStages(facts),
+                          "unserved:" + passedStages(rows),
                           "is running with no run serving it; replaying the stop to go on from"
                               + " its stages"));
       case LoopFacts.Owed.Fix fix ->
-          settled(facts, fix.review())
+          settled(rows, fix.review())
               .map(
                   review ->
                       Rescue.of(
@@ -223,7 +222,7 @@ final class StrandedReviewRescue {
                               + ", which ended with no stop; replaying the stop to take the step"
                               + " it held up"));
       case LoopFacts.Owed.Stop unheard ->
-          settled(facts, unheard.review())
+          settled(rows, unheard.review())
               .map(
                   review ->
                       Rescue.of(
@@ -241,8 +240,8 @@ final class StrandedReviewRescue {
    * rescued at a stage is not out of rescues at the next. The count holds still while the stage's
    * rows are written, as an id would not.
    */
-  private static long passedStages(LoopFacts facts) {
-    return facts.stages().stream().takeWhile(stage -> "passed".equals(stage.status())).count();
+  private static long passedStages(LoopFacts.Rows rows) {
+    return rows.stages().stream().takeWhile(stage -> "passed".equals(stage.status())).count();
   }
 
   /**
@@ -265,9 +264,10 @@ final class StrandedReviewRescue {
    * pipeline is still acting on — or, with no run recorded yet, the review itself is older than
    * that, so a sweep landing between its rows and its first launch leaves it alone.
    */
-  private Optional<ReviewStore.ReviewRow> settled(LoopFacts facts, ReviewStore.ReviewRow review) {
+  private Optional<ReviewStore.ReviewRow> settled(
+      LoopFacts.Rows rows, ReviewStore.ReviewRow review) {
     var cutoff = clock.get().minus(launchGrace);
-    var serving = facts.serving();
+    var serving = rows.serving();
     var settled =
         serving.isEmpty()
             ? MissedStops.parseOr(review.createdAt(), Instant.MAX).isBefore(cutoff)

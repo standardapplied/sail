@@ -46,12 +46,6 @@ public final class ReviewPipelineController implements EventSubscriber {
   private static final Set<String> ROUTED_TYPES =
       Set.of(Event.WellKnownTypes.AGENT_SESSION_STOPPED, Event.WellKnownTypes.AGENT_CANCELLED);
 
-  /**
-   * How many errored attempts of one iteration may accumulate before the spec escalates. Each is
-   * retried on a replayed stop: bounded, a transient failure heals and a persistent one surfaces.
-   */
-  static final int MAX_ERRORED_RETRIES = 3;
-
   /** How many steps one event may take: the longest chain the loop's table allows is shorter. */
   static final int MAX_STEPS = 8;
 
@@ -68,6 +62,7 @@ public final class ReviewPipelineController implements EventSubscriber {
   private final Runnable syncTrigger;
   private final Supplier<String> localHandle;
   private final LoopFactsReader reader;
+  private final Function<String, LoopFacts.Pipeline> pipelines;
   private final LoopNarrator narrator;
   private final LoopSteps steps;
 
@@ -95,8 +90,8 @@ public final class ReviewPipelineController implements EventSubscriber {
     Objects.requireNonNull(configResolver, "configResolver");
     Objects.requireNonNull(reviewerResolver, "reviewerResolver");
     Objects.requireNonNull(lanes, "lanes");
-    var pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
-    this.reader = new LoopFactsReader(specStore, reviewStore, runStore, pipelines, localHandle);
+    this.pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
+    this.reader = new LoopFactsReader(specStore, reviewStore, runStore, localHandle);
     this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
     this.steps =
         new LoopSteps(specStore, reviewStore, lanes, reader, narrator, syncTrigger, localHandle);
@@ -140,7 +135,7 @@ public final class ReviewPipelineController implements EventSubscriber {
     if (!isAuthoritative(event)) {
       return;
     }
-    var read = reader.forOneEvent();
+    var read = reader.forOneEvent(pipelines);
     try {
       routed(event).ifPresent(stop -> drive(stop, read));
     } finally {
@@ -206,34 +201,29 @@ public final class ReviewPipelineController implements EventSubscriber {
   }
 
   /**
-   * A stop frees whatever its run held, so every review this box drives that recorded a wait takes
-   * its step now, once the run it waits on has ended. Only a recorded wait is acted on here: an
-   * errored review keeps to the reconciler's pace, one whose launch was cut short is the
-   * reconciler's to rescue, and one whose run has ended waits for that run's own stop.
+   * A stop frees whatever its run held, so every spec of the project the loop may be moving is told
+   * ({@link LoopTrigger.Freed}): in {@code review} first, then {@code in_progress}. A failure for
+   * one never costs the specs after it theirs, nor replaces the routed stop's.
    */
   private void resumeWaiting(String project, BiFunction<String, String, LoopFacts> read) {
     try {
       Stream.of(SpecStatus.REVIEW, SpecStatus.IN_PROGRESS)
           .map(status -> new SpecStore.SpecFilter(project, status.wire(), null, null, null))
           .flatMap(filter -> specStore.list(filter).stream())
-          .forEach(spec -> resumeIfWaiting(project, spec.id(), read));
+          .forEach(spec -> freed(new Routed(project, spec.id(), new LoopTrigger.Freed()), read));
     } catch (RuntimeException e) {
       System.err.println(
           "review-pipeline: could not look for waiting reviews in " + project + ": " + e);
     }
   }
 
-  /** A failure here never costs the specs after it theirs, nor replaces the routed stop's. */
-  private void resumeIfWaiting(
-      String project, String specId, BiFunction<String, String, LoopFacts> read) {
+  private void freed(Routed spec, BiFunction<String, String, LoopFacts> read) {
     try {
-      var facts = read.apply(project, specId);
-      if (facts.drivenHere() && facts.owed() instanceof LoopFacts.Owed.Waiting) {
-        drive(new Routed(project, specId, new LoopTrigger.GoOn()), read);
-      }
+      drive(spec, read);
     } catch (RuntimeException e) {
       System.err.println(
-          "review-pipeline: could not resume waiting spec " + specId + ": " + e.getMessage());
+          "review-pipeline: could not go on with spec %s after a stop freed its claims: %s"
+              .formatted(spec.specId(), e.getMessage()));
     }
   }
 

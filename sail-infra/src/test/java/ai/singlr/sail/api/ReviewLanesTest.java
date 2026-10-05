@@ -102,7 +102,7 @@ class ReviewLanesTest {
     loop.built("auth");
     var reconciler = loop.reconciler(Instant::now);
 
-    for (var attempt = 1; attempt <= ReviewPipelineController.MAX_ERRORED_RETRIES; attempt++) {
+    for (var attempt = 1; attempt <= LoopDecision.MAX_ERRORED_RETRIES; attempt++) {
       var reviewer = loop.onlyLive();
       var review = reviewer.reviewId();
 
@@ -127,7 +127,7 @@ class ReviewLanesTest {
     assertTrue(loop.live().isEmpty(), "the budget is spent: no fourth reviewer launches");
     assertEquals("escalated", loop.statusOf(loop.reviewOf("auth")));
     assertEquals(
-        ReviewPipelineController.MAX_ERRORED_RETRIES,
+        LoopDecision.MAX_ERRORED_RETRIES,
         loop.reviews.reviewsForSpec("auth").size(),
         "every retry ran as the same iteration");
     assertTrue(loop.details("review_escalated").getFirst().contains("errored in a row"));

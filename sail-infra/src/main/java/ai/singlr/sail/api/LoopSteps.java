@@ -15,9 +15,9 @@ import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.ReviewStore.StageRow;
 import ai.singlr.sail.store.SpecStore;
-import ai.singlr.sail.store.SpecStore.SpecRow;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -159,7 +159,6 @@ final class LoopSteps {
   private Optional<LoopTrigger> pass(LoopFacts facts, LoopStep.Pass step) {
     var review = step.review();
     var specId = facts.specId();
-    stagesOf(facts, review);
     var verdict =
         ReviewNarration.passed(
             review.iteration(),
@@ -189,22 +188,24 @@ final class LoopSteps {
   /**
    * The stage row turns {@code running} only once its reviewer's claim has landed, before that
    * reviewer's unit starts — so a stage is {@code running} only while a run exists for it ({@link
-   * LoopFacts#stageReviewedBy}). A claim the gate refuses writes nothing of the stage, and the
+   * LoopFacts.Rows#stageReviewedBy}). A claim the gate refuses writes nothing of the stage, and the
    * stage is announced started only once a reviewer is running for it.
    */
   private Optional<LoopTrigger> launchReviewer(LoopFacts facts, LoopStep.LaunchReviewer step) {
     var stage = stagesOf(facts, step.review()).get(step.stage());
+    var stageConfig = facts.staged().config().stages().get(step.stage());
     var specId = facts.specId();
-    var spec = facts.spec();
-    var branch = spec.map(SpecRow::branch).orElse("main");
-    var repos = spec.map(SpecRow::repos).orElse(List.of());
+    var spec = facts.rows().spec().orElseThrow();
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
           var carried = reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
-          var categories = step.stageConfig().categories();
           var built =
               ReviewPromptBuilder.build(
-                  branch, repos, categories, narrator.roomMessages(specId), carried);
+                  spec.branch(),
+                  spec.repos(),
+                  stageConfig.categories(),
+                  narrator.roomMessages(specId),
+                  carried);
           return new ReviewLanes.Invocation(
               Lane.REVIEW,
               stage.reviewId(),
@@ -212,19 +213,18 @@ final class LoopSteps {
               specId,
               step.agent(),
               built.prompt(),
-              branch,
-              repos,
+              spec.branch(),
+              spec.repos(),
               null,
-              spec.map(SpecRow::reasoningEffort).orElse(null),
+              spec.reasoningEffort(),
               built.renderedMessages().stream().map(MessageRow::id).toList());
         };
     return launch(
         invocation,
         step.review(),
-        Lane.REVIEW,
-        step.stage(),
         () -> reviewStore.startStage(stage.id(), step.agent()),
-        () -> narrator.publishEvent(facts.project(), specId, "review_stage_started", stage.name()));
+        () -> narrator.publishEvent(facts.project(), specId, "review_stage_started", stage.name()),
+        why -> new LoopTrigger.ReviewerNotStarted(step.review().id(), step.stage(), why));
   }
 
   /**
@@ -232,49 +232,45 @@ final class LoopSteps {
    * landed and {@code started} once a run serves the review, when any wait it recorded is cleared.
    * A claim the gate refused is recorded as the run that holds it, and the room is told in the same
    * write, so once per run waited on. A launch that fails after its agent started still left a run
-   * serving the review, and the loop waits for that run's stop rather than act over it.
+   * serving the review, and the loop waits for that run's stop rather than act over it; one that
+   * left none is {@code notStarted}, for the reason it gives.
    */
   private Optional<LoopTrigger> launch(
       Supplier<ReviewLanes.Invocation> invocation,
       ReviewRow review,
-      Lane lane,
-      int stage,
       Runnable claimed,
-      Runnable started) {
-    boolean serving;
+      Runnable started,
+      Function<String, LoopTrigger> notStarted) {
     try {
-      serving =
-          switch (lanes.launch(invocation.get(), localHandle.get(), claimed)) {
-            case ReviewLanes.Launch.Started ran -> serving(review);
-            case ReviewLanes.Launch.Deferred deferred -> {
-              var holder = deferred.holder();
-              Runnable said =
-                  () -> narrator.appendRoom(review.specId(), ReviewNarration.waiting(holder));
-              reviewStore.waitOn(review.id(), holder.runId(), said);
-              syncTrigger.run();
-              yield false;
-            }
-          };
+      switch (lanes.launch(invocation.get(), localHandle.get(), claimed)) {
+        case ReviewLanes.Launch.Started ran -> served(review);
+        case ReviewLanes.Launch.Deferred deferred -> {
+          var holder = deferred.holder();
+          Runnable said =
+              () -> narrator.appendRoom(review.specId(), ReviewNarration.waiting(holder));
+          reviewStore.waitOn(review.id(), holder.runId(), said);
+          syncTrigger.run();
+          return Optional.empty();
+        }
+      }
     } catch (Exception e) {
       if (!reader.served(review.id())) {
-        return Optional.of(new LoopTrigger.LaunchFailed(review.id(), lane, stage, reasonOf(e)));
+        return Optional.of(notStarted.apply(reasonOf(e)));
       }
       System.err.println(
           "review-pipeline: a launch for review %s reported a failure after its agent started (%s);"
                   .formatted(review.id(), reasonOf(e))
               + " waiting for that run's stop");
-      serving = serving(review);
+      served(review);
     }
-    if (serving) {
-      started.run();
-    }
+    started.run();
     return Optional.empty();
   }
 
-  private boolean serving(ReviewRow review) {
+  /** A run serves {@code review} now: what it waits on is that run, and no other. */
+  private void served(ReviewRow review) {
     reviewStore.clearWait(review.id());
     syncTrigger.run();
-    return true;
   }
 
   /** A launch error wraps what refused it, and the wrapper alone says only that it failed. */
@@ -286,7 +282,7 @@ final class LoopSteps {
   }
 
   private Optional<LoopTrigger> readVerdict(LoopFacts facts, LoopStep.ReadVerdict step) {
-    var stage = facts.stages().get(step.stage());
+    var stage = facts.rows().stages().get(step.stage());
     var stageConfig = facts.staged().config().stages().get(step.stage());
     var outcome =
         step.error()
@@ -296,10 +292,15 @@ final class LoopSteps {
     return Optional.of(new LoopTrigger.StageJudged(step.review().id(), step.stage(), outcome));
   }
 
-  /** An infrastructure failure, not a verdict: no fix iteration, and no iteration is burned. */
+  /**
+   * An infrastructure failure, not a verdict: no fix iteration, and no iteration is burned. A stage
+   * its verdict already closed is left as that verdict left it; one that could not start is closed
+   * here, once the review holds its row.
+   */
   private Optional<LoopTrigger> errorReview(LoopFacts facts, LoopStep.ErrorReview step) {
-    var stage = stagesOf(facts, step.review()).get(step.stage());
     var why = step.why();
+    var stages = step.closed() ? facts.rows().stages() : stagesOf(facts, step.review());
+    var stage = stages.get(step.stage());
     if (!step.closed()) {
       System.err.println("review-pipeline: agent stage '" + stage.name() + "': " + why);
       reviewStore.completeStage(stage.id(), "failed", why);
@@ -332,7 +333,7 @@ final class LoopSteps {
    * claim changes nothing but the run the review waits on: the fix is still owed.
    */
   private Optional<LoopTrigger> launchFix(LoopFacts facts, LoopStep.LaunchFix step) {
-    var spec = facts.spec().orElseThrow();
+    var spec = facts.rows().spec().orElseThrow();
     var specId = facts.specId();
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
@@ -356,7 +357,12 @@ final class LoopSteps {
           advanceSpec(specId, SpecStatus.IN_PROGRESS);
           narrator.publishEvent(facts.project(), specId, "review_iteration_started", null);
         };
-    return launch(invocation, step.review(), Lane.FIX, 0, () -> {}, started);
+    return launch(
+        invocation,
+        step.review(),
+        () -> {},
+        started,
+        why -> new LoopTrigger.FixNotStarted(step.review().id(), why));
   }
 
   /**
@@ -365,7 +371,7 @@ final class LoopSteps {
    */
   private Optional<LoopTrigger> commitFixLeftovers(
       LoopFacts facts, LoopStep.CommitFixLeftovers step) {
-    var spec = facts.spec().orElseThrow();
+    var spec = facts.rows().spec().orElseThrow();
     try {
       var message =
           FixTaskBuilder.commitMessage(reviewStore.openFindingsForReview(step.review().id()));
@@ -383,14 +389,27 @@ final class LoopSteps {
     }
   }
 
-  /** There is no re-review to run: the branch still holds the code the reviewer just failed. */
+  /**
+   * There is no re-review to run: the branch still holds the code the reviewer just failed. The
+   * iteration is said to have failed once the review's end is written, like every end.
+   */
   private Optional<LoopTrigger> failFix(LoopFacts facts, LoopStep.FailFix step) {
     var reviewId = step.review().id();
+    var why = step.why();
     System.err.println(
         "review-pipeline: fix iteration of review %s for spec %s failed: %s"
-            .formatted(reviewId, facts.specId(), step.why()));
-    narrator.publishEvent(facts.project(), facts.specId(), "review_iteration_failed", step.why());
-    return escalate(facts, reviewId, ReviewNarration.fixFailed(step.why()));
+            .formatted(reviewId, facts.specId(), why));
+    var reason = ReviewNarration.fixFailed(why);
+    handToAPerson(facts.specId(), reviewId, reason);
+    narrator.publishEvent(facts.project(), facts.specId(), "review_iteration_failed", why);
+    narrator.publishEvent(facts.project(), facts.specId(), "review_escalated", reason);
+    return Optional.empty();
+  }
+
+  private Optional<LoopTrigger> escalate(LoopFacts facts, String reviewId, String reason) {
+    handToAPerson(facts.specId(), reviewId, reason);
+    narrator.publishEvent(facts.project(), facts.specId(), "review_escalated", reason);
+    return Optional.empty();
   }
 
   /**
@@ -398,8 +417,7 @@ final class LoopSteps {
    * line are one write ({@link ReviewStore#escalate}). The reason rides the synced row, so main
    * says what this box says, and travels as the event detail, so Slack says why.
    */
-  private Optional<LoopTrigger> escalate(LoopFacts facts, String reviewId, String reason) {
-    var specId = facts.specId();
+  private void handToAPerson(String specId, String reviewId, String reason) {
     reviewStore.escalate(
         reviewId,
         reason,
@@ -408,7 +426,5 @@ final class LoopSteps {
           narrator.appendRoom(specId, ReviewNarration.escalated(reason));
         });
     syncTrigger.run();
-    narrator.publishEvent(facts.project(), specId, "review_escalated", reason);
-    return Optional.empty();
   }
 }

@@ -888,7 +888,7 @@ watcher):
 - **P6. The loop's state is rows that already exist.** Which stage a review is in is its
   stage rows' statuses; which iteration, the review row's `iteration`; which run it waits on,
   the newest live run of this box that names it. What a review is owed next is one reading of
-  those rows (`LoopFacts.owed`) that the pipeline acts on and the reconciler rescues
+  those rows (`LoopFacts.Rows.owed`) that the pipeline acts on and the reconciler rescues
   by, so the two never disagree. Nothing is held on a thread across an agent's lifetime, and
   nothing at daemon start marks a running review failed: a run still going whose watcher
   died is re-armed with one (`WatcherRearmer`), and one that ended unobserved has its stop
@@ -980,8 +980,9 @@ class is named):
   (every review status and error × stage statuses × pipeline as written or changed × spec
   status × serving run × recorded wait, walked on `LoopDecision.next`),
   `ReviewLoopEveryStateTest.aStateForEachStepTheLoopTakesEndsInTheRealStoresWhereTheDecisionSaidItWould`,
-  `ReviewLoopEveryStateTest.theWalkEndsWhereTheRealStoresDoAcrossTheSpace` (every thirteenth
-  state through the real stores and a real stop),
+  `ReviewLoopEveryStateTest.theWalkEndsWhereTheRealStoresDoAcrossTheSpace` (every state of a
+  spec the loop moves, and every thirteenth of the rest, through the real stores and a real
+  stop),
   `aFailedGateWhoseFindingsAPersonResolvedBeforeTheFixLaunchedIsReviewedAgainNotFixed`,
   `aRunningReviewWhosePipelineLostItsStagesIsEscalatedSayingSo`,
   `aRunningReviewWhosePipelineLostItsStagesClosesTheStageItsReviewerRan`,
@@ -1183,21 +1184,23 @@ step of the loop and one class carries each step out. Each part has one job, all
 | `ReviewPipelineController` | routes: an authoritative stop becomes a trigger for one spec's loop |
 | `LoopFactsReader` | reads the stores into `LoopFacts`, the only reader for a decision |
 | `LoopDecision.next(LoopFacts, LoopTrigger)` | decides the one `LoopStep`; no store, clock, bus or container |
-| `LoopSteps` | acts: one method a step, every loop write and every launch |
-| `StageVerdicts` | reads a reviewer's verdict from its run's log and writes what it ruled |
+| `LoopSteps` | acts: one method a step, every write of a review, a spec's status or a wait, and every launch |
+| `StageVerdicts` | reads a reviewer's verdict from its run's log, writes what it ruled and closes the stage it judged |
 | `LoopNarrator` | says what happened, on the bus and in the room (`ReviewNarration` words it) |
 | `StrandedReviewRescue` | the reconciler's rescue of a review owed something nothing is coming to give it |
 
-`LoopFacts` is what the rows say of one spec at one moment: its status; its latest review that
-is not superseded, with that review's stage rows in order; the runs this box executed that
-serve the review, newest first; the spec's newest loop run; the pipeline reading (`Staged`
-with the project's roster reviewer, `None`, or `Unreadable(why)`); the open findings of a
-review that failed its gate, and those of them its first failed stage holds, with their ages
-(no other review's findings are read: no decision on it weighs one); the count of
-errored attempts of the review's iteration; and whether the run the review waits on has
-ended. `owed()`, `unfit()`, `awaited(run, statuses)`, `stageReviewedBy(run)` and
-`drivenHere()` are pure methods over it. The pipeline is resolved once per event, at the
-first read of one of the project's specs, and serves every decision of that event.
+`LoopFacts` is what a decision reads of one spec. Its `Rows` are what the spec's rows say: its
+status; its latest review that is not superseded, with that review's stage rows in order; the
+runs this box executed that serve the review, newest first; the spec's newest loop run; and
+whether the run the review waits on has ended. `owed()`, `due()` (a wait gives way to the step
+it holds once its holder has ended), `awaited(run, statuses)`, `stageReviewedBy(run)` and
+`drivenHere()` are pure methods over the rows, and the rows are all the reconciler's rescue
+reads. Beside them `LoopFacts` holds the pipeline reading (`Staged` with the project's roster
+reviewer, `None`, or `Unreadable(why)`), the count of errored attempts of the review's
+iteration, and, only when a fix is due, the review's open findings and the findings its first
+failed stage holds, with their ages: no decision on any other review weighs a finding, and
+none is read for one. The pipeline is resolved once per event, at the first read of
+one of the project's specs, and serves every decision and step of that event.
 
 A trigger is what happened; it carries no decision:
 
@@ -1207,14 +1210,16 @@ A trigger is what happened; it carries no decision:
 | `ReviewerEnded(run, failure)` | an authoritative stop of a reviewer; `failure` is the guardrail it was ended for (`killed: time limit (45m)`) or its non-zero exit (`failed: exit 1`), else empty |
 | `FixEnded(run, failure)` | the same, for a fix agent |
 | `OperatorStopped(run)` | `agent_cancelled`, or a stop of a run an operator's stop claimed |
-| `GoOn` | nothing new happened: a duplicate or replayed stop, a stop the loop was not waiting on, a wait whose holder ended, a gate that just failed |
+| `Freed` | a stop freed whatever its run held; raised, after the stop's own loop is driven, for every spec of the project in `review` or `in_progress` |
+| `GoOn` | a gate just failed: the loop goes on from what the rows owe |
 | `ReviewRunning` | a step left the review `running` with its spec in `review` |
 | `StageJudged(reviewId, stage, outcome)` | a step judged a stage of that review: `Passed`, `GateFailed`, `Errored(why)` |
-| `LaunchFailed(reviewId, lane, stage, why)` | a launch for that review (building its prompt or task included) threw and no live run serves it |
+| `ReviewerNotStarted(reviewId, stage, why)` / `FixNotStarted(reviewId, why)` | a launch for that review (building its prompt or task included) threw and no live run serves it |
 | `FixCommitted(run)` / `FixNotCommitted(run, why)` | a step tried to commit and push what fix agent `run` left |
 
-The last four are raised only by `LoopSteps`. A step is what to do, and a stage is named by its
-place in the pipeline, which is its row's place in the review:
+The first four and `Freed` are raised by the router, the rest only by `LoopSteps`. A step is
+what to do, and a stage is named by its place in the pipeline, which is its row's place in the
+review:
 
 | Step | What `LoopSteps` does | Follow-up trigger |
 |---|---|---|
@@ -1224,27 +1229,30 @@ place in the pipeline, which is its row's place in the review:
 | `StartReview(iteration)` | writes the review `running`, then moves the spec to `review` | `ReviewRunning` |
 | `EscalateNew(iteration, reason)` | writes the review and escalates it in the next write | none |
 | `Resume(review)` | sets a legacy `pending` review `running`, then moves the spec to `review` (`SpecStore.moveFromLoop`, also when it is there already) | `ReviewRunning` |
-| `LaunchReviewer(review, stage, stageConfig, agent)` | completes the review's stage rows, launches through `ReviewLanes`; the stage turns `running` when the claim lands; once the run serves, clears any recorded wait and publishes `review_stage_started`; a refused claim records the wait and its room line in one write | `LaunchFailed` only as defined above; none when started, when refused, or when it threw with a live run serving the review (treated as started) |
+| `LaunchReviewer(review, stage, agent)` | completes the review's stage rows, launches through `ReviewLanes`; the stage turns `running` when the claim lands; once the run serves, clears any recorded wait and publishes `review_stage_started`; a refused claim records the wait and its room line in one write | `ReviewerNotStarted` only as defined above; none when started, when refused, or when it threw with a live run serving the review (treated as started) |
 | `AwaitAPerson(review, stage)` | completes the stage rows, opens the human stage, publishes `review_stage_started`, tells the room | none |
-| `Pass(review)` | completes the stage rows, then `ReviewStore.pass` with the spec's move to `awaiting_merge` and the room verdict, then publishes `review_completed` | none |
+| `Pass(review)` | `ReviewStore.pass` with the spec's move to `awaiting_merge` and the room verdict, then publishes `review_completed` | none |
 | `ReadVerdict(review, stage, run, error)` | with an `error`, closes the stage `failed` for it; else `StageVerdicts.read`: reads the run's log, reconciles findings, closes the stage `passed` or `failed`, publishes `review_stage_passed` or `review_stage_failed` | `StageJudged` |
-| `ErrorReview(review, stage, why, closed)` | unless `closed`, closes the stage `failed` with the reason; fails the review with the error, publishes `review_errored` | none |
+| `ErrorReview(review, stage, why, closed)` | unless `closed`, completes the stage rows and closes the stage `failed` with the reason; fails the review with the error, publishes `review_errored` | none |
 | `FailGate(review)` | marks the review failed, posts the verdict to the room | `GoOn` |
-| `LaunchFix(review, findings)` | launches through `ReviewLanes`; a refused claim records the wait and its room line in one write; once the run serves, clears any recorded wait, moves the spec to `in_progress` and publishes `review_iteration_started` | as `LaunchReviewer` |
+| `LaunchFix(review, findings)` | launches through `ReviewLanes`; a refused claim records the wait and its room line in one write; once the run serves, clears any recorded wait, moves the spec to `in_progress` and publishes `review_iteration_started` | `FixNotStarted`, as for `LaunchReviewer` |
 | `CommitFixLeftovers(review, run)` | `ReviewLanes.ensureCommitted`; publishes the guardrail event when it committed something | `FixCommitted` or `FixNotCommitted` |
-| `FailFix(review, why)` | publishes `review_iteration_failed`, then escalates with `ReviewNarration.fixFailed` | none |
+| `FailFix(review, why)` | escalates with `ReviewNarration.fixFailed`, then publishes `review_iteration_failed` and `review_escalated` | none |
 | `Escalate(review, reason)` | `ReviewStore.escalate` with the spec's move to `review` and the room line, then publishes `review_escalated` | none |
 
 The decision is the table below, tried in order; the first row that matches wins. "Awaited in
-X" means: the run is this box's, names a review, no newer run of the spec's loop exists, the
-spec is `in_progress` or `review`, and that review is the spec's latest and its status is in X.
-"The loop's" means the spec is `in_progress` or `review`. Rows marked **P** first ask
+X" means: the run is this box's, no newer run of the spec's loop exists, the spec is
+`in_progress` or `review`, and the review the run names is the spec's latest and its status is
+in X. "The loop's" means the spec is `in_progress` or `review`. "Due" is what the rows owe, a
+wait counting as the step it holds once its holder has ended. Rows marked **P** first ask
 `facts.unfit()`: when it is present the step is `Escalate(review, that reason)`
 (`ReviewNarration.noStages`, `pipelineUnreadable(why)`, `pipelineChanged(stage)`). A
-follow-up trigger is about the review its step acted on and no other: `StageJudged` and
-`LaunchFailed` name it, `FixCommitted` and `FixNotCommitted` name the fix run that served it. When
-that review is no longer the spec's latest, because a re-dispatch superseded or replaced it while
-the step ran, the step is `Nothing`. `ReviewRunning` names none and goes on with the latest.
+follow-up trigger a slow step raises is about the review that step acted on and no other:
+`StageJudged`, `ReviewerNotStarted` and `FixNotStarted` name it, `FixCommitted` and
+`FixNotCommitted` name the fix run that served it, and when that review is no longer the
+spec's latest, because a re-dispatch superseded or replaced it while the step ran, the step is
+`Nothing`. `ReviewRunning` and `GoOn` follow a write with nothing slow before it, name no
+review and go on with the latest.
 
 | # | Trigger | When | Step |
 |---|---|---|---|
@@ -1255,27 +1263,32 @@ the step ran, the step is `Nothing`. `ReviewRunning` names none and goes on with
 | A5 | | pipeline `Staged` | `StartReview(1)` |
 | A6 | | pipeline `None` | `ParkForAPerson` |
 | A7 | | pipeline `Unreadable` | `EscalateNew(1, pipelineUnreadable)` |
+| W1 | `Freed` | this box did not execute the spec's newest loop run | `Nothing` |
+| W2 | | the rows owe anything but a recorded wait | `Nothing` |
+| W3 | | otherwise | as `GoOn` |
 | G0 | `GoOn` | the spec is not the loop's | `Nothing` |
-| G1 | | owed `Nothing` or `Stop` | `Nothing` |
-| G2 | | owed `Waiting`, holder not ended | `Nothing` |
-| G3 | | owed `Waiting`, holder ended | the row for the step it holds (`Advance` or `Fix`) |
-| G4 | | owed `Retry`, errored attempts of the iteration ≥ `MAX_ERRORED_RETRIES` | `Escalate(erroredOut)` |
-| G5 | | owed `Retry` (**P**) | `StartReview(same iteration)` |
-| G6 | | owed `Advance` (**P**) | `Resume` |
-| G11 | | owed `Fix` (**P**): a finding of the failed stage that its gate blocks has age ≥ `maxFindingAge` | `Escalate(stuckOn)` |
-| G12 | | owed `Fix` (**P**): iteration ≥ `maxIterations` | `Escalate(iterationsExhausted)` |
-| G13 | | owed `Fix` (**P**): no open finding | `StartReview(iteration + 1)` |
-| G14 | | owed `Fix` (**P**) | `LaunchFix(open findings)` |
-| G7 | `ReviewRunning` (**P**) | the stage the review is in is human and not running | `AwaitAPerson` |
-| G8 | | the stage the review is in is human and running | `Nothing` |
-| G9 | | the stage the review is in is an agent stage and no reviewer resolves for it | `ErrorReview(stage, "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml")` |
-| G9b | | the stage the review is in is an agent stage | `LaunchReviewer` |
-| G10 | | every configured stage has a row and it is `passed` | `Pass` |
+| G1 | | due `Nothing` or `Stop` | `Nothing` |
+| G2 | | due `Waiting`: its holder has not ended | `Nothing` |
+| G4 | | due `Retry`, errored attempts of the iteration ≥ `MAX_ERRORED_RETRIES` | `Escalate(erroredOut)` |
+| G5 | | due `Retry` (**P**) | `StartReview(same iteration)` |
+| G6 | | due `Advance` (**P**) | `Resume` |
+| G11 | | due `Fix` (**P**): a finding of the failed stage that its gate blocks has age ≥ `maxFindingAge` | `Escalate(stuckOn)` |
+| G12 | | due `Fix` (**P**): iteration ≥ `maxIterations` | `Escalate(iterationsExhausted)` |
+| G13 | | due `Fix` (**P**): no open finding | `StartReview(iteration + 1)` |
+| G14 | | due `Fix` (**P**) | `LaunchFix(open findings)` |
+| G6b | `ReviewRunning` | the spec has no review: a re-dispatch superseded it | `Nothing` |
+| G6c | | (**P**) a stage has yet to pass, and the spec is no longer the loop's: someone took it while the step before ran | `Nothing` |
+| G7 | | (**P**) the stage the review is in is human and not running | `AwaitAPerson` |
+| G8 | | (**P**) the stage the review is in is human and running | `Nothing` |
+| G9 | | (**P**) the stage the review is in is an agent stage and no reviewer resolves for it | `ErrorReview(stage, "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml")` |
+| G9b | | (**P**) the stage the review is in is an agent stage | `LaunchReviewer` |
+| G10 | | (**P**) every configured stage has a row and it is `passed` | `Pass` |
 | R1 | `ReviewerEnded` | not awaited in `pending`, `running` | as `GoOn` |
 | R2 | | (**P**) no running agent stage was started while this run was live | as `GoOn` |
-| R3 | | `failure` present | `ReadVerdict` with the error `"reviewer " + failure` |
-| R4 | | otherwise | `ReadVerdict` |
-| J1 | `StageJudged` | `Passed` | rows G7–G10 |
+| R3 | | (**P**) `failure` present | `ReadVerdict` with the error `"reviewer " + failure` |
+| R4 | | (**P**) otherwise | `ReadVerdict` |
+| J0 | `StageJudged` | the review judged is no longer the spec's latest | `Nothing` |
+| J1 | | `Passed` | rows G6c–G10 |
 | J2 | | `GateFailed` | `FailGate` |
 | J3 | | `Errored(why)` | `ErrorReview(stage, why)`, its stage already closed |
 | F1 | `FixEnded` | not awaited in `failed`, or the review failed by error | as `GoOn` |
@@ -1285,8 +1298,9 @@ the step ran, the step is `Nothing`. `ReviewRunning` names none and goes on with
 | F5 | | (**P**) otherwise | `StartReview(iteration + 1)` |
 | F6 | `FixNotCommitted(run, why)` | `run` no longer awaited in `failed` | `Nothing` |
 | F7 | | otherwise | `FailFix("fix agent's work could not be committed: " + why)` |
-| L1 | `LaunchFailed` | reviewer lane | `ErrorReview(stage, "reviewer could not start: " + why)` |
-| L2 | | fix lane | `FailFix("fix agent could not start: " + why)` |
+| L0 | `ReviewerNotStarted`, `FixNotStarted` | the review the launch was for is no longer the spec's latest | `Nothing` |
+| L1 | `ReviewerNotStarted` | otherwise | `ErrorReview(stage, "reviewer could not start: " + why)` |
+| L2 | `FixNotStarted` | otherwise | `FailFix("fix agent could not start: " + why)` |
 | O1 | `OperatorStopped` | the run's row is not terminal | `Nothing` |
 | O2 | | not awaited in `pending`, `running`, `failed` | `Nothing` |
 | O3 | | otherwise | `Escalate(stoppedByAnOperator(lane))` |
@@ -1311,13 +1325,13 @@ The controller routes one event this way:
 4. it drives: read facts, decide, act, and repeat with the follow-up trigger until a step
    returns none. More than 8 steps for one event throws `IllegalStateException` naming the
    spec and the steps taken;
-5. then, always, even when steps 2–4 threw, it raises `GoOn` for every spec of the project in
-   `review`, then `in_progress`, that this box drives and whose review is owed a recorded
-   wait. A failure here for one spec is logged, never published, never replaces the routed
-   event's failure, and never costs the specs after it;
+5. then, always, even when steps 2–4 threw, it raises `Freed` for every spec of the project in
+   `review`, then `in_progress`, and drives each the same way. A failure here for one spec is
+   logged, never published, never replaces the routed event's failure, and never costs the
+   specs after it;
 6. on a failure of steps 2–4, it publishes `review_pipeline_error`.
 
-The sync trigger fires after every write a box must tell main of:
+The sync trigger tells main of what a box wrote, at these places and no others:
 
 | Place | When |
 |---|---|
@@ -1325,21 +1339,30 @@ The sync trigger fires after every write a box must tell main of:
 | every spec move outside a review-end write | when it moved |
 | `StartReview`, `EscalateNew` | after the review row is written |
 | the first step that needs stage rows | after creating the missing rows |
-| `Pass`, `Escalate` | after the write, before the event |
+| `Pass`, `Escalate`, `FailFix` | after the write, before the events |
 | `AwaitAPerson` | last, after the event and the room line |
 | a launch that was refused | after the wait is recorded |
 | a launch whose run serves | after the wait is cleared |
 | `ReadVerdict` | after the stage is closed, before the outcome is acted on |
 | `ErrorReview` | after the review is failed, before the event |
-| every room line posted outside a review-end write | after it is posted |
+| every room line posted outside a review-end write (`FailGate`'s verdict, a person's stage, a ruling set aside) | after it is posted; `FailGate`'s status write rides this one |
+| `Resume` of a legacy `pending` review | with the spec's move, when it moved |
 
 *`LoopDecisionTest.theLoopTakesTheStepItsTableNames` (one case a row of the decision table,
 on facts built in memory), `LoopStepsTest` (each step leaves the rows in the state its name
-says: `startReviewWritesTheIterationRunningAndMovesItsSpecToReview`,
+says and tells main where the table above says:
+`startReviewWritesTheIterationRunningAndMovesItsSpecToReview`,
 `launchReviewerRefusedItsClaimRecordsTheWaitAndItsRoomLineAndStartsNoStage`,
+`launchReviewerWhoseLaunchFailsAfterItsAgentStartedWaitsForThatAgentsStop`,
 `passEndsTheReviewParksItsSpecAndSaysTheVerdictInOneWrite`,
 `escalateEndsTheReviewClosesItsRunningStageAndMovesItsSpecInOneWrite` and one for every other
-step), `ReviewPipelineControllerTest.aLoopThatWouldTakeMoreStepsThanItsTableAllowsIsAFaultNamingTheStepsItTook`,
+step), `LoopFactsReaderTest.findingsAreReadOnlyForAReviewAFixIsDueFor`,
+`ReviewLoopRecoveryTest.aKilledFixAgentEscalatesItsReviewThoughAFindingOfItCannotBeRead`,
+`ReviewLoopRecoveryTest.anUnheardFixStopIsReplayedThoughAFindingOfItsReviewCannotBeRead`,
+`ReviewLoopRecoveryTest.aStopWhoseOwnLoopCannotBeDrivenStillWakesTheReviewItFreed`,
+`ReviewLoopRecoveryTest.aStopThatFreesTheRepoTwoReviewsWaitForWakesTheSpecInReviewBeforeTheOneInProgress`,
+`ReviewLoopRecoveryTest.theStoppedRunIsFinishedAndMainToldOfItOnlyWhenTheRouterWroteIt`,
+`ReviewPipelineControllerTest.aLoopThatWouldTakeMoreStepsThanItsTableAllowsIsAFaultNamingTheStepsItTook`,
 `ReviewLoopRecoveryTest.aSpecWhoseRowsCannotBeReadCostsTheWaitingReviewsOfItsProjectNothing`,
 `LoopNarratorTest`.*
 

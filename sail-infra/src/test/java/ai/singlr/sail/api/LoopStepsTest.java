@@ -13,20 +13,21 @@ import static ai.singlr.sail.api.ReviewScripts.CRITICAL_FINDING;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,29 +40,34 @@ import org.junit.jupiter.api.io.TempDir;
  */
 class LoopStepsTest {
 
-  private static final ReviewPipelineConfig.StageConfig CODEX =
-      AN_AGENT_THEN_A_PERSON.stages().getFirst();
+  /**
+   * What main is told when the sync trigger fires: how many events the step had published by then,
+   * and how the spec, its review, the run that review waits on and its stages stood.
+   */
+  private record Told(
+      long events, SpecStatus spec, String review, String waitingOn, List<String> stages) {}
+
+  /** What main is told of a review that waits on no run. */
+  private static Told told(long events, SpecStatus spec, String review, String... stages) {
+    return new Told(events, spec, review, null, List.of(stages));
+  }
 
   @TempDir Path tempDir;
   private ReviewLoop loop;
   private LoopFactsReader reader;
   private LoopSteps steps;
   private final AtomicReference<ReviewLanes> lanes = new AtomicReference<>();
+  private final List<Told> told = new ArrayList<>();
+  private long eventsBefore;
 
   @BeforeEach
   void setUp() {
     loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
     loop.spec(SPEC, "api");
     lanes.set(loop.operations.reviewLanes());
-    var narrator = new LoopNarrator(loop.specs, loop.bus, loop.syncs::incrementAndGet);
+    var narrator = new LoopNarrator(loop.specs, loop.bus, this::sync);
     narrator.useMessages(loop.messages);
-    reader =
-        new LoopFactsReader(
-            loop.specs,
-            loop.reviews,
-            loop.runs,
-            project -> LoopRows.staged(AN_AGENT_THEN_A_PERSON),
-            () -> ReviewLoop.HANDLE);
+    reader = new LoopFactsReader(loop.specs, loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
     steps =
         new LoopSteps(
             loop.specs,
@@ -86,8 +92,49 @@ class LoopStepsTest {
             },
             reader,
             narrator,
-            loop.syncs::incrementAndGet,
+            this::sync,
             () -> ReviewLoop.HANDLE);
+  }
+
+  private void sync() {
+    var review = loop.reviews.latestReviewForSpec(SPEC);
+    told.add(
+        new Told(
+            loop.bus.publishedCount() - eventsBefore,
+            loop.specStatus(SPEC),
+            review.map(ReviewStore.ReviewRow::status).orElse(null),
+            review.map(ReviewStore.ReviewRow::waitingOn).orElse(null),
+            review.map(latest -> statuses(latest.id())).orElse(List.of())));
+  }
+
+  private List<String> statuses(String reviewId) {
+    return loop.reviews.stagesForReview(reviewId).stream()
+        .map(ReviewStore.StageRow::status)
+        .toList();
+  }
+
+  /** The real lanes, their launch handed to {@code launch} to run, or not, as it likes. */
+  private void launching(Function<Supplier<ReviewLanes.Launch>, ReviewLanes.Launch> launch) {
+    var real = lanes.get();
+    lanes.set(
+        new ReviewLanes() {
+          @Override
+          public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
+            return launch.apply(() -> real.launch(invocation, boxHandle, claimed));
+          }
+
+          @Override
+          public String output(RunStore.RunRow run) throws Exception {
+            return real.output(run);
+          }
+
+          @Override
+          public List<Rescue> ensureCommitted(
+              String project, List<String> repos, String branch, String commitMessage)
+              throws Exception {
+            return real.ensureCommitted(project, repos, branch, commitMessage);
+          }
+        });
   }
 
   @AfterEach
@@ -97,7 +144,10 @@ class LoopStepsTest {
 
   /** Takes {@code step} on the rows as they stand, as this box's machinery, and settles the bus. */
   private Optional<LoopTrigger> take(LoopStep step) {
-    var followUp = Acting.system(() -> steps.take(reader.read(PROJECT, SPEC), step));
+    told.clear();
+    eventsBefore = loop.bus.publishedCount();
+    var facts = reader.read(PROJECT, SPEC, LoopRows.staged(AN_AGENT_THEN_A_PERSON));
+    var followUp = Acting.system(() -> steps.take(facts, step));
     loop.settle();
     return followUp;
   }
@@ -118,7 +168,7 @@ class LoopStepsTest {
 
   /** A review whose first stage a reviewer ran to its end, saying {@code log}; its stop unheard. */
   private RunStore.RunRow reviewed(String log) {
-    take(new LoopStep.LaunchReviewer(reviewing(), 0, CODEX, "codex"));
+    take(new LoopStep.LaunchReviewer(reviewing(), 0, "codex"));
     var reviewer = loop.onlyLive();
     loop.container.exited(reviewer.id(), log, 0);
     Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
@@ -132,29 +182,10 @@ class LoopStepsTest {
   }
 
   @Test
-  void onlyAGateFailedReviewIsReadWithItsFindings() {
-    var review = reviewing();
-    var stage = Acting.system(() -> loop.reviews.createStage(review.id(), "codex", "agent"));
-    loop.db.execute(
-        """
-        INSERT INTO review_findings (id, stage_id, severity, category, title, description)
-        VALUES ('unreadable', ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
-        stage);
-
-    assertEquals(
-        List.of(),
-        reader.read(PROJECT, SPEC).openFindings(),
-        "no decision on a running review weighs a finding, so none is read for one");
-
-    loop.db.execute("UPDATE reviews SET status = 'failed' WHERE id = ?", review.id());
-    assertThrows(IllegalArgumentException.class, () -> reader.read(PROJECT, SPEC));
-  }
-
-  @Test
   void nothingWritesNothingAndSaysNothing() {
     assertEquals(Optional.empty(), take(new LoopStep.Nothing()));
 
-    assertEquals(0, loop.syncs.get());
+    assertEquals(List.of(), told);
     assertEquals(List.of(), loop.published);
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
   }
@@ -166,6 +197,7 @@ class LoopStepsTest {
     assertEquals(List.of("exit 3"), loop.details(Event.WellKnownTypes.AGENT_FAILED));
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
     assertTrue(loop.reviews.latestReviewForSpec(SPEC).isEmpty());
+    assertEquals(List.of(), told, "nothing was written");
   }
 
   @Test
@@ -174,7 +206,7 @@ class LoopStepsTest {
 
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
     assertTrue(loop.reviews.latestReviewForSpec(SPEC).isEmpty());
-    assertEquals(1, loop.syncs.get(), "the move reaches main");
+    assertEquals(List.of(told(0, SpecStatus.REVIEW, null)), told, "the move reaches main");
   }
 
   @Test
@@ -185,7 +217,10 @@ class LoopStepsTest {
     assertEquals("running", review().status());
     assertEquals(List.of(), stages(), "its stage rows are the next step's to write");
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
-    assertEquals(2, loop.syncs.get(), "the review row, then the spec's move");
+    assertEquals(
+        List.of(told(0, SpecStatus.IN_PROGRESS, "running"), told(0, SpecStatus.REVIEW, "running")),
+        told,
+        "main is told of the review row, written first, and then of the spec's move");
   }
 
   @Test
@@ -197,6 +232,11 @@ class LoopStepsTest {
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
     assertEquals(List.of("sail.yaml is unreadable"), loop.details("review_escalated"));
     assertEquals(1, loop.roomLines(SPEC, "Review escalated").size());
+    assertEquals(
+        List.of(
+            told(0, SpecStatus.IN_PROGRESS, "running"), told(0, SpecStatus.REVIEW, "escalated")),
+        told,
+        "main is told of the review row and of its end, each before anything is said of it");
   }
 
   @Test
@@ -208,6 +248,18 @@ class LoopStepsTest {
 
     assertEquals("running", review().status());
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
+    assertEquals(List.of(told(0, SpecStatus.REVIEW, "running")), told, "the spec's move");
+  }
+
+  @Test
+  void resumeOfASpecSomeoneElseMovedGoesOnWithItsReviewAndTellsMainOfNoMove() {
+    var running = reviewing();
+    Acting.system(() -> loop.specs.updateStatus(SPEC, SpecStatus.CANCELLED));
+
+    assertEquals(Optional.of(new LoopTrigger.ReviewRunning()), take(new LoopStep.Resume(running)));
+
+    assertEquals(SpecStatus.CANCELLED, loop.specStatus(SPEC));
+    assertEquals(List.of(), told, "a spec that did not move is nothing to tell main of");
   }
 
   @Test
@@ -227,15 +279,55 @@ class LoopStepsTest {
     var review = reviewing();
     loop.db.execute("UPDATE reviews SET waiting_on = 'holder-1' WHERE id = ?", review.id());
 
-    assertEquals(Optional.empty(), take(new LoopStep.LaunchReviewer(review, 0, CODEX, "codex")));
+    assertEquals(Optional.empty(), take(new LoopStep.LaunchReviewer(review, 0, "codex")));
 
     var reviewer = loop.onlyLive();
     assertEquals("review", reviewer.role());
     assertEquals(review.id(), reviewer.reviewId());
-    assertEquals(List.of("running", "pending"), stages().stream().map(s -> s.status()).toList());
+    assertEquals(List.of("running", "pending"), statuses(review.id()));
     assertEquals("codex", stages().getFirst().reviewer());
     assertNull(review().waitingOn(), "a run serves it now: it waits on that run's stop");
     assertEquals(List.of("codex"), loop.details("review_stage_started"));
+    assertEquals(
+        List.of(List.of("pending", "pending"), List.of("running", "pending")),
+        told.stream().map(Told::stages).toList(),
+        "main is told of the stage rows once they are written, and then that a run serves it");
+    assertEquals(
+        Arrays.asList("holder-1", null),
+        told.stream().map(Told::waitingOn).toList(),
+        "by when the wait it recorded is cleared");
+  }
+
+  @Test
+  void aLaunchCompletesTheStageRowsOfAReviewACrashLeftWithTooFew() {
+    var review = reviewing();
+    Acting.system(() -> loop.reviews.createStage(review.id(), "codex", "agent"));
+
+    take(new LoopStep.LaunchReviewer(review, 0, "codex"));
+
+    assertEquals(
+        List.of("codex", "approve"),
+        stages().stream().map(ReviewStore.StageRow::name).toList(),
+        "the row it held is kept, and only the missing one is written");
+  }
+
+  @Test
+  void launchReviewerWhoseLaunchFailsAfterItsAgentStartedWaitsForThatAgentsStop() {
+    var review = reviewing();
+    loop.db.execute("UPDATE reviews SET waiting_on = 'holder-1' WHERE id = ?", review.id());
+    launching(
+        real -> {
+          real.get();
+          throw new IllegalStateException("status read failed");
+        });
+
+    assertEquals(Optional.empty(), take(new LoopStep.LaunchReviewer(review, 0, "codex")));
+
+    assertEquals(review.id(), loop.onlyLive().reviewId());
+    assertEquals(List.of("running", "pending"), statuses(review.id()));
+    assertNull(review().waitingOn(), "a run serves it: it waits on that run's stop");
+    assertEquals(List.of("codex"), loop.details("review_stage_started"));
+    assertEquals("running", review().status(), "a working agent is never called a failure");
   }
 
   @Test
@@ -243,13 +335,17 @@ class LoopStepsTest {
     var review = reviewing();
     var holder = holder();
 
-    assertEquals(Optional.empty(), take(new LoopStep.LaunchReviewer(review, 0, CODEX, "codex")));
+    assertEquals(Optional.empty(), take(new LoopStep.LaunchReviewer(review, 0, "codex")));
 
     assertEquals(holder, review().waitingOn());
-    assertEquals(List.of("pending", "pending"), stages().stream().map(s -> s.status()).toList());
+    assertEquals(List.of("pending", "pending"), statuses(review.id()));
     assertEquals(1, loop.roomLines(SPEC, "Review is waiting for run").size());
     assertEquals(List.of(), loop.details("review_stage_started"));
     assertEquals(List.of(holder), loop.container.live());
+    assertEquals(
+        Arrays.asList(null, holder),
+        told.stream().map(Told::waitingOn).toList(),
+        "main is told of the stage rows, and then of the wait once it is recorded");
   }
 
   @Test
@@ -257,15 +353,44 @@ class LoopStepsTest {
     var review = reviewing();
     loop.refuseLaunches();
 
-    var followUp = take(new LoopStep.LaunchReviewer(review, 0, CODEX, "codex"));
+    var followUp = take(new LoopStep.LaunchReviewer(review, 0, "codex"));
 
-    var failed = (LoopTrigger.LaunchFailed) followUp.orElseThrow();
+    var failed = (LoopTrigger.ReviewerNotStarted) followUp.orElseThrow();
     assertEquals(review.id(), failed.reviewId());
-    assertEquals(Lane.REVIEW, failed.lane());
     assertEquals(0, failed.stage());
     assertFalse(failed.why().isBlank());
     assertEquals("running", review().status());
+    assertEquals(
+        List.of("running", "pending"),
+        statuses(review.id()),
+        "its claim had landed before the launch failed: the step that follows closes the stage");
     assertEquals(List.of(), loop.container.live());
+    assertEquals(1, told.size(), "main is told of the stage rows, and of nothing else");
+  }
+
+  @Test
+  void aLaunchThatFailedSaysWhatRefusedItAsFarDownAsItIsSaid() {
+    var review = reviewing();
+    launching(
+        real -> {
+          throw new IllegalStateException("launch failed:", new IllegalStateException("no codex"));
+        });
+
+    var wrapped = take(new LoopStep.LaunchReviewer(review, 0, "codex"));
+
+    assertEquals(
+        Optional.of(new LoopTrigger.ReviewerNotStarted(review.id(), 0, "launch failed: no codex")),
+        wrapped);
+
+    launching(
+        real -> {
+          throw new IllegalStateException("launch failed", new IllegalStateException(" "));
+        });
+
+    assertEquals(
+        Optional.of(new LoopTrigger.ReviewerNotStarted(review.id(), 0, "launch failed")),
+        take(new LoopStep.LaunchReviewer(review, 0, "codex")),
+        "a cause that says nothing adds nothing");
   }
 
   @Test
@@ -274,10 +399,17 @@ class LoopStepsTest {
 
     assertEquals(Optional.empty(), take(new LoopStep.AwaitAPerson(review, 1)));
 
-    assertEquals(List.of("pending", "running"), stages().stream().map(s -> s.status()).toList());
+    assertEquals(List.of("pending", "running"), statuses(review.id()));
     assertEquals("human", stages().get(1).reviewer());
     assertEquals(List.of("approve"), loop.details("review_stage_started"));
     assertEquals(1, loop.roomLines(SPEC, "Automated review stages passed.").size());
+    assertEquals(
+        List.of(
+            told(0, SpecStatus.IN_PROGRESS, "running", "pending", "pending"),
+            told(1, SpecStatus.IN_PROGRESS, "running", "pending", "running"),
+            told(1, SpecStatus.IN_PROGRESS, "running", "pending", "running")),
+        told,
+        "main is told of the stage rows, then of the room line that follows the event, then last");
   }
 
   @Test
@@ -290,7 +422,10 @@ class LoopStepsTest {
     assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus(SPEC));
     assertEquals(1, loop.roomLines(SPEC, "Review passed").size());
     assertEquals(1, loop.events("review_completed").size());
-    assertEquals(2, stages().size(), "a review ends holding a row for every stage");
+    assertEquals(
+        List.of(told(0, SpecStatus.AWAITING_MERGE, "passed")),
+        told,
+        "main is told once the end is written, before it is announced");
   }
 
   @Test
@@ -317,6 +452,10 @@ class LoopStepsTest {
     assertEquals("passed", stages().getFirst().status());
     assertEquals("running", review().status(), "the review's end is the next step's");
     assertEquals(List.of("codex"), loop.details("review_stage_passed"));
+    assertEquals(
+        List.of(told(1, SpecStatus.IN_PROGRESS, "running", "passed", "pending")),
+        told,
+        "main is told once the stage is closed and said to have passed");
   }
 
   @Test
@@ -351,6 +490,7 @@ class LoopStepsTest {
     assertEquals("failed", stages().getFirst().status());
     assertEquals(error, stages().getFirst().error(), "its log is never read for a verdict");
     assertEquals(List.of(), loop.details("review_stage_passed"));
+    assertEquals(List.of(told(0, SpecStatus.IN_PROGRESS, "running", "failed", "pending")), told);
   }
 
   @Test
@@ -394,6 +534,12 @@ class LoopStepsTest {
     assertEquals("failed", review().status());
     assertEquals("no reviewer", review().error(), "an error, so its iteration runs again");
     assertEquals(List.of("no reviewer"), loop.details("review_errored"));
+    assertEquals(
+        List.of(
+            told(0, SpecStatus.IN_PROGRESS, "running", "pending", "pending"),
+            told(0, SpecStatus.IN_PROGRESS, "failed", "failed", "pending")),
+        told,
+        "main is told of the stage rows, then of the failed review before it is announced");
   }
 
   @Test
@@ -407,6 +553,22 @@ class LoopStepsTest {
     assertEquals(closedAt, stages().getFirst().completedAt());
     assertEquals("reviewer failed: exit 1", review().error());
     assertEquals(List.of("reviewer failed: exit 1"), loop.details("review_errored"));
+    assertEquals(List.of(told(0, SpecStatus.IN_PROGRESS, "failed", "failed", "pending")), told);
+  }
+
+  @Test
+  void errorReviewOfAStageItsVerdictClosedWritesNoStageRowThePipelineHasSinceGained() {
+    var review = reviewing();
+    Acting.system(
+        () -> {
+          var stage = loop.reviews.createStage(review.id(), "codex", "agent");
+          loop.reviews.completeStage(stage, "failed", "reviewer failed: exit 1");
+        });
+
+    take(new LoopStep.ErrorReview(review, 0, "reviewer failed: exit 1", true));
+
+    assertEquals(List.of("failed"), statuses(review.id()), "a review that ended gains no stage");
+    assertEquals(List.of(told(0, SpecStatus.IN_PROGRESS, "failed", "failed")), told);
   }
 
   @Test
@@ -420,6 +582,10 @@ class LoopStepsTest {
     assertNull(review().error(), "a failed gate is a verdict: its findings go to a fix agent");
     assertEquals(1, loop.roomLines(SPEC, "Review failed").size());
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC), "the spec moves with the fix");
+    assertEquals(
+        List.of(told(0, SpecStatus.IN_PROGRESS, "failed", "failed", "pending")),
+        told,
+        "main is told of the verdict in the room");
   }
 
   /** A review that failed its gate on one critical finding, its reviewer's stop unheard. */
@@ -443,6 +609,40 @@ class LoopStepsTest {
     assertTrue(fix.task().contains("Bad"), "the fix task names what to fix");
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
     assertEquals(1, loop.events("review_iteration_started").size());
+    assertEquals(
+        List.of(SpecStatus.REVIEW, SpecStatus.IN_PROGRESS),
+        told.stream().map(Told::spec).toList(),
+        "main is told the fix run serves the review, and then of the spec's move");
+  }
+
+  @Test
+  void launchFixThatServesAReviewThatWaitedTellsMainOnceTheWaitIsCleared() {
+    var findings = gateFailed();
+    loop.db.execute("UPDATE reviews SET waiting_on = 'holder-1' WHERE id = ?", review().id());
+
+    take(new LoopStep.LaunchFix(review(), findings));
+
+    assertNull(review().waitingOn());
+    assertEquals(
+        Arrays.asList(null, null), told.stream().map(Told::waitingOn).toList(), told.toString());
+  }
+
+  @Test
+  void launchFixWhoseLaunchFailsAfterItsAgentStartedWaitsForThatAgentsStop() {
+    var findings = gateFailed();
+    Acting.system(() -> loop.specs.updateStatus(SPEC, SpecStatus.REVIEW));
+    launching(
+        real -> {
+          real.get();
+          throw new IllegalStateException("status read failed");
+        });
+
+    assertEquals(Optional.empty(), take(new LoopStep.LaunchFix(review(), findings)));
+
+    assertEquals("fix", loop.onlyLive().role());
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus(SPEC));
+    assertEquals(1, loop.events("review_iteration_started").size());
+    assertEquals("failed", review().status(), "it still waits for its fix agent's stop");
   }
 
   @Test
@@ -456,6 +656,10 @@ class LoopStepsTest {
     assertEquals(holder, review().waitingOn());
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
     assertEquals(List.of(), loop.events("review_iteration_started"));
+    assertEquals(
+        List.of(holder),
+        told.stream().map(Told::waitingOn).toList(),
+        "main is told of the wait once it is recorded");
   }
 
   @Test
@@ -465,10 +669,76 @@ class LoopStepsTest {
 
     var followUp = take(new LoopStep.LaunchFix(review(), findings));
 
-    var failed = (LoopTrigger.LaunchFailed) followUp.orElseThrow();
+    var failed = (LoopTrigger.FixNotStarted) followUp.orElseThrow();
     assertEquals(review().id(), failed.reviewId());
-    assertEquals(Lane.FIX, failed.lane());
+    assertFalse(failed.why().isBlank());
     assertEquals("failed", review().status(), "what a failed launch comes to is the next step's");
+    assertEquals(List.of(), told, "nothing was written");
+  }
+
+  /** The real lanes, with {@code before} run each time a reviewer's log is about to be read. */
+  private void beforeALogIsRead(Runnable before) {
+    var real = lanes.get();
+    lanes.set(
+        new ReviewLanes() {
+          @Override
+          public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
+            return real.launch(invocation, boxHandle, claimed);
+          }
+
+          @Override
+          public String output(RunStore.RunRow run) throws Exception {
+            before.run();
+            return real.output(run);
+          }
+
+          @Override
+          public List<Rescue> ensureCommitted(
+              String project, List<String> repos, String branch, String commitMessage)
+              throws Exception {
+            return real.ensureCommitted(project, repos, branch, commitMessage);
+          }
+        });
+  }
+
+  /** The loop's own drive of {@code reviewer}'s clean stop: decide, act, and follow up. */
+  private void stopOf(RunStore.RunRow reviewer) {
+    Acting.system(
+        () ->
+            ReviewPipelineController.drive(
+                SPEC,
+                () -> reader.read(PROJECT, SPEC, LoopRows.staged(AN_AGENT_THEN_A_PERSON)),
+                new LoopTrigger.ReviewerEnded(reviewer, Optional.empty()),
+                steps::take));
+    loop.settle();
+  }
+
+  @Test
+  void aGateThatFailsForASpecSomeoneTookWhileItsVerdictWasReadStartsNoFixOverTheirDecision() {
+    var reviewer = reviewed(CRITICAL_FINDING);
+    beforeALogIsRead(
+        () -> Acting.system(() -> loop.specs.updateStatus(SPEC, SpecStatus.CANCELLED)));
+
+    stopOf(reviewer);
+
+    assertEquals("failed", review().status(), "the verdict stands");
+    assertEquals(1, loop.roomLines(SPEC, "Review failed").size(), "and the room is told of it");
+    assertEquals(List.of(), loop.container.live(), "but no fix agent is launched");
+    assertEquals(List.of(), loop.details("review_escalated"));
+    assertEquals(SpecStatus.CANCELLED, loop.specStatus(SPEC));
+  }
+
+  @Test
+  void aStageThatPassesForASpecSomeoneTookWhileItsVerdictWasReadOpensNoStageAfterIt() {
+    var reviewer = reviewed(CLEAN_REVIEW);
+    beforeALogIsRead(
+        () -> Acting.system(() -> loop.specs.updateStatus(SPEC, SpecStatus.CANCELLED)));
+
+    stopOf(reviewer);
+
+    assertEquals(List.of("passed", "pending"), statuses(review().id()));
+    assertEquals(List.of("codex"), loop.details("review_stage_started"), "no person is asked");
+    assertEquals("running", review().status());
   }
 
   /** A fix agent that worked the review's findings and ended, its stop unheard. */
@@ -530,11 +800,24 @@ class LoopStepsTest {
     assertEquals("escalated", review().status());
     assertEquals(ReviewNarration.fixFailed("fix agent failed: exit 1"), review().error());
     assertEquals(SpecStatus.REVIEW, loop.specStatus(SPEC));
+    assertEquals(
+        List.of(told(0, SpecStatus.REVIEW, "escalated", "failed", "pending")),
+        told,
+        "main is told once the end is written, before anything is said of it");
+    var said =
+        loop.published.stream()
+            .map(Event::type)
+            .filter(type -> type.startsWith("review_"))
+            .toList();
+    assertEquals(
+        List.of("review_iteration_failed", "review_escalated"),
+        said.subList(said.size() - 2, said.size()),
+        "the iteration is said to have failed, and then its review to be a person's");
   }
 
   @Test
   void escalateEndsTheReviewClosesItsRunningStageAndMovesItsSpecInOneWrite() {
-    take(new LoopStep.LaunchReviewer(reviewing(), 0, CODEX, "codex"));
+    take(new LoopStep.LaunchReviewer(reviewing(), 0, "codex"));
 
     assertEquals(Optional.empty(), take(new LoopStep.Escalate(review(), "stopped by an operator")));
 
@@ -546,5 +829,9 @@ class LoopStepsTest {
     assertEquals(
         List.of("Review escalated: stopped by an operator."),
         loop.roomLines(SPEC, "Review escalated"));
+    assertEquals(
+        List.of(told(0, SpecStatus.REVIEW, "escalated", "failed", "pending")),
+        told,
+        "main is told once the end is written, before it is announced");
   }
 }

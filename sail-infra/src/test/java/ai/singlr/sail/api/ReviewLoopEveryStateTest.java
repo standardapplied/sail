@@ -18,7 +18,6 @@ import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.store.ReviewStore;
-import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -207,7 +206,9 @@ class ReviewLoopEveryStateTest {
   /** The stop of the spec's newest ended loop run, as the router hands it to the decision. */
   private static LoopTrigger stopOf(LoopFacts facts) {
     var ended =
-        facts.serving().stream().filter(run -> RunStatus.isTerminal(run.status())).findFirst();
+        facts.rows().serving().stream()
+            .filter(run -> RunStatus.isTerminal(run.status()))
+            .findFirst();
     if (ended.isEmpty()) {
       return new LoopTrigger.BuildEnded("build", 0);
     }
@@ -252,11 +253,11 @@ class ReviewLoopEveryStateTest {
               var review = resumed.review();
               var running =
                   LoopRows.review(review.iteration(), "running", null, review.waitingOn());
-              rows.review(running, facts.stages()).spec(SpecStatus.REVIEW);
+              rows.review(running, facts.rows().stages()).spec(SpecStatus.REVIEW);
               yield Optional.of(new LoopTrigger.ReviewRunning());
             }
             case LoopStep.ReadVerdict verdict -> {
-              var stages = new ArrayList<>(facts.stages());
+              var stages = new ArrayList<>(facts.rows().stages());
               var judged = stages.get(verdict.stage());
               stages.set(verdict.stage(), LoopRows.stage(judged.name(), "agent", "passed"));
               rows.review(verdict.review(), stages);
@@ -277,9 +278,10 @@ class ReviewLoopEveryStateTest {
   /** Which end the last step of a walk leaves the review at, or empty when it is at none. */
   private static Optional<End> endAfter(LoopStep last, LoopFacts facts) {
     return switch (last) {
-      case LoopStep.Nothing nothing -> endOf(facts);
+      case LoopStep.Nothing nothing -> endOf(facts.rows());
       case LoopStep.Pass passed -> Optional.of(End.PASSED);
-      case LoopStep.AwaitAPerson awaited -> Optional.of(End.A_PERSONS);
+      case LoopStep.AwaitAPerson awaited ->
+          Optional.of(waitsOnALiveRun(facts.rows()) ? End.A_RUNS : End.A_PERSONS);
       case LoopStep.LaunchReviewer launched -> Optional.of(End.A_RUNS);
       case LoopStep.LaunchFix launched -> Optional.of(End.A_RUNS);
       case LoopStep.Escalate escalated ->
@@ -293,7 +295,7 @@ class ReviewLoopEveryStateTest {
    * was escalated, its spec is in a status the loop never acts over, a run serves it, it waits on a
    * recorded run that still lives, or a person's stage is open.
    */
-  private static Optional<End> endOf(LoopFacts facts) {
+  private static Optional<End> endOf(LoopFacts.Rows facts) {
     var review = facts.review().orElseThrow();
     if ("passed".equals(review.status())) {
       return Optional.of(End.PASSED);
@@ -304,7 +306,7 @@ class ReviewLoopEveryStateTest {
     if (!facts.loops()) {
       return Optional.of(End.A_PERSONS);
     }
-    if (facts.served() || review.waitingOn() != null && !facts.holderEnded()) {
+    if (LoopFacts.Rows.live(facts.serving()) || waitsOnALiveRun(facts)) {
       return Optional.of(End.A_RUNS);
     }
     return facts.stages().stream()
@@ -312,6 +314,10 @@ class ReviewLoopEveryStateTest {
                 stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()))
         ? Optional.of(End.A_PERSONS)
         : Optional.empty();
+  }
+
+  private static boolean waitsOnALiveRun(LoopFacts.Rows rows) {
+    return rows.review().orElseThrow().waitingOn() != null && !rows.holderEnded();
   }
 
   @ParameterizedTest(name = "review {0}, spec {1}")
@@ -374,9 +380,10 @@ class ReviewLoopEveryStateTest {
   }
 
   /**
-   * Every thirteenth state of the space, written into the real stores and given a real stop: what
-   * the walk says of a state is what the stores say of it, across the space and not only where a
-   * step is first taken.
+   * What the walk says of a state is what the stores say of it: every state of a spec the loop
+   * moves is written into the real stores and given a real stop, and so is every thirteenth state
+   * of a spec it never acts over, starting a place further for each review and status so that
+   * between them they try every combination of stages, pipeline, run and wait.
    */
   @ParameterizedTest(name = "review {0}, spec {1}")
   @MethodSource("reviewAndSpecStates")
@@ -386,7 +393,11 @@ class ReviewLoopEveryStateTest {
     var states = states(shape, specStatus);
     var apart = new ArrayList<String>();
 
-    for (var place = 0; place < states.size(); place += 13) {
+    var loops = specStatus == SpecStatus.IN_PROGRESS || specStatus == SpecStatus.REVIEW;
+    var stride = loops ? 1 : 13;
+    var first =
+        loops ? 0 : (shape.ordinal() * SpecStatus.values().length + specStatus.ordinal()) % 13;
+    for (var place = first; place < states.size(); place += stride) {
       var state = states.get(place);
       write(state);
       stop(STATE);
@@ -519,7 +530,7 @@ class ReviewLoopEveryStateTest {
     if (status != SpecStatus.IN_PROGRESS && status != SpecStatus.REVIEW) {
       return Optional.of(End.A_PERSONS);
     }
-    if (live(loop.runs.forReview(review.id())) || waitsOnALiveRun(review)) {
+    if (LoopFacts.Rows.live(loop.runs.forReview(review.id())) || waitsOnALiveRun(review)) {
       return Optional.of(End.A_RUNS);
     }
     return loop.reviews.stagesForReview(review.id()).stream()
@@ -529,12 +540,8 @@ class ReviewLoopEveryStateTest {
         : Optional.empty();
   }
 
-  private static boolean live(List<RunStore.RunRow> runs) {
-    return runs.stream().anyMatch(run -> !RunStatus.isTerminal(run.status()));
-  }
-
   private boolean waitsOnALiveRun(ReviewStore.ReviewRow review) {
     return review.waitingOn() != null
-        && live(loop.runs.findById(review.waitingOn()).stream().toList());
+        && LoopFacts.Rows.live(loop.runs.findById(review.waitingOn()).stream().toList());
   }
 }

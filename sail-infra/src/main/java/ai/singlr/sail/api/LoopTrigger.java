@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.store.RunStore;
 import java.util.Map;
 import java.util.Objects;
@@ -35,7 +34,10 @@ sealed interface LoopTrigger {
         : Optional.empty();
   }
 
-  /** A build, an ad-hoc run or a run of no known lane ended; no {@code runId} for no row here. */
+  /**
+   * A build, an ad-hoc run or a run of no known lane ended. {@code runId} is null when this box
+   * holds no row of the run, {@code exitCode} when the stop says none.
+   */
   record BuildEnded(String runId, Integer exitCode) implements LoopTrigger {}
 
   /** A reviewer ended; {@code failure} is how it ended badly ({@link #failureOf}), if it did. */
@@ -47,7 +49,13 @@ sealed interface LoopTrigger {
   /** An operator stopped {@code run}: its cancel, or any stop of a run their stop claimed. */
   record OperatorStopped(RunStore.RunRow run) implements LoopTrigger {}
 
-  /** Nothing new: a duplicate or replayed stop, one nothing awaited, a wait whose holder ended. */
+  /** A stop freed whatever its run held, which a review this box drives may be waiting for. */
+  record Freed() implements LoopTrigger {}
+
+  /**
+   * A step left the review with something owed and nothing new to decide on: a gate just failed.
+   * The loop goes on from what the rows owe, as it does for a late or replayed stop.
+   */
   record GoOn() implements LoopTrigger {}
 
   /** A step left the spec's review {@code running} with its spec in {@code review}. */
@@ -57,8 +65,14 @@ sealed interface LoopTrigger {
   record StageJudged(String reviewId, int stage, StageVerdicts.StageOutcome outcome)
       implements LoopTrigger {}
 
-  /** A launch for the review threw, building its prompt or task included, and no run serves it. */
-  record LaunchFailed(String reviewId, Lane lane, int stage, String why) implements LoopTrigger {}
+  /**
+   * The launch of the reviewer of stage {@code stage} threw, building its prompt included, and no
+   * run serves the review.
+   */
+  record ReviewerNotStarted(String reviewId, int stage, String why) implements LoopTrigger {}
+
+  /** The launch of the review's fix agent threw, building its task included, and no run serves. */
+  record FixNotStarted(String reviewId, String why) implements LoopTrigger {}
 
   /** What fix agent {@code run} left uncommitted, if anything, is committed and pushed. */
   record FixCommitted(RunStore.RunRow run) implements LoopTrigger {}

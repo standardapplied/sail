@@ -21,38 +21,21 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Everything a decision of the review loop reads about one spec, as the rows stood at one moment
- * ({@link LoopFactsReader}). What they say the loop owes the spec's review ({@link #owed}) is the
- * one reading the pipeline and the missed-stop reconciler share, so the step the pipeline takes
- * when a stop arrives is always the step the reconciler replayed that stop for.
+ * Everything a decision of the review loop reads about one spec ({@link LoopFactsReader}): what its
+ * rows say ({@link Rows}), the project's pipeline, and what the step those rows owe weighs.
  *
- * <p>Only the runs this box ({@code node}) executed count as serving a review: a run row another
- * box pushed can name any review, and would otherwise hold this box's loop waiting on a stop that
- * is never coming here. And a box moves a spec's loop unasked only when it executed the spec's
- * newest loop run ({@link #drivenHere}): a review it merely holds a copy of is its executing box's.
- *
- * @param review the latest review of the spec's current dispatch attempt, with its {@code stages}
- * @param serving the runs this box executed that serve the review, newest first
- * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
- * @param openFindings the open findings of a review that failed its gate; none for any other
- * @param failedStageFindings those of them its first failed stage holds, each with its age
+ * @param openFindings the review's open findings, read only when a fix is due ({@link Rows#fixDue})
+ * @param failedStageFindings the findings its first failed stage holds, each with its age
  * @param erroredAttempts how many attempts of the review's iteration failed by infrastructure error
- * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
  */
 record LoopFacts(
     String project,
     String specId,
-    String node,
-    Optional<SpecStore.SpecRow> spec,
-    Optional<ReviewStore.ReviewRow> review,
-    List<ReviewStore.StageRow> stages,
-    List<RunStore.RunRow> serving,
-    Optional<RunStore.RunRow> newestLoopRun,
+    Rows rows,
     Pipeline pipeline,
     List<Finding> openFindings,
     List<Aged> failedStageFindings,
-    long erroredAttempts,
-    boolean holderEnded) {
+    long erroredAttempts) {
 
   /** What a project's review pipeline is, as far as it can be read. */
   sealed interface Pipeline {
@@ -110,28 +93,10 @@ record LoopFacts(
     record Stop(ReviewStore.ReviewRow review, RunStore.RunRow run) implements Owed {}
   }
 
-  /** Whether this box executed the newest run of the spec's loop, and so drives it. */
-  boolean drivenHere() {
-    return newestLoopRun.filter(run -> run.ownedBy(node)).isPresent();
-  }
-
-  /** Whether a run that serves the review — a reviewer or its fix agent — is yet to finish. */
-  boolean served() {
-    return serving.stream().anyMatch(run -> !RunStatus.isTerminal(run.status()));
-  }
-
   /**
-   * Whether the spec is the loop's to move: {@code in_progress}, or {@code review} — a spec can be
-   * moved there out of band while its agent still runs here. Every other status, {@code cancelled}
-   * above all, is someone's decision the loop never acts over.
+   * The pipeline, for a decision that found the review fit to run under it and for the step that
+   * decision named: one reading of the pipeline serves every decision and step of an event.
    */
-  boolean loops() {
-    return spec.map(SpecStore.SpecRow::status)
-        .filter(status -> status == SpecStatus.IN_PROGRESS || status == SpecStatus.REVIEW)
-        .isPresent();
-  }
-
-  /** The pipeline, for a decision that has found the review fit to run under it. */
   Pipeline.Staged staged() {
     return (Pipeline.Staged) pipeline;
   }
@@ -152,8 +117,8 @@ record LoopFacts(
 
   private Optional<String> changedUnder(ReviewPipelineConfig config) {
     var configured = config.stages();
-    for (var place = 0; place < stages.size(); place++) {
-      var row = stages.get(place);
+    for (var place = 0; place < rows.stages().size(); place++) {
+      var row = rows.stages().get(place);
       if (place >= configured.size()
           || !configured.get(place).name().equals(row.name())
           || !stageType(configured.get(place)).equals(row.stageType())) {
@@ -168,87 +133,156 @@ record LoopFacts(
   }
 
   /**
-   * The place of the stage {@code run} reviewed, or empty when no stage waits on it: the agent
-   * stage that is {@code running} and was started while the run was live — a stage starts once its
-   * reviewer's claim has landed, and before that reviewer's unit does. A stage started before the
-   * run was recorded, or after it ended, is another reviewer's to judge.
+   * What the rows say of one spec's loop, as they stood when they were read. What they say the loop
+   * owes the spec's review ({@link #owed}) is the one reading the pipeline and the missed-stop
+   * reconciler share, so the step the pipeline takes when a stop arrives is always the step the
+   * reconciler replayed that stop for.
+   *
+   * <p>Only the runs this box ({@code node}) executed count as serving a review: a run row another
+   * box pushed can name any review, and would otherwise hold this box's loop waiting on a stop that
+   * is never coming here. And a box moves a spec's loop unasked only when it executed the spec's
+   * newest loop run ({@link #drivenHere}): a review it merely holds a copy of is its executing
+   * box's.
+   *
+   * @param review the latest review of the spec's current dispatch attempt, with its {@code stages}
+   * @param serving the runs this box executed that serve the review, newest first
+   * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
+   * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
    */
-  Optional<Integer> stageReviewedBy(RunStore.RunRow run) {
-    var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
-    var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
-    return stages.stream()
-        .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
-        .filter(
-            stage -> {
-              var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
-              return !started.isBefore(recorded) && !started.isAfter(ended);
-            })
-        .findFirst()
-        .map(stages::indexOf);
-  }
+  record Rows(
+      String node,
+      Optional<SpecStore.SpecRow> spec,
+      Optional<ReviewStore.ReviewRow> review,
+      List<ReviewStore.StageRow> stages,
+      List<RunStore.RunRow> serving,
+      Optional<RunStore.RunRow> newestLoopRun,
+      boolean holderEnded) {
 
-  /** Whether a newer run of the spec's loop has come after run {@code runId}. */
-  boolean replaced(String runId) {
-    return newestLoopRun.filter(newest -> !newest.id().equals(runId)).isPresent();
-  }
-
-  /**
-   * The review {@code run} serves, when the loop is waiting on this very run: the run is this box's
-   * and the newest of its spec's loop, its spec is still the loop's to move, and its review is the
-   * spec's latest and in one of {@code statuses}. Any other stop is past, or not the loop's.
-   */
-  Optional<ReviewStore.ReviewRow> awaited(RunStore.RunRow run, String... statuses) {
-    if (!run.ownedBy(node) || run.reviewId() == null || !loops() || replaced(run.id())) {
-      return Optional.empty();
+    /** Whether this box executed the newest run of the spec's loop, and so drives it. */
+    boolean drivenHere() {
+      return newestLoopRun.filter(run -> run.ownedBy(node)).isPresent();
     }
-    return latest(run.reviewId()).filter(review -> List.of(statuses).contains(review.status()));
-  }
 
-  /** Review {@code reviewId} while it is the spec's latest: a follow-up is about no other. */
-  Optional<ReviewStore.ReviewRow> latest(String reviewId) {
-    return review.filter(latest -> latest.id().equals(reviewId));
-  }
-
-  /** What the latest review of the spec's current dispatch attempt is owed. */
-  Owed owed() {
-    var latest = review.orElse(null);
-    if (latest == null || served()) {
-      return new Owed.Nothing();
+    /** Whether one of {@code runs} — a reviewer or a fix agent — is yet to finish. */
+    static boolean live(List<RunStore.RunRow> runs) {
+      return runs.stream().anyMatch(run -> !RunStatus.isTerminal(run.status()));
     }
-    var newest = serving.stream().findFirst();
-    return switch (latest.status()) {
-      case "pending", "running" -> whileRunning(latest, newest);
-      case "failed" -> latest.errored() ? new Owed.Retry(latest) : afterGateFailure(latest, newest);
-      default -> new Owed.Nothing();
-    };
-  }
 
-  private Owed whileRunning(ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
-    if (waitsOnPerson()) {
-      return new Owed.Nothing();
+    /**
+     * Whether the spec is the loop's to move: {@code in_progress}, or {@code review} — a spec can
+     * be moved there out of band while its agent still runs here. Every other status, {@code
+     * cancelled} above all, is someone's decision the loop never acts over.
+     */
+    boolean loops() {
+      return spec.map(SpecStore.SpecRow::status)
+          .filter(status -> status == SpecStatus.IN_PROGRESS || status == SpecStatus.REVIEW)
+          .isPresent();
     }
-    return newest
-        .filter(run -> Lane.REVIEW.matches(run.role()))
-        .filter(reviewer -> stageReviewedBy(reviewer).isPresent())
-        .<Owed>map(reviewer -> new Owed.Stop(review, reviewer))
-        .orElseGet(() -> unserved(review, new Owed.Advance(review)));
-  }
 
-  private static Owed afterGateFailure(
-      ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
-    return newest
-        .filter(run -> Lane.FIX.matches(run.role()))
-        .<Owed>map(fix -> new Owed.Stop(review, fix))
-        .orElseGet(() -> unserved(review, new Owed.Fix(review)));
-  }
+    /**
+     * The place of the stage {@code run} reviewed, or empty when no stage waits on it: the agent
+     * stage that is {@code running} and was started while the run was live — a stage starts once
+     * its reviewer's claim has landed, and before that reviewer's unit does. A stage started before
+     * the run was recorded, or after it ended, is another reviewer's to judge.
+     */
+    Optional<Integer> stageReviewedBy(RunStore.RunRow run) {
+      var recorded = MissedStops.parseOr(run.startedAt(), Instant.MAX);
+      var ended = MissedStops.parseOr(run.completedAt(), Instant.MAX);
+      return stages.stream()
+          .filter(stage -> "running".equals(stage.status()) && !"human".equals(stage.stageType()))
+          .filter(
+              stage -> {
+                var started = MissedStops.parseOr(stage.startedAt(), Instant.MIN);
+                return !started.isBefore(recorded) && !started.isAfter(ended);
+              })
+          .findFirst()
+          .map(stages::indexOf);
+    }
 
-  /** What a review no run serves is owed: {@code step}, or to wait for the run that holds it. */
-  private static Owed unserved(ReviewStore.ReviewRow review, Owed step) {
-    return review.waitingOn() == null ? step : new Owed.Waiting(review, step);
-  }
+    /** The first stage of the review that failed: the one whose gate its findings face. */
+    Optional<ReviewStore.StageRow> failedStage() {
+      return stages.stream().filter(stage -> "failed".equals(stage.status())).findFirst();
+    }
 
-  private boolean waitsOnPerson() {
-    return stages.stream()
-        .anyMatch(stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
+    /** Whether a newer run of the spec's loop has come after run {@code runId}. */
+    boolean replaced(String runId) {
+      return newestLoopRun.filter(newest -> !newest.id().equals(runId)).isPresent();
+    }
+
+    /**
+     * The review {@code run} serves, when the loop is waiting on this very run: the run is this
+     * box's and the newest of its spec's loop, its spec is still the loop's to move, and its review
+     * is the spec's latest and in one of {@code statuses}. Any other stop is past, or not the
+     * loop's.
+     */
+    Optional<ReviewStore.ReviewRow> awaited(RunStore.RunRow run, String... statuses) {
+      if (!run.ownedBy(node) || !loops() || replaced(run.id())) {
+        return Optional.empty();
+      }
+      return latest(run.reviewId()).filter(review -> List.of(statuses).contains(review.status()));
+    }
+
+    /** Review {@code reviewId} while it is the spec's latest: a follow-up is about no other. */
+    Optional<ReviewStore.ReviewRow> latest(String reviewId) {
+      return review.filter(latest -> latest.id().equals(reviewId));
+    }
+
+    /** What the latest review of the spec's current dispatch attempt is owed. */
+    Owed owed() {
+      var latest = review.orElse(null);
+      if (latest == null || live(serving)) {
+        return new Owed.Nothing();
+      }
+      var newest = serving.stream().findFirst();
+      return switch (latest.status()) {
+        case "pending", "running" -> whileRunning(latest, newest);
+        case "failed" ->
+            latest.errored() ? new Owed.Retry(latest) : afterGateFailure(latest, newest);
+        default -> new Owed.Nothing();
+      };
+    }
+
+    /**
+     * The step the loop takes now for what the rows owe: a wait gives way to the step it holds once
+     * the run it waits on has ended, and holds it while that run lives.
+     */
+    Owed due() {
+      var owed = owed();
+      return owed instanceof Owed.Waiting waiting && holderEnded ? waiting.step() : owed;
+    }
+
+    /** The review a fix is due for, whose findings are what the next decision weighs. */
+    Optional<ReviewStore.ReviewRow> fixDue() {
+      return due() instanceof Owed.Fix fix ? Optional.of(fix.review()) : Optional.empty();
+    }
+
+    private Owed whileRunning(ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
+      if (waitsOnPerson()) {
+        return new Owed.Nothing();
+      }
+      return newest
+          .filter(run -> Lane.REVIEW.matches(run.role()))
+          .filter(reviewer -> stageReviewedBy(reviewer).isPresent())
+          .<Owed>map(reviewer -> new Owed.Stop(review, reviewer))
+          .orElseGet(() -> unserved(review, new Owed.Advance(review)));
+    }
+
+    private static Owed afterGateFailure(
+        ReviewStore.ReviewRow review, Optional<RunStore.RunRow> newest) {
+      return newest
+          .filter(run -> Lane.FIX.matches(run.role()))
+          .<Owed>map(fix -> new Owed.Stop(review, fix))
+          .orElseGet(() -> unserved(review, new Owed.Fix(review)));
+    }
+
+    /** What a review no run serves is owed: {@code step}, or to wait for the run that holds it. */
+    private static Owed unserved(ReviewStore.ReviewRow review, Owed step) {
+      return review.waitingOn() == null ? step : new Owed.Waiting(review, step);
+    }
+
+    private boolean waitsOnPerson() {
+      return stages.stream()
+          .anyMatch(stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()));
+    }
   }
 }

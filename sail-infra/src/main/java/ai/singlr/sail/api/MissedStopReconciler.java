@@ -126,7 +126,7 @@ public final class MissedStopReconciler implements AutoCloseable {
   private final Supplier<String> localHandle;
   private final Supplier<Instant> clock;
   private final PeriodicPass pass;
-  final StrandedReviewRescue strandedReviews;
+  private final StrandedReviewRescue strandedReviews;
 
   public MissedStopReconciler(
       SpecStore specStore,
@@ -249,13 +249,18 @@ public final class MissedStopReconciler implements AutoCloseable {
                   + e.getMessage());
         }
       }
-      replayed += strandedReviews.rescueStrandedReviews(handledThisSweep);
+      replayed += rescueStrandedReviews(handledThisSweep);
       replayed += finishDeadSessions(handledThisSweep);
       replayed += finalizeInterruptedStops();
     } catch (Exception e) {
       System.err.println("  [reconcile] missed-stop sweep aborted: " + e.getMessage());
     }
     return replayed;
+  }
+
+  /** The sweep's rescue of stranded reviews, skipping the specs it already handled. */
+  int rescueStrandedReviews(Set<String> handledThisSweep) {
+    return strandedReviews.rescueStrandedReviews(handledThisSweep);
   }
 
   /**

@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static ai.singlr.sail.api.LoopRows.AN_AGENT_THEN_A_PERSON;
 import static ai.singlr.sail.api.LoopRows.ENDED;
 import static ai.singlr.sail.api.LoopRows.NODE;
+import static ai.singlr.sail.api.LoopRows.RECORDED;
 import static ai.singlr.sail.api.LoopRows.REVIEW;
 import static ai.singlr.sail.api.LoopRows.ended;
 import static ai.singlr.sail.api.LoopRows.facts;
@@ -19,13 +20,14 @@ import static ai.singlr.sail.api.LoopRows.staged;
 import static ai.singlr.sail.api.LoopRows.stages;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
+import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -44,14 +46,29 @@ class LoopDecisionTest {
   private static final RunStore.RunRow BUILD = ended("build-1", "build", null);
   private static final RunStore.RunRow REVIEWER = ended("reviewer-1", "review", REVIEW);
   private static final RunStore.RunRow FIXER = ended("fix-1", "fix", REVIEW);
-  private static final ReviewPipelineConfig.StageConfig CODEX =
-      AN_AGENT_THEN_A_PERSON.stages().getFirst();
+  private static final ReviewPipelineConfig TWO_AGENTS =
+      ReviewPipelineConfig.fromMap(
+          Map.of(
+              "stages",
+              List.of(
+                  Map.<String, Object>of(
+                      "name", "codex", "type", "agent", "agent", "codex", "gate", "no_critical"),
+                  Map.<String, Object>of(
+                      "name",
+                      "claude",
+                      "type",
+                      "agent",
+                      "agent",
+                      "claude-code",
+                      "gate",
+                      "all_clear"))));
   private static final ReviewPipelineConfig UNNAMED_REVIEWER =
       ReviewPipelineConfig.mandatoryDefault();
   private static final Finding CRITICAL = finding("f1", Finding.Severity.CRITICAL);
   private static final Finding HIGH = finding("f2", Finding.Severity.HIGH);
   private static final LoopStep NOTHING = new LoopStep.Nothing();
   private static final LoopTrigger GO_ON = new LoopTrigger.GoOn();
+  private static final LoopTrigger FREED = new LoopTrigger.Freed();
   private static final LoopTrigger REVIEW_RUNNING = new LoopTrigger.ReviewRunning();
 
   private record Row(String name, LoopRows.Facts facts, LoopTrigger trigger, LoopStep step) {
@@ -116,6 +133,11 @@ class LoopDecisionTest {
             buildEnded(null, 0),
             NOTHING),
         row(
+            "A1 a failed build of a spec that is not the loop's is not said to have failed",
+            facts().spec(SpecStatus.CANCELLED),
+            buildEnded(null, 2),
+            NOTHING),
+        row(
             "A1 a spec in progress is the loop's",
             facts().spec(SpecStatus.IN_PROGRESS),
             buildEnded(null, 0),
@@ -170,6 +192,56 @@ class LoopDecisionTest {
     return new LoopStep.StartReview(iteration);
   }
 
+  private static Stream<Row> freed() {
+    var waiting = review(1, "running", null, "holder-1");
+    var anotherBoxs = run("build-1", "node-b", "build", null, "stopped", ENDED);
+    return Stream.of(
+        row(
+            "W1 a wait another box drives is that box's to take",
+            facts().review(waiting, List.of()).holderEnded(true).newestLoopRun(anotherBoxs),
+            FREED,
+            NOTHING),
+        row(
+            "W1 a spec with no run of its loop is driven by no box",
+            facts().review(waiting, List.of()).holderEnded(true),
+            FREED,
+            NOTHING),
+        row(
+            "W2 an errored review keeps to the reconciler's pace",
+            facts().newestLoopRun(BUILD).review(ERRORED, List.of()),
+            FREED,
+            NOTHING),
+        row(
+            "W2 a review whose launch was cut short is the reconciler's to rescue",
+            facts().newestLoopRun(BUILD).review(RUNNING, List.of()),
+            FREED,
+            NOTHING),
+        row(
+            "W2 a review whose reviewer ended waits for that run's own stop",
+            reviewed(),
+            FREED,
+            NOTHING),
+        row(
+            "W3 a wait whose holder still runs",
+            facts().newestLoopRun(BUILD).review(waiting, List.of()),
+            FREED,
+            NOTHING),
+        row(
+            "W3 a wait whose holder ended takes the step it held",
+            facts().newestLoopRun(BUILD).review(waiting, List.of()).holderEnded(true),
+            FREED,
+            new LoopStep.Resume(waiting)),
+        row(
+            "W3 a wait of a spec that is not the loop's is left alone",
+            facts()
+                .newestLoopRun(BUILD)
+                .spec(SpecStatus.CANCELLED)
+                .review(waiting, List.of())
+                .holderEnded(true),
+            FREED,
+            NOTHING));
+  }
+
   private static Stream<Row> goOn() {
     var waiting = review(1, "running", null, "holder-1");
     var waitingToFix = review(1, "failed", null, "holder-1");
@@ -206,22 +278,37 @@ class LoopDecisionTest {
         row("G1 a review whose reviewer ended is owed that run's stop", reviewed(), GO_ON, NOTHING),
         row("G1 a review whose fix agent ended is owed that run's stop", fixed(), GO_ON, NOTHING),
         row(
+            "G1 a review that ended is not looked at again, whatever became of its pipeline",
+            facts().review(review("passed"), List.of()).pipeline(new LoopFacts.Pipeline.None()),
+            GO_ON,
+            NOTHING),
+        row(
+            "G1 a review owed its run's stop is left to it, whatever became of its pipeline",
+            reviewed().pipeline(new LoopFacts.Pipeline.None()),
+            GO_ON,
+            NOTHING),
+        row(
+            "G2 a wait holds, whatever became of the pipeline, while its holder runs",
+            facts().review(waiting, List.of()).pipeline(new LoopFacts.Pipeline.None()),
+            GO_ON,
+            NOTHING),
+        row(
             "G2 a wait whose holder still runs",
             facts().review(waiting, List.of()),
             GO_ON,
             NOTHING),
         row(
-            "G3 a wait whose holder ended takes the step it held",
+            "G6 a wait whose holder ended is due the step it held",
             facts().review(waiting, List.of()).holderEnded(true),
             GO_ON,
             new LoopStep.Resume(waiting)),
         row(
-            "G3 a fix that waited is launched once its holder ended",
+            "G14 a fix that waited is launched once its holder ended",
             owedAFix(waitingToFix).holderEnded(true),
             GO_ON,
             new LoopStep.LaunchFix(waitingToFix, List.of(HIGH))),
         row(
-            "G3 a fix that waits is not launched while its holder runs",
+            "G2 a fix that waits is not launched while its holder runs",
             owedAFix(waitingToFix),
             GO_ON,
             NOTHING),
@@ -302,6 +389,17 @@ class LoopDecisionTest {
             GO_ON,
             new LoopStep.LaunchFix(GATE_FAILED, List.of(HIGH))),
         row(
+            "G11 a finding is weighed against the gate of the stage that failed, not the first",
+            facts()
+                .pipeline(staged(TWO_AGENTS))
+                .review(
+                    GATE_FAILED,
+                    List.of(stage("codex", "agent", "passed"), stage("claude", "agent", "failed")))
+                .open(HIGH)
+                .failedStage(aged(HIGH, 9)),
+            GO_ON,
+            escalate(GATE_FAILED, ReviewNarration.stuckOn(HIGH.title(), 9))),
+        row(
             "G11 stuck is said before the iterations are counted",
             owedAFix(review(3, "failed", null, null)).failedStage(aged(CRITICAL, 2)),
             GO_ON,
@@ -340,31 +438,41 @@ class LoopDecisionTest {
   }
 
   private static Stream<Row> reviewRunning() {
-    var unnamed = UNNAMED_REVIEWER.stages().getFirst();
     return Stream.of(
-        row("no review: a re-dispatch superseded it", facts(), REVIEW_RUNNING, NOTHING),
+        row("G6b no review: a re-dispatch superseded it", facts(), REVIEW_RUNNING, NOTHING),
         row(
             "G9b a review just written is in its first stage",
             facts().review(RUNNING, List.of()),
             REVIEW_RUNNING,
-            new LoopStep.LaunchReviewer(RUNNING, 0, CODEX, "codex")),
+            new LoopStep.LaunchReviewer(RUNNING, 0, "codex")),
         row(
             "G9b a stage that did not pass is the one the review is in",
             facts().review(RUNNING, stages("failed", "pending")),
             REVIEW_RUNNING,
-            new LoopStep.LaunchReviewer(RUNNING, 0, CODEX, "codex")),
+            new LoopStep.LaunchReviewer(RUNNING, 0, "codex")),
         row(
             "G9b a stage that names no agent is reviewed by the project's roster reviewer",
             facts()
                 .review(RUNNING, List.of())
                 .pipeline(new LoopFacts.Pipeline.Staged(UNNAMED_REVIEWER, "codex")),
             REVIEW_RUNNING,
-            new LoopStep.LaunchReviewer(RUNNING, 0, unnamed, "codex")),
+            new LoopStep.LaunchReviewer(RUNNING, 0, "codex")),
+        row(
+            "G9b a stage's own agent reviews it, whoever the roster would name",
+            facts()
+                .review(RUNNING, List.of())
+                .pipeline(new LoopFacts.Pipeline.Staged(AN_AGENT_THEN_A_PERSON, "claude-code")),
+            REVIEW_RUNNING,
+            new LoopStep.LaunchReviewer(RUNNING, 0, "codex")),
         row(
             "G9 an agent stage no reviewer resolves for",
             facts().review(RUNNING, List.of()).pipeline(staged(UNNAMED_REVIEWER)),
             REVIEW_RUNNING,
-            new LoopStep.ErrorReview(RUNNING, 0, LoopDecision.NO_REVIEWER, false)),
+            new LoopStep.ErrorReview(
+                RUNNING,
+                0,
+                "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml",
+                false)),
         row(
             "G7 a person's stage not yet opened",
             facts().review(RUNNING, stages("passed", "pending")),
@@ -381,6 +489,29 @@ class LoopDecisionTest {
             REVIEW_RUNNING,
             NOTHING),
         row(
+            "G6c no stage is started for a spec someone took while the last step ran",
+            facts().spec(SpecStatus.CANCELLED).review(RUNNING, List.of()),
+            REVIEW_RUNNING,
+            NOTHING),
+        row(
+            "G6c nor is a person's stage opened for it",
+            facts().spec(SpecStatus.CANCELLED).review(RUNNING, stages("passed", "pending")),
+            REVIEW_RUNNING,
+            NOTHING),
+        row(
+            "G10 a review whose every stage passed ends, whoever moved its spec meanwhile",
+            facts().spec(SpecStatus.CANCELLED).review(RUNNING, stages("passed", "passed")),
+            REVIEW_RUNNING,
+            new LoopStep.Pass(RUNNING)),
+        row(
+            "P a review its pipeline can no longer judge is a person's, whoever moved its spec",
+            facts()
+                .spec(SpecStatus.CANCELLED)
+                .review(RUNNING, List.of())
+                .pipeline(new LoopFacts.Pipeline.None()),
+            REVIEW_RUNNING,
+            escalate(RUNNING, ReviewNarration.noStages())),
+        row(
             "G10 every stage passed",
             facts().review(RUNNING, stages("passed", "passed")),
             REVIEW_RUNNING,
@@ -392,10 +523,9 @@ class LoopDecisionTest {
             escalate(RUNNING, ReviewNarration.noStages())));
   }
 
-  private static Stream<Row> reviewerEnded() {
-    var anotherBoxs = run("reviewer-1", "node-b", "review", REVIEW, "stopped", ENDED);
-    var ofAnEarlierReview = ended("reviewer-1", "review", "review-0");
-    var startedAfterItEnded =
+  /** The rows of a review whose agent stage is {@code running} since {@code started}. */
+  private static List<ReviewStore.StageRow> runningSince(Instant started) {
+    return List.of(
         new ReviewStore.StageRow(
             "stage-codex",
             REVIEW,
@@ -403,10 +533,47 @@ class LoopDecisionTest {
             "agent",
             "running",
             "codex",
-            ENDED.plusSeconds(1).toString(),
+            started.toString(),
             null,
-            null);
+            null),
+        stage("approve", "human", "pending"));
+  }
+
+  private static Stream<Row> reviewerEnded() {
+    var anotherBoxs = run("reviewer-1", "node-b", "review", REVIEW, "stopped", ENDED);
+    var ofAnEarlierReview = ended("reviewer-1", "review", "review-0");
     return Stream.of(
+        row(
+            "R2 a stage started the moment its reviewer was recorded is that reviewer's",
+            facts().review(RUNNING, runningSince(RECORDED)).serving(REVIEWER),
+            reviewerEnded(REVIEWER),
+            new LoopStep.ReadVerdict(RUNNING, 0, REVIEWER, Optional.empty())),
+        row(
+            "R2 a stage started the moment its reviewer ended is that reviewer's",
+            facts().review(RUNNING, runningSince(ENDED)).serving(REVIEWER),
+            reviewerEnded(REVIEWER),
+            new LoopStep.ReadVerdict(RUNNING, 0, REVIEWER, Optional.empty())),
+        row(
+            "R2 a stage started before the reviewer was recorded is another reviewer's",
+            facts().review(RUNNING, runningSince(RECORDED.minusSeconds(1))).serving(REVIEWER),
+            reviewerEnded(REVIEWER),
+            new LoopStep.Resume(RUNNING)),
+        row(
+            "R1 a late reviewer's stop looks at no pipeline: its review ended",
+            facts()
+                .review(review("passed"), stages("passed", "passed"))
+                .serving(REVIEWER)
+                .pipeline(new LoopFacts.Pipeline.None()),
+            reviewerEnded(REVIEWER),
+            NOTHING),
+        row(
+            "P a reviewer no stage waits on, under a pipeline that lost its stages",
+            facts()
+                .review(RUNNING, stages("pending", "pending"))
+                .serving(REVIEWER)
+                .pipeline(new LoopFacts.Pipeline.None()),
+            reviewerEnded(REVIEWER),
+            escalate(RUNNING, ReviewNarration.noStages())),
         row(
             "R4 the reviewer its review waits on",
             reviewed(),
@@ -470,11 +637,17 @@ class LoopDecisionTest {
             new LoopStep.Resume(RUNNING)),
         row(
             "R2 a stage started after the reviewer ended is another reviewer's",
-            facts()
-                .review(RUNNING, List.of(startedAfterItEnded, stage("approve", "human", "pending")))
-                .serving(REVIEWER),
+            facts().review(RUNNING, runningSince(ENDED.plusSeconds(1))).serving(REVIEWER),
             reviewerEnded(REVIEWER),
             new LoopStep.Resume(RUNNING)),
+        row(
+            "P is asked before a stage is looked for: a reviewer its review awaits, no stage of it",
+            facts()
+                .review(RUNNING, stages("passed", "running"))
+                .serving(REVIEWER)
+                .pipeline(new LoopFacts.Pipeline.None()),
+            reviewerEnded(REVIEWER),
+            escalate(RUNNING, ReviewNarration.noStages())),
         row(
             "R2 a person's stage is never a reviewer's to judge",
             facts().review(RUNNING, stages("passed", "running")).serving(REVIEWER),
@@ -486,28 +659,36 @@ class LoopDecisionTest {
     var judged = facts().review(RUNNING, stages("passed", "pending")).serving(REVIEWER);
     return Stream.of(
         row(
-            "a stage that passed leads to the next",
+            "J1 a stage that passed leads to the next",
             judged,
             new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.Passed()),
             new LoopStep.AwaitAPerson(RUNNING, 1)),
         row(
-            "a stage that failed its gate",
+            "J1 a stage that passed leads to no other for a spec someone took meanwhile",
+            facts()
+                .spec(SpecStatus.CANCELLED)
+                .review(RUNNING, stages("passed", "pending"))
+                .serving(REVIEWER),
+            new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.Passed()),
+            NOTHING),
+        row(
+            "J2 a stage that failed its gate",
             judged,
             new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.GateFailed()),
             new LoopStep.FailGate(RUNNING)),
         row(
-            "a stage that errored",
+            "J3 a stage that errored",
             judged,
             new LoopTrigger.StageJudged(
                 REVIEW, 1, new StageVerdicts.StageOutcome.Errored("unparseable")),
             new LoopStep.ErrorReview(RUNNING, 1, "unparseable", true)),
         row(
-            "a verdict on a review a re-dispatch superseded",
+            "J0 a verdict on a review a re-dispatch superseded",
             facts(),
             new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.GateFailed()),
             NOTHING),
         row(
-            "a verdict on a review a re-dispatch's review replaced",
+            "J0 a verdict on a review a re-dispatch's review replaced",
             judged,
             new LoopTrigger.StageJudged("review-0", 0, new StageVerdicts.StageOutcome.GateFailed()),
             NOTHING));
@@ -543,71 +724,81 @@ class LoopDecisionTest {
             fixEnded(FIXER),
             new LoopStep.Resume(RUNNING)),
         row(
-            "what a fix agent left is committed: the branch is judged again",
+            "F5 what a fix agent left is committed: the branch is judged again",
             fixed(),
             new LoopTrigger.FixCommitted(FIXER),
             new LoopStep.StartReview(2)),
         row(
-            "committed, and the review was superseded meanwhile",
+            "F4 committed, and the review was superseded meanwhile",
             facts().serving(FIXER),
             new LoopTrigger.FixCommitted(FIXER),
             NOTHING),
         row(
-            "committed, and the review is no longer the failed one the fix answered",
+            "F4 committed, and the review is no longer the failed one the fix answered",
             facts().review(RUNNING, List.of()).serving(FIXER),
             new LoopTrigger.FixCommitted(FIXER),
             NOTHING),
         row(
-            "P committed under a pipeline that changed while the fix ran",
+            "F5 P committed under a pipeline that changed while the fix ran",
             fixed().pipeline(new LoopFacts.Pipeline.None()),
             new LoopTrigger.FixCommitted(FIXER),
             escalate(GATE_FAILED, ReviewNarration.noStages())),
         row(
-            "what a fix agent left could not be committed",
+            "F7 what a fix agent left could not be committed",
             fixed(),
             new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
             new LoopStep.FailFix(
                 GATE_FAILED, "fix agent's work could not be committed: push rejected")),
         row(
-            "not committed, and the review was superseded meanwhile",
+            "F6 not committed, and the review was superseded meanwhile",
             facts().serving(FIXER),
             new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
             NOTHING),
         row(
-            "not committed, and a re-dispatch's review replaced the one the fix answered",
+            "F6 not committed, and a re-dispatch's review replaced the one the fix answered",
             facts().review(GATE_FAILED, stages("failed", "pending")).serving(answeredAnother),
             new LoopTrigger.FixNotCommitted(answeredAnother, "push rejected"),
             NOTHING),
         row(
-            "not committed, and the review is no longer the failed one the fix answered",
+            "F6 not committed, and the review is no longer the failed one the fix answered",
             facts().review(RUNNING, List.of()).serving(FIXER),
             new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
             NOTHING));
   }
 
-  private static Stream<Row> launchFailed() {
+  private static Stream<Row> notStarted() {
     var launching = facts().review(RUNNING, stages("passed", "pending"));
     return Stream.of(
         row(
-            "a reviewer that could not start",
+            "L1 a reviewer that could not start",
             launching,
-            new LoopTrigger.LaunchFailed(REVIEW, Lane.REVIEW, 1, "container refused"),
+            new LoopTrigger.ReviewerNotStarted(REVIEW, 1, "container refused"),
             new LoopStep.ErrorReview(
                 RUNNING, 1, "reviewer could not start: container refused", false)),
         row(
-            "a fix agent that could not start",
-            owedAFix(GATE_FAILED),
-            new LoopTrigger.LaunchFailed(REVIEW, Lane.FIX, 0, "container refused"),
-            new LoopStep.FailFix(GATE_FAILED, "fix agent could not start: container refused")),
-        row(
-            "a launch that failed for a review a re-dispatch superseded",
+            "L0 a reviewer that could not start for a review a re-dispatch superseded",
             facts(),
-            new LoopTrigger.LaunchFailed(REVIEW, Lane.FIX, 0, "container refused"),
+            new LoopTrigger.ReviewerNotStarted(REVIEW, 1, "container refused"),
             NOTHING),
         row(
-            "a launch that failed for a review a re-dispatch's review replaced",
+            "L0 a reviewer that could not start for a review a re-dispatch's review replaced",
+            launching,
+            new LoopTrigger.ReviewerNotStarted("review-0", 1, "container refused"),
+            NOTHING),
+        row(
+            "L2 a fix agent that could not start",
             owedAFix(GATE_FAILED),
-            new LoopTrigger.LaunchFailed("review-0", Lane.FIX, 0, "container refused"),
+            new LoopTrigger.FixNotStarted(REVIEW, "container refused"),
+            new LoopStep.FailFix(GATE_FAILED, "fix agent could not start: container refused")),
+        row(
+            "L0 a fix agent that could not start for a review a re-dispatch superseded",
+            facts(),
+            new LoopTrigger.FixNotStarted(REVIEW, "container refused"),
+            NOTHING),
+        row(
+            "L0 a fix agent that could not start for a review a re-dispatch's review replaced",
+            owedAFix(GATE_FAILED),
+            new LoopTrigger.FixNotStarted("review-0", "container refused"),
             NOTHING));
   }
 
@@ -630,6 +821,11 @@ class LoopDecisionTest {
             new LoopTrigger.OperatorStopped(REVIEWER),
             escalate(ERRORED, ReviewNarration.stoppedByAnOperator("reviewer"))),
         row(
+            "O3 an operator stopped the reviewer of a legacy pending review",
+            facts().review(review("pending"), stages("running", "pending")).serving(REVIEWER),
+            new LoopTrigger.OperatorStopped(REVIEWER),
+            escalate(review("pending"), ReviewNarration.stoppedByAnOperator("reviewer"))),
+        row(
             "O1 the halt is still under way",
             reviewed().serving(stopping),
             new LoopTrigger.OperatorStopped(stopping),
@@ -649,12 +845,13 @@ class LoopDecisionTest {
   private static Stream<Row> rows() {
     return Stream.of(
             buildEnded(),
+            freed(),
             goOn(),
             reviewRunning(),
             reviewerEnded(),
             stageJudged(),
             fixEnded(),
-            launchFailed(),
+            notStarted(),
             operatorStopped())
         .flatMap(rows -> rows);
   }

@@ -24,12 +24,19 @@ import java.util.function.Supplier;
  *
  * <p>A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
  * replaced — never repeats a step: the loop goes on from what the review's rows say it is owed
- * ({@link LoopFacts#owed}), which is both its retry and its crash recovery. And before any step on
- * an existing review, one the pipeline can no longer judge ({@link LoopFacts#unfit}) is escalated.
+ * ({@link LoopFacts.Rows#owed}), which is both its retry and its crash recovery. And before any
+ * step on an existing review, one the pipeline can no longer judge ({@link LoopFacts#unfit}) is
+ * escalated.
  */
 final class LoopDecision {
 
-  static final String NO_REVIEWER =
+  /**
+   * How many errored attempts of one iteration may accumulate before the spec escalates. Each is
+   * retried on a replayed stop: bounded, a transient failure heals and a persistent one surfaces.
+   */
+  static final int MAX_ERRORED_RETRIES = 3;
+
+  private static final String NO_REVIEWER =
       "no reviewer agent resolved; set stages[].agent or agent.install in sail.yaml";
 
   private static final String NOT_COMMITTED = "fix agent's work could not be committed: ";
@@ -37,16 +44,18 @@ final class LoopDecision {
   private LoopDecision() {}
 
   static LoopStep next(LoopFacts facts, LoopTrigger trigger) {
+    var rows = facts.rows();
     return switch (trigger) {
       case LoopTrigger.BuildEnded build -> buildEnded(facts, build);
       case LoopTrigger.ReviewerEnded reviewer -> reviewerEnded(facts, reviewer);
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
+      case LoopTrigger.Freed freed -> freed(facts);
       case LoopTrigger.GoOn goOn -> goOn(facts);
-      case LoopTrigger.ReviewRunning running -> on(facts.review(), review -> inItsStages(facts));
+      case LoopTrigger.ReviewRunning running -> on(rows.review(), review -> inItsStages(facts));
       case LoopTrigger.StageJudged judged ->
           on(
-              facts.latest(judged.reviewId()),
+              rows.latest(judged.reviewId()),
               review ->
                   switch (judged.outcome()) {
                     case StageOutcome.Passed passed -> inItsStages(facts);
@@ -54,15 +63,23 @@ final class LoopDecision {
                     case StageOutcome.Errored errored ->
                         new LoopStep.ErrorReview(review, judged.stage(), errored.message(), true);
                   });
-      case LoopTrigger.LaunchFailed failed ->
-          on(facts.latest(failed.reviewId()), review -> launchFailed(review, failed));
+      case LoopTrigger.ReviewerNotStarted failed ->
+          on(
+              rows.latest(failed.reviewId()),
+              review ->
+                  new LoopStep.ErrorReview(
+                      review, failed.stage(), notStarted(Lane.REVIEW, failed.why()), false));
+      case LoopTrigger.FixNotStarted failed ->
+          on(
+              rows.latest(failed.reviewId()),
+              review -> new LoopStep.FailFix(review, notStarted(Lane.FIX, failed.why())));
       case LoopTrigger.FixCommitted committed ->
           on(
-              facts.awaited(committed.run(), "failed"),
+              rows.awaited(committed.run(), "failed"),
               review -> fit(facts, () -> new LoopStep.StartReview(review.iteration() + 1)));
       case LoopTrigger.FixNotCommitted failed ->
           on(
-              facts.awaited(failed.run(), "failed"),
+              rows.awaited(failed.run(), "failed"),
               review -> new LoopStep.FailFix(review, NOT_COMMITTED + failed.why()));
     };
   }
@@ -75,16 +92,17 @@ final class LoopDecision {
    * working fix agent, nor one beside the build that replaced this one.
    */
   private static LoopStep buildEnded(LoopFacts facts, LoopTrigger.BuildEnded build) {
-    if (!facts.loops()) {
+    var rows = facts.rows();
+    if (!rows.loops()) {
       return new LoopStep.Nothing();
     }
-    if (build.runId() != null && facts.replaced(build.runId())) {
+    if (build.runId() != null && rows.replaced(build.runId())) {
       return goOn(facts);
     }
     if (build.exitCode() != null && build.exitCode() != 0) {
       return new LoopStep.SayBuildFailed(build.exitCode());
     }
-    if (facts.review().isPresent()) {
+    if (rows.review().isPresent()) {
       return goOn(facts);
     }
     return switch (facts.pipeline()) {
@@ -97,8 +115,8 @@ final class LoopDecision {
 
   /** The reviewer its review waits on has its stage judged; any other reviewer's stop is late. */
   private static LoopStep reviewerEnded(LoopFacts facts, LoopTrigger.ReviewerEnded ended) {
-    var review = facts.awaited(ended.run(), "pending", "running").orElse(null);
-    var stage = facts.stageReviewedBy(ended.run()).orElse(null);
+    var review = facts.rows().awaited(ended.run(), "pending", "running").orElse(null);
+    var stage = facts.rows().stageReviewedBy(ended.run()).orElse(null);
     if (review == null) {
       return goOn(facts);
     }
@@ -117,7 +135,7 @@ final class LoopDecision {
    * its is committed, the branch still holds the code the reviewer failed, and the spec escalates.
    */
   private static LoopStep fixEnded(LoopFacts facts, LoopTrigger.FixEnded ended) {
-    var review = facts.awaited(ended.run(), "failed").filter(failed -> !failed.errored());
+    var review = facts.rows().awaited(ended.run(), "failed").filter(failed -> !failed.errored());
     if (review.isEmpty()) {
       return goOn(facts);
     }
@@ -131,35 +149,46 @@ final class LoopDecision {
    * An operator's stop of a reviewer or a fix agent is a person's decision about the loop, so the
    * loop does not retry over it: the review escalates — also when the stop landed while the run was
    * still launching and the failed launch already errored the review. A build they stopped has no
-   * review to escalate. While the halt is under way nothing is decided: a failed one gives it back.
+   * review to escalate. While the halt is under way nothing is decided: a halt that fails gives the
+   * run back to the loop.
    */
   private static LoopStep operatorStopped(LoopFacts facts, RunRow run) {
     var reason = ReviewNarration.stoppedByAnOperator(noun(run.lane().orElse(Lane.REVIEW)));
     return Optional.of(run)
         .filter(stopped -> RunStatus.isTerminal(stopped.status()))
-        .flatMap(stopped -> facts.awaited(stopped, "pending", "running", "failed"))
+        .flatMap(stopped -> facts.rows().awaited(stopped, "pending", "running", "failed"))
         .<LoopStep>map(review -> new LoopStep.Escalate(review, reason))
         .orElseGet(LoopStep.Nothing::new);
   }
 
-  private static LoopStep goOn(LoopFacts facts) {
-    return facts.loops() ? owed(facts, facts.owed()) : new LoopStep.Nothing();
+  /**
+   * Only a recorded wait is acted on when a stop frees a claim, and only by the box that drives the
+   * spec's loop: an errored review keeps to the reconciler's pace, one whose launch was cut short
+   * is the reconciler's to rescue, and one whose run has ended waits for that run's own stop.
+   */
+  private static LoopStep freed(LoopFacts facts) {
+    var rows = facts.rows();
+    return rows.drivenHere() && rows.owed() instanceof Owed.Waiting
+        ? goOn(facts)
+        : new LoopStep.Nothing();
   }
 
   /**
    * An errored review runs its iteration again — an infrastructure error burns none — within its
    * budget. One whose reviewer or fix agent has ended is left to that run's own stop, the only word
-   * on what its work is worth, and a wait holds its step until the run it waits on has ended.
+   * on what its work is worth, and a wait holds its step while the run it waits on lives.
    */
-  private static LoopStep owed(LoopFacts facts, Owed owed) {
-    var retries = ReviewPipelineController.MAX_ERRORED_RETRIES;
-    return switch (owed) {
+  private static LoopStep goOn(LoopFacts facts) {
+    if (!facts.rows().loops()) {
+      return new LoopStep.Nothing();
+    }
+    var retries = MAX_ERRORED_RETRIES;
+    return switch (facts.rows().due()) {
       case Owed.Retry(var review) when facts.erroredAttempts() >= retries ->
           new LoopStep.Escalate(review, ReviewNarration.erroredOut(retries, review.iteration()));
       case Owed.Retry(var review) -> fit(facts, () -> new LoopStep.StartReview(review.iteration()));
       case Owed.Advance(var review) -> fit(facts, () -> new LoopStep.Resume(review));
       case Owed.Fix(var review) -> fit(facts, () -> fix(facts, review));
-      case Owed.Waiting waiting when facts.holderEnded() -> owed(facts, waiting.step());
       case Owed.Waiting stillHeld -> new LoopStep.Nothing();
       case Owed.Stop awaitsItsStop -> new LoopStep.Nothing();
       case Owed.Nothing nothing -> new LoopStep.Nothing();
@@ -169,18 +198,24 @@ final class LoopDecision {
   /**
    * The step of a running review: the first configured stage whose row has not passed, or is not
    * written yet, is the one it is in. An agent stage with no reviewer to resolve is an
-   * infrastructure error like any other, and with every stage passed the review has.
+   * infrastructure error like any other, and a review whose every stage has passed has passed. No
+   * stage is started for a spec that is no longer the loop's to move: someone took it while the
+   * step before this one ran, and the loop starts no agent over their decision.
    */
   private static LoopStep inItsStages(LoopFacts facts) {
-    return fit(facts, () -> stageStep(facts, facts.review().orElseThrow()));
+    return fit(facts, () -> stageStep(facts, facts.rows().review().orElseThrow()));
   }
 
   private static LoopStep stageStep(LoopFacts facts, ReviewRow review) {
     var configured = facts.staged().config().stages();
+    var rows = facts.rows().stages();
     for (var place = 0; place < configured.size(); place++) {
-      var status = place < facts.stages().size() ? facts.stages().get(place).status() : "pending";
+      var status = place < rows.size() ? rows.get(place).status() : "pending";
       if ("passed".equals(status)) {
         continue;
+      }
+      if (!facts.rows().loops()) {
+        return new LoopStep.Nothing();
       }
       var stage = place;
       var stageConfig = configured.get(place);
@@ -192,7 +227,7 @@ final class LoopDecision {
       return facts
           .staged()
           .reviewer(stageConfig)
-          .<LoopStep>map(agent -> new LoopStep.LaunchReviewer(review, stage, stageConfig, agent))
+          .<LoopStep>map(agent -> new LoopStep.LaunchReviewer(review, stage, agent))
           .orElseGet(() -> new LoopStep.ErrorReview(review, stage, NO_REVIEWER, false));
     }
     return new LoopStep.Pass(review);
@@ -208,10 +243,10 @@ final class LoopDecision {
    */
   private static LoopStep fix(LoopFacts facts, ReviewRow review) {
     var config = facts.staged().config();
-    var failed = facts.stages().stream().filter(stage -> "failed".equals(stage.status()));
     var gate =
-        failed
-            .findFirst()
+        facts
+            .rows()
+            .failedStage()
             .flatMap(
                 stage ->
                     config.stages().stream()
@@ -235,18 +270,15 @@ final class LoopDecision {
         : new LoopStep.LaunchFix(review, facts.openFindings());
   }
 
-  private static LoopStep launchFailed(ReviewRow review, LoopTrigger.LaunchFailed failed) {
-    var why = noun(failed.lane()) + " could not start: " + failed.why();
-    return failed.lane() == Lane.FIX
-        ? new LoopStep.FailFix(review, why)
-        : new LoopStep.ErrorReview(review, failed.stage(), why, false);
+  private static String notStarted(Lane lane, String why) {
+    return noun(lane) + " could not start: " + why;
   }
 
   /** {@code step}, unless the project's pipeline can no longer judge the spec's review. */
   private static LoopStep fit(LoopFacts facts, Supplier<LoopStep> step) {
     return facts
         .unfit()
-        .<LoopStep>map(unfit -> new LoopStep.Escalate(facts.review().orElseThrow(), unfit))
+        .<LoopStep>map(unfit -> new LoopStep.Escalate(facts.rows().review().orElseThrow(), unfit))
         .orElseGet(step);
   }
 

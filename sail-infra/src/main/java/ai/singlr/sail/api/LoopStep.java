@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.config.ReviewPipelineConfig.StageConfig;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
 import ai.singlr.sail.store.RunStore;
@@ -14,7 +13,8 @@ import java.util.Optional;
 
 /**
  * One step of a spec's review loop: what to do, decided by {@link LoopDecision#next} and carried
- * out by {@link LoopSteps}. A stage is named by its place in the pipeline, its row's in the review.
+ * out by {@link LoopSteps}. A stage is named by its place in the pipeline, which is its row's place
+ * in the review.
  */
 sealed interface LoopStep {
 
@@ -32,8 +32,7 @@ sealed interface LoopStep {
   /** Go on with a review no run serves: it is running from here on, with its spec in review. */
   record Resume(ReviewRow review) implements LoopStep {}
 
-  record LaunchReviewer(ReviewRow review, int stage, StageConfig stageConfig, String agent)
-      implements LoopStep {}
+  record LaunchReviewer(ReviewRow review, int stage, String agent) implements LoopStep {}
 
   record AwaitAPerson(ReviewRow review, int stage) implements LoopStep {}
 

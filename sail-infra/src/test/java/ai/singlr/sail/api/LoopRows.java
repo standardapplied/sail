@@ -226,20 +226,16 @@ final class LoopRows {
     }
 
     LoopFacts build() {
-      return new LoopFacts(
-          PROJECT,
-          SPEC,
-          NODE,
-          Optional.ofNullable(spec),
-          Optional.ofNullable(review),
-          stages,
-          serving,
-          Optional.ofNullable(newest),
-          pipeline,
-          open,
-          failedStage,
-          erroredAttempts,
-          holderEnded);
+      var rows =
+          new LoopFacts.Rows(
+              NODE,
+              Optional.ofNullable(spec),
+              Optional.ofNullable(review),
+              stages,
+              serving,
+              Optional.ofNullable(newest),
+              holderEnded);
+      return new LoopFacts(PROJECT, SPEC, rows, pipeline, open, failedStage, erroredAttempts);
     }
   }
 }
