@@ -14,6 +14,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * What the review pipeline says in a spec's room and on its events: the verdict of each review, the
@@ -107,11 +108,21 @@ final class ReviewNarration {
     return agent + " stopped by an operator; re-dispatch with --restart to start a fresh attempt";
   }
 
-  /** Why a review whose project's pipeline cannot be read, for {@code why}, is a person's. */
+  /**
+   * Why a review whose project's pipeline cannot be read is a person's: the first line of {@code
+   * why} that says anything, which names the project and the fault — a parser's message runs on for
+   * lines, and the rest of it is the descriptor's to show — and what to do about it.
+   */
   static String pipelineUnreadable(String why) {
-    return "the project's review pipeline could not be read ("
-        + why
-        + "); fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
+    var fault =
+        Stream.ofNullable(why)
+            .flatMap(String::lines)
+            .map(String::strip)
+            .filter(line -> !line.isEmpty())
+            .findFirst()
+            .orElse("the project's review pipeline could not be read");
+    return fault
+        + "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
         + " --restart";
   }
 

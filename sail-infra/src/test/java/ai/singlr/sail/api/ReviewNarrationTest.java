@@ -170,4 +170,27 @@ class ReviewNarrationTest {
     assertEquals(List.of("critical", "low"), List.copyOf(counts.keySet()));
     assertTrue(ReviewNarration.severityCounts(List.of()).isEmpty());
   }
+
+  @Test
+  void anUnreadablePipelineIsSaidByTheFirstLineOfWhatWentWrongAndWhatToDo() {
+    var parse =
+        ReviewNarration.pipelineUnreadable(
+            "sail.yaml of project 'acme' could not be read: while parsing a flow sequence\n"
+                + " in 'reader', line 3, column 9:\n    agent: [unterminated\n");
+
+    assertEquals(
+        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence; fix the"
+            + " project's sail.yaml with `sail project edit`, then re-dispatch with --restart",
+        parse,
+        "a parser's message runs on for lines; a reason is one sentence");
+    assertTrue(
+        ReviewNarration.pipelineUnreadable("\n  guardrails.max_idle is not a duration\n")
+            .startsWith("guardrails.max_idle is not a duration; fix"),
+        "the first line that says anything");
+    for (var nothingSaid : new String[] {null, "", " \n "}) {
+      assertTrue(
+          ReviewNarration.pipelineUnreadable(nothingSaid)
+              .startsWith("the project's review pipeline could not be read; fix"));
+    }
+  }
 }

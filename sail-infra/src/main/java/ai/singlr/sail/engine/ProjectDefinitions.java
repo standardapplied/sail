@@ -165,7 +165,7 @@ public final class ProjectDefinitions {
   public static void persist(String name, Path explicitFile, String definition, Actor operator)
       throws IOException {
     if (explicitFile != null) {
-      Files.writeString(explicitFile, definition);
+      write(explicitFile, definition);
       return;
     }
     ProjectCatalog.record(

@@ -177,7 +177,7 @@ public final class AgentSession {
         pid="$(tr -d '[:space:]' < "$1" 2>/dev/null)"
       fi
       case "$pid" in
-        ''|0|*[!0-9]*|??????????*) pid="" ;;
+        ''|0|*[!0-9]*) pid="" ;;
       esac
       if [ -z "$pid" ] && [ -n "$2" ]; then
         pid="$(systemctl --user show "$2" --property=MainPID --value)" || exit 1

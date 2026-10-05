@@ -118,8 +118,16 @@ class AgentPresenceScriptTest {
 
   @Test
   void aPidFileIsReadAsItsStatusReadsItSoThePidZeroAndAPaddedPidAreNotMisread() throws Exception {
-    agent = new ProcessBuilder("sleep", "300").start();
+    agent = new ProcessBuilder("true").start();
+    agent.waitFor();
     var silent = managerThat("exit 1\n");
+    var padded =
+        new AgentUnit(
+            "sail-agent-test",
+            "agent.log",
+            Files.writeString(dir.resolve("padded.pid"), "  " + agent.pid() + " \r\n").toString(),
+            "agent-session.json",
+            "task.txt");
     var zero =
         new AgentUnit(
             "sail-agent-test",
@@ -129,9 +137,10 @@ class AgentPresenceScriptTest {
             "task.txt");
 
     assertInstanceOf(
-        AgentSession.Presence.Running.class,
-        presenceOf(unitWithPidFile("  " + agent.pid() + " \r\n")),
-        "the pid is the file's content less its whitespace");
+        AgentSession.Presence.Gone.class,
+        new AgentSession(silent).presence("acme-health", padded),
+        "the pid is the file's content less its whitespace: it names a process that ended, so"
+            + " the manager, which does not answer, is never asked");
     assertInstanceOf(
         AgentSession.Presence.Unanswered.class,
         new AgentSession(silent).presence("acme-health", zero),

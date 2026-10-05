@@ -19,6 +19,7 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -540,7 +541,8 @@ public final class Fleet implements AutoCloseable {
       if (joined.contains("incus list")) {
         return new Result(0, RUNNING_JSON, "");
       }
-      return new Result(0, joined.endsWith("/agent.log") ? CLEAN_REVIEW : "", "");
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(0, joined.endsWith("/agent.log") ? CLEAN_REVIEW : "", ""));
     }
 
     @Override
