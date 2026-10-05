@@ -16,6 +16,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -34,6 +35,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -1052,6 +1054,101 @@ class StopOperationsTest {
   }
 
   @Test
+  void aStopWhoseContainerGivesNoAnswerAboutTheAgentFailsWithNothingWritten() throws Exception {
+    var halts = new ArrayList<String>();
+    var shell = silentShell().on("incus list ^acme$", RUNNING_JSON);
+    var ops = stopOps(shell, recordingHalter(halts, ENDED), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.AGENT_STATUS_FAILED, refusal.failure().errorCode());
+    assertEquals(
+        "running",
+        runStore.findById(R1).orElseThrow().status(),
+        "incus lists the container running and it ran no command: a live agent and a dead one"
+            + " read alike, so the run is not recorded as either");
+    assertEquals(SpecStatus.IN_PROGRESS, specStore.findById("auth").orElseThrow().status());
+    assertTrue(events.isEmpty(), "no cancel is published for a run nobody could ask about");
+    assertTrue(halts.isEmpty());
+  }
+
+  @Test
+  void aRetriedStopWhoseContainerStillGivesNoAnswerKeepsItsClaim() throws Exception {
+    var shell = silentShell().on("incus list ^acme$", RUNNING_JSON);
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+    interruptStop();
+
+    var refusal =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(
+                    ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false)));
+
+    assertEquals(ErrorCode.AGENT_STATUS_FAILED, refusal.failure().errorCode());
+    assertEquals(
+        StopOperations.STOPPING,
+        runStore.findById(R1).orElseThrow().status(),
+        "the claim waits for a container that answers; it is not finalized over a silent one");
+    assertTrue(events.isEmpty());
+  }
+
+  @Test
+  void oneLostLivenessCommandNeverRecordsALiveAgentAsGone() throws Exception {
+    var halts = new ArrayList<String>();
+    var shell = liveAgentShell();
+    shell
+        .on("kill -0 123", new ShellExec.Result(1, "", "websocket: close 1006"))
+        .on("printf gone", "alive")
+        .hookOn("printf gone", () -> shell.on("kill -0 123", ""));
+    var ops = stopOps(shell, recordingHalter(halts, ENDED), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(
+        StopOperations.Stopped.class,
+        outcome,
+        "the agent was asked after again once the container answered, found alive, and halted");
+    assertEquals(1, halts.size());
+  }
+
+  @Test
+  void anAgentInAStoppedContainerIsRecordedGone() throws Exception {
+    var shell =
+        silentShell()
+            .on(
+                "incus list ^acme$",
+                """
+                [{"name": "acme", "status": "Stopped", "state": {}}]
+                """);
+    var ops = stopOps(shell, failingHalter(), StopOperations.Listener.NONE);
+    seedSpec("auth", SpecStatus.IN_PROGRESS, LOCAL_HANDLE);
+    seedRun(123, UNIT);
+
+    var outcome =
+        Actor.call(ADMIN, () -> ops.stop(new StopOperations.RunTarget(R1), LOCAL_HANDLE, false));
+
+    assertInstanceOf(StopOperations.NotRunning.class, outcome);
+    assertEquals(
+        "stopped",
+        runStore.findById(R1).orElseThrow().status(),
+        "a stopped container runs no agent: that is incus's answer, and it is one");
+    assertEquals(SpecStatus.CANCELLED, specStore.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void aStopRetryFinalizesAnInterruptedClaimWhoseAgentDied() throws Exception {
     var shell =
         shell()
@@ -1501,8 +1598,17 @@ class StopOperationsTest {
     };
   }
 
+  /**
+   * A container that answers: it runs a command, and its unit manager says the run's unit has no
+   * process unless a test says otherwise.
+   */
   private static FakeShell shell() {
-    return new FakeShell();
+    return new FakeShell(true);
+  }
+
+  /** A container no command runs in, whatever incus lists it as. */
+  private static FakeShell silentShell() {
+    return new FakeShell(false);
   }
 
   private static final class FakeShell implements ShellExec {
@@ -1510,6 +1616,11 @@ class StopOperationsTest {
     private final Map<String, Exception> failures = new LinkedHashMap<>();
     private final Map<String, Runnable> hooks = new LinkedHashMap<>();
     private final List<String> invocations = new ArrayList<>();
+    private final boolean reachable;
+
+    FakeShell(boolean reachable) {
+      this.reachable = reachable;
+    }
 
     FakeShell on(String pattern, String stdout) {
       return on(pattern, new Result(0, stdout, ""));
@@ -1549,7 +1660,10 @@ class StopOperationsTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return Optional.of(joined)
+          .filter(asked -> reachable)
+          .flatMap(ScriptedShellExecutor::reachableContainer)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

@@ -1871,10 +1871,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      var applied = new LinkedHashMap<>(snapshot);
-      findById(id)
-          .map(RunStore::snapshotMap)
-          .ifPresent(local -> LOCAL_FIELDS.forEach(field -> applied.put(field, local.get(field))));
+      var local = findById(id).map(RunStore::snapshotMap).orElse(null);
+      var applied = EntitySchema.keepingLocal(snapshot, local, LOCAL_FIELDS);
       writeRow(rowFrom(id, applied));
       recordPrincipals(id, applied);
     }

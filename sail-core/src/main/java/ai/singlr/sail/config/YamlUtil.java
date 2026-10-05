@@ -114,10 +114,19 @@ public final class YamlUtil {
   /**
    * Dumps in block style: these files ({@code host.yaml}, {@code config.yaml}, {@code sail.yaml})
    * are declarative configuration the operator edits by hand, and the default flow style emits a
-   * single-line {@code {...}} map that is hostile to both editing and diffing.
+   * single-line {@code {...}} map that is hostile to both editing and diffing. A list's items sit
+   * indented under their key, and a long value — a verify command — stays on its one line rather
+   * than fold at a column, as a person would write them.
    */
   public static String dumpToString(Map<String, Object> map) {
-    var dump = new Dump(DumpSettings.builder().setDefaultFlowStyle(FlowStyle.BLOCK).build());
+    var dump =
+        new Dump(
+            DumpSettings.builder()
+                .setDefaultFlowStyle(FlowStyle.BLOCK)
+                .setIndicatorIndent(2)
+                .setIndentWithIndicator(true)
+                .setWidth(Integer.MAX_VALUE)
+                .build());
     return dump.dumpToString(map);
   }
 

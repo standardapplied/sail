@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.authority.RunAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.HostInfo;
@@ -17,6 +18,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.LinkedHashMap;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -52,15 +54,17 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * theft, and a run that persisted its agent pid is additionally guarded against in-container pid
  * reuse — a stale file naming a different live pid, or the recorded pid itself reoccupied by a
  * process whose {@code /proc} start-time fingerprint no longer matches the one persisted at launch,
- * refuses with a conflict instead of authorizing a kill, and the verified halt re-probes before
- * anything is finalized. A run that is no longer its spec's latest attempt is never a lever to
- * cancel newer work (a terminal one is {@link AlreadyTerminal}; a live or dead one is halted or
- * released without touching the spec), and a second stop of the same run is idempotent by
- * construction, returning {@link AlreadyTerminal} without signalling anything.
+ * refuses with a conflict instead of authorizing a kill. Whether there is an agent to halt at all
+ * is the container's to say ({@link AgentPresence}): an agent is recorded as already gone only on
+ * that answer, and a container that gave none fails the stop with nothing written. A run that is no
+ * longer its spec's latest attempt is never a lever to cancel newer work (a terminal one is {@link
+ * AlreadyTerminal}; a live or dead one is halted or released without touching the spec), and a
+ * second stop of the same run is idempotent by construction, returning {@link AlreadyTerminal}
+ * without signalling anything.
  */
 public final class StopOperations {
 
-  /** The run status a committed stop claim holds between the claim and its verified finish. */
+  /** The run status a committed stop claim holds until its halt reports the agent ended. */
   static final String STOPPING = "stopping";
 
   /** What a stop should act on: one project's active run (CLI) or an exact run id (API). */
@@ -258,19 +262,19 @@ public final class StopOperations {
       return new NotRunning(run.id(), run.specId(), true, false);
     }
     var unit = runUnit(run);
-    var info = probe(run.project(), unit);
-    if (info == null || !info.running()) {
+    var agent = probe(run.project(), unit).orElse(null);
+    if (agent == null) {
       if (dryRun) {
         return new NotRunning(run.id(), specIdOf(run), previewCancel(run, spec), true);
       }
       return new NotRunning(run.id(), specIdOf(run), recordIntent(run, spec), true);
     }
-    requirePidOwnership(run, info.pid());
-    listener.halting(run.project(), unit.unitName(), info.pid());
+    requirePidOwnership(run, agent.pid());
+    listener.halting(run.project(), unit.unitName(), agent.pid());
     if (dryRun) {
-      return new Stopped(run.id(), specIdOf(run), info.pid(), previewCancel(run, spec));
+      return new Stopped(run.id(), specIdOf(run), agent.pid(), previewCancel(run, spec));
     }
-    return killVerified(run, spec, unit, info.pid());
+    return haltClaimed(run, spec, unit, agent.pid());
   }
 
   /**
@@ -289,13 +293,10 @@ public final class StopOperations {
    * claim instead waits, as an interrupted stop does, for the operator's retry or the reconciler's
    * interrupted-stop pass to finalize it.
    */
-  private Outcome killVerified(
+  private Outcome haltClaimed(
       RunStore.RunRow run, SpecStore.SpecRow spec, AgentUnit unit, int pid) {
     var cancelled = claimStop(run, spec);
-    if (halt(run.project(), unit) instanceof AgentSession.Halt.Survived) {
-      abortStop(run, spec, cancelled);
-      throw survivedTheStop(pid);
-    }
+    haltOrFail(run, unit, pid, () -> abortStop(run, spec, cancelled));
     finishStop(run);
     return new Stopped(run.id(), specIdOf(run), pid, cancelled);
   }
@@ -304,31 +305,30 @@ public final class StopOperations {
    * Resumes a stop claim left behind by an interrupted kill — a crash between the claim and its
    * finalization. The terminal intent is already durable (the spec is cancelled), so only the
    * process side remains: a dead unit just finalizes the claim and publishes the withheld operator
-   * event, a live one is halted, verified, and then finalized. The same pid identity guard as the
-   * first stop applies — a durable claim is never authority to kill a different process that later
-   * occupies the unit. A halt that does not report the agent ended leaves the claim in place for
-   * the next retry or the reconciler's interrupted-stop pass — never restored, because the original
-   * operator intent still stands.
+   * event, a live one is halted and, once its halt reports it ended, finalized. An agent the
+   * container gives no answer about is neither: the retry fails and the claim waits. The same pid
+   * identity guard as the first stop applies — a durable claim is never authority to kill a
+   * different process that later occupies the unit. A halt that does not report the agent ended
+   * leaves the claim in place for the next retry or the reconciler's interrupted-stop pass — never
+   * restored, because the original operator intent still stands.
    */
   private Outcome resumeStop(RunStore.RunRow run, boolean dryRun) {
     var unit = runUnit(run);
-    var info = probe(run.project(), unit);
-    if (info == null || !info.running()) {
+    var agent = probe(run.project(), unit).orElse(null);
+    if (agent == null) {
       if (!dryRun) {
         finishStop(run);
       }
       return new NotRunning(run.id(), specIdOf(run), false, true);
     }
-    requirePidOwnership(run, info.pid());
-    listener.halting(run.project(), unit.unitName(), info.pid());
+    requirePidOwnership(run, agent.pid());
+    listener.halting(run.project(), unit.unitName(), agent.pid());
     if (dryRun) {
-      return new Stopped(run.id(), specIdOf(run), info.pid(), false);
+      return new Stopped(run.id(), specIdOf(run), agent.pid(), false);
     }
-    if (halt(run.project(), unit) instanceof AgentSession.Halt.Survived) {
-      throw survivedTheStop(info.pid());
-    }
+    haltOrFail(run, unit, agent.pid(), () -> {});
     finishStop(run);
-    return new Stopped(run.id(), specIdOf(run), info.pid(), false);
+    return new Stopped(run.id(), specIdOf(run), agent.pid(), false);
   }
 
   /**
@@ -375,9 +375,7 @@ public final class StopOperations {
     return cancelled.get();
   }
 
-  /**
-   * Finalizes a claim whose halt is verified; the event is the winner's to publish, exactly once.
-   */
+  /** Finalizes a claim whose agent is gone; the event is the winner's to publish, exactly once. */
   private void finishStop(RunStore.RunRow run) {
     if (runStore.transition(run.id(), STOPPING, "stopped")) {
       events.publish(operatorCancelEvent(run));
@@ -603,40 +601,57 @@ public final class StopOperations {
     return AgentUnit.recorded(run.id(), Objects.toString(run.unit(), ""));
   }
 
-  private AgentSession.SessionInfo probe(String project, AgentUnit unit) {
+  /**
+   * The run's agent when it is running, or empty when the container answered that it is gone. A
+   * container that gave no answer fails the stop here, before anything is claimed or recorded: an
+   * agent nobody can ask about is not an agent that is not running.
+   */
+  private Optional<AgentSession.SessionInfo> probe(String project, AgentUnit unit) {
+    AgentSession.Presence presence;
     try {
-      return new AgentSession(shell).queryStatus(project, unit);
+      presence = new AgentPresence(shell).of(project, unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
     }
+    return switch (presence) {
+      case AgentSession.Presence.Running running -> Optional.of(running.session());
+      case AgentSession.Presence.Gone gone -> Optional.empty();
+      case AgentSession.Presence.Unanswered silent ->
+          throw new ApiException(
+              ErrorCode.AGENT_STATUS_FAILED,
+              "The container did not answer whether the agent is running.",
+              "Nothing was stopped or recorded. Check that the container is running and"
+                  + " reachable, then retry the stop.");
+    };
   }
 
   /**
-   * Halts the agent and answers {@link AgentSession.Halt.Ended} or {@link
-   * AgentSession.Halt.Survived} — the two things a container can say of it. A halt nothing answered
-   * for, or one that threw, is a stop that failed with nothing known: an unanswered question is
-   * never an answer, so it finalizes nothing.
+   * Halts the agent and returns only once the container answered that it ended. An agent that
+   * survived fails the stop after {@code survived} has run; a halt nothing answered for, or one
+   * that threw, fails it with nothing known: an unanswered question is never an answer, so the
+   * caller finalizes nothing.
    */
-  private AgentSession.Halt halt(String project, AgentUnit unit) {
+  private void haltOrFail(RunStore.RunRow run, AgentUnit unit, int pid, Runnable survived) {
     AgentSession.Halt halt;
     try {
-      halt = halter.halt(project, unit);
+      halt = halter.halt(run.project(), unit);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.AGENT_STOP_FAILED, "Failed to stop agent.", e);
     }
-    if (halt instanceof AgentSession.Halt.Unanswered) {
-      throw new ApiException(
-          ErrorCode.AGENT_STOP_FAILED,
-          "The container did not answer whether the agent stopped.",
-          "Check that the container is running and reachable, then retry the stop.");
+    switch (halt) {
+      case AgentSession.Halt.Ended ended -> {}
+      case AgentSession.Halt.Survived alive -> {
+        survived.run();
+        throw new ApiException(
+            ErrorCode.AGENT_STOP_FAILED,
+            "Agent PID " + pid + " is still running after the stop signal.",
+            "Retry the stop.");
+      }
+      case AgentSession.Halt.Unanswered silent ->
+          throw new ApiException(
+              ErrorCode.AGENT_STOP_FAILED,
+              "The container did not answer whether the agent stopped.",
+              "Check that the container is running and reachable, then retry the stop.");
     }
-    return halt;
-  }
-
-  private static ApiException survivedTheStop(int pid) {
-    return new ApiException(
-        ErrorCode.AGENT_STOP_FAILED,
-        "Agent PID " + pid + " is still running after the stop signal.",
-        "Retry the stop.");
   }
 }

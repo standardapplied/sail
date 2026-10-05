@@ -78,6 +78,22 @@ class YamlUtilTest {
   }
 
   @Test
+  void aListsItemsSitUnderTheirKeyAndALongValueStaysOnItsLine() {
+    var verify = "mvn clean verify -Pintegration && " + "npm run test --workspace web ".repeat(6);
+    var map = new LinkedHashMap<String, Object>();
+    map.put("install", List.of("claude-code", "codex"));
+    map.put("verify", verify.strip());
+
+    var yaml = YamlUtil.dumpToString(map);
+
+    assertTrue(yaml.contains("install:\n  - claude-code\n  - codex\n"), yaml);
+    assertTrue(
+        yaml.contains("verify: " + verify.strip() + "\n"),
+        "a command a person will read and edit is never folded at a column: " + yaml);
+    assertEquals(map, YamlUtil.parseMap(yaml));
+  }
+
+  @Test
   void dumpJsonProducesFlowStyleOutput() {
     var map = new LinkedHashMap<String, Object>();
     map.put("name", "snap-1");

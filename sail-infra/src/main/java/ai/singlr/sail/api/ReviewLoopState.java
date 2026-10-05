@@ -52,11 +52,12 @@ final class ReviewLoopState {
     record Fix(ReviewStore.ReviewRow review) implements Owed {}
 
     /**
-     * The gate refused the review's last launch — a reviewer for a running review, a fix agent for
-     * one that failed its gate — and the review recorded the run that held the claim. It takes that
-     * step again once {@code holderRunId} has ended.
+     * The gate refused the review's last launch, and the review recorded the run that held the
+     * claim ({@link ReviewStore.ReviewRow#waitingOn}). It is owed {@code step} — the {@link
+     * Advance} or {@link Fix} it was refused — and whoever takes it does so only once that run has
+     * ended ({@link #ended}).
      */
-    record Waiting(ReviewStore.ReviewRow review, String holderRunId) implements Owed {}
+    record Waiting(ReviewStore.ReviewRow review, Owed step) implements Owed {}
 
     /**
      * The run the review waited on — the reviewer of its running stage, or the fix agent that
@@ -93,6 +94,14 @@ final class ReviewLoopState {
    */
   boolean served(String reviewId) {
     return serving(reviewId).stream().anyMatch(run -> !RunStatus.isTerminal(run.status()));
+  }
+
+  /**
+   * Whether the run a waiting review waits on holds nothing any more: its row is terminal, or this
+   * box holds no row of it — erased since — and a run with no row holds no claim.
+   */
+  boolean ended(String runId) {
+    return runs.findById(runId).filter(run -> !RunStatus.isTerminal(run.status())).isEmpty();
   }
 
   /**
@@ -148,9 +157,9 @@ final class ReviewLoopState {
         .orElseGet(() -> unserved(review, new Owed.Fix(review)));
   }
 
-  /** What a review no run serves is owed: its recorded wait, or else the step never tried. */
-  private static Owed unserved(ReviewStore.ReviewRow review, Owed untried) {
-    return review.waitingOn() == null ? untried : new Owed.Waiting(review, review.waitingOn());
+  /** What a review no run serves is owed: {@code step}, or to wait for the run that holds it. */
+  private static Owed unserved(ReviewStore.ReviewRow review, Owed step) {
+    return review.waitingOn() == null ? step : new Owed.Waiting(review, step);
   }
 
   private boolean waitsOnPerson(String reviewId) {

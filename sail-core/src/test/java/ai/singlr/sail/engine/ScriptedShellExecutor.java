@@ -14,6 +14,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -90,6 +91,19 @@ public final class ScriptedShellExecutor implements ShellExec {
   public ScriptedShellExecutor onceOnOk(String pattern) {
     consumable.add(pattern);
     return on(pattern, new Result(0, "", ""));
+  }
+
+  /**
+   * What a container that is up, with no agent in it, answers when it is asked whether a run's
+   * agent is there (the one script {@code AgentSession.presence} believes): {@code gone}. Empty for
+   * any other command. A test's own stub shell falls through to this, so that it models a container
+   * with no agent in it rather than a container nobody can reach — which fails every command too,
+   * and of which nothing may be concluded.
+   */
+  public static Optional<Result> reachableContainer(String command) {
+    return command.contains("printf gone") && command.contains("--property=MainPID")
+        ? Optional.of(new Result(0, "gone", ""))
+        : Optional.empty();
   }
 
   /** Returns an unmodifiable list of all commands that were executed, in order. */

@@ -6,8 +6,8 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.Finding;
-import ai.singlr.sail.store.RunStore;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -73,13 +73,69 @@ final class ReviewNarration {
     return "Review escalated: " + reason + ".";
   }
 
+  /** Why a review whose attempts keep failing by infrastructure error is a person's. */
+  static String erroredOut(int attempts, int iteration) {
+    return attempts
+        + " review attempts errored in a row at iteration "
+        + iteration
+        + "; fix the reviewer, then re-dispatch with --restart";
+  }
+
+  /** Why a review a blocking finding has outlived {@code age} fix iterations of is a person's. */
+  static String stuckOn(String finding, int age) {
+    return "finding \""
+        + finding
+        + "\" survived "
+        + age
+        + " fix iterations; the loop is stuck on it — fix or dismiss it, then re-dispatch";
+  }
+
+  /** Why a review that has used every iteration its project allows is a person's. */
+  static String iterationsExhausted(int maxIterations) {
+    return "review iterations exhausted ("
+        + maxIterations
+        + "); re-dispatch with --restart to start a fresh attempt";
+  }
+
+  /** Why a review whose fix iteration failed, for {@code why}, is a person's. */
+  static String fixFailed(String why) {
+    return "fix iteration failed — " + why + "; triage and re-dispatch";
+  }
+
+  /** Why a review whose {@code agent} an operator stopped is a person's. */
+  static String stoppedByAnOperator(String agent) {
+    return agent + " stopped by an operator; re-dispatch with --restart to start a fresh attempt";
+  }
+
+  /** Why a review whose project's pipeline cannot be read, for {@code why}, is a person's. */
+  static String pipelineUnreadable(String why) {
+    return "the project's review pipeline could not be read ("
+        + why
+        + "); fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
+        + " --restart";
+  }
+
+  /** Why a review whose project has no pipeline stages left is a person's. */
+  static String noStages() {
+    return "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+        + " re-dispatch with --restart";
+  }
+
+  /** Why a review one of whose stages the project's pipeline no longer has is a person's. */
+  static String pipelineChanged(String stage) {
+    return "the project's review pipeline changed while this review ran: stage '"
+        + stage
+        + "' is no longer where the review has it; re-dispatch with --restart to review under"
+        + " the pipeline as it is now";
+  }
+
   /**
    * The room line of a review whose launch was refused its claim: the run it waits on, by its id,
    * its lane and the spec it works.
    */
-  static String waiting(RunStore.RunRow holder) {
+  static String waiting(DispatchGate.RunningRun holder) {
     return "Review is waiting for run `"
-        + holder.id()
+        + holder.runId()
         + "` (`"
         + holder.role()
         + "` of `"

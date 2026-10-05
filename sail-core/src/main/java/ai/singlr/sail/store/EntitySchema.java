@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -56,6 +57,18 @@ public interface EntitySchema {
    * conflict on metadata.
    */
   Map<String, Object> comparable(Map<String, Object> full);
+
+  /**
+   * {@code snapshot} as this box adopts it: each of {@code localFields} — the box's own
+   * bookkeeping, which never crosses the wire — keeps the value of the box's own row {@code local},
+   * or none when the box holds no row, whatever the snapshot names for it.
+   */
+  static Map<String, Object> keepingLocal(
+      Map<String, Object> snapshot, Map<String, Object> local, Set<String> localFields) {
+    var adopted = new LinkedHashMap<>(snapshot);
+    localFields.forEach(field -> adopted.put(field, local == null ? null : local.get(field)));
+    return adopted;
+  }
 
   /**
    * Deletes the live row for {@code id} (and any child rows). Runs inside the journal's

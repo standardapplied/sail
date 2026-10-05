@@ -28,6 +28,15 @@ class NotificationsTest {
   }
 
   @Test
+  void anEmptyListOfEventsIsNoListOfEventsSoItIsWrittenBackAsItWasRead() {
+    var all = new Notifications("https://ntfy.sh/sail", List.of());
+
+    assertEquals(new Notifications("https://ntfy.sh/sail", null), all);
+    assertTrue(all.shouldNotify("agent_session_stopped"));
+    assertEquals(all, Notifications.fromMap(all.toMap()));
+  }
+
+  @Test
   void eventsListIsImmutable() {
     var mutable = new java.util.ArrayList<String>(List.of("agent_session_stopped"));
     var n = Notifications.fromMap(Map.of("url", "https://ntfy.sh/test", "events", mutable));

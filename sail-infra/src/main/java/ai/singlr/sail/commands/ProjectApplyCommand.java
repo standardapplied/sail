@@ -760,15 +760,8 @@ public final class ProjectApplyCommand implements Runnable {
   static void syncProjectBundle(Path sourceSailYamlPath, Path canonicalYamlPath) throws Exception {
     var sourceYaml = sourceSailYamlPath.toAbsolutePath().normalize();
     var targetYaml = canonicalYamlPath.toAbsolutePath().normalize();
-    if (targetYaml.getParent() != null) {
-      Files.createDirectories(targetYaml.getParent());
-    }
     if (!sourceYaml.equals(targetYaml)) {
-      Files.copy(
-          sourceYaml,
-          targetYaml,
-          StandardCopyOption.REPLACE_EXISTING,
-          StandardCopyOption.COPY_ATTRIBUTES);
+      ProjectDefinitions.write(targetYaml, Files.readString(sourceYaml));
     }
     syncFilesDirectory(
         sourceYaml.getParent().resolve("files"), targetYaml.getParent().resolve("files"));

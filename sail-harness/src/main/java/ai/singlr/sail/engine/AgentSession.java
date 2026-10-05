@@ -140,52 +140,142 @@ public final class AgentSession {
   }
 
   /**
-   * Fails unless a command runs in the container at all, so a caller that read no live session can
-   * tell a process that is gone from a container it could not reach — incusd restarting, the
-   * container stopped — whose sessions it knows nothing about.
+   * Whether a run's agent is there, as far as its container says. Only {@link Gone} says it is not:
+   * whoever finishes a run, releases its claim or finalizes its stop for want of an agent does so
+   * on that answer alone.
    */
-  public void requireReachable(String containerName)
-      throws IOException, InterruptedException, TimeoutException {
-    var result = shell.exec(ContainerExec.asDevUser(containerName, List.of("true")));
-    if (!result.ok()) {
-      throw new IOException(
-          "Container '" + containerName + "' could not be reached: " + result.stderr());
-    }
+  public sealed interface Presence {
+
+    /** The agent's process is alive; {@code session} is what its files say of it. */
+    record Running(SessionInfo session) implements Presence {}
+
+    /**
+     * No live process is the run's agent: the container ran the question and answered so, or — as
+     * {@code AgentPresence} adds — the container itself is stopped or does not exist.
+     */
+    record Gone() implements Presence {}
+
+    /**
+     * Nothing is known: the container ran no command, or the unit's manager did not say whether the
+     * unit has a process and no pid file named one.
+     */
+    record Unanswered() implements Presence {}
   }
 
-  /** Queries the given role's session status. Returns null if no session exists for it. */
-  @SuppressWarnings("unchecked")
+  /**
+   * Says whether the run named by a pid file (its first argument) and a unit (its second, blank for
+   * a session that never was one) has a live process, {@code alive} or {@code gone}, from inside
+   * the container. It names the process as {@link #queryStatus} does: by the pid file when that
+   * holds a pid, and otherwise by the unit's manager. It says either word only when it could tell:
+   * a unit whose manager does not answer, with no pid file to name its process, ends it with
+   * nothing said — as does an exec that never ran it.
+   */
+  private static final String PRESENCE_SCRIPT =
+      """
+      pid=""
+      if [ -r "$1" ]; then
+        pid="$(tr -d '[:space:]' < "$1" 2>/dev/null)"
+      fi
+      case "$pid" in
+        ''|0|*[!0-9]*|??????????*) pid="" ;;
+      esac
+      if [ -z "$pid" ] && [ -n "$2" ]; then
+        pid="$(systemctl --user show "$2" --property=MainPID --value)" || exit 1
+      fi
+      case "$pid" in
+        ''|0|*[!0-9]*)
+          printf gone
+          exit 0
+          ;;
+      esac
+      if kill -0 "$pid" 2>/dev/null; then
+        printf alive
+      else
+        printf gone
+      fi
+      """;
+
+  /**
+   * Asks the container whether the run's agent is there. A reading that finds no live process is
+   * not believed as it stands: a container that cannot be reached fails every command, and one lost
+   * command reads exactly like a process that is gone. The question is put again as one script in
+   * the container, and only what that script prints is taken for an answer.
+   */
+  public Presence presence(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var read = queryStatus(containerName, unit);
+    if (read != null && read.running()) {
+      return new Presence.Running(read);
+    }
+    var asked =
+        shell.exec(
+            ContainerExec.asDevUser(
+                containerName,
+                List.of(
+                    "bash",
+                    "-c",
+                    PRESENCE_SCRIPT,
+                    "bash",
+                    unit.pidPath(),
+                    Strings.isBlank(unit.unitName()) ? "" : unit.service())));
+    return switch (asked.ok() ? asked.stdout().strip() : "") {
+      case "gone" -> new Presence.Gone();
+      case "alive" -> {
+        var again = queryStatus(containerName, unit);
+        yield again != null && again.running()
+            ? new Presence.Running(again)
+            : new Presence.Unanswered();
+      }
+      default -> new Presence.Unanswered();
+    };
+  }
+
+  /**
+   * Queries the given role's session status, for whoever shows it. Returns null if nothing names a
+   * process for it. Whoever acts on an agent being absent asks {@code AgentPresence} instead: a
+   * null, or a session that is not running, is also what a container that ran no command reads as.
+   */
   public SessionInfo queryStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
     var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
     var pidResult = shell.exec(pidCmd);
-    var parsedPid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
-    if (parsedPid == null) {
-      parsedPid = querySystemdPid(containerName, unit);
+    var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
+    if (pid == null && !Strings.isBlank(unit.unitName())) {
+      pid = querySystemdPid(containerName, unit);
     }
-    if (parsedPid == null) {
+    if (pid == null) {
       return null;
     }
-
-    var pid = parsedPid;
-
     var aliveCmd =
         ContainerExec.asDevUser(containerName, List.of("kill", "-0", String.valueOf(pid)));
     var alive = shell.exec(aliveCmd).ok();
+    var meta = sessionFile(containerName, unit);
+    return new SessionInfo(
+        alive,
+        pid,
+        Objects.toString(meta.get("task"), ""),
+        Objects.toString(meta.get("started_at"), ""),
+        Objects.toString(meta.get("branch"), ""),
+        unit.logPath());
+  }
 
-    var sessionCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
-    var sessionResult = shell.exec(sessionCmd);
-    var task = "";
-    var startedAt = "";
-    var branch = "";
-    if (sessionResult.ok() && !sessionResult.stdout().isBlank()) {
-      var meta = (Map<String, Object>) YamlUtil.parseMap(sessionResult.stdout());
-      task = Objects.toString(meta.get("task"), "");
-      startedAt = Objects.toString(meta.get("started_at"), "");
-      branch = Objects.toString(meta.get("branch"), "");
+  /**
+   * The run's session file as a map, empty when it is missing or is not one: the agent can write
+   * that file, and what it wrote must never stop its watcher or its stop from reading the rest.
+   */
+  @SuppressWarnings("unchecked")
+  private Map<String, Object> sessionFile(String containerName, AgentUnit unit)
+      throws IOException, InterruptedException, TimeoutException {
+    var result =
+        shell.exec(ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath())));
+    if (!result.ok() || result.stdout().isBlank()) {
+      return Map.of();
     }
-
-    return new SessionInfo(alive, pid, task, startedAt, branch, unit.logPath());
+    try {
+      return (Map<String, Object>) YamlUtil.parseMap(result.stdout());
+    } catch (RuntimeException unparseable) {
+      return Map.of();
+    }
   }
 
   /**
@@ -255,7 +345,10 @@ public final class AgentSession {
     record Unanswered() implements Halt {}
   }
 
-  /** How many times a unit that was sent SIGKILL is asked whether it is gone, a second apart. */
+  /** How long an agent sent SIGTERM is given to end before it is sent SIGKILL, in seconds. */
+  private static final int TERM_GRACE_SECONDS = 3;
+
+  /** How many times an agent sent SIGKILL is asked whether it is gone, a second apart. */
   private static final int KILL_SETTLE_ASKS = 5;
 
   /**
@@ -284,7 +377,7 @@ public final class AgentSession {
     if (!signalUnit(containerName, unit, "SIGTERM")) {
       return new Halt.Unanswered();
     }
-    pause(containerName, 3);
+    pause(containerName, TERM_GRACE_SECONDS);
     var afterTerm = answeredExitStatus(containerName, unit);
     if (afterTerm.isEmpty()) {
       return new Halt.Unanswered();
@@ -341,20 +434,26 @@ public final class AgentSession {
   }
 
   /**
-   * Ends the process whose pid is its one argument and says what became of it, {@code gone} or
-   * {@code alive}, from inside the container: SIGTERM, a grace period, SIGKILL when it is still
-   * there. It says either only once its SIGTERM was delivered, so a run of it that printed neither
-   * — the signal refused, the exec lost on the way in or out — says nothing of the process.
+   * Ends the process whose pid is its first argument and says what became of it, {@code gone} or
+   * {@code alive}, from inside the container, by the ladder a unit is ended by: SIGTERM, the grace
+   * its second argument gives in seconds, SIGKILL when it is still there, and then as many asks a
+   * second apart as its third argument allows. It says either only once its SIGTERM was delivered,
+   * so a run of it that printed neither — the signal refused, the exec lost on the way in or out —
+   * says nothing of the process.
    */
   private static final String HALT_PID_SCRIPT =
       """
       kill "$1" || exit 1
-      sleep 3
-      if test -d "/proc/$1"; then
+      sleep "$2"
+      if kill -0 "$1" 2>/dev/null; then
         kill -9 "$1"
-        sleep 1
+        asks=0
+        while [ "$asks" -lt "$3" ] && kill -0 "$1" 2>/dev/null; do
+          sleep 1
+          asks=$((asks + 1))
+        done
       fi
-      if test -d "/proc/$1"; then
+      if kill -0 "$1" 2>/dev/null; then
         printf alive
       else
         printf gone
@@ -373,7 +472,14 @@ public final class AgentSession {
         shell.exec(
             ContainerExec.asDevUser(
                 containerName,
-                List.of("bash", "-c", HALT_PID_SCRIPT, "bash", String.valueOf(pid))));
+                List.of(
+                    "bash",
+                    "-c",
+                    HALT_PID_SCRIPT,
+                    "bash",
+                    String.valueOf(pid),
+                    String.valueOf(TERM_GRACE_SECONDS),
+                    String.valueOf(KILL_SETTLE_ASKS))));
     return switch (halted.ok() ? halted.stdout().strip() : "") {
       case "gone" -> ended(containerName, unit);
       case "alive" -> new Halt.Survived();
@@ -650,20 +756,10 @@ public final class AgentSession {
    * Reads the given role's unit terminal state from systemd in a single call: liveness, exit code,
    * and the spec/agent it was launched for (parsed from the unit's recorded environment). Lets the
    * watcher detect an exit and synthesize a reliable stop signal even when the agent's own hook
-   * never fired. A container that does not answer reads as an active unit: a run nobody could see
-   * end has not ended.
-   */
-  public ExitState queryExitStatus(String containerName, AgentUnit unit)
-      throws IOException, InterruptedException, TimeoutException {
-    var answered = answeredExitStatus(containerName, unit);
-    return answered.isPresent() ? answered.get() : exitState(containerName, unit, "");
-  }
-
-  /**
-   * As {@link #queryExitStatus}, or empty when the question was not answered — the container is
-   * stopped, incus could not reach it, or the user's systemd manager is not there to ask. Only an
-   * answer says a unit is gone: whoever is about to report a run ended asks here, so silence is
-   * never taken for an agent's death.
+   * never fired. Empty when the question was not answered — the container is stopped, incus could
+   * not reach it, or the user's systemd manager is not there to ask. Only an answer says a unit is
+   * gone: whoever is about to report a run ended asks here, so silence is never taken for an
+   * agent's death.
    */
   public Optional<ExitState> answeredExitStatus(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
@@ -707,15 +803,9 @@ public final class AgentSession {
    * file. Used as the fallback when a collected unit no longer reports its environment; returns
    * blanks for an ad-hoc session.
    */
-  @SuppressWarnings("unchecked")
   private SessionDescriptor readSessionDescriptor(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    var cmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.sessionPath()));
-    var result = shell.exec(cmd);
-    if (!result.ok() || result.stdout().isBlank()) {
-      return new SessionDescriptor("", "", "", "");
-    }
-    var meta = (Map<String, Object>) YamlUtil.parseMap(result.stdout());
+    var meta = sessionFile(containerName, unit);
     return new SessionDescriptor(
         Objects.toString(meta.get("spec_id"), ""),
         Objects.toString(meta.get("agent_type"), ""),

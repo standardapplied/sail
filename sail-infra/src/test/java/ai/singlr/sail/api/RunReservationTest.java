@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -81,6 +82,27 @@ class RunReservationTest {
       @Override
       public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout) {
         return new ShellExec.Result(1, "", "");
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
+  }
+
+  /** A container that answers, and whose unit manager says the run's unit has no process. */
+  private static ShellExec answeringShell() {
+    return new ShellExec() {
+      @Override
+      public ShellExec.Result exec(List<String> command) {
+        return ScriptedShellExecutor.reachableContainer(String.join(" ", command))
+            .orElseGet(() -> new ShellExec.Result(1, "", ""));
+      }
+
+      @Override
+      public ShellExec.Result exec(List<String> command, Path workDir, Duration timeout) {
+        return exec(command);
       }
 
       @Override
@@ -350,15 +372,28 @@ class RunReservationTest {
   }
 
   @Test
-  void anAbsentAgentReleasesTheReservation() {
+  void anAgentAContainerThatRunsNoCommandCannotSpeakForIsTreatedAsLive() {
     reserve(reservation(quietShell(), runStore));
 
     reservation(quietShell(), runStore).releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
 
     assertEquals(
+        "running",
+        runStore.findById(RUN_ID).orElseThrow().status(),
+        "every command failing is what a live agent in an unreachable container reads as");
+  }
+
+  @Test
+  void anAbsentAgentReleasesTheReservation() {
+    reserve(reservation(quietShell(), runStore));
+
+    reservation(answeringShell(), runStore)
+        .releaseIfAbsent(RUN_ID, "acme", AgentUnit.forRun(RUN_ID));
+
+    assertEquals(
         "failed",
         runStore.findById(RUN_ID).orElseThrow().status(),
-        "a probe that finds no live agent frees the run");
+        "a container that answers and names no process for the run frees it");
   }
 
   @Test

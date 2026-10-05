@@ -247,6 +247,10 @@ class ReviewLanesTest {
     var watchers = loop.watcherCommandsOf(reviewer.id());
     assertEquals(2, watchers.size());
     assertTrue(watchers.getLast().contains("--max-duration 45m"), watchers.getLast());
+    assertTrue(
+        watchers.getLast().contains("--started-at " + reviewer.startedAt()),
+        "a re-armed watcher holds the run to what is left of its budget, from its row's start: "
+            + watchers.getLast());
 
     loop.finish(reviewer.id(), CLEAN_REVIEW);
 

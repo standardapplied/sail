@@ -710,14 +710,22 @@ run there is no stall deadline; the window starts again when the last call in fl
 finishes. A call that ran is told finished whether it succeeded or failed: Claude Code fires
 `PostToolUse` only for a call that succeeded and `PostToolUseFailure` for one that failed (a
 command that exits non-zero), and both publish `agent_tool_finished`; Codex fires
-`PostToolUse` for both. A call Claude Code denies before running it fires neither, and stays
-counted until the run's `max_duration`; a run with full permissions is never denied one. With
-no `max_duration` the stall window is the run's only bound, so it runs
-through a tool call too. The stall window
-counts only time the watcher could see: a watcher outlives the daemon it listens to, and
+`PostToolUse` for both. A call Claude Code denies before running it fires neither, and a
+finish can be lost on its way to the daemon, so the count is also set to none whenever the
+main agent's batch of calls resolves: `PostToolBatch` publishes `agent_tool_finished`
+carrying `batch: true`, for the main agent only, since a subagent's batch says nothing of
+the calls its parent still waits on. A count that went wrong is right again at the next
+batch. The count is the run's, not each agent's: the main agent's batch resolving also ends
+a call a background subagent still has in flight, which is then bounded by the stall window
+from its last event like any call the watcher did not count. A call that began where the watcher could not hear it — before a re-armed watcher
+started, or while its feed was down — is not counted, and has one stall window from then.
+Codex has no batch hook; there a lost finish leaves the wall clock as the bound. With no
+`max_duration` the stall window is the run's only bound, so it runs through a tool call
+too. The stall window counts only time the watcher could see: a watcher outlives the daemon it listens to, and
 when its event stream ends with a daemon restart it opens the stream again at its next poll
-and starts the window afresh, the calls in flight still counted, while the wall clock runs on (a daemon that accepts the
-connection and does not answer is given a few seconds, not the watch). The watcher is handed its run's
+and starts the window afresh, the calls in flight still counted, while the wall clock runs
+on (a daemon that accepts the connection and does not answer is given a few seconds, not
+the watch). The watcher is handed its run's
 limits on its command line when it is spawned (`--max-duration`, `--max-idle`, `--action`)
 and never reads the project's guardrails itself, so an edit applies to the next run; it is
 handed the run row's `started_at` the same way (`--started-at`), which anchors the wall
@@ -738,9 +746,17 @@ back with no answer are each `Unanswered`. Silence is never an agent's death: a 
 survives the kill is not reported ended and is killed again at the next poll, no kill is
 tried while the container cannot say whether it worked, a kill counts as tried only on
 `Ended` or `Survived` (an agent no signal reached that then ends exited on its own, and its
-stop says so), and a watcher that finds its container stopped — or the unit's
-manager gone and the agent's process with it — ends its watch with no stop, since nothing
-there says how the run ended; the missed-stop reconciler speaks for that run. The watch
+stop says so), and a watcher whose unit's manager gives no answer while the agent is known
+gone — its container stopped, or its process dead in a container that answers — ends its
+watch with no stop, since nothing there says how the run ended; the missed-stop reconciler
+speaks for that run. How a unit that answers ended is its manager's to say, and that is
+what a watcher publishes a stop on. Where nothing else says, whether an agent is gone is
+one reading (`AgentPresence`), shared by the watcher whose manager went silent or that
+finds no session to watch, the reconciler, an operator's stop and a failed launch's
+cleanup: one script in the container looked for the run's process, by its pid file or
+else its unit, and printed that it is gone — or incus lists the container stopped or
+absent. Only the printed word is believed, so no number of lost commands reads a live
+agent as gone; a container that runs no command says nothing of its agents. The watch
 ends with its run: its run's authoritative stop or cancel, published by anyone, ends it
 with nothing published and no trigger written. Rollback uses Incus
 snapshots, which are instant on `zfs` and full copies on `dir`, and the pre-dispatch
@@ -916,17 +932,22 @@ class is named):
 
 - **C1. A wait is a recorded fact.** A review whose launch was refused its claim records the
   run that holds it (`reviews.waiting_on`, local to the box like a run's pid, never synced),
-  and the room is told once per (review, holder): "Review is waiting for run `<runId>`
-  (`<role>` of `<specId>`) to finish."
+  and the room is told in the same write, so once per (review, holder): "Review is waiting
+  for run `<runId>` (`<role>` of `<specId>`) to finish." A wait whose line could not be
+  written is not recorded; a review that changes status, is superseded or is approved waits
+  on nothing.
   *`aReviewerRefusedItsClaimRecordsTheRunItWaitsOnAndIsLaunchedByThatRunsStop`,
   `aWaitIsSaidOncePerRunWaitedOnHoweverManyStopsFindItStillHeld`,
   `aFixAgentRefusedItsClaimWaitsOnItsHolderAndIsReplayedOnceWhenThatRunEndsWithNoStop`,
-  `ReviewStoreTest.aWaitIsRecordedOnceAndIsThisBoxsOwnNeverJournaledOrSynced`,
+  `ReviewStoreTest.aWaitIsRecordedOnceAndWhatTellsOfItIsWrittenWithIt`,
+  `ReviewStoreTest.aWaitWhoseTellingFailsIsNotRecorded`,
+  `ReviewStoreTest.aWaitOnASyncedReviewIsThisBoxsOwnNeverDirtyARevisionOrOnTheWire`,
+  `ReviewStoreTest.aReviewThatChangesStatusIsSupersededOrIsApprovedWaitsOnNoRunAnyMore`,
   `ReviewStoreTest.adoptingMainsRevisionKeepsTheRunThisBoxWaitsOn`,
   `ReviewAgentLoopIT.aReviewerRefusedTheRepoARealRunHoldsWaitsOnItAndStartsWhenItStops`.*
-- **C2. Recovery acts on the record, once.** The reconciler rescues a waiting review when
-  the run it waits on has ended, once per (review, holder). It samples no gate and has no
-  retry budget.
+- **C2. Recovery acts on the record, once.** The reconciler rescues a waiting review once
+  the run it waits on has been terminal for longer than the launch grace, or is gone from
+  the store, once per (review, holder). It samples no gate and has no retry budget.
   *`aWaitingReviewWhoseHolderEndsWithNoStopIsReplayedExactlyOnce`,
   `aHolderThatOnlyJustEndedIsNotRescuedOverWhileItsOwnStopMayStillBeOnItsWay`,
   `aReviewRefusedThreeTimesRunningByRunsThatEndWithNoStopWaitsOnEachAndIsReplayedOncePerWait`,
@@ -943,21 +964,54 @@ class is named):
 - **C4. Every review ends.** From every state the stores can hold, one pipeline step leaves
   the review served by a run, waiting on a recorded run, owned by a person, passed, or
   escalated with a reason. A failed gate with nothing left open is reviewed again as the next
-  iteration; a review whose pipeline lost its stages is escalated saying so.
-  *`everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated` (every review
-  status and error × stage statuses × spec status × serving run × recorded wait),
+  iteration. A review the project's pipeline can no longer judge is escalated saying so: the
+  pipeline lost its stages, a stage the review holds is not the pipeline's stage in that
+  place any more (renamed, removed or retyped while the review ran), or the project's
+  descriptor cannot be read — which is never taken for a project with no pipeline. A build
+  that ends while the descriptor cannot be read gets its review written and escalated for
+  that reason, not a review under the default pipeline and not a stop replayed until the
+  file heals. Every writer of a descriptor replaces it in one move
+  (`ProjectDefinitions.write`), so a reader never sees half of one. An escalation closes
+  any stage still `running`.
+  *`ReviewLoopEveryStateTest.everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated`
+  (every review status and error × stage statuses × pipeline as written or changed × spec
+  status × serving run × recorded wait),
   `aFailedGateWhoseFindingsAPersonResolvedBeforeTheFixLaunchedIsReviewedAgainNotFixed`,
-  `aRunningReviewWhosePipelineLostItsStagesIsEscalatedSayingSo`.*
+  `aRunningReviewWhosePipelineLostItsStagesIsEscalatedSayingSo`,
+  `aRunningReviewWhosePipelineLostItsStagesClosesTheStageItsReviewerRan`,
+  `aStageThePipelineNoLongerHasWhenItsReviewerStopsEscalatesItsReviewSayingSo`,
+  `aSecondStageThePipelineReplacedEscalatesItsReviewNamingTheStageItHolds`,
+  `aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview`,
+  `anErroredReviewIsNotRetriedUnderAPipelineThatChangedSinceItsStagesWereWritten`,
+  `aFixIsNotReReviewedUnderAPipelineThatChangedWhileItRan`,
+  `aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged`,
+  `aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed`,
+  `ProjectDefinitionsTest.aDescriptorIsReplacedInOneMoveKeepingItsModeAndLeavingNothingBeside`,
+  `ReviewWiringTest.aProjectWithNoDescriptorHasNoneAndOneThatCannotBeReadIsAnErrorNamingTheProject`.*
 - **C5. A review's end is one write.** The review's final status, its reason, its spec's
-  status and the room line commit together or not at all (`ReviewStore.finish`); events are
-  published, and the sync triggered, after the commit.
+  status and the room line commit together or not at all (`ReviewStore.pass` and
+  `escalate`); a person's sign-off is one write too (`approve`: the stage that waited on
+  them, the review and its spec). The spec moves only if it is still the loop's
+  (`SpecStore.moveFromLoop`), whoever ends the review. Events are published, and the sync
+  triggered, after the commit. The room line is cut to what a room message holds, so a verdict or a reason of
+  any length still lands; the reason is kept whole on the review.
   *`aPassWhoseWriteFailsHalfwayLeavesTheReviewRunningTheSpecInReviewAndTheRoomUntold`,
   `anEscalationWhoseWriteFailsHalfwayLeavesTheReviewAndItsSpecAsTheyWereAndTheRoomUntold`,
-  `ReviewStoreTest.aFinishWhoseCompanionWriteFailsLeavesTheReviewAsItWas`,
-  `ReviewStoreTest.finishingAReviewWritesItsStatusItsReasonAndWhatEndsBesideItAsOne`.*
+  `anEscalationWhoseReasonOutgrowsARoomMessageStillLandsWithItsReasonKeptWhole`,
+  `aPassWhoseVerdictOutgrowsARoomMessageStillLands`,
+  `ReviewStoreTest.aReviewsEndIsWrittenWithWhatEndsBesideIt`,
+  `ReviewStoreTest.aReviewsEndWhoseCompanionWriteFailsLeavesTheReviewAsItWas`,
+  `MessageStoreTest.aBodyTooLongForARoomIsCutBetweenCharactersAndSaysSo`,
+  `ReviewOperationsTest.anApprovalWhoseSpecCannotBeMovedLeavesTheReviewAndItsStageAsTheyWere`.*
 - **C6. A stop says only what happened.** A run is reported ended for a limit, or finalized
   as stopped by an operator, only after a signal was delivered to it and the container
-  answered that the unit is gone. An unanswered question is never an answer.
+  answered that the unit is gone. An unanswered question is never an answer, and there is
+  one reading of whether an agent is there where nothing else says (`AgentPresence`):
+  running, gone — one script in the container looked for the run's process and printed so,
+  or incus lists the container stopped or absent — or unanswered. The stop that records an agent already gone, the sweep that finishes a run
+  nobody reported, the watcher whose unit's manager went silent and the launch that releases
+  a claim all act only on gone; unanswered fails the stop with nothing written and leaves
+  the others to ask again.
   *`RunWatchTest.anAgentNoSignalReachedThatThenExitsOnItsOwnIsReportedAsThePlainExitItWas`,
   `RunWatchTest.aKillNothingAnsweredForKeepsThePidFileAndIsAskedAgainAtTheNextPoll`,
   `AgentSessionTest.aSigtermThatCouldNotBeDeliveredIsUnansweredAndNothingElseIsTouched`,
@@ -968,40 +1022,85 @@ class is named):
   `AgentSessionTest.aPidFileThatCouldNotBeReadIsUnansweredNeverAnAgentTakenForGone`,
   `AgentSessionTest.aProcessAlreadyGoneWhenTheSignalIsSentWasNotEndedByIt`,
   `AgentSessionTest.aRealProcessThatIgnoresTheSigtermIsEndedByTheSigkill`,
+  `AgentSessionTest.aContainerThatRunsNoCommandSaysNothingOfItsAgent`,
+  `AgentSessionTest.commandsLostWhileAnAgentLivesNeverReadItAsGone`,
+  `AgentSessionTest.anAnswerThatIsNeitherWordIsNoAnswer`,
+  `AgentPresenceScriptTest.aPidFileNamingAProcessThatEndedIsAnAgentGone`,
+  `AgentPresenceScriptTest.aUnitWhoseManagerDoesNotAnswerAndWhosePidFileNamesNothingIsNotKnownGone`,
+  `AgentPresenceScriptTest.aUnitItsManagerSaysHasNoProcessIsGone`,
+  `AgentWatchCommandTest.aRunWhoseContainerGivesNoAnswerAboutItsAgentIsWatched`,
+  `AgentPresenceTest.aRunningContainerThatRanNoCommandLeavesTheQuestionOpen`,
+  `AgentPresenceTest.aContainerThatIsStoppedRunsNoAgent`,
   `StopOperationsTest.anOperatorsStopTheManagerDoesNotAnswerFailsAndKeepsTheClaimForARetryToFinish`,
-  `StopOperationsTest.aHaltTheAgentSurvivedRestoresTheSpecAndLeavesTheRunReconcilable`.*
+  `StopOperationsTest.aStopWhoseContainerGivesNoAnswerAboutTheAgentFailsWithNothingWritten`,
+  `StopOperationsTest.aRetriedStopWhoseContainerStillGivesNoAnswerKeepsItsClaim`,
+  `StopOperationsTest.oneLostLivenessCommandNeverRecordsALiveAgentAsGone`,
+  `StopOperationsTest.aHaltTheAgentSurvivedRestoresTheSpecAndLeavesTheRunReconcilable`,
+  `RunReservationTest.anAgentAContainerThatRunsNoCommandCannotSpeakForIsTreatedAsLive`,
+  `RunLauncherTest.aLostLaunchWhoseAgentSurvivedItsHaltIsNeverSaidTornDown`,
+  `RunLauncherTest.aRunFinishedUnderItsLaunchInAContainerThatGivesNoAnswerIsNotTakenForOneThatEndedItself`.*
 - **C7. Every watcher ends** when its run's authoritative stop or cancel is published, by
   anyone.
   *`RunWatchTest.aWatcherPollingASilentManagerEndsWhenItsRunsStopIsPublishedByTheReconciler`,
   `RunWatchTest.aWatcherEndsWhenItsRunsCancelIsPublished`,
   `RunWatchTest.theAgentsOwnTurnEndStopAndAnotherRunsEndNeverEndTheWatch`.*
-- **C8. A run's wall clock comes from its run row.**
+- **C8. A run's wall clock comes from its run row.** The spawner passes the row's
+  `started_at` to the watcher, first and at every re-arm; nothing in the container, which the
+  agent can write, moves it, and a session file the agent wrote nonsense into still reads.
   *`ReviewLanesTest.aRunIsHeldToItsTimeLimitFromItsRowsStartWhateverItsSessionFileIsRewrittenToSay`,
+  `ReviewLanesTest.aDaemonRestartWhileAReviewerRunsFailsNothingAndReArmsAWatcherThatDiedWithIt`,
+  `AgentWatchCommandTest.theWatchHoldsItsRunToTheStartItWasGivenWhateverTheAgentsSessionFileSays`,
   `AgentWatchCommandTest.refusesToStartWithoutTheRunRowsStart`,
+  `AgentSessionTest.aSessionFileTheAgentWroteNonsenseIntoNeverStopsItsStatusBeingRead`,
   `WatcherSpawnerTest.watchCommandForRunAddressesTheRunAndItsRecordedUnit`.*
 - **C9. A run with a tool call in flight is not stalled** when a wall-clock limit bounds it.
+  The watcher counts the calls it heard start. A call is over at its own finish, or when the
+  main agent's batch resolves: Claude Code fires no finish for a call it denies, and a finish
+  can be lost on its way to the daemon, so the hook for a resolved batch (`PostToolBatch`,
+  posted as `agent_tool_finished` with `batch: true`, the main agent's only) sets the count
+  to none. A call that began where the watch could not hear it — before a re-armed watch
+  started, or while its feed was down — is not counted and gets one whole stall window from
+  then. Codex has no batch hook: its count rests on each call's own finish.
   *`RunWatchTest.aToolCallLongerThanTheStallWindowIsWorkNotAStall`,
   `RunWatchTest.aToolCallThatNeverFinishesIsEndedAtTheWallClockLimit`,
   `RunWatchTest.aToolCallThatNeverFinishesIsAStallWhenNoWallClockLimitBoundsTheRun`,
   `RunWatchTest.oneOfTwoToolCallsStillInFlightIsNotAStall`,
   `RunWatchTest.aRunThatCallsNoToolForItsStallWindowIsKilledForTheStall`,
   `RunWatchTest.aToolCallInFlightIsStillInFlightAfterTheFeedOpensAgain`,
-  `RunWatchTest.aToolCallThatFailedIsNoLongerInFlightAndTheSilenceAfterItIsAStall`,
+  `RunWatchTest.aToolCallTheCliDeniedIsOverWhenItsBatchResolvesAndTheSilenceAfterItIsAStall`,
+  `RunWatchTest.aBatchThatResolvesSaysNothingOfACallTheNextBatchStarts`,
+  `RunWatchTest.aFinishNoStartWasHeardForNeverHidesACallThatStartsAfterIt`,
+  `RunWatchTest.whatTheAgentLogsWhileACallIsInFlightTakesNothingOffTheCount`,
+  `SailEventHelperScriptTest.theMainAgentsBatchEndIsPostedAsAToolFinishThatMarksTheBatch`,
+  `SailEventHelperScriptTest.aSubagentsBatchEndIsNotPosted`,
   `ClaudeCodeHookConfigTest.aToolCallThatFailedIsToldFinishedAsOneThatSucceededIs`,
+  `ClaudeCodeHookConfigTest.aBatchThatResolvedIsToldThroughItsOwnHook`,
   `ReviewAgentLoopIT.aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall`.*
 - **C10. Main says what the driving box said, and a replayed stop is not said again.** An
   escalation's reason rides the synced review row (`reviews.error`) into main's
-  `review_escalated`; a stop the reconciler publishes for a run whose row had already ended
-  carries `replay: true`, which the pipeline routes and Slack and webhooks skip.
+  `review_escalated`; a stop the reconciler publishes for a run whose stop was already said
+  carries `replay: true`, which the pipeline routes and Slack and webhooks skip. A run's
+  first stop carries none, however long ago its row ended. A stage closed for an error —
+  its reviewer could not run, or its review was escalated under it — is told on main by its
+  review's error or escalation, as on the driving box, never as a stage that failed its
+  gate.
   *`anEscalatedReviewsSyncedRowCarriesItsReasonAndMainSaysWhatThisBoxSaid`,
   `aReplayedStopOfABuildThatHadAlreadyStoppedMovesTheLoopAndIsNotSaidAgain`,
   `theFirstStopOfARunThatDiedUnwatchedIsSaidThoughTheReconcilerPublishesIt`,
+  `theOnlyStopOfARunFinishedInPlaceWithNoneIsSaidHoweverLongAgoItsRowEnded`,
   `SyncTransitionEventsTest.anEscalatedReviewBecomesReviewEscalatedSayingWhyAsItsRowRecordsIt`,
+  `SyncTransitionEventsTest.aStageClosedForAnErrorIsToldByItsReviewNotAsAFailedGate`,
   `SlackReactorTest.aStopTheReconcilerReplaysIsNotSaidAgainAndItsFirstStopIs`,
   `WebhookReactorTest.aStopTheReconcilerReplaysIsNotNotifiedAgainAndItsFirstStopIs`.*
 - **C11. `generate` then parse returns the configuration it was given.** The `agent` block
-  `sail project init` writes is `SailYaml.Agent.toMap()`, the one writer.
-  *`SailYamlGeneratorTest.anAgentWithEveryFieldSetComesBackFromGenerateThenParseAsItWent`.*
+  `sail project init` writes is `SailYaml.Agent.toMap()`, the one writer. A review limit left
+  at its default is not written, so rewriting a project's `sail.yaml` never pins it to
+  today's defaults; an empty list of notification events is no list; and written YAML
+  indents a list's items under their key and never folds a long value.
+  *`SailYamlGeneratorTest.anAgentWithEveryFieldSetComesBackFromGenerateThenParseAsItWent`,
+  `ReviewPipelineConfigTest.aLimitTheProjectLeftAtItsDefaultIsNotWrittenIntoItsBlock`,
+  `NotificationsTest.anEmptyListOfEventsIsNoListOfEventsSoItIsWrittenBackAsItWasRead`,
+  `YamlUtilTest.aListsItemsSitUnderTheirKeyAndALongValueStaysOnItsLine`.*
 - **C12. One fix agent per review.** No fix agent starts for a review while a process started
   for that review by a server older than 0.46.4 is alive: such a server exported the review
   id as `SAIL_RUN_ID`, and `LegacyFixAgent` kills every process carrying exactly that entry
@@ -1015,12 +1114,16 @@ class is named):
 A stop the loop is not waiting on — a duplicate, a replay, the stop of a run a newer one has
 replaced, including a re-dispatched build — never repeats a step. While a run still serves
 the spec's latest review it changes nothing; otherwise the loop goes on from what the
-review's rows say is owed: an errored review is retried as the same iteration within
+review's rows say is owed, under the project's pipeline as it is then — and a review whose
+stages are no longer that pipeline's, or whose pipeline cannot be read, is escalated
+saying so before any step is taken, a retry and the iteration after a fix included: an
+errored review is retried as the same iteration within
 `MAX_ERRORED_RETRIES`, a `running` one continues from its stages (a stage is judged only on
 the log of the reviewer that was live when the stage started), a gate-failed one that never
 got its fix agent gets it — or, with nothing left open, is reviewed again — and one that
-recorded a wait takes the step the gate refused it. That one path is both the loop's retry and its crash recovery;
-the reconciler's replays drive it. A review whose reviewer or fix agent has ended is owed
+recorded a wait takes the step the gate refused it, once the run it waits on has ended.
+That one path is both the loop's retry and its crash recovery; the reconciler's replays
+drive it. A review whose reviewer or fix agent has ended is owed
 that run's own stop and nothing else: no other stop relaunches over a verdict about to be
 heard. The loop acts only on a spec that is still `in_progress` or `review` — a cancelled
 spec gets no fix agent — and counts only the runs this box executed as serving a review, so
@@ -1071,8 +1174,9 @@ discards it. So an FDE always recovers by returning to the branch. The loop reco
 from a daemon restart or a dead watcher (P6): the missed-stop sweep publishes the stop of
 any loop run that ended with no watcher left to report it, and replays the newest loop stop
 for a review that is owed something nothing is coming to give it, and the pipeline goes on
-from the review's rows. Every such rescue is one-shot, keyed by the review and what it is
-owed: an errored review (the retry); a reviewer or fix agent that ended with nothing coming
+from the review's rows. Every such rescue is one-shot, keyed by what is owed: a spec in
+`review` with no review at all, by the spec (the dropped kickoff); and, by the review, an
+errored review (the retry); a reviewer or fix agent that ended with nothing coming
 of it; a review `running` with no run serving it, no person to wait on and no wait recorded
 (per stage); a failed gate with no fix agent and no wait recorded; and a recorded wait whose
 holder has ended, per holder (C2). A wait is rescued only once the run it names is terminal

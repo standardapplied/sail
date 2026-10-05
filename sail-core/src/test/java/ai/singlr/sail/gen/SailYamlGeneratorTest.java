@@ -513,17 +513,17 @@ class SailYamlGeneratorTest {
                   lint: "mvn spotless:check"
                 review_pipeline:
                   max_iterations: 4
-                  max_finding_age: 2
+                  max_finding_age: 5
                   guardrails:
                     max_duration: 50m
                     max_idle: 15m
-                    action: stop
+                    action: notify
                   stages:
                     - name: correctness
                       type: agent
                       agent: codex
                       categories: [correctness, security]
-                      gate: no_critical
+                      gate: all_clear
                     - name: sign-off
                       type: human
                 """));
@@ -549,6 +549,8 @@ class SailYamlGeneratorTest {
     assertEquals("25m", agent.guardrails().maxIdle());
     assertEquals(2, agent.reviewPipeline().stages().size());
     assertEquals("15m", agent.reviewPipeline().guardrails().maxIdle());
+    assertEquals(5, agent.reviewPipeline().maxFindingAge(), "no value here is a default");
+    assertTrue(yaml.contains("  install:\n    - claude-code\n    - codex\n"), yaml);
     assertTrue(yaml.contains("# AI coding agent configuration.\n"), "the comments stay above it");
     assertTrue(yaml.endsWith("\n\n"), "and the block still ends with a blank line");
   }

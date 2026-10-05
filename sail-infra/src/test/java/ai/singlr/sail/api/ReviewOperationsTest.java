@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -134,6 +135,43 @@ class ReviewOperationsTest {
         SpecStatus.AWAITING_MERGE,
         specStore.findById("auth").orElseThrow().status(),
         "approval decides the findings; merging the PR is a separate human act");
+    assertEquals("passed", reviewStore.findStage(stageId).orElseThrow().status());
+  }
+
+  @Test
+  void anApprovalNeverMovesASpecThatIsNoLongerTheLoopsToMove() {
+    var reviewId = reviewStore.createReview("auth", 1);
+    reviewStore.startStage(reviewStore.createStage(reviewId, "human", "human"), "uday");
+    specStore.updateStatus("auth", SpecStatus.CANCELLED);
+
+    Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId));
+
+    assertEquals("passed", reviewStore.findReview(reviewId).orElseThrow().status());
+    assertEquals(
+        SpecStatus.CANCELLED,
+        specStore.findById("auth").orElseThrow().status(),
+        "the review is decided, and a spec someone cancelled stays cancelled");
+  }
+
+  @Test
+  void anApprovalWhoseSpecCannotBeMovedLeavesTheReviewAndItsStageAsTheyWere() {
+    var reviewId = reviewStore.createReview("auth", 1);
+    var stageId = reviewStore.createStage(reviewId, "human", "human");
+    reviewStore.startStage(stageId, "uday");
+    db.execute(
+        """
+        CREATE TRIGGER specs_down BEFORE UPDATE ON specs
+        BEGIN SELECT RAISE(ABORT, 'specs are down'); END""");
+
+    assertThrows(RuntimeException.class, () -> Acting.by(UDAY_ADMIN, () -> ops.approve(reviewId)));
+
+    var review = reviewStore.findReview(reviewId).orElseThrow();
+    assertEquals(
+        "running",
+        review.status(),
+        "an approval is one write: a review is never passed beside a spec nothing moved");
+    assertNull(review.decidedBy());
+    assertEquals("running", reviewStore.findStage(stageId).orElseThrow().status());
   }
 
   @Test

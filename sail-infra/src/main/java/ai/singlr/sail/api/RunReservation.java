@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
@@ -190,17 +190,20 @@ public final class RunReservation {
     Claim claim;
     try (var hold = sessionYield.lock(project)) {
       claim = claimOf(reservation);
-      if (claim instanceof Claim.Claimed) {
-        yieldDisplacedSessions(runId, project, specId, role, repos);
-      }
+      whenClaimed(claim, () -> yieldDisplacedSessions(runId, project, specId, role, repos));
     } catch (IOException e) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
     }
-    if (claim instanceof Claim.Claimed) {
-      pruneRuns(project);
-    }
+    whenClaimed(claim, () -> pruneRuns(project));
     return claim;
+  }
+
+  private static void whenClaimed(Claim claim, Runnable then) {
+    switch (claim) {
+      case Claim.Claimed claimed -> then.run();
+      case Claim.Held held -> {}
+    }
   }
 
   private Claim claimOf(Supplier<RunStore.Reservation> reservation) {
@@ -264,8 +267,9 @@ public final class RunReservation {
    * process, so the run is failed and its repo freed. But once the agent process exists — a
    * background unit that started, a foreground child whose blocking wait threw — a later failure
    * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
-   * session. An unprobeable identity is treated as live for the same reason — the missed-stop
-   * reconciler releases a genuinely dead run on its next pass.
+   * session. An agent the container gives no answer about ({@link AgentPresence}) is treated as
+   * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
+   * pass.
    */
   public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
     if (agentLive(project, unit)) {
@@ -313,8 +317,7 @@ public final class RunReservation {
 
   private boolean agentLive(String project, AgentUnit unit) {
     try {
-      var status = new AgentSession(shell).queryStatus(project, unit);
-      return status != null && status.running();
+      return !new AgentPresence(shell).gone(project, unit);
     } catch (Exception e) {
       return true;
     }
@@ -341,24 +344,23 @@ public final class RunReservation {
    * overlap check surfaces the same refusal without reserving.
    */
   static ApiException overlapRefusal(DispatchGate.Conflict conflict) {
+    var run = conflict.run();
+    var occupied =
+        Strings.isBlank(run.specId())
+            ? "Ad-hoc agent run " + run.runId() + " is occupying this container."
+            : "Agent run "
+                + run.runId()
+                + " is already working spec '"
+                + run.specId()
+                + "' in "
+                + (conflict.overlap().isEmpty()
+                    ? "this container"
+                    : "repo(s) " + conflict.overlap())
+                + ".";
     return new ApiException(
         ErrorCode.AGENT_ALREADY_RUNNING,
-        occupied(conflict),
+        occupied,
         "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
-  }
-
-  /** What the run in the way holds, as a sentence: the gate's verdict in words. */
-  static String occupied(DispatchGate.Conflict conflict) {
-    var run = conflict.run();
-    return Strings.isBlank(run.specId())
-        ? "Ad-hoc agent run " + run.runId() + " is occupying this container."
-        : "Agent run "
-            + run.runId()
-            + " is already working spec '"
-            + run.specId()
-            + "' in "
-            + (conflict.overlap().isEmpty() ? "this container" : "repo(s) " + conflict.overlap())
-            + ".";
   }
 
   /**

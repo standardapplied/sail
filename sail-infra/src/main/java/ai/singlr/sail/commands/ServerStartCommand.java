@@ -458,13 +458,9 @@ public final class ServerStartCommand implements Runnable {
     }
   }
 
-  /** Loads a project's {@code sail.yaml}, or {@code null} when it is missing or unreadable. */
+  /** Loads a project's {@code sail.yaml}, or {@code null} when it has none. */
   private static SailYaml loadProjectYaml(String project) {
-    try {
-      return SailYaml.fromMap(
-          YamlUtil.parseFile(SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR)));
-    } catch (Exception e) {
-      return null;
-    }
+    return ReviewWiring.descriptor(
+        project, SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR));
   }
 }

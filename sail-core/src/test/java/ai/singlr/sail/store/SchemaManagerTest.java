@@ -355,7 +355,7 @@ class SchemaManagerTest {
         "2-abc",
         db.queryOne("SELECT rev FROM reviews WHERE id = 'r1'", row -> row.text(0)).orElseThrow(),
         "the column is this box's own bookkeeping: nothing is journaled or offered to main");
-    assertTrue(reviews.waitOn("r1", "01a0ecdf-0000-7000-8000-0000000000b1"));
+    reviews.waitOn("r1", "01a0ecdf-0000-7000-8000-0000000000b1", () -> {});
     assertEquals(
         "01a0ecdf-0000-7000-8000-0000000000b1", reviews.findReview("r1").orElseThrow().waitingOn());
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());

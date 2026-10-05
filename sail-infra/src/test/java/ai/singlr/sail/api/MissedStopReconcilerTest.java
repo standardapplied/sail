@@ -17,6 +17,7 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
@@ -723,7 +724,7 @@ class MissedStopReconcilerTest {
                 reviewersLaunched.add(invocation);
                 var reviewer = reviewerOf(invocation.reviewId(), invocation.specId());
                 claimed.run();
-                return new Launch.Started(reviewer);
+                return new Launch.Started();
               }
 
               @Override
@@ -1005,7 +1006,7 @@ class MissedStopReconcilerTest {
     recordEvent("auth", "review_stage_started", Instant.now().toString());
     var review = runningReview("auth");
     var holder = finishedSession("billing", "completed", 0);
-    Acting.system(() -> reviewStore.waitOn(review, holder));
+    Acting.system(() -> reviewStore.waitOn(review, holder, () -> {}));
 
     assertEquals(
         0,
@@ -1016,7 +1017,7 @@ class MissedStopReconcilerTest {
     assertEquals(0, rec.sweep() + rec.sweep(), "one rescue per run waited on, however it went");
 
     var gone = DateTimeUtils.newId().toString();
-    Acting.system(() -> reviewStore.waitOn(review, gone));
+    Acting.system(() -> reviewStore.waitOn(review, gone, () -> {}));
 
     assertEquals(1, rec.sweep(), "a wait on a run this box holds no row of is a wait on nothing");
     assertEquals(0, rec.sweep(), "and it too is rescued once");
@@ -1429,7 +1430,7 @@ class MissedStopReconcilerTest {
             if (command.contains("kill") && probes.getAndIncrement() == 0) {
               return new Result(1, "", "Error: websocket: close 1006 (abnormal closure)");
             }
-            return new Result(0, "", "");
+            return new Result(0, command.contains("bash") ? "alive" : "", "");
           }
 
           @Override
@@ -1447,7 +1448,7 @@ class MissedStopReconcilerTest {
         0, reconciler(MissedStopReconciler.systemdUnitProbe(restarting), PAST_GRACE).sweep());
 
     assertEquals("running", sessionStore.findById(adhoc).orElseThrow().status());
-    assertEquals(2, probes.get(), "read again once the container answered");
+    assertEquals(2, probes.get(), "read again once the container said the agent is there");
   }
 
   @Test
@@ -1866,19 +1867,19 @@ class MissedStopReconcilerTest {
       @Override
       public Result exec(List<String> command) {
         var joined = String.join(" ", command);
+        var asked = ScriptedShellExecutor.reachableContainer(joined);
+        if (asked.isPresent()) {
+          return asked.get();
+        }
         if (joined.contains("agent.pid") && pidRecorded) {
           return new Result(0, "123", "");
         }
         if (joined.contains("kill -0 123") && alive) {
           return new Result(0, "", "");
         }
-        if (joined.endsWith(" true")) {
-          return new Result(0, "", "");
-        }
-        if (joined.startsWith("incus list")) {
-          return new Result(0, "[{\"name\": \"acme\", \"status\": \"Running\"}]", "");
-        }
-        return new Result(1, "", "no such file");
+        return joined.startsWith("incus list")
+            ? new Result(0, "[{\"name\": \"acme\", \"status\": \"Running\"}]", "")
+            : new Result(1, "", "no such file");
       }
 
       @Override

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -321,11 +322,34 @@ final class FakeContainer implements ShellExec {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
     }
+    if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
+      return presence(inner.get(inner.size() - 2), inner.getLast());
+    }
     var script = inner.stream().filter(arg -> arg.contains("printf '%s' \"$1\" >")).findFirst();
     if (script.isPresent()) {
       files.put(inner.get(inner.size() - 1), inner.get(inner.size() - 2));
     }
     return ok("");
+  }
+
+  /**
+   * The answer to "is this run's agent there": the process its pid file names, or else the one its
+   * unit's manager names — which a manager that is down cannot — is alive or gone.
+   */
+  private Result presence(String pidPath, String service) {
+    var named = files.get(pidPath);
+    if (named == null && !service.isEmpty() && managerDown) {
+      return fail("Failed to connect to bus");
+    }
+    var agent =
+        named != null
+            ? agents.values().stream()
+                .filter(candidate -> String.valueOf(candidate.pid).equals(named.strip()))
+                .findFirst()
+            : Optional.ofNullable(
+                agents.get(
+                    service.replace(AgentUnit.RUN_UNIT_PREFIX, "").replace(SERVICE_SUFFIX, "")));
+    return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
   }
 
   private Result systemctl(List<String> inner) {

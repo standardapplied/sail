@@ -13,7 +13,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Guardrails;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ClaudeCodeHookConfig;
@@ -50,6 +49,7 @@ class RunWatchTest {
   private final List<Instant> publishedAt = new ArrayList<>();
   private final List<Boolean> triggerAtPublish = new ArrayList<>();
   private final List<String> told = new ArrayList<>();
+  private final List<String> noted = new ArrayList<>();
   private final Timeline feed = new Timeline();
 
   @BeforeEach
@@ -102,6 +102,12 @@ class RunWatchTest {
 
     void toolFinishedBy(String runId) {
       said(Event.WellKnownTypes.AGENT_TOOL_FINISHED, runId, Map.of());
+    }
+
+    /** The main agent of {@code runId} has every call of its batch behind it. */
+    void batchResolvedBy(String runId) {
+      said(
+          Event.WellKnownTypes.AGENT_TOOL_FINISHED, runId, Map.of(Event.WellKnownData.BATCH, true));
     }
 
     /** An event of {@code type} about {@code runId} arrives on the feed. */
@@ -191,6 +197,21 @@ class RunWatchTest {
       @Override
       public void ended() {
         told.add("ended");
+      }
+
+      @Override
+      public void endedBy(String type) {
+        told.add("ended by " + type);
+      }
+
+      @Override
+      public void leftToTheReconciler() {
+        noted.add("left to the reconciler");
+      }
+
+      @Override
+      public void stillRunning(GuardrailChecker.GuardrailResult.Triggered limit, boolean survived) {
+        noted.add((survived ? "survived " : "unanswered ") + limit.cause());
       }
     };
   }
@@ -377,6 +398,9 @@ class RunWatchTest {
     assertEquals("stall (20m)", recordedTrigger().cause());
     assertEquals(
         List.of("tripped stall (20m)", "ended"), told, "and it is told as the trip it was");
+    assertTrue(
+        noted.contains("survived stall (20m)"),
+        "each kill it survived is said, with no stop published for it: " + noted);
   }
 
   @Test
@@ -534,6 +558,7 @@ class RunWatchTest {
             + " removed, reset or escalated, so nothing reads the live agent as gone");
     assertEquals(1, published.size(), "the watcher asked again once the manager answered");
     assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertTrue(noted.contains("unanswered stall (20m)"), noted.toString());
     assertFalse(
         Duration.between(START, publishedAt.getFirst()).compareTo(Duration.ofMinutes(22)) < 0);
     assertNull(container.file(UNIT.pidPath()), "the pid file goes once the agent is known gone");
@@ -563,7 +588,7 @@ class RunWatchTest {
 
     assertTrue(published.isEmpty(), "the run's stop was said: the watcher says nothing more");
     assertNull(recordedTrigger());
-    assertTrue(told.isEmpty(), told.toString());
+    assertEquals(List.of("ended by " + Event.WellKnownTypes.AGENT_SESSION_STOPPED), told);
     assertTrue(
         elapsed().compareTo(Duration.ofMinutes(8).plus(RunWatch.LIVENESS_POLL)) <= 0,
         "the watch ended with its run, not hours later at a limit: " + elapsed());
@@ -584,6 +609,7 @@ class RunWatchTest {
     assertTrue(published.isEmpty(), "an operator ended the run: its watcher publishes nothing");
     assertNull(recordedTrigger());
     assertEquals(0, kills());
+    assertEquals(List.of("ended by " + Event.WellKnownTypes.AGENT_CANCELLED), told);
     assertTrue(elapsed().compareTo(Duration.ofMinutes(8).plus(RunWatch.LIVENESS_POLL)) <= 0);
   }
 
@@ -680,22 +706,13 @@ class RunWatchTest {
   }
 
   @Test
-  @SuppressWarnings("unchecked")
-  void aToolCallThatFailedIsNoLongerInFlightAndTheSilenceAfterItIsAStall() throws Exception {
-    var hooks = (Map<String, Object>) YamlUtil.parseMap(ClaudeCodeHookConfig.render()).get("hooks");
-    var onFailure = (List<Map<String, Object>>) hooks.get("PostToolUseFailure");
-    assertNotNull(onFailure, "Claude Code tells of a failed call through this hook alone");
-    var command =
-        (String)
-            ((List<Map<String, Object>>) onFailure.getFirst().get("hooks"))
-                .getFirst()
-                .get("command");
-    var saidOfAFailedCall = command.substring(command.lastIndexOf(' ') + 1);
+  void aToolCallTheCliDeniedIsOverWhenItsBatchResolvesAndTheSilenceAfterItIsAStall()
+      throws Exception {
     feed.at(
         Duration.ofMinutes(5),
         () -> {
           feed.toolStartedBy(RUN);
-          feed.said(saidOfAFailedCall, RUN, Map.of());
+          feed.batchResolvedBy(RUN);
         });
 
     watch(new Guardrails("45m", "20m", "stop"));
@@ -703,10 +720,57 @@ class RunWatchTest {
     assertEquals(
         "stall (20m)",
         published.getFirst().data().get("reason"),
-        "a call that failed has ended: counted in flight it would hold the stall off until the"
-            + " time limit");
+        "a denied call has no finish of its own: counted in flight it would hold the stall off"
+            + " until the time limit");
     assertFalse(elapsed().compareTo(Duration.ofMinutes(25)) < 0, elapsed().toString());
     assertTrue(elapsed().compareTo(Duration.ofMinutes(26)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void aBatchThatResolvesEndsEveryCallInItHoweverManyHadNoFinishOfTheirOwn() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.toolStartedBy(RUN);
+          feed.toolStartedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "stall (20m)",
+        published.getFirst().data().get("reason"),
+        "three calls denied in one batch: its end is not one more finish, it is the end of all"
+            + " of them");
+  }
+
+  @Test
+  void aBatchThatResolvesSaysNothingOfACallTheNextBatchStarts() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+    feed.at(Duration.ofMinutes(6), () -> feed.toolStartedBy(RUN));
+    feed.at(
+        Duration.ofMinutes(36),
+        () -> {
+          feed.toolFinishedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+
+    watch(new Guardrails("2h", "20m", "stop"));
+
+    assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertFalse(
+        elapsed().compareTo(Duration.ofMinutes(56)) < 0,
+        "the half-hour call of the second batch was work, and the stall window began when it"
+            + " finished: "
+            + elapsed());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(57)) < 0, elapsed().toString());
   }
 
   @Test
@@ -724,12 +788,36 @@ class RunWatchTest {
   }
 
   @Test
-  void aToolCallThatFinishesTwiceNeverCountsBelowNone() {
-    var inFlight = RunWatch.toolCallsInFlight(0, Event.WellKnownTypes.AGENT_TOOL_FINISHED);
+  void whatTheAgentLogsWhileACallIsInFlightTakesNothingOffTheCount() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+    feed.at(
+        Duration.ofMinutes(10),
+        () -> feed.said(Event.WellKnownTypes.AGENT_LOG_CHUNK, RUN, Map.of()));
 
-    assertEquals(0, inFlight);
-    assertEquals(1, RunWatch.toolCallsInFlight(inFlight, Event.WellKnownTypes.AGENT_TOOL_STARTED));
-    assertEquals(1, RunWatch.toolCallsInFlight(1, Event.WellKnownTypes.AGENT_LOG_CHUNK));
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "time limit (45m)",
+        published.getFirst().data().get("reason"),
+        "a log line is progress, not a call finishing: the call that started is still in flight");
+  }
+
+  @Test
+  void aFinishNoStartWasHeardForNeverHidesACallThatStartsAfterIt() throws Exception {
+    feed.at(
+        Duration.ofMinutes(4),
+        () -> {
+          feed.toolFinishedBy(RUN);
+          feed.toolFinishedBy(RUN);
+        });
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "time limit (45m)",
+        published.getFirst().data().get("reason"),
+        "calls in flight never count below none, so the call that started is one in flight");
   }
 
   @Test
@@ -743,6 +831,7 @@ class RunWatchTest {
         "a stopped container cannot say how the run ended: the reconciler, which reads the"
             + " container's state, speaks for it");
     assertTrue(told.isEmpty());
+    assertEquals(List.of("left to the reconciler"), noted);
     assertTrue(
         elapsed().compareTo(Duration.ofMinutes(5).plus(RunWatch.LIVENESS_POLL)) <= 0,
         "noticed at the next poll, not at a limit: " + elapsed());
@@ -994,7 +1083,10 @@ class RunWatchTest {
     var captured = new AtomicReference<Event>();
 
     RunWatch.emitStop(
-        captured::set, PROJECT, new AgentSession(shell).queryExitStatus(PROJECT, UNIT), null);
+        captured::set,
+        PROJECT,
+        new AgentSession(shell).answeredExitStatus(PROJECT, UNIT).orElseThrow(),
+        null);
 
     assertEquals("auth", captured.get().spec());
     assertEquals("claude-code", captured.get().agent());

@@ -71,9 +71,10 @@ final class ReviewOperations {
                 () ->
                     new ApiException(
                         ErrorCode.INVALID_REQUEST, "No human review stage awaiting approval."));
-    reviewStore.completeStage(humanStage.id(), "passed");
-    reviewStore.approve(reviewId, decidedBy());
-    specStore.updateStatus(review.specId(), SpecStatus.AWAITING_MERGE);
+    reviewStore.approve(
+        reviewId,
+        decidedBy(),
+        () -> specStore.moveFromLoop(review.specId(), SpecStatus.AWAITING_MERGE));
     return new ReviewApproveResponse(reviewId, true);
   }
 

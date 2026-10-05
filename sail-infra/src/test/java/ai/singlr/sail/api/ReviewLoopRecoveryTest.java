@@ -19,7 +19,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.ReviewPipelineConfig;
-import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -34,23 +33,16 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
 
 /**
  * What the review loop does when things land out of order or not at all: a stop that is lost, heard
@@ -758,10 +750,12 @@ class ReviewLoopRecoveryTest {
     var holder = holderOf("billing", "build");
     var build = loop.built("auth");
     endsWithNoStop(holder);
+    var ended = Instant.parse(loop.runs.findById(holder).orElseThrow().completedAt());
+    var insideTheGrace = ended.plus(MissedStopReconciler.LAUNCH_GRACE).minusSeconds(1);
 
     assertEquals(
         0,
-        sweeps(loop.reconciler(Instant::now), 2),
+        sweeps(loop.reconciler(() -> insideTheGrace), 2),
         "the holder ended inside the grace window: its stop may be the very next event");
     assertEquals(0, replaysOf(build));
     assertEquals(1, sweeps(loop.reconciler(LATER), 2), "past it, nothing is coming");
@@ -878,6 +872,30 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
+  void theOnlyStopOfARunFinishedInPlaceWithNoneIsSaidHoweverLongAgoItsRowEnded() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var said = loop.narrating();
+    loop.spec("auth", SpecStatus.REVIEW, "claude-code", null, null, List.of("api"));
+    var build = loop.run("auth", "build");
+    loop.container.started(build);
+    loop.container.exited(build, "done", 0);
+
+    sweeps(loop.reconciler(LATER), 3);
+
+    assertEquals(
+        List.of("review"),
+        loop.live().stream().map(RunStore.RunRow::role).toList(),
+        "the spec was moved to review under its build, whose row a sweep then finished with no"
+            + " stop: the next sweep's stop is what starts its review");
+    assertEquals(
+        1,
+        said.stopsInSlack(),
+        "and it is the build's first and only stop, so it is news: a row that had ended is not a"
+            + " stop that was said");
+    assertEquals(1, said.stopsToWebhooks());
+  }
+
+  @Test
   void theFirstStopOfARunThatDiedUnwatchedIsSaidThoughTheReconcilerPublishesIt() {
     loop = ReviewLoop.staged(tempDir, "codex");
     var said = loop.narrating();
@@ -969,6 +987,221 @@ class ReviewLoopRecoveryTest {
     assertTrue(loop.runsIn("auth", "fix").isEmpty(), "no fix agent ran over nothing");
     assertTrue(loop.details("review_escalated").isEmpty());
     assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+  }
+
+  @Test
+  void anEscalationWhoseReasonOutgrowsARoomMessageStillLandsWithItsReasonKeptWhole() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.container.dirty("api", " M src/Fixed.java\n");
+    loop.container.gitFails("pre-commit hook failed:\n" + "E".repeat(70_000), "commit");
+
+    loop.finish(fix.id(), "fixed");
+
+    var review = loop.reviews.findReview(fix.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "a room line too long to write never undoes the escalation it is written with");
+    assertTrue(review.error().length() > 70_000, "the reason is kept whole on the review");
+    var line = loop.roomLines("auth", "Review escalated").getFirst();
+    assertTrue(line.endsWith("[cut: longer than a room message can be]"), "and the room is told");
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+  }
+
+  @Test
+  void aPassWhoseVerdictOutgrowsARoomMessageStillLands() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.finish(fix.id(), "fixed");
+    var reviewer = loop.onlyLive();
+    Acting.by(
+        ADMIN,
+        () ->
+            loop.reviews
+                .openFindingsForReview(fix.reviewId())
+                .forEach(
+                    finding ->
+                        loop.reviews.resolveFinding(
+                            finding.id(),
+                            Finding.Resolution.DISPUTED,
+                            "the reviewer's argument ".repeat(3_000))));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEquals("passed", loop.statusOf(reviewer.reviewId()));
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus("auth"));
+    assertEquals(1, loop.roomLines("auth", "Review passed").size());
+  }
+
+  @Test
+  void aStageThePipelineNoLongerHasWhenItsReviewerStopsEscalatesItsReviewSayingSo() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "nothing can judge a stage the pipeline was changed away from: the review is a person's,"
+            + " never left running with nothing owed");
+    assertTrue(review.error().contains("stage 'codex'"), review.error());
+    assertEquals(
+        List.of("failed"),
+        loop.reviews.stagesForReview(review.id()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "and no stage of an escalated review is left running");
+    assertEquals(0, sweeps(loop.reconciler(LATER), 3), "nothing is owed for it any more");
+  }
+
+  @Test
+  void aSecondStageThePipelineReplacedEscalatesItsReviewNamingTheStageItHolds() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex", "claude-code"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CLEAN_REVIEW);
+    var second = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("codex", "gemini"));
+
+    loop.finish(second.id(), CLEAN_REVIEW);
+
+    assertEquals("escalated", loop.statusOf(second.reviewId()));
+    assertTrue(
+        loop.reviews.findReview(second.reviewId()).orElseThrow().error().contains("claude-code"),
+        "the stage the review holds in second place is not the pipeline's second stage any more");
+  }
+
+  @Test
+  void aRunningReviewWhosePipelineLostItsStagesClosesTheStageItsReviewerRan() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages());
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEquals("escalated", loop.statusOf(reviewer.reviewId()));
+    assertEquals(
+        List.of("failed"),
+        loop.reviews.stagesForReview(reviewer.reviewId()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "a stage is running only while a run exists for it or a person owns it");
+  }
+
+  @Test
+  void aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
+    var custom =
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: security\n"
+            + "        type: agent\n"
+            + "        agent: codex\n"
+            + "        gate: no_critical\n";
+    loop = ReviewLoop.wired(tempDir, custom);
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.describe("agent: [unterminated");
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals("escalated", review.status());
+    assertTrue(
+        review.error().contains("could not be read"),
+        "the review is handed to a person for what is true — its project's descriptor cannot be"
+            + " read — and never judged against the default pipeline an unread file would be"
+            + " taken for: "
+            + review.error());
+    assertFalse(review.error().contains("changed while this review ran"), review.error());
+  }
+
+  @Test
+  void aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(
+        ReviewPipelineConfig.fromMap(
+            Map.of("stages", List.of(Map.<String, Object>of("name", "codex", "type", "human")))));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "the stage kept its name and stopped being a reviewer's: a reviewer's verdict is no"
+            + " longer what passes it");
+    assertTrue(review.error().contains("stage 'codex'"), review.error());
+  }
+
+  @Test
+  void anErroredReviewIsNotRetriedUnderAPipelineThatChangedSinceItsStagesWereWritten() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.refuseLaunches();
+    loop.built("auth");
+    var errored = loop.reviewOf("auth");
+    assertEquals("failed", loop.statusOf(errored));
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    assertEquals(1, sweeps(loop.reconciler(LATER), 2));
+
+    assertEquals("escalated", loop.statusOf(errored));
+    assertTrue(
+        loop.reviews.findReview(errored).orElseThrow().error().contains("changed while"),
+        "findings carry forward by stage name: a retry under other stages would carry none");
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size(), "and no review is begun under it");
+  }
+
+  @Test
+  void aFixIsNotReReviewedUnderAPipelineThatChangedWhileItRan() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    loop.finish(fix.id(), "fixed");
+
+    assertEquals("escalated", loop.statusOf(fix.reviewId()));
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size());
+    assertTrue(loop.live().isEmpty(), "no reviewer is launched under the other pipeline");
+  }
+
+  @Test
+  void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
+    loop.describe("agent: [unterminated");
+
+    var build = loop.built("auth");
+
+    var review = loop.reviews.latestReviewForSpec("auth").orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "the build's work is not reviewed under a pipeline nobody could read, nor under the"
+            + " default one an unread file would be taken for: a person is told why");
+    assertTrue(review.error().contains("could not be read"), review.error());
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertTrue(loop.live().isEmpty());
+    assertEquals(0, sweeps(loop.reconciler(LATER), 3), "and nothing is owed for it any more");
+    assertEquals(0, replaysOf(build));
   }
 
   @Test
@@ -1069,260 +1302,6 @@ class ReviewLoopRecoveryTest {
 
     assertEscalatedForNoStages(errored);
     assertEquals(1, loop.reviews.reviewsForSpec("auth").size());
-  }
-
-  /** How a review's row can stand: every status its CHECK admits, with and without an error. */
-  private enum ReviewShape {
-    PENDING("pending", null),
-    RUNNING("running", null),
-    PASSED("passed", null),
-    GATE_FAILED("failed", null),
-    ERRORED("failed", "reviewer could not start"),
-    ESCALATED("escalated", "reviewer stopped by an operator"),
-    ESCALATED_BEFORE_REASONS_WERE_RECORDED("escalated", null);
-
-    private final String status;
-    private final String error;
-
-    ReviewShape(String status, String error) {
-      this.status = status;
-      this.error = error;
-    }
-  }
-
-  /** The run that serves the review, if any: its lane, and whether it has ended. */
-  private enum Serving {
-    NO_RUN(null, false),
-    A_LIVE_REVIEWER(Lane.REVIEW, false),
-    AN_ENDED_REVIEWER(Lane.REVIEW, true),
-    A_LIVE_FIX_AGENT(Lane.FIX, false),
-    AN_ENDED_FIX_AGENT(Lane.FIX, true);
-
-    private final Lane lane;
-    private final boolean ended;
-
-    Serving(Lane lane, boolean ended) {
-      this.lane = lane;
-      this.ended = ended;
-    }
-  }
-
-  /** What the review recorded that it waits on. */
-  private enum Wait {
-    ON_NO_RUN,
-    ON_A_LIVE_RUN,
-    ON_AN_ENDED_RUN
-  }
-
-  private static final List<String> STAGE_STATUSES =
-      List.of("pending", "running", "passed", "failed", "skipped");
-
-  private static final ReviewPipelineConfig AN_AGENT_THEN_A_PERSON =
-      ReviewPipelineConfig.fromMap(
-          Map.of(
-              "max_iterations",
-              3,
-              "stages",
-              List.of(
-                  Map.<String, Object>of(
-                      "name", "codex", "type", "agent", "agent", "codex", "gate", "no_critical"),
-                  Map.<String, Object>of("name", "approve", "type", "human"))));
-
-  /** No stage rows yet, or the agent stage and the person's stage in every pair of statuses. */
-  private static List<List<String>> stageShapes() {
-    var shapes = new ArrayList<List<String>>();
-    shapes.add(List.of());
-    for (var agent : STAGE_STATUSES) {
-      for (var person : STAGE_STATUSES) {
-        shapes.add(List.of(agent, person));
-      }
-    }
-    return shapes;
-  }
-
-  private static Stream<Arguments> reviewAndSpecStates() {
-    return Arrays.stream(ReviewShape.values())
-        .flatMap(
-            shape -> Arrays.stream(SpecStatus.values()).map(spec -> Arguments.of(shape, spec)));
-  }
-
-  private static final String STATE = "auth";
-
-  /**
-   * Writes one state straight into the tables, as rows, in place of the one before it — whether or
-   * not the loop would ever write it: {@link #STATE} in {@code specStatus} with a finished build,
-   * its review in {@code shape}, the review's stage rows, the run that serves it and the run it
-   * waits on.
-   */
-  private void state(
-      ReviewShape shape, SpecStatus specStatus, List<String> stages, Serving serving, Wait wait) {
-    loop.container.live().forEach(runId -> loop.container.exited(runId, "", 0));
-    loop.db.transaction(
-        () -> {
-          loop.db.execute(
-              """
-              DELETE FROM review_stages
-              WHERE review_id IN (SELECT id FROM reviews WHERE spec_id = ?)""",
-              STATE);
-          loop.db.execute("DELETE FROM reviews WHERE spec_id = ?", STATE);
-          loop.db.execute("DELETE FROM runs WHERE spec_id = ?", STATE);
-          loop.db.execute("UPDATE specs SET status = ? WHERE id = ?", specStatus.wire(), STATE);
-          runRow("build", null, true);
-          var review = DateTimeUtils.newId().toString();
-          var served = serving.lane == null ? null : runRow(serving.lane.wire(), review, false);
-          var holder = wait == Wait.ON_NO_RUN ? null : runRow(Lane.ROOM_FULL.wire(), null, false);
-          loop.db.execute(
-              """
-              INSERT INTO reviews (id, spec_id, iteration, status, created_at, error, waiting_on)
-              VALUES (?, ?, 1, ?, ?, ?, ?)""",
-              review,
-              STATE,
-              shape.status,
-              DateTimeUtils.now().toString(),
-              shape.error,
-              holder);
-          for (var i = 0; i < stages.size(); i++) {
-            loop.db.execute(
-                """
-                INSERT INTO review_stages (id, review_id, name, stage_type, status, started_at)
-                VALUES (?, ?, ?, ?, ?, ?)""",
-                DateTimeUtils.newId().toString(),
-                review,
-                AN_AGENT_THEN_A_PERSON.stages().get(i).name(),
-                i == 0 ? "agent" : "human",
-                stages.get(i),
-                "running".equals(stages.get(i)) ? DateTimeUtils.now().toString() : null);
-          }
-          if (serving.ended) {
-            ends(served, CLEAN_REVIEW);
-          }
-          if (wait == Wait.ON_AN_ENDED_RUN) {
-            ends(holder, "replied");
-          }
-        });
-  }
-
-  /** A run row of {@link #STATE} in lane {@code role}: ended, or with its agent at work. */
-  private String runRow(String role, String review, boolean ended) {
-    var id = DateTimeUtils.newId().toString();
-    var unit = AgentUnit.forRun(id);
-    loop.db.execute(
-        """
-        INSERT INTO runs (id, project, spec_id, node, owner, role, agent, branch, task, status,
-            started_at, log_path, unit, repos, review_id)
-        VALUES (?, ?, ?, ?, ?, ?, 'claude-code', 'feat/test', 'work', 'running', ?, ?, ?, '[]', ?)""",
-        id,
-        PROJECT,
-        STATE,
-        ReviewLoop.HANDLE,
-        ReviewLoop.HANDLE,
-        role,
-        DateTimeUtils.now().toString(),
-        unit.logPath(),
-        unit.unitName(),
-        review);
-    loop.container.started(id);
-    if (ended) {
-      ends(id, "done");
-    }
-    return id;
-  }
-
-  private void ends(String runId, String log) {
-    loop.container.exited(runId, log, 0);
-    loop.db.execute(
-        "UPDATE runs SET status = 'stopped', exit_code = 0, completed_at = ? WHERE id = ?",
-        DateTimeUtils.now().toString(),
-        runId);
-  }
-
-  /** One pipeline step: the stop of the spec's newest ended loop run, as the reconciler replays. */
-  private void step(String spec) {
-    var newestEnded =
-        loop.runs.listForSpec(spec).stream()
-            .filter(run -> !Lane.ROOM_FULL.matches(run.role()))
-            .filter(run -> RunStatus.isTerminal(run.status()))
-            .findFirst()
-            .orElseThrow();
-    loop.onEvent(MissedStopReconciler.stopEvent(newestEnded, newestEnded.exitCode(), null));
-  }
-
-  /**
-   * Which of the five ends {@code spec}'s latest review is at, or empty when it is at none: it is
-   * served by a run, waits on a recorded run that still lives, is a person's — a person's stage is
-   * open, or its spec is in a status the loop never acts over — passed, or escalated, saying why
-   * whenever it was the loop that escalated it.
-   */
-  private Optional<String> endOf(String spec, ReviewShape before) {
-    var review = loop.reviews.latestReviewForSpec(spec).orElseThrow();
-    var state = new ReviewLoopState(loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
-    var status = loop.specStatus(spec);
-    if ("passed".equals(review.status())) {
-      return Optional.of("passed");
-    }
-    if ("escalated".equals(review.status())) {
-      return "escalated".equals(before.status) || review.error() != null
-          ? Optional.of("escalated")
-          : Optional.empty();
-    }
-    if (status != SpecStatus.IN_PROGRESS && status != SpecStatus.REVIEW) {
-      return Optional.of("a person's: its spec is " + status.wire());
-    }
-    if (state.served(review.id())) {
-      return Optional.of("served by a run");
-    }
-    if (review.waitingOn() != null
-        && loop.runs
-            .findById(review.waitingOn())
-            .filter(run -> !RunStatus.isTerminal(run.status()))
-            .isPresent()) {
-      return Optional.of("waiting on a recorded run");
-    }
-    return loop.reviews.stagesForReview(review.id()).stream()
-            .anyMatch(
-                stage -> "human".equals(stage.stageType()) && "running".equals(stage.status()))
-        ? Optional.of("a person's: a stage waits on them")
-        : Optional.empty();
-  }
-
-  @ParameterizedTest(name = "review {0}, spec {1}")
-  @MethodSource("reviewAndSpecStates")
-  void everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated(
-      ReviewShape shape, SpecStatus specStatus) {
-    loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
-    loop.spec(STATE, "api");
-    var read = new ReviewLoopState(loop.reviews, loop.runs, () -> ReviewLoop.HANDLE);
-    var deadEnds = new ArrayList<String>();
-    var states = 0;
-    for (var stages : stageShapes()) {
-      for (var serving : Serving.values()) {
-        for (var wait : Wait.values()) {
-          states++;
-          state(shape, specStatus, stages, serving, wait);
-          var owed = read.owed(STATE).getClass().getSimpleName();
-
-          step(STATE);
-
-          if (endOf(STATE, shape).isEmpty()) {
-            var left = loop.reviews.latestReviewForSpec(STATE).orElseThrow();
-            deadEnds.add(
-                "stages %s, %s, waiting %s: owed %s, left %s (%s) with its spec %s"
-                    .formatted(
-                        stages,
-                        serving,
-                        wait,
-                        owed,
-                        left.status(),
-                        left.error(),
-                        loop.specStatus(STATE).wire()));
-          }
-        }
-      }
-    }
-
-    assertEquals(List.of(), deadEnds, "every state is one step from an end");
-    assertEquals(stageShapes().size() * Serving.values().length * Wait.values().length, states);
-    assertEquals(List.of(), loop.details("review_pipeline_error"), "and no step failed");
   }
 
   @Test

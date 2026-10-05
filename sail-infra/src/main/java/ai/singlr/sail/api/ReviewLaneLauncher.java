@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LegacyFixAgent;
@@ -55,7 +56,6 @@ final class ReviewLaneLauncher implements ReviewLanes {
     var config = projects.loadRunning(project).config();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
-    var role = invocation.lane().wire();
     var claim =
         runReservation.reserveForReview(
             runId,
@@ -70,11 +70,22 @@ final class ReviewLaneLauncher implements ReviewLanes {
             invocation.task(),
             unit,
             config);
-    if (claim instanceof RunReservation.Claim.Held held) {
-      return new Launch.Deferred(
-          held.conflict().run().runId(), RunReservation.occupied(held.conflict()));
-    }
-    var credential = ((RunReservation.Claim.Claimed) claim).credential();
+    return switch (claim) {
+      case RunReservation.Claim.Held held -> new Launch.Deferred(held.conflict().run());
+      case RunReservation.Claim.Claimed reserved ->
+          launchClaimed(invocation, runId, unit, config, reserved.credential(), claimed);
+    };
+  }
+
+  private Launch launchClaimed(
+      Invocation invocation,
+      String runId,
+      AgentUnit unit,
+      SailYaml config,
+      String credential,
+      Runnable claimed) {
+    var project = invocation.project();
+    var role = invocation.lane().wire();
     try {
       claimed.run();
       if (invocation.lane() == Lane.FIX) {
@@ -106,7 +117,7 @@ final class ReviewLaneLauncher implements ReviewLanes {
           new RunLauncher.RunContext(
               project, unit, runId, invocation.specId(), invocation.agent(), role, true),
           launch);
-      return new Launch.Started(runId);
+      return new Launch.Started();
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;

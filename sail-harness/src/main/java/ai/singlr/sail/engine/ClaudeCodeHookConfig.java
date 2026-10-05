@@ -41,6 +41,11 @@ import java.util.concurrent.TimeoutException;
  *       that exits non-zero, a file that is not there — so both are a call's end, and the watcher,
  *       which counts a run's calls in flight, is told when a call that ran is over. A call Claude
  *       Code denies before running it fires neither
+ *   <li>{@code PostToolBatch} → {@link SailEventHelper#BATCH_RESOLVED}: fired once every call of a
+ *       batch has resolved, a batch of one included, and after a batch whose call was denied. It is
+ *       what closes a denied call, and a call whose own finish was lost on its way to the daemon,
+ *       so the count of calls in flight returns to none at every batch. A subagent's batches fire
+ *       it too, naming their {@code agent_id}; the helper posts only the main agent's
  *   <li>{@code Stop} → {@link SailStopGate}, which publishes {@code agent_session_stopped} when it
  *       allows the stop or {@code agent_stop_nudged} when it blocks a premature one. It must be the
  *       only {@code Stop} hook: hooks in a matcher group run in parallel, so a bare publisher
@@ -98,6 +103,11 @@ public final class ClaudeCodeHookConfig {
     hooks.put("PreToolUse", List.of(matcherGroup(null, toolStarted)));
     hooks.put("PostToolUse", List.of(matcherGroup(null, toolFinished, roomRelayCommand())));
     hooks.put("PostToolUseFailure", List.of(matcherGroup(null, toolFinished)));
+    hooks.put(
+        "PostToolBatch",
+        List.of(
+            matcherGroup(
+                null, hookCommand(SailEventHelper.SCRIPT_PATH, SailEventHelper.BATCH_RESOLVED))));
     hooks.put("Stop", List.of(matcherGroup(null, stop)));
     hooks.put("SessionEnd", List.of(matcherGroup(null, sessionEnd)));
 

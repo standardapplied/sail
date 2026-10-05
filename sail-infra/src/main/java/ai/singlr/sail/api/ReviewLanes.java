@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 
@@ -55,17 +56,16 @@ public interface ReviewLanes {
   /** How a launch left the review it serves. */
   sealed interface Launch {
 
-    /** The agent is running as run {@code runId}; the pipeline hears how it ends from its stop. */
-    record Started(String runId) implements Launch {}
+    /** The agent is running as a run of its own; the pipeline hears how it ends from its stop. */
+    record Started() implements Launch {}
 
     /**
      * Nothing was started: another run holds what this one would claim. Not a failure — the review
      * waits on that run, and takes its step when it has ended.
      *
-     * @param holderRunId the run that holds the claim
-     * @param why what that run holds, as the gate said it
+     * @param holder the run that holds the claim, as the gate named it
      */
-    record Deferred(String holderRunId, String why) implements Launch {}
+    record Deferred(DispatchGate.RunningRun holder) implements Launch {}
   }
 
   /**

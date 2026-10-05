@@ -12,10 +12,8 @@ import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -240,11 +238,7 @@ final class ReviewLoop implements AutoCloseable {
   }
 
   private SailYaml load() {
-    try {
-      return SailYaml.fromMap(YamlUtil.parseFile(yaml));
-    } catch (Exception e) {
-      return null;
-    }
+    return ReviewWiring.descriptor(PROJECT, yaml);
   }
 
   /** One agent stage per name, each reviewed by the agent of that name, gated on no critical. */
@@ -610,7 +604,7 @@ final class ReviewLoop implements AutoCloseable {
               container,
               feed(runId, time, working),
               publisher,
-              QUIET,
+              new QuietNarrator(),
               time::get)
           .run();
     } catch (Exception e) {
@@ -626,43 +620,38 @@ final class ReviewLoop implements AutoCloseable {
     return watchEndedAt;
   }
 
-  private static final RunWatch.Narrator QUIET =
-      new RunWatch.Narrator() {
-        @Override
-        public void tripped(
-            GuardrailChecker.GuardrailResult.Triggered limit, Duration elapsed, String snapshot) {}
-
-        @Override
-        public void exited() {}
-
-        @Override
-        public void ended() {}
-      };
-
   /**
    * A feed over a clock that passes as the watch waits on it: a silent one lets every wait run out;
-   * a working one hands the watch one of the run's own tool calls halfway through each wait.
+   * a working one hands the watch one of the run's own tool calls halfway through each wait, its
+   * start and then its finish.
    */
   private static RunWatch.Feed feed(String runId, AtomicReference<Instant> time, boolean working) {
     var started = time.get();
     return new RunWatch.Feed() {
+
+      private boolean calling;
+
       @Override
       public Event poll(Duration wait) {
         if (Duration.between(started, time.get()).compareTo(WATCH_HORIZON) > 0) {
           throw new AssertionError("the watch of run " + runId + " never ended");
+        }
+        if (calling) {
+          calling = false;
+          return said(Event.WellKnownTypes.AGENT_TOOL_FINISHED);
         }
         if (!working || wait.compareTo(Duration.ofSeconds(1)) < 0) {
           time.updateAndGet(now -> now.plus(wait));
           return null;
         }
         time.updateAndGet(now -> now.plus(wait.dividedBy(2)));
+        calling = true;
+        return said(Event.WellKnownTypes.AGENT_TOOL_STARTED);
+      }
+
+      private Event said(String type) {
         return Event.of(
-            PROJECT,
-            null,
-            Event.WellKnownTypes.AGENT_TOOL_STARTED,
-            "claude-code",
-            "host",
-            Map.of(Event.WellKnownData.RUN_ID, runId));
+            PROJECT, null, type, "claude-code", "host", Map.of(Event.WellKnownData.RUN_ID, runId));
       }
 
       @Override
@@ -680,7 +669,10 @@ final class ReviewLoop implements AutoCloseable {
   /** The stop the run's watcher publishes, read off the container as the watcher reads it. */
   Event watcherStop(String runId, String reason) {
     try {
-      var exit = new AgentSession(container).queryExitStatus(PROJECT, AgentUnit.forRun(runId));
+      var exit =
+          new AgentSession(container)
+              .answeredExitStatus(PROJECT, AgentUnit.forRun(runId))
+              .orElseThrow();
       return RunWatch.stop(PROJECT, RunWatch.addressedTo(runId, exit), reason);
     } catch (Exception e) {
       throw new IllegalStateException(e);

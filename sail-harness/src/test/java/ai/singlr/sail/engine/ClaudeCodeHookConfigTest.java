@@ -83,6 +83,25 @@ class ClaudeCodeHookConfigTest {
 
   @Test
   @SuppressWarnings("unchecked")
+  void aBatchThatResolvedIsToldThroughItsOwnHook() {
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(ClaudeCodeHookConfig.render()).get("hooks");
+
+    var groups = (List<Map<String, Object>>) hooks.get("PostToolBatch");
+
+    assertNotNull(
+        groups,
+        "a call Claude Code denies has no finish of its own: only its batch resolving says it"
+            + " is over, and without that the call is counted in flight for the rest of the run");
+    assertEquals(1, groups.size());
+    assertNull(groups.getFirst().get("matcher"), "every batch, whatever tools were in it");
+    assertEquals(
+        List.of(SailEventHelper.SCRIPT_PATH + " " + SailEventHelper.BATCH_RESOLVED),
+        ((List<Map<String, Object>>) groups.getFirst().get("hooks"))
+            .stream().map(hook -> hook.get("command")).toList());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
   void renderWiresTheStopGateAsTheOnlyStopHook() {
     var json = ClaudeCodeHookConfig.render();
     var hooks = (Map<String, Object>) YamlUtil.parseMap(json).get("hooks");

@@ -15,6 +15,8 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -153,5 +155,44 @@ class ProjectDefinitionsTest {
         return false;
       }
     };
+  }
+
+  @Test
+  void aDescriptorIsReplacedInOneMoveKeepingItsModeAndLeavingNothingBeside(@TempDir Path dir)
+      throws Exception {
+    var descriptor = dir.resolve("sail.yaml");
+
+    ProjectDefinitions.write(descriptor, "name: acme\n");
+
+    assertEquals("name: acme\n", Files.readString(descriptor));
+    assertEquals(
+        PosixFilePermissions.fromString("rw-r--r--"),
+        Files.getPosixFilePermissions(descriptor),
+        "a descriptor written for the first time is readable like any other");
+    Files.setPosixFilePermissions(descriptor, PosixFilePermissions.fromString("rw-rw----"));
+
+    ProjectDefinitions.write(descriptor, "name: acme\nimage: ubuntu/24.04\n");
+
+    assertEquals("name: acme\nimage: ubuntu/24.04\n", Files.readString(descriptor));
+    assertEquals(
+        PosixFilePermissions.fromString("rw-rw----"), Files.getPosixFilePermissions(descriptor));
+    try (var beside = Files.list(dir)) {
+      assertEquals(List.of(descriptor), beside.toList(), "no half-written file is left behind");
+    }
+  }
+
+  @Test
+  void aDescriptorThatIsALinkIsWrittenWhereItPointsAndOneInANewDirectoryIsCreated(@TempDir Path dir)
+      throws Exception {
+    var real = Files.writeString(dir.resolve("real.yaml"), "name: acme\n");
+    var link = Files.createSymbolicLink(dir.resolve("sail.yaml"), real);
+    var fresh = dir.resolve("projects").resolve("billing").resolve("sail.yaml");
+
+    ProjectDefinitions.write(link, "name: acme\nimage: ubuntu/24.04\n");
+    ProjectDefinitions.write(fresh, "name: billing\n");
+
+    assertTrue(Files.isSymbolicLink(link), "the link is still a link");
+    assertEquals("name: acme\nimage: ubuntu/24.04\n", Files.readString(real));
+    assertEquals("name: billing\n", Files.readString(fresh));
   }
 }

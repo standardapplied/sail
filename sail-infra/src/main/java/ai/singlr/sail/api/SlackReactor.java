@@ -186,7 +186,7 @@ public final class SlackReactor implements EventSubscriber {
     if (!Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(event.type())) {
       return false;
     }
-    if (event.data().get(Event.WellKnownData.SOURCE) == null) {
+    if (!Event.WellKnownData.authoritative(event.data())) {
       return true;
     }
     return Event.WellKnownData.replay(event.data()) || isCleanChatStop(event);

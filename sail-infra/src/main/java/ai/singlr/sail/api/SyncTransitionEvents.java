@@ -192,6 +192,11 @@ public final class SyncTransitionEvents {
     return detail.isEmpty() ? List.of() : List.of(located.event("review_errored", detail, host));
   }
 
+  /**
+   * What main says of a node's stage as its row changes: started, passed, or failed its gate. A
+   * stage closed for an error — its reviewer could not run, or its review was escalated under it —
+   * failed no gate, and is told by its review's error or escalation, as the driving box tells it.
+   */
   private static List<Event> stageEvents(
       SyncTransition transition, Function<String, String> projectOfSpec, String host) {
     var located = locate(transition, projectOfSpec);
@@ -206,6 +211,9 @@ public final class SyncTransitionEvents {
     return switch (transition.to()) {
       case "running" -> List.of(located.event("review_stage_started", data, host));
       case "passed", "failed" -> {
+        if (text(transition.snapshot(), "error") != null) {
+          yield List.of();
+        }
         var findings = findingsData(transition.snapshot());
         if (!findings.isEmpty()) {
           data.put("findings", findings);

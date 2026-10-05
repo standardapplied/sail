@@ -9,10 +9,9 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RunStatus;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GuardrailTrigger;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Actor;
@@ -95,7 +94,13 @@ public final class MissedStopReconciler implements AutoCloseable {
   private static final SpecStore.SpecFilter REVIEW =
       new SpecStore.SpecFilter(null, "review", null, null, null);
 
-  /** What a run's recorded agent identity still says: whether it is active, and how it ended. */
+  /**
+   * What a run's recorded agent identity still says: whether it is active, and how it ended. A
+   * probe that cannot tell throws, and a caller that finishes or frees anything on "not active"
+   * reads that as alive: this sweep's probe ({@link #systemdUnitProbe}) throws for a container that
+   * gave no answer. The watcher re-armer's probe answers false there instead, which for it is the
+   * side that does nothing: no watcher is armed onto an agent nobody could see.
+   */
   @FunctionalInterface
   public interface UnitProbe {
     boolean active(String project, String runId, String unit) throws Exception;
@@ -154,34 +159,23 @@ public final class MissedStopReconciler implements AutoCloseable {
   }
 
   /**
-   * Probes the run-scoped pid file first, then its systemd unit. The pid path also covers
-   * foreground builds, which use the same run identity without creating a service. A run that reads
-   * as not running is gone only when its container says so: a container that is stopped or no
-   * longer exists runs nothing; a running one must answer a command and then read the run as not
-   * running a second time, so a command lost while incusd restarted, before the container answered
-   * again, never reads a working agent as gone; and one incus cannot report fails the probe — which
-   * every pass reads as alive — so an incus outage never reads as every run in it gone.
+   * The production probe: a run is active or gone as {@link AgentPresence} reads it — the pid file
+   * first, then its systemd unit, so foreground builds, which use the same run identity without
+   * creating a service, are covered too. A container that gave no answer fails the probe, which
+   * every pass reads as alive, so an incus outage never reads as every run in it gone.
    */
   public static UnitProbe systemdUnitProbe(ShellExec shell) {
     var agentSession = new AgentSession(shell);
-    var containers = new ContainerManager(shell);
+    var presence = new AgentPresence(shell);
     return new UnitProbe() {
       @Override
       public boolean active(String project, String runId, String unit) throws Exception {
-        var recorded = AgentUnit.recorded(runId, unit);
-        if (running(agentSession.queryStatus(project, recorded))) {
-          return true;
-        }
-        return switch (containers.queryState(project)) {
-          case ContainerState.Stopped stopped -> false;
-          case ContainerState.NotCreated gone -> false;
-          case ContainerState.Running running -> {
-            agentSession.requireReachable(project);
-            yield running(agentSession.queryStatus(project, recorded));
-          }
-          case ContainerState.Error unknown ->
+        return switch (presence.of(project, AgentUnit.recorded(runId, unit))) {
+          case AgentSession.Presence.Running running -> true;
+          case AgentSession.Presence.Gone gone -> false;
+          case AgentSession.Presence.Unanswered silent ->
               throw new IOException(
-                  "Container '" + project + "' could not be read: " + unknown.message());
+                  "Container '" + project + "' gave no answer about run " + runId + ".");
         };
       }
 
@@ -193,18 +187,18 @@ public final class MissedStopReconciler implements AutoCloseable {
       @Override
       public Ending ending(String project, String runId, String unit) throws Exception {
         var recorded = AgentUnit.recorded(runId, unit);
-        var exit = agentSession.queryExitStatus(project, recorded);
+        var exitCode =
+            agentSession
+                .answeredExitStatus(project, recorded)
+                .map(AgentSession.ExitState::exitCode)
+                .filter(code -> code != 0);
         var limit =
             GuardrailTrigger.read(shell, project, recorded)
                 .filter(GuardrailTrigger::stops)
                 .map(GuardrailTrigger::cause);
-        return new Ending(exit.exitCode() == 0 ? null : exit.exitCode(), limit.orElse(null));
+        return new Ending(exitCode.orElse(null), limit.orElse(null));
       }
     };
-  }
-
-  private static boolean running(AgentSession.SessionInfo info) {
-    return info != null && info.running();
   }
 
   /** Starts the periodic sweep at the default cadence. */
@@ -565,15 +559,15 @@ public final class MissedStopReconciler implements AutoCloseable {
                           "failed its gate and no fix agent was launched; replaying the stop to"
                               + " launch it"));
       case ReviewLoopState.Owed.Waiting waiting ->
-          Optional.of(waiting)
-              .filter(wait -> ended(wait.holderRunId()))
+          Optional.of(waiting.review())
+              .filter(review -> endedAWhileAgo(review.waitingOn()))
               .map(
-                  wait ->
+                  review ->
                       Rescue.of(
-                          wait.review(),
-                          "waiting:" + wait.holderRunId(),
+                          review,
+                          "waiting:" + review.waitingOn(),
                           "waited on run "
-                              + wait.holderRunId()
+                              + review.waitingOn()
                               + ", which ended with no stop; replaying the stop to take the step"
                               + " it held up"));
       case ReviewLoopState.Owed.Stop unheard ->
@@ -606,15 +600,13 @@ public final class MissedStopReconciler implements AutoCloseable {
    * its row is gone, or terminal for longer than {@link #LAUNCH_GRACE}. A holder that only just
    * ended may still have its stop on the way, and that stop is what wakes the review.
    */
-  private boolean ended(String holderRunId) {
+  private boolean endedAWhileAgo(String holderRunId) {
     var cutoff = clock.get().minus(LAUNCH_GRACE);
-    return sessionStore
-        .findById(holderRunId)
-        .map(
-            holder ->
-                RunStatus.isTerminal(holder.status())
-                    && MissedStops.parseOr(holder.completedAt(), Instant.MAX).isBefore(cutoff))
-        .orElse(true);
+    return loop.ended(holderRunId)
+        && sessionStore
+            .findById(holderRunId)
+            .map(holder -> MissedStops.parseOr(holder.completedAt(), Instant.MAX).isBefore(cutoff))
+            .orElse(true);
   }
 
   /**
@@ -702,14 +694,19 @@ public final class MissedStopReconciler implements AutoCloseable {
    * run's stop, or one that names no run, never speaks for this one.
    */
   private Optional<String> recordedReason(RunStore.RunRow run) {
+    return saidStops(run)
+        .filter(stop -> Strings.isNotBlank(stop.reason()))
+        .max(Comparator.comparing(RecordedStop::at))
+        .map(RecordedStop::reason);
+  }
+
+  /** The authoritative stops already said for {@code run}, as the event store recorded them. */
+  private Stream<RecordedStop> saidStops(RunStore.RunRow run) {
     return eventStore
         .forSpecAndType(run.specId(), Event.WellKnownTypes.AGENT_SESSION_STOPPED)
         .stream()
         .map(RecordedStop::of)
-        .filter(stop -> stop.authoritative() && run.id().equals(stop.runId()))
-        .filter(stop -> Strings.isNotBlank(stop.reason()))
-        .max(Comparator.comparing(RecordedStop::at))
-        .map(RecordedStop::reason);
+        .filter(stop -> stop.authoritative() && run.id().equals(stop.runId()));
   }
 
   /**
@@ -726,7 +723,7 @@ public final class MissedStopReconciler implements AutoCloseable {
         var runId = Objects.toString(data.get(Event.WellKnownData.RUN_ID), null);
         return new RecordedStop(
             timestampOf(row),
-            data.get(Event.WellKnownData.SOURCE) != null,
+            Event.WellKnownData.authoritative(data),
             runId,
             runId == null ? null : Event.WellKnownData.exitCode(data),
             Objects.toString(data.get(Event.WellKnownData.REASON), null));
@@ -772,7 +769,7 @@ public final class MissedStopReconciler implements AutoCloseable {
    * stop of a run still recorded {@code running} is that run's first.
    */
   private void publishStop(RunStore.RunRow session, Integer exitCode, String why) {
-    var replay = RunStatus.isTerminal(session.status());
+    var replay = saidStops(session).findAny().isPresent();
     var ending = endingOf(session);
     var code = exitCode != null ? exitCode : ending.exitCode();
     var reason = recordedReason(session).orElse(ending.reason());

@@ -20,7 +20,6 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
-import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -46,6 +45,7 @@ import java.util.function.Predicate;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 /**
  * The review loop against a <strong>real incus container</strong> with a fake agent binary standing
@@ -56,8 +56,10 @@ import org.junit.jupiter.api.Test;
  * run's own log; and a killed unit leaving no agent process behind. The test stands in for the
  * watcher only: it reads each unit's exit the way the watcher does and publishes the stop the
  * watcher would. Runs only under the {@code integration} profile (maven-failsafe) against a real
- * incus daemon; skips elsewhere via {@link #ensureIncusOrSkip}.
+ * incus daemon; skips elsewhere via {@link #ensureIncusOrSkip}. Every test is bounded: a loop that
+ * hangs against a real container fails its test instead of holding the lane.
  */
+@Timeout(value = 10, unit = TimeUnit.MINUTES)
 class ReviewAgentLoopIT extends AbstractIncusIT {
 
   private static final String CONTAINER = "sail-it-review-loop";
@@ -252,7 +254,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals("codex", reviewer.agent());
     assertEquals(AgentUnit.forRun(reviewer.id()).unitName(), reviewer.unit());
     assertEquals(reviewStore.latestReviewForSpec("auth").orElseThrow().id(), reviewer.reviewId());
-    awaitInContainer(
+    eventually(
         () -> logOf(reviewer).contains("review started"),
         "the reviewer's log streams to its own run directory while it runs");
     assertTrue(
@@ -291,7 +293,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var reviewer = launched("review", "review_stage_started");
     var unit = AgentUnit.forRun(reviewer.id());
     var session = new AgentSession(shell);
-    awaitInContainer(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
+    eventually(() -> logOf(reviewer).contains("review started"), "the fake agent is running");
 
     var halt = session.killAgent(CONTAINER, unit);
 
@@ -305,7 +307,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         survivors.ok(),
         "the kill takes the unit's whole cgroup: no agent process is left to push work: "
             + survivors.stdout());
-    var exit = session.queryExitStatus(CONTAINER, unit);
+    var exit = session.answeredExitStatus(CONTAINER, unit).orElseThrow();
     bus.publish(
         RunStops.of(
             Event.WellKnownData.SOURCE_WATCHER,
@@ -331,11 +333,11 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     hold();
     bus.publish(buildStop("billing"));
     var holder = launched("billing", "review", "review_stage_started");
-    awaitInContainer(() -> logOf(holder).contains("review started"), "billing's reviewer runs");
+    eventually(() -> logOf(holder).contains("review started"), "billing's reviewer runs");
 
     bus.publish(stopOfABuildRunOf("auth"));
 
-    awaitInContainer(
+    eventually(
         () ->
             reviewStore
                 .latestReviewForSpec("auth")
@@ -414,19 +416,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
               }
             },
             bus::publish,
-            new RunWatch.Narrator() {
-              @Override
-              public void tripped(
-                  GuardrailChecker.GuardrailResult.Triggered limit,
-                  Duration elapsed,
-                  String snapshot) {}
-
-              @Override
-              public void exited() {}
-
-              @Override
-              public void ended() {}
-            },
+            new QuietNarrator(),
             Instant::now)
         .run();
 
@@ -447,7 +437,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     hold();
     bus.publish(buildStop("auth"));
     var reviewer = launched("auth", "review", "review_stage_started");
-    awaitInContainer(() -> logOf(reviewer).contains("review started"), "the reviewer is running");
+    eventually(() -> logOf(reviewer).contains("review started"), "the reviewer is running");
     var legacy = processWithRunId(reviewer.reviewId());
     var otherRun = processWithRunId(reviewer.id());
     assertTrue(alive(legacy) && alive(otherRun), "both stand-in processes are running");
@@ -459,7 +449,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
 
     var fix = launched("auth", "fix", "review_iteration_started");
     assertEquals(reviewer.reviewId(), fix.reviewId());
-    awaitInContainer(
+    eventually(
         () -> new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(fix.id())),
         "the fix agent's unit is running");
     assertFalse(
@@ -585,11 +575,12 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var session = new AgentSession(shell);
     var unit = AgentUnit.forRun(run.id());
     var ended = new AtomicReference<AgentSession.ExitState>();
-    awaitInContainer(
+    eventually(
         () -> {
-          var exit = session.queryExitStatus(CONTAINER, unit);
-          ended.set(exit);
-          return !exit.active() && run.id().equals(exit.runId());
+          var exit = session.answeredExitStatus(CONTAINER, unit);
+          exit.ifPresent(ended::set);
+          return exit.filter(state -> !state.active() && run.id().equals(state.runId()))
+              .isPresent();
         },
         "the " + run.role() + " unit exits");
     var exit = ended.get();
@@ -672,25 +663,26 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             () -> new AssertionError("no " + role + " run; runs: " + runStore.listForSpec(specId)));
   }
 
-  /** Something that is true of the container, or not yet. */
+  /** Something that is true by now, or not yet. */
   @FunctionalInterface
-  private interface ContainerState {
+  private interface Condition {
     boolean holds() throws Exception;
   }
 
   /**
-   * Waits for something to become true inside the container. The container is another machine's
-   * state: it publishes nothing this test could wait on, so it is asked again until it says so.
+   * Waits for something that publishes nothing this test could wait on: the container's state,
+   * which is another machine's, or a row the loop writes without an event — the run a refused
+   * review waits on. It is asked again until it holds.
    */
-  private static void awaitInContainer(ContainerState state, String what) throws Exception {
+  private static void eventually(Condition condition, String what) throws Exception {
     var deadline = Instant.now().plus(PATIENCE);
     while (Instant.now().isBefore(deadline)) {
-      if (state.holds()) {
+      if (condition.holds()) {
         return;
       }
       Thread.sleep(Duration.ofMillis(200));
     }
-    throw new AssertionError("never happened in the container: " + what);
+    throw new AssertionError("never happened: " + what);
   }
 
   /**
@@ -717,7 +709,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   }
 
   private void awaitUserManager() throws Exception {
-    awaitInContainer(
+    eventually(
         () -> exec(CONTAINER, List.of("test", "-S", "/run/user/1000/bus")).ok(),
         "the dev user's systemd manager (bus) comes up");
   }

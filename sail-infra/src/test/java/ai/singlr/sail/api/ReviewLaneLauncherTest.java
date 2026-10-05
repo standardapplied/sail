@@ -64,7 +64,8 @@ class ReviewLaneLauncherTest {
 
   private String launch(ReviewLanes.Invocation invocation) {
     var launched = Acting.system(() -> lanes.launch(invocation, ReviewLoop.HANDLE, () -> {}));
-    return assertInstanceOf(ReviewLanes.Launch.Started.class, launched).runId();
+    assertInstanceOf(ReviewLanes.Launch.Started.class, launched);
+    return loop.runs.forReview(invocation.reviewId()).getFirst().id();
   }
 
   @Test
@@ -119,10 +120,9 @@ class ReviewLaneLauncherTest {
             () -> lanes.launch(invocation(Lane.FIX, List.of()), ReviewLoop.HANDLE, () -> {}));
 
     var deferred = assertInstanceOf(ReviewLanes.Launch.Deferred.class, second);
-    assertEquals(first, deferred.holderRunId(), "the refusal names the run in the way");
-    assertEquals(
-        "Agent run " + first + " is already working spec 'auth' in this container.",
-        deferred.why());
+    assertEquals(first, deferred.holder().runId(), "the refusal names the run in the way");
+    assertEquals("auth", deferred.holder().specId());
+    assertEquals(Lane.REVIEW.wire(), deferred.holder().role());
     assertEquals(
         List.of(first),
         loop.container.launched(),
