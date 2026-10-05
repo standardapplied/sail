@@ -778,6 +778,7 @@ class ReviewLoopRecoveryTest {
         INSERT INTO review_findings (id, stage_id, severity, category, title, description)
         VALUES ('unreadable', ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
         stage);
+    loop.db.execute("UPDATE reviews SET status = 'failed' WHERE spec_id = 'broken'");
     loop.container.exited(holder, "done", 0);
 
     loop.onEvent(ReviewLoop.buildStop("billing", holder));

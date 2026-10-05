@@ -1191,8 +1191,9 @@ step of the loop and one class carries each step out. Each part has one job, all
 `LoopFacts` is what the rows say of one spec at one moment: its status; its latest review that
 is not superseded, with that review's stage rows in order; the runs this box executed that
 serve the review, newest first; the spec's newest loop run; the pipeline reading (`Staged`
-with the project's roster reviewer, `None`, or `Unreadable(why)`); the review's open
-findings, and the open findings of its first failed stage with their ages; the count of
+with the project's roster reviewer, `None`, or `Unreadable(why)`); the open findings of a
+review that failed its gate, and those of them its first failed stage holds, with their ages
+(no other review's findings are read: no decision on it weighs one); the count of
 errored attempts of the review's iteration; and whether the run the review waits on has
 ended. `owed()`, `unfit()`, `awaited(run, statuses)`, `stageReviewedBy(run)` and
 `drivenHere()` are pure methods over it. The pipeline is resolved once per event, at the

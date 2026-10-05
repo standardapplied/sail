@@ -171,7 +171,7 @@ public final class EventBus implements AutoCloseable {
           Thread.currentThread().interrupt();
           return;
         }
-        if (!active) {
+        if (event == CLOSED) {
           return;
         }
         try {
@@ -200,7 +200,7 @@ public final class EventBus implements AutoCloseable {
 
     /**
      * Stops delivery and wakes the drain thread, which exits at once: the events still queued are
-     * dropped, and the one being handled is finished. Whatever it takes next finds it closed.
+     * dropped, and one already taken is delivered, as it was before the close could wake a thread.
      */
     @Override
     public void close() {

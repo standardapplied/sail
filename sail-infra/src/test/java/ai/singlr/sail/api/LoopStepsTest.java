@@ -13,6 +13,7 @@ import static ai.singlr.sail.api.ReviewScripts.CRITICAL_FINDING;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Lane;
@@ -128,6 +129,25 @@ class LoopStepsTest {
     var holder = loop.run("billing", "build");
     loop.container.started(holder);
     return holder;
+  }
+
+  @Test
+  void onlyAGateFailedReviewIsReadWithItsFindings() {
+    var review = reviewing();
+    var stage = Acting.system(() -> loop.reviews.createStage(review.id(), "codex", "agent"));
+    loop.db.execute(
+        """
+        INSERT INTO review_findings (id, stage_id, severity, category, title, description)
+        VALUES ('unreadable', ?, 'NO_SEVERITY', 'LOGIC', 'Bad', 'row')""",
+        stage);
+
+    assertEquals(
+        List.of(),
+        reader.read(PROJECT, SPEC).openFindings(),
+        "no decision on a running review weighs a finding, so none is read for one");
+
+    loop.db.execute("UPDATE reviews SET status = 'failed' WHERE id = ?", review.id());
+    assertThrows(IllegalArgumentException.class, () -> reader.read(PROJECT, SPEC));
   }
 
   @Test

@@ -34,7 +34,8 @@ import java.util.Optional;
  * @param review the latest review of the spec's current dispatch attempt, with its {@code stages}
  * @param serving the runs this box executed that serve the review, newest first
  * @param newestLoopRun the spec's newest build, reviewer or fix run, whichever box executed it
- * @param failedStageFindings the open findings of the review's first failed stage, with their ages
+ * @param openFindings the open findings of a review that failed its gate; none for any other
+ * @param failedStageFindings those of them its first failed stage holds, each with its age
  * @param erroredAttempts how many attempts of the review's iteration failed by infrastructure error
  * @param holderEnded whether the run the review recorded that it waits on holds nothing any more
  */

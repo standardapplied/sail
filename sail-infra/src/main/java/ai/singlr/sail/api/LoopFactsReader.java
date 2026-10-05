@@ -54,6 +54,7 @@ final class LoopFactsReader {
   private LoopFacts read(String project, String specId, LoopFacts.Pipeline pipeline) {
     var review = reviews.latestReviewForSpec(specId);
     var stages = review.map(latest -> reviews.stagesForReview(latest.id())).orElse(List.of());
+    var gateFailed = review.filter(latest -> "failed".equals(latest.status()) && !latest.errored());
     return new LoopFacts(
         project,
         specId,
@@ -64,9 +65,9 @@ final class LoopFactsReader {
         review.map(latest -> serving(latest.id())).orElse(List.of()),
         runs.latestLoopRun(specId),
         pipeline,
-        review.map(latest -> reviews.openFindingsForReview(latest.id())).orElse(List.of()),
+        gateFailed.map(latest -> reviews.openFindingsForReview(latest.id())).orElse(List.of()),
         stages.stream()
-            .filter(stage -> "failed".equals(stage.status()))
+            .filter(stage -> gateFailed.isPresent() && "failed".equals(stage.status()))
             .findFirst()
             .map(this::openFindingsWithAges)
             .orElse(List.of()),
