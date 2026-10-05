@@ -28,6 +28,12 @@ import java.util.Objects;
 public record ReviewPipelineConfig(
     int maxIterations, int maxFindingAge, List<StageConfig> stages, Guardrails guardrails) {
 
+  /** How many review iterations a dispatch attempt gets when the project sets none. */
+  static final int DEFAULT_MAX_ITERATIONS = 3;
+
+  /** How many fix iterations a blocking finding may survive when the project sets none. */
+  static final int DEFAULT_MAX_FINDING_AGE = 2;
+
   /** A pipeline under the review lanes' default limits. */
   public ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
     this(maxIterations, maxFindingAge, stages, Guardrails.reviewDefaults());
@@ -123,8 +129,8 @@ public record ReviewPipelineConfig(
    */
   public static ReviewPipelineConfig mandatoryDefault() {
     return new ReviewPipelineConfig(
-        3,
-        2,
+        DEFAULT_MAX_ITERATIONS,
+        DEFAULT_MAX_FINDING_AGE,
         List.of(
             new StageConfig(
                 "review",
@@ -142,9 +148,13 @@ public record ReviewPipelineConfig(
   @SuppressWarnings("unchecked")
   static ReviewPipelineConfig fromMap(Map<String, Object> map, String descriptor) {
     var maxIterations =
-        map.containsKey("max_iterations") ? ((Number) map.get("max_iterations")).intValue() : 3;
+        map.containsKey("max_iterations")
+            ? ((Number) map.get("max_iterations")).intValue()
+            : DEFAULT_MAX_ITERATIONS;
     var maxFindingAge =
-        map.containsKey("max_finding_age") ? ((Number) map.get("max_finding_age")).intValue() : 2;
+        map.containsKey("max_finding_age")
+            ? ((Number) map.get("max_finding_age")).intValue()
+            : DEFAULT_MAX_FINDING_AGE;
     var stagesList = (List<Map<String, Object>>) map.getOrDefault("stages", List.of());
     var stages = stagesList.stream().map(StageConfig::fromMap).toList();
     var guardrails =
@@ -153,12 +163,22 @@ public record ReviewPipelineConfig(
     return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages, guardrails);
   }
 
-  /** This pipeline as its {@code review_pipeline} block, as {@link #fromMap} reads it. */
+  /**
+   * This pipeline as its {@code review_pipeline} block, as {@link #fromMap} reads it. A limit that
+   * is the default is left out, as a project that never set it left it out: written down, it would
+   * pin that project to today's default the next time anything rewrote its {@code sail.yaml}.
+   */
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
-    map.put("max_iterations", maxIterations);
-    map.put("max_finding_age", maxFindingAge);
-    map.put("guardrails", guardrails.toMap());
+    if (maxIterations != DEFAULT_MAX_ITERATIONS) {
+      map.put("max_iterations", maxIterations);
+    }
+    if (maxFindingAge != DEFAULT_MAX_FINDING_AGE) {
+      map.put("max_finding_age", maxFindingAge);
+    }
+    if (!guardrails.equals(Guardrails.reviewDefaults())) {
+      map.put("guardrails", guardrails.toMap());
+    }
     map.put("stages", stages.stream().map(StageConfig::toMap).toList());
     return map;
   }

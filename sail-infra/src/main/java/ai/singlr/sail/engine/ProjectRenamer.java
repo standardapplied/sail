@@ -168,9 +168,8 @@ public final class ProjectRenamer {
   }
 
   private void materialize(String name, String definition) throws IOException {
-    var dir = projectsDir.resolve(name);
-    Files.createDirectories(dir);
-    Files.writeString(dir.resolve(SailPaths.PROJECT_DESCRIPTOR), definition);
+    ProjectDefinitions.write(
+        projectsDir.resolve(name).resolve(SailPaths.PROJECT_DESCRIPTOR), definition);
   }
 
   static String withName(String definition, String name) {

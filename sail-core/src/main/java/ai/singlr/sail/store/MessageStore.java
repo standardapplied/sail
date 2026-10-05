@@ -12,6 +12,9 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -29,6 +32,10 @@ import java.util.Set;
 public final class MessageStore implements ConflictResolver, SyncedStore {
 
   public static final int MAX_BODY_BYTES = 64 * 1024;
+
+  /** What a body ends with when {@link #fitted} cut it short. */
+  static final String CUT = "\n\n[cut: longer than a room message can be]";
+
   private static final String ENTITY = "message";
 
   private static final String COLUMNS =
@@ -592,6 +599,27 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         row.text(6),
         row.text(7),
         row.integer(8) != 0);
+  }
+
+  /**
+   * {@code body} as a room can hold it: itself when it is within {@link #MAX_BODY_BYTES}, otherwise
+   * its beginning, cut between characters and marked as cut — a half of a surrogate pair standing
+   * alone in it counts as the one byte it is written as, and does not end the body early. For a
+   * writer whose message must land whatever its length, because it is written in one transaction
+   * with what it tells of.
+   */
+  public static String fitted(String body) {
+    if (body.getBytes(StandardCharsets.UTF_8).length <= MAX_BODY_BYTES) {
+      return body;
+    }
+    var kept = CharBuffer.wrap(body);
+    var room = ByteBuffer.allocate(MAX_BODY_BYTES - CUT.getBytes(StandardCharsets.UTF_8).length);
+    StandardCharsets.UTF_8
+        .newEncoder()
+        .onMalformedInput(CodingErrorAction.REPLACE)
+        .onUnmappableCharacter(CodingErrorAction.REPLACE)
+        .encode(kept, room, true);
+    return body.substring(0, kept.position()) + CUT;
   }
 
   private static void requireBody(String body) {

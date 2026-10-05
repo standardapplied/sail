@@ -411,6 +411,18 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * Moves a spec the review loop owns to {@code status}, returning whether it did: compare-and-set
+   * from the two statuses the loop works in ({@code in_progress}, {@code review}). Once any other
+   * transition has won — above all an operator's {@code cancelled}, which is terminal — the loop's
+   * write is dropped instead of resurrecting the spec, whoever in the loop makes it: the pipeline
+   * ending a review, or a person approving one.
+   */
+  public boolean moveFromLoop(String id, SpecStatus status) {
+    return compareAndSetStatus(id, SpecStatus.IN_PROGRESS, status)
+        || compareAndSetStatus(id, SpecStatus.REVIEW, status);
+  }
+
+  /**
    * Status transition that commits only if the spec still holds {@code expected}, returning whether
    * it did. The check and the write are one statement under the write lock ({@code BEGIN
    * IMMEDIATE}), so a lifecycle writer racing another transition — above all an operator's {@code

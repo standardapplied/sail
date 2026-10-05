@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 
@@ -55,26 +56,29 @@ public interface ReviewLanes {
   /** How a launch left the review it serves. */
   sealed interface Launch {
 
-    /** The agent is running as run {@code runId}; the pipeline hears how it ends from its stop. */
-    record Started(String runId) implements Launch {}
+    /** The agent is running as a run of its own; the pipeline hears how it ends from its stop. */
+    record Started() implements Launch {}
 
     /**
-     * Nothing was started: another run holds what this one would claim. Not a failure — the claim
-     * is tried again when a run in the project stops.
+     * Nothing was started: another run holds what this one would claim. Not a failure — the review
+     * waits on that run, and takes its step when it has ended.
      *
-     * @param why the run that holds the claim, as the gate said it
+     * @param holder the run that holds the claim, as the gate named it
      */
-    record Deferred(String why) implements Launch {}
+    record Deferred(DispatchGate.RunningRun holder) implements Launch {}
   }
 
   /**
    * Launches {@code invocation} as a run this box executes for the FDE whose handle is {@code
-   * boxHandle}. A claim the dispatch gate refuses is {@link Launch.Deferred}; a launch that fails
-   * throws. A failure before the agent exists leaves no run {@code running}; one after it — the
-   * launch command or the status read failing over a unit that did start — leaves the run {@code
-   * running} with its agent, whose stop still reaches the pipeline.
+   * boxHandle}. A claim the dispatch gate refuses is {@link Launch.Deferred}, and nothing was
+   * written for it; a launch that fails throws. {@code claimed} runs once the claim has landed —
+   * the run row exists — and before the agent's unit starts: whatever must be true of the review
+   * only while a run serves it is written there. A failure before the agent exists leaves no run
+   * {@code running}; one after it — the launch command or the status read failing over a unit that
+   * did start — leaves the run {@code running} with its agent, whose stop still reaches the
+   * pipeline.
    */
-  Launch launch(Invocation invocation, String boxHandle);
+  Launch launch(Invocation invocation, String boxHandle, Runnable claimed);
 
   /**
    * What {@code run}'s agent said last: the final answer of a streamed log, or the whole log of an

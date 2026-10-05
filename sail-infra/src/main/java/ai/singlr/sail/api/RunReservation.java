@@ -8,7 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentSession;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.RunRetention;
 import ai.singlr.sail.engine.ShellExec;
@@ -96,7 +96,7 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
-    return claimed(
+    return switch (claim(
         runId,
         project,
         specId,
@@ -116,16 +116,30 @@ public final class RunReservation {
                 task,
                 unit.logPath(),
                 unit.unitName(),
-                configuredMaxDuration(config, role)));
+                configuredMaxDuration(config, role)))) {
+      case Claim.Claimed claimed -> claimed.credential();
+      case Claim.Held held -> throw overlapRefusal(held.conflict());
+    };
+  }
+
+  /** How a claim on a spec's repos was answered. */
+  public sealed interface Claim {
+
+    /** The run is reserved; {@code credential} is its plaintext bearer credential. */
+    record Claimed(String credential) implements Claim {}
+
+    /** Nothing was reserved: the run {@code conflict} names holds what this one would claim. */
+    record Held(DispatchGate.Conflict conflict) implements Claim {}
   }
 
   /**
    * Reserves a reviewer's or a fix agent's run, naming the review it serves, through the same gate
    * a dispatch passes: the run claims its spec's repos, so it never starts beside a live build of
    * its own spec, a full chat turn or another spec's run over them, and a conversation resumed over
-   * them yields as it does to a build.
+   * them yields as it does to a build. A claim another run holds is an answer, not a failure:
+   * {@link Claim.Held} names the run in the way, which is what the review then waits on.
    */
-  public String reserveForReview(
+  public Claim reserveForReview(
       String runId,
       String reviewId,
       String project,
@@ -138,7 +152,7 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
-    return claimed(
+    return claim(
         runId,
         project,
         specId,
@@ -163,42 +177,47 @@ public final class RunReservation {
 
   /**
    * The one claim every lane makes: under the project's claim lock, the reservation is decided and
-   * its row written in one transaction, a refusal is thrown before anything launches, and the
-   * conversations the claim displaces yield.
+   * its row written in one transaction, and the conversations a claim that landed displaces yield.
+   * A claim a run holds reserves nothing and displaces no one.
    */
-  private String claimed(
+  private Claim claim(
       String runId,
       String project,
       String specId,
       String role,
       List<String> repos,
-      Supplier<RunStore.Reservation> claim) {
-    String credential;
+      Supplier<RunStore.Reservation> reservation) {
+    Claim claim;
     try (var hold = sessionYield.lock(project)) {
-      credential = credentialOf(claim);
-      yieldDisplacedSessions(runId, project, specId, role, repos);
+      claim = claimOf(reservation);
+      whenClaimed(claim, () -> yieldDisplacedSessions(runId, project, specId, role, repos));
     } catch (IOException e) {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED, "Could not lock project '" + project + "' to dispatch.", e);
     }
-    pruneRuns(project);
-    return credential;
+    whenClaimed(claim, () -> pruneRuns(project));
+    return claim;
   }
 
-  private String credentialOf(Supplier<RunStore.Reservation> claim) {
-    RunStore.Reservation reservation;
+  private static void whenClaimed(Claim claim, Runnable then) {
+    switch (claim) {
+      case Claim.Claimed claimed -> then.run();
+      case Claim.Held held -> {}
+    }
+  }
+
+  private Claim claimOf(Supplier<RunStore.Reservation> reservation) {
+    RunStore.Reservation reserved;
     try {
-      reservation = claim.get();
+      reserved = reservation.get();
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }
-    if (reservation instanceof RunStore.Reservation.Conflicted conflicted) {
-      throw overlapRefusal(conflicted.conflict());
-    }
-    if (reservation instanceof RunStore.Reservation.LeaseHeld held) {
-      throw leaseRefusal(held);
-    }
-    return ((RunStore.Reservation.Reserved) reservation).credential();
+    return switch (reserved) {
+      case RunStore.Reservation.Reserved landed -> new Claim.Claimed(landed.credential());
+      case RunStore.Reservation.Conflicted conflicted -> new Claim.Held(conflicted.conflict());
+      case RunStore.Reservation.LeaseHeld held -> throw leaseRefusal(held);
+    };
   }
 
   /**
@@ -248,8 +267,9 @@ public final class RunReservation {
    * process, so the run is failed and its repo freed. But once the agent process exists — a
    * background unit that started, a foreground child whose blocking wait threw — a later failure
    * leaves a live agent, and failing the run would free the repo under it and admit an overlapping
-   * session. An unprobeable identity is treated as live for the same reason — the missed-stop
-   * reconciler releases a genuinely dead run on its next pass.
+   * session. An agent the container gives no answer about ({@link AgentPresence}) is treated as
+   * live for the same reason — the missed-stop reconciler releases a genuinely dead run on its next
+   * pass.
    */
   public void releaseIfAbsent(String runId, String project, AgentUnit unit) {
     if (agentLive(project, unit)) {
@@ -297,8 +317,7 @@ public final class RunReservation {
 
   private boolean agentLive(String project, AgentUnit unit) {
     try {
-      var status = new AgentSession(shell).queryStatus(project, unit);
-      return status != null && status.running();
+      return !new AgentPresence(shell).gone(project, unit);
     } catch (Exception e) {
       return true;
     }
@@ -328,7 +347,7 @@ public final class RunReservation {
     var run = conflict.run();
     var occupied =
         Strings.isBlank(run.specId())
-            ? "Ad-hoc agent run " + run.runId() + " is occupying this container"
+            ? "Ad-hoc agent run " + run.runId() + " is occupying this container."
             : "Agent run "
                 + run.runId()
                 + " is already working spec '"
@@ -336,20 +355,12 @@ public final class RunReservation {
                 + "' in "
                 + (conflict.overlap().isEmpty()
                     ? "this container"
-                    : "repo(s) " + conflict.overlap());
+                    : "repo(s) " + conflict.overlap())
+                + ".";
     return new ApiException(
         ErrorCode.AGENT_ALREADY_RUNNING,
-        occupied + ".",
+        occupied,
         "Wait for it to finish or stop it, or dispatch a spec targeting disjoint repos.");
-  }
-
-  /**
-   * Whether {@code failure} is the gate refusing a claim for a run that holds what it needs ({@link
-   * #overlapRefusal}). That refusal clears when the run in the way stops, and a stop is an event;
-   * any other failure of a claim does not announce its end.
-   */
-  static boolean heldByARun(ApiException failure) {
-    return failure.failure().errorCode() == ErrorCode.AGENT_ALREADY_RUNNING;
   }
 
   /**

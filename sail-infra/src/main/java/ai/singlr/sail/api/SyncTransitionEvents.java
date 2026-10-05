@@ -170,10 +170,16 @@ public final class SyncTransitionEvents {
     }
     return switch (transition.to()) {
       case "passed" -> List.of(located.event("review_completed", Map.of(), host));
-      case "escalated" -> List.of(located.event("review_escalated", Map.of(), host));
+      case "escalated" -> List.of(located.event("review_escalated", detail(transition), host));
       case "failed" -> reviewErrored(transition, located, host);
       default -> List.of();
     };
+  }
+
+  /** Why the review ended as it did, as its synced row records it: the event's {@code detail}. */
+  private static Map<String, Object> detail(SyncTransition transition) {
+    var error = text(transition.snapshot(), "error");
+    return error == null ? Map.of() : Map.of("detail", error);
   }
 
   /**
@@ -182,13 +188,15 @@ public final class SyncTransitionEvents {
    */
   private static List<Event> reviewErrored(
       SyncTransition transition, Located located, String host) {
-    var error = text(transition.snapshot(), "error");
-    if (error == null) {
-      return List.of();
-    }
-    return List.of(located.event("review_errored", Map.of("detail", error), host));
+    var detail = detail(transition);
+    return detail.isEmpty() ? List.of() : List.of(located.event("review_errored", detail, host));
   }
 
+  /**
+   * What main says of a node's stage as its row changes: started, passed, or failed its gate. A
+   * stage closed for an error — its reviewer could not run, or its review was escalated under it —
+   * failed no gate, and is told by its review's error or escalation, as the driving box tells it.
+   */
   private static List<Event> stageEvents(
       SyncTransition transition, Function<String, String> projectOfSpec, String host) {
     var located = locate(transition, projectOfSpec);
@@ -203,6 +211,9 @@ public final class SyncTransitionEvents {
     return switch (transition.to()) {
       case "running" -> List.of(located.event("review_stage_started", data, host));
       case "passed", "failed" -> {
+        if (text(transition.snapshot(), "error") != null) {
+          yield List.of();
+        }
         var findings = findingsData(transition.snapshot());
         if (!findings.isEmpty()) {
           data.put("findings", findings);

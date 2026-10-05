@@ -362,8 +362,7 @@ public final class SyncOperations {
         continue;
       }
       try {
-        Files.createDirectories(descriptor.getParent());
-        Files.writeString(descriptor, project.definition());
+        ProjectDefinitions.write(descriptor, project.definition());
         created.add(project.name());
       } catch (IOException e) {
         System.err.println(

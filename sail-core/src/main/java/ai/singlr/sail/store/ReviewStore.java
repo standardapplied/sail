@@ -40,6 +40,16 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   private static final String FINDINGS_HASH = ReviewFindingsContent.HASH_FIELD;
   private static final Set<String> SURROGATE_FIELDS = Set.of("id");
 
+  /**
+   * The box's own bookkeeping of a review it drives: which of its runs a launch waits on. Kept out
+   * of the comparable snapshot and across an adoption ({@link EntitySchema#keepingLocal}).
+   */
+  private static final Set<String> LOCAL_FIELDS = Set.of("waiting_on");
+
+  private static final String REVIEW_COLUMNS =
+      "id, spec_id, iteration, status, created_at, completed_at, decided_by, superseded_at, error,"
+          + " waiting_on";
+
   private final Sqlite db;
   private final ChangeLog changeLog;
   private final RevisionJournal revisions;
@@ -58,6 +68,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * @param supersededAt when a later dispatch attempt closed this review, or {@code null} while it
    *     belongs to the current attempt. The pipeline ignores superseded rows, so iterations count
    *     per attempt rather than per spec lifetime.
+   * @param waitingOn the run whose claim refused this review's last launch on this box, or {@code
+   *     null} when it waits on none. Local to the box that drives the review; never synced.
    */
   public record ReviewRow(
       String id,
@@ -68,7 +80,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       String completedAt,
       String decidedBy,
       String supersededAt,
-      String error) {
+      String error,
+      String waitingOn) {
 
     public boolean superseded() {
       return supersededAt != null;
@@ -138,10 +151,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   public Optional<ReviewRow> findReview(String reviewId) {
     return db.queryOne(
-        "SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,"
-            + " superseded_at, error FROM reviews WHERE id = ?",
-        this::mapReview,
-        reviewId);
+        "SELECT " + REVIEW_COLUMNS + " FROM reviews WHERE id = ?", this::mapReview, reviewId);
   }
 
   /**
@@ -153,10 +163,10 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   public Optional<ReviewRow> latestReviewForSpec(String specId) {
     return db.queryOne(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,
-          superseded_at, error
+        SELECT %s
         FROM reviews WHERE spec_id = ? AND superseded_at IS NULL
-        ORDER BY created_at DESC, rowid DESC LIMIT 1""",
+        ORDER BY created_at DESC, rowid DESC LIMIT 1"""
+            .formatted(REVIEW_COLUMNS),
         this::mapReview,
         specId);
   }
@@ -165,24 +175,30 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   public List<ReviewRow> reviewsForSpec(String specId) {
     return db.query(
         """
-        SELECT id, spec_id, iteration, status, created_at, completed_at, decided_by,
-          superseded_at, error
-        FROM reviews WHERE spec_id = ? ORDER BY created_at ASC, rowid ASC""",
+        SELECT %s
+        FROM reviews WHERE spec_id = ? ORDER BY created_at ASC, rowid ASC"""
+            .formatted(REVIEW_COLUMNS),
         this::mapReview,
         specId);
   }
 
-  /** Marks a review passed and records the deciding principal (the human who approved it). */
-  public void approve(String reviewId, String decidedBy) {
+  /**
+   * Ends the review as passed by the person {@code decidedBy} names: the stage that waited on them
+   * passes, the review passes, and {@code alongside} runs, in one transaction ({@link #pass}).
+   */
+  public void approve(String reviewId, String decidedBy, Runnable alongside) {
     db.transaction(
         () -> {
-          db.execute(
-              "UPDATE reviews SET status = 'passed', completed_at = ?, decided_by = ? WHERE id = ?",
-              DateTimeUtils.now().toString(),
-              decidedBy,
-              reviewId);
-          journal(reviewId);
+          db.execute("UPDATE reviews SET decided_by = ? WHERE id = ?", decidedBy, reviewId);
+          closeRunningStages(reviewId, "passed", null);
+          pass(reviewId, alongside);
         });
+  }
+
+  private void closeRunningStages(String reviewId, String status, String error) {
+    stagesForReview(reviewId).stream()
+        .filter(stage -> "running".equals(stage.status()))
+        .forEach(stage -> completeStage(stage.id(), status, error));
   }
 
   /**
@@ -201,7 +217,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
                   row -> row.text(0),
                   specId);
           db.execute(
-              "UPDATE reviews SET superseded_at = ? WHERE spec_id = ? AND superseded_at IS NULL",
+              "UPDATE reviews SET superseded_at = ?, waiting_on = NULL"
+                  + " WHERE spec_id = ? AND superseded_at IS NULL",
               DateTimeUtils.now().toString(),
               specId);
           affected.forEach(this::journal);
@@ -211,13 +228,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
 
   /**
    * Marks the review failed by infrastructure error, not verdict; retried without burning an
-   * iteration.
+   * iteration. It waits on no run any more.
    */
   public void failReviewWithError(String reviewId, String error) {
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE reviews SET status = 'failed', error = ?, completed_at = ? WHERE id = ?",
+              "UPDATE reviews SET status = 'failed', error = ?, completed_at = ?,"
+                  + " waiting_on = NULL WHERE id = ?",
               error,
               DateTimeUtils.now().toString(),
               reviewId);
@@ -225,20 +243,83 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         });
   }
 
+  /**
+   * Moves the review to {@code status}. A review that changes status waits on no run any more: the
+   * wait belonged to the step its old status owed.
+   */
   public void updateReviewStatus(String reviewId, String status) {
+    db.transaction(() -> writeStatus(reviewId, status, null));
+  }
+
+  /**
+   * Ends the review as passed and runs {@code alongside} in the same transaction: the seam for the
+   * spec's status and the room line that end with it. Any failure rolls back all of it, so a
+   * finished review is never left beside a spec nothing will move.
+   */
+  public void pass(String reviewId, Runnable alongside) {
+    db.transaction(
+        () -> {
+          writeStatus(reviewId, "passed", null);
+          alongside.run();
+        });
+  }
+
+  /**
+   * Ends the review as escalated to a person, with {@code reason} recorded as its {@code error} —
+   * which rides its synced row, so every box says why — any stage still {@code running} closed as
+   * failed for that reason, since no run and no person owns it any more, and {@code alongside} in
+   * the same transaction, as {@link #pass} runs it.
+   */
+  public void escalate(String reviewId, String reason, Runnable alongside) {
+    db.transaction(
+        () -> {
+          closeRunningStages(reviewId, "failed", reason);
+          writeStatus(reviewId, "escalated", reason);
+          alongside.run();
+        });
+  }
+
+  private void writeStatus(String reviewId, String status, String error) {
     var completedAt =
         "passed".equals(status) || "failed".equals(status) || "escalated".equals(status)
             ? DateTimeUtils.now().toString()
             : null;
+    db.execute(
+        """
+        UPDATE reviews SET status = ?, completed_at = COALESCE(?, completed_at),
+            error = COALESCE(?, error), waiting_on = NULL WHERE id = ?""",
+        status,
+        completedAt,
+        error,
+        reviewId);
+    journal(reviewId);
+  }
+
+  /**
+   * Records that the review's launch was refused its claim by run {@code holderRunId}. When that is
+   * news — the review did not already wait on that run — {@code said} runs in the same transaction,
+   * so a wait and whatever tells of it are recorded together or not at all. This box's own
+   * bookkeeping ({@code LOCAL_FIELDS}), so it journals no revision: one would name a version of the
+   * review main never holds.
+   */
+  public void waitOn(String reviewId, String holderRunId, Runnable said) {
+    Objects.requireNonNull(holderRunId, "holderRunId");
     db.transaction(
         () -> {
           db.execute(
-              "UPDATE reviews SET status = ?, completed_at = COALESCE(?, completed_at) WHERE id = ?",
-              status,
-              completedAt,
-              reviewId);
-          journal(reviewId);
+              "UPDATE reviews SET waiting_on = ? WHERE id = ? AND waiting_on IS NOT ?",
+              holderRunId,
+              reviewId,
+              holderRunId);
+          if (db.changes() > 0) {
+            said.run();
+          }
         });
+  }
+
+  /** Records that the review waits on no run: the step it was refused has been taken. */
+  public void clearWait(String reviewId) {
+    db.execute("UPDATE reviews SET waiting_on = NULL WHERE id = ?", reviewId);
   }
 
   public String createStage(String reviewId, String name, String stageType) {
@@ -878,6 +959,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     map.put("decided_by", review.decidedBy());
     map.put("superseded_at", review.supersededAt());
     map.put("error", review.error());
+    map.put("waiting_on", review.waitingOn());
     var stages = new ArrayList<Map<String, Object>>();
     for (var stage : stagesForReview(id)) {
       var s = new LinkedHashMap<String, Object>();
@@ -916,13 +998,14 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     db.execute(
         """
         INSERT INTO reviews (id, spec_id, iteration, status, created_at, completed_at,
-            decided_by, superseded_at, error, findings_hash)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            decided_by, superseded_at, error, findings_hash, waiting_on)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET spec_id = excluded.spec_id,
             iteration = excluded.iteration, status = excluded.status,
             created_at = excluded.created_at, completed_at = excluded.completed_at,
             decided_by = excluded.decided_by, superseded_at = excluded.superseded_at,
-            error = excluded.error, findings_hash = excluded.findings_hash""",
+            error = excluded.error, findings_hash = excluded.findings_hash,
+            waiting_on = excluded.waiting_on""",
         id,
         Snapshots.text(snapshot, "spec_id"),
         Snapshots.integer(snapshot, "iteration"),
@@ -932,7 +1015,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         Snapshots.text(snapshot, "decided_by"),
         Snapshots.text(snapshot, "superseded_at"),
         Snapshots.text(snapshot, "error"),
-        hash);
+        hash,
+        Snapshots.text(snapshot, "waiting_on"));
     var stages =
         Objects.requireNonNullElse(
             (List<Map<String, Object>>) snapshot.get("stages"), List.<Map<String, Object>>of());
@@ -992,7 +1076,9 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     }
     var m = new LinkedHashMap<String, Object>();
     for (var field : full.keySet()) {
-      if (!SURROGATE_FIELDS.contains(field) && !field.startsWith("_")) {
+      if (!SURROGATE_FIELDS.contains(field)
+          && !LOCAL_FIELDS.contains(field)
+          && !field.startsWith("_")) {
         m.put(field, full.get(field));
       }
     }
@@ -1039,12 +1125,17 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
       return aggregateMap(id);
     }
 
-    /** Adopts main's aggregate, but only when it actually differs ({@link #writeAggregate}). */
+    /**
+     * Adopts main's aggregate, but only when it actually differs ({@link #writeAggregate}), keeping
+     * this box's own {@link #LOCAL_FIELDS} whatever the adopted snapshot names for them.
+     */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      if (!sameContent(aggregateMap(id), snapshot)) {
-        writeAggregate(id, snapshot);
+      var local = aggregateMap(id);
+      if (sameContent(local, snapshot)) {
+        return;
       }
+      writeAggregate(id, EntitySchema.keepingLocal(snapshot, local, LOCAL_FIELDS));
     }
 
     @Override
@@ -1068,7 +1159,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         row.text(5),
         row.text(6),
         row.text(7),
-        row.text(8));
+        row.text(8),
+        row.text(9));
   }
 
   private StageRow mapStage(Sqlite.Row row) {

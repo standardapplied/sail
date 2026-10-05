@@ -20,6 +20,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -312,7 +313,8 @@ class DispatchCommandWiringTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

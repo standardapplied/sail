@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,6 +52,52 @@ class ClaudeCodeHookConfigTest {
     assertTrue(
         json.contains(SailEventHelper.SCRIPT_PATH + " agent_tool_finished"),
         "PostToolUse must emit agent_tool_finished");
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void aToolCallThatFailedIsToldFinishedAsOneThatSucceededIs() {
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(ClaudeCodeHookConfig.render()).get("hooks");
+    var finished = SailEventHelper.SCRIPT_PATH + " agent_tool_finished";
+
+    for (var ending : List.of("PostToolUse", "PostToolUseFailure")) {
+      var groups = (List<Map<String, Object>>) hooks.get(ending);
+      assertNotNull(
+          groups,
+          ending
+              + " must be wired: Claude Code fires PostToolUse only for a call that succeeded, so a"
+              + " failed call with no hook of its own is counted in flight for the rest of the run");
+      assertEquals(1, groups.size(), ending);
+      assertNull(groups.getFirst().get("matcher"), ending + " must match every tool");
+      var commands =
+          ((List<Map<String, Object>>) groups.getFirst().get("hooks"))
+              .stream().map(hook -> hook.get("command")).toList();
+      assertTrue(commands.contains(finished), ending + ": " + commands);
+    }
+    var started = (List<Map<String, Object>>) hooks.get("PreToolUse");
+    assertEquals(
+        List.of(SailEventHelper.SCRIPT_PATH + " agent_tool_started"),
+        ((List<Map<String, Object>>) started.getFirst().get("hooks"))
+            .stream().map(hook -> hook.get("command")).toList());
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void aBatchThatResolvedIsToldThroughItsOwnHook() {
+    var hooks = (Map<String, Object>) YamlUtil.parseMap(ClaudeCodeHookConfig.render()).get("hooks");
+
+    var groups = (List<Map<String, Object>>) hooks.get("PostToolBatch");
+
+    assertNotNull(
+        groups,
+        "a call Claude Code denies has no finish of its own: only its batch resolving says it"
+            + " is over, and without that the call is counted in flight for the rest of the run");
+    assertEquals(1, groups.size());
+    assertNull(groups.getFirst().get("matcher"), "every batch, whatever tools were in it");
+    assertEquals(
+        List.of(SailEventHelper.SCRIPT_PATH + " " + SailEventHelper.BATCH_RESOLVED),
+        ((List<Map<String, Object>>) groups.getFirst().get("hooks"))
+            .stream().map(hook -> hook.get("command")).toList());
   }
 
   @Test

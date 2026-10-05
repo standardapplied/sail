@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -1386,6 +1387,8 @@ class SailOperationsTest {
         shell()
             .on("incus list ^acme$", RUNNING_JSON)
             .on("runs/" + R1 + "/agent.pid", "123")
+            .on("--signal=SIGTERM", "")
+            .on("systemctl --user show", "ActiveState=inactive\nExecMainStatus=0\n")
             .onSequence(
                 "kill -0 123", new ShellExec.Result(0, "", ""), new ShellExec.Result(1, "", ""));
     var operations =
@@ -2356,9 +2359,9 @@ class SailOperationsTest {
                 .on(
                     "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
                     "{\"task\": \"work\"}")
-                .on("kill 123", "")
+                .on("--signal=SIGTERM", "")
+                .on("systemctl --user show", "ActiveState=inactive\nExecMainStatus=0\n")
                 .on("sleep 3", "")
-                .on("kill -9 123", "")
                 .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""));
 
     var result = Acting.by(ADMIN, () -> operations.stopRun(R1, "node-a"));
@@ -2383,9 +2386,9 @@ class SailOperationsTest {
                 .on(
                     "cat /home/dev/.sail/runs/" + R1 + "/agent-session.json",
                     "{\"task\": \"work\"}")
-                .on("kill 123", "")
+                .on("--signal=SIGTERM", "")
+                .on("systemctl --user show", "ActiveState=inactive\nExecMainStatus=0\n")
                 .on("sleep 3", "")
-                .on("kill -9 123", "")
                 .on("rm -f /home/dev/.sail/runs/" + R1 + "/agent.pid", ""),
             null,
             s -> seedAssigned(s, "auth", "in_progress", LOCAL_HANDLE),
@@ -3416,7 +3419,8 @@ class SailOperationsTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

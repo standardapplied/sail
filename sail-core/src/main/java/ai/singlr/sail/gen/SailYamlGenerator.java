@@ -6,6 +6,7 @@
 package ai.singlr.sail.gen;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.YamlUtil;
 import java.util.Map;
 
 /**
@@ -221,41 +222,8 @@ public final class SailYamlGenerator {
         # AI coding agent configuration.
         # type: primary agent for `sail agent start` (claude-code | codex | helios)
         # install: agent CLIs to install during provisioning (defaults to [type] if omitted)
-        agent:
         """);
-    sb.append("  type: ").append(agent.type()).append("\n");
-    sb.append("  auto_snapshot: ").append(agent.autoSnapshot()).append("\n");
-    sb.append("  auto_branch: ").append(agent.autoBranch()).append("\n");
-    if (agent.branchPrefix() != null) {
-      sb.append("  branch_prefix: ").append(quoteYaml(agent.branchPrefix())).append("\n");
-    }
-    if (agent.install() != null && !agent.install().isEmpty()) {
-      sb.append("  install:\n");
-      for (var cli : agent.install()) {
-        sb.append("    - ").append(cli).append("\n");
-      }
-    }
-    if (agent.guardrails() != null) {
-      sb.append("  guardrails:\n");
-      var g = agent.guardrails();
-      if (g.maxDuration() != null) {
-        sb.append("    max_duration: ").append(g.maxDuration()).append("\n");
-      }
-      sb.append("    action: ").append(g.action()).append("\n");
-    }
-    if (agent.methodology() != null) {
-      sb.append("  methodology:\n");
-      var m = agent.methodology();
-      if (m.approach() != null) {
-        sb.append("    approach: ").append(m.approach()).append("\n");
-      }
-      if (m.verify() != null) {
-        sb.append("    verify: ").append(quoteYaml(m.verify())).append("\n");
-      }
-      if (m.lint() != null) {
-        sb.append("    lint: ").append(quoteYaml(m.lint())).append("\n");
-      }
-    }
+    sb.append(YamlUtil.dumpToString(Map.of("agent", agent.toMap())));
     sb.append("\n");
   }
 

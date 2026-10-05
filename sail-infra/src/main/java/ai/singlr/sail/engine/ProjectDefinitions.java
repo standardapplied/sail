@@ -15,6 +15,8 @@ import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
@@ -122,9 +124,35 @@ public final class ProjectDefinitions {
   /** Writes a definition to the canonical descriptor (the materialized view of the catalog). */
   public static Path materialize(String name, String definition) throws IOException {
     var path = canonicalPath(name);
-    Files.createDirectories(path.getParent());
-    Files.writeString(path, definition);
+    write(path, definition);
     return path;
+  }
+
+  /**
+   * Writes a project's descriptor at {@code path} the way the one the server reads is always
+   * written — a file an engineer names with {@code -f} is theirs, and {@link #persist} writes that
+   * in place, also when it names this same file: replaced in a single move, so whoever reads it
+   * while it is rewritten — the review loop resolves a project's pipeline at every step — reads the
+   * definition before or the one after, never a file that is half of either. The new file keeps the
+   * mode of the one it replaces, or is readable by all like any descriptor written for the first
+   * time; a descriptor that is a link is written where it points.
+   */
+  public static void write(Path path, String definition) throws IOException {
+    Files.createDirectories(path.toAbsolutePath().getParent());
+    var target = Files.exists(path) ? path.toRealPath() : path.toAbsolutePath();
+    var written = Files.createTempFile(target.getParent(), ".sail-", ".tmp");
+    try {
+      Files.writeString(written, definition);
+      Files.setPosixFilePermissions(
+          written,
+          Files.exists(target)
+              ? Files.getPosixFilePermissions(target)
+              : PosixFilePermissions.fromString("rw-r--r--"));
+      Files.move(
+          written, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(written);
+    }
   }
 
   /**

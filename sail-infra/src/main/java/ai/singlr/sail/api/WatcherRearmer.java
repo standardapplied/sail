@@ -20,11 +20,11 @@ import java.util.function.Supplier;
  * chat turn, a reviewer, a fix agent; the run table is the one session model — whose recorded agent
  * unit is still active but which no live watcher covers, this relaunches the watcher — at daemon
  * start and then periodically, so a watcher that dies mid-run (crash, OOM kill) leaves the agent
- * unguarded for at most one pass interval. The relaunched {@code sail agent watch} recomputes its
- * wall-clock deadline from the session's original {@code started_at}, so an agent three hours into
- * a four-hour budget gets the remaining hour, not a fresh four. Only sessions this node executed
- * are considered — a synced foreign run is its executing node's to guard, and arming a local
- * watcher against it would eventually enforce a foreign deadline on this box's container.
+ * unguarded for at most one pass interval. The relaunched {@code sail agent watch} is handed the
+ * run row's {@code started_at}, the anchor its first watcher had, so an agent three hours into a
+ * four-hour budget gets the remaining hour, not a fresh four. Only sessions this node executed are
+ * considered — a synced foreign run is its executing node's to guard, and arming a local watcher
+ * against it would eventually enforce a foreign deadline on this box's container.
  *
  * <p>Coverage is probed, not bookkept ({@link WatcherCoverage}): re-arming a run a watcher this
  * pass could not address still covers would double it, and its guardrail actions would fire twice.
@@ -151,7 +151,7 @@ public final class WatcherRearmer implements AutoCloseable {
                     + unit.get().name()
                     + " ("
                     + unit.get().scope()
-                    + " scope), resuming the original deadline from the session's started_at"));
+                    + " scope), resuming the original deadline from the run's started_at"));
     return true;
   }
 

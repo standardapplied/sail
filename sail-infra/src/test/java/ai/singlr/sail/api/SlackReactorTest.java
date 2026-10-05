@@ -307,6 +307,29 @@ class SlackReactorTest {
   }
 
   @Test
+  void aStopTheReconcilerReplaysIsNotSaidAgainAndItsFirstStopIs() {
+    var poster = new RecordingPoster();
+    var reactor = reactor(poster);
+
+    reactor.onEvent(
+        event(
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            Map.of(
+                Event.WellKnownData.SOURCE,
+                Event.WellKnownData.SOURCE_RECONCILE,
+                Event.WellKnownData.REPLAY,
+                true)));
+    assertTrue(poster.posts.isEmpty(), "the run's stop was said when it stopped");
+
+    reactor.onEvent(
+        event(
+            Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+            Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE)));
+
+    assertEquals(1, poster.posts.size(), "a stop the reconciler says first is news");
+  }
+
+  @Test
   void aCleanBuildStopStillPosts() {
     var poster = new RecordingPoster();
     var reactor = reactor(poster);

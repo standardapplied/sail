@@ -7,11 +7,15 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.Lane;
+import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
+import ai.singlr.sail.engine.LegacyFixAgent;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StreamJsonResult;
 import ai.singlr.sail.store.RunStore;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -22,8 +26,8 @@ import java.util.List;
  * and watched under the project's {@code agent.review_pipeline.guardrails}. The run reserves its
  * spec's repos through the gate a dispatch passes ({@link RunReservation#reserveForReview}), so a
  * refusal — a live build of the same spec, a full chat turn over the same repos — is a launch
- * deferred before anything starts. Nothing waits on the agent: the run's stop reaches the pipeline
- * over the bus.
+ * deferred before anything starts or is written, naming the run it waits on. Nothing waits on the
+ * agent: the run's stop reaches the pipeline over the bus.
  */
 final class ReviewLaneLauncher implements ReviewLanes {
 
@@ -47,35 +51,46 @@ final class ReviewLaneLauncher implements ReviewLanes {
   }
 
   @Override
-  public Launch launch(Invocation invocation, String boxHandle) {
+  public Launch launch(Invocation invocation, String boxHandle, Runnable claimed) {
     var project = invocation.project();
     var config = projects.loadRunning(project).config();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
+    var claim =
+        runReservation.reserveForReview(
+            runId,
+            invocation.reviewId(),
+            project,
+            invocation.specId(),
+            boxHandle,
+            invocation.lane(),
+            invocation.repos(),
+            invocation.agent(),
+            invocation.branch(),
+            invocation.task(),
+            unit,
+            config);
+    return switch (claim) {
+      case RunReservation.Claim.Held held -> new Launch.Deferred(held.conflict().run());
+      case RunReservation.Claim.Claimed reserved ->
+          launchClaimed(invocation, runId, unit, config, reserved.credential(), claimed);
+    };
+  }
+
+  private Launch launchClaimed(
+      Invocation invocation,
+      String runId,
+      AgentUnit unit,
+      SailYaml config,
+      String credential,
+      Runnable claimed) {
+    var project = invocation.project();
     var role = invocation.lane().wire();
-    String credential;
     try {
-      credential =
-          runReservation.reserveForReview(
-              runId,
-              invocation.reviewId(),
-              project,
-              invocation.specId(),
-              boxHandle,
-              invocation.lane(),
-              invocation.repos(),
-              invocation.agent(),
-              invocation.branch(),
-              invocation.task(),
-              unit,
-              config);
-    } catch (ApiException refused) {
-      if (RunReservation.heldByARun(refused)) {
-        return new Launch.Deferred(refused.getMessage());
+      claimed.run();
+      if (invocation.lane() == Lane.FIX) {
+        stopLegacyFixAgent(project, invocation.reviewId());
       }
-      throw refused;
-    }
-    try {
       if (!invocation.shown().isEmpty()) {
         runStore.markDelivered(runId, invocation.shown());
       }
@@ -102,10 +117,27 @@ final class ReviewLaneLauncher implements ReviewLanes {
           new RunLauncher.RunContext(
               project, unit, runId, invocation.specId(), invocation.agent(), role, true),
           launch);
-      return new Launch.Started(runId);
+      return new Launch.Started();
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
+    }
+  }
+
+  /**
+   * Ends whatever fix agent an older server left running for {@code reviewId} ({@link
+   * LegacyFixAgent}), so the fix run about to start is the only one on the spec's branch. A
+   * container that cannot say whether one is alive fails the launch: starting beside it is the one
+   * thing this must never do.
+   */
+  private void stopLegacyFixAgent(String project, String reviewId) {
+    try {
+      LegacyFixAgent.stop(shell, project, reviewId);
+    } catch (IOException unanswered) {
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED,
+          "Could not rule out a fix agent an older server left running.",
+          unanswered);
     }
   }
 

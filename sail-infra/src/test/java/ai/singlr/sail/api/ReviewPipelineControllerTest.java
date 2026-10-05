@@ -24,7 +24,6 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
-import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
@@ -1645,25 +1644,6 @@ class ReviewPipelineControllerTest {
     assertTrue(
         passed.body().contains("Off-by-one in pager"),
         "sub-gate findings on a passed review deserve eyes before merge, not silence");
-  }
-
-  @Test
-  void aRoomWriteFailureNeverFailsThePipeline() {
-    createSpec("auth", "in_progress");
-    var brokenDb = Sqlite.open(tempDir.resolve("broken.db"));
-    new SchemaManager(brokenDb).migrate();
-    var brokenMessages = new MessageStore(brokenDb);
-    brokenDb.close();
-
-    var ctrl = controller(singleAgentStage("no_critical"), (p, a, pr, rid, cred) -> CLEAN_REVIEW);
-    ctrl.controller.useMessages(brokenMessages);
-
-    ctrl.onEvent(agentStoppedEvent("auth"));
-
-    assertEquals(
-        SpecStatus.AWAITING_MERGE,
-        specStore.findById("auth").orElseThrow().status(),
-        "narration is best-effort: a dead room store must not strand the verdict");
   }
 
   @Test

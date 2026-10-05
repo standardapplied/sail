@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -39,9 +40,11 @@ class OperationsFactoryTest {
     var shell =
         new ShellExec() {
           public Result exec(List<String> command) {
-            return command.contains("list")
-                ? new Result(0, "[{\"name\":\"proj\",\"status\":\"Running\",\"state\":{}}]", "")
-                : new Result(1, "", "missing");
+            if (command.contains("list")) {
+              return new Result(0, "[{\"name\":\"proj\",\"status\":\"Running\",\"state\":{}}]", "");
+            }
+            return ScriptedShellExecutor.reachableContainer(String.join(" ", command))
+                .orElseGet(() -> new Result(1, "", "missing"));
           }
 
           public Result exec(List<String> command, Path workDir, Duration timeout) {

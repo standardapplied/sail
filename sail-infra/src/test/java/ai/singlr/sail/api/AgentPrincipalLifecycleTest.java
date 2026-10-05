@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -232,7 +233,10 @@ class AgentPrincipalLifecycleTest {
             specStore,
             runStore,
             bus::publish,
-            (project, unit) -> agentAlive.set(false),
+            (project, unit) -> {
+              agentAlive.set(false);
+              return new AgentSession.Halt.Ended();
+            },
             StopOperations.Listener.NONE);
     var stopped =
         Acting.by(ADMIN, () -> stopOps.stop(new StopOperations.RunTarget(runId), HANDLE, false));

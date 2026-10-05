@@ -228,7 +228,14 @@ class SpecListCommandTest {
             new String[] {"agent", "log"},
             new String[] {"agent", "review"},
             new String[] {"agent", "sweep"},
-            new String[] {"agent", "watch", "--run", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+            new String[] {
+              "agent",
+              "watch",
+              "--run",
+              "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+              "--started-at",
+              "2026-10-04T12:00:00Z"
+            },
             new String[] {"agent", "report"},
             new String[] {"agent", "context", "regen"},
             new String[] {"spec", "dispatch"})) {

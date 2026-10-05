@@ -406,6 +406,23 @@ class ReviewPipelineConfigTest {
   }
 
   @Test
+  void aLimitTheProjectLeftAtItsDefaultIsNotWrittenIntoItsBlock() {
+    var defaults = ReviewPipelineConfig.mandatoryDefault();
+    var oneSet =
+        ReviewPipelineConfig.fromMap(
+            Map.of("max_finding_age", 4, "stages", List.of(Map.of("name", "review"))));
+
+    assertEquals(
+        List.of("stages"),
+        List.copyOf(defaults.toMap().keySet()),
+        "written down, today's defaults would stay the project's limits after the defaults"
+            + " change");
+    assertEquals(defaults, ReviewPipelineConfig.fromMap(defaults.toMap()));
+    assertEquals(List.of("max_finding_age", "stages"), List.copyOf(oneSet.toMap().keySet()));
+    assertEquals(oneSet, ReviewPipelineConfig.fromMap(oneSet.toMap()));
+  }
+
+  @Test
   void aLimitOfZeroAndAnActionThatIsNoWordAreRefusedNamingWhatIsAccepted() {
     var zero =
         assertThrows(

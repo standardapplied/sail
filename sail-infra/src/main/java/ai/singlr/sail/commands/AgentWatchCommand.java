@@ -16,6 +16,7 @@ import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerManager;
@@ -23,6 +24,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
 import java.nio.file.Files;
@@ -33,6 +35,7 @@ import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -50,9 +53,11 @@ import picocli.CommandLine.Spec;
  * watcher ({@code --max-duration}, {@code --max-idle}, {@code --action}); the watcher never reads a
  * project's guardrails itself. A limit left off is not enforced.
  *
- * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises and
- * {@code --unit} the systemd unit that run was launched as (recorded on the run, never re-derived
- * here).
+ * <p>Every watcher is run-addressed: {@code --run} names the run whose agent it supervises, {@code
+ * --unit} the systemd unit that run was launched as (recorded on the run, never re-derived here),
+ * and {@code --started-at} when the run's row says it started — the anchor of its wall clock,
+ * handed over by whoever spawned the watcher and never read from the run's session file, which the
+ * agent can write.
  */
 @Command(
     name = "watch",
@@ -78,6 +83,14 @@ public final class AgentWatchCommand implements Runnable {
           "Systemd unit the run was launched as, as recorded on the run (default: derived from"
               + " --run).")
   private String unitName;
+
+  @Option(
+      names = "--started-at",
+      required = true,
+      description =
+          "When the run started, as recorded on its run row (ISO-8601 instant); anchors"
+              + " --max-duration.")
+  private String startedAt;
 
   @Option(
       names = "--max-duration",
@@ -130,10 +143,35 @@ public final class AgentWatchCommand implements Runnable {
         : AgentUnit.recorded(runId, unitName);
   }
 
+  private Guardrails guardrails() {
+    return Guardrails.of(maxDuration, maxIdle, action);
+  }
+
+  /**
+   * Whether there is a run to watch: there is unless its agent is known gone, since a container
+   * that gave no answer about it may hold an agent at work, and the watch asks again at every poll.
+   * A run whose agent is gone has its stop published when its unit still says how it ended, and
+   * then nothing is left to watch; one whose unit says nothing of it never ran.
+   */
+  boolean watchable(ShellExec shell, RunWatch.StopPublisher publisher) throws Exception {
+    if (!new AgentPresence(shell).gone(name, resolveUnit())) {
+      return true;
+    }
+    if (RunWatch.stopIfAlreadyEnded(
+        name, runId, resolveUnit(), new AgentSession(shell), publisher)) {
+      return false;
+    }
+    throw new IllegalStateException(
+        "No agent session running. Launch one with: sail agent start "
+            + name
+            + " --background --task '...'");
+  }
+
   private void execute() throws Exception {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
-    var guardrails = Guardrails.of(maxDuration, maxIdle, action);
+    var guardrails = guardrails();
+    var started = parseStartedAt(startedAt);
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
 
@@ -141,37 +179,40 @@ public final class AgentWatchCommand implements Runnable {
     var notifications = config.agent() != null ? config.agent().notifications() : null;
     var notifier = buildNotifier(notifications);
 
-    var unit = resolveUnit();
-    var agentSession = new AgentSession(shell);
-    var sessionInfo = agentSession.queryStatus(name, unit);
     var publisher = resolvePublisher();
-    if (sessionInfo == null || !sessionInfo.running()) {
-      if (RunWatch.stopIfAlreadyEnded(name, runId, unit, agentSession, publisher)) {
-        return;
-      }
-      throw new IllegalStateException(
-          "No agent session running. Launch one with: sail agent start "
-              + name
-              + " --background --task '...'");
+    if (!watchable(shell, publisher)) {
+      return;
     }
-    var startedAt = parseStartedAt(sessionInfo.startedAt());
-    announceStart(guardrails, RunWatch.deadline(startedAt, guardrails.maxDuration()));
+    announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
 
     try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
-      new RunWatch(
-              name,
-              runId,
-              unit,
-              guardrails,
-              startedAt,
-              dryRun,
-              shell,
-              feed,
-              publisher,
-              narrator(notifier, notifications),
-              DateTimeUtils::now)
-          .run();
+      watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
     }
+  }
+
+  /**
+   * The watch this command runs: of {@code --run}, as its recorded unit, under the limits it was
+   * given, its wall clock anchored to {@code --started-at} — the run row's start, which the spawner
+   * passes — and to nothing the container holds, since the agent can write there.
+   */
+  RunWatch watch(
+      ShellExec shell,
+      RunWatch.Feed feed,
+      RunWatch.StopPublisher publisher,
+      RunWatch.Narrator narrator,
+      Supplier<Instant> clock) {
+    return new RunWatch(
+        name,
+        runId,
+        resolveUnit(),
+        guardrails(),
+        parseStartedAt(startedAt),
+        dryRun,
+        shell,
+        feed,
+        publisher,
+        narrator,
+        clock);
   }
 
   /**
@@ -246,6 +287,37 @@ public final class AgentWatchCommand implements Runnable {
       public void ended() {
         notifySessionDone(notifier, notifications);
       }
+
+      @Override
+      public void endedBy(String type) {
+        System.err.println(
+            "  [watch] run "
+                + runId
+                + " was ended by its "
+                + type
+                + "; the watch ends with it, publishing nothing");
+      }
+
+      @Override
+      public void leftToTheReconciler() {
+        System.err.println(
+            "  [watch] nothing in "
+                + name
+                + " says how run "
+                + runId
+                + " ended: its container is stopped, or its unit's manager is gone and its"
+                + " process with it; the run is left to the missed-stop reconciler");
+      }
+
+      @Override
+      public void stillRunning(GuardrailChecker.GuardrailResult.Triggered limit, boolean survived) {
+        System.err.println(
+            "  [watch] "
+                + resolveUnit().unitName()
+                + (survived ? " survived the kill for " : " gave no answer to the kill for ")
+                + limit.cause()
+                + "; no stop published, trying again at the next poll");
+      }
     };
   }
 
@@ -271,13 +343,14 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   static Instant parseStartedAt(String iso) {
-    if (Strings.isBlank(iso)) {
-      return DateTimeUtils.now();
-    }
     try {
-      return Instant.parse(iso);
+      return Instant.parse(Objects.toString(iso, ""));
     } catch (DateTimeParseException e) {
-      return DateTimeUtils.now();
+      throw new IllegalArgumentException(
+          "--started-at '"
+              + iso
+              + "' is not an ISO-8601 instant; pass the run row's started_at, e.g."
+              + " 2026-10-04T12:00:00Z.");
     }
   }
 

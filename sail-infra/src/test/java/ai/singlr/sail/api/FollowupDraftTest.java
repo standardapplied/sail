@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class FollowupDraftTest {
 
   private static final ReviewStore.ReviewRow REVIEW =
-      new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null);
+      new ReviewStore.ReviewRow("r1", "auth", 1, "passed", "t0", "t1", null, null, null, null);
 
   private static Finding finding(Finding.Severity severity, Finding.Suggestion suggestion) {
     return Finding.create(

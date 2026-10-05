@@ -295,11 +295,28 @@ class SyncTransitionEventsTest {
   }
 
   @Test
-  void anEscalatedReviewBecomesReviewEscalated() {
+  void anEscalatedReviewBecomesReviewEscalatedSayingWhyAsItsRowRecordsIt() {
+    var events =
+        map(
+            new SyncTransition(
+                "review",
+                "rev1",
+                "failed",
+                "escalated",
+                review("escalated", "fix agent stopped by an operator")));
+
+    assertEquals(1, events.size());
+    assertEquals("review_escalated", events.getFirst().type());
+    assertEquals("fix agent stopped by an operator", events.getFirst().data().get("detail"));
+  }
+
+  @Test
+  void anEscalatedReviewWhoseRowRecordsNoReasonStillBecomesReviewEscalated() {
     var events =
         map(new SyncTransition("review", "rev1", "failed", "escalated", review("escalated", null)));
 
     assertEquals("review_escalated", events.getFirst().type());
+    assertNull(events.getFirst().data().get("detail"), "a row from an older box names no reason");
   }
 
   @Test
@@ -377,6 +394,17 @@ class SyncTransitionEventsTest {
     var findings = (Map<?, ?>) events.getFirst().data().get("findings");
     assertEquals(List.of("high", "medium"), List.copyOf(findings.keySet()));
     assertEquals(2, findings.get("high"));
+  }
+
+  @Test
+  void aStageClosedForAnErrorIsToldByItsReviewNotAsAFailedGate() {
+    var closed = stage("failed", Map.of());
+    closed.put("error", "reviewer stopped by an operator");
+
+    assertTrue(
+        map(new SyncTransition("review_stage", "s1", "running", "failed", closed)).isEmpty(),
+        "the driving box says such a stage through its review's error or escalation, never as a"
+            + " stage that failed its gate: main says no more than it did");
   }
 
   @Test

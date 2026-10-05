@@ -80,6 +80,28 @@ class WebhookReactorTest {
   }
 
   @Test
+  void aStopTheReconcilerReplaysIsNotNotifiedAgainAndItsFirstStopIs() {
+    var calls = new ArrayList<String>();
+    var notifications = new Notifications("https://example.com/wh", List.of());
+    var reactor = new WebhookReactor(project -> notifications, url -> recorder(calls));
+    var first =
+        Map.<String, Object>of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE);
+    var replay =
+        Map.<String, Object>of(
+            Event.WellKnownData.SOURCE,
+            Event.WellKnownData.SOURCE_RECONCILE,
+            Event.WellKnownData.REPLAY,
+            true);
+
+    reactor.onEvent(Event.of("light", "oauth", "agent_session_stopped", "sail", "h", replay));
+    assertTrue(calls.isEmpty(), "the run's end was notified when it ended");
+    reactor.onEvent(Event.of("light", "oauth", "guardrail_triggered", "sail", "h", replay));
+    reactor.onEvent(Event.of("light", "oauth", "agent_session_stopped", "sail", "h", first));
+
+    assertEquals(2, calls.size(), "only a stop is ever a replay, and a first stop is news");
+  }
+
+  @Test
   void onEventSkipsSyncDerivedEventsTheOriginNodeAlreadyNotified() {
     var calls = new ArrayList<String>();
     var notifications = new Notifications("https://example.com/wh", List.of("spec_dispatched"));

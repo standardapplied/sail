@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ActingAs;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -100,6 +101,42 @@ class MessageStoreTest {
 
     assertEquals(
         Map.of("room", second.createdAt(), "other", other.createdAt()), messages.latestByRoom());
+  }
+
+  @Test
+  void aBodyThatFitsIsFittedAsItIs() {
+    var atTheLimit = "x".repeat(MessageStore.MAX_BODY_BYTES);
+
+    assertEquals("short", MessageStore.fitted("short"));
+    assertEquals(atTheLimit, MessageStore.fitted(atTheLimit));
+  }
+
+  @Test
+  void aBodyTooLongForARoomIsCutBetweenCharactersAndSaysSo() {
+    var tooLong = "é".repeat(MessageStore.MAX_BODY_BYTES);
+
+    var fitted = MessageStore.fitted(tooLong);
+
+    assertTrue(fitted.endsWith(MessageStore.CUT), "a reader is told the message goes on");
+    assertTrue(fitted.startsWith("ééé"));
+    assertFalse(fitted.contains("\uFFFD"), "no character is cut in half");
+    var bytes = fitted.getBytes(StandardCharsets.UTF_8).length;
+    assertTrue(bytes <= MessageStore.MAX_BODY_BYTES, bytes + " bytes");
+    assertTrue(bytes > MessageStore.MAX_BODY_BYTES - 2, "and it keeps all a room message can hold");
+    assertEquals(fitted, messages.append("room", "ada", fitted, null).body());
+  }
+
+  @Test
+  void aBodyWithHalfASurrogatePairInItIsCutAtTheLimitNotAtThatCharacter() {
+    var tooLong = "error \uD83D " + "x".repeat(MessageStore.MAX_BODY_BYTES);
+
+    var fitted = MessageStore.fitted(tooLong);
+
+    assertTrue(fitted.endsWith(MessageStore.CUT));
+    assertTrue(
+        fitted.getBytes(StandardCharsets.UTF_8).length > MessageStore.MAX_BODY_BYTES - 2,
+        "a character no encoding has does not end the message where it stands");
+    assertTrue(fitted.getBytes(StandardCharsets.UTF_8).length <= MessageStore.MAX_BODY_BYTES);
   }
 
   @Test

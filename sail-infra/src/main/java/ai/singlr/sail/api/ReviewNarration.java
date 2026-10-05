@@ -6,12 +6,15 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * What the review pipeline says in a spec's room and on its events: the verdict of each review, the
@@ -64,6 +67,91 @@ final class ReviewNarration {
     return "Automated review stages passed."
         + disputedLines(disputed)
         + "\nAwaiting human approval.";
+  }
+
+  /** The room line of a review handed to a person, saying why. */
+  static String escalated(String reason) {
+    return "Review escalated: " + reason + ".";
+  }
+
+  /** Why a review whose attempts keep failing by infrastructure error is a person's. */
+  static String erroredOut(int attempts, int iteration) {
+    return attempts
+        + " review attempts errored in a row at iteration "
+        + iteration
+        + "; fix the reviewer, then re-dispatch with --restart";
+  }
+
+  /** Why a review a blocking finding has outlived {@code age} fix iterations of is a person's. */
+  static String stuckOn(String finding, int age) {
+    return "finding \""
+        + finding
+        + "\" survived "
+        + age
+        + " fix iterations; the loop is stuck on it — fix or dismiss it, then re-dispatch";
+  }
+
+  /** Why a review that has used every iteration its project allows is a person's. */
+  static String iterationsExhausted(int maxIterations) {
+    return "review iterations exhausted ("
+        + maxIterations
+        + "); re-dispatch with --restart to start a fresh attempt";
+  }
+
+  /** Why a review whose fix iteration failed, for {@code why}, is a person's. */
+  static String fixFailed(String why) {
+    return "fix iteration failed — " + why + "; triage and re-dispatch";
+  }
+
+  /** Why a review whose {@code agent} an operator stopped is a person's. */
+  static String stoppedByAnOperator(String agent) {
+    return agent + " stopped by an operator; re-dispatch with --restart to start a fresh attempt";
+  }
+
+  /**
+   * Why a review whose project's pipeline cannot be read is a person's: {@code why}, which names
+   * the project and the fault, as one line — a parser tells where and what over several, the last
+   * of them the one that says what is wrong, with a line that only points under each — and what to
+   * do about it.
+   */
+  static String pipelineUnreadable(String why) {
+    var fault =
+        Stream.ofNullable(why)
+            .flatMap(String::lines)
+            .map(String::strip)
+            .filter(line -> !line.isEmpty() && !line.equals("^"))
+            .collect(Collectors.joining(" "));
+    return (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
+        + "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
+        + " --restart";
+  }
+
+  /** Why a review whose project has no pipeline stages left is a person's. */
+  static String noStages() {
+    return "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+        + " re-dispatch with --restart";
+  }
+
+  /** Why a review one of whose stages the project's pipeline no longer has is a person's. */
+  static String pipelineChanged(String stage) {
+    return "the project's review pipeline changed while this review ran: stage '"
+        + stage
+        + "' is no longer where the review has it; re-dispatch with --restart to review under"
+        + " the pipeline as it is now";
+  }
+
+  /**
+   * The room line of a review whose launch was refused its claim: the run it waits on, by its id,
+   * its lane and the spec it works.
+   */
+  static String waiting(DispatchGate.RunningRun holder) {
+    return "Review is waiting for run `"
+        + holder.runId()
+        + "` (`"
+        + holder.role()
+        + "` of `"
+        + Objects.toString(holder.specId(), "")
+        + "`) to finish.";
   }
 
   /** The room note for a reviewer's rulings on findings someone resolved while its stage ran. */

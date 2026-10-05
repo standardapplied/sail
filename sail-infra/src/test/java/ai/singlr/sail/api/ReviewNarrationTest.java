@@ -6,13 +6,17 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.Finding;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ReviewNarrationTest {
 
@@ -169,5 +173,32 @@ class ReviewNarrationTest {
     assertEquals(Map.of("critical", 1, "low", 2), counts);
     assertEquals(List.of("critical", "low"), List.copyOf(counts.keySet()));
     assertTrue(ReviewNarration.severityCounts(List.of()).isEmpty());
+  }
+
+  @Test
+  void anUnreadablePipelineIsSaidInOneLineWithAllOfWhatTheParserSaidAndWhatToDo(@TempDir Path dir)
+      throws Exception {
+    var descriptor = Files.writeString(dir.resolve("sail.yaml"), "agent: [unterminated\n");
+    var unreadable =
+        assertThrows(
+            IllegalStateException.class, () -> ReviewWiring.descriptor("acme", descriptor));
+
+    var reason = ReviewNarration.pipelineUnreadable(unreadable.getMessage());
+
+    assertTrue(unreadable.getMessage().lines().count() > 1, "a parser's message runs over lines");
+    assertTrue(unreadable.getMessage().contains("^"), "and points under what it quotes");
+    assertEquals(
+        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence in reader,"
+            + " line 1, column 8: agent: [unterminated expected ',' or ']', but got <stream end>"
+            + " in reader, line 2, column 1:; fix the project's sail.yaml with `sail project"
+            + " edit`, then re-dispatch with --restart",
+        reason,
+        "all of what the parser said, where and what, as one line: the lines that only point"
+            + " under a snippet say nothing and are left out");
+    for (var nothingSaid : new String[] {null, "", " \n "}) {
+      assertTrue(
+          ReviewNarration.pipelineUnreadable(nothingSaid)
+              .startsWith("the project's review pipeline could not be read; fix"));
+    }
   }
 }

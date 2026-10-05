@@ -20,6 +20,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -236,6 +237,100 @@ class RunLauncherTest {
         "an agent still running against a row that says it is over did not end itself, and must"
             + " not run on unrecorded with its reservation freed: "
             + commands);
+  }
+
+  /**
+   * A live agent whose unit answers {@code show} as {@code unitState} says, and whose kill is
+   * delivered or not.
+   */
+  private static ShellExec haltedShell(String unitState, boolean signalDelivered) {
+    return shell(
+        command -> {
+          var joined = String.join(" ", command);
+          if (joined.contains("cat") && joined.contains("pid")) {
+            return new ShellExec.Result(0, "12345\n", "");
+          }
+          if (joined.contains("systemctl --user kill")) {
+            return new ShellExec.Result(signalDelivered ? 0 : 1, "", "");
+          }
+          if (joined.contains("systemctl --user show")) {
+            return new ShellExec.Result(0, "ActiveState=" + unitState + "\n", "");
+          }
+          return new ShellExec.Result(0, "", "");
+        });
+  }
+
+  private ApiException lostLaunch(ShellExec shell) {
+    seedRunningRun();
+    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped")));
+    return assertThrows(
+        ApiException.class, () -> launcher(shell, runStore).finishLaunch(ctx(true), outcome()));
+  }
+
+  @Test
+  void aLostLaunchWhoseAgentTheContainerSaysEndedIsSaidTornDown() {
+    var ex = lostLaunch(haltedShell("inactive", true));
+
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("the agent was torn down"), ex.getMessage());
+  }
+
+  @Test
+  void aLostLaunchWhoseAgentSurvivedItsHaltIsNeverSaidTornDown() {
+    var ex = lostLaunch(haltedShell("active", true));
+
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("its agent survived its halt"), ex.getMessage());
+    assertTrue(
+        ex.failure().action().contains(AgentUnit.forRun(RUN_ID).unitName()),
+        "the operator is told which unit is still to be stopped: " + ex.failure().action());
+  }
+
+  @Test
+  void aLostLaunchWhoseHaltNothingAnsweredForIsNeverSaidTornDown() {
+    var ex = lostLaunch(haltedShell("active", false));
+
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("could not be confirmed stopped"), ex.getMessage());
+  }
+
+  @Test
+  void aLostLaunchWhoseHaltThrewIsNeverSaidTornDown() {
+    var live = haltedShell("active", true);
+    var ex =
+        lostLaunch(
+            shell(
+                command -> {
+                  if (String.join(" ", command).contains("systemctl --user kill")) {
+                    throw new UncheckedIOException(new IOException("incus exec failed"));
+                  }
+                  try {
+                    return live.exec(command);
+                  } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                  }
+                }));
+
+    assertEquals(ErrorCode.CONFLICT, ex.failure().errorCode());
+    assertTrue(ex.getMessage().contains("could not be confirmed stopped"), ex.getMessage());
+  }
+
+  @Test
+  void aRunFinishedUnderItsLaunchInAContainerThatGivesNoAnswerIsNotTakenForOneThatEndedItself() {
+    seedRunningRun();
+    Acting.system(() -> assertTrue(runStore.transition(RUN_ID, "running", "stopped", 0)));
+
+    var ex =
+        assertThrows(
+            ApiException.class,
+            () -> launcher(quietShell(), runStore).finishLaunch(ctx(true), outcome()));
+
+    assertEquals(
+        ErrorCode.CONFLICT,
+        ex.failure().errorCode(),
+        "nothing says the agent is gone, so the launch is not reported as one that launched and"
+            + " ended");
+    assertTrue(ex.getMessage().contains("could not be confirmed stopped"), ex.getMessage());
   }
 
   @Test

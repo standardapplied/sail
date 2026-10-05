@@ -234,6 +234,11 @@ public record Event(
     /** Who emitted an authoritative stop; absent on a raw agent-hook stop. */
     public static final String SOURCE = "source";
 
+    /** Whether a stop's {@code data} names a {@link #SOURCE}, and so is the run's real end. */
+    public static boolean authoritative(Map<String, Object> data) {
+      return data.get(SOURCE) != null;
+    }
+
     /** {@link #SOURCE} value: the guardrail watcher, which observed the process exit code. */
     public static final String SOURCE_WATCHER = "watcher";
 
@@ -280,6 +285,33 @@ public record Event(
      * carries no {@link #EXIT_CODE}: the run did not end itself, so it has none of its own.
      */
     public static final String REASON = "reason";
+
+    /**
+     * Carried, as {@code true}, on an authoritative stop the missed-stop reconciler published for a
+     * run whose stop was already said: it is published again only so the loop goes on from it. The
+     * review pipeline routes it like any stop; whoever narrates stops to people says nothing for
+     * it. The first stop of a run — one that died unwatched, or whose row was finished in place
+     * with no stop — carries none, however long ago the run ended.
+     */
+    public static final String REPLAY = "replay";
+
+    /** Whether a stop's {@code data} marks it a {@link #REPLAY}. */
+    public static boolean replay(Map<String, Object> data) {
+      return Boolean.parseBoolean(Objects.toString(data.get(REPLAY), null));
+    }
+
+    /**
+     * Carried, as {@code true}, on the {@code agent_tool_finished} that says the run's main agent
+     * has every tool call of its batch behind it — the ones that ran, and any the CLI denied or
+     * whose own finish never arrived. Whoever counts a run's calls in flight counts none after it;
+     * to everyone else it is a call finishing like any other.
+     */
+    public static final String BATCH = "batch";
+
+    /** Whether a tool event's {@code data} marks the end of a {@link #BATCH}. */
+    public static boolean batch(Map<String, Object> data) {
+      return Boolean.parseBoolean(Objects.toString(data.get(BATCH), null));
+    }
 
     /** Host pid of the guardrail watcher covering a dispatched session, carried on its start. */
     public static final String WATCHER_PID = "watcher_pid";

@@ -23,6 +23,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -48,6 +49,7 @@ class RunWatchTest {
   private final List<Instant> publishedAt = new ArrayList<>();
   private final List<Boolean> triggerAtPublish = new ArrayList<>();
   private final List<String> told = new ArrayList<>();
+  private final List<String> noted = new ArrayList<>();
   private final Timeline feed = new Timeline();
 
   @BeforeEach
@@ -88,15 +90,31 @@ class RunWatchTest {
       }
     }
 
+    /** A tool call of {@code runId} that returns at once: it starts and it finishes. */
     void toolCallBy(String runId) {
-      queued.add(
-          Event.of(
-              PROJECT,
-              "auth",
-              Event.WellKnownTypes.AGENT_TOOL_STARTED,
-              "claude-code",
-              "host",
-              Map.of(Event.WellKnownData.RUN_ID, runId)));
+      toolStartedBy(runId);
+      toolFinishedBy(runId);
+    }
+
+    void toolStartedBy(String runId) {
+      said(Event.WellKnownTypes.AGENT_TOOL_STARTED, runId, Map.of());
+    }
+
+    void toolFinishedBy(String runId) {
+      said(Event.WellKnownTypes.AGENT_TOOL_FINISHED, runId, Map.of());
+    }
+
+    /** The main agent of {@code runId} has every call of its batch behind it. */
+    void batchResolvedBy(String runId) {
+      said(
+          Event.WellKnownTypes.AGENT_TOOL_FINISHED, runId, Map.of(Event.WellKnownData.BATCH, true));
+    }
+
+    /** An event of {@code type} about {@code runId} arrives on the feed. */
+    void said(String type, String runId, Map<String, Object> data) {
+      var named = new LinkedHashMap<>(data);
+      named.put(Event.WellKnownData.RUN_ID, runId);
+      queued.add(Event.of(PROJECT, "auth", type, "claude-code", "host", named));
     }
 
     @Override
@@ -179,6 +197,21 @@ class RunWatchTest {
       @Override
       public void ended() {
         told.add("ended");
+      }
+
+      @Override
+      public void endedBy(String type) {
+        told.add("ended by " + type);
+      }
+
+      @Override
+      public void leftToTheReconciler() {
+        noted.add("left to the reconciler");
+      }
+
+      @Override
+      public void stillRunning(GuardrailChecker.GuardrailResult.Triggered limit, boolean survived) {
+        noted.add((survived ? "survived " : "unanswered ") + limit.cause());
       }
     };
   }
@@ -365,6 +398,9 @@ class RunWatchTest {
     assertEquals("stall (20m)", recordedTrigger().cause());
     assertEquals(
         List.of("tripped stall (20m)", "ended"), told, "and it is told as the trip it was");
+    assertTrue(
+        noted.contains("survived stall (20m)"),
+        "each kill it survived is said, with no stop published for it: " + noted);
   }
 
   @Test
@@ -469,6 +505,322 @@ class RunWatchTest {
   }
 
   @Test
+  void anAgentNoSignalReachedThatThenExitsOnItsOwnIsReportedAsThePlainExitItWas() throws Exception {
+    container.undeliverable(true);
+    feed.at(Duration.ofMinutes(21), () -> container.exited(RUN, "fixed and pushed", 0));
+
+    watch(new Guardrails(null, "20m", "stop"));
+
+    assertTrue(kills() >= 1, "the limit was crossed and a kill was sent");
+    assertEquals(1, published.size());
+    assertEquals(
+        0,
+        published.getFirst().data().get("exit_code"),
+        "no signal was ever delivered: the agent ended itself, and its finished work is its own");
+    assertNull(published.getFirst().data().get("reason"));
+    assertNull(recordedTrigger(), "a kill that never landed ended nothing");
+    assertEquals(List.of("exited"), told);
+  }
+
+  @Test
+  void aKillNothingAnsweredForKeepsThePidFileAndIsAskedAgainAtTheNextPoll() throws Exception {
+    var duringTheSilence = new ArrayList<String>();
+    container.survivesKill(true);
+    container.afterSigterm(() -> container.managerDown(true));
+    feed.at(
+        Duration.ofMinutes(21),
+        () -> {
+          duringTheSilence.add("pid file " + container.file(UNIT.pidPath()));
+          duringTheSilence.add(
+              "sigkills " + container.commandsContaining("--signal=SIGKILL").size());
+          duringTheSilence.add("resets " + container.commandsContaining("reset-failed").size());
+          duringTheSilence.add("reconciler reads it active: " + reconcilerReadsItActive());
+          duringTheSilence.add("published " + published.size());
+        });
+    feed.at(
+        Duration.ofMinutes(22),
+        () -> {
+          container.managerDown(false);
+          container.survivesKill(false);
+        });
+
+    watch(new Guardrails(null, "20m", "stop"));
+
+    assertEquals(
+        List.of(
+            "pid file " + container.pidOf(RUN),
+            "sigkills 0",
+            "resets 0",
+            "reconciler reads it active: true",
+            "published 0"),
+        duringTheSilence,
+        "a manager that went silent after the SIGTERM said nothing of the agent: nothing was"
+            + " removed, reset or escalated, so nothing reads the live agent as gone");
+    assertEquals(1, published.size(), "the watcher asked again once the manager answered");
+    assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertTrue(noted.contains("unanswered stall (20m)"), noted.toString());
+    assertFalse(
+        Duration.between(START, publishedAt.getFirst()).compareTo(Duration.ofMinutes(22)) < 0);
+    assertNull(container.file(UNIT.pidPath()), "the pid file goes once the agent is known gone");
+  }
+
+  private boolean reconcilerReadsItActive() {
+    try {
+      return MissedStopReconciler.systemdUnitProbe(container).active(PROJECT, RUN, UNIT.unitName());
+    } catch (Exception e) {
+      throw new IllegalStateException(e);
+    }
+  }
+
+  @Test
+  void aWatcherPollingASilentManagerEndsWhenItsRunsStopIsPublishedByTheReconciler()
+      throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> container.managerDown(true));
+    feed.at(
+        Duration.ofMinutes(8),
+        () ->
+            feed.said(
+                Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+                RUN,
+                Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_RECONCILE)));
+
+    watch(REVIEW_LIMITS);
+
+    assertTrue(published.isEmpty(), "the run's stop was said: the watcher says nothing more");
+    assertNull(recordedTrigger());
+    assertEquals(List.of("ended by " + Event.WellKnownTypes.AGENT_SESSION_STOPPED), told);
+    assertTrue(
+        elapsed().compareTo(Duration.ofMinutes(8).plus(RunWatch.LIVENESS_POLL)) <= 0,
+        "the watch ended with its run, not hours later at a limit: " + elapsed());
+  }
+
+  @Test
+  void aWatcherEndsWhenItsRunsCancelIsPublished() throws Exception {
+    feed.at(
+        Duration.ofMinutes(8),
+        () ->
+            feed.said(
+                Event.WellKnownTypes.AGENT_CANCELLED,
+                RUN,
+                Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_OPERATOR)));
+
+    watch(REVIEW_LIMITS);
+
+    assertTrue(published.isEmpty(), "an operator ended the run: its watcher publishes nothing");
+    assertNull(recordedTrigger());
+    assertEquals(0, kills());
+    assertEquals(List.of("ended by " + Event.WellKnownTypes.AGENT_CANCELLED), told);
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(8).plus(RunWatch.LIVENESS_POLL)) <= 0);
+  }
+
+  @Test
+  void theAgentsOwnTurnEndStopAndAnotherRunsEndNeverEndTheWatch() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.said(Event.WellKnownTypes.AGENT_SESSION_STOPPED, RUN, Map.of());
+          feed.said(
+              Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+              OTHER_RUN,
+              Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_WATCHER));
+          feed.said(
+              Event.WellKnownTypes.AGENT_CANCELLED,
+              OTHER_RUN,
+              Map.of(Event.WellKnownData.SOURCE, Event.WellKnownData.SOURCE_OPERATOR));
+        });
+    feed.at(Duration.ofMinutes(10), () -> container.exited(RUN, "done", 0));
+
+    watch(REVIEW_LIMITS);
+
+    assertEquals(1, published.size(), "a turn boundary is not the run's end, nor is another run's");
+    assertEquals(0, published.getFirst().data().get("exit_code"));
+    assertFalse(
+        Duration.between(START, publishedAt.getFirst()).compareTo(Duration.ofMinutes(10)) < 0);
+  }
+
+  @Test
+  void aToolCallLongerThanTheStallWindowIsWorkNotAStall() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+    feed.at(Duration.ofMinutes(35), () -> feed.toolFinishedBy(RUN));
+    feed.at(Duration.ofMinutes(36), () -> container.exited(RUN, "verified and pushed", 0));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(0, kills(), "thirty minutes inside one tool call is thirty minutes of work");
+    assertEquals(1, published.size());
+    assertEquals(0, published.getFirst().data().get("exit_code"));
+    assertNull(published.getFirst().data().get("reason"));
+  }
+
+  @Test
+  void aToolCallThatNeverFinishesIsEndedAtTheWallClockLimit() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals("time limit (45m)", published.getFirst().data().get("reason"));
+    assertFalse(elapsed().compareTo(Duration.ofMinutes(45)) < 0, elapsed().toString());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(46)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void aToolCallThatNeverFinishesIsAStallWhenNoWallClockLimitBoundsTheRun() throws Exception {
+    feed.toolStartedBy(RUN);
+
+    watch(new Guardrails(null, "20m", "stop"));
+
+    assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertFalse(elapsed().compareTo(Duration.ofMinutes(20)) < 0, elapsed().toString());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(21)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void oneOfTwoToolCallsStillInFlightIsNotAStall() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.toolStartedBy(RUN);
+        });
+    feed.at(Duration.ofMinutes(6), () -> feed.toolFinishedBy(RUN));
+    feed.at(Duration.ofMinutes(40), () -> container.exited(RUN, "done", 0));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(0, kills(), "one call finished, the other is still running: the run is working");
+    assertEquals(0, published.getFirst().data().get("exit_code"));
+  }
+
+  @Test
+  void theStallWindowStartsWhenTheLastToolCallInFlightFinishes() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+    feed.at(Duration.ofMinutes(30), () -> feed.toolFinishedBy(RUN));
+
+    watch(new Guardrails("2h", "20m", "stop"));
+
+    assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertFalse(
+        elapsed().compareTo(Duration.ofMinutes(50)) < 0,
+        "silent since the call finished at 30m, not since it started at 5m: " + elapsed());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(51)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void aToolCallTheCliDeniedIsOverWhenItsBatchResolvesAndTheSilenceAfterItIsAStall()
+      throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "stall (20m)",
+        published.getFirst().data().get("reason"),
+        "a denied call has no finish of its own: counted in flight it would hold the stall off"
+            + " until the time limit");
+    assertFalse(elapsed().compareTo(Duration.ofMinutes(25)) < 0, elapsed().toString());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(26)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void aBatchThatResolvesEndsEveryCallInItHoweverManyHadNoFinishOfTheirOwn() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.toolStartedBy(RUN);
+          feed.toolStartedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "stall (20m)",
+        published.getFirst().data().get("reason"),
+        "three calls denied in one batch: its end is not one more finish, it is the end of all"
+            + " of them");
+  }
+
+  @Test
+  void aBatchThatResolvesSaysNothingOfACallTheNextBatchStarts() throws Exception {
+    feed.at(
+        Duration.ofMinutes(5),
+        () -> {
+          feed.toolStartedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+    feed.at(Duration.ofMinutes(6), () -> feed.toolStartedBy(RUN));
+    feed.at(
+        Duration.ofMinutes(36),
+        () -> {
+          feed.toolFinishedBy(RUN);
+          feed.batchResolvedBy(RUN);
+        });
+
+    watch(new Guardrails("2h", "20m", "stop"));
+
+    assertEquals("stall (20m)", published.getFirst().data().get("reason"));
+    assertFalse(
+        elapsed().compareTo(Duration.ofMinutes(56)) < 0,
+        "the half-hour call of the second batch was work, and the stall window began when it"
+            + " finished: "
+            + elapsed());
+    assertTrue(elapsed().compareTo(Duration.ofMinutes(57)) < 0, elapsed().toString());
+  }
+
+  @Test
+  void aToolCallInFlightIsStillInFlightAfterTheFeedOpensAgain() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+    feed.at(Duration.ofMinutes(10), () -> feed.live = false);
+
+    watch(new Guardrails("2h", "20m", "stop"));
+
+    assertTrue(feed.reopened >= 1);
+    assertEquals(
+        "time limit (2h)",
+        published.getFirst().data().get("reason"),
+        "the call that started before the feed went down is still running after it came back");
+  }
+
+  @Test
+  void whatTheAgentLogsWhileACallIsInFlightTakesNothingOffTheCount() throws Exception {
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+    feed.at(
+        Duration.ofMinutes(10),
+        () -> feed.said(Event.WellKnownTypes.AGENT_LOG_CHUNK, RUN, Map.of()));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "time limit (45m)",
+        published.getFirst().data().get("reason"),
+        "a log line is progress, not a call finishing: the call that started is still in flight");
+  }
+
+  @Test
+  void aFinishNoStartWasHeardForNeverHidesACallThatStartsAfterIt() throws Exception {
+    feed.at(
+        Duration.ofMinutes(4),
+        () -> {
+          feed.toolFinishedBy(RUN);
+          feed.toolFinishedBy(RUN);
+        });
+    feed.at(Duration.ofMinutes(5), () -> feed.toolStartedBy(RUN));
+
+    watch(new Guardrails("45m", "20m", "stop"));
+
+    assertEquals(
+        "time limit (45m)",
+        published.getFirst().data().get("reason"),
+        "calls in flight never count below none, so the call that started is one in flight");
+  }
+
+  @Test
   void aStoppedContainerEndsTheWatchWithNoStopSinceNothingSaysHowTheRunEnded() throws Exception {
     feed.at(Duration.ofMinutes(5), container::stopped);
 
@@ -479,6 +831,7 @@ class RunWatchTest {
         "a stopped container cannot say how the run ended: the reconciler, which reads the"
             + " container's state, speaks for it");
     assertTrue(told.isEmpty());
+    assertEquals(List.of("left to the reconciler"), noted);
     assertTrue(
         elapsed().compareTo(Duration.ofMinutes(5).plus(RunWatch.LIVENESS_POLL)) <= 0,
         "noticed at the next poll, not at a limit: " + elapsed());
@@ -730,7 +1083,10 @@ class RunWatchTest {
     var captured = new AtomicReference<Event>();
 
     RunWatch.emitStop(
-        captured::set, PROJECT, new AgentSession(shell).queryExitStatus(PROJECT, UNIT), null);
+        captured::set,
+        PROJECT,
+        new AgentSession(shell).answeredExitStatus(PROJECT, UNIT).orElseThrow(),
+        null);
 
     assertEquals("auth", captured.get().spec());
     assertEquals("claude-code", captured.get().agent());

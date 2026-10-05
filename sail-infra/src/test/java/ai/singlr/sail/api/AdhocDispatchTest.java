@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -625,7 +626,11 @@ class AdhocDispatchTest {
   private static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
-    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    /**
+     * Every launch reconciles the in-container sail helpers; answer as already installed. The
+     * container answers what nothing else scripts: it runs a command, and its unit manager names no
+     * process for a unit.
+     */
     StubShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
@@ -649,7 +654,8 @@ class AdhocDispatchTest {
           return entry.getValue();
         }
       }
-      return new Result(1, "", "no script for " + joined);
+      return ScriptedShellExecutor.reachableContainer(joined)
+          .orElseGet(() -> new Result(1, "", "no script for " + joined));
     }
 
     @Override

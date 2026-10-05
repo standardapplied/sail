@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -52,6 +53,10 @@ final class FakeContainer implements ShellExec {
   private volatile String hostFragment = "";
   private volatile Runnable beforeHost = () -> {};
   private final AtomicReference<Runnable> afterAliveProbe = new AtomicReference<>();
+  private final AtomicReference<Runnable> afterSigterm = new AtomicReference<>();
+  private volatile boolean undeliverable;
+  private volatile String failingFragment = "";
+  private volatile String failingWith = "";
 
   private static final class Agent {
     private final int pid;
@@ -88,6 +93,17 @@ final class FakeContainer implements ShellExec {
     files.put(AgentUnit.forRun(runId).logPath(), log);
   }
 
+  /** Every script run in the container that contains {@code fragment} fails with {@code why}. */
+  void failing(String fragment, String why) {
+    this.failingFragment = fragment;
+    this.failingWith = why;
+  }
+
+  /** Something in the container — the agent, say — wrote {@code content} to {@code path}. */
+  void wroteFile(String path, String content) {
+    files.put(path, content);
+  }
+
   /** Whether a watcher process for {@code runId} is running on the host. */
   boolean watched(String runId) {
     return watchers.contains(runId);
@@ -96,6 +112,11 @@ final class FakeContainer implements ShellExec {
   /** The watcher of {@code runId} is gone: its watch ended, or it died. */
   void watcherGone(String runId) {
     watchers.remove(runId);
+  }
+
+  /** The pid of {@code runId}'s agent, as its pid file names it. */
+  String pidOf(String runId) {
+    return String.valueOf(agents.get(runId).pid);
   }
 
   boolean alive(String runId) {
@@ -175,6 +196,16 @@ final class FakeContainer implements ShellExec {
    */
   void afterAliveProbe(Runnable hook) {
     afterAliveProbe.set(hook);
+  }
+
+  /** Whether no signal reaches a unit: the kill command itself fails, and nothing is signalled. */
+  void undeliverable(boolean undeliverable) {
+    this.undeliverable = undeliverable;
+  }
+
+  /** Runs {@code hook} once, right after the next SIGTERM has been delivered to a unit. */
+  void afterSigterm(Runnable hook) {
+    afterSigterm.set(hook);
   }
 
   /** Whether the dev user's systemd manager is gone: every question about a unit fails. */
@@ -288,11 +319,37 @@ final class FakeContainer implements ShellExec {
   }
 
   private Result bash(List<String> inner) {
+    if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
+      return fail(failingWith);
+    }
+    if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
+      return presence(inner.get(inner.size() - 2), inner.getLast());
+    }
     var script = inner.stream().filter(arg -> arg.contains("printf '%s' \"$1\" >")).findFirst();
     if (script.isPresent()) {
       files.put(inner.get(inner.size() - 1), inner.get(inner.size() - 2));
     }
     return ok("");
+  }
+
+  /**
+   * The answer to "is this run's agent there": the process its pid file names, or else the one its
+   * unit's manager names — which a manager that is down cannot — is alive or gone.
+   */
+  private Result presence(String pidPath, String service) {
+    var named = files.get(pidPath);
+    if (named == null && !service.isEmpty() && managerDown) {
+      return fail("Failed to connect to bus");
+    }
+    var agent =
+        named != null
+            ? agents.values().stream()
+                .filter(candidate -> String.valueOf(candidate.pid).equals(named.strip()))
+                .findFirst()
+            : Optional.ofNullable(
+                agents.get(
+                    service.replace(AgentUnit.RUN_UNIT_PREFIX, "").replace(SERVICE_SUFFIX, "")));
+    return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
   }
 
   private Result systemctl(List<String> inner) {
@@ -304,7 +361,13 @@ final class FakeContainer implements ShellExec {
       return alive ? ok("") : fail("");
     }
     if (inner.contains("kill")) {
+      if (undeliverable) {
+        return fail("Failed to kill unit: transport endpoint is not connected");
+      }
       end(agent);
+      if (inner.contains("--signal=SIGTERM")) {
+        Optional.ofNullable(afterSigterm.getAndSet(null)).ifPresent(Runnable::run);
+      }
       return refusesKill && inner.contains("--signal=SIGKILL")
           ? fail("Failed to kill unit: permission denied")
           : ok("");

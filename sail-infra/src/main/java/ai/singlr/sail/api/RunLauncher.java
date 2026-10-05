@@ -5,11 +5,13 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
@@ -265,7 +267,8 @@ public final class RunLauncher {
    * supervision is on by default, under the limits of the run's lane ({@link
    * SailYaml.Agent#guardrailsFor}) as the project sets them at this launch, and the watcher is also
    * the authoritative stop observer the review pipeline advances on. One watcher per run,
-   * supervising exactly this run's unit.
+   * supervising exactly this run's unit, its wall clock anchored to the run row's {@code
+   * started_at}.
    */
   private Optional<WatcherSpawner.Spawned> launchWatcherIfAgent(LaunchSpec s) throws IOException {
     var agent = s.config().agent();
@@ -278,7 +281,19 @@ public final class RunLauncher {
             SailPaths.resolveSailYaml(s.project(), file).toAbsolutePath(),
             s.runId(),
             s.unit().unitName(),
+            startedAt(s.runId()),
             agent.guardrailsFor(Lane.of(s.role()).orElse(null))));
+  }
+
+  /**
+   * When the run's row says it started. Every launch reserves its row before it starts; one nothing
+   * recorded starts now, at its launch.
+   */
+  private String startedAt(String runId) {
+    return Optional.ofNullable(runStore)
+        .flatMap(runs -> runs.findById(runId))
+        .map(RunStore.RunRow::startedAt)
+        .orElseGet(() -> DateTimeUtils.now().toString());
   }
 
   /**
@@ -346,28 +361,50 @@ public final class RunLauncher {
     if (!unmarked) {
       return false;
     }
-    var now = querySession(new AgentSession(shell), ctx.project(), ctx.unit());
-    return now == null || !now.running();
+    try {
+      return new AgentPresence(shell).gone(ctx.project(), ctx.unit());
+    } catch (Exception e) {
+      throw new ApiException(ErrorCode.AGENT_STATUS_FAILED, "Failed to query agent status.", e);
+    }
   }
 
   /**
    * Tears down a launch whose run was ended during preparation: the run's terminal outcome is
    * already recorded — by an operator's stop, or by a reconciler that outran a slow launch — so the
-   * just-started agent must die rather than run unrecorded against a released claim. Halting is
-   * best-effort — the unit is transient and run-scoped, so a halt that races the process's own exit
-   * is a no-op — and the conflict names what happened.
+   * just-started agent must die rather than run unrecorded against a released claim. The conflict
+   * says what the halt did ({@link AgentSession.Halt}): an agent that survived it, or that the
+   * container gave no answer about, is named as still to be stopped, never as torn down.
    */
   private ApiException launchLostToCancel(String runId, String project, AgentUnit unit) {
+    AgentSession.Halt halt;
     try {
-      StopOperations.sessionHalter(shell).halt(project, unit);
+      halt = new AgentSession(shell).killAgent(project, unit);
     } catch (Exception e) {
       System.err.println(
           "  [api] Warning: could not halt cancelled launch " + runId + ": " + e.getMessage());
+      halt = new AgentSession.Halt.Unanswered();
     }
+    var ended = "Run " + runId + " was ended while its launch was preparing; ";
+    return switch (halt) {
+      case AgentSession.Halt.Ended torn ->
+          new ApiException(
+              ErrorCode.CONFLICT,
+              ended + "the agent was torn down.",
+              "The run's outcome is already recorded; dispatch again if the work is still wanted.");
+      case AgentSession.Halt.Survived alive -> stillToStop(ended, unit, "survived its halt");
+      case AgentSession.Halt.Unanswered silent ->
+          stillToStop(ended, unit, "could not be confirmed stopped");
+    };
+  }
+
+  private static ApiException stillToStop(String ended, AgentUnit unit, String what) {
+    System.err.println("  [api] Warning: " + ended + "its agent " + what + ".");
     return new ApiException(
         ErrorCode.CONFLICT,
-        "Run " + runId + " was ended while its launch was preparing; the agent was torn down.",
-        "The run's outcome is already recorded; dispatch again if the work is still wanted.");
+        ended + "its agent " + what + ".",
+        "The run's outcome is already recorded and nothing watches an agent it left: if unit "
+            + unit.unitName()
+            + " is still active in the container, stop it before dispatching again.");
   }
 
   /**

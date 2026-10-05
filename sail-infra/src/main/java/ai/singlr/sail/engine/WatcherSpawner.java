@@ -98,10 +98,17 @@ public final class WatcherSpawner {
    * The run-addressed watcher argv: the watcher supervises exactly one run, probing the agent unit
    * the run was launched with (recorded on the run row, never re-derived), filtering heartbeats by
    * the run id, and enforcing {@code guardrails} — the limits of the run's lane, as the project set
-   * them when the watcher was spawned. A limit the lane does not set is left off, and unlimited.
+   * them when the watcher was spawned — from {@code startedAt}, the instant the run's own row says
+   * it started: the wall clock is the row's, never anything the agent can write. A limit the lane
+   * does not set is left off, and unlimited.
    */
   public static List<String> watchCommandForRun(
-      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails) {
+      String project,
+      Path sailYaml,
+      String runId,
+      String agentUnit,
+      String startedAt,
+      Guardrails guardrails) {
     var command =
         new ArrayList<>(
             List.of(
@@ -113,6 +120,8 @@ public final class WatcherSpawner {
                 Ids.requireUuid(runId),
                 "--unit",
                 agentUnit,
+                "--started-at",
+                startedAt,
                 "-f",
                 sailYaml.toAbsolutePath().toString(),
                 "--action",
@@ -143,11 +152,16 @@ public final class WatcherSpawner {
    * thread was interrupted mid-ladder, which the caller treats as a launch failure.
    */
   public Spawned spawnForRun(
-      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails)
+      String project,
+      Path sailYaml,
+      String runId,
+      String agentUnit,
+      String startedAt,
+      Guardrails guardrails)
       throws IOException {
     return spawnFresh(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit, guardrails),
+        watchCommandForRun(project, sailYaml, runId, agentUnit, startedAt, guardrails),
         watchLogForRun(project, runId));
   }
 
@@ -181,11 +195,16 @@ public final class WatcherSpawner {
    * back to a plain process. Empty means no systemd scope is available.
    */
   public Optional<Unit> spawnUnitForRun(
-      String project, Path sailYaml, String runId, String agentUnit, Guardrails guardrails)
+      String project,
+      Path sailYaml,
+      String runId,
+      String agentUnit,
+      String startedAt,
+      Guardrails guardrails)
       throws IOException {
     return spawnUnit(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit, guardrails),
+        watchCommandForRun(project, sailYaml, runId, agentUnit, startedAt, guardrails),
         watchLogForRun(project, runId));
   }
 

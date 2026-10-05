@@ -23,8 +23,9 @@ import java.util.Set;
  */
 public record Notifications(String url, List<String> events, SlackNotifications slack) {
 
+  /** No events and an empty list of them are one thing — every event — and are held as one. */
   public Notifications {
-    events = events == null ? null : List.copyOf(events);
+    events = events == null || events.isEmpty() ? null : List.copyOf(events);
   }
 
   public Notifications(String url, List<String> events) {
@@ -114,6 +115,6 @@ public record Notifications(String url, List<String> events, SlackNotifications 
 
   /** Returns true if the given event should trigger a notification. */
   public boolean shouldNotify(String event) {
-    return events == null || events.isEmpty() || events.contains(event);
+    return events == null || events.contains(event);
   }
 }

@@ -12,6 +12,7 @@ import static ai.singlr.sail.api.ReviewScripts.CRITICAL_FINDING;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +26,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
@@ -34,6 +36,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -152,9 +155,46 @@ class ReviewLoopRecoveryTest {
   }
 
   private long verdictsInTheRoom() {
-    return loop.messages.list("auth", null, 20).stream()
-        .filter(message -> message.body().startsWith("Review failed"))
-        .count();
+    return loop.roomLines("auth", "Review failed").size();
+  }
+
+  private List<String> waitsInTheRoom() {
+    return loop.roomLines("auth", "Review is waiting");
+  }
+
+  private static String waitLine(String holder, String role, String specId) {
+    return "Review is waiting for run `"
+        + holder
+        + "` (`"
+        + role
+        + "` of `"
+        + specId
+        + "`) to finish.";
+  }
+
+  /** A run in lane {@code role} of {@code specId}, at work over the whole container. */
+  private String holderOf(String specId, String role) {
+    var holder = loop.run(specId, role);
+    loop.container.started(holder);
+    return holder;
+  }
+
+  /** The run ended and its row was completed in place: no stop of it ever reaches the bus. */
+  private void endsWithNoStop(String runId) {
+    loop.container.exited(runId, "done", 0);
+    Acting.system(() -> loop.runs.complete(runId, "completed", 0));
+  }
+
+  /** The room is down: every message written to it fails, as a database error would. */
+  private void roomFails() {
+    loop.db.execute(
+        """
+        CREATE TRIGGER room_down BEFORE INSERT ON room_messages
+        BEGIN SELECT RAISE(ABORT, 'room is down'); END""");
+  }
+
+  private void roomRecovers() {
+    loop.db.execute("DROP TRIGGER room_down");
   }
 
   @Test
@@ -620,7 +660,149 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aRescueRefusedByARunNoSweepEverSawIsTriedAgainOnceTheClaimIsFree() {
+  void aReviewerRefusedItsClaimRecordsTheRunItWaitsOnAndIsLaunchedByThatRunsStop() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("billing", "api");
+    var holder = holderOf("billing", "build");
+
+    var build = loop.built("auth");
+
+    var review = loop.reviewOf("auth");
+    assertEquals(List.of(holder), loop.container.live(), "auth's reviewer was refused the repo");
+    assertEquals(holder, loop.waitingOn(review), "the wait names the run that holds the claim");
+    assertEquals(List.of(waitLine(holder, "build", "billing")), waitsInTheRoom());
+    assertFalse(
+        loop.reviews.comparableSnapshot(review).containsKey("waiting_on"),
+        "which run this box waits on is its own bookkeeping, never synced");
+    var reconciler = loop.reconciler(LATER);
+    assertEquals(0, sweeps(reconciler, 2), "the holder lives: nothing to rescue");
+
+    loop.container.exited(holder, "crashed", 1);
+    loop.onEvent(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_WATCHER,
+            PROJECT,
+            "billing",
+            "claude-code",
+            holder,
+            "build",
+            1,
+            null));
+
+    var reviewer = loop.onlyLive();
+    assertEquals("review", reviewer.role(), "the holder's stop launched the reviewer");
+    assertEquals(review, reviewer.reviewId());
+    assertNull(loop.waitingOn(review), "a review a run serves waits on no one");
+    assertEquals(1, waitsInTheRoom().size(), "the room was told once");
+    assertEquals(0, sweeps(reconciler, 2));
+    assertEquals(0, replaysOf(build), "the reconciler published nothing: the stop did it all");
+  }
+
+  @Test
+  void aWaitIsSaidOncePerRunWaitedOnHoweverManyStopsFindItStillHeld() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("billing", "api");
+    var holder = holderOf("billing", "build");
+    loop.built("auth");
+    var review = loop.reviewOf("auth");
+
+    for (var stop = 1; stop <= 2; stop++) {
+      loop.onEvent(
+          MissedStopReconciler.stopEvent(loop.runsIn("auth", "build").getFirst(), 0, null));
+    }
+
+    assertEquals(holder, loop.waitingOn(review));
+    assertEquals(
+        List.of(waitLine(holder, "build", "billing")),
+        waitsInTheRoom(),
+        "refused twice by the same run: the wait is recorded once, and said once");
+  }
+
+  @Test
+  void aWaitingReviewWhoseHolderEndsWithNoStopIsReplayedExactlyOnce() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
+    var holder = holderOf("billing", "build");
+    var build = loop.built("auth");
+    var review = loop.reviewOf("auth");
+    assertEquals(holder, loop.waitingOn(review));
+    var reconciler = loop.reconciler(LATER);
+
+    assertEquals(0, sweeps(reconciler, 2));
+    assertEquals(0, replaysOf(build), "no replay while the run it waits on lives");
+
+    loop.container.exited(holder, "done", 0);
+    assertEquals(1, reconciler.sweep(), "the dead build is finished in place, with no stop");
+    assertEquals("stopped", loop.runs.findById(holder).orElseThrow().status());
+    assertEquals(1, sweeps(reconciler, 3), "and the review that waited on it is rescued, once");
+
+    assertEquals(1, replaysOf(build));
+    var reviewer = loop.onlyLive();
+    assertEquals("review", reviewer.role());
+    assertEquals(review, reviewer.reviewId());
+    assertNull(loop.waitingOn(review));
+  }
+
+  @Test
+  void aHolderThatOnlyJustEndedIsNotRescuedOverWhileItsOwnStopMayStillBeOnItsWay() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
+    var holder = holderOf("billing", "build");
+    var build = loop.built("auth");
+    endsWithNoStop(holder);
+    var ended = Instant.parse(loop.runs.findById(holder).orElseThrow().completedAt());
+    var insideTheGrace = ended.plus(MissedStopReconciler.LAUNCH_GRACE).minusSeconds(1);
+
+    assertEquals(
+        0,
+        sweeps(loop.reconciler(() -> insideTheGrace), 2),
+        "the holder ended inside the grace window: its stop may be the very next event");
+    assertEquals(0, replaysOf(build));
+    assertEquals(1, sweeps(loop.reconciler(LATER), 2), "past it, nothing is coming");
+  }
+
+  @Test
+  void aReviewRefusedThreeTimesRunningByRunsThatEndWithNoStopWaitsOnEachAndIsReplayedOncePerWait() {
+    var holders = new CopyOnWriteArrayList<String>();
+    var races = new AtomicInteger(3);
+    loop =
+        new ReviewLoop(
+            tempDir,
+            ReviewLoop.YAML,
+            project -> {
+              if (races.getAndDecrement() > 0) {
+                holders.add(holderOf("auth", Lane.ROOM_FULL.wire()));
+              }
+              return ReviewLoop.stages("codex");
+            },
+            project -> "codex");
+    var build = loop.built("auth");
+    var review = loop.reviewOf("auth");
+    var reconciler = loop.reconciler(LATER);
+
+    for (var wait = 1; wait <= 3; wait++) {
+      var holder = holders.getLast();
+      assertEquals(wait, holders.size(), "a new run took the repo before each launch");
+      assertEquals(holder, loop.waitingOn(review), "wait " + wait + " names its own holder");
+      assertEquals(0, sweeps(reconciler, 2), "no replay while that holder lives");
+      endsWithNoStop(holder);
+      assertEquals(1, sweeps(reconciler, 3), "one replay for the wait on " + holder);
+      assertEquals(wait, replaysOf(build));
+    }
+
+    assertEquals(
+        holders.stream().map(holder -> waitLine(holder, "room-full", "auth")).toList(),
+        waitsInTheRoom(),
+        "three waits, each said once and each naming its own holder");
+    var reviewer = loop.onlyLive();
+    assertEquals("review", reviewer.role(), "the third replay found the claim free");
+    assertEquals(review, reviewer.reviewId());
+    assertEquals(0, sweeps(reconciler, 3), "and nothing is owed any more");
+    assertEquals(3, replaysOf(build));
+  }
+
+  @Test
+  void aReviewTheDaemonDiedBeforeLaunchingIsReplayedOnceAndARefusedReplayBecomesARecordedWait() {
     var holder = new AtomicReference<String>();
     var armed = new AtomicBoolean();
     loop =
@@ -629,61 +811,565 @@ class ReviewLoopRecoveryTest {
             ReviewLoop.YAML,
             project -> {
               if (armed.compareAndSet(true, false)) {
-                holder.set(loop.run("auth", Lane.ROOM_FULL.wire()));
-                loop.container.started(holder.get());
+                holder.set(holderOf("auth", Lane.ROOM_FULL.wire()));
               }
               return ReviewLoop.stages("codex");
             },
             project -> "codex");
-    strandedReviewOf("auth");
+    var build = strandedReviewOf("auth");
+    var review = loop.reviewOf("auth");
+    assertNull(loop.waitingOn(review));
+    assertTrue(loop.reviews.stagesForReview(review).isEmpty());
     var reconciler = loop.reconciler(LATER);
     armed.set(true);
 
-    assertEquals(1, reconciler.sweep(), "free when the sweep looked: rescued");
-    loop.settle();
+    assertEquals(1, sweeps(reconciler, 3), "a running review nothing serves is replayed, once");
     assertEquals(
         List.of(holder.get()),
         loop.container.live(),
         "a run took the repo before the pipeline's launch: the replay was refused");
-    loop.container.exited(holder.get(), "replied", 0);
-    Acting.system(() -> loop.runs.complete(holder.get(), "completed", 0));
+    assertEquals(holder.get(), loop.waitingOn(review), "and the refusal is a recorded wait");
+    assertEquals(1, replaysOf(build));
+
+    endsWithNoStop(holder.get());
 
     assertEquals(
         1,
         sweeps(reconciler, 5),
-        "the holder ended with no stop and no sweep ever saw it: nothing else will wake the"
-            + " review, so its rescue is tried again, and once launched it is owed no more");
+        "the holder ended with no stop: the wait on it is rescued, once, and once launched the"
+            + " review is owed no more");
+    assertEquals(2, replaysOf(build));
     assertEquals("review", loop.onlyLive().role());
   }
 
   @Test
-  void aRescueThatChangesNothingIsTriedABoundedNumberOfTimesWhateverRunsComeAndGo() {
+  void aReplayedStopOfABuildThatHadAlreadyStoppedMovesTheLoopAndIsNotSaidAgain() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var said = loop.narrating();
+    loop.spec("billing", SpecStatus.PENDING, "claude-code", null, null, List.of("api"));
+    var holder = holderOf("billing", "build");
+    var build = loop.built("auth");
+    assertEquals(1, said.stopsInSlack(), "the build's stop was said when it stopped");
+    assertEquals(1, said.stopsToWebhooks());
+    assertEquals(List.of(holder), loop.container.live(), "its reviewer waits for the repo");
+    endsWithNoStop(holder);
+
+    assertEquals(1, sweeps(loop.reconciler(LATER), 2), "the wait is rescued by a replay");
+
+    assertEquals(1, replaysOf(build));
+    var replay =
+        loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+            .filter(stop -> "reconcile".equals(stop.data().get(Event.WellKnownData.SOURCE)))
+            .findFirst()
+            .orElseThrow();
+    assertEquals(true, replay.data().get(Event.WellKnownData.REPLAY));
+    assertEquals(
+        "review",
+        loop.onlyLive().role(),
+        "the pipeline routed the replay like any stop: the reviewer it held up is running");
+    assertEquals(1, said.stopsInSlack(), "and nobody was told the build stopped a second time");
+    assertEquals(1, said.stopsToWebhooks());
+  }
+
+  @Test
+  void theOnlyStopOfARunFinishedInPlaceWithNoneIsSaidHoweverLongAgoItsRowEnded() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var said = loop.narrating();
+    loop.spec("auth", SpecStatus.REVIEW, "claude-code", null, null, List.of("api"));
+    var build = loop.run("auth", "build");
+    loop.container.started(build);
+    loop.container.exited(build, "done", 0);
+
+    sweeps(loop.reconciler(LATER), 3);
+
+    assertEquals(
+        List.of("review"),
+        loop.live().stream().map(RunStore.RunRow::role).toList(),
+        "the spec was moved to review under its build, whose row a sweep then finished with no"
+            + " stop: the next sweep's stop is what starts its review");
+    assertEquals(
+        1,
+        said.stopsInSlack(),
+        "and it is the build's first and only stop, so it is news: a row that had ended is not a"
+            + " stop that was said");
+    assertEquals(1, said.stopsToWebhooks());
+  }
+
+  @Test
+  void theFirstStopOfARunThatDiedUnwatchedIsSaidThoughTheReconcilerPublishesIt() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var said = loop.narrating();
+    loop.spec("auth", "api");
+    var build = holderOf("auth", "build");
+    loop.container.exited(build, "done", 0);
+
+    assertEquals(1, sweeps(loop.reconciler(LATER), 1));
+
+    var stop =
+        loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
+            .filter(event -> build.equals(event.data().get(Event.WellKnownData.RUN_ID)))
+            .findFirst()
+            .orElseThrow();
+    assertNull(stop.data().get(Event.WellKnownData.REPLAY), "nobody said this stop before");
+    assertEquals(1, said.stopsInSlack(), "so it is news: " + said.slack());
+    assertEquals(1, said.stopsToWebhooks());
+    assertEquals("review", loop.onlyLive().role(), "and the pipeline routed it");
+  }
+
+  @Test
+  void aRefusedReviewersStageStaysPendingAndMainIsToldNoStageStarted() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.spec("billing", "api");
+    holderOf("billing", "build");
+
+    loop.built("auth");
+
+    var review = loop.reviewOf("auth");
+    assertEquals(
+        List.of("pending"),
+        loop.reviews.stagesForReview(review).stream().map(ReviewStore.StageRow::status).toList(),
+        "a stage is running only while a run exists for it");
+    assertTrue(loop.events("review_stage_started").isEmpty());
+    assertEquals(
+        List.of(),
+        loop.narratedOnMain(review).stream().map(Event::type).toList(),
+        "main, reading the synced rows, announces no stage that has no reviewer");
+  }
+
+  @Test
+  void aLaunchedReviewersStageIsRunningAndItsRunRecordedBeforeItsUnitStarts() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    var atUnitStart = new CopyOnWriteArrayList<String>();
+    loop.onLaunch(
+        runId -> {
+          var run = loop.runs.findById(runId).orElseThrow();
+          atUnitStart.add(run.role() + " " + run.status());
+          loop.reviews.stagesForReview(run.reviewId()).stream()
+              .map(stage -> "stage " + stage.status() + " by " + stage.reviewer())
+              .forEach(atUnitStart::add);
+        });
+
+    loop.built("auth");
+
+    assertEquals(List.of("review running", "stage running by codex"), atUnitStart);
+    assertEquals(
+        List.of("review_stage_started"),
+        loop.narratedOnMain(loop.reviewOf("auth")).stream().map(Event::type).toList());
+  }
+
+  @Test
+  void aFailedGateWhoseFindingsAPersonResolvedBeforeTheFixLaunchedIsReviewedAgainNotFixed() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
+    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    var chat = chatTurnTakesTheRepo();
+    loop.onEvent(loop.watcherStop(reviewer.id(), null));
+    assertEquals("failed", loop.statusOf(reviewer.reviewId()));
+    assertEquals(chat, loop.waitingOn(reviewer.reviewId()), "the fix agent waits for the repo");
+    Acting.by(
+        ADMIN,
+        () ->
+            loop.reviews
+                .openFindingsForReview(reviewer.reviewId())
+                .forEach(
+                    finding ->
+                        loop.reviews.resolveFinding(
+                            finding.id(), Finding.Resolution.DISMISSED, "not a defect")));
+
+    chatTurnEnds(chat);
+
+    var next = loop.onlyLive();
+    assertEquals("review", next.role(), "nothing is left to fix: the branch is judged again");
+    assertEquals(2, loop.reviews.findReview(next.reviewId()).orElseThrow().iteration());
+    assertEquals(loop.reviewOf("auth"), next.reviewId());
+    assertTrue(loop.runsIn("auth", "fix").isEmpty(), "no fix agent ran over nothing");
+    assertTrue(loop.details("review_escalated").isEmpty());
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+  }
+
+  @Test
+  void anEscalationWhoseReasonOutgrowsARoomMessageStillLandsWithItsReasonKeptWhole() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.container.dirty("api", " M src/Fixed.java\n");
+    loop.container.gitFails("pre-commit hook failed:\n" + "E".repeat(70_000), "commit");
+
+    loop.finish(fix.id(), "fixed");
+
+    var review = loop.reviews.findReview(fix.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "a room line too long to write never undoes the escalation it is written with");
+    assertTrue(review.error().length() > 70_000, "the reason is kept whole on the review");
+    var line = loop.roomLines("auth", "Review escalated").getFirst();
+    assertTrue(line.endsWith("[cut: longer than a room message can be]"), "and the room is told");
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+  }
+
+  @Test
+  void aPassWhoseVerdictOutgrowsARoomMessageStillLands() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.finish(fix.id(), "fixed");
+    var reviewer = loop.onlyLive();
+    Acting.by(
+        ADMIN,
+        () ->
+            loop.reviews
+                .openFindingsForReview(fix.reviewId())
+                .forEach(
+                    finding ->
+                        loop.reviews.resolveFinding(
+                            finding.id(),
+                            Finding.Resolution.DISPUTED,
+                            "the reviewer's argument ".repeat(3_000))));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEquals("passed", loop.statusOf(reviewer.reviewId()));
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus("auth"));
+    assertEquals(1, loop.roomLines("auth", "Review passed").size());
+  }
+
+  @Test
+  void aStageThePipelineNoLongerHasWhenItsReviewerStopsEscalatesItsReviewSayingSo() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "nothing can judge a stage the pipeline was changed away from: the review is a person's,"
+            + " never left running with nothing owed");
+    assertTrue(review.error().contains("stage 'codex'"), review.error());
+    assertEquals(
+        List.of("failed"),
+        loop.reviews.stagesForReview(review.id()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "and no stage of an escalated review is left running");
+    assertEquals(0, sweeps(loop.reconciler(LATER), 3), "nothing is owed for it any more");
+  }
+
+  @Test
+  void aSecondStageThePipelineReplacedEscalatesItsReviewNamingTheStageItHolds() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex", "claude-code"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CLEAN_REVIEW);
+    var second = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("codex", "gemini"));
+
+    loop.finish(second.id(), CLEAN_REVIEW);
+
+    assertEquals("escalated", loop.statusOf(second.reviewId()));
+    assertTrue(
+        loop.reviews.findReview(second.reviewId()).orElseThrow().error().contains("claude-code"),
+        "the stage the review holds in second place is not the pipeline's second stage any more");
+  }
+
+  @Test
+  void aRunningReviewWhosePipelineLostItsStagesClosesTheStageItsReviewerRan() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages());
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEquals("escalated", loop.statusOf(reviewer.reviewId()));
+    assertEquals(
+        List.of("failed"),
+        loop.reviews.stagesForReview(reviewer.reviewId()).stream()
+            .map(ReviewStore.StageRow::status)
+            .toList(),
+        "a stage is running only while a run exists for it or a person owns it");
+  }
+
+  @Test
+  void aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged() {
+    var custom =
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: security\n"
+            + "        type: agent\n"
+            + "        agent: codex\n"
+            + "        gate: no_critical\n";
+    loop = ReviewLoop.wired(tempDir, custom);
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.describe("agent: [unterminated");
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals("escalated", review.status());
+    assertTrue(
+        review.error().contains("could not be read"),
+        "the review is handed to a person for what is true — its project's descriptor cannot be"
+            + " read — and never judged against the default pipeline an unread file would be"
+            + " taken for: "
+            + review.error());
+    assertFalse(review.error().contains("changed while this review ran"), review.error());
+  }
+
+  @Test
+  void aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(
+        ReviewPipelineConfig.fromMap(
+            Map.of("stages", List.of(Map.<String, Object>of("name", "codex", "type", "human")))));
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "the stage kept its name and stopped being a reviewer's: a reviewer's verdict is no"
+            + " longer what passes it");
+    assertTrue(review.error().contains("stage 'codex'"), review.error());
+  }
+
+  @Test
+  void anErroredReviewIsNotRetriedUnderAPipelineThatChangedSinceItsStagesWereWritten() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.refuseLaunches();
+    loop.built("auth");
+    var errored = loop.reviewOf("auth");
+    assertEquals("failed", loop.statusOf(errored));
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    assertEquals(1, sweeps(loop.reconciler(LATER), 2));
+
+    assertEquals("escalated", loop.statusOf(errored));
+    assertTrue(
+        loop.reviews.findReview(errored).orElseThrow().error().contains("changed while"),
+        "findings carry forward by stage name: a retry under other stages would carry none");
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size(), "and no review is begun under it");
+  }
+
+  @Test
+  void aFixIsNotReReviewedUnderAPipelineThatChangedWhileItRan() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages("claude-code"));
+
+    loop.finish(fix.id(), "fixed");
+
+    assertEquals("escalated", loop.statusOf(fix.reviewId()));
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size());
+    assertTrue(loop.live().isEmpty(), "no reviewer is launched under the other pipeline");
+  }
+
+  @Test
+  void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
+    loop.describe("agent: [unterminated");
+
+    var build = loop.built("auth");
+
+    var review = loop.reviews.latestReviewForSpec("auth").orElseThrow();
+    assertEquals(
+        "escalated",
+        review.status(),
+        "the build's work is not reviewed under a pipeline nobody could read, nor under the"
+            + " default one an unread file would be taken for: a person is told why");
+    assertTrue(review.error().contains("could not be read"), review.error());
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertTrue(loop.live().isEmpty());
+    assertEquals(0, sweeps(loop.reconciler(LATER), 3), "and nothing is owed for it any more");
+    assertEquals(0, replaysOf(build));
+  }
+
+  @Test
+  void aRunningReviewWhosePipelineLostItsStagesIsEscalatedSayingSo() {
     loop = ReviewLoop.staged(tempDir);
     var build = strandedReviewOf("auth");
-    loop.spec("billing", "api");
+    var review = loop.reviewOf("auth");
     var reconciler = loop.reconciler(LATER);
 
-    sweeps(reconciler, 6);
-    assertEquals(
-        MissedStopReconciler.WAITING_RESCUES,
-        replaysOf(build),
-        "the pipeline has no stage to run, so no replay moves this review: it is tried its few"
-            + " times and then left");
+    assertEquals(1, sweeps(reconciler, 3), "one replay, and the review is a person's");
 
-    for (var turn = 1; turn <= 3; turn++) {
-      var holder = loop.run("billing", "build");
-      loop.container.started(holder);
-      sweeps(reconciler, 1);
-      loop.container.exited(holder, "done", 0);
-      loop.onEvent(ReviewLoop.buildStop("billing", holder));
-      sweeps(reconciler, 1);
-    }
-
+    var reason =
+        "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+            + " re-dispatch with --restart";
+    assertEquals("escalated", loop.statusOf(review));
+    assertEquals(reason, loop.reviews.findReview(review).orElseThrow().error());
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertEquals(List.of(reason), loop.details("review_escalated"));
     assertEquals(
-        MissedStopReconciler.WAITING_RESCUES + 1,
-        replaysOf(build),
-        "a review with no stage rows is replayed once while a run holds the repo, since its"
-            + " first stage may claim nothing; runs that come and go after that buy it no more");
+        List.of("Review escalated: " + reason + "."), loop.roomLines("auth", "Review esc"));
+    assertEquals(1, replaysOf(build));
+  }
+
+  private static final String NO_STAGES =
+      "the project's review pipeline has no stages; set agent.review_pipeline.stages, then"
+          + " re-dispatch with --restart";
+
+  /** A loop whose project's pipeline is whatever {@code pipeline} holds when it is asked. */
+  private void loopUnder(AtomicReference<ReviewPipelineConfig> pipeline) {
+    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+  }
+
+  private void assertEscalatedForNoStages(String review) {
+    assertEquals("escalated", loop.statusOf(review));
+    assertEquals(NO_STAGES, loop.reviews.findReview(review).orElseThrow().error());
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertEquals(List.of(NO_STAGES), loop.details("review_escalated"));
+  }
+
+  @Test
+  void aReviewersStopThatFindsThePipelineWithoutStagesEscalatesItsReview() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loopUnder(pipeline);
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages());
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEscalatedForNoStages(reviewer.reviewId());
+  }
+
+  @Test
+  void aFixOwedThatFindsThePipelineWithoutStagesEscalatesItsReview() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loopUnder(pipeline);
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
+    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
+    var chat = chatTurnTakesTheRepo();
+    loop.onEvent(loop.watcherStop(reviewer.id(), null));
+    assertEquals(chat, loop.waitingOn(reviewer.reviewId()));
+    pipeline.set(null);
+
+    chatTurnEnds(chat);
+
+    assertEscalatedForNoStages(reviewer.reviewId());
+    assertTrue(loop.runsIn("auth", "fix").isEmpty());
+  }
+
+  @Test
+  void aFinishedFixThatFindsThePipelineWithoutStagesEscalatesRatherThanStartANewReview() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loopUnder(pipeline);
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    pipeline.set(ReviewLoop.stages());
+
+    loop.finish(fix.id(), "fixed");
+
+    assertEscalatedForNoStages(fix.reviewId());
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size(), "no re-review nothing can judge");
+  }
+
+  @Test
+  void anErroredReviewThatFindsThePipelineWithoutStagesEscalatesRatherThanRetry() {
+    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
+    loopUnder(pipeline);
+    loop.refuseLaunches();
+    loop.built("auth");
+    var errored = loop.reviewOf("auth");
+    assertEquals("failed", loop.statusOf(errored));
+    pipeline.set(ReviewLoop.stages());
+
+    assertEquals(1, sweeps(loop.reconciler(LATER), 2));
+
+    assertEscalatedForNoStages(errored);
+    assertEquals(1, loop.reviews.reviewsForSpec("auth").size());
+  }
+
+  @Test
+  void aPassWhoseWriteFailsHalfwayLeavesTheReviewRunningTheSpecInReviewAndTheRoomUntold() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    var reviewer = loop.onlyLive();
+    roomFails();
+
+    loop.finish(reviewer.id(), CLEAN_REVIEW);
+
+    assertEquals("running", loop.statusOf(reviewer.reviewId()), "the pass rolled back whole");
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertTrue(loop.roomLines("auth", "Review passed").isEmpty());
+    assertTrue(loop.events("review_completed").isEmpty(), "nothing is announced that did not land");
+    assertEquals(1, loop.events("review_pipeline_error").size());
+
+    roomRecovers();
+    assertEquals(
+        1, sweeps(loop.reconciler(LATER), 3), "a review left running is still owed its end");
+
+    assertEquals("passed", loop.statusOf(reviewer.reviewId()));
+    assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus("auth"));
+    assertEquals(1, loop.roomLines("auth", "Review passed").size());
+    assertEquals(1, loop.events("review_completed").size());
+  }
+
+  @Test
+  void anEscalationWhoseWriteFailsHalfwayLeavesTheReviewAndItsSpecAsTheyWereAndTheRoomUntold() {
+    var fix = fixing();
+    roomFails();
+
+    loop.exit(fix.id(), "boom", 1);
+
+    var review = loop.reviews.findReview(fix.reviewId()).orElseThrow();
+    assertEquals("failed", review.status(), "the escalation rolled back whole");
+    assertNull(review.error(), "with its reason");
+    assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"));
+    assertTrue(loop.roomLines("auth", "Review escalated").isEmpty());
+    assertTrue(loop.details("review_escalated").isEmpty());
+
+    roomRecovers();
+    assertEquals(
+        1, sweeps(loop.reconciler(LATER), 3), "the fix agent's stop is still owed its end");
+
+    assertEquals("escalated", loop.statusOf(fix.reviewId()));
+    assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
+    assertEquals(1, loop.roomLines("auth", "Review escalated").size());
+  }
+
+  @Test
+  void anEscalatedReviewsSyncedRowCarriesItsReasonAndMainSaysWhatThisBoxSaid() {
+    var fix = fixing();
+
+    loop.exit(fix.id(), "boom", 1);
+
+    var said = loop.details("review_escalated");
+    assertEquals(
+        List.of("fix iteration failed — fix agent failed: exit 1; triage and re-dispatch"), said);
+    assertEquals(said.getFirst(), loop.reviews.comparableSnapshot(fix.reviewId()).get("error"));
+    var onMain =
+        loop.narratedOnMain(fix.reviewId()).stream()
+            .filter(event -> "review_escalated".equals(event.type()))
+            .toList();
+    assertEquals(1, onMain.size());
+    assertEquals(said.getFirst(), onMain.getFirst().data().get("detail"));
+    assertEquals(
+        Event.WellKnownData.SOURCE_SYNC, onMain.getFirst().data().get(Event.WellKnownData.SOURCE));
   }
 
   @Test
@@ -913,7 +1599,7 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
-  void aFixOwedBehindARunThatEndsWithNoStopIsRescuedAgainThoughItsRescueWasSpent() {
+  void aFixAgentRefusedItsClaimWaitsOnItsHolderAndIsReplayedOnceWhenThatRunEndsWithNoStop() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.built("auth");
     var reviewer = loop.onlyLive();
@@ -923,24 +1609,22 @@ class ReviewLoopRecoveryTest {
     loop.onEvent(loop.watcherStop(reviewer.id(), null));
     var reconciler = loop.reconciler(LATER);
 
-    assertEquals(
-        1,
-        reconciler.sweep(),
-        "what a failed gate is owed may be an escalation, which needs no claim: it is rescued"
-            + " whoever holds the repo");
-    loop.settle();
-    assertEquals(List.of(chat), loop.container.live(), "this one is owed a fix agent: refused");
-    assertEquals(0, reconciler.sweep(), "its rescue is spent, and its claim still held");
+    assertEquals("failed", loop.statusOf(reviewer.reviewId()));
+    assertEquals(chat, loop.waitingOn(reviewer.reviewId()), "the failed review records its wait");
+    assertEquals(List.of(waitLine(chat, "room-full", "auth")), waitsInTheRoom());
+    assertEquals(0, sweeps(reconciler, 2));
+    assertEquals(0, replaysOf(reviewer.id()), "no replay while the run it waits on lives");
 
     loop.container.exited(chat, "replied", 0);
     assertEquals(1, reconciler.sweep(), "the dead chat turn is finished in place");
-    assertEquals(1, reconciler.sweep(), "the claim is free: its rescue is tried again");
-    loop.settle();
+    assertEquals(1, sweeps(reconciler, 3), "and the fix it held up is rescued, once");
 
+    assertEquals(1, replaysOf(reviewer.id()));
     var fix = loop.onlyLive();
     assertEquals("fix", fix.role());
     assertEquals(reviewer.reviewId(), fix.reviewId());
-    assertEquals(1, verdictsInTheRoom());
+    assertNull(loop.waitingOn(reviewer.reviewId()));
+    assertEquals(1, verdictsInTheRoom(), "the verdict was said when the gate failed, once");
   }
 
   @Test
@@ -965,51 +1649,6 @@ class ReviewLoopRecoveryTest {
         loop.events(Event.WellKnownTypes.AGENT_SESSION_STOPPED).stream()
             .filter(stop -> "reconcile".equals(stop.data().get(Event.WellKnownData.SOURCE)))
             .count());
-  }
-
-  @Test
-  void aFixRefusedWhileHeldStillHasEveryFreeRescueOwedToIt() {
-    var holder = new AtomicReference<String>();
-    var races = new AtomicInteger();
-    loop =
-        new ReviewLoop(
-            tempDir,
-            ReviewLoop.YAML,
-            project -> {
-              if (races.getAndDecrement() > 0) {
-                holder.set(loop.run("auth", Lane.ROOM_FULL.wire()));
-                loop.container.started(holder.get());
-              }
-              return ReviewLoop.stages("codex");
-            },
-            project -> "codex");
-    loop.built("auth");
-    var reviewer = loop.onlyLive();
-    loop.container.exited(reviewer.id(), CRITICAL_FINDING, 0);
-    Acting.system(() -> loop.runs.complete(reviewer.id(), "stopped", 0));
-    var chat = chatTurnTakesTheRepo();
-    loop.onEvent(loop.watcherStop(reviewer.id(), null));
-    var reconciler = loop.reconciler(LATER);
-    assertEquals(1, sweeps(reconciler, 2), "replayed once while held, and refused");
-    loop.container.exited(chat, "replied", 0);
-    Acting.system(() -> loop.runs.complete(chat, "completed", 0));
-
-    for (var race = 1; race < MissedStopReconciler.WAITING_RESCUES; race++) {
-      races.set(1);
-      assertEquals(1, reconciler.sweep(), "free when the sweep looked");
-      loop.settle();
-      assertEquals(List.of(holder.get()), loop.container.live(), "and refused all the same");
-      loop.container.exited(holder.get(), "replied", 0);
-      Acting.system(() -> loop.runs.complete(holder.get(), "completed", 0));
-    }
-    races.set(0);
-
-    assertEquals(
-        1,
-        sweeps(reconciler, 3),
-        "the replay made while the claim was held was certain to be refused: it cost the review"
-            + " none of the rescues it is owed once the claim is free");
-    assertEquals("fix", loop.onlyLive().role());
   }
 
   @Test
