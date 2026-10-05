@@ -69,9 +69,8 @@ final class LoopNarrator {
   /**
    * Posts the pipeline's narration to the spec's room: the findings themselves, which events cannot
    * carry, and the loop's cross-iteration memory, since the reviewer's prompt includes the room's
-   * recent messages. Best-effort — a line that tells of work still under way must never fail that
-   * work. The lines that end a review, or record its wait, are written with it ({@link
-   * #appendRoom}).
+   * recent messages. Best-effort: a line telling of work under way must never fail that work. The
+   * lines that end a review, or record its wait, are written with it ({@link #appendRoom}).
    */
   void postRoom(String specId, String body) {
     try {

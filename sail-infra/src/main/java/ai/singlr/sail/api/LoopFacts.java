@@ -201,9 +201,12 @@ record LoopFacts(
     if (!run.ownedBy(node) || run.reviewId() == null || !loops() || replaced(run.id())) {
       return Optional.empty();
     }
-    return review
-        .filter(latest -> latest.id().equals(run.reviewId()))
-        .filter(latest -> List.of(statuses).contains(latest.status()));
+    return latest(run.reviewId()).filter(review -> List.of(statuses).contains(review.status()));
+  }
+
+  /** Review {@code reviewId} while it is the spec's latest: a follow-up is about no other. */
+  Optional<ReviewStore.ReviewRow> latest(String reviewId) {
+    return review.filter(latest -> latest.id().equals(reviewId));
   }
 
   /** What the latest review of the spec's current dispatch attempt is owed. */

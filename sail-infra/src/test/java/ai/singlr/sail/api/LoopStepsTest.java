@@ -260,6 +260,7 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.LaunchReviewer(review, 0, CODEX, "codex"));
 
     var failed = (LoopTrigger.LaunchFailed) followUp.orElseThrow();
+    assertEquals(review.id(), failed.reviewId());
     assertEquals(Lane.REVIEW, failed.lane());
     assertEquals(0, failed.stage());
     assertFalse(failed.why().isBlank());
@@ -310,7 +311,8 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.ReadVerdict(review(), 0, reviewer, Optional.empty()));
 
     assertEquals(
-        Optional.of(new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.Passed())),
+        Optional.of(
+            new LoopTrigger.StageJudged(review().id(), 0, new StageVerdicts.StageOutcome.Passed())),
         followUp);
     assertEquals("passed", stages().getFirst().status());
     assertEquals("running", review().status(), "the review's end is the next step's");
@@ -324,7 +326,9 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.ReadVerdict(review(), 0, reviewer, Optional.empty()));
 
     assertEquals(
-        Optional.of(new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.GateFailed())),
+        Optional.of(
+            new LoopTrigger.StageJudged(
+                review().id(), 0, new StageVerdicts.StageOutcome.GateFailed())),
         followUp);
     assertEquals("failed", stages().getFirst().status());
     assertNull(stages().getFirst().error(), "a verdict, not an error");
@@ -340,7 +344,9 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.ReadVerdict(review(), 0, reviewer, Optional.of(error)));
 
     assertEquals(
-        Optional.of(new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.Errored(error))),
+        Optional.of(
+            new LoopTrigger.StageJudged(
+                review().id(), 0, new StageVerdicts.StageOutcome.Errored(error))),
         followUp);
     assertEquals("failed", stages().getFirst().status());
     assertEquals(error, stages().getFirst().error(), "its log is never read for a verdict");
@@ -373,7 +379,7 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.ReadVerdict(review(), 0, reviewer, Optional.empty()));
 
     var outcome = new StageVerdicts.StageOutcome.Errored("log unreadable");
-    assertEquals(Optional.of(new LoopTrigger.StageJudged(0, outcome)), followUp);
+    assertEquals(Optional.of(new LoopTrigger.StageJudged(review().id(), 0, outcome)), followUp);
     assertEquals("log unreadable", stages().getFirst().error());
   }
 
@@ -459,7 +465,9 @@ class LoopStepsTest {
 
     var followUp = take(new LoopStep.LaunchFix(review(), findings));
 
-    assertEquals(Lane.FIX, ((LoopTrigger.LaunchFailed) followUp.orElseThrow()).lane());
+    var failed = (LoopTrigger.LaunchFailed) followUp.orElseThrow();
+    assertEquals(review().id(), failed.reviewId());
+    assertEquals(Lane.FIX, failed.lane());
     assertEquals("failed", review().status(), "what a failed launch comes to is the next step's");
   }
 
@@ -506,6 +514,7 @@ class LoopStepsTest {
     var followUp = take(new LoopStep.CommitFixLeftovers(review(), fix));
 
     var failed = (LoopTrigger.FixNotCommitted) followUp.orElseThrow();
+    assertEquals(fix, failed.run());
     assertTrue(failed.why().contains("index.lock"), failed.why());
     assertEquals("failed", review().status());
   }

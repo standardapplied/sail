@@ -28,6 +28,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -876,6 +877,35 @@ class ReviewLanesTest {
         "the review was superseded while the fix agent's work was being committed: the new"
             + " attempt owns the spec, and no re-review starts");
     assertTrue(loop.live().isEmpty());
+  }
+
+  @Test
+  void aFixWhoseRescueFailsAfterAReDispatchReplacedItsReviewLeavesTheReplacementRunning() {
+    loop = ReviewLoop.staged(tempDir, "codex");
+    loop.built("auth");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+    loop.container.dirty("api", " M src/Fixed.java\n");
+    loop.container.gitFails("fatal: index.lock exists", "commit");
+    var replacement = new AtomicReference<String>();
+    loop.container.beforeGit(
+        () -> {
+          if (replacement.get() == null) {
+            loop.reviews.supersedeForSpec("auth");
+            replacement.set(loop.reviews.createReview("auth", 1));
+          }
+        });
+
+    loop.finish(fix.id(), "fixed");
+
+    assertEquals(
+        "running",
+        loop.statusOf(replacement.get()),
+        "the fix agent answered the review a re-dispatch superseded: its failed rescue is no"
+            + " word on the review that replaced it");
+    assertEquals("failed", loop.statusOf(fix.reviewId()));
+    assertTrue(loop.details("review_iteration_failed").isEmpty());
+    assertTrue(loop.details("review_escalated").isEmpty());
   }
 
   @Test

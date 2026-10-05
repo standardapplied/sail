@@ -488,27 +488,34 @@ class LoopDecisionTest {
         row(
             "a stage that passed leads to the next",
             judged,
-            new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.Passed()),
+            new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.Passed()),
             new LoopStep.AwaitAPerson(RUNNING, 1)),
         row(
             "a stage that failed its gate",
             judged,
-            new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.GateFailed()),
+            new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.GateFailed()),
             new LoopStep.FailGate(RUNNING)),
         row(
             "a stage that errored",
             judged,
-            new LoopTrigger.StageJudged(1, new StageVerdicts.StageOutcome.Errored("unparseable")),
+            new LoopTrigger.StageJudged(
+                REVIEW, 1, new StageVerdicts.StageOutcome.Errored("unparseable")),
             new LoopStep.ErrorReview(RUNNING, 1, "unparseable", true)),
         row(
             "a verdict on a review a re-dispatch superseded",
             facts(),
-            new LoopTrigger.StageJudged(0, new StageVerdicts.StageOutcome.GateFailed()),
+            new LoopTrigger.StageJudged(REVIEW, 0, new StageVerdicts.StageOutcome.GateFailed()),
+            NOTHING),
+        row(
+            "a verdict on a review a re-dispatch's review replaced",
+            judged,
+            new LoopTrigger.StageJudged("review-0", 0, new StageVerdicts.StageOutcome.GateFailed()),
             NOTHING));
   }
 
   private static Stream<Row> fixEnded() {
     var errored = review(1, "failed", "fix could not start", null);
+    var answeredAnother = ended("fix-1", "fix", "review-0");
     return Stream.of(
         row(
             "F3 the fix agent its review waits on",
@@ -558,13 +565,23 @@ class LoopDecisionTest {
         row(
             "what a fix agent left could not be committed",
             fixed(),
-            new LoopTrigger.FixNotCommitted("push rejected"),
+            new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
             new LoopStep.FailFix(
                 GATE_FAILED, "fix agent's work could not be committed: push rejected")),
         row(
             "not committed, and the review was superseded meanwhile",
-            facts(),
-            new LoopTrigger.FixNotCommitted("push rejected"),
+            facts().serving(FIXER),
+            new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
+            NOTHING),
+        row(
+            "not committed, and a re-dispatch's review replaced the one the fix answered",
+            facts().review(GATE_FAILED, stages("failed", "pending")).serving(answeredAnother),
+            new LoopTrigger.FixNotCommitted(answeredAnother, "push rejected"),
+            NOTHING),
+        row(
+            "not committed, and the review is no longer the failed one the fix answered",
+            facts().review(RUNNING, List.of()).serving(FIXER),
+            new LoopTrigger.FixNotCommitted(FIXER, "push rejected"),
             NOTHING));
   }
 
@@ -574,18 +591,23 @@ class LoopDecisionTest {
         row(
             "a reviewer that could not start",
             launching,
-            new LoopTrigger.LaunchFailed(Lane.REVIEW, 1, "container refused"),
+            new LoopTrigger.LaunchFailed(REVIEW, Lane.REVIEW, 1, "container refused"),
             new LoopStep.ErrorReview(
                 RUNNING, 1, "reviewer could not start: container refused", false)),
         row(
             "a fix agent that could not start",
             owedAFix(GATE_FAILED),
-            new LoopTrigger.LaunchFailed(Lane.FIX, 0, "container refused"),
+            new LoopTrigger.LaunchFailed(REVIEW, Lane.FIX, 0, "container refused"),
             new LoopStep.FailFix(GATE_FAILED, "fix agent could not start: container refused")),
         row(
             "a launch that failed for a review a re-dispatch superseded",
             facts(),
-            new LoopTrigger.LaunchFailed(Lane.FIX, 0, "container refused"),
+            new LoopTrigger.LaunchFailed(REVIEW, Lane.FIX, 0, "container refused"),
+            NOTHING),
+        row(
+            "a launch that failed for a review a re-dispatch's review replaced",
+            owedAFix(GATE_FAILED),
+            new LoopTrigger.LaunchFailed("review-0", Lane.FIX, 0, "container refused"),
             NOTHING));
   }
 

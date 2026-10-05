@@ -43,10 +43,10 @@ final class LoopDecision {
       case LoopTrigger.FixEnded fix -> fixEnded(facts, fix);
       case LoopTrigger.OperatorStopped stopped -> operatorStopped(facts, stopped.run());
       case LoopTrigger.GoOn goOn -> goOn(facts);
-      case LoopTrigger.ReviewRunning running -> onReview(facts, review -> inItsStages(facts));
+      case LoopTrigger.ReviewRunning running -> on(facts.review(), review -> inItsStages(facts));
       case LoopTrigger.StageJudged judged ->
-          onReview(
-              facts,
+          on(
+              facts.latest(judged.reviewId()),
               review ->
                   switch (judged.outcome()) {
                     case StageOutcome.Passed passed -> inItsStages(facts);
@@ -55,14 +55,15 @@ final class LoopDecision {
                         new LoopStep.ErrorReview(review, judged.stage(), errored.message(), true);
                   });
       case LoopTrigger.LaunchFailed failed ->
-          onReview(facts, review -> launchFailed(review, failed));
+          on(facts.latest(failed.reviewId()), review -> launchFailed(review, failed));
       case LoopTrigger.FixCommitted committed ->
-          facts
-              .awaited(committed.run(), "failed")
-              .map(review -> fit(facts, () -> new LoopStep.StartReview(review.iteration() + 1)))
-              .orElseGet(LoopStep.Nothing::new);
+          on(
+              facts.awaited(committed.run(), "failed"),
+              review -> fit(facts, () -> new LoopStep.StartReview(review.iteration() + 1)));
       case LoopTrigger.FixNotCommitted failed ->
-          onReview(facts, review -> new LoopStep.FailFix(review, NOT_COMMITTED + failed.why()));
+          on(
+              facts.awaited(failed.run(), "failed"),
+              review -> new LoopStep.FailFix(review, NOT_COMMITTED + failed.why()));
     };
   }
 
@@ -249,9 +250,9 @@ final class LoopDecision {
         .orElseGet(step);
   }
 
-  /** The step for the spec's review, or nothing when a re-dispatch superseded it meanwhile. */
-  private static LoopStep onReview(LoopFacts facts, Function<ReviewRow, LoopStep> step) {
-    return facts.review().map(step).orElseGet(LoopStep.Nothing::new);
+  /** The step for the review a follow-up is about, or nothing when a re-dispatch replaced it. */
+  private static LoopStep on(Optional<ReviewRow> review, Function<ReviewRow, LoopStep> step) {
+    return review.map(step).orElseGet(LoopStep.Nothing::new);
   }
 
   /** What the loop calls the agent of a review lane when it says how that agent ended. */

@@ -1209,9 +1209,9 @@ A trigger is what happened; it carries no decision:
 | `OperatorStopped(run)` | `agent_cancelled`, or a stop of a run an operator's stop claimed |
 | `GoOn` | nothing new happened: a duplicate or replayed stop, a stop the loop was not waiting on, a wait whose holder ended, a gate that just failed |
 | `ReviewRunning` | a step left the review `running` with its spec in `review` |
-| `StageJudged(stage, outcome)` | a step judged a stage: `Passed`, `GateFailed`, `Errored(why)` |
-| `LaunchFailed(lane, stage, why)` | a launch (building its prompt or task included) threw and no live run serves the review |
-| `FixCommitted(run)` / `FixNotCommitted(why)` | a step tried to commit and push what a fix agent left |
+| `StageJudged(reviewId, stage, outcome)` | a step judged a stage of that review: `Passed`, `GateFailed`, `Errored(why)` |
+| `LaunchFailed(reviewId, lane, stage, why)` | a launch for that review (building its prompt or task included) threw and no live run serves it |
+| `FixCommitted(run)` / `FixNotCommitted(run, why)` | a step tried to commit and push what fix agent `run` left |
 
 The last four are raised only by `LoopSteps`. A step is what to do, and a stage is named by its
 place in the pipeline, which is its row's place in the review:
@@ -1241,8 +1241,10 @@ spec is `in_progress` or `review`, and that review is the spec's latest and its 
 "The loop's" means the spec is `in_progress` or `review`. Rows marked **P** first ask
 `facts.unfit()`: when it is present the step is `Escalate(review, that reason)`
 (`ReviewNarration.noStages`, `pipelineUnreadable(why)`, `pipelineChanged(stage)`). A
-follow-up trigger that finds no review, because a re-dispatch superseded it meanwhile, is
-`Nothing`.
+follow-up trigger is about the review its step acted on and no other: `StageJudged` and
+`LaunchFailed` name it, `FixCommitted` and `FixNotCommitted` name the fix run that served it. When
+that review is no longer the spec's latest, because a re-dispatch superseded or replaced it while
+the step ran, the step is `Nothing`. `ReviewRunning` names none and goes on with the latest.
 
 | # | Trigger | When | Step |
 |---|---|---|---|
@@ -1281,7 +1283,8 @@ follow-up trigger that finds no review, because a re-dispatch superseded it mean
 | F3 | | otherwise | `CommitFixLeftovers` |
 | F4 | `FixCommitted(run)` | `run` no longer awaited in `failed`, whether or not anything was committed | `Nothing` |
 | F5 | | (**P**) otherwise | `StartReview(iteration + 1)` |
-| F6 | `FixNotCommitted(why)` | | `FailFix("fix agent's work could not be committed: " + why)` |
+| F6 | `FixNotCommitted(run, why)` | `run` no longer awaited in `failed` | `Nothing` |
+| F7 | | otherwise | `FailFix("fix agent's work could not be committed: " + why)` |
 | L1 | `LaunchFailed` | reviewer lane | `ErrorReview(stage, "reviewer could not start: " + why)` |
 | L2 | | fix lane | `FailFix("fix agent could not start: " + why)` |
 | O1 | `OperatorStopped` | the run's row is not terminal | `Nothing` |

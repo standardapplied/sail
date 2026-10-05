@@ -262,7 +262,9 @@ class ReviewLoopEveryStateTest {
               rows.review(verdict.review(), stages);
               yield Optional.of(
                   new LoopTrigger.StageJudged(
-                      verdict.stage(), new StageVerdicts.StageOutcome.Passed()));
+                      verdict.review().id(),
+                      verdict.stage(),
+                      new StageVerdicts.StageOutcome.Passed()));
             }
             case LoopStep.CommitFixLeftovers leftovers ->
                 Optional.of(new LoopTrigger.FixCommitted(leftovers.run()));

@@ -47,23 +47,22 @@ sealed interface LoopTrigger {
   /** An operator stopped {@code run}: its cancel, or any stop of a run their stop claimed. */
   record OperatorStopped(RunStore.RunRow run) implements LoopTrigger {}
 
-  /**
-   * Nothing new: a duplicate or replayed stop, one nothing waited on, a wait whose holder ended.
-   */
+  /** Nothing new: a duplicate or replayed stop, one nothing awaited, a wait whose holder ended. */
   record GoOn() implements LoopTrigger {}
 
   /** A step left the spec's review {@code running} with its spec in {@code review}. */
   record ReviewRunning() implements LoopTrigger {}
 
-  /** A step judged the stage in place {@code stage} of the pipeline. */
-  record StageJudged(int stage, StageVerdicts.StageOutcome outcome) implements LoopTrigger {}
+  /** A step judged the stage in place {@code stage} of review {@code reviewId}. */
+  record StageJudged(String reviewId, int stage, StageVerdicts.StageOutcome outcome)
+      implements LoopTrigger {}
 
-  /** A launch threw — building its prompt or task included — and no live run serves the review. */
-  record LaunchFailed(Lane lane, int stage, String why) implements LoopTrigger {}
+  /** A launch for the review threw, building its prompt or task included, and no run serves it. */
+  record LaunchFailed(String reviewId, Lane lane, int stage, String why) implements LoopTrigger {}
 
   /** What fix agent {@code run} left uncommitted, if anything, is committed and pushed. */
   record FixCommitted(RunStore.RunRow run) implements LoopTrigger {}
 
-  /** What a fix agent left uncommitted could not be committed and pushed, for {@code why}. */
-  record FixNotCommitted(String why) implements LoopTrigger {}
+  /** What fix agent {@code run} left uncommitted could not be committed and pushed. */
+  record FixNotCommitted(RunStore.RunRow run, String why) implements LoopTrigger {}
 }

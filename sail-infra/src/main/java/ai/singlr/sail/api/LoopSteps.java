@@ -18,7 +18,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SpecStore.SpecRow;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -91,9 +90,7 @@ final class LoopSteps {
     return Optional.empty();
   }
 
-  /**
-   * The row is written before the spec moves, so no crash leaves a spec in review, owed nothing.
-   */
+  /** The row is written before the spec moves: no crash leaves a spec in review, owed nothing. */
   private Optional<LoopTrigger> startReview(LoopFacts facts, LoopStep.StartReview step) {
     createReview(facts.specId(), step.iteration());
     advanceSpec(facts.specId(), SpecStatus.REVIEW);
@@ -224,7 +221,8 @@ final class LoopSteps {
     return launch(
         invocation,
         step.review(),
-        why -> new LoopTrigger.LaunchFailed(Lane.REVIEW, step.stage(), why),
+        Lane.REVIEW,
+        step.stage(),
         () -> reviewStore.startStage(stage.id(), step.agent()),
         () -> narrator.publishEvent(facts.project(), specId, "review_stage_started", stage.name()));
   }
@@ -239,7 +237,8 @@ final class LoopSteps {
   private Optional<LoopTrigger> launch(
       Supplier<ReviewLanes.Invocation> invocation,
       ReviewRow review,
-      Function<String, LoopTrigger> failed,
+      Lane lane,
+      int stage,
       Runnable claimed,
       Runnable started) {
     boolean serving;
@@ -258,7 +257,7 @@ final class LoopSteps {
           };
     } catch (Exception e) {
       if (!reader.served(review.id())) {
-        return Optional.of(failed.apply(reasonOf(e)));
+        return Optional.of(new LoopTrigger.LaunchFailed(review.id(), lane, stage, reasonOf(e)));
       }
       System.err.println(
           "review-pipeline: a launch for review %s reported a failure after its agent started (%s);"
@@ -294,7 +293,7 @@ final class LoopSteps {
             .map(error -> verdicts.errored(stage, error))
             .orElseGet(() -> verdicts.read(stage, stageConfig, step.run()));
     syncTrigger.run();
-    return Optional.of(new LoopTrigger.StageJudged(step.stage(), outcome));
+    return Optional.of(new LoopTrigger.StageJudged(step.review().id(), step.stage(), outcome));
   }
 
   /** An infrastructure failure, not a verdict: no fix iteration, and no iteration is burned. */
@@ -357,8 +356,7 @@ final class LoopSteps {
           advanceSpec(specId, SpecStatus.IN_PROGRESS);
           narrator.publishEvent(facts.project(), specId, "review_iteration_started", null);
         };
-    Function<String, LoopTrigger> failed = why -> new LoopTrigger.LaunchFailed(Lane.FIX, 0, why);
-    return launch(invocation, step.review(), failed, () -> {}, started);
+    return launch(invocation, step.review(), Lane.FIX, 0, () -> {}, started);
   }
 
   /**
@@ -381,7 +379,7 @@ final class LoopSteps {
       }
       return Optional.of(new LoopTrigger.FixCommitted(step.run()));
     } catch (Exception e) {
-      return Optional.of(new LoopTrigger.FixNotCommitted(e.getMessage()));
+      return Optional.of(new LoopTrigger.FixNotCommitted(step.run(), e.getMessage()));
     }
   }
 
