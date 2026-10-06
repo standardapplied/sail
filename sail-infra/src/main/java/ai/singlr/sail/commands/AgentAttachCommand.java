@@ -10,7 +10,6 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
@@ -18,6 +17,8 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -29,7 +30,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -62,9 +62,6 @@ import picocli.CommandLine.Spec;
     description = "Resume the latest run's recorded agent conversation.",
     mixinStandardHelpOptions = true)
 public final class AgentAttachCommand implements Runnable {
-
-  private static final Pattern SAFE_SESSION_ID =
-      Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
 
   private static final Set<String> LIVE_STATUSES = Set.of("running", "stopping");
 
@@ -130,7 +127,7 @@ public final class AgentAttachCommand implements Runnable {
     if (run != null && LIVE_STATUSES.contains(run.status())) {
       throw new IllegalStateException(refusal(run, name));
     }
-    var agentType = run != null ? AgentCli.fromYamlName(run.agent()) : resolveAgentType();
+    var agentType = run != null ? Harnesses.of(run.agent()) : resolveAgentType();
     var sessionId = validatedSessionId(run);
     var command = buildResumeCommand(agentType, sessionId);
     if (sessionId == null) {
@@ -268,7 +265,7 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void attachFresh(RunStore.RunRow run, AgentCli agentType, List<String> command)
+  private void attachFresh(RunStore.RunRow run, Harness agentType, List<String> command)
       throws Exception {
     if (json) {
       System.out.println(YamlUtil.dumpJson(plan(run, agentType, null, command)));
@@ -350,7 +347,7 @@ public final class AgentAttachCommand implements Runnable {
     if (run == null || run.sessionId() == null) {
       return null;
     }
-    if (!isSafeSessionId(run.sessionId())) {
+    if (!Harness.isSafeSessionId(run.sessionId())) {
       throw new IllegalStateException(
           "Run "
               + run.id()
@@ -359,10 +356,6 @@ public final class AgentAttachCommand implements Runnable {
               + " inside the container.");
     }
     return run.sessionId();
-  }
-
-  static boolean isSafeSessionId(String sessionId) {
-    return SAFE_SESSION_ID.matcher(sessionId).matches();
   }
 
   private static String refusal(RunStore.RunRow run, String project) {
@@ -393,7 +386,7 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private void announceResume(
-      RunStore.RunRow run, AgentCli agentType, String sessionId, ResumePlan plan) {
+      RunStore.RunRow run, Harness agentType, String sessionId, ResumePlan plan) {
     if (run.conversationId() != null && plan.room().isBlank()) {
       System.out.println(
           Ansi.AUTO.string(
@@ -415,7 +408,7 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private LinkedHashMap<String, Object> plan(
-      RunStore.RunRow run, AgentCli agentType, String sessionId, ResumePlan resume) {
+      RunStore.RunRow run, Harness agentType, String sessionId, ResumePlan resume) {
     var map = plan(run, agentType, sessionId, resume.command());
     map.put("session", resume.session());
     if (!resume.room().isBlank()) {
@@ -425,7 +418,7 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private LinkedHashMap<String, Object> plan(
-      RunStore.RunRow run, AgentCli agentType, String sessionId, List<String> command) {
+      RunStore.RunRow run, Harness agentType, String sessionId, List<String> command) {
     var map = new LinkedHashMap<String, Object>();
     map.put("project", name);
     map.put("agent", agentType.yamlName());
@@ -444,15 +437,15 @@ public final class AgentAttachCommand implements Runnable {
     return map;
   }
 
-  private AgentCli resolveAgentType() throws IOException {
+  private Harness resolveAgentType() throws IOException {
     var sailYamlPath = SailPaths.resolveSailYaml(name, file);
     if (Files.exists(sailYamlPath)) {
       var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
       if (config.agent() != null && config.agent().type() != null) {
-        return AgentCli.fromYamlName(config.agent().type());
+        return Harnesses.of(config.agent().type());
       }
     }
-    return AgentCli.CLAUDE_CODE;
+    return Harnesses.DEFAULT;
   }
 
   /**
@@ -461,13 +454,8 @@ public final class AgentAttachCommand implements Runnable {
    * where sail-launched sessions run, so the CLI's per-directory session lookup finds the recorded
    * conversation.
    */
-  public static List<String> buildResumeCommand(AgentCli agentType, String sessionId) {
-    var launch =
-        switch (agentType) {
-          case CLAUDE_CODE -> sessionId != null ? "claude --resume " + sessionId : "claude";
-          case CODEX -> sessionId != null ? "codex resume " + sessionId : "codex";
-        };
-    return List.of("bash", "-lc", "cd ~/workspace && " + launch);
+  public static List<String> buildResumeCommand(Harness agentType, String sessionId) {
+    return List.of("bash", "-lc", "cd ~/workspace && " + agentType.attach(sessionId));
   }
 
   static List<String> buildIncusExecWithTty(String container, List<String> args) {

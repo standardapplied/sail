@@ -11,10 +11,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.commands.AgentAttachCommand;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SailSessionReport;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -135,7 +135,7 @@ class SessionReportDeliveryIT {
             "bash",
             "-lc",
             "cd ~/workspace && claude --resume 0199aaaa-1111-7000-8000-000000000001"),
-        AgentAttachCommand.buildResumeCommand(AgentCli.fromYamlName(run.agent()), run.sessionId()));
+        AgentAttachCommand.buildResumeCommand(Harnesses.of(run.agent()), run.sessionId()));
   }
 
   @Test

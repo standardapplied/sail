@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Methodology;
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harnesses;
 import org.junit.jupiter.api.Test;
 
 class MethodologyGeneratorTest {
@@ -18,7 +18,8 @@ class MethodologyGeneratorTest {
   @Test
   void generateFiles_nullMethodology_returnsEmpty() {
     var files =
-        MethodologyGenerator.generateFiles(AgentCli.CLAUDE_CODE, null, "/home/dev/workspace/");
+        MethodologyGenerator.generateFiles(
+            Harnesses.of("claude-code"), null, "/home/dev/workspace/");
 
     assertTrue(files.isEmpty());
   }
@@ -29,7 +30,7 @@ class MethodologyGeneratorTest {
 
     var files =
         MethodologyGenerator.generateFiles(
-            AgentCli.CLAUDE_CODE, methodology, "/home/dev/workspace/");
+            Harnesses.of("claude-code"), methodology, "/home/dev/workspace/");
 
     assertEquals(1, files.size());
     assertEquals("/home/dev/workspace/.claude/skills/spec/SKILL.md", files.get(0).remotePath());
@@ -43,7 +44,7 @@ class MethodologyGeneratorTest {
 
     var files =
         MethodologyGenerator.generateFiles(
-            AgentCli.CLAUDE_CODE, methodology, "/home/dev/workspace/");
+            Harnesses.of("claude-code"), methodology, "/home/dev/workspace/");
 
     assertEquals(1, files.size());
     assertEquals("/home/dev/workspace/.claude/skills/verify/SKILL.md", files.get(0).remotePath());
@@ -56,7 +57,7 @@ class MethodologyGeneratorTest {
 
     var files =
         MethodologyGenerator.generateFiles(
-            AgentCli.CLAUDE_CODE, methodology, "/home/dev/workspace/");
+            Harnesses.of("claude-code"), methodology, "/home/dev/workspace/");
 
     assertEquals(2, files.size());
     assertTrue(files.get(0).remotePath().contains("spec"));
@@ -68,7 +69,8 @@ class MethodologyGeneratorTest {
     var methodology = new Methodology("spec-driven", null, null);
 
     var files =
-        MethodologyGenerator.generateFiles(AgentCli.CODEX, methodology, "/home/dev/workspace/");
+        MethodologyGenerator.generateFiles(
+            Harnesses.of("codex"), methodology, "/home/dev/workspace/");
 
     assertEquals(1, files.size());
     assertEquals("/home/dev/workspace/.agents/skills/spec/SKILL.md", files.get(0).remotePath());

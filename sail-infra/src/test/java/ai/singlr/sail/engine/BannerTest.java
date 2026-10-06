@@ -806,7 +806,7 @@ class BannerTest {
   @Test
   void agentAuthTunnelPrintsPort3000() {
     var out = new ByteArrayOutputStream();
-    Banner.printAgentAuthTunnel("acme", new PrintStream(out), Ansi.OFF);
+    Banner.printAgentAuthTunnel("acme", 3000, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("-L 3000:localhost:3000"));

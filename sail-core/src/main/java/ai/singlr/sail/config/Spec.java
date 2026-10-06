@@ -6,8 +6,8 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -244,7 +244,7 @@ public record Spec(
     if (Strings.isBlank(agent)) {
       return null;
     }
-    AgentCli.fromYamlName(agent);
+    Harnesses.of(agent);
     return agent;
   }
 

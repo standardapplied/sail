@@ -9,7 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harnesses;
 import org.junit.jupiter.api.Test;
 
 class SpecSkillGeneratorTest {
@@ -18,7 +18,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeCodeGeneratesSkillMdAndTemplate() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
 
     assertEquals(2, files.size());
     assertEquals(BASE + ".claude/skills/spec-board/SKILL.md", files.get(0).remotePath());
@@ -27,7 +27,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillMdHasFrontmatter() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.startsWith("---\n"));
@@ -38,7 +38,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillMdManagesSpecsThroughTheCliNotFiles() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("spec create"));
@@ -49,7 +49,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillMdContainsAllCommands() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("list"), "Should contain list command");
@@ -61,7 +61,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillMdContainsKanbanBoard() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("Pending"));
@@ -72,7 +72,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillMdContainsStatusLifecycle() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("pending"));
@@ -83,7 +83,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeTemplateFileContainsSpecStructure() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var template = files.get(1).content();
 
     assertTrue(template.contains("## Goal"));
@@ -95,7 +95,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void codexGetsARealSkillFileNotInlineInstructions() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CODEX, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("codex"), BASE);
 
     assertEquals(2, files.size());
     assertEquals(BASE + ".agents/skills/spec-board/SKILL.md", files.get(0).remotePath());
@@ -108,7 +108,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void filesAreNotExecutable() {
-    var claudeFiles = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var claudeFiles = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
 
     for (var file : claudeFiles) {
       assertFalse(file.executable());
@@ -117,7 +117,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void claudeSkillReferencesTemplateFile() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("spec-template.md"));
@@ -125,7 +125,7 @@ class SpecSkillGeneratorTest {
 
   @Test
   void dependencyRulesDocumented() {
-    var files = SpecSkillGenerator.generateFiles(AgentCli.CLAUDE_CODE, BASE);
+    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
     var content = files.get(0).content();
 
     assertTrue(content.contains("depends-on"));

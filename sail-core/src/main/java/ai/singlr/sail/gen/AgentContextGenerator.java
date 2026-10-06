@@ -7,7 +7,8 @@ package ai.singlr.sail.gen;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -54,17 +55,17 @@ public final class AgentContextGenerator {
    * Determines which agents need context files. Uses the {@code install} list from the agent
    * config, falling back to just the primary agent type.
    */
-  static List<AgentCli> resolveTargetAgents(SailYaml config) {
+  static List<Harness> resolveTargetAgents(SailYaml config) {
     if (config.agent() == null) {
       return List.of();
     }
     var installList = config.agent().install();
     if (installList != null && !installList.isEmpty()) {
-      return installList.stream().distinct().map(AgentCli::fromYamlName).toList();
+      return installList.stream().distinct().map(Harnesses::of).toList();
     }
     var primaryType = config.agent().type();
     if (primaryType != null) {
-      return List.of(AgentCli.fromYamlName(primaryType));
+      return List.of(Harnesses.of(primaryType));
     }
     return List.of();
   }

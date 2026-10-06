@@ -9,9 +9,10 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.RoomAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.FdeStore;
@@ -105,7 +106,7 @@ public final class LaunchAdmission {
    * the container's PATH — sail.yaml's agent block declares what a project apply installed, but the
    * container is the authority on what can actually launch.
    */
-  public void requireInstalled(AgentCli agentCli, String project) {
+  public void requireInstalled(Harness agentCli, String project) {
     var found =
         exec(
             ContainerExec.asDevUser(
@@ -122,13 +123,15 @@ public final class LaunchAdmission {
   }
 
   /** Resolves the agent to launch, refusing an unknown or missing name as a client error. */
-  public static AgentCli resolveAgent(String agentYamlName) {
+  public static Harness resolveAgent(String agentYamlName) {
     if (Strings.isBlank(agentYamlName)) {
       throw new ApiException(
-          ErrorCode.BAD_REQUEST, "Name the agent to seat.", "Pass agent: claude-code or codex.");
+          ErrorCode.BAD_REQUEST,
+          "Name the agent to seat.",
+          "Pass agent: " + String.join(" or ", Harnesses.names()) + ".");
     }
     try {
-      return AgentCli.fromYamlName(agentYamlName);
+      return Harnesses.of(agentYamlName);
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }

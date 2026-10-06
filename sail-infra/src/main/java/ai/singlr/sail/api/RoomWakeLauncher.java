@@ -9,11 +9,12 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.RoomWakePrompt;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.DispatchGate;
@@ -99,7 +100,7 @@ public final class RoomWakeLauncher {
             ? engagement.agent()
             : spec.agent() != null ? spec.agent() : config.agent().type();
     var full = engagement != null && engagement.full();
-    if (!full && !AgentCli.fromYamlName(agentType).supportsRoomLane()) {
+    if (!full && Harnesses.of(agentType).readOnlyRefusal().isPresent()) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED,
           "Room wake needs a harness-enforced read-only session, and "
@@ -222,7 +223,7 @@ public final class RoomWakeLauncher {
     }
     var agentType = member.agent();
     var full = member.full();
-    if (!full && !AgentCli.fromYamlName(agentType).supportsRoomLane()) {
+    if (!full && Harnesses.of(agentType).readOnlyRefusal().isPresent()) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED,
           "Room wake needs a harness-enforced read-only session, and "
@@ -303,7 +304,7 @@ public final class RoomWakeLauncher {
         .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))
-        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
+        .filter(run -> Harness.isSafeSessionId(run.sessionId()))
         .findFirst()
         .map(RunStore.RunRow::sessionId)
         .orElse(null);
@@ -314,7 +315,7 @@ public final class RoomWakeLauncher {
         .filter(run -> run.ownedBy(localHandle))
         .filter(run -> Strings.isNotBlank(run.sessionId()))
         .filter(run -> agentType.equals(run.agent()))
-        .filter(run -> AgentCli.isSafeSessionId(run.sessionId()))
+        .filter(run -> Harness.isSafeSessionId(run.sessionId()))
         .findFirst()
         .map(RunStore.RunRow::sessionId)
         .orElse(null);

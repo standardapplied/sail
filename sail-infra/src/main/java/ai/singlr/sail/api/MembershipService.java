@@ -139,10 +139,11 @@ public final class MembershipService {
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
-    if (!member.full() && !agentCli.supportsRoomLane()) {
+    var refusal = agentCli.readOnlyRefusal();
+    if (!member.full() && refusal.isPresent()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyRefusal(),
+          refusal.get(),
           "Add " + agentCli.yamlName() + " with full access instead.");
     }
     var project = spec.project();
@@ -188,10 +189,11 @@ public final class MembershipService {
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
-    if (!member.full() && !agentCli.supportsRoomLane()) {
+    var refusal = agentCli.readOnlyRefusal();
+    if (!member.full() && refusal.isPresent()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          agentCli.readOnlyRefusal(),
+          refusal.get(),
           "Add " + agentCli.yamlName() + " with full access instead.");
     }
     projects.loadRunning(room.project());

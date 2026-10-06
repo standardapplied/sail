@@ -6,7 +6,7 @@
 package ai.singlr.sail.gen;
 
 import ai.singlr.sail.config.Methodology;
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harness;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -35,7 +35,7 @@ public final class MethodologyGenerator {
    * @param basePath the workspace base path (e.g. {@code /home/dev/workspace/})
    */
   public static List<GeneratedFile> generateFiles(
-      AgentCli agent, Methodology methodology, String basePath) {
+      Harness agent, Methodology methodology, String basePath) {
     if (methodology == null) {
       return List.of();
     }
@@ -112,7 +112,7 @@ public final class MethodologyGenerator {
     return sb.toString();
   }
 
-  private static String skillPath(AgentCli agent, String basePath, String skillName) {
+  private static String skillPath(Harness agent, String basePath, String skillName) {
     return basePath + agent.skillsDir() + skillName + "/SKILL.md";
   }
 

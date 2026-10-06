@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,11 +24,11 @@ import java.util.concurrent.TimeoutException;
  * {@code config.toml}) and <em>silently skips</em> new or changed hooks until they are trusted,
  * including in headless {@code codex exec} (verified against codex-cli 0.144.0). Sail cannot
  * pre-seed those hashes — the format is internal and {@code config.toml} belongs to the engineer —
- * so sail-dispatched sessions pass {@code --dangerously-bypass-hook-trust} instead (see {@link
- * AgentCli#headlessCommand}). Engineer-run interactive {@code codex} sessions never get that flag,
- * so this layer stays inert for them unless they trust it via {@code /hooks} — and even then the
- * {@link SailEventHelper} script self-gates on {@code SAIL_SPEC_ID} and {@link SailStopGate} on
- * {@code SAIL_RUN_ID}, so nothing leaks into the spec event bus and no interactive stop is gated.
+ * so sail-dispatched sessions pass {@code --dangerously-bypass-hook-trust} instead (see {@code
+ * Codex#headless}). Engineer-run interactive {@code codex} sessions never get that flag, so this
+ * layer stays inert for them unless they trust it via {@code /hooks} — and even then the {@link
+ * SailEventHelper} script self-gates on {@code SAIL_SPEC_ID} and {@link SailStopGate} on {@code
+ * SAIL_RUN_ID}, so nothing leaks into the spec event bus and no interactive stop is gated.
  *
  * <p>Hooks wired:
  *
@@ -162,7 +163,7 @@ public final class CodexHookConfig {
   private static Map<String, Object> sessionReportCommand() {
     var hook = new LinkedHashMap<String, Object>();
     hook.put("type", "command");
-    hook.put("command", SailSessionReport.SCRIPT_PATH + " " + AgentCli.CODEX.yamlName());
+    hook.put("command", SailSessionReport.SCRIPT_PATH + " " + Harnesses.of("codex").yamlName());
     hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }

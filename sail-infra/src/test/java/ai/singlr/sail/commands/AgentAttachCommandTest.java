@@ -12,8 +12,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtyIdentity;
@@ -64,13 +64,13 @@ class AgentAttachCommandTest {
 
   @Test
   void aRecordedSessionResumesExactlyByIdForClaudeCode() {
-    var cmd = AgentAttachCommand.buildResumeCommand(AgentCli.CLAUDE_CODE, "abc-123");
+    var cmd = AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "abc-123");
     assertEquals(List.of("bash", "-lc", "cd ~/workspace && claude --resume abc-123"), cmd);
   }
 
   @Test
   void aRecordedSessionResumesExactlyByIdForCodex() {
-    var cmd = AgentAttachCommand.buildResumeCommand(AgentCli.CODEX, "abc-123");
+    var cmd = AgentAttachCommand.buildResumeCommand(Harnesses.of("codex"), "abc-123");
     assertEquals(
         List.of("bash", "-lc", "cd ~/workspace && codex resume abc-123"),
         cmd,
@@ -81,38 +81,11 @@ class AgentAttachCommandTest {
   void aNullSessionAttachesFreshNeverAnInteractivePicker() {
     assertEquals(
         List.of("bash", "-lc", "cd ~/workspace && claude"),
-        AgentAttachCommand.buildResumeCommand(AgentCli.CLAUDE_CODE, null),
+        AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), null),
         "no recorded session means a fresh conversation, not '--resume' picker roulette");
     assertEquals(
         List.of("bash", "-lc", "cd ~/workspace && codex"),
-        AgentAttachCommand.buildResumeCommand(AgentCli.CODEX, null));
-  }
-
-  @Test
-  void ordinarySessionIdShapesAreSafe() {
-    assertTrue(AgentAttachCommand.isSafeSessionId("0198f00d-1234-7000-8000-abcdefabcdef"));
-    assertTrue(AgentAttachCommand.isSafeSessionId("abc-123"));
-    assertTrue(AgentAttachCommand.isSafeSessionId("a"));
-    assertTrue(AgentAttachCommand.isSafeSessionId("9session.name_x"));
-  }
-
-  @Test
-  void sessionIdStartingWithDashIsRejectedAsOptionInjection() {
-    assertFalse(
-        AgentAttachCommand.isSafeSessionId("--dangerously-bypass-approvals-and-sandbox"),
-        "a leading '-' would be parsed by the agent CLI as an option, not a session id");
-    assertFalse(AgentAttachCommand.isSafeSessionId("-r"));
-    assertFalse(AgentAttachCommand.isSafeSessionId(".hidden"));
-    assertFalse(AgentAttachCommand.isSafeSessionId("_x"));
-  }
-
-  @Test
-  void sessionIdWithShellMetacharactersOrOversizeIsRejected() {
-    assertFalse(AgentAttachCommand.isSafeSessionId("abc; rm -rf /"));
-    assertFalse(AgentAttachCommand.isSafeSessionId("abc$(id)"));
-    assertFalse(AgentAttachCommand.isSafeSessionId(""));
-    assertFalse(AgentAttachCommand.isSafeSessionId("a".repeat(129)));
-    assertTrue(AgentAttachCommand.isSafeSessionId("a".repeat(128)));
+        AgentAttachCommand.buildResumeCommand(Harnesses.of("codex"), null));
   }
 
   @Test
@@ -368,7 +341,7 @@ class AgentAttachCommandTest {
     var plan =
         new AgentAttachCommand.ResumePlan(
             "resume-1",
-            AgentAttachCommand.buildResumeCommand(AgentCli.CLAUDE_CODE, "abc"),
+            AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "abc"),
             "acme",
             "spec-x");
     assertEquals(

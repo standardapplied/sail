@@ -8,6 +8,9 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harness.Launch;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -515,7 +518,7 @@ public final class AgentSession {
       String sshUser,
       String workDir,
       boolean fullPermissions,
-      AgentCli agentCli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -528,7 +531,7 @@ public final class AgentSession {
         sshUser,
         workDir,
         fullPermissions,
-        agentCli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -551,7 +554,7 @@ public final class AgentSession {
       String sshUser,
       String workDir,
       boolean fullPermissions,
-      AgentCli agentCli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -561,20 +564,12 @@ public final class AgentSession {
       String runCredential,
       String role,
       String resumeSessionId) {
-    var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
+    var cli = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
-    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
-    var agentCmd =
-        agentCommand(
-            cli,
-            fullPermissions,
-            model,
-            reasoningEffort,
-            settingsPath,
-            role,
-            resumeSessionId,
-            unit);
+    var launch =
+        new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, resumeSessionId, true);
+    var agentCmd = agentCommand(cli, role, launch);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
@@ -632,7 +627,7 @@ public final class AgentSession {
       String sshUser,
       String workDir,
       boolean fullPermissions,
-      AgentCli agentCli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -645,7 +640,7 @@ public final class AgentSession {
         sshUser,
         workDir,
         fullPermissions,
-        agentCli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -662,7 +657,7 @@ public final class AgentSession {
       String sshUser,
       String workDir,
       boolean fullPermissions,
-      AgentCli agentCli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -671,12 +666,12 @@ public final class AgentSession {
       String runId,
       String runCredential,
       String role) {
-    var cli = Objects.requireNonNullElse(agentCli, AgentCli.CLAUDE_CODE);
+    var cli = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
     warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
-    var settingsPath = cli == AgentCli.CLAUDE_CODE ? ClaudeCodeHookConfig.SETTINGS_PATH : null;
     var agentCmd =
-        cli.headlessCommand(unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath);
+        cli.headless(
+            new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, null, false));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
     var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
     var script =
@@ -710,37 +705,13 @@ public final class AgentSession {
    * full-permission chat by mispassing a flag. Every other lane keeps the full-permission dispatch
    * command.
    */
-  private static String agentCommand(
-      AgentCli cli,
-      boolean fullPermissions,
-      String model,
-      String reasoningEffort,
-      String settingsPath,
-      String role,
-      String resumeSessionId,
-      AgentUnit unit) {
-    if ("room".equals(role)) {
-      return resumeSessionId == null
-          ? cli.headlessRoomCommand(unit.taskPath(), model, settingsPath, true)
-          : cli.headlessRoomResumeCommand(
-              resumeSessionId, unit.taskPath(), model, settingsPath, true);
-    }
-    return resumeSessionId == null
-        ? cli.headlessCommand(
-            unit.taskPath(), fullPermissions, model, reasoningEffort, settingsPath, true)
-        : cli.headlessResumeCommand(
-            resumeSessionId,
-            unit.taskPath(),
-            fullPermissions,
-            model,
-            reasoningEffort,
-            settingsPath,
-            true);
+  private static String agentCommand(Harness cli, String role, Launch launch) {
+    return "room".equals(role) ? cli.readOnly(launch) : cli.headless(launch);
   }
 
   private static void warnIfReasoningEffortDropped(
-      AgentCli cli, String specId, String reasoningEffort) {
-    if (cli != AgentCli.CLAUDE_CODE || Strings.isBlank(reasoningEffort)) {
+      Harness cli, String specId, String reasoningEffort) {
+    if (cli.honoursReasoningEffort() || Strings.isBlank(reasoningEffort)) {
       return;
     }
     var spec = Strings.isBlank(specId) ? "this launch" : "spec " + specId;

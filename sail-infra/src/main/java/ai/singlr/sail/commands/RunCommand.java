@@ -20,7 +20,6 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
@@ -35,6 +34,8 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.AgentContextGenerator;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -212,7 +213,7 @@ public final class RunCommand implements Runnable {
             && "full".equals(config.agent().config().get("permissions"));
 
     var agentType = config.agent() != null ? config.agent().type() : "claude-code";
-    var agentCli = AgentCli.fromYamlName(agentType);
+    var agentCli = Harnesses.of(agentType);
 
     var label = SnapshotManager.defaultLabel();
     var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
@@ -225,16 +226,15 @@ public final class RunCommand implements Runnable {
       prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
-    if (!json && agentCli == AgentCli.CLAUDE_CODE) {
-      Banner.printAgentAuthTunnel(name, System.out, Ansi.AUTO);
+    if (!json && agentCli.loginTunnelPort().isPresent()) {
+      Banner.printAgentAuthTunnel(
+          name, agentCli.loginTunnelPort().getAsInt(), System.out, Ansi.AUTO);
       System.out.println();
     }
 
-    if (!json && task == null && agentCli == AgentCli.CLAUDE_CODE) {
+    if (!json && task == null && agentCli.interactiveTip().isPresent()) {
       System.out.println(
-          Ansi.AUTO.string(
-              "  @|faint Tip: Type /rc inside Claude Code to connect from your phone"
-                  + " via Remote Control.|@"));
+          Ansi.AUTO.string("  @|faint Tip: " + agentCli.interactiveTip().get() + "|@"));
       System.out.println();
     }
 
@@ -506,8 +506,8 @@ public final class RunCommand implements Runnable {
   }
 
   private void launchInteractive(
-      String sshUser, String workDir, boolean fullPermissions, AgentCli agentCli) throws Exception {
-    var agentCmd = agentCli.interactiveCommand(fullPermissions);
+      String sshUser, String workDir, boolean fullPermissions, Harness agentCli) throws Exception {
+    var agentCmd = agentCli.interactive(fullPermissions);
     var sshCmd =
         List.of("ssh", "-t", sshUser + "@" + name, "--", "cd " + workDir + " && " + agentCmd);
 

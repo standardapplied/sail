@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -214,7 +215,8 @@ public final class ClaudeCodeHookConfig {
   private static Map<String, Object> sessionReportCommand() {
     var hook = new LinkedHashMap<String, Object>();
     hook.put("type", "command");
-    hook.put("command", SailSessionReport.SCRIPT_PATH + " " + AgentCli.CLAUDE_CODE.yamlName());
+    hook.put(
+        "command", SailSessionReport.SCRIPT_PATH + " " + Harnesses.of("claude-code").yamlName());
     hook.put("timeout", SailSessionReport.HOOK_TIMEOUT_SECONDS);
     return hook;
   }

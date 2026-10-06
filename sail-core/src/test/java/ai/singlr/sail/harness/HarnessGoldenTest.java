@@ -8,9 +8,7 @@ package ai.singlr.sail.harness;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentCli;
-import ai.singlr.sail.gen.LanguageRulesGenerator;
+import ai.singlr.sail.harness.Harness.Launch;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -25,6 +23,9 @@ class HarnessGoldenTest {
   private static final String PROMPT = " -p \"$(cat " + TASK + ")\"";
   private static final String CODEX_TASK = " \"$(cat " + TASK + ")\"";
   private static final String HOME = "/home/dev/";
+  private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");
+  private static final Harness CODEX = Harnesses.of("codex");
+  private static final List<String> JAVA_PATHS = List.of("**/*.java", "pom.xml");
 
   private static final String MALFORMED_ID =
       "Malformed session id; refusing to build a resume command from replicated data.";
@@ -41,23 +42,16 @@ class HarnessGoldenTest {
 
   private static String claudeHeadless(
       boolean full, String model, String effort, String resume, boolean stream) {
-    return resume == null
-        ? AgentCli.CLAUDE_CODE.headlessCommand(TASK, full, model, effort, SETTINGS, stream)
-        : AgentCli.CLAUDE_CODE.headlessResumeCommand(
-            resume, TASK, full, model, effort, SETTINGS, stream);
+    return CLAUDE_CODE.headless(new Launch(TASK, full, model, effort, resume, stream));
   }
 
   private static String codexHeadless(
       boolean full, String model, String effort, String resume, boolean stream) {
-    return resume == null
-        ? AgentCli.CODEX.headlessCommand(TASK, full, model, effort, null, stream)
-        : AgentCli.CODEX.headlessResumeCommand(resume, TASK, full, model, effort, null, stream);
+    return CODEX.headless(new Launch(TASK, full, model, effort, resume, stream));
   }
 
   private static String claudeReadOnly(String model, String resume, boolean stream) {
-    return resume == null
-        ? AgentCli.CLAUDE_CODE.headlessRoomCommand(TASK, model, SETTINGS, stream)
-        : AgentCli.CLAUDE_CODE.headlessRoomResumeCommand(resume, TASK, model, SETTINGS, stream);
+    return CLAUDE_CODE.readOnly(new Launch(TASK, false, model, null, resume, stream));
   }
 
   @Test
@@ -146,17 +140,27 @@ class HarnessGoldenTest {
   }
 
   @Test
+  void claudeCodeReadOnlyIgnoresFullPermissionsAndReasoningEffort() {
+    assertEquals(
+        CLAUDE_ROOM + PROMPT,
+        CLAUDE_CODE.readOnly(new Launch(TASK, true, null, "high", null, false)));
+    assertEquals(
+        CLAUDE_ROOM_STREAMED + " --model claude-opus-4 --resume sess-42" + PROMPT,
+        CLAUDE_CODE.readOnly(new Launch(TASK, true, "claude-opus-4", "high", "sess-42", true)));
+  }
+
+  @Test
   void codexHasNoReadOnlySession() {
     assertEquals(
         "Codex CLI has no harness-enforced read-only session inside a sail container: its"
             + " bubblewrap sandbox needs user namespaces, which incus containers block, so its only"
             + " working mode bypasses all restrictions. Add it with full access instead — the"
             + " per-turn repo reservation guards that lane.",
-        AgentCli.CODEX.readOnlyRefusal());
+        CODEX.readOnlyRefusal().orElseThrow());
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> AgentCli.CODEX.headlessRoomCommand(TASK, null, null, false));
+            () -> CODEX.readOnly(new Launch(TASK, false, null, null, null, false)));
     assertEquals(
         "Codex CLI has no harness-enforced read-only session inside a sail container; the room"
             + " lane refuses to launch it.",
@@ -183,18 +187,23 @@ class HarnessGoldenTest {
 
   @Test
   void interactive() {
-    assertEquals("claude", AgentCli.CLAUDE_CODE.interactiveCommand(false));
-    assertEquals(
-        "claude --dangerously-skip-permissions", AgentCli.CLAUDE_CODE.interactiveCommand(true));
-    assertEquals("codex", AgentCli.CODEX.interactiveCommand(false));
-    assertEquals(
-        "codex --dangerously-bypass-approvals-and-sandbox",
-        AgentCli.CODEX.interactiveCommand(true));
+    assertEquals("claude", CLAUDE_CODE.interactive(false));
+    assertEquals("claude --dangerously-skip-permissions", CLAUDE_CODE.interactive(true));
+    assertEquals("codex", CODEX.interactive(false));
+    assertEquals("codex --dangerously-bypass-approvals-and-sandbox", CODEX.interactive(true));
+  }
+
+  @Test
+  void attach() {
+    assertEquals("claude --resume sess-42", CLAUDE_CODE.attach("sess-42"));
+    assertEquals("claude", CLAUDE_CODE.attach(null));
+    assertEquals("codex resume sess-42", CODEX.attach("sess-42"));
+    assertEquals("codex", CODEX.attach(null));
   }
 
   @Test
   void anUnknownHarnessNameIsRefusedNamingTheKnownOnes() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> AgentCli.fromYamlName("helios"));
+    var ex = assertThrows(IllegalArgumentException.class, () -> Harnesses.of("helios"));
     assertEquals(
         "Unknown agent CLI: 'helios'. Known agents: claude-code, codex.\n"
             + "  Check the 'install' list in your sail.yaml agent section.",
@@ -203,9 +212,7 @@ class HarnessGoldenTest {
 
   @Test
   void claudeCodeLanguageRule() {
-    var files = LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, rules(), HOME);
-
-    assertEquals(HOME + ".claude/rules/java.md", files.get(0).remotePath());
+    assertEquals(HOME + ".claude/rules/java.md", HOME + CLAUDE_CODE.languageRulePath("java"));
     assertEquals(
         """
         ---
@@ -216,16 +223,16 @@ class HarnessGoldenTest {
 
         Use records.
         """,
-        files.get(0).content());
-    assertEquals(HOME + ".claude/rules/security.md", files.get(1).remotePath());
-    assertEquals("Validate input.\n", files.get(1).content());
+        CLAUDE_CODE.languageRule("java", JAVA_PATHS, "Use records.\n"));
+    assertEquals(
+        HOME + ".claude/rules/security.md", HOME + CLAUDE_CODE.languageRulePath("security"));
+    assertEquals(
+        "Validate input.\n", CLAUDE_CODE.languageRule("security", List.of(), "Validate input.\n"));
   }
 
   @Test
   void codexLanguageRule() {
-    var files = LanguageRulesGenerator.generateFiles(AgentCli.CODEX, rules(), HOME);
-
-    assertEquals(HOME + ".agents/skills/java/SKILL.md", files.get(0).remotePath());
+    assertEquals(HOME + ".agents/skills/java/SKILL.md", HOME + CODEX.languageRulePath("java"));
     assertEquals(
         """
         ---
@@ -236,8 +243,9 @@ class HarnessGoldenTest {
 
         Use records.
         """,
-        files.get(0).content());
-    assertEquals(HOME + ".agents/skills/security/SKILL.md", files.get(1).remotePath());
+        CODEX.languageRule("java", JAVA_PATHS, "Use records.\n"));
+    assertEquals(
+        HOME + ".agents/skills/security/SKILL.md", HOME + CODEX.languageRulePath("security"));
     assertEquals(
         """
         ---
@@ -248,12 +256,6 @@ class HarnessGoldenTest {
 
         Validate input.
         """,
-        files.get(1).content());
-  }
-
-  private static List<SailYaml.AgentRule> rules() {
-    return List.of(
-        new SailYaml.AgentRule("java", List.of("**/*.java", "pom.xml"), "Use records.\n"),
-        new SailYaml.AgentRule("security", List.of(), "Validate input.\n"));
+        CODEX.languageRule("security", List.of(), "Validate input.\n"));
   }
 }

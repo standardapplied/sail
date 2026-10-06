@@ -6,13 +6,14 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -53,7 +54,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
 
   private void execute() throws Exception {
     NameValidator.requireValidProjectName(name);
-    var tool = AgentCli.fromYamlName(agentName);
+    var tool = Harnesses.of(agentName);
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -123,7 +124,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
     }
   }
 
-  private void printJson(AgentCli tool, String status) {
+  private void printJson(Harness tool, String status) {
     var map = new LinkedHashMap<String, Object>();
     map.put("project", name);
     map.put("agent", tool.yamlName());

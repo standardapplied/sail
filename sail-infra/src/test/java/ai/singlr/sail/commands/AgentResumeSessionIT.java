@@ -17,8 +17,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -102,7 +102,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
         var plan =
             new AgentAttachCommand.ResumePlan(
                 SessionYield.resumeSession(runId),
-                AgentAttachCommand.buildResumeCommand(AgentCli.CLAUDE_CODE, "sess-abc"),
+                AgentAttachCommand.buildResumeCommand(Harnesses.of("claude-code"), "sess-abc"),
                 CONTAINER,
                 AgentAttachCommand.knownRoom(rooms, run));
         assertEquals(ROOM, plan.room(), "the run's room binds the session");

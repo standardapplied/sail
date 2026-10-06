@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -30,18 +30,21 @@ class LanguageRulesGeneratorTest {
 
   @Test
   void nullRulesGenerateNothing() {
-    assertTrue(LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, null, HOME).isEmpty());
+    assertTrue(
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), null, HOME).isEmpty());
   }
 
   @Test
   void emptyRulesGenerateNothing() {
     assertTrue(
-        LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, List.of(), HOME).isEmpty());
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), List.of(), HOME)
+            .isEmpty());
   }
 
   @Test
   void claudeRuleIsAPathScopedRuleFile() {
-    var files = LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, List.of(java()), HOME);
+    var files =
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), List.of(java()), HOME);
 
     assertEquals(1, files.size());
     var rule = files.getFirst();
@@ -56,7 +59,8 @@ class LanguageRulesGeneratorTest {
   @Test
   void claudeRuleRendersEveryGlob() {
     var files =
-        LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, List.of(typescript()), HOME);
+        LanguageRulesGenerator.generateFiles(
+            Harnesses.of("claude-code"), List.of(typescript()), HOME);
 
     var content = files.getFirst().content();
     assertTrue(content.contains("\"**/*.ts\""));
@@ -68,7 +72,7 @@ class LanguageRulesGeneratorTest {
     var rule = new SailYaml.AgentRule("house-style", List.of(), "- Always prefer composition.");
 
     var content =
-        LanguageRulesGenerator.generateFiles(AgentCli.CLAUDE_CODE, List.of(rule), HOME)
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), List.of(rule), HOME)
             .getFirst()
             .content();
 
@@ -78,7 +82,7 @@ class LanguageRulesGeneratorTest {
 
   @Test
   void codexRuleIsADescriptionLoadedSkill() {
-    var files = LanguageRulesGenerator.generateFiles(AgentCli.CODEX, List.of(java()), HOME);
+    var files = LanguageRulesGenerator.generateFiles(Harnesses.of("codex"), List.of(java()), HOME);
 
     assertEquals(1, files.size());
     var skill = files.getFirst();
@@ -96,7 +100,7 @@ class LanguageRulesGeneratorTest {
   void everyConfiguredRuleBecomesAFile() {
     var files =
         LanguageRulesGenerator.generateFiles(
-            AgentCli.CLAUDE_CODE, List.of(java(), typescript()), HOME);
+            Harnesses.of("claude-code"), List.of(java(), typescript()), HOME);
 
     assertEquals(2, files.size());
     assertTrue(files.stream().anyMatch(f -> f.remotePath().endsWith("/rules/java.md")));
@@ -106,7 +110,8 @@ class LanguageRulesGeneratorTest {
   @Test
   void generatedRulesAreNotExecutable() {
     var files =
-        LanguageRulesGenerator.generateFiles(AgentCli.CODEX, List.of(java(), typescript()), HOME);
+        LanguageRulesGenerator.generateFiles(
+            Harnesses.of("codex"), List.of(java(), typescript()), HOME);
 
     assertTrue(files.stream().noneMatch(GeneratedFile::executable));
   }
