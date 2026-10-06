@@ -6,15 +6,13 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
-import java.nio.file.Files;
+import java.util.Objects;
 
 /**
- * Loads a project's descriptor and live container state for the operations layer. One loader for
+ * Loads a project's definition and live container state for the operations layer. One loader for
  * every lane — {@link SailOperations} routes and {@link DispatchOperations} both resolve projects
  * through it, so "project not found / stopped / errored" is decided (and worded) exactly once.
  */
@@ -23,26 +21,28 @@ final class ProjectLoader {
   record LoadedProject(SailYaml config, ContainerState state) {}
 
   private final ShellExec shell;
-  private final String file;
+  private final ProjectReader definitions;
 
-  ProjectLoader(ShellExec shell, String file) {
+  ProjectLoader(ShellExec shell, ProjectReader definitions) {
     this.shell = shell;
-    this.file = file;
+    this.definitions = Objects.requireNonNull(definitions, "definitions");
   }
 
   LoadedProject load(String project) {
-    var sailYamlPath = SailPaths.resolveSailYaml(project, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new ApiException(
-          ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
-          "Project descriptor was not found: " + sailYamlPath.toAbsolutePath());
-    }
+    var config = definition(project);
     try {
-      var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
       var state = new ContainerManager(shell).queryState(project);
       return new LoadedProject(config, state);
     } catch (Exception e) {
       throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, "Failed to load project.", e);
+    }
+  }
+
+  private SailYaml definition(String project) {
+    try {
+      return definitions.require(project);
+    } catch (ProjectReader.Unreadable e) {
+      throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, e.getMessage(), e);
     }
   }
 

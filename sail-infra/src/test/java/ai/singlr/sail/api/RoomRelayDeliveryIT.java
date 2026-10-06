@@ -72,7 +72,7 @@ class RoomRelayDeliveryIT {
     var operations =
         new SailOperations(
                 new ShellExecutor(false),
-                "sail.yaml",
+                ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
                 null,
                 new SpecStore(db),

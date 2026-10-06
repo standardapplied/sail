@@ -225,7 +225,7 @@ class SailOperationsSyncTest {
     return TestControlPlane.standalone(
         new SailOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             (command, logPath) -> 4242L,
             bus,
             null,

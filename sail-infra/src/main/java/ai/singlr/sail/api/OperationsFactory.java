@@ -42,7 +42,6 @@ public final class OperationsFactory {
             create(
                 db,
                 new ShellExecutor(false),
-                SailPaths.PROJECT_DESCRIPTOR,
                 null,
                 null,
                 SyncScheduler.disabled(),
@@ -50,8 +49,8 @@ public final class OperationsFactory {
   }
 
   public static HostOperations open(
-      ShellExec shell, String file, OperationHooks hooks, SessionYield sessionYield) {
-    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, file, hooks, sessionYield));
+      ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
+    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, hooks, sessionYield));
   }
 
   private static HostOperations open(Path path, Function<Sqlite, SailOperations> create) {
@@ -65,14 +64,13 @@ public final class OperationsFactory {
   }
 
   public static SailOperations create(
-      Sqlite db, ShellExec shell, String file, OperationHooks hooks, SessionYield sessionYield) {
-    return create(db, shell, file, null, null, SyncScheduler.disabled(), sessionYield, hooks);
+      Sqlite db, ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
+    return create(db, shell, null, null, SyncScheduler.disabled(), sessionYield, hooks);
   }
 
   public static SailOperations create(
       Sqlite db,
       ShellExec shell,
-      String file,
       EventBus bus,
       EventSubscriber audit,
       SyncScheduler scheduler,
@@ -80,7 +78,6 @@ public final class OperationsFactory {
     return create(
         db,
         shell,
-        file,
         bus,
         audit,
         scheduler,
@@ -99,22 +96,22 @@ public final class OperationsFactory {
   private static SailOperations create(
       Sqlite db,
       ShellExec shell,
-      String file,
       EventBus bus,
       EventSubscriber audit,
       SyncScheduler scheduler,
       SessionYield sessionYield,
       OperationHooks hooks) {
+    var projectStore = new ProjectStore(db);
     return new SailOperations(
             shell,
-            file,
+            ProjectReader.ofCatalog(projectStore),
             WatcherSpawner::spawnProcess,
             bus,
             audit instanceof AuditPersister persister ? persister : null,
             new SpecStore(db),
             new ReviewStore(db),
             new RunStore(db),
-            new ProjectStore(db),
+            projectStore,
             ConnectEnvironment::detect,
             scheduler,
             new FdeStore(db),

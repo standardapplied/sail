@@ -202,7 +202,6 @@ public final class ServerStartCommand implements Runnable {
         OperationsFactory.create(
             db,
             new ShellExecutor(false),
-            SailPaths.PROJECT_DESCRIPTOR,
             bus,
             persister,
             SyncScheduler.disabled(),

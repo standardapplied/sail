@@ -108,7 +108,7 @@ class SailOperationsSeamTest {
 
   private SailOperations operations(Sqlite db) {
     return OperationsFactory.create(
-            db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,
@@ -178,13 +178,7 @@ class SailOperationsSeamTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                node.db,
-                shell,
-                "sail.yaml",
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE);
+                node.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE);
         var server = server(operations, node.db)) {
       var clock = new BackoffTest.TestClock();
       var nanos = new AtomicLong();
@@ -1263,7 +1257,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1293,7 +1287,7 @@ class SailOperationsSeamTest {
       Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1322,7 +1316,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,

@@ -54,7 +54,10 @@ class SailEventPublisherTest {
       var operations =
           TestControlPlane.standalone(
               new SailOperations(
-                  new ShellExecutor(true), tmp.resolve("sail.yaml").toString(), bus, persister),
+                  new ShellExecutor(true),
+                  TestProjects.reading(tmp.resolve("sail.yaml")),
+                  bus,
+                  persister),
               db,
               tmp);
       try (var server =

@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.api.EventBus;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
@@ -21,6 +22,7 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -62,7 +64,12 @@ class ApiSpecCommandsTest {
     reviewStore = new ReviewStore(db);
     var operations =
         new SailOperations(
-                new ShellExecutor(false), "sail.yaml", bus, persister, specStore, reviewStore)
+                new ShellExecutor(false),
+                ProjectReader.ofCatalog(new ProjectStore(db)),
+                bus,
+                persister,
+                specStore,
+                reviewStore)
             .useMessages(new MessageStore(db))
             .useRooms(new RoomStore(db));
     server =

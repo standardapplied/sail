@@ -278,7 +278,7 @@ public final class Fleet implements AutoCloseable {
       dispatcher =
           new DispatchOperations(
               shell,
-              descriptor.toString(),
+              TestProjects.reading(descriptor),
               specs,
               reviews,
               runs,
@@ -303,7 +303,7 @@ public final class Fleet implements AutoCloseable {
       stopper =
           new StopOperations(
               shell,
-              descriptor.toString(),
+              TestProjects.reading(descriptor),
               specs,
               runs,
               bus::publish,
@@ -312,7 +312,7 @@ public final class Fleet implements AutoCloseable {
       operations =
           new SailOperations(
                   shell,
-                  descriptor.toString(),
+                  TestProjects.reading(descriptor),
                   (command, log) -> 4242L,
                   bus,
                   null,

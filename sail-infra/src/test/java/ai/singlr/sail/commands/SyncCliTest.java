@@ -223,9 +223,9 @@ class SyncCliTest {
         "a database from before health reports nothing attempted, not a missing table");
 
     if ("upgrade-agent-stop".equals(scenario)) {
-      Files.writeString(
-          Files.createDirectories(SailPaths.projectDir("acme")).resolve("sail.yaml"),
-          "name: acme\n");
+      db.execute(
+          "INSERT INTO projects (name, definition, created_by, created_at, updated_by, updated_at)"
+              + " VALUES ('acme', 'name: acme', 'it', 'now', 'it', 'now')");
       var output = new ByteArrayOutputStream();
       var original = System.out;
       try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {

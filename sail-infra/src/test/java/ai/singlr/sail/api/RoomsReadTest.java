@@ -101,7 +101,7 @@ class RoomsReadTest {
     Files.writeString(yaml, "name: acme\n");
     return new SailOperations(
             new ShellExecutor(false),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             null,
             null,
             new SpecStore(db),

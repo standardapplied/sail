@@ -65,7 +65,6 @@ class SyncCommandTest {
           OperationsFactory.create(
                   db,
                   new ShellExecutor(true),
-                  "sail.yaml",
                   null,
                   null,
                   SyncScheduler.disabled(),
@@ -113,7 +112,6 @@ class SyncCommandTest {
           OperationsFactory.create(
                   db,
                   new ShellExecutor(true),
-                  "sail.yaml",
                   null,
                   null,
                   SyncScheduler.disabled(),
@@ -155,7 +153,6 @@ class SyncCommandTest {
           OperationsFactory.create(
                   db,
                   new ShellExecutor(true),
-                  "sail.yaml",
                   null,
                   null,
                   SyncScheduler.disabled(),

@@ -251,7 +251,7 @@ class RoomCommitGuardTest {
             });
     var guard =
         new RoomCommitGuard(
-            runStore, new ProjectLoader(shell, yaml.toString()), events::add, shell);
+            runStore, new ProjectLoader(shell, TestProjects.reading(yaml)), events::add, shell);
 
     guard.guardRoomRun("acme", "run-1");
 

@@ -14,6 +14,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
@@ -34,7 +35,6 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -90,16 +90,13 @@ class DispatchCommandWiringTest {
   @TempDir Path tempDir;
 
   private Sqlite db;
-  private String yaml;
 
   private SailOperations cliOperations(ShellExec shell, List<Event> events) throws Exception {
     return Acting.system(
         () -> {
-          var yamlPath = tempDir.resolve("sail.yaml");
-          Files.writeString(yamlPath, YAML);
-          yaml = yamlPath.toString();
           db = Sqlite.open(tempDir.resolve("control-plane.db"));
           new SchemaManager(db).migrate();
+          new ProjectStore(db).upsert("acme", YAML);
           var specStore = new SpecStore(db);
           Acting.as(
               "me",
@@ -126,7 +123,6 @@ class DispatchCommandWiringTest {
           return DispatchCommand.operations(
               db,
               shell,
-              yaml,
               events::add,
               new WatcherSpawner(shell, (command, logPath) -> 4242L),
               (project, config) -> "",
@@ -212,7 +208,7 @@ class DispatchCommandWiringTest {
     var server =
         new SailOperations(
             shell(),
-            yaml,
+            ProjectReader.ofCatalog(new ProjectStore(db)),
             null,
             null,
             new SpecStore(db),

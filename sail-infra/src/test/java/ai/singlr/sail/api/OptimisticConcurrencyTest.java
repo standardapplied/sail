@@ -13,6 +13,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -47,7 +48,12 @@ class OptimisticConcurrencyTest {
     var bus = new EventBus();
     var persister = new SpecStoreAuditPersister(eventStore);
     var operations =
-        new SailOperations(new ShellExecutor(false), "sail.yaml", bus, persister, specStore);
+        new SailOperations(
+            new ShellExecutor(false),
+            ProjectReader.ofCatalog(new ProjectStore(db)),
+            bus,
+            persister,
+            specStore);
     server =
         new SailApiServer(
             "127.0.0.1",

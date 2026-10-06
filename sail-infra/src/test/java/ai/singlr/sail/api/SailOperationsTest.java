@@ -112,7 +112,7 @@ class SailOperationsTest {
 
   @Test
   void healthReturnsOk() {
-    var operations = new SailOperations(new FakeShell(), "sail.yaml");
+    var operations = new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null));
 
     assertEquals("ok", get(operations.health(), "status"));
   }
@@ -213,7 +213,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
             shell().on("incus list --format json", EMPTY_JSON),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             null,
             null,
             new SpecStore(db),
@@ -236,7 +236,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
             new FakeShell(),
-            "sail.yaml",
+            ProjectReader.ofCatalog(new ProjectStore(db)),
             null,
             null,
             new SpecStore(db),
@@ -260,7 +260,9 @@ class SailOperationsTest {
 
   @Test
   void fdesFailsWhenTheRosterIsNotWired() {
-    assertError(ErrorCode.INTERNAL, new SailOperations(new FakeShell(), "sail.yaml").fdes());
+    assertError(
+        ErrorCode.INTERNAL,
+        new SailOperations(new FakeShell(), ProjectReader.ofCatalog(null)).fdes());
   }
 
   @Test
@@ -676,7 +678,7 @@ class SailOperationsTest {
             .on(
                 "incus snapshot list acme",
                 "[{\"name\": \"snap-1\", \"created_at\": \"2026-08-17T08:00:00Z\"}]");
-    var operations = new SailOperations(shell, yaml.toString());
+    var operations = new SailOperations(shell, TestProjects.reading(yaml));
 
     var list = operations.snapshots("acme");
     assertEquals("dispatch", list.orThrow().snapshots().getFirst().source());
@@ -686,7 +688,7 @@ class SailOperationsTest {
 
     assertEquals(
         "accepted", operations.restoreSnapshot("acme", "snap-1", "uday").orThrow().status());
-    var deleter = new SailOperations(shell, yaml.toString());
+    var deleter = new SailOperations(shell, TestProjects.reading(yaml));
     assertEquals("accepted", deleter.deleteSnapshot("acme", "snap-1").orThrow().status());
   }
 
@@ -706,7 +708,7 @@ class SailOperationsTest {
       var operations =
           new SailOperations(
               shell,
-              yaml.toString(),
+              TestProjects.reading(yaml),
               (command, logPath) -> 4242L,
               null,
               null,
@@ -1671,7 +1673,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
             shell().on("incus list ^acme$", RUNNING_JSON),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             new EventBus(),
             null,
             new SpecStore(db),
@@ -1698,7 +1700,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
                 shell(),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 new EventBus(),
                 null,
                 specStore,
@@ -1733,7 +1735,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
                 shell(),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 new EventBus(),
                 null,
                 new SpecStore(db),
@@ -1762,7 +1764,9 @@ class SailOperationsTest {
   @Test
   void boxCredentialLaneFailsClosedWhenUnwired() {
     assertTrue(
-        new SailOperations(shell(), "sail.yaml").boxActorForCredential("sailbox_x").isEmpty());
+        new SailOperations(shell(), ProjectReader.ofCatalog(null))
+            .boxActorForCredential("sailbox_x")
+            .isEmpty());
   }
 
   @Test
@@ -1823,7 +1827,7 @@ class SailOperationsTest {
     var operations =
         new SailOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             null,
             null,
             store,
@@ -2016,7 +2020,8 @@ class SailOperationsTest {
               },
               latch));
       var operations =
-          new SailOperations(shell, yaml.toString(), (cmd, log) -> 4242L, bus, null, store, null);
+          new SailOperations(
+              shell, TestProjects.reading(yaml), (cmd, log) -> 4242L, bus, null, store, null);
 
       dispatch(operations, "acme", request("auth"));
 
@@ -2489,7 +2494,8 @@ class SailOperationsTest {
 
   @Test
   void missingDescriptorMapsToNotFound() {
-    var operations = new SailOperations(shell(), tempDir.resolve("missail.yaml").toString());
+    var operations =
+        new SailOperations(shell(), TestProjects.reading(tempDir.resolve("missail.yaml")));
 
     var error = operations.project("acme");
 
@@ -2516,7 +2522,8 @@ class SailOperationsTest {
   @Test
   void publishEventFailsWithNoControlPlaneToDecideItBy(@TempDir Path tmp) throws Exception {
     try (var bus = new EventBus()) {
-      var operations = new SailOperations(shell(), baseYamlPath(tmp).toString(), bus, null);
+      var operations =
+          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tmp)), bus, null);
       var result =
           Actor.call(
               ADMIN,
@@ -2695,7 +2702,8 @@ class SailOperationsTest {
             @Override
             public void onEvent(Event event) {}
           });
-      var operations = new SailOperations(shell(), baseYamlPath(tempDir).toString(), bus, null);
+      var operations =
+          new SailOperations(shell(), TestProjects.reading(baseYamlPath(tempDir)), bus, null);
 
       var result = operations.eventBusStats();
 
@@ -2781,7 +2789,7 @@ class SailOperationsTest {
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
     var operations =
         new SailOperations(
-            shell(), yaml.toString(), null, null, null, specStore, reviewStore, null);
+            shell(), TestProjects.reading(yaml), null, null, null, specStore, reviewStore, null);
 
     assertTrue(operations.reviewDetail(reviewId).isSuccess());
     assertTrue(Acting.by(ADMIN, () -> operations.dismissFinding(reviewId, findingId)).isSuccess());
@@ -3063,7 +3071,9 @@ class SailOperationsTest {
     var db = Sqlite.open(dir.resolve("events.db"));
     new SchemaManager(db).migrate();
     return TestControlPlane.standalone(
-        new SailOperations(shell(), baseYamlPath(dir).toString(), bus, persister), db, dir);
+        new SailOperations(shell(), TestProjects.reading(baseYamlPath(dir)), bus, persister),
+        db,
+        dir);
   }
 
   private Path baseYamlPath(Path dir) throws IOException {
@@ -3169,7 +3179,7 @@ class SailOperationsTest {
     seedSessions.accept(sessionStore);
     return new SailOperations(
         shell,
-        yaml.toString(),
+        TestProjects.reading(yaml),
         (command, logPath) -> 4242L,
         bus,
         null,
@@ -3192,7 +3202,7 @@ class SailOperationsTest {
     seedProjects.accept(projectStore);
     return new SailOperations(
         shell,
-        yaml.toString(),
+        TestProjects.reading(yaml),
         null,
         null,
         null,
@@ -3221,7 +3231,7 @@ class SailOperationsTest {
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =
         watcher != null ? watcher : (command, logPath) -> 4242L;
-    return new SailOperations(shell, yaml.toString(), fallback, null, null, store, null);
+    return new SailOperations(shell, TestProjects.reading(yaml), fallback, null, null, store, null);
   }
 
   /**

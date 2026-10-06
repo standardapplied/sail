@@ -118,7 +118,7 @@ class AgentPrincipalLifecycleTest {
     var dispatchOps =
         new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             runStore,
@@ -157,7 +157,7 @@ class AgentPrincipalLifecycleTest {
     var operations =
         new SailOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             (command, logPath) -> 4242L,
             bus,
             null,
@@ -229,7 +229,7 @@ class AgentPrincipalLifecycleTest {
     var stopOps =
         new StopOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             runStore,
             bus::publish,
@@ -287,7 +287,7 @@ class AgentPrincipalLifecycleTest {
     var dispatchOps =
         new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             runStore,
@@ -325,7 +325,7 @@ class AgentPrincipalLifecycleTest {
     var operations =
         new SailOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             (command, logPath) -> 4242L,
             bus,
             null,

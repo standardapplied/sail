@@ -71,7 +71,7 @@ public final class AgentSweepCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
@@ -141,7 +141,6 @@ public final class AgentSweepCommand implements Runnable {
         };
     return OperationsFactory.open(
         shell,
-        file,
         new OperationHooks(
             event -> {},
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),

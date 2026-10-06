@@ -19,7 +19,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -83,10 +82,7 @@ public final class AgentStopCommand implements Runnable {
     var handle = Objects.toString(HostSync.handle(), "");
     try (var operations =
         OperationsFactory.open(
-            shell,
-            SailPaths.PROJECT_DESCRIPTOR,
-            hooks(shell, this::publishLifecycle, listener()),
-            SessionYield.NONE)) {
+            shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
       var outcome = stopAsOperator(operations, name, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
@@ -119,8 +115,7 @@ public final class AgentStopCommand implements Runnable {
       ShellExec shell,
       DispatchOperations.EventSink events,
       StopOperations.Listener listener) {
-    return OperationsFactory.create(
-        db, shell, SailPaths.PROJECT_DESCRIPTOR, hooks(shell, events, listener), SessionYield.NONE);
+    return OperationsFactory.create(db, shell, hooks(shell, events, listener), SessionYield.NONE);
   }
 
   private static OperationHooks hooks(

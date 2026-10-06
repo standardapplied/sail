@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -52,7 +53,7 @@ class SpecMessageOperationsTest {
     operations =
         new SailOperations(
                 new ShellExecutor(false),
-                "sail.yaml",
+                ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
                 null,
                 new SpecStore(db),
@@ -320,7 +321,7 @@ class SpecMessageOperationsTest {
     var withRooms =
         new SailOperations(
                 new ShellExecutor(false),
-                "sail.yaml",
+                ProjectReader.ofCatalog(new ProjectStore(db)),
                 bus,
                 null,
                 new SpecStore(db),

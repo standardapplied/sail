@@ -123,7 +123,7 @@ class EventDoorTest {
     operations =
         TestControlPlane.on(
             OperationsFactory.create(
-                db, SHELL, "sail.yaml", bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                db, SHELL, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
             db,
             tempDir,
             MAIN);

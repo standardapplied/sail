@@ -1504,7 +1504,8 @@ class StopOperationsTest {
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
-    return new StopOperations(shell, yaml.toString(), specStore, runStore, sink, halter, listener);
+    return new StopOperations(
+        shell, TestProjects.reading(yaml), specStore, runStore, sink, halter, listener);
   }
 
   private void seedSpec(String id, SpecStatus status, String assignee) {

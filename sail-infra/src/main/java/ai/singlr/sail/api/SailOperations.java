@@ -27,7 +27,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -311,7 +310,6 @@ public final class SailOperations implements HostOperations {
   }
 
   private final ShellExec shell;
-  private final String file;
   private final WatcherSpawner watcherSpawner;
   private final EventBus eventBus;
   private final AuditPersister auditPersister;
@@ -337,34 +335,38 @@ public final class SailOperations implements HostOperations {
   private EventStore eventStore;
 
   public SailOperations() {
-    this(new ShellExecutor(false), SailPaths.PROJECT_DESCRIPTOR);
+    this(new ShellExecutor(false), ProjectReader.ofCatalog(null));
   }
 
-  public SailOperations(ShellExec shell, String file) {
-    this(shell, file, WatcherSpawner::spawnProcess);
+  public SailOperations(ShellExec shell, ProjectReader definitions) {
+    this(shell, definitions, WatcherSpawner::spawnProcess);
   }
 
-  SailOperations(ShellExec shell, String file, WatcherSpawner.ProcessSpawner watcherFallback) {
-    this(shell, file, watcherFallback, null, null);
+  SailOperations(
+      ShellExec shell, ProjectReader definitions, WatcherSpawner.ProcessSpawner watcherFallback) {
+    this(shell, definitions, watcherFallback, null, null);
   }
 
   /** Construct with explicit event-bus wiring; used by {@link SailApiServer}. */
   public SailOperations(
-      ShellExec shell, String file, EventBus eventBus, AuditPersister auditPersister) {
-    this(shell, file, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
+      ShellExec shell,
+      ProjectReader definitions,
+      EventBus eventBus,
+      AuditPersister auditPersister) {
+    this(shell, definitions, WatcherSpawner::spawnProcess, eventBus, auditPersister, null, null);
   }
 
   /** Construct with database-backed stores; used by the control plane server. */
   public SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       SpecStore specStore,
       ReviewStore reviewStore) {
     this(
         shell,
-        file,
+        definitions,
         WatcherSpawner::spawnProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
@@ -375,17 +377,17 @@ public final class SailOperations implements HostOperations {
   /** Construct with database-backed spec store (no review store). */
   public SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       SpecStore specStore) {
-    this(shell, file, eventBus, auditSubscriber, specStore, null);
+    this(shell, definitions, eventBus, auditSubscriber, specStore, null);
   }
 
   /** Construct with the project catalog included but no sync or run aggregate. */
   public SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       SpecStore specStore,
@@ -393,7 +395,7 @@ public final class SailOperations implements HostOperations {
       ProjectStore projectStore) {
     this(
         shell,
-        file,
+        definitions,
         eventBus,
         auditSubscriber,
         specStore,
@@ -406,17 +408,18 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * As {@link #SailOperations(ShellExec, String, EventBus, EventSubscriber, SpecStore, ReviewStore,
-   * ProjectStore)} with the node's sync-on-write scheduler, the run aggregate, the FDE roster, and
-   * the pty host seam; used by {@code sail server start} so spec mutations propagate to main, stale
-   * reads freshen without a manual {@code sail sync}, dispatches record their runs — without the
-   * run store every {@code /v1/runs} route refuses and API-lane dispatches silently record no run
-   * at all — dispatch trusts only handles present in the synced roster, and a claim ends the
-   * resumed conversations it displaces. Every other constructor serves lanes with no pty host.
+   * As {@link #SailOperations(ShellExec, ProjectReader, EventBus, EventSubscriber, SpecStore,
+   * ReviewStore, ProjectStore)} with the node's sync-on-write scheduler, the run aggregate, the FDE
+   * roster, and the pty host seam; used by {@code sail server start} so spec mutations propagate to
+   * main, stale reads freshen without a manual {@code sail sync}, dispatches record their runs —
+   * without the run store every {@code /v1/runs} route refuses and API-lane dispatches silently
+   * record no run at all — dispatch trusts only handles present in the synced roster, and a claim
+   * ends the resumed conversations it displaces. Every other constructor serves lanes with no pty
+   * host.
    */
   public SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       EventBus eventBus,
       EventSubscriber auditSubscriber,
       SpecStore specStore,
@@ -428,7 +431,7 @@ public final class SailOperations implements HostOperations {
       SessionYield sessionYield) {
     this(
         shell,
-        file,
+        definitions,
         WatcherSpawner::spawnProcess,
         eventBus,
         auditSubscriber instanceof AuditPersister ap ? ap : null,
@@ -506,27 +509,35 @@ public final class SailOperations implements HostOperations {
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister) {
-    this(shell, file, watcherFallback, eventBus, auditPersister, null, null);
+    this(shell, definitions, watcherFallback, eventBus, auditPersister, null, null);
   }
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
       SpecStore specStore,
       ReviewStore reviewStore) {
-    this(shell, file, watcherFallback, eventBus, auditPersister, specStore, reviewStore, null);
+    this(
+        shell,
+        definitions,
+        watcherFallback,
+        eventBus,
+        auditPersister,
+        specStore,
+        reviewStore,
+        null);
   }
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
@@ -535,7 +546,7 @@ public final class SailOperations implements HostOperations {
       RunStore runStore) {
     this(
         shell,
-        file,
+        definitions,
         watcherFallback,
         eventBus,
         auditPersister,
@@ -551,7 +562,7 @@ public final class SailOperations implements HostOperations {
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
@@ -562,7 +573,7 @@ public final class SailOperations implements HostOperations {
       Supplier<ConnectEnvironment> connectEnvironment) {
     this(
         shell,
-        file,
+        definitions,
         watcherFallback,
         eventBus,
         auditPersister,
@@ -578,7 +589,7 @@ public final class SailOperations implements HostOperations {
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
@@ -590,7 +601,7 @@ public final class SailOperations implements HostOperations {
       SyncScheduler syncScheduler) {
     this(
         shell,
-        file,
+        definitions,
         watcherFallback,
         eventBus,
         auditPersister,
@@ -606,7 +617,7 @@ public final class SailOperations implements HostOperations {
 
   SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
@@ -620,7 +631,7 @@ public final class SailOperations implements HostOperations {
       SessionYield sessionYield) {
     this(
         shell,
-        file,
+        definitions,
         watcherFallback,
         eventBus,
         auditPersister,
@@ -645,7 +656,7 @@ public final class SailOperations implements HostOperations {
 
   public SailOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       WatcherSpawner.ProcessSpawner watcherFallback,
       EventBus eventBus,
       AuditPersister auditPersister,
@@ -659,7 +670,6 @@ public final class SailOperations implements HostOperations {
       SessionYield sessionYield,
       OperationHooks hooks) {
     this.shell = shell;
-    this.file = file;
     this.watcherSpawner = hooks.watcher();
     this.eventBus = eventBus;
     this.auditPersister = auditPersister;
@@ -670,7 +680,7 @@ public final class SailOperations implements HostOperations {
     this.connectEnvironment = connectEnvironment;
     this.syncScheduler = syncScheduler;
     this.fdeStore = fdeStore;
-    this.projects = new ProjectLoader(shell, file);
+    this.projects = new ProjectLoader(shell, definitions);
     this.snapshotOps = new SnapshotOperations(shell, projects, runStore, this::publishOnBus);
     this.globalSpecOps =
         new GlobalSpecOperations(
@@ -679,7 +689,7 @@ public final class SailOperations implements HostOperations {
     this.dispatchOps =
         new DispatchOperations(
             shell,
-            file,
+            definitions,
             specStore,
             reviewStore,
             runStore,
@@ -694,7 +704,7 @@ public final class SailOperations implements HostOperations {
         specStore != null && runStore != null
             ? new StopOperations(
                 shell,
-                file,
+                definitions,
                 specStore,
                 runStore,
                 hooks.events(),

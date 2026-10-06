@@ -85,8 +85,7 @@ class DisabledFdeTest {
     boxCredential = new BoxCredentialStore(db).replace("mady");
     runCredential = reserveRun("mady", "acme", "seed");
     operations =
-        OperationsFactory.create(
-                db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,

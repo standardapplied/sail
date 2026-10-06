@@ -160,7 +160,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var dispatch =
         new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             reviewStore,
             runStore,

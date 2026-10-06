@@ -384,7 +384,6 @@ public final class RunCommand implements Runnable {
         };
     return OperationsFactory.open(
         shell,
-        file,
         new OperationHooks(
             this::publishLifecycle,
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),

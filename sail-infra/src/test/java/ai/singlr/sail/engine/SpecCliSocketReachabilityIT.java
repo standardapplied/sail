@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.LocalApiSocket;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.TestControlPlane;
@@ -17,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -81,7 +83,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
       var operations =
           new SailOperations(
                   new ShellExecutor(false),
-                  "sail.yaml",
+                  ProjectReader.ofCatalog(new ProjectStore(db)),
                   bus,
                   null,
                   specStore,

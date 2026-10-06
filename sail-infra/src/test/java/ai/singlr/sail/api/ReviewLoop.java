@@ -159,7 +159,7 @@ final class ReviewLoop implements AutoCloseable {
     operations =
         new DispatchOperations(
                 container,
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 specs,
                 reviews,
                 runs,
@@ -448,7 +448,7 @@ final class ReviewLoop implements AutoCloseable {
   StopOperations stops(StopOperations.AgentHalter halter) {
     return new StopOperations(
         container,
-        yaml.toString(),
+        TestProjects.reading(yaml),
         specs,
         runs,
         bus::publish,

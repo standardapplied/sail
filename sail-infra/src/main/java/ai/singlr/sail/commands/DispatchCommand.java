@@ -92,7 +92,7 @@ public final class DispatchCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
@@ -129,7 +129,6 @@ public final class DispatchCommand implements Runnable {
     try (var operations =
         OperationsFactory.open(
             shell,
-            file,
             new OperationHooks(
                 this::publishLifecycle,
                 new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
@@ -150,7 +149,6 @@ public final class DispatchCommand implements Runnable {
   static SailOperations operations(
       Sqlite db,
       ShellExec shell,
-      String file,
       DispatchOperations.EventSink events,
       WatcherSpawner watcherSpawner,
       DispatchOperations.Snapshotter snapshotter,
@@ -160,7 +158,6 @@ public final class DispatchCommand implements Runnable {
     return OperationsFactory.create(
         db,
         shell,
-        file,
         new OperationHooks(
             events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
         sessionYield);

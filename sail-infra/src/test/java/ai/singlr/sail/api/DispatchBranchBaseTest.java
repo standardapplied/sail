@@ -146,7 +146,7 @@ class DispatchBranchBaseTest {
     var ops =
         new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             new RunStore(db),
