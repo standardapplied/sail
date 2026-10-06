@@ -154,7 +154,7 @@ public record StageSkill(String name, String body, List<File> files) {
    * matter that is never closed is refused. Any other first line makes the whole file the body.
    */
   public static StageSkill of(String name, String skillMd, List<File> files) {
-    var text = skillMd.startsWith("﻿") ? skillMd.substring(1) : skillMd;
+    var text = skillMd.startsWith("\uFEFF") ? skillMd.substring(1) : skillMd;
     var lines = text.lines().toList();
     if (lines.isEmpty() || !lines.getFirst().equals(FENCE)) {
       return new StageSkill(name, String.join("\n", lines).strip(), files);

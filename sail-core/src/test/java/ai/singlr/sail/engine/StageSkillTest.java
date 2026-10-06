@@ -71,8 +71,8 @@ class StageSkillTest {
   void aByteOrderMarkIsDropped() {
     var plain = "---\nname: mine\n---\nJudge it my way.\n";
 
-    assertEquals(skill(plain), skill("﻿" + plain));
-    assertEquals("Judge it my way.", skill("﻿Judge it my way.").body());
+    assertEquals(skill(plain), skill("\uFEFF" + plain));
+    assertEquals("Judge it my way.", skill("\uFEFFJudge it my way.").body());
   }
 
   @Test

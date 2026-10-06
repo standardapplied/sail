@@ -200,6 +200,21 @@ class StageSkillInstallerTest {
   }
 
   @Test
+  void aStampReadThatFailedIsNotBelievedWhateverItPrinted() throws Exception {
+    var source = Source.of("SKILL.md", "Body.\n");
+    install("run-1", source);
+    container.commands.clear();
+    container.failingReads = true;
+
+    install("run-2", source);
+
+    assertEquals(1, container.pushes().size(), "the skill is installed again");
+    assertEquals(
+        with(Map.of("SKILL.md", "Body.\n"), StageSkillInstaller.fingerprint(source.skill())),
+        installed());
+  }
+
+  @Test
   void aSkillThatGainedChangedAndLostFilesLeavesExactlyTheNewOnes() throws Exception {
     install(
         "run-1", Source.of("SKILL.md", "One.\n", "kept.md", "Kept.\n", "dropped/old.md", "Old.\n"));
@@ -325,10 +340,7 @@ class StageSkillInstallerTest {
   @Test
   void aBuildFolderJustUnderTheStaleAgeIsLeft() throws Exception {
     var recent = Files.createDirectories(Path.of(folder + ".slow-run"));
-    Files.setLastModifiedTime(
-        recent,
-        FileTime.from(
-            Instant.now().minus(Duration.ofMinutes(StageSkillInstaller.STALE_BUILD_MINUTES - 2))));
+    Files.setLastModifiedTime(recent, FileTime.from(Instant.now().minus(Duration.ofMinutes(58))));
 
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
@@ -461,6 +473,7 @@ class StageSkillInstallerTest {
     private String throwing;
     private TimeoutException thrown;
     private String alsoThrowing;
+    private boolean failingReads;
 
     static List<String> inner(List<String> command) {
       var boundary = command.indexOf("--");
@@ -511,7 +524,9 @@ class StageSkillInstallerTest {
       var process = new ProcessBuilder(inner(command)).start();
       var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
       var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
-      return new Result(process.waitFor(), stdout, stderr);
+      var exit = process.waitFor();
+      return new Result(
+          failingReads && inner(command).getFirst().equals("cat") ? 1 : exit, stdout, stderr);
     }
 
     private static Result push(List<String> command) {
