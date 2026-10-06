@@ -9,8 +9,8 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
 import java.util.Optional;
@@ -61,8 +61,7 @@ public final class AdhocRunner {
       DispatchOperations.AdhocPreparer preparer) {
     var loaded = projects.loadRunning(project);
     var config = loaded.config();
-    var agentType =
-        config.agent() != null ? config.agent().type() : AgentCli.CLAUDE_CODE.yamlName();
+    var agentType = config.agent() != null ? config.agent().type() : Harnesses.DEFAULT.yamlName();
     var runId = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(runId);
     var background = request.background();

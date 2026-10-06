@@ -29,6 +29,7 @@ public final class ScriptedShellExecutor implements ShellExec {
   private final Set<String> consumable = new HashSet<>();
   private final Set<String> consumed = new HashSet<>();
   private final List<String> invocations = new ArrayList<>();
+  private final List<List<String>> arguments = new ArrayList<>();
   private final Result defaultResult;
 
   public ScriptedShellExecutor() {
@@ -106,6 +107,14 @@ public final class ScriptedShellExecutor implements ShellExec {
         : Optional.empty();
   }
 
+  /**
+   * Returns each executed command as the arguments it was given, in order: what {@link
+   * #invocations} joins, for a test that must tell one argument from two.
+   */
+  public List<List<String>> arguments() {
+    return Collections.unmodifiableList(arguments);
+  }
+
   /** Returns an unmodifiable list of all commands that were executed, in order. */
   public List<String> invocations() {
     return Collections.unmodifiableList(invocations);
@@ -120,6 +129,7 @@ public final class ScriptedShellExecutor implements ShellExec {
   public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
     var joined = String.join(" ", command);
     invocations.add(joined);
+    arguments.add(List.copyOf(command));
     for (var entry : throwing.entrySet()) {
       if (joined.contains(entry.getKey())) {
         throw entry.getValue();

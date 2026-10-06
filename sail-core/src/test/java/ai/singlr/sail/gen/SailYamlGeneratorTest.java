@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -373,6 +374,13 @@ class SailYamlGeneratorTest {
 
     assertTrue(yaml.contains("agent:"));
     assertTrue(yaml.contains("type: claude-code"));
+    assertTrue(
+        yaml.contains("# type: primary agent for `sail agent start` (claude-code | codex)\n"),
+        "the comment names exactly the harnesses sail knows: " + yaml);
+    assertEquals(
+        "claude-code | codex",
+        String.join(" | ", Harnesses.names()),
+        "a harness added to Harnesses.all() shows up in this comment");
     assertTrue(yaml.contains("auto_snapshot: true"));
     assertTrue(yaml.contains("auto_branch: true"));
     assertTrue(yaml.contains("branch_prefix: agent/"));

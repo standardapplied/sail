@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import org.junit.jupiter.api.Test;
@@ -214,14 +215,20 @@ class ContainerSailSetupTest {
             SailSessionReport.SCRIPT_PATH,
             SpecCliHelper.SCRIPT_PATH,
             SpecCliHelper.PROFILE_PATH,
-            ClaudeCodeHookConfig.SETTINGS_PATH,
-            CodexHookConfig.SETTINGS_PATH,
+            Harnesses.of("claude-code").hooks().path(),
+            Harnesses.of("codex").hooks().path(),
             SshdKeepalive.DROP_IN_PATH),
         java.util.List.copyOf(files.keySet()),
         "the fingerprint must cover every sail-owned in-container file, in stable order — a"
             + " script riding in this list IS its rollout: the fingerprint changes and every"
             + " container converges on next apply or dispatch");
     files.forEach((path, content) -> assertFalse(content.isBlank(), path + " has no payload"));
+    for (var harness : Harnesses.all()) {
+      assertEquals(
+          HarnessHooks.render(harness),
+          files.get(harness.hooks().path()),
+          "each harness's hook file holds its own hooks");
+    }
   }
 
   @Test

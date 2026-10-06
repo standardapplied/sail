@@ -7,6 +7,7 @@ package ai.singlr.sail.gen;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.Map;
 
 /**
@@ -220,9 +221,10 @@ public final class SailYamlGenerator {
     sb.append(
         """
         # AI coding agent configuration.
-        # type: primary agent for `sail agent start` (claude-code | codex | helios)
+        # type: primary agent for `sail agent start` (__HARNESSES__)
         # install: agent CLIs to install during provisioning (defaults to [type] if omitted)
-        """);
+        """
+            .replace("__HARNESSES__", String.join(" | ", Harnesses.names())));
     sb.append(YamlUtil.dumpToString(Map.of("agent", agent.toMap())));
     sb.append("\n");
   }

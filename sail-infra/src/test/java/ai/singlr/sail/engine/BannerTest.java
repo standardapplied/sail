@@ -804,14 +804,13 @@ class BannerTest {
   }
 
   @Test
-  void agentAuthTunnelPrintsPort3000() {
+  void theAgentAuthTunnelForwardsTheGivenPortAtBothEnds() {
     var out = new ByteArrayOutputStream();
-    Banner.printAgentAuthTunnel("acme", new PrintStream(out), Ansi.OFF);
+    Banner.printAgentAuthTunnel("acme", 4100, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
-    assertTrue(output.contains("-L 3000:localhost:3000"));
-    assertTrue(output.contains("acme"));
-    assertTrue(output.contains("-N"));
+    assertTrue(
+        output.endsWith("ssh -N -L 4100:localhost:4100 acme" + System.lineSeparator()), output);
     assertTrue(output.contains("Agent auth"));
   }
 

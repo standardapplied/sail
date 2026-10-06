@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,6 +86,39 @@ public final class ProjectInitCommand implements Runnable {
             "    @|faint Next:|@ review the file, then run @|bold "
                 + nextApplyCommand(config.name(), outputPath)
                 + "|@"));
+  }
+
+  /**
+   * Asks which harness the project's agent runs, offering the default, and which others to install
+   * beside it. Answers {@code null} for a project that wants no agent.
+   */
+  static SailYaml.Agent promptAgent(PrintStream out, Ansi ansi) {
+    var agentType =
+        ConsoleHelper.promptWithDefault(out, ansi, agentTypePrompt(), Harnesses.DEFAULT.yamlName());
+    if ("none".equalsIgnoreCase(agentType)) {
+      return null;
+    }
+    List<String> install = null;
+    if (ConsoleHelper.confirmNo("Install additional agent CLIs?")) {
+      install = new ArrayList<>();
+      install.add(agentType);
+      do {
+        var other = ConsoleHelper.promptRequired(out, ansi, agentCliPrompt());
+        if (!other.equals(agentType)) {
+          install.add(other);
+        }
+      } while (ConsoleHelper.confirmNo("Add another?"));
+    }
+    return new SailYaml.Agent(
+        agentType, true, "agent/", true, install, null, null, null, null, null);
+  }
+
+  static String agentTypePrompt() {
+    return "Agent type (" + String.join("/", Harnesses.names()) + "/none)";
+  }
+
+  static String agentCliPrompt() {
+    return "Agent CLI name (" + String.join("/", Harnesses.names()) + ")";
   }
 
   static Path defaultOutputPath(String name) {
@@ -207,26 +241,7 @@ public final class ProjectInitCommand implements Runnable {
     var ssh = new SailYaml.Ssh(sshUser, authorizedKeys);
 
     out.println();
-    var agentType =
-        ConsoleHelper.promptWithDefault(
-            out, ansi, "Agent type (claude-code/codex/helios/none)", "claude-code");
-    SailYaml.Agent agent = null;
-    if (!"none".equalsIgnoreCase(agentType)) {
-      List<String> install = null;
-      if (ConsoleHelper.confirmNo("Install additional agent CLIs?")) {
-        install = new ArrayList<>();
-        install.add(agentType);
-        do {
-          var cli = ConsoleHelper.promptRequired(out, ansi, "Agent CLI name (claude-code/codex)");
-          if (!cli.equals(agentType)) {
-            install.add(cli);
-          }
-        } while (ConsoleHelper.confirmNo("Add another?"));
-      }
-      agent =
-          new SailYaml.Agent(
-              agentType, true, "agent/", true, install, null, null, null, null, null);
-    }
+    var agent = promptAgent(out, ansi);
 
     return new SailYaml(
         name,

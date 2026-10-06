@@ -14,7 +14,12 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -26,10 +31,12 @@ class AgentSessionTest {
 
   private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final AgentUnit RUN_UNIT = AgentUnit.forRun(RUN_ID);
+  private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");
+  private static final Harness CODEX = Harnesses.of("codex");
 
   private static List<String> background(
       boolean fullPermissions,
-      AgentCli cli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -39,7 +46,7 @@ class AgentSessionTest {
         "dev",
         "/home/dev/workspace",
         fullPermissions,
-        cli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -51,7 +58,7 @@ class AgentSessionTest {
 
   private static List<String> foreground(
       boolean fullPermissions,
-      AgentCli cli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -61,7 +68,7 @@ class AgentSessionTest {
         "dev",
         "/home/dev/workspace",
         fullPermissions,
-        cli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -695,7 +702,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandStructure() {
-    var cmd = background(false, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = background(false, CLAUDE_CODE, null, null, null, null);
 
     assertEquals("incus", cmd.getFirst());
     assertTrue(cmd.contains("acme"));
@@ -708,7 +715,7 @@ class AgentSessionTest {
                 + " --setenv \"SAIL_RUN_ROLE=${10}\" --unit "
                 + RUN_UNIT.unitName()));
     assertTrue(joined.contains("claude --print"));
-    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
+    assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(cmd.contains(RUN_UNIT.logPath()));
     assertTrue(cmd.contains(RUN_UNIT.pidPath()));
     assertTrue(joined.contains(RUN_UNIT.taskPath()));
@@ -717,7 +724,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandRedirectsToARunScopedLog() {
-    var cmd = background(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var cmd = background(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
 
     var joined = String.join(" ", cmd);
     assertTrue(
@@ -759,7 +766,7 @@ class AgentSessionTest {
         "dev",
         "/home/dev/workspace",
         true,
-        AgentCli.CLAUDE_CODE,
+        CLAUDE_CODE,
         null,
         null,
         "spec-1",
@@ -771,7 +778,7 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandRedirectsToARunScopedLog() {
-    var cmd = foreground(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var cmd = foreground(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
 
     var joined = String.join(" ", cmd);
     assertTrue(
@@ -784,7 +791,7 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandWritesTheRunScopedPidFile() {
-    var cmd = foreground(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var cmd = foreground(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
 
     assertEquals(
         RUN_UNIT.pidPath(),
@@ -803,7 +810,7 @@ class AgentSessionTest {
             "dev",
             "/home/dev/workspace",
             true,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             "spec-1",
@@ -819,7 +826,7 @@ class AgentSessionTest {
             "dev",
             "/home/dev/workspace",
             true,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             "spec-1",
@@ -837,8 +844,8 @@ class AgentSessionTest {
 
   @Test
   void theTwelveArgumentOverloadsExportABlankRole() {
-    var background = background(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
-    var foreground = foreground(true, AgentCli.CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var background = background(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
+    var foreground = foreground(true, CLAUDE_CODE, null, null, "spec-1", "claude-code");
 
     assertEquals("", background.getLast());
     assertEquals("", foreground.getLast());
@@ -852,7 +859,7 @@ class AgentSessionTest {
             "dev",
             "/home/dev/workspace",
             true,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             "spec-1",
@@ -878,7 +885,7 @@ class AgentSessionTest {
             "dev",
             "/home/dev/workspace",
             true,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             "spec-1",
@@ -894,7 +901,7 @@ class AgentSessionTest {
             "dev",
             "/home/dev/workspace",
             true,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             "spec-1",
@@ -918,7 +925,7 @@ class AgentSessionTest {
                 "dev",
                 "/home/dev/workspace",
                 true,
-                AgentCli.CLAUDE_CODE,
+                CLAUDE_CODE,
                 null,
                 null,
                 "spec-1",
@@ -943,7 +950,7 @@ class AgentSessionTest {
                 "dev",
                 "/home/dev/workspace",
                 false,
-                AgentCli.CLAUDE_CODE,
+                CLAUDE_CODE,
                 null,
                 null,
                 null,
@@ -959,7 +966,7 @@ class AgentSessionTest {
                 "dev",
                 "/home/dev/workspace",
                 false,
-                AgentCli.CLAUDE_CODE,
+                CLAUDE_CODE,
                 null,
                 null,
                 null,
@@ -1000,7 +1007,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandStreamsClaudeOutput() {
-    var cmd = background(false, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = background(false, CLAUDE_CODE, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(
@@ -1010,7 +1017,7 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandDoesNotStream() {
-    var cmd = foreground(false, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = foreground(false, CLAUDE_CODE, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertFalse(
@@ -1020,7 +1027,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandCodexDoesNotGetStreamFlag() {
-    var cmd = background(false, AgentCli.CODEX, null, null, null, null);
+    var cmd = background(false, CODEX, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertFalse(
@@ -1029,7 +1036,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandPassesEmptySpecForAdHocLaunches() {
-    var cmd = background(false, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = background(false, CLAUDE_CODE, null, null, null, null);
 
     var specId = cmd.get(cmd.size() - 5);
     var agent = cmd.get(cmd.size() - 4);
@@ -1043,7 +1050,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandPassesSpecIdAndAgent() {
-    var cmd = background(true, AgentCli.CLAUDE_CODE, null, null, "oauth-flow", "claude-code");
+    var cmd = background(true, CLAUDE_CODE, null, null, "oauth-flow", "claude-code");
 
     assertTrue(cmd.contains("oauth-flow"), "specId must be present as positional arg");
     assertTrue(cmd.contains("claude-code"), "agent type must be present as positional arg");
@@ -1055,7 +1062,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandNonClaudeOmitsSettingsFlag() {
-    var cmd = background(true, AgentCli.CODEX, null, null, null, null);
+    var cmd = background(true, CODEX, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertFalse(joined.contains("--settings"), "only Claude Code gets the sail settings file");
@@ -1063,19 +1070,19 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandWithPermissions() {
-    var cmd = background(true, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = background(true, CLAUDE_CODE, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(
         joined.contains(
             "claude --print --output-format stream-json --verbose --settings "
-                + ClaudeCodeHookConfig.SETTINGS_PATH
+                + CLAUDE_CODE.hooks().path()
                 + " --dangerously-skip-permissions"));
   }
 
   @Test
   void buildBackgroundLaunchCommandCodexUsesExec() {
-    var cmd = background(false, AgentCli.CODEX, null, null, null, null);
+    var cmd = background(false, CODEX, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("codex exec"));
@@ -1085,7 +1092,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandCodexFullAuto() {
-    var cmd = background(true, AgentCli.CODEX, null, null, null, null);
+    var cmd = background(true, CODEX, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("codex exec --dangerously-bypass-approvals-and-sandbox"));
@@ -1093,7 +1100,7 @@ class AgentSessionTest {
 
   @Test
   void buildBackgroundLaunchCommandCodexModelOptions() {
-    var cmd = background(true, AgentCli.CODEX, "gpt-5.5", "high", null, null);
+    var cmd = background(true, CODEX, "gpt-5.5", "high", null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(
@@ -1111,9 +1118,7 @@ class AgentSessionTest {
     System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
     List<String> cmd;
     try {
-      cmd =
-          background(
-              true, AgentCli.CLAUDE_CODE, "claude-opus-4", "high", "auth-flow", "claude-code");
+      cmd = background(true, CLAUDE_CODE, "claude-opus-4", "high", "auth-flow", "claude-code");
     } finally {
       System.setErr(originalErr);
     }
@@ -1124,9 +1129,11 @@ class AgentSessionTest {
     assertFalse(joined.contains("reasoning"), "reasoning_effort is dropped for Claude Code");
 
     var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
-    assertTrue(warning.contains("reasoning_effort"), "the drop must never be silent");
-    assertTrue(warning.contains("high"));
-    assertTrue(warning.contains("auth-flow"), "the warning names the spec");
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " spec auth-flow.\n",
+        warning,
+        "the drop must never be silent, and the harness says so in its own name");
   }
 
   @Test
@@ -1135,7 +1142,7 @@ class AgentSessionTest {
     var captured = new java.io.ByteArrayOutputStream();
     System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
     try {
-      background(true, AgentCli.CLAUDE_CODE, null, "none", "auth-flow", "claude-code");
+      background(true, CLAUDE_CODE, null, "none", "auth-flow", "claude-code");
     } finally {
       System.setErr(originalErr);
     }
@@ -1151,7 +1158,7 @@ class AgentSessionTest {
     var captured = new java.io.ByteArrayOutputStream();
     System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
     try {
-      background(true, AgentCli.CLAUDE_CODE, "claude-opus-4", null, null, null);
+      background(true, CLAUDE_CODE, "claude-opus-4", null, null, null);
     } finally {
       System.setErr(originalErr);
     }
@@ -1166,13 +1173,79 @@ class AgentSessionTest {
     System.setErr(new java.io.PrintStream(captured, true, java.nio.charset.StandardCharsets.UTF_8));
     List<String> cmd;
     try {
-      cmd = foreground(true, AgentCli.CLAUDE_CODE, null, "high", "auth-flow", "claude-code");
+      cmd = foreground(true, CLAUDE_CODE, null, "high", "auth-flow", "claude-code");
     } finally {
       System.setErr(originalErr);
     }
 
     assertFalse(String.join(" ", cmd).contains("reasoning"));
     assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).contains("auth-flow"));
+  }
+
+  private static String stderrWhile(Runnable launch) {
+    var originalErr = System.err;
+    var captured = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      launch.run();
+    } finally {
+      System.setErr(originalErr);
+    }
+    return captured.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void aHarnessThatHonoursReasoningEffortIsNeverWarnedAbout() {
+    assertEquals("", stderrWhile(() -> background(true, CODEX, null, "high", "auth-flow", null)));
+    assertEquals("", stderrWhile(() -> foreground(true, CODEX, null, "high", "auth-flow", null)));
+  }
+
+  @Test
+  void aBlankReasoningEffortIsNothingToDrop() {
+    assertEquals("", stderrWhile(() -> background(true, CLAUDE_CODE, null, "", "auth-flow", null)));
+    assertEquals(
+        "", stderrWhile(() -> background(true, CLAUDE_CODE, null, "  ", "auth-flow", null)));
+  }
+
+  @Test
+  void theDroppedEffortWarningNamesTheHarnessAndTheSpecOrThisLaunchWhenThereIsNone() {
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " this launch."
+            + System.lineSeparator(),
+        stderrWhile(() -> background(true, CLAUDE_CODE, null, "high", null, null)));
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " spec auth-flow."
+            + System.lineSeparator(),
+        stderrWhile(() -> foreground(true, CLAUDE_CODE, null, "high", "auth-flow", null)));
+  }
+
+  @Test
+  void aFullChatTurnResumesItsRecordedSessionThroughTheFullCommandNotTheReadOnlyOne() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            CODEX,
+            null,
+            null,
+            "spec-1",
+            "codex",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room-full",
+            "sess-42");
+
+    assertTrue(
+        String.join(" ", cmd)
+            .contains(
+                "codex exec resume --dangerously-bypass-approvals-and-sandbox"
+                    + " --dangerously-bypass-hook-trust sess-42 "),
+        String.join(" ", cmd));
   }
 
   @Test
@@ -1192,7 +1265,7 @@ class AgentSessionTest {
             "dev",
             workDir,
             false,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             null,
@@ -1219,7 +1292,7 @@ class AgentSessionTest {
             "dev",
             workDir,
             false,
-            AgentCli.CLAUDE_CODE,
+            CLAUDE_CODE,
             null,
             null,
             null,
@@ -1236,13 +1309,13 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandStructure() {
-    var cmd = foreground(false, AgentCli.CLAUDE_CODE, null, null, null, null);
+    var cmd = foreground(false, CLAUDE_CODE, null, null, null, null);
 
     assertEquals("incus", cmd.getFirst());
     assertTrue(cmd.contains("acme"));
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("claude --print"));
-    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
+    assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(joined.contains("agent-task.txt"));
     var script = cmd.get(cmd.indexOf("-c") + 1);
     assertEquals(
@@ -1256,7 +1329,7 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandPassesSpecIdAndAgent() {
-    var cmd = foreground(true, AgentCli.CLAUDE_CODE, null, null, "oauth-flow", "claude-code");
+    var cmd = foreground(true, CLAUDE_CODE, null, null, "oauth-flow", "claude-code");
 
     assertTrue(cmd.contains("oauth-flow"));
     assertTrue(cmd.contains("claude-code"));
@@ -1264,7 +1337,7 @@ class AgentSessionTest {
 
   @Test
   void buildForegroundTaskCommandCodexExec() {
-    var cmd = foreground(true, AgentCli.CODEX, null, null, null, null);
+    var cmd = foreground(true, CODEX, null, null, null, null);
 
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("codex exec --dangerously-bypass-approvals-and-sandbox"));

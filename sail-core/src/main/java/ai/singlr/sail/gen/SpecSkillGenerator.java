@@ -5,7 +5,7 @@
 
 package ai.singlr.sail.gen;
 
-import ai.singlr.sail.engine.AgentCli;
+import ai.singlr.sail.harness.Harness;
 import java.util.List;
 
 /**
@@ -25,7 +25,7 @@ public final class SpecSkillGenerator {
   private SpecSkillGenerator() {}
 
   /** Generates the spec skill files for the given agent. */
-  public static List<GeneratedFile> generateFiles(AgentCli agent, String basePath) {
+  public static List<GeneratedFile> generateFiles(Harness agent, String basePath) {
     var skillDir = basePath + agent.skillsDir() + "spec-board/";
     return List.of(
         new GeneratedFile(skillDir + "SKILL.md", skillMd(), false),

@@ -14,9 +14,14 @@ import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -167,7 +172,8 @@ public final class ConnectCommand implements Runnable {
       String containerIp,
       String containerUser,
       String identityFile) {
-    return """
+    var snippet =
+        """
         # Add to ~/.ssh/config on your Mac:
 
         Host singular-server
@@ -183,22 +189,40 @@ public final class ConnectCommand implements Runnable {
 
         # Then connect:
         #   ssh %s
-        #   zed ssh://%s@%s/home/%s/workspace
-        #
-        # Agent auth (port forwarding for subscription login):
-        #   ssh -N -L 3000:localhost:3000 %s"""
-        .formatted(
-            serverIp,
-            serverUser,
-            identityFile,
-            name,
-            containerIp,
-            containerUser,
-            identityFile,
-            name,
-            containerUser,
-            name,
-            containerUser,
-            name);
+        #   zed ssh://%s@%s/home/%s/workspace"""
+            .formatted(
+                serverIp,
+                serverUser,
+                identityFile,
+                name,
+                containerIp,
+                containerUser,
+                identityFile,
+                name,
+                containerUser,
+                name,
+                containerUser);
+    return snippet + agentAuth(Harnesses.all(), name);
+  }
+
+  /**
+   * How to forward the port each of {@code harnesses} logs in through, once per port, and nothing
+   * for one that needs none. A box can run any harness sail knows, so the snippet names the port of
+   * each that needs one.
+   */
+  static String agentAuth(List<Harness> harnesses, String name) {
+    return harnesses.stream()
+        .map(Harness::loginTunnelPort)
+        .flatMapToInt(OptionalInt::stream)
+        .distinct()
+        .mapToObj(
+            port ->
+                "\n#\n# Agent auth (port forwarding for subscription login):\n#   ssh -N -L "
+                    + port
+                    + ":localhost:"
+                    + port
+                    + " "
+                    + name)
+        .collect(Collectors.joining());
   }
 }

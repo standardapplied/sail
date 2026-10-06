@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
@@ -183,7 +184,7 @@ public final class ProjectApplier {
     var added = 0;
     var skipped = 0;
     for (var agentName : install) {
-      var tool = AgentCli.fromYamlName(agentName);
+      var tool = Harnesses.of(agentName);
       var check =
           probes.exec(
               ContainerExec.asDevUser(name, List.of("bash", "-lc", "which " + tool.binaryName())));

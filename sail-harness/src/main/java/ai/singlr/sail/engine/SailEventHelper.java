@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
@@ -75,7 +76,7 @@ public final class SailEventHelper {
         BATCH="yes"
       fi
       SPEC_ID="${SAIL_SPEC_ID:-}"
-      AGENT="${SAIL_AGENT:-claude-code}"
+      AGENT="${SAIL_AGENT:-__DEFAULT_AGENT__}"
       RUN_ID="${SAIL_RUN_ID:-}"
       RUN_ROLE="${SAIL_RUN_ROLE:-}"
       PROJECT="$(hostname)"
@@ -121,7 +122,8 @@ public final class SailEventHelper {
   public static String scriptContent() {
     return SCRIPT
         .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
-        .replace("__BATCH_RESOLVED__", BATCH_RESOLVED);
+        .replace("__BATCH_RESOLVED__", BATCH_RESOLVED)
+        .replace("__DEFAULT_AGENT__", Harnesses.DEFAULT.yamlName());
   }
 
   /**

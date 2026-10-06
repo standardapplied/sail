@@ -16,7 +16,6 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -34,6 +33,8 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
@@ -753,25 +754,27 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * The known agent CLIs and their member-mode support, declared at the {@link AgentCli} seam: read
+   * The known agent CLIs and their member-mode support, declared at the {@link Harness} seam: read
    * only is offered only where the harness enforces it, and the refusal reason travels so clients
    * grey the option out with the same words the launch gate refuses with.
    */
   @Override
   public Result<AgentsResponse> agents() {
     var agents =
-        Arrays.stream(AgentCli.values())
+        Harnesses.all().stream()
             .map(
-                cli ->
-                    new AgentView(
-                        cli.yamlName(),
-                        cli.displayName(),
-                        List.of(
-                            new AgentModeView(
-                                EngagementMode.READ_ONLY.wire(),
-                                cli.supportsRoomLane(),
-                                cli.readOnlyRefusal()),
-                            new AgentModeView(EngagementMode.FULL.wire(), true, null))))
+                harness -> {
+                  var refusal = harness.readOnlyRefusal();
+                  return new AgentView(
+                      harness.yamlName(),
+                      harness.displayName(),
+                      List.of(
+                          new AgentModeView(
+                              EngagementMode.READ_ONLY.wire(),
+                              refusal.isEmpty(),
+                              refusal.orElse(null)),
+                          new AgentModeView(EngagementMode.FULL.wire(), true, null)));
+                })
             .toList();
     return Result.success(new AgentsResponse(agents));
   }

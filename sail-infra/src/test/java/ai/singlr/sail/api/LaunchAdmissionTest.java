@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
@@ -155,7 +155,7 @@ class LaunchAdmissionTest {
   @Test
   void requireInstalledAdmitsWhenTheBinaryIsOnThePath() {
     var admission = new LaunchAdmission(shellExiting(0), fdeStore);
-    assertDoesNotThrow(() -> admission.requireInstalled(AgentCli.CLAUDE_CODE, "acme"));
+    assertDoesNotThrow(() -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
   }
 
   @Test
@@ -163,7 +163,8 @@ class LaunchAdmissionTest {
     var admission = new LaunchAdmission(shellExiting(1), fdeStore);
     var ex =
         assertThrows(
-            ApiException.class, () -> admission.requireInstalled(AgentCli.CLAUDE_CODE, "acme"));
+            ApiException.class,
+            () -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
     assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, ex.failure().errorCode());
   }
 
@@ -172,19 +173,21 @@ class LaunchAdmissionTest {
     var admission = new LaunchAdmission(throwingShell(), fdeStore);
     var ex =
         assertThrows(
-            ApiException.class, () -> admission.requireInstalled(AgentCli.CLAUDE_CODE, "acme"));
+            ApiException.class,
+            () -> admission.requireInstalled(Harnesses.of("claude-code"), "acme"));
     assertEquals(ErrorCode.COMMAND_FAILED, ex.failure().errorCode());
   }
 
   @Test
   void resolveAgentReturnsTheNamedAgent() {
-    assertEquals(AgentCli.CLAUDE_CODE, LaunchAdmission.resolveAgent("claude-code"));
+    assertEquals(Harnesses.of("claude-code"), LaunchAdmission.resolveAgent("claude-code"));
   }
 
   @Test
   void resolveAgentRejectsABlankName() {
     var ex = assertThrows(ApiException.class, () -> LaunchAdmission.resolveAgent("  "));
     assertEquals(ErrorCode.BAD_REQUEST, ex.failure().errorCode());
+    assertEquals("Pass agent: claude-code or codex.", ex.failure().action());
   }
 
   @Test

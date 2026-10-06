@@ -10,7 +10,6 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
-import ai.singlr.sail.engine.AgentCli;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
@@ -19,6 +18,7 @@ import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
 import java.util.LinkedHashMap;
@@ -229,14 +229,14 @@ public final class RunLauncher {
   }
 
   static List<String> launchCommand(LaunchSpec s) {
-    var agentCli = AgentCli.fromYamlName(s.agentType());
+    var harness = Harnesses.of(s.agentType());
     return s.background()
         ? AgentSession.buildBackgroundLaunchCommand(
             s.project(),
             s.config().sshUser(),
             s.workDir(),
             s.fullPermissions(),
-            agentCli,
+            harness,
             s.model(),
             s.reasoningEffort(),
             s.specId(),
@@ -251,7 +251,7 @@ public final class RunLauncher {
             s.config().sshUser(),
             s.workDir(),
             s.fullPermissions(),
-            agentCli,
+            harness,
             s.model(),
             s.reasoningEffort(),
             s.specId(),

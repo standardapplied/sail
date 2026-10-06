@@ -15,10 +15,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.ClaudeCodeHookConfig;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.GuardrailTrigger;
+import ai.singlr.sail.engine.HarnessHooks;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.harness.Harnesses;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -975,8 +976,8 @@ class RunWatchTest {
   }
 
   @Test
-  void toolProgressEventsTheWatcherResetsOnAreActuallyEmittedByTheHookConfig() {
-    var hookJson = ClaudeCodeHookConfig.render();
+  void toolProgressEventsTheWatcherResetsOnAreActuallyEmittedByTheHookFile() {
+    var hookJson = HarnessHooks.render(Harnesses.of("claude-code"));
 
     assertTrue(
         hookJson.contains(Event.WellKnownTypes.AGENT_TOOL_STARTED)

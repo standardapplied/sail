@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -137,11 +138,21 @@ class RoomsSurfaceTest {
     var claude =
         agents.stream().filter(a -> a.name().equals("claude-code")).findFirst().orElseThrow();
     var codex = agents.stream().filter(a -> a.name().equals("codex")).findFirst().orElseThrow();
+    assertEquals(
+        List.of("claude-code", "codex"),
+        agents.stream().map(AgentView::name).toList(),
+        "every harness sail knows, in the order it lists them");
     assertTrue(claude.modes().stream().allMatch(AgentModeView::supported));
+    assertTrue(
+        claude.modes().stream().allMatch(mode -> mode.reason() == null),
+        "a mode a harness supports carries no reason");
     var codexReadOnly =
         codex.modes().stream().filter(m -> m.mode().equals("read_only")).findFirst().orElseThrow();
     assertTrue(!codexReadOnly.supported(), "codex has no harness-enforced read-only session");
-    assertTrue(codexReadOnly.reason().contains("full access"), codexReadOnly.reason());
+    assertEquals(
+        Harnesses.of("codex").readOnlyRefusal().orElseThrow(),
+        codexReadOnly.reason(),
+        "the reason is the one the launch gate refuses with");
   }
 
   @Test

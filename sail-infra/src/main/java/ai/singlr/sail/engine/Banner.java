@@ -573,10 +573,17 @@ public final class Banner {
             "    @|bold \u2192 Ports:|@   ssh " + tunnelArgs + " " + user + "@" + name + " -N"));
   }
 
-  /** Prints agent auth tunnel hint (port 3000 forwarding for subscription-based login). */
-  public static void printAgentAuthTunnel(String name, PrintStream out, Ansi ansi) {
+  /** Prints the agent auth tunnel hint: forwarding {@code port} for subscription-based login. */
+  public static void printAgentAuthTunnel(String name, int port, PrintStream out, Ansi ansi) {
     out.println(
-        amber(ansi, "    @|bold \u2192 Agent auth:|@ ssh -N -L 3000:localhost:3000 " + name));
+        amber(
+            ansi,
+            "    @|bold \u2192 Agent auth:|@ ssh -N -L "
+                + port
+                + ":localhost:"
+                + port
+                + " "
+                + name));
   }
 
   /** Prints a container status line — green ✓ for running, faint ■ for stopped. */

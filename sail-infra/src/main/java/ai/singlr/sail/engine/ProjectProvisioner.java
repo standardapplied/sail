@@ -8,6 +8,8 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -982,7 +984,7 @@ public final class ProjectProvisioner {
       installNames = List.of(agentConfig.type());
     }
 
-    var tools = installNames.stream().map(AgentCli::fromYamlName).toList();
+    var tools = installNames.stream().map(Harnesses::of).toList();
 
     step(17, "Installing " + tools.size() + " agent CLI(s)...");
 
@@ -1005,7 +1007,7 @@ public final class ProjectProvisioner {
     }
 
     tracker.advance(currentPhase);
-    var toolNames = tools.stream().map(AgentCli::yamlName).toList();
+    var toolNames = tools.stream().map(Harness::yamlName).toList();
     stepDone(
         17,
         "Installed "

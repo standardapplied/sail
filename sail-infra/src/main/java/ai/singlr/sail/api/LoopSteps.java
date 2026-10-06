@@ -10,6 +10,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
@@ -344,7 +345,7 @@ final class LoopSteps {
               step.review().id(),
               facts.project(),
               specId,
-              spec.agent() != null ? spec.agent() : "claude-code",
+              spec.agent() != null ? spec.agent() : Harnesses.DEFAULT.yamlName(),
               built.task(),
               spec.branch(),
               spec.repos(),
