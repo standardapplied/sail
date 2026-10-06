@@ -17,6 +17,9 @@ public interface HostCatalog {
 
   List<ProjectStore.ProjectRow> projects();
 
+  /** The definitions of this box's projects, read from the catalog. */
+  ProjectReader definitions();
+
   List<Spec> projectSpecs(String project);
 
   Optional<SpecStore.SpecContent> specContent(String id);

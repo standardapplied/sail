@@ -376,6 +376,19 @@ class SailOperationsSeamTest {
   }
 
   @Test
+  void anEmptyDatabaseHoldsNoProjectAndIsPreparedByTheRead() {
+    try (var db = Sqlite.openMemory();
+        var operations = operations(db)) {
+      var refused =
+          assertThrows(
+              ApiException.class, () -> operations.catalog().definitions().require("acme"));
+
+      assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
+      assertTrue(new SchemaManager(db).currentVersion() > 0, "the read prepared the database");
+    }
+  }
+
+  @Test
   void aFreshDatabaseIsPreparedBeforeRecordingHealth() throws Exception {
     try (var main = new SyncBox("main");
         var db = Sqlite.openMemory();
@@ -1415,7 +1428,9 @@ class SailOperationsSeamTest {
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
       assertTrue(operations.catalog().demoDefinition().contains("demo"));
+      assertEquals("demo", operations.catalog().definitions().require("demo").name());
       assertTrue(operations.catalog().destroy("demo", true).purged());
+      assertTrue(operations.catalog().definitions().read("demo").isEmpty());
       var missing =
           assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
       assertTrue(missing.getMessage().contains("sail migrate"), "a purged demo is not resurrected");

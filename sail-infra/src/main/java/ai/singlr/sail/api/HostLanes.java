@@ -124,6 +124,12 @@ final class HostLanes {
     }
 
     @Override
+    public ProjectReader definitions() {
+      schema.initialize();
+      return ProjectReader.ofCatalog(projectStore);
+    }
+
+    @Override
     public List<Spec> projectSpecs(String project) {
       return specs.projectSpecs(project);
     }
