@@ -46,49 +46,89 @@ public final class StageSkills {
     return skill.block("~/" + harness.skillsDir() + skill.name() + "/");
   }
 
+  /** How the skill a stage names stands for a project: what a launch would find. */
+  public sealed interface Standing {
+
+    /** One of the skills sail ships. */
+    record BuiltIn(StageSkill skill) implements Standing {}
+
+    /** A skill the project holds, read whole. */
+    record Held(StageSkill skill) implements Standing {}
+
+    /**
+     * No skill: the project holds no text file at {@code manifest}.
+     *
+     * @param manifest the project file a skill of that name starts with
+     */
+    record Missing(String manifest) implements Standing {}
+
+    /**
+     * A skill the project holds and {@link StageSkill} refuses.
+     *
+     * @param why what refused it, as {@link StageSkill} says it
+     * @param files how many files the project holds under the skill's folder
+     */
+    record Invalid(String why, int files) implements Standing {}
+  }
+
   /** The skill named {@code name}: sail's own under that name, or else {@code project}'s. */
   public StageSkill resolve(String project, String name) {
+    return switch (standing(project, name)) {
+      case Standing.BuiltIn builtIn -> builtIn.skill();
+      case Standing.Held held -> held.skill();
+      case Standing.Missing missing ->
+          throw refused(
+              project,
+              name,
+              "cannot be read: "
+                  + missing.manifest()
+                  + " is missing or is not a text file. Add it with 'sail project files add <file>"
+                  + " --as "
+                  + missing.manifest()
+                  + "'.");
+      case Standing.Invalid invalid -> throw refused(project, name, "is refused: " + invalid.why());
+    };
+  }
+
+  /**
+   * How the skill named {@code name} stands for {@code project}, read now: the one reading {@link
+   * #resolve} answers from, as a value for whoever shows it rather than launches under it.
+   */
+  public Standing standing(String project, String name) {
     var builtIn = BuiltInSkills.of(name);
     if (builtIn.isPresent()) {
-      return builtIn.get();
+      return new Standing.BuiltIn(builtIn.get());
     }
+    var held = 0;
     try {
       StageSkill.requireName(name);
       var shared = filesOf(project, name);
       var folder = StageSkill.PROJECT_ROOT + name + "/";
       var rows = shared.list().stream().filter(row -> row.path().startsWith(folder)).toList();
+      held = rows.size();
       var manifest =
           rows.stream()
               .filter(row -> row.path().equals(folder + StageSkill.MANIFEST))
               .filter(row -> "text".equals(row.kind()))
-              .findFirst()
-              .orElseThrow(
-                  () ->
-                      refused(
-                          project,
-                          name,
-                          "cannot be read: "
-                              + folder
-                              + StageSkill.MANIFEST
-                              + " is missing or is not a text file. Add it with 'sail project"
-                              + " files add <file> --as "
-                              + folder
-                              + StageSkill.MANIFEST
-                              + "'."));
-      return StageSkill.of(
-          name,
-          text(shared, manifest),
-          rows.stream()
-              .map(
-                  row ->
-                      new StageSkill.File(
-                          row.path().substring(folder.length()),
-                          row.contentHash(),
-                          row.size(),
-                          row.mode()))
-              .toList());
+              .findFirst();
+      if (manifest.isEmpty()) {
+        return new Standing.Missing(folder + StageSkill.MANIFEST);
+      }
+      return new Standing.Held(
+          StageSkill.of(
+              name,
+              text(shared, manifest.get()),
+              rows.stream()
+                  .map(
+                      row ->
+                          new StageSkill.File(
+                              row.path().substring(folder.length()),
+                              row.contentHash(),
+                              row.size(),
+                              row.mode()))
+                  .toList()));
     } catch (IllegalArgumentException | IOException unreadable) {
-      throw refused(project, name, "is refused: " + unreadable.getMessage());
+      return new Standing.Invalid(unreadable.getMessage(), held);
     }
   }
 
