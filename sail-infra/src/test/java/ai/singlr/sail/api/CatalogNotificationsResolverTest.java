@@ -19,6 +19,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -73,7 +74,7 @@ class CatalogNotificationsResolverTest {
     reactor.onEvent(Event.of("light-grid", null, "spec_dispatched", "sail", "h").withId(1L));
 
     assertEquals(
-        java.util.List.of("https://ntfy.sh/moved spec_dispatched"),
+        List.of("https://ntfy.sh/moved spec_dispatched"),
         sent,
         "the revision recorded in the catalog is what the next event is sent under, with nothing else run");
   }

@@ -22,6 +22,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
@@ -82,7 +83,7 @@ class AgentContextRegenCommandTest {
   @Test
   void aProjectNotInTheCatalogFailsBeforeAnythingIsReplacedAndSoDoesARowThatCannotBeRead() {
     var dbPath = seeded("acme", ACME);
-    var asked = new java.util.concurrent.atomic.AtomicInteger();
+    var asked = new AtomicInteger();
     var identity =
         new LocalIdentity(
             new ShellExec() {
