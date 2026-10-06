@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 class HarnessGoldenTest {
 
   private static final String TASK = "/home/dev/.sail/agent-task.txt";
-  private static final String SETTINGS = "/home/dev/.sail/claude-settings.json";
   private static final String PROMPT = " -p \"$(cat " + TASK + ")\"";
   private static final String CODEX_TASK = " \"$(cat " + TASK + ")\"";
   private static final String HOME = "/home/dev/";
@@ -257,5 +256,13 @@ class HarnessGoldenTest {
         Validate input.
         """,
         CODEX.languageRule("security", List.of(), "Validate input.\n"));
+  }
+
+  @Test
+  void eachHarnessInstallsWithItsOwnCommand() {
+    assertEquals("curl -fsSL https://claude.ai/install.sh | bash", CLAUDE_CODE.installCommand());
+    assertEquals(
+        "curl -fsSL https://chatgpt.com/codex/install.sh | CODEX_NON_INTERACTIVE=1 sh",
+        CODEX.installCommand());
   }
 }

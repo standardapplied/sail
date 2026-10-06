@@ -16,7 +16,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -33,7 +36,7 @@ class AgentSessionTest {
 
   private static List<String> background(
       boolean fullPermissions,
-      Harness cli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -43,7 +46,7 @@ class AgentSessionTest {
         "dev",
         "/home/dev/workspace",
         fullPermissions,
-        cli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -55,7 +58,7 @@ class AgentSessionTest {
 
   private static List<String> foreground(
       boolean fullPermissions,
-      Harness cli,
+      Harness harness,
       String model,
       String reasoningEffort,
       String specId,
@@ -65,7 +68,7 @@ class AgentSessionTest {
         "dev",
         "/home/dev/workspace",
         fullPermissions,
-        cli,
+        harness,
         model,
         reasoningEffort,
         specId,
@@ -1177,6 +1180,72 @@ class AgentSessionTest {
 
     assertFalse(String.join(" ", cmd).contains("reasoning"));
     assertTrue(captured.toString(java.nio.charset.StandardCharsets.UTF_8).contains("auth-flow"));
+  }
+
+  private static String stderrWhile(Runnable launch) {
+    var originalErr = System.err;
+    var captured = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(captured, true, StandardCharsets.UTF_8));
+    try {
+      launch.run();
+    } finally {
+      System.setErr(originalErr);
+    }
+    return captured.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void aHarnessThatHonoursReasoningEffortIsNeverWarnedAbout() {
+    assertEquals("", stderrWhile(() -> background(true, CODEX, null, "high", "auth-flow", null)));
+    assertEquals("", stderrWhile(() -> foreground(true, CODEX, null, "high", "auth-flow", null)));
+  }
+
+  @Test
+  void aBlankReasoningEffortIsNothingToDrop() {
+    assertEquals("", stderrWhile(() -> background(true, CLAUDE_CODE, null, "", "auth-flow", null)));
+    assertEquals(
+        "", stderrWhile(() -> background(true, CLAUDE_CODE, null, "  ", "auth-flow", null)));
+  }
+
+  @Test
+  void theDroppedEffortWarningNamesTheHarnessAndTheSpecOrThisLaunchWhenThereIsNone() {
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " this launch."
+            + System.lineSeparator(),
+        stderrWhile(() -> background(true, CLAUDE_CODE, null, "high", null, null)));
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " spec auth-flow."
+            + System.lineSeparator(),
+        stderrWhile(() -> foreground(true, CLAUDE_CODE, null, "high", "auth-flow", null)));
+  }
+
+  @Test
+  void aFullChatTurnResumesItsRecordedSessionThroughTheFullCommandNotTheReadOnlyOne() {
+    var cmd =
+        AgentSession.buildBackgroundLaunchCommand(
+            "acme",
+            "dev",
+            "/home/dev/workspace",
+            true,
+            CODEX,
+            null,
+            null,
+            "spec-1",
+            "codex",
+            RUN_UNIT.logPath(),
+            RUN_ID,
+            "cred-0",
+            "room-full",
+            "sess-42");
+
+    assertTrue(
+        String.join(" ", cmd)
+            .contains(
+                "codex exec resume --dangerously-bypass-approvals-and-sandbox"
+                    + " --dangerously-bypass-hook-trust sess-42 "),
+        String.join(" ", cmd));
   }
 
   @Test

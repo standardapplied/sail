@@ -229,14 +229,14 @@ public final class RunLauncher {
   }
 
   static List<String> launchCommand(LaunchSpec s) {
-    var agentCli = Harnesses.of(s.agentType());
+    var harness = Harnesses.of(s.agentType());
     return s.background()
         ? AgentSession.buildBackgroundLaunchCommand(
             s.project(),
             s.config().sshUser(),
             s.workDir(),
             s.fullPermissions(),
-            agentCli,
+            harness,
             s.model(),
             s.reasoningEffort(),
             s.specId(),
@@ -251,7 +251,7 @@ public final class RunLauncher {
             s.config().sshUser(),
             s.workDir(),
             s.fullPermissions(),
-            agentCli,
+            harness,
             s.model(),
             s.reasoningEffort(),
             s.specId(),

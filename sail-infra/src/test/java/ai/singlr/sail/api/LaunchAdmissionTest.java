@@ -187,6 +187,7 @@ class LaunchAdmissionTest {
   void resolveAgentRejectsABlankName() {
     var ex = assertThrows(ApiException.class, () -> LaunchAdmission.resolveAgent("  "));
     assertEquals(ErrorCode.BAD_REQUEST, ex.failure().errorCode());
+    assertEquals("Pass agent: claude-code or codex.", ex.failure().action());
   }
 
   @Test

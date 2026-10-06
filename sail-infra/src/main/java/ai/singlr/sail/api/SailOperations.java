@@ -763,16 +763,18 @@ public final class SailOperations implements HostOperations {
     var agents =
         Harnesses.all().stream()
             .map(
-                cli ->
-                    new AgentView(
-                        cli.yamlName(),
-                        cli.displayName(),
-                        List.of(
-                            new AgentModeView(
-                                EngagementMode.READ_ONLY.wire(),
-                                cli.readOnlyRefusal().isEmpty(),
-                                cli.readOnlyRefusal().orElse(null)),
-                            new AgentModeView(EngagementMode.FULL.wire(), true, null))))
+                harness -> {
+                  var refusal = harness.readOnlyRefusal();
+                  return new AgentView(
+                      harness.yamlName(),
+                      harness.displayName(),
+                      List.of(
+                          new AgentModeView(
+                              EngagementMode.READ_ONLY.wire(),
+                              refusal.isEmpty(),
+                              refusal.orElse(null)),
+                          new AgentModeView(EngagementMode.FULL.wire(), true, null)));
+                })
             .toList();
     return Result.success(new AgentsResponse(agents));
   }

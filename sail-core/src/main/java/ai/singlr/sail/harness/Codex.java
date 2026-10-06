@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.engine.ContainerExec;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
@@ -29,7 +30,7 @@ final class Codex implements Harness {
    * self-gate on the run's environment, so nothing leaks into the spec event bus and no interactive
    * stop is gated.
    */
-  private static final String HOOKS_PATH = "/home/dev/.codex/hooks.json";
+  private static final String HOOKS_PATH = ContainerExec.DEV_HOME + "/.codex/hooks.json";
 
   @Override
   public String yamlName() {
@@ -108,6 +109,12 @@ final class Codex implements Harness {
         + launch.task();
   }
 
+  /**
+   * Codex cannot run the room lane's read-only session at all: its only enforcement layer is the
+   * bubblewrap sandbox, which needs user namespaces, blocked inside incus containers ({@code bwrap:
+   * setting up uid map: Permission denied}), so its sole executing mode is the full bypass flag the
+   * room forbids.
+   */
   @Override
   public Optional<String> readOnlyRefusal() {
     return Optional.of(
@@ -125,7 +132,9 @@ final class Codex implements Harness {
 
   @Override
   public String attach(String sessionId) {
-    return sessionId != null ? BINARY + " resume " + sessionId : BINARY;
+    return sessionId != null
+        ? BINARY + " resume " + Harness.requireSafeSessionId(sessionId)
+        : BINARY;
   }
 
   @Override

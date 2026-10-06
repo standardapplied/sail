@@ -115,4 +115,33 @@ class LanguageRulesGeneratorTest {
 
     assertTrue(files.stream().noneMatch(GeneratedFile::executable));
   }
+
+  @Test
+  void aRulesBodyIsStrippedAndEndsWithOneNewlineUnderWhateverFramesIt() {
+    var rule = new SailYaml.AgentRule("go", List.of("**/*.go"), "\n\n  Handle every error.  \n\n");
+
+    assertEquals(
+        "---\npaths:\n  - \"**/*.go\"\n---\n\nHandle every error.\n",
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), List.of(rule), HOME)
+            .getFirst()
+            .content());
+    assertEquals(
+        "---\nname: go\ndescription: >\n  Go coding standards for this project. Apply when writing"
+            + " or reviewing go (**/*.go).\n---\n\nHandle every error.\n",
+        LanguageRulesGenerator.generateFiles(Harnesses.of("codex"), List.of(rule), HOME)
+            .getFirst()
+            .content());
+  }
+
+  @Test
+  void aRuleWithNoBodyIsAnEmptyFileForAHarnessThatAddsNoFrame() {
+    var rule = new SailYaml.AgentRule("go", List.of(), null);
+
+    var file =
+        LanguageRulesGenerator.generateFiles(Harnesses.of("claude-code"), List.of(rule), HOME)
+            .getFirst();
+
+    assertEquals(HOME + ".claude/rules/go.md", file.remotePath());
+    assertEquals("", file.content());
+  }
 }

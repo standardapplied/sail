@@ -127,28 +127,28 @@ public final class MembershipService {
     LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     authorizeRoster(spec.roomIdOrIdentity());
     admission.requireTrustedRoster(localHandle);
-    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
+    var harness = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
     try {
       member =
           Engagement.of(
-              agentCli.yamlName(),
+              harness.yamlName(),
               mode,
               LaunchAdmission.validateModel(model),
               DateTimeUtils.now().toString());
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
-    var refusal = agentCli.readOnlyRefusal();
+    var refusal = harness.readOnlyRefusal();
     if (!member.full() && refusal.isPresent()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
           refusal.get(),
-          "Add " + agentCli.yamlName() + " with full access instead.");
+          "Add " + harness.yamlName() + " with full access instead.");
     }
     var project = spec.project();
     projects.loadRunning(project);
-    admission.requireInstalled(agentCli, project);
+    admission.requireInstalled(harness, project);
     if (!member.full() || !takeSnapshot) {
       persistMembership(specId, member);
       publishEngaged(project, specId, member, "");
@@ -177,27 +177,27 @@ public final class MembershipService {
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     admission.requireTrustedRoster(localHandle);
-    var agentCli = LaunchAdmission.resolveAgent(agentYamlName);
+    var harness = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
     try {
       member =
           Engagement.of(
-              agentCli.yamlName(),
+              harness.yamlName(),
               mode,
               LaunchAdmission.validateModel(model),
               DateTimeUtils.now().toString());
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
     }
-    var refusal = agentCli.readOnlyRefusal();
+    var refusal = harness.readOnlyRefusal();
     if (!member.full() && refusal.isPresent()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
           refusal.get(),
-          "Add " + agentCli.yamlName() + " with full access instead.");
+          "Add " + harness.yamlName() + " with full access instead.");
     }
     projects.loadRunning(room.project());
-    admission.requireInstalled(agentCli, room.project());
+    admission.requireInstalled(harness, room.project());
     store.updateRoster(roomId, Roster.solo(member).toJson());
     publishEngaged(room.project(), roomId, member, "");
     return new EngageLaunch(member.agent(), member.mode(), "", null);

@@ -16,6 +16,8 @@ import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 /** What every harness sail knows must answer, run over {@link Harnesses#all}. */
 class HarnessContractTest {
@@ -111,5 +113,42 @@ class HarnessContractTest {
     assertFalse(Harness.isSafeSessionId(""));
     assertFalse(Harness.isSafeSessionId(null));
     assertFalse(Harness.isSafeSessionId("a".repeat(129)));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "a b", "a;b", "a$b", "a/b", "a|b", "a&b", "a`b", "a'b", "a\"b", "a(b", "a>b", "a\nb",
+        "abc\n", "a\\b", "a*b", "a~b", "a=b", "a,b", "a:b", "a\tb"
+      })
+  void eachCharacterOutsideTheSafeSetIsRejectedOnItsOwn(String sessionId) {
+    assertFalse(Harness.isSafeSessionId(sessionId), sessionId);
+  }
+
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void attachRefusesAMalformedSessionIdAndStartsAFreshConversationForNone(Harness harness) {
+    var ex = assertThrows(IllegalArgumentException.class, () -> harness.attach("a; rm -rf /"));
+
+    assertEquals(MALFORMED_ID, ex.getMessage());
+    assertEquals(harness.binaryName(), harness.attach(null));
+  }
+
+  @ParameterizedTest
+  @MethodSource("harnesses")
+  void everyPathAHarnessNamesUnderTheHomeDirectoryIsRelativeToIt(Harness harness) {
+    assertFalse(harness.homeContextPath().startsWith("/"), harness.homeContextPath());
+    assertFalse(harness.skillsDir().startsWith("/"), harness.skillsDir());
+    assertTrue(harness.skillsDir().endsWith("/"), "a skill lives at <skillsDir><name>/SKILL.md");
+    assertFalse(harness.languageRulePath("java").startsWith("/"));
+    assertTrue(harness.languageRulePath("java").contains("java"));
+  }
+
+  @ParameterizedTest
+  @NullSource
+  @ValueSource(strings = {"", "  "})
+  void aLaunchNamesTheTaskFileItReads(String taskFile) {
+    assertThrows(
+        IllegalArgumentException.class, () -> new Launch(taskFile, true, null, null, null, true));
   }
 }

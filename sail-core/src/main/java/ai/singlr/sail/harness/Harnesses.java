@@ -10,10 +10,10 @@ import java.util.List;
 /** The harnesses sail knows, and the one it assumes when a project names none. */
 public final class Harnesses {
 
-  private static final List<Harness> ALL = List.of(new ClaudeCode(), new Codex());
-
   /** The harness a project gets when its {@code sail.yaml} names none. */
-  public static final Harness DEFAULT = ALL.getFirst();
+  public static final Harness DEFAULT = new ClaudeCode();
+
+  private static final List<Harness> ALL = List.of(DEFAULT, new Codex());
 
   private Harnesses() {}
 

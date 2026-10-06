@@ -6,6 +6,7 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.engine.BoxCredentialFile;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -18,21 +19,20 @@ final class ClaudeCode implements Harness {
 
   private static final String BINARY = "claude";
 
-  private static final String DEV_HOME = "/home/dev";
-
   /**
    * The sail-owned settings file, passed to {@code claude} via {@code --settings} only when sail
    * launches the agent: engineer SSH sessions that run bare {@code claude} never see these hooks,
    * so their {@code Stop} events do not leak into the spec event bus.
    */
-  private static final String SETTINGS_PATH = DEV_HOME + "/.sail/claude-settings.json";
+  private static final String SETTINGS_PATH =
+      ContainerExec.DEV_HOME + "/.sail/claude-settings.json";
 
-  private static final String ROOM_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
+  private static final String READ_ONLY_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
 
-  private static final String ROOM_ALLOWED_TOOLS =
+  private static final String READ_ONLY_ALLOWED_TOOLS =
       " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\"";
 
-  private static final String ROOM_ISOLATION = " --setting-sources \"\" --strict-mcp-config";
+  private static final String READ_ONLY_ISOLATION = " --setting-sources \"\" --strict-mcp-config";
 
   @Override
   public String yamlName() {
@@ -118,7 +118,7 @@ final class ClaudeCode implements Harness {
    * (verified empirically). So the session reads the code it is consulting on and nothing else:
    * every container secret lives outside the workspace ({@code ~/.ssh}, {@code ~/.sail}, {@code
    * ~/.claude}, {@code /var/lib/sail}) and is unreadable by default. The {@code Read}-deny rules in
-   * {@link #roomReadDenyRules}, which Claude applies to a Bash read of a denied path too,
+   * {@link #readDenyRules}, which Claude applies to a Bash read of a denied path too,
    * belt-and-suspenders the highest-value credentials on top of that; they are not the primary
    * boundary. Git is deliberately absent: {@code git diff --output=<path>} writes through a prefix
    * allow-rule, and git's external-diff and pager config are command-execution surfaces, which a
@@ -144,17 +144,14 @@ final class ClaudeCode implements Harness {
    * committed <em>inside</em> the workspace (which the consultant reads by design, as any build
    * agent does). That boundary is owned by the room-lane hardening follow-up spec (a sidecar
    * container with a read-only disk device), which incus does not give a same-container process.
-   * Codex cannot run this lane at all: its only enforcement layer is the bubblewrap sandbox, which
-   * needs user namespaces, blocked inside incus containers ({@code bwrap: setting up uid map:
-   * Permission denied}), so its sole executing mode is the full bypass flag the room forbids.
    */
   @Override
   public String readOnly(Launch launch) {
     var resume = resumeOption(launch);
     return invocation(launch)
-        + ROOM_ISOLATION
-        + ROOM_TOOLS
-        + ROOM_ALLOWED_TOOLS
+        + READ_ONLY_ISOLATION
+        + READ_ONLY_TOOLS
+        + READ_ONLY_ALLOWED_TOOLS
         + modelOption(launch.model())
         + resume
         + " -p "
@@ -173,7 +170,9 @@ final class ClaudeCode implements Harness {
 
   @Override
   public String attach(String sessionId) {
-    return sessionId != null ? BINARY + " --resume " + sessionId : BINARY;
+    return sessionId != null
+        ? BINARY + " --resume " + Harness.requireSafeSessionId(sessionId)
+        : BINARY;
   }
 
   @Override
@@ -193,12 +192,12 @@ final class ClaudeCode implements Harness {
   }
 
   /**
-   * Besides hooks, the settings file carries the {@link #roomReadDenyRules} permission rules and
-   * turns commit co-author attribution off. {@code SessionStart} runs the session-started event for
-   * the {@code startup} source only, and the session report in its own matcher-less group beside
-   * it: the event announces a session's beginning exactly once, but the report must fire on every
-   * start source, since a resume, clear or compact restart mints a new conversation whose identity
-   * must overwrite the row. {@code PostToolUse} fires only for a call that succeeded and {@code
+   * Besides hooks, the settings file carries the {@link #readDenyRules} permission rules and turns
+   * commit co-author attribution off. {@code SessionStart} runs the session-started event for the
+   * {@code startup} source only, and the session report in its own matcher-less group beside it:
+   * the event announces a session's beginning exactly once, but the report must fire on every start
+   * source, since a resume, clear or compact restart mints a new conversation whose identity must
+   * overwrite the row. {@code PostToolUse} fires only for a call that succeeded and {@code
    * PostToolUseFailure} for one that failed, so both tell the watcher a call that ran is over; a
    * call Claude Code denies before running it fires neither, and {@code PostToolBatch}, fired once
    * every call of a batch has resolved, is what closes it. {@code Stop} runs the stop gate alone:
@@ -209,7 +208,7 @@ final class ClaudeCode implements Harness {
   public HookFile hooks() {
     var settings = new LinkedHashMap<String, Object>();
     settings.put("includeCoAuthoredBy", false);
-    settings.put("permissions", Map.of("deny", roomReadDenyRules()));
+    settings.put("permissions", Map.of("deny", readDenyRules()));
     return new HookFile(
         SETTINGS_PATH,
         settings,
@@ -241,11 +240,11 @@ final class ClaudeCode implements Harness {
    * Residual (a secret committed inside the workspace, a kernel escape, a harness-enforcement bug)
    * is owned by the room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
    */
-  private static List<String> roomReadDenyRules() {
+  private static List<String> readDenyRules() {
     return List.of(
         boxCredentialReadDeny(),
-        "Read(" + DEV_HOME + "/.ssh/**)",
-        "Read(" + DEV_HOME + "/.git-credentials)");
+        "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
+        "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)");
   }
 
   private static String boxCredentialReadDeny() {

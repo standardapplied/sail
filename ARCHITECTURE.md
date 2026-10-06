@@ -710,17 +710,21 @@ adapter gives, not a name a caller recognises. Adding a harness is adding one ad
 | `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
 | `honoursReasoningEffort()`, `loginTunnelPort()`, `interactiveTip()` | whether a reasoning effort means anything, which port the login flow needs forwarded, what to tell an engineer before an interactive session |
 | `hooks()` | the harness's `HookFile`: which of its events run which of sail's `SailHook`s |
-| `isSafeSessionId(id)` | whether a hook-reported, replicated session id may touch a shell string |
+| `isSafeSessionId(id)`, `requireSafeSessionId(id)` | whether a hook-reported, replicated session id may touch a shell string, and the one check every adapter makes before it does |
 
 A `Launch` carries the task file, whether every action is auto-approved, the model, the
 reasoning effort, the session to resume and whether to stream. A malformed session id throws
-before it can reach a shell string; `readOnly` ignores permissions and reasoning effort, and
-a harness with a refusal throws rather than build one.
+before it can reach a shell string, in `headless`, `readOnly` and `attach` alike; `readOnly`
+ignores permissions and reasoning effort, and a harness with a refusal throws rather than
+build one. The login port is the adapter's alone to name: `sail agent run`
+prints the tunnel for the harness it starts, and `sail project connect` for each harness sail
+knows that needs one.
 
 Hooks are data. `SailHook` names the eight things sail runs at a harness's events:
 `SESSION_STARTED`, `SESSION_REPORT`, `TOOL_STARTED`, `TOOL_FINISHED`, `ROOM_RELAY`,
 `STOP_GATE`, `BATCH_RESOLVED`, `SESSION_ENDED`; the first six are required of every
-harness, and a `HookFile` whose groups do not name one cannot be built. `HarnessHooks`
+harness, and a `HookFile` whose groups do not name one cannot be built, nor one whose path
+is not absolute inside a directory. `HarnessHooks`
 (`sail-harness`) renders the file from the adapter's declaration, one switch giving each hook
 its script and timeout, and `ContainerSailSetup` installs and fingerprints the file of every
 harness in `Harnesses.all()`.

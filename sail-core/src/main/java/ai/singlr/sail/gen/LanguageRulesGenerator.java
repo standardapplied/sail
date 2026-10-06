@@ -14,15 +14,9 @@ import java.util.List;
  * Materializes org-supplied {@link SailYaml.AgentRule language rules} into each harness's native
  * "load only when relevant" channel, so a project's coding standards reach the agent only while it
  * touches the matching files — never bloating the always-loaded context. Sail ships no rule content
- * of its own; the body is supplied verbatim by the project's {@code agent_context.rules}.
- *
- * <ul>
- *   <li><b>Claude Code</b> — a path-scoped rule {@code ~/.claude/rules/<name>.md} whose {@code
- *       paths:} frontmatter loads it only when a matching file enters context (or a session-start
- *       rule when the project gives no globs).
- *   <li><b>Codex</b> — a skill {@code ~/.agents/skills/<name>/SKILL.md} Codex loads by its
- *       synthesized {@code description} when the work is relevant (Codex has no path glob).
- * </ul>
+ * of its own; the body is supplied verbatim by the project's {@code agent_context.rules}. Where a
+ * rule lands and what frames it is each harness's own ({@link Harness#languageRulePath}, {@link
+ * Harness#languageRule}).
  *
  * <p>Every file is sail-owned and overwritten on every run. Pure utility — no I/O, no shell.
  */

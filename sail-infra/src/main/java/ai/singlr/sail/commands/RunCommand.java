@@ -38,6 +38,7 @@ import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -213,7 +214,7 @@ public final class RunCommand implements Runnable {
             && "full".equals(config.agent().config().get("permissions"));
 
     var agentType = config.agent() != null ? config.agent().type() : Harnesses.DEFAULT.yamlName();
-    var agentCli = Harnesses.of(agentType);
+    var harness = Harnesses.of(agentType);
 
     var label = SnapshotManager.defaultLabel();
     var snapshotTaken = !dryRun && SnapshotDecision.shouldSnapshot(snapshot, config, json);
@@ -226,22 +227,14 @@ public final class RunCommand implements Runnable {
       prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
-    if (!json && agentCli.loginTunnelPort().isPresent()) {
-      Banner.printAgentAuthTunnel(
-          name, agentCli.loginTunnelPort().getAsInt(), System.out, Ansi.AUTO);
-      System.out.println();
-    }
-
-    if (!json && task == null && agentCli.interactiveTip().isPresent()) {
-      System.out.println(
-          Ansi.AUTO.string("  @|faint Tip: " + agentCli.interactiveTip().get() + "|@"));
-      System.out.println();
+    if (!json) {
+      printLaunchNotes(harness, name, task == null, System.out, Ansi.AUTO);
     }
 
     if (task != null) {
       launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label);
     } else {
-      launchInteractive(sshUser, workDir, fullPermissions, agentCli);
+      launchInteractive(sshUser, workDir, fullPermissions, harness);
     }
   }
 
@@ -467,6 +460,31 @@ public final class RunCommand implements Runnable {
   }
 
   /**
+   * What a person starting a session of {@code harness} in project {@code name} is told first: how
+   * to forward the port its login needs, when it needs one, and its tip for interactive use, when
+   * it has one and the session is interactive.
+   */
+  static void printLaunchNotes(
+      Harness harness, String name, boolean interactive, PrintStream out, Ansi ansi) {
+    harness
+        .loginTunnelPort()
+        .ifPresent(
+            port -> {
+              Banner.printAgentAuthTunnel(name, port, out, ansi);
+              out.println();
+            });
+    if (interactive) {
+      harness
+          .interactiveTip()
+          .ifPresent(
+              tip -> {
+                out.println(ansi.string("  @|faint Tip: " + tip + "|@"));
+                out.println();
+              });
+    }
+  }
+
+  /**
    * Builds the agent task prompt for a pending spec: its title and id, the body (falling back to
    * the title when empty), and the instruction to mark it done and pick up the next one.
    */
@@ -506,8 +524,8 @@ public final class RunCommand implements Runnable {
   }
 
   private void launchInteractive(
-      String sshUser, String workDir, boolean fullPermissions, Harness agentCli) throws Exception {
-    var agentCmd = agentCli.interactive(fullPermissions);
+      String sshUser, String workDir, boolean fullPermissions, Harness harness) throws Exception {
+    var agentCmd = harness.interactive(fullPermissions);
     var sshCmd =
         List.of("ssh", "-t", sshUser + "@" + name, "--", "cd " + workDir + " && " + agentCmd);
 

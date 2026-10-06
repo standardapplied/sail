@@ -15,6 +15,7 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -212,5 +213,45 @@ class RunCommandTest {
 
     assertTrue(task.contains("Add auth"));
     assertTrue(task.contains("sail spec status acme auth done"));
+  }
+
+  private static String launchNotes(String harness, boolean interactive) {
+    var out = new ByteArrayOutputStream();
+    RunCommand.printLaunchNotes(
+        Harnesses.of(harness),
+        "acme",
+        interactive,
+        new PrintStream(out, true, StandardCharsets.UTF_8),
+        CommandLine.Help.Ansi.OFF);
+    return out.toString(StandardCharsets.UTF_8);
+  }
+
+  @Test
+  void anInteractiveSessionOfAHarnessWithALoginPortAndATipIsToldBoth() {
+    var nl = System.lineSeparator();
+
+    assertEquals(
+        "    → Agent auth: ssh -N -L 3000:localhost:3000 acme"
+            + nl
+            + nl
+            + "  Tip: Type /rc inside Claude Code to connect from your phone via Remote Control."
+            + nl
+            + nl,
+        launchNotes("claude-code", true));
+  }
+
+  @Test
+  void aTaskRunIsToldOfTheLoginPortButNotTheInteractiveTip() {
+    var nl = System.lineSeparator();
+
+    assertEquals(
+        "    → Agent auth: ssh -N -L 3000:localhost:3000 acme" + nl + nl,
+        launchNotes("claude-code", false));
+  }
+
+  @Test
+  void aHarnessWithNeitherALoginPortNorATipIsToldNothing() {
+    assertEquals("", launchNotes("codex", true));
+    assertEquals("", launchNotes("codex", false));
   }
 }

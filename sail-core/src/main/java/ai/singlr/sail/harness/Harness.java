@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.harness;
 
+import ai.singlr.sail.common.Strings;
 import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
@@ -25,7 +26,7 @@ public interface Harness {
    * auto-approved, an optional model and reasoning effort, the recorded conversation to resume
    * ({@code null} for a fresh session) and whether the harness should stream its output as it runs.
    * A background dispatch streams; the foreground paths parse the harness's final output and do
-   * not.
+   * not. A launch with no task file to read is refused.
    */
   record Launch(
       String taskFile,
@@ -35,22 +36,20 @@ public interface Harness {
       String resumeSessionId,
       boolean stream) {
 
+    private static final Pattern SAFE_SESSION_ID =
+        Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
+
+    public Launch {
+      Strings.requireNonBlank(taskFile, "taskFile");
+    }
+
     /**
-     * The recorded session this launch resumes, or empty for a fresh session. A session id arrives
-     * hook-reported and replicates across boxes, so it is checked against {@link #isSafeSessionId}
-     * before it can touch a shell string.
+     * The recorded session this launch resumes, or empty for a fresh session.
      *
-     * @throws IllegalArgumentException when the id fails the safe pattern
+     * @throws IllegalArgumentException when the id is not {@link #requireSafeSessionId safe}
      */
     public Optional<String> resume() {
-      if (resumeSessionId == null) {
-        return Optional.empty();
-      }
-      if (!isSafeSessionId(resumeSessionId)) {
-        throw new IllegalArgumentException(
-            "Malformed session id; refusing to build a resume command from replicated data.");
-      }
-      return Optional.of(resumeSessionId);
+      return Optional.ofNullable(resumeSessionId).map(Harness::requireSafeSessionId);
     }
 
     /** The prompt argument: the task read from its file inside the container. */
@@ -128,6 +127,8 @@ public interface Harness {
   /**
    * The interactive command resuming the recorded session {@code sessionId} exactly by id, or a
    * fresh conversation when it is {@code null}: never an interactive picker.
+   *
+   * @throws IllegalArgumentException when the id is not {@link #requireSafeSessionId safe}
    */
   String attach(String sessionId);
 
@@ -153,13 +154,20 @@ public interface Harness {
    * harness as an option, not a session id.
    */
   static boolean isSafeSessionId(String sessionId) {
-    return sessionId != null && SafeSessionId.PATTERN.matcher(sessionId).matches();
+    return sessionId != null && Launch.SAFE_SESSION_ID.matcher(sessionId).matches();
   }
 
-  /** Holds the pattern an interface cannot declare privately. */
-  final class SafeSessionId {
-    private static final Pattern PATTERN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,127}");
-
-    private SafeSessionId() {}
+  /**
+   * {@code sessionId}, once it is known {@link #isSafeSessionId safe}: the one check every adapter
+   * makes before a session id touches a command it builds.
+   *
+   * @throws IllegalArgumentException when the id fails the safe pattern
+   */
+  static String requireSafeSessionId(String sessionId) {
+    if (!isSafeSessionId(sessionId)) {
+      throw new IllegalArgumentException(
+          "Malformed session id; refusing to build a resume command from replicated data.");
+    }
+    return sessionId;
   }
 }

@@ -16,9 +16,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.harness.HookFile;
+import ai.singlr.sail.harness.SailHook;
+import ai.singlr.sail.harness.StubHarness;
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
 
 class HarnessHooksTest {
@@ -224,11 +229,20 @@ class HarnessHooksTest {
         cmds.size(),
         "one hooks layer only: lanes are expressed by SAIL_SPEC_ID/SAIL_RUN_ID at launch, never"
             + " by a second settings file");
-    assertTrue(cmds.get(0).contains("mkdir -p /home/dev/.sail"));
-    assertTrue(cmds.get(1).contains("/home/dev/.sail/claude-settings.json"));
-    assertFalse(
-        cmds.get(1).contains("settings.local.json"),
-        "must not write to the project-scoped settings.local.json anymore");
+    assertTrue(cmds.get(0).endsWith(" mkdir -p /home/dev/.sail"), cmds.get(0));
+    assertEquals(
+        List.of(
+            "bash",
+            "-c",
+            "printf '%s' \"$1\" > \"$2\"",
+            "bash",
+            HarnessHooks.render(CLAUDE_CODE),
+            "/home/dev/.sail/claude-settings.json"),
+        shell
+            .arguments()
+            .get(1)
+            .subList(shell.arguments().get(1).size() - 6, shell.arguments().get(1).size()),
+        "the rendered file is the content written, and its declared path is where it goes");
   }
 
   @Test
@@ -239,15 +253,23 @@ class HarnessHooksTest {
 
     var cmds = shell.invocations();
     assertEquals(2, cmds.size());
-    assertTrue(cmds.get(0).contains("mkdir -p /home/dev/.codex"));
-    assertTrue(cmds.get(1).contains("/home/dev/.codex/hooks.json"));
+    assertTrue(cmds.get(0).endsWith(" mkdir -p /home/dev/.codex"), cmds.get(0));
+    var written = shell.arguments().get(1);
+    assertEquals(
+        List.of(HarnessHooks.render(CODEX), "/home/dev/.codex/hooks.json"),
+        written.subList(written.size() - 2, written.size()));
   }
 
   @Test
-  void installPropagatesMkdirFailure() {
-    var shell = new ScriptedShellExecutor().onFail("mkdir", "denied");
+  void aDirectoryThatCannotBeMadeStopsTheInstallBeforeAnythingIsWritten() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("mkdir", "denied");
 
-    assertThrows(IOException.class, () -> new HarnessHooks(shell).install("light-grid", CODEX));
+    var ex =
+        assertThrows(IOException.class, () -> new HarnessHooks(shell).install("light-grid", CODEX));
+
+    assertEquals("Failed to create /home/dev/.codex in light-grid: denied", ex.getMessage());
+    assertEquals(1, shell.invocations().size(), "nothing is written into a directory not made");
   }
 
   @Test
@@ -260,13 +282,52 @@ class HarnessHooksTest {
     var ex =
         assertThrows(
             IOException.class, () -> new HarnessHooks(shell).install("light-grid", CLAUDE_CODE));
-    assertTrue(ex.getMessage().contains("disk full"));
+    assertEquals(
+        "Failed to write /home/dev/.sail/claude-settings.json in light-grid: disk full",
+        ex.getMessage());
   }
 
   @Test
-  void installRejectsInvalidContainerName() {
-    var writer = new HarnessHooks(new ScriptedShellExecutor());
-    assertThrows(Exception.class, () -> writer.install("../bad", CLAUDE_CODE));
+  void aContainerNameThatIsNotAProjectNameIsRefusedBeforeAnyCommandRuns() {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new HarnessHooks(shell).install("../bad", CLAUDE_CODE));
+    assertTrue(shell.invocations().isEmpty());
+  }
+
+  @Test
+  void anEventTwoSeparatedGroupsNameIsWrittenOnceWhereItWasFirstNamedForAnyHarness() {
+    var third =
+        new StubHarness(
+            "third",
+            new HookFile(
+                "/home/dev/.third/hooks.json",
+                new LinkedHashMap<>(Map.of("first", true)),
+                List.of(
+                    new HookFile.Group("Start", "boot", List.of(SailHook.SESSION_STARTED)),
+                    new HookFile.Group(
+                        "Tool",
+                        null,
+                        List.of(
+                            SailHook.TOOL_STARTED, SailHook.TOOL_FINISHED, SailHook.ROOM_RELAY)),
+                    new HookFile.Group("Start", null, List.of(SailHook.SESSION_REPORT)),
+                    new HookFile.Group("End", null, List.of(SailHook.STOP_GATE)))),
+            OptionalInt.empty());
+
+    var root = YamlUtil.parseMap(HarnessHooks.render(third));
+
+    assertEquals(List.of("first", "hooks"), List.copyOf(root.keySet()));
+    assertEquals(List.of("Start", "Tool", "End"), List.copyOf(hooksOf(third).keySet()));
+    var start = groups(third, "Start");
+    assertEquals(2, start.size(), "both groups of the event, in the order they were declared");
+    assertEquals("boot", start.get(0).get("matcher"));
+    assertFalse(start.get(1).containsKey("matcher"));
+    assertEquals(
+        SailSessionReport.SCRIPT_PATH + " third",
+        hooks(start.get(1)).getFirst().get("command"),
+        "the session report is told which harness reports");
   }
 
   @Test

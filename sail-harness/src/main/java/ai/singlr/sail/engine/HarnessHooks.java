@@ -49,10 +49,15 @@ public final class HarnessHooks {
    * name it.
    */
   public static String render(Harness harness) {
-    var file = harness.hooks();
+    return render(harness.hooks(), harness);
+  }
+
+  private static String render(HookFile file, Harness harness) {
     var hooks = new LinkedHashMap<String, List<Map<String, Object>>>();
     for (var group : file.groups()) {
-      hooks.computeIfAbsent(group.event(), event -> new ArrayList<>()).add(render(group, harness));
+      hooks
+          .computeIfAbsent(group.event(), event -> new ArrayList<>())
+          .add(renderGroup(group, harness));
     }
     var root = new LinkedHashMap<String, Object>(file.settings());
     root.put("hooks", hooks);
@@ -63,8 +68,9 @@ public final class HarnessHooks {
   public void install(String container, Harness harness)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
-    var path = harness.hooks().path();
-    var dir = path.substring(0, path.lastIndexOf('/'));
+    var file = harness.hooks();
+    var path = file.path();
+    var dir = file.directory();
 
     var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", dir)));
     if (!mkdir.ok()) {
@@ -76,22 +82,27 @@ public final class HarnessHooks {
             ContainerExec.asDevUser(
                 container,
                 List.of(
-                    "bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", render(harness), path)));
+                    "bash",
+                    "-c",
+                    "printf '%s' \"$1\" > \"$2\"",
+                    "bash",
+                    render(file, harness),
+                    path)));
     if (!write.ok()) {
       throw new IOException("Failed to write " + path + " in " + container + ": " + write.stderr());
     }
   }
 
-  private static Map<String, Object> render(HookFile.Group group, Harness harness) {
+  private static Map<String, Object> renderGroup(HookFile.Group group, Harness harness) {
     var rendered = new LinkedHashMap<String, Object>();
     if (group.matcher() != null) {
       rendered.put("matcher", group.matcher());
     }
-    rendered.put("hooks", group.hooks().stream().map(hook -> render(hook, harness)).toList());
+    rendered.put("hooks", group.hooks().stream().map(hook -> renderHook(hook, harness)).toList());
     return rendered;
   }
 
-  private static Map<String, Object> render(SailHook hook, Harness harness) {
+  private static Map<String, Object> renderHook(SailHook hook, Harness harness) {
     var script = script(hook, harness);
     var rendered = new LinkedHashMap<String, Object>();
     rendered.put("type", "command");

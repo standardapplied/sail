@@ -223,6 +223,12 @@ class ContainerSailSetupTest {
             + " script riding in this list IS its rollout: the fingerprint changes and every"
             + " container converges on next apply or dispatch");
     files.forEach((path, content) -> assertFalse(content.isBlank(), path + " has no payload"));
+    for (var harness : Harnesses.all()) {
+      assertEquals(
+          HarnessHooks.render(harness),
+          files.get(harness.hooks().path()),
+          "each harness's hook file holds its own hooks");
+    }
   }
 
   @Test

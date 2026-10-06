@@ -127,17 +127,17 @@ public final class AgentAttachCommand implements Runnable {
     if (run != null && LIVE_STATUSES.contains(run.status())) {
       throw new IllegalStateException(refusal(run, name));
     }
-    var agentType = run != null ? Harnesses.of(run.agent()) : resolveAgentType();
+    var harness = run != null ? Harnesses.of(run.agent()) : resolveHarness();
     var sessionId = validatedSessionId(run);
-    var command = buildResumeCommand(agentType, sessionId);
+    var command = buildResumeCommand(harness, sessionId);
     if (sessionId == null) {
-      attachFresh(run, agentType, buildIncusExecWithTty(name, command));
+      attachFresh(run, harness, buildIncusExecWithTty(name, command));
       return;
     }
     requireNoLiveConflict(run, latest.running(), name);
     var plan = new ResumePlan(SessionYield.resumeSession(run.id()), command, name, latest.room());
     if (json) {
-      System.out.println(YamlUtil.dumpJson(plan(run, agentType, sessionId, plan)));
+      System.out.println(YamlUtil.dumpJson(plan(run, harness, sessionId, plan)));
       return;
     }
     if (dryRun) {
@@ -150,7 +150,7 @@ public final class AgentAttachCommand implements Runnable {
               + plan.session()
               + "'.");
     }
-    announceResume(run, agentType, sessionId, plan);
+    announceResume(run, harness, sessionId, plan);
     requireRunning();
     var size = Stty.size(new int[] {24, 80});
     var hostSocket = SessionCommand.socketOrDefault(socket);
@@ -265,10 +265,10 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void attachFresh(RunStore.RunRow run, Harness agentType, List<String> command)
+  private void attachFresh(RunStore.RunRow run, Harness harness, List<String> command)
       throws Exception {
     if (json) {
-      System.out.println(YamlUtil.dumpJson(plan(run, agentType, null, command)));
+      System.out.println(YamlUtil.dumpJson(plan(run, harness, null, command)));
       return;
     }
     if (dryRun) {
@@ -386,7 +386,7 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private void announceResume(
-      RunStore.RunRow run, Harness agentType, String sessionId, ResumePlan plan) {
+      RunStore.RunRow run, Harness harness, String sessionId, ResumePlan plan) {
     if (run.conversationId() != null && plan.room().isBlank()) {
       System.out.println(
           Ansi.AUTO.string(
@@ -397,7 +397,7 @@ public final class AgentAttachCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string(
             "  @|faint Resuming "
-                + agentType.yamlName()
+                + harness.yamlName()
                 + " session "
                 + sessionId
                 + " of run "
@@ -408,8 +408,8 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private LinkedHashMap<String, Object> plan(
-      RunStore.RunRow run, Harness agentType, String sessionId, ResumePlan resume) {
-    var map = plan(run, agentType, sessionId, resume.command());
+      RunStore.RunRow run, Harness harness, String sessionId, ResumePlan resume) {
+    var map = plan(run, harness, sessionId, resume.command());
     map.put("session", resume.session());
     if (!resume.room().isBlank()) {
       map.put("room", resume.room());
@@ -418,10 +418,10 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private LinkedHashMap<String, Object> plan(
-      RunStore.RunRow run, Harness agentType, String sessionId, List<String> command) {
+      RunStore.RunRow run, Harness harness, String sessionId, List<String> command) {
     var map = new LinkedHashMap<String, Object>();
     map.put("project", name);
-    map.put("agent", agentType.yamlName());
+    map.put("agent", harness.yamlName());
     map.put("mode", sessionId != null ? "resume" : "fresh");
     if (run != null) {
       map.put("run_id", run.id());
@@ -437,7 +437,7 @@ public final class AgentAttachCommand implements Runnable {
     return map;
   }
 
-  private Harness resolveAgentType() throws IOException {
+  private Harness resolveHarness() throws IOException {
     var sailYamlPath = SailPaths.resolveSailYaml(name, file);
     if (Files.exists(sailYamlPath)) {
       var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
@@ -454,8 +454,8 @@ public final class AgentAttachCommand implements Runnable {
    * where sail-launched sessions run, so the CLI's per-directory session lookup finds the recorded
    * conversation.
    */
-  public static List<String> buildResumeCommand(Harness agentType, String sessionId) {
-    return List.of("bash", "-lc", "cd ~/workspace && " + agentType.attach(sessionId));
+  public static List<String> buildResumeCommand(Harness harness, String sessionId) {
+    return List.of("bash", "-lc", "cd ~/workspace && " + harness.attach(sessionId));
   }
 
   static List<String> buildIncusExecWithTty(String container, List<String> args) {

@@ -564,14 +564,15 @@ public final class AgentSession {
       String runCredential,
       String role,
       String resumeSessionId) {
-    var cli = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
-    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
+    var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
+    warnIfReasoningEffortDropped(launching, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var launch =
         new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, resumeSessionId, true);
-    var agentCmd = agentCommand(cli, role, launch);
+    var agentCmd = agentCommand(launching, role, launch);
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
-    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
+    var effectiveAgent =
+        agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
     var script =
         """
         mkdir -p "$1"
@@ -666,14 +667,15 @@ public final class AgentSession {
       String runId,
       String runCredential,
       String role) {
-    var cli = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
-    warnIfReasoningEffortDropped(cli, specId, reasoningEffort);
+    var launching = Objects.requireNonNullElse(harness, Harnesses.DEFAULT);
+    warnIfReasoningEffortDropped(launching, specId, reasoningEffort);
     var unit = AgentUnit.forRun(runId);
     var agentCmd =
-        cli.headless(
+        launching.headless(
             new Launch(unit.taskPath(), fullPermissions, model, reasoningEffort, null, false));
     var effectiveSpec = Objects.requireNonNullElse(specId, "");
-    var effectiveAgent = agentType == null || agentType.isBlank() ? cli.yamlName() : agentType;
+    var effectiveAgent =
+        agentType == null || agentType.isBlank() ? launching.yamlName() : agentType;
     var script =
         "mkdir -p \"$(dirname \"$5\")\"; printf '%s\\n' \"$$\" > \"$7\"; cd \"$1\" && "
             + "SAIL_SPEC_ID=\"$3\" SAIL_AGENT=\"$4\" SAIL_RUN_ID=\"$6\""
@@ -699,25 +701,24 @@ public final class AgentSession {
   }
 
   /**
-   * The headless invocation for the run's lane. A {@code room} run gets the harness-restricted chat
-   * command — no mutating tools, print-mode default-deny, only the {@code spec} CLI and read-only
-   * git auto-approved — regardless of {@code fullPermissions}, so no caller can launch a
-   * full-permission chat by mispassing a flag. Every other lane keeps the full-permission dispatch
-   * command.
+   * The headless invocation for the run's lane. A {@code room} run gets the harness's read-only
+   * session ({@link Harness#readOnly}) regardless of {@code fullPermissions}, so no caller can
+   * launch a full-permission chat by mispassing a flag. Every other lane keeps the full-permission
+   * dispatch command.
    */
-  private static String agentCommand(Harness cli, String role, Launch launch) {
-    return "room".equals(role) ? cli.readOnly(launch) : cli.headless(launch);
+  private static String agentCommand(Harness harness, String role, Launch launch) {
+    return "room".equals(role) ? harness.readOnly(launch) : harness.headless(launch);
   }
 
   private static void warnIfReasoningEffortDropped(
-      Harness cli, String specId, String reasoningEffort) {
-    if (cli.honoursReasoningEffort() || Strings.isBlank(reasoningEffort)) {
+      Harness harness, String specId, String reasoningEffort) {
+    if (harness.honoursReasoningEffort() || Strings.isBlank(reasoningEffort)) {
       return;
     }
     var target = Strings.isBlank(specId) ? "this launch" : "spec " + specId;
     System.err.println(
         "  ⚠ "
-            + cli.displayName()
+            + harness.displayName()
             + " has no reasoning_effort setting; dropping reasoning_effort='"
             + reasoningEffort
             + "' for "

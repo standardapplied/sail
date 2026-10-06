@@ -106,18 +106,18 @@ public final class LaunchAdmission {
    * the container's PATH — sail.yaml's agent block declares what a project apply installed, but the
    * container is the authority on what can actually launch.
    */
-  public void requireInstalled(Harness agentCli, String project) {
+  public void requireInstalled(Harness harness, String project) {
     var found =
         exec(
             ContainerExec.asDevUser(
                 project,
-                List.of("bash", "-lc", "command -v -- \"$1\"", "bash", agentCli.binaryName())));
+                List.of("bash", "-lc", "command -v -- \"$1\"", "bash", harness.binaryName())));
     if (!found.ok()) {
       throw new ApiException(
           ErrorCode.AGENT_NOT_CONFIGURED,
-          "Agent '" + agentCli.yamlName() + "' is not installed in project '" + project + "'.",
+          "Agent '" + harness.yamlName() + "' is not installed in project '" + project + "'.",
           "Add "
-              + agentCli.yamlName()
+              + harness.yamlName()
               + " to sail.yaml's agent.install list and run 'sail project apply'.");
     }
   }
