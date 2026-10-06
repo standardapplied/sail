@@ -10,6 +10,7 @@ import static ai.singlr.sail.api.LoopRows.SPEC;
 import static ai.singlr.sail.api.ReviewLoop.PROJECT;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.api.LoopFacts.Pipeline;
@@ -144,15 +145,29 @@ class LoopFactsReaderTest {
                 })
             .apply(PROJECT));
     assertEquals(1, asked.get());
+    var unreadable = new ProjectReader.Unreadable("acme", new IllegalArgumentException("bad"));
     assertEquals(
-        new Pipeline.Unreadable("sail.yaml of project 'acme' could not be read"),
+        new Pipeline.Unreadable(unreadable.getMessage()),
         LoopFactsReader.pipelines(
                 p -> {
-                  throw new IllegalStateException("sail.yaml of project 'acme' could not be read");
+                  throw unreadable;
                 },
                 p -> "codex")
             .apply(PROJECT),
-        "an unreadable descriptor is never taken for a project with no pipeline");
+        "an unreadable definition is never taken for a project with no pipeline");
+    var storeFailure = new IllegalStateException("database is locked");
+    assertSame(
+        storeFailure,
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                LoopFactsReader.pipelines(
+                        p -> {
+                          throw storeFailure;
+                        },
+                        p -> "codex")
+                    .apply(PROJECT)),
+        "a failure of the store is not a pipeline nobody can read: it propagates, to be replayed");
   }
 
   @Test

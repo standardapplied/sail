@@ -376,7 +376,8 @@ class RateLimitGateTest {
         passkeys,
         null,
         null,
-        gate);
+        gate,
+        project -> null);
   }
 
   private static HttpRequest.Builder streamRequest(SailApiServer server) {

@@ -7,8 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ReviewStore;
@@ -16,7 +14,6 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
@@ -127,19 +124,5 @@ class ReviewWiringTest {
 
       assertEquals("review-pipeline", controller.name());
     }
-  }
-
-  @Test
-  void aProjectWithNoDescriptorHasNoneAndOneThatCannotBeReadIsAnErrorNamingTheProject(
-      @TempDir Path dir) throws Exception {
-    var written = Files.writeString(dir.resolve("sail.yaml"), "agent: [unterminated");
-
-    assertNull(ReviewWiring.descriptor("acme", dir.resolve("absent.yaml")));
-    var unreadable =
-        assertThrows(IllegalStateException.class, () -> ReviewWiring.descriptor("acme", written));
-    assertTrue(unreadable.getMessage().contains("'acme'"), unreadable.getMessage());
-
-    Files.writeString(written, "name: acme\nagent:\n  type: codex\n");
-    assertEquals("codex", ReviewWiring.descriptor("acme", written).agent().type());
   }
 }

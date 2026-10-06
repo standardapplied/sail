@@ -1143,7 +1143,7 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.wired(tempDir, custom);
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    loop.describe("agent: [unterminated");
+    loop.corruptDefinition();
 
     loop.finish(reviewer.id(), CLEAN_REVIEW);
 
@@ -1156,6 +1156,30 @@ class ReviewLoopRecoveryTest {
             + " taken for: "
             + review.error());
     assertFalse(review.error().contains("changed while this review ran"), review.error());
+  }
+
+  @Test
+  void aPipelineRevisionInTheCatalogIsWhatTheNextLoopEventRunsUnderWithNothingElseRun() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
+    loop.describe(
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: security\n"
+            + "        type: agent\n"
+            + "        agent: claude-code\n"
+            + "        gate: no_critical\n");
+
+    loop.built("auth");
+
+    var reviewer = loop.onlyLive();
+    assertEquals("claude-code", reviewer.agent(), "not the roster's codex of the first revision");
+    assertEquals(
+        List.of("security"),
+        loop.reviews.stagesForReview(reviewer.reviewId()).stream()
+            .map(ReviewStore.StageRow::name)
+            .toList(),
+        "the build's stop ran under the revision the catalog holds, with no project apply");
   }
 
   @Test
@@ -1217,7 +1241,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
-    loop.describe("agent: [unterminated");
+    loop.corruptDefinition();
 
     var build = loop.built("auth");
 

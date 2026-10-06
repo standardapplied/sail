@@ -432,7 +432,7 @@ class SlackReactorTest {
 
   @Test
   void withDefaultsDoesNotThrow() {
-    assertNotNull(SlackReactor.withDefaults(threads, specStore));
+    assertNotNull(SlackReactor.withDefaults(project -> null, threads, specStore));
   }
 
   private static String captureStderr(Runnable work) {

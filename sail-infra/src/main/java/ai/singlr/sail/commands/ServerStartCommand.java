@@ -5,12 +5,15 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.CatalogNotificationsResolver;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventRetentionSweeper;
 import ai.singlr.sail.api.MissedStopReconciler;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.PtyEventBridge;
+import ai.singlr.sail.api.RateLimitGate;
 import ai.singlr.sail.api.ReviewWiring;
 import ai.singlr.sail.api.RoomWakeReactor;
 import ai.singlr.sail.api.RunActivityStamper;
@@ -31,7 +34,6 @@ import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -217,13 +219,15 @@ public final class ServerStartCommand implements Runnable {
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
+    var reader = ProjectReader.ofCatalog(projectStore);
+    var notifications = new CatalogNotificationsResolver(reader);
     var reviewController =
         ReviewWiring.controller(
                 specStore,
                 reviewStore,
                 runStore,
                 bus,
-                ServerStartCommand::loadProjectYaml,
+                project -> reader.read(project).orElse(null),
                 operations.reviewLanes(),
                 syncScheduler::afterWrite,
                 NodeIdentity::handle)
@@ -243,7 +247,7 @@ public final class ServerStartCommand implements Runnable {
     roomWake.startSweep(Duration.ofSeconds(60));
     shutdown.register(roomWake);
     if (narratesSlack(HostSync.config())) {
-      bus.subscribe(SlackReactor.withDefaults(new SlackThreadStore(db), specStore));
+      bus.subscribe(SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore));
     } else {
       System.out.println(
           Ansi.AUTO.string(
@@ -275,7 +279,9 @@ public final class ServerStartCommand implements Runnable {
             SailPaths.apiSocketPath(),
             passkeyHandler,
             specStore,
-            reviewController);
+            reviewController,
+            new RateLimitGate(),
+            notifications);
     var sweeper = new ExpiredRowSweeper(dbPath);
     var eventSweeper = new EventRetentionSweeper(eventStore);
     var retentionSweeper = operations.retentionSweeper();
@@ -455,11 +461,5 @@ public final class ServerStartCommand implements Runnable {
               HostInfo.hostname(),
               Map.of("status", s.status().wire(), "since", String.valueOf(s.updatedAt()))));
     }
-  }
-
-  /** Loads a project's {@code sail.yaml}, or {@code null} when it has none. */
-  private static SailYaml loadProjectYaml(String project) {
-    return ReviewWiring.descriptor(
-        project, SailPaths.resolveSailYaml(project, SailPaths.PROJECT_DESCRIPTOR));
   }
 }

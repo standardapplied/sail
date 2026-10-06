@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -29,8 +30,6 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncTransitions;
 import java.io.IOException;
-import java.io.UncheckedIOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -102,7 +101,8 @@ final class ReviewLoop implements AutoCloseable {
   DispatchOperations operations;
   ReviewPipelineController controller;
 
-  private final Path yaml;
+  private final ProjectStore projects;
+  private final ProjectReader reader;
   private final Function<String, ReviewPipelineConfig> config;
   private final Function<String, String> reviewer;
   private final AtomicLong offered = new AtomicLong();
@@ -134,13 +134,14 @@ final class ReviewLoop implements AutoCloseable {
       String yamlContent,
       Function<String, ReviewPipelineConfig> config,
       Function<String, String> reviewer) {
-    this.yaml = dir.resolve("sail-" + System.nanoTime() + ".yaml");
+    db = Sqlite.open(dir.resolve("loop-" + System.nanoTime() + ".db"));
+    new SchemaManager(db).migrate();
+    projects = new ProjectStore(db);
+    reader = ProjectReader.ofCatalog(projects);
     describe(yamlContent);
     Function<String, SailYaml> loader = project -> load();
     this.config = config != null ? config : ReviewWiring.configResolver(loader);
     this.reviewer = reviewer != null ? reviewer : ReviewWiring.reviewerResolver(loader);
-    db = Sqlite.open(dir.resolve("loop-" + System.nanoTime() + ".db"));
-    new SchemaManager(db).migrate();
     specs = new SpecStore(db);
     reviews = new ReviewStore(db);
     runs = new RunStore(db);
@@ -159,7 +160,7 @@ final class ReviewLoop implements AutoCloseable {
     operations =
         new DispatchOperations(
                 container,
-                TestProjects.reading(yaml),
+                reader,
                 specs,
                 reviews,
                 runs,
@@ -228,17 +229,22 @@ final class ReviewLoop implements AutoCloseable {
         operations::relaunchWatcher);
   }
 
-  /** Rewrites the project's descriptor, as an edit to {@code sail.yaml} between two runs does. */
+  /**
+   * Records a revision of the project's definition, as an edit arriving by sync between two runs
+   * does.
+   */
   void describe(String yamlContent) {
-    try {
-      Files.writeString(yaml, yamlContent);
-    } catch (IOException e) {
-      throw new UncheckedIOException(e);
-    }
+    Acting.system(() -> projects.upsert(PROJECT, yamlContent));
+  }
+
+  /** Leaves the project's row holding text that is not a definition. */
+  void corruptDefinition() {
+    db.execute(
+        "UPDATE projects SET definition = ? WHERE name = ?", "agent: [unterminated", PROJECT);
   }
 
   private SailYaml load() {
-    return ReviewWiring.descriptor(PROJECT, yaml);
+    return reader.read(PROJECT).orElse(null);
   }
 
   /** One agent stage per name, each reviewed by the agent of that name, gated on no critical. */
@@ -447,13 +453,7 @@ final class ReviewLoop implements AutoCloseable {
   /** The stop executor this server would run, halting agents through {@code halter}. */
   StopOperations stops(StopOperations.AgentHalter halter) {
     return new StopOperations(
-        container,
-        TestProjects.reading(yaml),
-        specs,
-        runs,
-        bus::publish,
-        halter,
-        StopOperations.Listener.NONE);
+        container, reader, specs, runs, bus::publish, halter, StopOperations.Listener.NONE);
   }
 
   /** Every agent this loop launches from now on says what {@code script} says, then exits. */
