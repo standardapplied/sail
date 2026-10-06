@@ -80,8 +80,8 @@ Three Maven modules, Java 25, one native binary.
 
 | Module | Package roots | Responsibility |
 |---|---|---|
-| `sail-core` | `auth`, `common`, `config`, `engine`, `gen`, `ssh`, `store`, `sync`, `webauthn` | Domain model and config records, the Panama-SQLite store, the DB-sync engine and replicas, passkey and WebAuthn primitives, the SSH gateway tokenizer, pure file generators, and shared id, time, and string seams. No CLI, no HTTP, no native binary. Its only external dependency is SnakeYAML Engine. |
-| `sail-harness` | `engine` | The in-container agent harness that runs inside project containers: agent sessions, the guardrail checker, reporting, the in-container `spec` CLI helper, the webhook notifier, and hook config writers. |
+| `sail-core` | `auth`, `common`, `config`, `engine`, `gen`, `harness`, `ssh`, `store`, `sync`, `webauthn` | Domain model and config records, the Panama-SQLite store, the DB-sync engine and replicas, passkey and WebAuthn primitives, the SSH gateway tokenizer, pure file generators, and shared id, time, and string seams. No CLI, no HTTP, no native binary. Its only external dependency is SnakeYAML Engine. |
+| `sail-harness` | `engine` | The in-container agent harness that runs inside project containers: agent sessions, the guardrail checker, reporting, the in-container `spec` CLI helper, the webhook notifier, and the hook renderer that writes each harness's hook file. |
 | `sail-infra` | `api`, `commands`, `engine` (plus `Main`, `Sail`, `SailVersion`) | The picocli CLI, the loopback HTTP control-plane API and its reactors, and the host-side provisioning engines (Incus, Podman, ZFS, and systemd drivers). It builds the GraalVM native binary `sail`. |
 
 Coverage discipline: `ai.singlr.sail.api.*` is held to 100% line and method coverage under
@@ -692,6 +692,64 @@ description-loaded Codex skill. Java standards then reach the agent only while i
 never bloating the always-loaded context. The bodies are project-supplied, and sail ships
 none.
 
+**The harness contract** (`ai.singlr.sail.harness`): sail drives two coding harnesses,
+Claude Code and Codex, and will drive more. Everything that differs between them sits behind
+one interface, `Harness`, with one package-private adapter per harness (`ClaudeCode`,
+`Codex`) and a registry, `Harnesses`, that resolves a `sail.yaml` name (`of`), lists every
+harness (`all`) and names the default (`DEFAULT`). No main code outside the adapters names
+one, compares a harness with a name or switches on one: a capability is an answer the
+adapter gives, not a name a caller recognises. Adding a harness is adding one adapter.
+
+| `Harness` method | What it answers |
+|---|---|
+| `yamlName()`, `binaryName()`, `displayName()`, `installCommand()` | identity: the `sail.yaml` name, the binary on PATH, the name people read, how to install it |
+| `homeContextPath()`, `skillsDir()` | where the sail-owned context file and skills live under `$HOME` |
+| `languageRulePath(name)`, `languageRule(name, paths, body)` | where a project's language rule lands and what it holds, in the harness's native load-when-relevant channel |
+| `headless(Launch)` | the command for a build, a reviewer, a fix agent or a full chat turn; fresh when the launch's `resumeSessionId` is null, resumed otherwise |
+| `readOnly(Launch)`, `readOnlyRefusal()` | the room lane's harness-restricted command, or why the harness has none |
+| `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
+| `honoursReasoningEffort()`, `loginTunnelPort()`, `interactiveTip()` | whether a reasoning effort means anything, which port the login flow needs forwarded, what to tell an engineer before an interactive session |
+| `hooks()` | the harness's `HookFile`: which of its events run which of sail's `SailHook`s |
+| `isSafeSessionId(id)` | whether a hook-reported, replicated session id may touch a shell string |
+
+A `Launch` carries the task file, whether every action is auto-approved, the model, the
+reasoning effort, the session to resume and whether to stream. A malformed session id throws
+before it can reach a shell string; `readOnly` ignores permissions and reasoning effort, and
+a harness with a refusal throws rather than build one.
+
+Hooks are data. `SailHook` names the eight things sail runs at a harness's events:
+`SESSION_STARTED`, `SESSION_REPORT`, `TOOL_STARTED`, `TOOL_FINISHED`, `ROOM_RELAY`,
+`STOP_GATE`, `BATCH_RESOLVED`, `SESSION_ENDED`; the first six are required of every
+harness, and a `HookFile` whose groups do not name one cannot be built. `HarnessHooks`
+(`sail-harness`) renders the file from the adapter's declaration, one switch giving each hook
+its script and timeout, and `ContainerSailSetup` installs and fingerprints the file of every
+harness in `Harnesses.all()`.
+
+| Claude Code event (`~/.sail/claude-settings.json`) | Matcher | Hooks |
+|---|---|---|
+| `SessionStart` | `startup` | `SESSION_STARTED` |
+| `SessionStart` | none | `SESSION_REPORT` |
+| `PreToolUse` | none | `TOOL_STARTED` |
+| `PostToolUse` | none | `TOOL_FINISHED`, `ROOM_RELAY` |
+| `PostToolUseFailure` | none | `TOOL_FINISHED` |
+| `PostToolBatch` | none | `BATCH_RESOLVED` |
+| `Stop` | none | `STOP_GATE` |
+| `SessionEnd` | none | `SESSION_ENDED` |
+
+The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules that
+belt-and-brace the room lane's top credentials.
+
+| Codex event (`~/.codex/hooks.json`) | Matcher | Hooks |
+|---|---|---|
+| `SessionStart` | none | `SESSION_STARTED`, `SESSION_REPORT` |
+| `PreToolUse` | none | `TOOL_STARTED` |
+| `PostToolUse` | none | `TOOL_FINISHED`, `ROOM_RELAY` |
+| `Stop` | none | `STOP_GATE` |
+
+Golden tests (`HarnessGoldenTest`, `HarnessHooksGoldenTest`) pin every launch command and
+both hook files as text; `HarnessContractTest` runs what every harness must answer over
+`Harnesses.all()`.
+
 **Guardrails and rollback:** a guardrails block sets a `max_duration`, a `max_idle` stall
 window, and an action (`snapshot-and-stop`, `stop`, or `notify`), and each lane reads its
 own: `agent.guardrails` bounds a build, an ad-hoc run and a chat turn (default `4h` / `20m`
@@ -1080,8 +1138,8 @@ class is named):
   `RunWatchTest.whatTheAgentLogsWhileACallIsInFlightTakesNothingOffTheCount`,
   `SailEventHelperScriptTest.theMainAgentsBatchEndIsPostedAsAToolFinishThatMarksTheBatch`,
   `SailEventHelperScriptTest.aSubagentsBatchEndIsNotPosted`,
-  `ClaudeCodeHookConfigTest.aToolCallThatFailedIsToldFinishedAsOneThatSucceededIs`,
-  `ClaudeCodeHookConfigTest.aBatchThatResolvedIsToldThroughItsOwnHook`,
+  `HarnessHooksTest.aToolCallThatFailedIsToldFinishedAsOneThatSucceededIs`,
+  `HarnessHooksTest.aBatchThatResolvedIsToldThroughItsOwnHook`,
   `ReviewAgentLoopIT.aRealToolCallLongerThanTheStallWindowIsNotKilledAsAStall`.*
 - **C10. Main says what the driving box said, and a replayed stop is not said again.** An
   escalation's reason rides the synced review row (`reviews.error`) into main's
