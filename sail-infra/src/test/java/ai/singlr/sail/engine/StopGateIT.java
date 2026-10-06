@@ -17,6 +17,7 @@ import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TestControlPlane;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
@@ -108,7 +109,10 @@ class StopGateIT extends AbstractIncusIT {
                     "-",
                     "dev",
                     "-c",
-                    "grep -F " + SailStopGate.SCRIPT_PATH + " " + CodexHookConfig.SETTINGS_PATH));
+                    "grep -F "
+                        + SailStopGate.SCRIPT_PATH
+                        + " "
+                        + Harnesses.of("codex").hooks().path()));
         assertTrue(
             codexHooks.ok(),
             "the installed codex hooks.json must wire the stop gate: " + codexHooks.stderr());

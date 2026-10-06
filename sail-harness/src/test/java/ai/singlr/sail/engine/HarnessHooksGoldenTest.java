@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
+import ai.singlr.sail.harness.Harnesses;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -55,13 +56,17 @@ class HarnessHooksGoldenTest {
 
   @Test
   void claudeCodeHookFile() {
-    assertEquals("/home/dev/.sail/claude-settings.json", ClaudeCodeHookConfig.SETTINGS_PATH);
-    assertEquals(CLAUDE_CODE_HOOKS, ClaudeCodeHookConfig.render());
+    var claudeCode = Harnesses.of("claude-code");
+
+    assertEquals("/home/dev/.sail/claude-settings.json", claudeCode.hooks().path());
+    assertEquals(CLAUDE_CODE_HOOKS, HarnessHooks.render(claudeCode));
   }
 
   @Test
   void codexHookFile() {
-    assertEquals("/home/dev/.codex/hooks.json", CodexHookConfig.SETTINGS_PATH);
-    assertEquals(CODEX_HOOKS, CodexHookConfig.render());
+    var codex = Harnesses.of("codex");
+
+    assertEquals("/home/dev/.codex/hooks.json", codex.hooks().path());
+    assertEquals(CODEX_HOOKS, HarnessHooks.render(codex));
   }
 }

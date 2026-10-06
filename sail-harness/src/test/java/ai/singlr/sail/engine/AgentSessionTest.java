@@ -712,7 +712,7 @@ class AgentSessionTest {
                 + " --setenv \"SAIL_RUN_ROLE=${10}\" --unit "
                 + RUN_UNIT.unitName()));
     assertTrue(joined.contains("claude --print"));
-    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
+    assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(cmd.contains(RUN_UNIT.logPath()));
     assertTrue(cmd.contains(RUN_UNIT.pidPath()));
     assertTrue(joined.contains(RUN_UNIT.taskPath()));
@@ -1073,7 +1073,7 @@ class AgentSessionTest {
     assertTrue(
         joined.contains(
             "claude --print --output-format stream-json --verbose --settings "
-                + ClaudeCodeHookConfig.SETTINGS_PATH
+                + CLAUDE_CODE.hooks().path()
                 + " --dangerously-skip-permissions"));
   }
 
@@ -1244,7 +1244,7 @@ class AgentSessionTest {
     assertTrue(cmd.contains("acme"));
     var joined = String.join(" ", cmd);
     assertTrue(joined.contains("claude --print"));
-    assertTrue(joined.contains("--settings " + ClaudeCodeHookConfig.SETTINGS_PATH));
+    assertTrue(joined.contains("--settings " + CLAUDE_CODE.hooks().path()));
     assertTrue(joined.contains("agent-task.txt"));
     var script = cmd.get(cmd.indexOf("-c") + 1);
     assertEquals(

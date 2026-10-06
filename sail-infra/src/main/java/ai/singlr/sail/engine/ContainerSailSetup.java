@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -83,8 +84,10 @@ public final class ContainerSailSetup {
     new SailRoomRelay(shell).install(container);
     new SailSessionReport(shell).install(container);
     new SpecCliHelper(shell).install(container);
-    new ClaudeCodeHookConfig(shell).install(container);
-    new CodexHookConfig(shell).install(container);
+    var hooks = new HarnessHooks(shell);
+    for (var harness : Harnesses.all()) {
+      hooks.install(container, harness);
+    }
     new SshdKeepalive(shell).install(container);
     writeStamp(shell, container, expected);
     return Result.UPDATED;
@@ -123,8 +126,9 @@ public final class ContainerSailSetup {
     files.put(SailSessionReport.SCRIPT_PATH, SailSessionReport.scriptContent());
     files.put(SpecCliHelper.SCRIPT_PATH, SpecCliHelper.scriptContent());
     files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
-    files.put(ClaudeCodeHookConfig.SETTINGS_PATH, ClaudeCodeHookConfig.render());
-    files.put(CodexHookConfig.SETTINGS_PATH, CodexHookConfig.render());
+    for (var harness : Harnesses.all()) {
+      files.put(harness.hooks().path(), HarnessHooks.render(harness));
+    }
     files.put(SshdKeepalive.DROP_IN_PATH, SshdKeepalive.content());
     return files;
   }
