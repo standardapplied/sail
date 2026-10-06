@@ -169,6 +169,12 @@ class PtySessionTest {
 
   private PtySession resumed(SessionFiles files, Journal journal, String script, boolean withShim)
       throws Exception {
+    return resumed(files, journal, script, withShim, PtyEvents.NONE);
+  }
+
+  private PtySession resumed(
+      SessionFiles files, Journal journal, String script, boolean withShim, PtyEvents events)
+      throws Exception {
     var command = List.of("sh", "-c", script);
     var argv = withShim ? PtyChildShimTest.shim(files.exit(), "sh", "-c", script) : command;
     var origin = origin("r", "uday", "");
@@ -186,7 +192,27 @@ class PtySessionTest {
             System.currentTimeMillis(),
             "t",
             true);
-    return PtySession.resume(meta, PtyEvents.NONE, pty, journal, files, SdNotify.NONE);
+    return PtySession.resume(meta, events, pty, journal, files, SdNotify.NONE);
+  }
+
+  /** Reports the session's ending, which a child that exits before any attach publishes first. */
+  private static final class Ending implements PtyEvents {
+    private final CountDownLatch ended = new CountDownLatch(1);
+
+    boolean await() throws InterruptedException {
+      return ended.await(30, TimeUnit.SECONDS);
+    }
+
+    @Override
+    public void sessionStarted(PtySession.Origin origin) {}
+
+    @Override
+    public void sessionAttached(PtySession.Origin origin, String fde) {}
+
+    @Override
+    public void sessionEnded(PtySession.Origin origin, String reason) {
+      ended.countDown();
+    }
   }
 
   @Test
@@ -211,23 +237,10 @@ class PtySessionTest {
               createdLongBeforeTheStranger,
               "t",
               true);
-      var ended = new CountDownLatch(1);
-      var recorder =
-          new PtyEvents() {
-            @Override
-            public void sessionStarted(PtySession.Origin origin) {}
-
-            @Override
-            public void sessionAttached(PtySession.Origin origin, String fde) {}
-
-            @Override
-            public void sessionEnded(PtySession.Origin origin, String reason) {
-              ended.countDown();
-            }
-          };
-      var session = PtySession.resume(meta, recorder, pty, journal, files, SdNotify.NONE);
+      var ending = new Ending();
+      var session = PtySession.resume(meta, ending, pty, journal, files, SdNotify.NONE);
       try {
-        assertTrue(ended.await(30, TimeUnit.SECONDS), "the session ends on its own");
+        assertTrue(ending.await(), "the session ends on its own");
         assertEquals(PtySession.STATUS_LOST, session.endedReason());
       } finally {
         session.close();
@@ -381,12 +394,18 @@ class PtySessionTest {
 
   @Test
   void aResumedSessionWithoutAnExitFileEndsLoudlyNeverAsASilentZero() throws Exception {
-    var session = resumed("exit 0", false);
+    var files = SessionFiles.in(dir, "r");
+    var ending = new Ending();
+    var session =
+        resumed(files, RingJournal.open(files.ring(), 64 * 1024), "exit 0", false, ending);
     try {
-      var client = new Collector();
-      session.attach(client, false, "uday");
-      assertTrue(client.ended.await(30, TimeUnit.SECONDS));
+      assertTrue(ending.await(), "the session ends on its own");
       assertEquals(PtySession.STATUS_LOST, session.endedReason());
+      var refused =
+          assertThrows(IOException.class, () -> session.attach(new Collector(), false, "uday"));
+      assertTrue(
+          refused.getMessage().contains("has ended: " + PtySession.STATUS_LOST),
+          refused.getMessage());
     } finally {
       session.close();
     }

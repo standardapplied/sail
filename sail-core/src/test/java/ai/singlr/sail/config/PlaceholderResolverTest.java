@@ -83,6 +83,19 @@ class PlaceholderResolverTest {
   }
 
   @Test
+  void aTokenIsReplacedAtEveryOccurrenceAndAnUnknownOneIsNamed() {
+    var result =
+        PlaceholderResolver.resolve("a: ${GIT_NAME}\nb:\n  - ${GIT_NAME}\n  - x\n", name -> "Mady");
+
+    assertEquals(Map.of("a", "Mady", "b", List.of("Mady", "x")), result);
+    var unknown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> PlaceholderResolver.resolve("a: ${MYSTERY}\n", name -> "x"));
+    assertTrue(unknown.getMessage().contains("${MYSTERY}"), unknown.getMessage());
+  }
+
+  @Test
   void providerResolveRejectsUnknownPlaceholders() {
     var ex =
         assertThrows(

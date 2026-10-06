@@ -227,7 +227,7 @@ public final class ServerStartCommand implements Runnable {
                 reviewStore,
                 runStore,
                 bus,
-                project -> reader.read(project).orElse(null),
+                ReviewWiring.definitions(reader),
                 operations.reviewLanes(),
                 syncScheduler::afterWrite,
                 NodeIdentity::handle)

@@ -37,6 +37,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -113,11 +114,7 @@ public final class AgentWatchCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--host", description = "sail-api host.", defaultValue = "127.0.0.1")
   private String apiHost;
@@ -336,7 +333,7 @@ public final class AgentWatchCommand implements Runnable {
   }
 
   /** The project's notifications as the catalog holds them when the watch starts. */
-  private Notifications notifications() throws Exception {
+  Notifications notifications() {
     try (var operations = this.operations.get()) {
       var config = operations.catalog().definitions().require(name);
       return config.agent() != null ? config.agent().notifications() : null;

@@ -70,17 +70,10 @@ public final class PlaceholderResolver {
       if (resolved.containsKey(name)) {
         continue;
       }
-      if (!KNOWN_PLACEHOLDERS.containsKey(name)) {
-        throw new IllegalArgumentException(
-            "Unknown placeholder: ${"
-                + name
-                + "}. Known placeholders: "
-                + KNOWN_PLACEHOLDERS.keySet());
-      }
+      var prompt = promptFor(name);
       var value = values.apply(name);
       if (Strings.isBlank(value)) {
-        throw new IllegalArgumentException(
-            "No value for ${" + name + "} (" + KNOWN_PLACEHOLDERS.get(name) + ")");
+        throw new IllegalArgumentException("No value for " + token(name) + " (" + prompt + ")");
       }
       resolved.put(name, value.strip());
     }
@@ -92,20 +85,21 @@ public final class PlaceholderResolver {
    * string values that carry it, wherever they sit in the tree. Every other value, and every
    * placeholder not in {@code values}, is kept as it was.
    */
-  @SuppressWarnings("unchecked")
   public static Map<String, Object> substitute(
       Map<String, Object> root, Map<String, String> values) {
-    return values.isEmpty() ? root : (Map<String, Object>) substituteNode(root, values);
+    return values.isEmpty() ? root : substituteMap(root, values);
+  }
+
+  private static <K> Map<K, Object> substituteMap(Map<K, ?> map, Map<String, String> values) {
+    var resolved = new LinkedHashMap<K, Object>();
+    map.forEach((key, child) -> resolved.put(key, substituteNode(child, values)));
+    return resolved;
   }
 
   private static Object substituteNode(Object node, Map<String, String> values) {
     return switch (node) {
       case String text -> substituteText(text, values);
-      case Map<?, ?> map -> {
-        var resolved = new LinkedHashMap<Object, Object>();
-        map.forEach((key, child) -> resolved.put(key, substituteNode(child, values)));
-        yield resolved;
-      }
+      case Map<?, ?> map -> substituteMap(map, values);
       case List<?> list -> list.stream().map(child -> substituteNode(child, values)).toList();
       case null, default -> node;
     };

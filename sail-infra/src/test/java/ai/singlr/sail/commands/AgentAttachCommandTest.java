@@ -9,9 +9,11 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
@@ -20,6 +22,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -34,8 +37,23 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledOnOs;
 import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
 
 class AgentAttachCommandTest {
+
+  @TempDir Path dir;
+
+  @Test
+  void theHarnessIsTheCatalogRowsAgentAndTheDefaultForAProjectWithNoRow() {
+    var dbPath = seeded("acme", "name: acme\nagent:\n  type: codex\n");
+    var acme = new AgentAttachCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(acme).parseArgs("acme");
+    var absent = new AgentAttachCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(absent).parseArgs("absent", "-f", "/abs/sail.yaml");
+
+    assertEquals("codex", acme.resolveHarness().yamlName());
+    assertSame(Harnesses.DEFAULT, absent.resolveHarness());
+  }
 
   @Test
   void anUnreadableRunStateRefusesTheAttachInsteadOfForkingFresh() {
@@ -384,5 +402,14 @@ class AgentAttachCommandTest {
           "a spec without a room here opens unbound rather than unreachable");
       assertEquals("", AgentAttachCommand.knownRoom(rooms, runs.findById("r3").orElseThrow()));
     }
+  }
+
+  private Path seeded(String project, String definition) {
+    var dbPath = dir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+    }
+    return dbPath;
   }
 }

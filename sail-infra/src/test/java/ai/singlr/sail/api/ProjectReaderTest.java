@@ -82,6 +82,28 @@ class ProjectReaderTest {
   }
 
   @Test
+  void aRowThatIsYamlButNotADefinitionIsUnreadableToo() {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var store = new ProjectStore(db);
+      Acting.system(() -> store.upsert("acme", ACME));
+      db.execute(
+          "UPDATE projects SET definition = ? WHERE name = ?",
+          ACME + "  review_pipeline:\n    stages:\n      - type: agent\n",
+          "acme");
+
+      var unreadable =
+          assertThrows(
+              ProjectReader.Unreadable.class, () -> ProjectReader.ofCatalog(store).read("acme"));
+
+      assertTrue(
+          unreadable.getMessage().startsWith("The definition of project 'acme' in the catalog"),
+          unreadable.getMessage());
+      assertFalse(unreadable.getCause() instanceof ProjectReader.Unreadable);
+    }
+  }
+
+  @Test
   void aFailureOfTheStoreItselfIsNotWrapped() {
     var db = Sqlite.open(dir.resolve("sail.db"));
     new SchemaManager(db).migrate();

@@ -17,7 +17,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.LocalIdentity;
-import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
@@ -30,7 +30,6 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -164,20 +163,7 @@ class RunCommandTest {
   }
 
   private static CommandLine command(Path dbPath) {
-    var noGit =
-        new ShellExec() {
-          public Result exec(List<String> command) {
-            return new Result(1, "", "");
-          }
-
-          public Result exec(List<String> command, Path workDir, Duration timeout) {
-            return exec(command);
-          }
-
-          public boolean isDryRun() {
-            return false;
-          }
-        };
+    var noGit = new ScriptedShellExecutor();
     return new CommandLine(
         new RunCommand(
             () -> OperationsFactory.open(dbPath),

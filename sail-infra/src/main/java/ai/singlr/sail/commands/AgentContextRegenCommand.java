@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -34,7 +35,7 @@ import picocli.CommandLine.Spec;
 
 @Command(
     name = "regen",
-    description = "Regenerate the agent context file from sail.yaml.",
+    description = "Regenerate the agent context files from the project's definition.",
     mixinStandardHelpOptions = true)
 public final class AgentContextRegenCommand implements Runnable {
 
@@ -44,11 +45,7 @@ public final class AgentContextRegenCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -94,8 +91,12 @@ public final class AgentContextRegenCommand implements Runnable {
 
     if (contextFiles.isEmpty()) {
       throw new IllegalStateException(
-          "No agent configured in sail.yaml."
-              + "\n  Add an 'agent:' section to generate context files.");
+          "Project '"
+              + name
+              + "' has no agent configured."
+              + "\n  Add an 'agent:' section with 'sail project edit "
+              + name
+              + "'.");
     }
 
     var pushed = new ArrayList<String>();

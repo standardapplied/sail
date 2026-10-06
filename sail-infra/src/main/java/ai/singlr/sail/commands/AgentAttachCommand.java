@@ -32,6 +32,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -70,11 +71,7 @@ public final class AgentAttachCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--dry-run", description = "Print the exact command instead of attaching.")
   private boolean dryRun;
@@ -446,7 +443,7 @@ public final class AgentAttachCommand implements Runnable {
     return map;
   }
 
-  private Harness resolveHarness() throws Exception {
+  Harness resolveHarness() {
     try (var operations = this.operations.get()) {
       return operations
           .catalog()

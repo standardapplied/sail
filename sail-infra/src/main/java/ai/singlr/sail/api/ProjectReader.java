@@ -16,6 +16,7 @@ import java.util.Optional;
  * reads, so a revision that reaches the catalog, by sync or by a command, is what the next read
  * sees.
  */
+@FunctionalInterface
 public interface ProjectReader {
 
   /** The project's definition, or empty when this box holds no definition of it. */
@@ -39,10 +40,10 @@ public interface ProjectReader {
    * project.
    */
   static ProjectReader ofCatalog(ProjectStore store) {
-    return project ->
-        store == null
-            ? Optional.empty()
-            : store.findByName(project).map(row -> parse(project, row.definition()));
+    if (store == null) {
+      return project -> Optional.empty();
+    }
+    return project -> store.findByName(project).map(row -> parse(project, row.definition()));
   }
 
   private static SailYaml parse(String project, String definition) {
@@ -55,7 +56,7 @@ public interface ProjectReader {
 
   /** A catalog row that holds a definition which cannot be read as one. */
   final class Unreadable extends RuntimeException {
-    public Unreadable(String project, Throwable cause) {
+    Unreadable(String project, Throwable cause) {
       super(
           "The definition of project '"
               + project

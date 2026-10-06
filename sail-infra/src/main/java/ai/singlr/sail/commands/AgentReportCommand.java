@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -41,11 +42,7 @@ public final class AgentReportCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
@@ -64,6 +61,13 @@ public final class AgentReportCommand implements Runnable {
     CliCommand.run(spec, this::execute);
   }
 
+  /** The project's definition from the catalog, which a report needs. */
+  SailYaml definition() {
+    try (var operations = this.operations.get()) {
+      return operations.catalog().definitions().require(name);
+    }
+  }
+
   private void execute() throws Exception {
     name = CurrentProject.require(name);
     NameValidator.requireValidProjectName(name);
@@ -80,13 +84,8 @@ public final class AgentReportCommand implements Runnable {
           throw new IllegalStateException("Container error: " + e.message());
     }
 
-    SailYaml config;
-    try (var operations = this.operations.get()) {
-      config = operations.catalog().definitions().require(name);
-    }
-
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(name, config, projectSpecs(name), latestSession(name));
+    var report = reporter.generate(name, definition(), projectSpecs(name), latestSession(name));
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));

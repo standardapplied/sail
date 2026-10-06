@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -178,18 +179,12 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void dryRunSkipsCanonicalBundlePersistenceEntirely() throws Exception {
+  void dryRunSkipsCanonicalBundlePersistenceEntirely() {
     var missingSource = Path.of("/definitely/not/there/sail.yaml");
 
-    ProjectApplyCommand.persistCanonicalBundle("web", missingSource, true);
-
-    assertThrows(
-        Exception.class,
-        () ->
-            ProjectApplyCommand.syncProjectBundle(
-                missingSource, missingSource.resolveSibling("canonical.yaml")),
-        "the same source outside dry-run would fail loudly — proof the dry run never reached"
-            + " the filesystem");
+    assertDoesNotThrow(
+        () -> ProjectApplyCommand.persistCanonicalBundle("web", missingSource, true),
+        "a source that cannot even be read is never touched under dry-run");
   }
 
   @Test

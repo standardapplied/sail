@@ -23,7 +23,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -73,7 +72,7 @@ class DispatchCommandTest {
   }
 
   @Test
-  void failsWithMissingSailYaml() {
+  void aProjectThisBoxDoesNotHoldIsRefusedWhateverFileIsNamed() {
     var cmd = new CommandLine(new Sail());
 
     var exitCode =
@@ -84,29 +83,6 @@ class DispatchCommandTest {
             "test-project",
             "-f",
             tempDir.resolve("nope.yaml").toString());
-
-    assertNotEquals(0, exitCode);
-  }
-
-  @Test
-  void failsGracefullyWithoutRunningContainer() throws Exception {
-    var yaml =
-        """
-        name: test-project
-        resources:
-          cpu: 2
-          memory: 4GB
-          disk: 20GB
-        agent:
-          type: claude-code
-        """;
-    var yamlPath = tempDir.resolve("sail.yaml");
-    Files.writeString(yamlPath, yaml);
-
-    var cmd = new CommandLine(new Sail());
-
-    var exitCode =
-        cmd.execute("spec", "dispatch", "--project", "test-project", "-f", yamlPath.toString());
 
     assertNotEquals(0, exitCode);
   }

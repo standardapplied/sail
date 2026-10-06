@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 
@@ -90,11 +91,7 @@ public final class DispatchCommand implements Runnable {
               + " pending and records a 'restarted' lifecycle event before dispatching.")
   private boolean restart;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @picocli.CommandLine.Mixin private SyncOptions syncOptions;
 

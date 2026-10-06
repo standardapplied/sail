@@ -52,6 +52,15 @@ public final class ReviewWiring {
         localHandle);
   }
 
+  /**
+   * What the loop reads a project as: its catalog definition, null for a project with no row, and
+   * {@link ProjectReader.Unreadable} for one whose row cannot be read, which is never taken for a
+   * project with no pipeline.
+   */
+  public static Function<String, SailYaml> definitions(ProjectReader reader) {
+    return project -> reader.read(project).orElse(null);
+  }
+
   /** Resolves a project's review pipeline: its configured one, or the mandatory default. */
   static Function<String, ReviewPipelineConfig> configResolver(Function<String, SailYaml> loader) {
     return project -> {

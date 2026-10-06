@@ -49,14 +49,15 @@ import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 /**
- * Unified harness entry point. Regenerates agent context from sail.yaml, then launches the
- * configured agent. Equivalent to {@code sail agent context regen} followed by {@code sail agent
- * launch}, but in a single command.
+ * Unified harness entry point. Regenerates agent context from the project's definition in the
+ * catalog, then launches the configured agent. Equivalent to {@code sail agent context regen}
+ * followed by {@code sail agent launch}, but in a single command.
  */
 @Command(
     name = "run",
@@ -104,11 +105,7 @@ public final class RunCommand implements Runnable {
               + " passed, prompts interactively (defaults to no); skips silently in --json mode.")
   private Boolean snapshot;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Ignored: the project is read from the catalog.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 

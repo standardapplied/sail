@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -86,7 +87,7 @@ class ProjectCatalogTest {
     assertTrue(
         failed.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),
         failed.getMessage());
-    assertTrue(failed.getCause() != null, "the cause rides along");
+    assertNotNull(failed.getCause(), "the cause rides along");
   }
 
   @Test

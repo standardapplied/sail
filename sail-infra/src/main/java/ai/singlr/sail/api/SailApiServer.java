@@ -74,11 +74,12 @@ public final class SailApiServer implements AutoCloseable {
   }
 
   /**
-   * Full control-plane constructor. {@code specStore} wires the spec-lifecycle reactor and {@code
-   * reviewController} wires the review pipeline. When the review controller is present it owns the
-   * {@code in_progress -> review} transition (and the review that follows), so the lifecycle
-   * reactor — which only performs that transition — is not also subscribed; exactly one handler
-   * advances a stopped agent's spec.
+   * The constructor tests build, which sends no webhooks: as the full one with no notifications
+   * resolver. {@code specStore} wires the spec-lifecycle reactor and {@code reviewController} wires
+   * the review pipeline. When the review controller is present it owns the {@code in_progress ->
+   * review} transition (and the review that follows), so the lifecycle reactor — which only
+   * performs that transition — is not also subscribed; exactly one handler advances a stopped
+   * agent's spec.
    */
   public SailApiServer(
       String host,

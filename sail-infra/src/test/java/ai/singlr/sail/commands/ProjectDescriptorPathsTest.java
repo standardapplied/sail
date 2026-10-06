@@ -116,7 +116,7 @@ class ProjectDescriptorPathsTest {
   }
 
   @Test
-  void syncProjectBundleCopiesDescriptorAndFilesToCanonicalLocation() throws Exception {
+  void syncFilesDirectoryCopiesTheFilesBesideTheDescriptor() throws Exception {
     var sourceDir = tempDir.resolve("source");
     var canonicalDir = tempDir.resolve("canonical");
     var sourceYaml = sourceDir.resolve("sail.yaml");
@@ -127,17 +127,15 @@ class ProjectDescriptorPathsTest {
     Files.writeString(sourceFilesDir.resolve("app/.env"), "FOO=bar\n");
     Files.writeString(sourceFilesDir.resolve("scripts/start.sh"), "#!/bin/bash\necho ok\n");
 
-    var canonicalYaml = canonicalDir.resolve("sail.yaml");
-    ProjectApplyCommand.syncProjectBundle(sourceYaml, canonicalYaml);
+    ProjectApplyCommand.syncFilesDirectory(sourceFilesDir, canonicalDir.resolve("files"));
 
-    assertEquals("name: acme-health\n", Files.readString(canonicalYaml));
     assertEquals("FOO=bar\n", Files.readString(canonicalDir.resolve("files/app/.env")));
     assertEquals(
         "#!/bin/bash\necho ok\n", Files.readString(canonicalDir.resolve("files/scripts/start.sh")));
   }
 
   @Test
-  void syncProjectBundleRemovesStaleCanonicalFilesWhenSourceHasNone() throws Exception {
+  void syncFilesDirectoryRemovesStaleCanonicalFilesWhenSourceHasNone() throws Exception {
     var sourceDir = tempDir.resolve("source");
     var canonicalDir = tempDir.resolve("canonical");
     var sourceYaml = sourceDir.resolve("sail.yaml");
@@ -146,13 +144,14 @@ class ProjectDescriptorPathsTest {
     Files.writeString(sourceYaml, "name: acme-health\n");
     Files.writeString(canonicalDir.resolve("files/old.env"), "STALE=true\n");
 
-    ProjectApplyCommand.syncProjectBundle(sourceYaml, canonicalDir.resolve("sail.yaml"));
+    ProjectApplyCommand.syncFilesDirectory(
+        sourceDir.resolve("files"), canonicalDir.resolve("files"));
 
     assertFalse(Files.exists(canonicalDir.resolve("files")));
   }
 
   @Test
-  void syncProjectBundleReplacesCanonicalFilesWithSourceBundle() throws Exception {
+  void syncFilesDirectoryReplacesCanonicalFilesWithTheSourcesOwn() throws Exception {
     var sourceDir = tempDir.resolve("source");
     var canonicalDir = tempDir.resolve("canonical");
     var sourceFilesDir = sourceDir.resolve("files");
@@ -162,8 +161,7 @@ class ProjectDescriptorPathsTest {
     Files.writeString(sourceFilesDir.resolve("new.env"), "NEW=true\n");
     Files.writeString(canonicalDir.resolve("files/old.env"), "OLD=true\n");
 
-    ProjectApplyCommand.syncProjectBundle(
-        sourceDir.resolve("sail.yaml"), canonicalDir.resolve("sail.yaml"));
+    ProjectApplyCommand.syncFilesDirectory(sourceFilesDir, canonicalDir.resolve("files"));
 
     assertFalse(Files.exists(canonicalDir.resolve("files/old.env")));
     assertEquals("NEW=true\n", Files.readString(canonicalDir.resolve("files/new.env")));

@@ -555,9 +555,9 @@ the box's local `git config`. The agent's context, written by `agent context reg
 `agent run`, names the same identity: the row's `${GIT_NAME}` and `${GIT_EMAIL}` are replaced
 by the box's git values where it has them and left as they are where it has none, and no
 other placeholder is touched. Both paths substitute into the parsed definition, never its
-text (`PlaceholderResolver.substitute`): the redacted row holds its placeholders quoted, so
-a value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in
-the YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
+text (`PlaceholderResolver.substitute`): a redacted row holds its placeholders quoted, so a
+value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in the
+YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
 workstation key at `~/.sail/workstation_key.pub`, which is the laptop key the box owner
 connects to containers with. This is a different key from the machine sync key that a node
 presents to main. Because each box has a single owner, one workstation key authorizes that
@@ -1067,6 +1067,8 @@ class is named):
   `aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged`,
   `aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed`,
   `ProjectDefinitionsTest.aDescriptorIsReplacedInOneMoveKeepingItsModeAndLeavingNothingBeside`,
+  `ProjectDefinitionsTest.aDefinitionTheCatalogDidNotTakeIsWrittenNowhereAndOneItTookIsWrittenAfterIt`,
+  `CatalogRevisionBySyncTest.aRevisionAppliedBySyncIsWhatTheNodesNextReadTheLoopAndTheNextNotificationUse`,
   `ProjectReaderTest.aRowThatDoesNotParseIsUnreadableNamingTheProjectAndWhatTheParserSaid`,
   `ReviewLoopRecoveryTest.aPipelineRevisionInTheCatalogIsWhatTheNextLoopEventRunsUnderWithNothingElseRun`,
   `LoopFactsReaderTest.aProjectsPipelineIsNoneStagedOrUnreadable`,
@@ -1821,13 +1823,14 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 
 ## Design invariants to preserve
 
-- One binary, zero runtime dependencies, fully declarative. `sail.yaml` is the source of
-  truth, and the container is derived state that can be destroyed and recreated.
+- One binary, zero runtime dependencies, fully declarative. A project's definition is the
+  source of truth, and the container is derived state that can be destroyed and recreated.
 - The database is the replicated source of truth for specs, projects, and shared files, and
   on-disk descriptors are a copy nothing running reads: the loop, the API lanes, notifications
   and the agent commands read a project's catalog row through `ProjectReader`, with no file
-  fallback. Writes go through the catalog first, and a definition the catalog did not take is
-  written nowhere, so an edit can never diverge or be lost on the next sync.
+  fallback. Writes go through the catalog first (`ProjectDefinitions.persist`), and a definition
+  the catalog did not take is not written as the canonical descriptor either, so an edit can
+  never diverge or be lost on the next sync.
 - Every write names who is acting: one bound `Actor`, read by the journal and by every policy,
   never a string or an argument a caller threads through. A write with nothing bound fails.
 - One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once

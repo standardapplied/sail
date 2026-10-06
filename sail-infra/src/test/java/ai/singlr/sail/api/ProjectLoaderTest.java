@@ -11,10 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
-import java.nio.file.Path;
-import java.time.Duration;
-import java.util.List;
+import java.io.IOException;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -66,19 +65,7 @@ class ProjectLoaderTest {
   void aContainerThatCannotBeQueriedFailsTheLoadWithoutBlamingTheDefinition() {
     var loader =
         new ProjectLoader(
-            new ShellExec() {
-              public Result exec(List<String> command) {
-                throw new IllegalStateException("incus unreachable");
-              }
-
-              public Result exec(List<String> command, Path workDir, Duration timeout) {
-                return exec(command);
-              }
-
-              public boolean isDryRun() {
-                return false;
-              }
-            },
+            new ScriptedShellExecutor().onThrow("incus list", new IOException("incus unreachable")),
             p -> Optional.of(ACME));
 
     var failed = assertThrows(ApiException.class, () -> loader.load("acme"));
@@ -93,18 +80,6 @@ class ProjectLoaderTest {
   }
 
   private static ShellExec listing(String json) {
-    return new ShellExec() {
-      public Result exec(List<String> command) {
-        return new Result(0, json, "");
-      }
-
-      public Result exec(List<String> command, Path workDir, Duration timeout) {
-        return exec(command);
-      }
-
-      public boolean isDryRun() {
-        return false;
-      }
-    };
+    return new ScriptedShellExecutor().onOk("incus list", json);
   }
 }

@@ -13,16 +13,14 @@ import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.engine.LocalIdentity;
-import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
-import java.time.Duration;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
@@ -37,6 +35,8 @@ class AgentContextRegenCommandTest {
         email: ${GIT_EMAIL}
       ssh:
         user: dev
+        authorized_keys:
+          - ${SSH_PUBLIC_KEY}
       agent:
         type: claude-code
       """;
@@ -63,6 +63,10 @@ class AgentContextRegenCommandTest {
       assertEquals("Mady Lane", config.git().name());
       assertEquals("mady@example.dev", config.git().email());
       assertEquals("dev", config.ssh().user());
+      assertEquals(
+          List.of("${SSH_PUBLIC_KEY}"),
+          config.ssh().authorizedKeys(),
+          "the context names the git identity only; every other placeholder is left as it is");
     }
   }
 
@@ -98,24 +102,8 @@ class AgentContextRegenCommandTest {
   @Test
   void aProjectNotInTheCatalogFailsBeforeAnythingIsReplacedAndSoDoesARowThatCannotBeRead() {
     var dbPath = seeded("acme", ACME);
-    var asked = new AtomicInteger();
-    var identity =
-        new LocalIdentity(
-            new ShellExec() {
-              public Result exec(List<String> command) {
-                asked.incrementAndGet();
-                return new Result(0, "Mady", "");
-              }
-
-              public Result exec(List<String> command, Path workDir, Duration timeout) {
-                return exec(command);
-              }
-
-              public boolean isDryRun() {
-                return false;
-              }
-            },
-            dir.resolve("none.pub"));
+    var git = new ScriptedShellExecutor().onOk("user.", "Mady");
+    var identity = new LocalIdentity(git, dir.resolve("none.pub"));
 
     try (var operations = OperationsFactory.open(dbPath)) {
       var refused =
@@ -137,8 +125,9 @@ class AgentContextRegenCommandTest {
                   AgentContextRegenCommand.definitionWithBoxIdentity(
                       operations.catalog(), "acme", identity));
       assertTrue(unreadable.getMessage().contains("'acme'"), unreadable.getMessage());
-      assertEquals(
-          0, asked.get(), "the box's identity is never asked for a project it cannot read");
+      assertTrue(
+          git.invocations().isEmpty(),
+          "the box's identity is never asked for a project it cannot read");
     }
   }
 
@@ -152,21 +141,8 @@ class AgentContextRegenCommandTest {
   }
 
   private LocalIdentity identity(Map<String, String> gitConfig) {
-    return new LocalIdentity(
-        new ShellExec() {
-          public Result exec(List<String> command) {
-            var value = gitConfig.get(command.getLast());
-            return value == null ? new Result(1, "", "") : new Result(0, value + "\n", "");
-          }
-
-          public Result exec(List<String> command, Path workDir, Duration timeout) {
-            return exec(command);
-          }
-
-          public boolean isDryRun() {
-            return false;
-          }
-        },
-        dir.resolve("none.pub"));
+    var git = new ScriptedShellExecutor();
+    gitConfig.forEach((key, value) -> git.onOk(key, value + "\n"));
+    return new LocalIdentity(git, dir.resolve("none.pub"));
   }
 }

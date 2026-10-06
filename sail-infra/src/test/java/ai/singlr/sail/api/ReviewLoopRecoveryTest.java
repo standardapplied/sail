@@ -1149,6 +1149,7 @@ class ReviewLoopRecoveryTest {
 
     var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
     assertEquals("escalated", review.status());
+    assertTrue(review.error().contains("project '" + ReviewLoop.PROJECT + "'"), review.error());
     assertTrue(
         review.error().contains("could not be read"),
         "the review is handed to a person for what is true — its project's descriptor cannot be"
@@ -1184,13 +1185,24 @@ class ReviewLoopRecoveryTest {
 
   @Test
   void aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview() {
-    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
-    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop =
+        ReviewLoop.wired(
+            tempDir,
+            ReviewLoop.YAML
+                + "  review_pipeline:\n"
+                + "    stages:\n"
+                + "      - name: codex\n"
+                + "        type: agent\n"
+                + "        agent: codex\n"
+                + "        gate: no_critical\n");
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    pipeline.set(
-        ReviewPipelineConfig.fromMap(
-            Map.of("stages", List.of(Map.<String, Object>of("name", "codex", "type", "human")))));
+    loop.describe(
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: codex\n"
+            + "        type: human\n");
 
     loop.finish(reviewer.id(), CLEAN_REVIEW);
 

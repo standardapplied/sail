@@ -7,6 +7,8 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ReviewStore;
@@ -18,6 +20,7 @@ import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -30,6 +33,25 @@ class ReviewWiringTest {
       map.put("agent", agent);
     }
     return SailYaml.fromMap(map);
+  }
+
+  @Test
+  void theLoopReadsAProjectAsItsRowNullForNoneAndAnUnreadableRowAsItIs() {
+    var sail = yaml(null);
+    var unreadable = new ProjectReader.Unreadable("acme", new IllegalArgumentException("bad"));
+
+    assertNull(ReviewWiring.definitions(project -> Optional.empty()).apply("acme"));
+    assertSame(sail, ReviewWiring.definitions(project -> Optional.of(sail)).apply("acme"));
+    assertSame(
+        unreadable,
+        assertThrows(
+            ProjectReader.Unreadable.class,
+            () ->
+                ReviewWiring.definitions(
+                        project -> {
+                          throw unreadable;
+                        })
+                    .apply("acme")));
   }
 
   @Test
