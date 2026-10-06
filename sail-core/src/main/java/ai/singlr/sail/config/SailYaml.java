@@ -6,12 +6,15 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.StageSkill;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Root model for {@code sail.yaml} project descriptor. */
@@ -29,6 +32,10 @@ public record SailYaml(
     Agent agent,
     AgentContext agentContext,
     Ssh ssh) {
+
+  /** The skills sail generates into every harness's skills folder under these names. */
+  private static final Set<String> GENERATED_SKILLS = Set.of("spec", "spec-board", "verify");
+
   @SuppressWarnings("unchecked")
   public static SailYaml fromMap(Map<String, Object> map) {
     var name = (String) map.get("name");
@@ -42,6 +49,9 @@ public record SailYaml(
     var agentCtxRaw = (Map<String, Object>) map.get("agent_context");
     var sshRaw = (Map<String, Object>) map.get("ssh");
 
+    var agent = agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null;
+    var agentContext = agentCtxRaw != null ? AgentContext.fromMap(agentCtxRaw) : null;
+    requireStageSkillsOfTheirOwn(agent, agentContext);
     return new SailYaml(
         name,
         (String) map.get("description"),
@@ -69,9 +79,45 @@ public record SailYaml(
                         (a, b) -> a,
                         LinkedHashMap::new))
             : null,
-        agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null,
-        agentCtxRaw != null ? AgentContext.fromMap(agentCtxRaw) : null,
+        agent,
+        agentContext,
         sshRaw != null ? Ssh.fromMap(sshRaw) : null);
+  }
+
+  /**
+   * A stage's skill is installed as a folder named for it, beside the skills sail generates: the
+   * methodology's, the spec board's, and on Codex one per {@code agent_context.rules} entry. A
+   * stage skill under one of those names would replace that folder, so the definition is refused.
+   * This is the one place that holds both the agent block and the rules.
+   */
+  private static void requireStageSkillsOfTheirOwn(Agent agent, AgentContext agentContext) {
+    if (agent == null) {
+      return;
+    }
+    var taken = new HashSet<>(GENERATED_SKILLS);
+    if (agentContext != null && agentContext.rules() != null) {
+      agentContext.rules().forEach(rule -> taken.add(rule.name()));
+    }
+    requireOwnName(Agent.BUILD_SKILL_KEY, agent.buildSkill(), taken);
+    var pipeline = agent.reviewPipeline();
+    if (pipeline == null) {
+      return;
+    }
+    requireOwnName(ReviewPipelineConfig.FIX_SKILL_KEY, pipeline.fixSkill(), taken);
+    for (var stage : pipeline.agentStages()) {
+      requireOwnName(ReviewPipelineConfig.stageSkillKey(stage.name()), stage.skill(), taken);
+    }
+  }
+
+  private static void requireOwnName(String key, String skill, Set<String> taken) {
+    if (taken.contains(skill)) {
+      throw new IllegalArgumentException(
+          key
+              + " '"
+              + skill
+              + "' is the name of a skill sail installs itself (spec, spec-board, verify, and one"
+              + " per agent_context.rules entry); give the stage's skill or the rule another name.");
+    }
   }
 
   private static String descriptor(String name) {
@@ -291,7 +337,42 @@ public record SailYaml(
       Guardrails guardrails,
       Notifications notifications,
       Methodology methodology,
-      ReviewPipelineConfig reviewPipeline) {
+      ReviewPipelineConfig reviewPipeline,
+      String buildSkill) {
+
+    static final String BUILD_SKILL_KEY = "agent.build_skill";
+
+    /** The build works under {@link StageSkill#BUILD} when the block names no skill. */
+    public Agent {
+      buildSkill = StageSkill.configured(BUILD_SKILL_KEY, buildSkill, StageSkill.BUILD);
+    }
+
+    /** An agent block whose build works under sail's own skill. */
+    public Agent(
+        String type,
+        boolean autoBranch,
+        String branchPrefix,
+        boolean autoSnapshot,
+        List<String> install,
+        Map<String, String> config,
+        Guardrails guardrails,
+        Notifications notifications,
+        Methodology methodology,
+        ReviewPipelineConfig reviewPipeline) {
+      this(
+          type,
+          autoBranch,
+          branchPrefix,
+          autoSnapshot,
+          install,
+          config,
+          guardrails,
+          notifications,
+          methodology,
+          reviewPipeline,
+          null);
+    }
+
     public Agent(
         String type,
         boolean autoBranch,
@@ -368,7 +449,8 @@ public record SailYaml(
           methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null,
           reviewPipelineRaw != null
               ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
-              : null);
+              : null,
+          (String) map.get("build_skill"));
     }
 
     public Map<String, Object> toMap() {
@@ -382,6 +464,7 @@ public record SailYaml(
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (methodology != null) map.put("methodology", methodology.toMap());
+      if (!buildSkill.equals(StageSkill.BUILD)) map.put("build_skill", buildSkill);
       if (reviewPipeline != null) map.put("review_pipeline", reviewPipeline.toMap());
       return map;
     }
@@ -551,7 +634,8 @@ public record SailYaml(
             agent.guardrails(),
             agent.notifications(),
             agent.methodology(),
-            agent.reviewPipeline());
+            agent.reviewPipeline(),
+            agent.buildSkill());
     return new SailYaml(
         name,
         description,

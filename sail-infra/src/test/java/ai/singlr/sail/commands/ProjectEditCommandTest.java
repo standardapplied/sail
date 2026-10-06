@@ -50,6 +50,17 @@ class ProjectEditCommandTest {
   }
 
   @Test
+  void rejectsAStageSkillSailWouldRefuseNamingItsKey() {
+    var error =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProjectEditCommand.validate(
+                    "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
+    assertTrue(error.getMessage().contains("agent.build_skill 'sail-x'"), error.getMessage());
+  }
+
+  @Test
   void theEditorsSaveIsTheNewDefinitionAndItsScratchFileIsGone() throws Exception {
     var opened = new ArrayList<Path>();
 

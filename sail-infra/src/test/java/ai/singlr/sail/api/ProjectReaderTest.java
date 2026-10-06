@@ -59,6 +59,31 @@ class ProjectReaderTest {
   }
 
   @Test
+  void aRowThatNamesASkillSailRefusesIsUnreadableNamingTheProjectAndTheKey() {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var store = new ProjectStore(db);
+      Acting.system(() -> store.upsert("acme", ACME));
+      db.execute(
+          "UPDATE projects SET definition = ? WHERE name = ?",
+          ACME + "  build_skill: verify\n",
+          "acme");
+
+      var unreadable =
+          assertThrows(
+              ProjectReader.Unreadable.class, () -> ProjectReader.ofCatalog(store).read("acme"));
+
+      assertTrue(
+          unreadable
+              .getMessage()
+              .startsWith(
+                  "The definition of project 'acme' in the catalog could not be read:"
+                      + " agent.build_skill 'verify' is the name of a skill sail installs itself"),
+          unreadable.getMessage());
+    }
+  }
+
+  @Test
   void aRowThatDoesNotParseIsUnreadableNamingTheProjectAndWhatTheParserSaid() {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();

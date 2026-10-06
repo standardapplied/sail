@@ -243,6 +243,30 @@ class ProjectApplyCommandTest {
   }
 
   @Test
+  void planTargetRefusesAStageSkillSailWouldRefuseNamingItsKey() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProjectApplyCommand.planTarget(
+                    "alpha",
+                    new ContainerState.Stopped(),
+                    """
+                    name: alpha
+                    agent:
+                      type: codex
+                      review_pipeline:
+                        stages:
+                          - name: sign-off
+                            type: human
+                            skill: acme-review
+                    """));
+    assertTrue(
+        thrown.getMessage().startsWith("agent.review_pipeline.stages[sign-off].skill is set"),
+        thrown.getMessage());
+  }
+
+  @Test
   void planTargetResolvesActionAndConfigForAValidTarget() {
     var plan =
         ProjectApplyCommand.planTarget("alpha", new ContainerState.Stopped(), "name: alpha\n");

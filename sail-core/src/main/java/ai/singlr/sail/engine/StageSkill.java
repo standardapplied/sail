@@ -49,6 +49,9 @@ public record StageSkill(String name, String body, List<File> files) {
   /** The most bytes a skill's folder may hold, {@code SKILL.md} included. */
   public static final long MAX_BYTES = 1024 * 1024;
 
+  /** What the name of every skill sail ships starts with, and no project skill's may. */
+  public static final String RESERVED = "sail-";
+
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
   private static final String FENCE = "---";
 
@@ -112,6 +115,28 @@ public record StageSkill(String name, String body, List<File> files) {
   /** Whether {@code name} can name a skill: a short lowercase slug, safe as a folder's name. */
   public static boolean isName(String name) {
     return name != null && NAME.matcher(name).matches();
+  }
+
+  /**
+   * The skill a project's definition names under {@code key}: {@code fallback}, the skill sail
+   * ships for that stage, when it names none. A key accepts its own default or a name the project
+   * can hold a skill under, so every other name starting {@code sail-} is refused: those are
+   * sail's.
+   */
+  public static String configured(String key, String name, String fallback) {
+    if (name == null) {
+      return fallback;
+    }
+    if (!isName(name)) {
+      throw new IllegalArgumentException(
+          "%s '%s' is not a skill name: it must match %s.".formatted(key, name, NAME.pattern()));
+    }
+    if (name.startsWith(RESERVED) && !name.equals(fallback)) {
+      throw new IllegalArgumentException(
+          "%s '%s' is not a skill a project can name: names starting %s are sail's, and this key's is %s."
+              .formatted(key, name, RESERVED, fallback));
+    }
+    return name;
   }
 
   /**
