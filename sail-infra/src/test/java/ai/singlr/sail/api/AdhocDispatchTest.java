@@ -110,7 +110,7 @@ class AdhocDispatchTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     return new DispatchOperations(
         shell,
-        yaml.toString(),
+        TestProjects.reading(yaml),
         specStore,
         new ReviewStore(db),
         withRunStore ? runStore : null,
@@ -441,7 +441,7 @@ class AdhocDispatchTest {
     var ops =
         new DispatchOperations(
             new StubShell().on("incus list ^acme$", RUNNING_JSON),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             new SpecStore(db),
             new ReviewStore(db),
             runStore,
@@ -575,7 +575,7 @@ class AdhocDispatchTest {
     var ops =
         new DispatchOperations(
             liveAgentShell(),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             new SpecStore(db),
             new ReviewStore(db),
             runStore,

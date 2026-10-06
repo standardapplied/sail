@@ -77,8 +77,7 @@ class UnassignedSpecTest {
     new SchemaManager(db).migrate();
     specs = new SpecStore(db);
     operations =
-        OperationsFactory.create(
-                db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,

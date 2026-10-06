@@ -229,8 +229,7 @@ class HostCliIdentityTest {
   private void serve(SyncConfig config) throws IOException {
     box.set(config);
     operations =
-        OperationsFactory.create(
-                db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,

@@ -15,7 +15,6 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -38,7 +37,6 @@ import java.util.Optional;
 public final class RunLauncher {
 
   private final ShellExec shell;
-  private final String file;
   private final DispatchOperations.AgentLauncher launcher;
   private final DispatchOperations.Listener listener;
   private final WatcherSpawner watcherSpawner;
@@ -47,14 +45,12 @@ public final class RunLauncher {
 
   public RunLauncher(
       ShellExec shell,
-      String file,
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener,
       WatcherSpawner watcherSpawner,
       RunStore runStore,
       DispatchOperations.EventSink events) {
     this.shell = shell;
-    this.file = file;
     this.launcher = launcher;
     this.listener = listener;
     this.watcherSpawner = watcherSpawner;
@@ -278,7 +274,6 @@ public final class RunLauncher {
     return Optional.of(
         watcherSpawner.spawnForRun(
             s.project(),
-            SailPaths.resolveSailYaml(s.project(), file).toAbsolutePath(),
             s.runId(),
             s.unit().unitName(),
             startedAt(s.runId()),

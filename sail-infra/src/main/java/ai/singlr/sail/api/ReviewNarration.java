@@ -122,7 +122,7 @@ final class ReviewNarration {
             .filter(line -> !line.isEmpty() && !line.equals("^"))
             .collect(Collectors.joining(" "));
     return (fault.isEmpty() ? "the project's review pipeline could not be read" : fault)
-        + "; fix the project's sail.yaml with `sail project edit`, then re-dispatch with"
+        + "; fix the project's definition with `sail project edit`, then re-dispatch with"
         + " --restart";
   }
 

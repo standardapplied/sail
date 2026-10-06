@@ -108,7 +108,7 @@ class SailOperationsSeamTest {
 
   private SailOperations operations(Sqlite db) {
     return OperationsFactory.create(
-            db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,
@@ -178,13 +178,7 @@ class SailOperationsSeamTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                node.db,
-                shell,
-                "sail.yaml",
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE);
+                node.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE);
         var server = server(operations, node.db)) {
       var clock = new BackoffTest.TestClock();
       var nanos = new AtomicLong();
@@ -372,6 +366,19 @@ class SailOperationsSeamTest {
       assertTrue(failure.getMessage().contains("newer than this Sail binary supports"));
       assertEquals(1, failure.getSuppressed().length);
       assertTrue(failure.getSuppressed()[0].getMessage().contains("sync_health"));
+    }
+  }
+
+  @Test
+  void anEmptyDatabaseHoldsNoProjectAndIsPreparedByTheRead() {
+    try (var db = Sqlite.openMemory();
+        var operations = operations(db)) {
+      var refused =
+          assertThrows(
+              ApiException.class, () -> operations.catalog().definitions().require("acme"));
+
+      assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
+      assertTrue(new SchemaManager(db).currentVersion() > 0, "the read prepared the database");
     }
   }
 
@@ -1250,7 +1257,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "admin");
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1280,7 +1287,7 @@ class SailOperationsSeamTest {
       Acting.system(() -> new ProjectStore(db).upsert("old", "name: old\n"));
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1309,7 +1316,7 @@ class SailOperationsSeamTest {
       new FdeStore(db).add("node", "Node", "node@example.com", "member");
       try (var operations =
           OperationsFactory.create(
-                  db, shell, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+                  db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
               .useControlPlane(
                   db,
                   tempDir,
@@ -1415,7 +1422,9 @@ class SailOperationsSeamTest {
       assertEquals(
           1L, box.db.queryOne("SELECT count(*) FROM events", row -> row.integer(0)).orElseThrow());
       assertTrue(operations.catalog().demoDefinition().contains("demo"));
+      assertEquals("demo", operations.catalog().definitions().require("demo").name());
       assertTrue(operations.catalog().destroy("demo", true).purged());
+      assertTrue(operations.catalog().definitions().read("demo").isEmpty());
       var missing =
           assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
       assertTrue(missing.getMessage().contains("sail migrate"), "a purged demo is not resurrected");

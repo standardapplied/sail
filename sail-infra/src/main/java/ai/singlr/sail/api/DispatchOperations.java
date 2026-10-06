@@ -10,7 +10,6 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.AgentSession;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -155,7 +154,6 @@ public final class DispatchOperations {
   }
 
   private final ShellExec shell;
-  private final String file;
   private final ProjectLoader projects;
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
@@ -189,7 +187,7 @@ public final class DispatchOperations {
    */
   public DispatchOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       SpecStore specStore,
       ReviewStore reviewStore,
       RunStore runStore,
@@ -201,8 +199,7 @@ public final class DispatchOperations {
       Listener listener,
       SessionYield sessionYield) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.file = Objects.requireNonNull(file, "file");
-    this.projects = new ProjectLoader(shell, file);
+    this.projects = new ProjectLoader(shell, definitions);
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.runStore = runStore;
@@ -217,7 +214,7 @@ public final class DispatchOperations {
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
-        new RunLauncher(shell, file, launcher, listener, watcherSpawner, runStore, this.events);
+        new RunLauncher(shell, launcher, listener, watcherSpawner, runStore, this.events);
     this.runReservation = new RunReservation(runStore, shell, listener, sessionYield);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
@@ -327,7 +324,6 @@ public final class DispatchOperations {
     }
     return watcherSpawner.spawnUnitForRun(
         run.project(),
-        SailPaths.resolveSailYaml(run.project(), file).toAbsolutePath(),
         run.id(),
         run.unit(),
         run.startedAt(),

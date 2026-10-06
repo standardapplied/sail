@@ -12,7 +12,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -20,6 +19,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Files;
@@ -35,8 +35,6 @@ class OperationsFactoryTest {
 
   @Test
   void factoryPreservesDryRunLaunchesAndPublishesStopEventsOnTheServerBus() throws Exception {
-    var descriptor = tempDir.resolve("sail.yaml");
-    Files.writeString(descriptor, "name: proj\n");
     var shell =
         new ShellExec() {
           public Result exec(List<String> command) {
@@ -59,13 +57,8 @@ class OperationsFactoryTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                box.db,
-                shell,
-                descriptor.toString(),
-                bus,
-                null,
-                SyncScheduler.disabled(),
-                SessionYield.NONE)) {
+                box.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE)) {
+      Acting.system(() -> new ProjectStore(box.db).upsert("proj", "name: proj\n"));
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
       var plain = operations.dispatching().startAdhoc("proj", preview, "node");
       var prepared =
@@ -150,15 +143,12 @@ class OperationsFactoryTest {
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               StopOperations.Listener.NONE);
-      try (var operations =
-          OperationsFactory.open(shell, SailPaths.PROJECT_DESCRIPTOR, hooks, SessionYield.NONE)) {
+      try (var operations = OperationsFactory.open(shell, hooks, SessionYield.NONE)) {
         assertEquals("test", operations.identity().tokens().getFirst().name());
         assertNotNull(operations.syncStatus());
       }
       assertThrows(
-          NullPointerException.class,
-          () ->
-              OperationsFactory.open(shell, SailPaths.PROJECT_DESCRIPTOR, null, SessionYield.NONE));
+          NullPointerException.class, () -> OperationsFactory.open(shell, null, SessionYield.NONE));
     } finally {
       if (previous == null) environment.remove("SAIL_DATA_DIR");
       else environment.put("SAIL_DATA_DIR", previous);

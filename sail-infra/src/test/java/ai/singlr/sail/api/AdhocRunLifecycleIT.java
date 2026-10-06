@@ -117,7 +117,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var dispatchOps =
           new DispatchOperations(
               shell,
-              yaml.toString(),
+              TestProjects.reading(yaml),
               specStore,
               new ReviewStore(db),
               runStore,
@@ -158,7 +158,7 @@ class AdhocRunLifecycleIT extends AbstractIncusIT {
       var stopOps =
           new StopOperations(
               shell,
-              yaml.toString(),
+              TestProjects.reading(yaml),
               specStore,
               runStore,
               events::add,

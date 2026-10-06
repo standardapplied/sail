@@ -178,20 +178,19 @@ class ReviewNarrationTest {
   @Test
   void anUnreadablePipelineIsSaidInOneLineWithAllOfWhatTheParserSaidAndWhatToDo(@TempDir Path dir)
       throws Exception {
-    var descriptor = Files.writeString(dir.resolve("sail.yaml"), "agent: [unterminated\n");
-    var unreadable =
-        assertThrows(
-            IllegalStateException.class, () -> ReviewWiring.descriptor("acme", descriptor));
+    var definitions = TestProjects.reading(dir.resolve("sail.yaml"));
+    Files.writeString(dir.resolve("sail.yaml"), "agent: [unterminated\n");
+    var unreadable = assertThrows(ProjectReader.Unreadable.class, () -> definitions.read("acme"));
 
     var reason = ReviewNarration.pipelineUnreadable(unreadable.getMessage());
 
     assertTrue(unreadable.getMessage().lines().count() > 1, "a parser's message runs over lines");
     assertTrue(unreadable.getMessage().contains("^"), "and points under what it quotes");
     assertEquals(
-        "sail.yaml of project 'acme' could not be read: while parsing a flow sequence in reader,"
-            + " line 1, column 8: agent: [unterminated expected ',' or ']', but got <stream end>"
-            + " in reader, line 2, column 1:; fix the project's sail.yaml with `sail project"
-            + " edit`, then re-dispatch with --restart",
+        "The definition of project 'acme' in the catalog could not be read: while parsing a flow"
+            + " sequence in reader, line 1, column 8: agent: [unterminated expected ',' or ']', but"
+            + " got <stream end> in reader, line 2, column 1:; fix the project's definition with"
+            + " `sail project edit`, then re-dispatch with --restart",
         reason,
         "all of what the parser said, where and what, as one line: the lines that only point"
             + " under a snippet say nothing and are left out");

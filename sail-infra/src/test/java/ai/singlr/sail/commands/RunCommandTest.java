@@ -13,9 +13,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -89,22 +96,17 @@ class RunCommandTest {
   }
 
   @Test
-  void missingSailYamlFails() {
-    var cmd = new CommandLine(new Sail());
+  void aProjectNotInTheCatalogFailsSayingSoWhateverFileIsNamed() {
+    var cmd = command(tempDir.resolve("control-plane.db"));
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
     var exitCode =
         cmd.execute(
-            "agent",
-            "run",
-            "test-project",
-            "--dry-run",
-            "--file",
-            tempDir.resolve("nonexistent.yaml").toString());
+            "test-project", "--dry-run", "--file", tempDir.resolve("nonexistent.yaml").toString());
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("not found"));
+    assertTrue(errOutput.contains("Project 'test-project' is not in the catalog."), errOutput);
   }
 
   @Test
@@ -131,28 +133,41 @@ class RunCommandTest {
   }
 
   @Test
-  void containerNotRunningFails() throws Exception {
-    var yamlFile = tempDir.resolve("sail.yaml");
-    Files.writeString(
-        yamlFile,
-        """
-            name: test-proj
-            resources:
-              cpu: 2
-              memory: 4GB
-              disk: 50GB
-            agent:
-              type: claude-code
-            """);
-    var cmd = new CommandLine(new Sail());
+  void containerNotRunningFails() {
+    var dbPath = tempDir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(
+          () ->
+              new ProjectStore(db)
+                  .upsert(
+                      "test-proj",
+                      """
+                      name: test-proj
+                      resources:
+                        cpu: 2
+                        memory: 4GB
+                        disk: 50GB
+                      agent:
+                        type: claude-code
+                      """));
+    }
+    var cmd = command(dbPath);
     cmd.setExecutionExceptionHandler((ex, cl, pr) -> 1);
 
-    var exitCode =
-        cmd.execute("agent", "run", "test-proj", "--dry-run", "--file", yamlFile.toString());
+    var exitCode = cmd.execute("test-proj", "--dry-run", "--file", "ignored.yaml");
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("does not exist"));
+    assertTrue(errOutput.contains("does not exist"), errOutput);
+  }
+
+  private static CommandLine command(Path dbPath) {
+    var noGit = new ScriptedShellExecutor();
+    return new CommandLine(
+        new RunCommand(
+            () -> OperationsFactory.open(dbPath),
+            new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"))));
   }
 
   @Test

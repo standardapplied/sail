@@ -72,7 +72,8 @@ final class LoopFactsReader {
 
   /**
    * What a project's review pipeline is: {@code configResolver} answers null for none, and throws
-   * for a descriptor that cannot be read, which is never taken for a project with no pipeline.
+   * {@link ProjectReader.Unreadable} for a definition that cannot be read, which is never taken for
+   * a project with no pipeline. Any other failure is the store's and propagates.
    */
   static Function<String, Pipeline> pipelines(
       Function<String, ReviewPipelineConfig> configResolver,
@@ -87,7 +88,7 @@ final class LoopFactsReader {
             config.stages().stream()
                 .anyMatch(stage -> stage.type() == StageType.AGENT && stage.agent() == null);
         return new Pipeline.Staged(config, unnamed ? reviewerResolver.apply(project) : null);
-      } catch (RuntimeException unreadable) {
+      } catch (ProjectReader.Unreadable unreadable) {
         return new Pipeline.Unreadable(unreadable.getMessage());
       }
     };

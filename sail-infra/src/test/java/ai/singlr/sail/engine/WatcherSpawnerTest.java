@@ -34,10 +34,6 @@ class WatcherSpawnerTest {
 
   @TempDir Path tempDir;
 
-  private Path yaml() {
-    return tempDir.resolve("sail.yaml");
-  }
-
   private static final Guardrails LIMITS = new Guardrails("45m", "20m", "stop");
   private static final String STARTED_AT = "2026-10-04T12:00:00Z";
 
@@ -53,8 +49,7 @@ class WatcherSpawnerTest {
 
   @Test
   void watchCommandForRunAddressesTheRunAndItsRecordedUnit() {
-    var command =
-        WatcherSpawner.watchCommandForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var command = WatcherSpawner.watchCommandForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(
         List.of(
@@ -68,8 +63,6 @@ class WatcherSpawnerTest {
             AGENT_UNIT,
             "--started-at",
             STARTED_AT,
-            "-f",
-            yaml().toAbsolutePath().toString(),
             "--action",
             "stop",
             "--max-duration",
@@ -83,7 +76,7 @@ class WatcherSpawnerTest {
   void aLimitTheLaneDoesNotSetIsLeftOffTheWatchCommand() {
     var command =
         WatcherSpawner.watchCommandForRun(
-            "acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, new Guardrails(null, null, "notify"));
+            "acme", RUN_ID, AGENT_UNIT, STARTED_AT, new Guardrails(null, null, "notify"));
 
     assertEquals(
         List.of("--action", "notify"), command.subList(command.size() - 2, command.size()));
@@ -96,7 +89,7 @@ class WatcherSpawnerTest {
     var shell = new FakeShell().on("systemd-run --user", ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var spawned = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var spawned = spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", false), spawned);
     var invocation = shell.invocationsMatching("systemd-run").getFirst();
@@ -114,9 +107,8 @@ class WatcherSpawnerTest {
     var shell = new FakeShell().on("systemd-run --user", ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var first = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
-    var second =
-        spawner.spawnForRun("acme", yaml(), other, "sail-agent-" + other, STARTED_AT, LIMITS);
+    var first = spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var second = spawner.spawnForRun("acme", other, "sail-agent-" + other, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", false), first);
     assertEquals(new WatcherSpawner.Unit("sail-watch-" + other, "user", false), second);
@@ -130,7 +122,7 @@ class WatcherSpawnerTest {
     var shell = new FakeShell().on("systemd-run --user", ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var spawned = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var spawned = spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", false), spawned);
     assertEquals(
@@ -144,7 +136,7 @@ class WatcherSpawnerTest {
                 String.join(
                     " ",
                     WatcherSpawner.watchCommandForRun(
-                        "acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS)))
+                        "acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS)))
             .replace("  ", " "),
         shell.invocationsMatching("systemd-run").getFirst());
   }
@@ -166,7 +158,7 @@ class WatcherSpawnerTest {
     var shell = new FakeShell().on("systemd-run --user", fail()).on("systemd-run --collect", ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var spawned = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var spawned = spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "system", false), spawned);
   }
@@ -183,12 +175,12 @@ class WatcherSpawnerTest {
               return 4242L;
             });
 
-    var spawned = spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var spawned = spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Fallback(4242L), spawned);
     var command = new ArrayList<>(List.of("nohup"));
     command.addAll(
-        WatcherSpawner.watchCommandForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
+        WatcherSpawner.watchCommandForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
     assertEquals(command, launched.get("command"));
     assertEquals(WatcherSpawner.watchLogForRun("acme", RUN_ID), launched.get("log"));
     assertTrue(Files.isDirectory(runLog().getParent()));
@@ -201,7 +193,7 @@ class WatcherSpawnerTest {
     var error =
         assertThrows(
             IOException.class,
-            () -> spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
+            () -> spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
 
     assertTrue(error.getMessage().contains(WATCH_UNIT));
     assertTrue(error.getMessage().contains("no fallback"));
@@ -212,7 +204,7 @@ class WatcherSpawnerTest {
     var shell = new FakeShell().on("--quiet is-active " + WATCH_UNIT, ok());
     var spawner = new WatcherSpawner(shell, WatcherSpawnerTest::failingFallback);
 
-    var spawned = spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var spawned = spawner.spawnUnitForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", true), spawned.orElseThrow());
     assertTrue(shell.invocationsMatching("systemd-run").isEmpty());
@@ -226,7 +218,7 @@ class WatcherSpawnerTest {
     var error =
         assertThrows(
             IOException.class,
-            () -> spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
+            () -> spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
 
     assertTrue(error.getMessage().contains("Interrupted"));
     assertTrue(Thread.interrupted(), "interrupt flag must be restored");
@@ -249,7 +241,7 @@ class WatcherSpawnerTest {
             .on("systemd-run", fail());
     var spawner = new WatcherSpawner(shell, null);
 
-    var unit = spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
+    var unit = spawner.spawnUnitForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS);
 
     assertEquals(new WatcherSpawner.Unit(WATCH_UNIT, "user", true), unit.orElseThrow());
   }
@@ -258,8 +250,7 @@ class WatcherSpawnerTest {
   void spawnUnitIsEmptyWhenNoSystemdScopeExists() throws Exception {
     var spawner = new WatcherSpawner(new FakeShell(), null);
 
-    assertTrue(
-        spawner.spawnUnitForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS).isEmpty());
+    assertTrue(spawner.spawnUnitForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS).isEmpty());
   }
 
   @Test
@@ -269,7 +260,7 @@ class WatcherSpawnerTest {
 
     assertEquals(
         new WatcherSpawner.Fallback(7L),
-        spawner.spawnForRun("acme", yaml(), RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
+        spawner.spawnForRun("acme", RUN_ID, AGENT_UNIT, STARTED_AT, LIMITS));
   }
 
   @Test

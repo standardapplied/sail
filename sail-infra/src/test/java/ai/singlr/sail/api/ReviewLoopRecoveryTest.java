@@ -1143,12 +1143,13 @@ class ReviewLoopRecoveryTest {
     loop = ReviewLoop.wired(tempDir, custom);
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    loop.describe("agent: [unterminated");
+    loop.corruptDefinition();
 
     loop.finish(reviewer.id(), CLEAN_REVIEW);
 
     var review = loop.reviews.findReview(reviewer.reviewId()).orElseThrow();
     assertEquals("escalated", review.status());
+    assertTrue(review.error().contains("project '" + ReviewLoop.PROJECT + "'"), review.error());
     assertTrue(
         review.error().contains("could not be read"),
         "the review is handed to a person for what is true — its project's descriptor cannot be"
@@ -1159,14 +1160,49 @@ class ReviewLoopRecoveryTest {
   }
 
   @Test
+  void aPipelineRevisionInTheCatalogIsWhatTheNextLoopEventRunsUnderWithNothingElseRun() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
+    loop.describe(
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: security\n"
+            + "        type: agent\n"
+            + "        agent: claude-code\n"
+            + "        gate: no_critical\n");
+
+    loop.built("auth");
+
+    var reviewer = loop.onlyLive();
+    assertEquals("claude-code", reviewer.agent(), "not the roster's codex of the first revision");
+    assertEquals(
+        List.of("security"),
+        loop.reviews.stagesForReview(reviewer.reviewId()).stream()
+            .map(ReviewStore.StageRow::name)
+            .toList(),
+        "the build's stop ran under the revision the catalog holds, with no project apply");
+  }
+
+  @Test
   void aStageThePipelineMadeAPersonsWhileItsReviewerRanEscalatesItsReview() {
-    var pipeline = new AtomicReference<>(ReviewLoop.stages("codex"));
-    loop = new ReviewLoop(tempDir, ReviewLoop.YAML, project -> pipeline.get(), project -> "codex");
+    loop =
+        ReviewLoop.wired(
+            tempDir,
+            ReviewLoop.YAML
+                + "  review_pipeline:\n"
+                + "    stages:\n"
+                + "      - name: codex\n"
+                + "        type: agent\n"
+                + "        agent: codex\n"
+                + "        gate: no_critical\n");
     loop.built("auth");
     var reviewer = loop.onlyLive();
-    pipeline.set(
-        ReviewPipelineConfig.fromMap(
-            Map.of("stages", List.of(Map.<String, Object>of("name", "codex", "type", "human")))));
+    loop.describe(
+        ReviewLoop.YAML
+            + "  review_pipeline:\n"
+            + "    stages:\n"
+            + "      - name: codex\n"
+            + "        type: human\n");
 
     loop.finish(reviewer.id(), CLEAN_REVIEW);
 
@@ -1217,7 +1253,7 @@ class ReviewLoopRecoveryTest {
   @Test
   void aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed() {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
-    loop.describe("agent: [unterminated");
+    loop.corruptDefinition();
 
     var build = loop.built("auth");
 

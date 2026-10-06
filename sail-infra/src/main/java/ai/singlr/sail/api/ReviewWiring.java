@@ -8,12 +8,9 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.AgentRoster;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -56,21 +53,12 @@ public final class ReviewWiring {
   }
 
   /**
-   * A project's descriptor as read from {@code path}: null when the project has none. One that is
-   * there and cannot be read is an error — it is never taken for a project that configured nothing,
-   * which would put the mandatory default pipeline in place of the one the project's reviews are
-   * running under.
+   * What the loop reads a project as: its catalog definition, null for a project with no row, and
+   * {@link ProjectReader.Unreadable} for one whose row cannot be read, which is never taken for a
+   * project with no pipeline.
    */
-  public static SailYaml descriptor(String project, Path path) {
-    if (!Files.exists(path)) {
-      return null;
-    }
-    try {
-      return SailYaml.fromMap(YamlUtil.parseFile(path));
-    } catch (Exception e) {
-      throw new IllegalStateException(
-          "sail.yaml of project '" + project + "' could not be read: " + e.getMessage(), e);
-    }
+  public static Function<String, SailYaml> definitions(ProjectReader reader) {
+    return project -> reader.read(project).orElse(null);
   }
 
   /** Resolves a project's review pipeline: its configured one, or the mandatory default. */

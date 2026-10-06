@@ -58,10 +58,14 @@ class ResourceAuthzTest {
     fdes = new FdeStore(db);
     sessions = new AuthSessionStore(db);
     tokenStore = new TokenStore(db);
-    var yaml = tempDir.resolve("sail.yaml").toString();
     var ops =
         new SailOperations(
-            new ShellExecutor(false), yaml, new EventBus(), null, specStore, reviewStore);
+            new ShellExecutor(false),
+            ProjectReader.ofCatalog(null),
+            new EventBus(),
+            null,
+            specStore,
+            reviewStore);
     var auth = TestAuth.sessions(db);
     server = new SailApiServer("127.0.0.1", 0, ops, auth, new EventBus(), null, null, null);
     server.start();

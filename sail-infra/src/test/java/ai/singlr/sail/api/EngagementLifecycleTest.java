@@ -98,7 +98,7 @@ class EngagementLifecycleTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     return new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             runStore,
@@ -390,7 +390,7 @@ class EngagementLifecycleTest {
       var sailOps =
           new SailOperations(
                   shell,
-                  yaml.toString(),
+                  TestProjects.reading(yaml),
                   (command, logPath) -> 4242L,
                   bus,
                   null,
@@ -439,7 +439,7 @@ class EngagementLifecycleTest {
       var sailOps =
           new SailOperations(
                   shell,
-                  yaml.toString(),
+                  TestProjects.reading(yaml),
                   (command, logPath) -> 4242L,
                   bus,
                   null,
@@ -548,7 +548,7 @@ class EngagementLifecycleTest {
     var unwired =
         new DispatchOperations(
                 shell(),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 specStore,
                 new ReviewStore(db),
                 runStore,

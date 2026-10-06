@@ -95,7 +95,7 @@ class RoomPrincipalAccessTest {
     var operations =
         new SailOperations(
                 NoShell.INSTANCE,
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 (command, logPath) -> 4242L,
                 bus,
                 null,

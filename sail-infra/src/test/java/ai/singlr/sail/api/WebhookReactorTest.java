@@ -189,8 +189,8 @@ class WebhookReactorTest {
   }
 
   @Test
-  void withDefaultResolverDoesNotThrow() {
-    assertNotNull(WebhookReactor.withDefaultResolver());
+  void sendingDoesNotThrow() {
+    assertNotNull(WebhookReactor.sending(project -> null));
   }
 
   private static WebhookSender recorder() {

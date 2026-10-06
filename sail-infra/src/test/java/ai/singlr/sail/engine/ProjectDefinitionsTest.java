@@ -6,10 +6,13 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -82,6 +85,35 @@ class ProjectDefinitionsTest {
   }
 
   @Test
+  void aDefinitionTheCatalogDidNotTakeIsWrittenNowhereAndOneItTookIsWrittenAfterIt()
+      throws Exception {
+    var canonical = dir.resolve("projects/web/sail.yaml");
+    var unopenable = Files.createDirectory(dir.resolve("not-a-database"));
+    var operator = Actor.cliOperator("uday");
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                ProjectDefinitions.persist(unopenable, "web", canonical, "name: web\n", operator));
+
+    assertTrue(
+        refused.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),
+        refused.getMessage());
+    assertFalse(
+        Files.exists(canonical), "a definition the catalog did not take is written nowhere");
+
+    var catalog = dir.resolve("catalog.db");
+    ProjectDefinitions.persist(catalog, "web", canonical, "name: web\n", operator);
+
+    assertEquals("name: web\n", Files.readString(canonical));
+    try (var recorded = Sqlite.open(catalog)) {
+      assertEquals(
+          "name: web\n", new ProjectStore(recorded).findByName("web").orElseThrow().definition());
+    }
+  }
+
+  @Test
   void resolveIsEmptyWhenNoSourceHasTheProject() {
     assertTrue(
         ProjectDefinitions.resolve(store, "ghost", null, dir.resolve("absent.yaml")).isEmpty());
@@ -112,6 +144,18 @@ class ProjectDefinitionsTest {
     assertEquals("Mady M", config.git().name());
     assertEquals("mady@example.com", config.git().email());
     assertEquals(workstationKey, config.ssh().authorizedKeys().getFirst());
+  }
+
+  @Test
+  void resolveForProvisioningKeepsAnApostropheInTheBoxsGitNameOutOfTheYaml() {
+    var redacted =
+        PersonalFields.redact("name: acme\ngit:\n  name: Mady O'Neil\n  email: m@x.io\n");
+    var identity =
+        new LocalIdentity(gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"));
+
+    var config = ProjectDefinitions.resolveForProvisioning(redacted, identity);
+
+    assertEquals("Mady O'Neil", config.git().name());
   }
 
   @Test

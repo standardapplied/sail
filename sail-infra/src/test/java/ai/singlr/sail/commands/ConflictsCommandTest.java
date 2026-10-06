@@ -224,13 +224,7 @@ class ConflictsCommandTest {
   private HostOperations operations() {
     var config = new SyncConfig("node", "sail@main", "node");
     return OperationsFactory.create(
-            db,
-            new ShellExecutor(true),
-            "sail.yaml",
-            null,
-            null,
-            SyncScheduler.disabled(),
-            SessionYield.NONE)
+            db, new ShellExecutor(true), null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,

@@ -7,11 +7,14 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -26,6 +29,24 @@ import picocli.CommandLine;
 class AgentReportCommandTest {
 
   @TempDir Path tempDir;
+
+  @Test
+  void theDefinitionAReportIsBuiltFromIsTheCatalogRowAndAProjectWithNoneFailsSayingSo() {
+    var dbPath = tempDir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(
+          () -> new ProjectStore(db).upsert("acme", "name: acme\nagent:\n  type: codex\n"));
+    }
+    var acme = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(acme).parseArgs("acme", "-f", "/abs/sail.yaml");
+    var absent = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(absent).parseArgs("absent");
+
+    assertEquals("codex", acme.definition().agent().type());
+    var refused = assertThrows(ApiException.class, absent::definition);
+    assertEquals("Project 'absent' is not in the catalog.", refused.getMessage());
+  }
 
   @Test
   void helpTextIncludesOptions() {

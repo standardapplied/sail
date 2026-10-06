@@ -115,8 +115,7 @@ class OneDecisionTest {
     agentRun = reserve("mine", null, "build");
     roomRun = reserve(null, "den", DispatchGate.ROOM_ROLE);
     operations =
-        OperationsFactory.create(
-                db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
             .useControlPlane(
                 db,
                 tempDir,

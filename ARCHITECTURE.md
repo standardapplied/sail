@@ -551,7 +551,13 @@ deterministic, so every box agrees on an identity-free definition and the engine
 
 Each box resolves the placeholders locally, once, at provision time
 (`ProjectDefinitions.resolveForProvisioning` calling `LocalIdentity`). Git fields come from
-the box's local `git config`. `${SSH_PUBLIC_KEY}` resolves to the box's registered
+the box's local `git config`. The agent's context, written by `agent context regen` and
+`agent run`, names the same identity: the row's `${GIT_NAME}` and `${GIT_EMAIL}` are replaced
+by the box's git values where it has them and left as they are where it has none, and no
+other placeholder is touched. Both paths substitute into the parsed definition, never its
+text (`PlaceholderResolver.substitute`): a redacted row holds its placeholders quoted, so a
+value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in the
+YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
 workstation key at `~/.sail/workstation_key.pub`, which is the laptop key the box owner
 connects to containers with. This is a different key from the machine sync key that a node
 presents to main. Because each box has a single owner, one workstation key authorizes that
@@ -1029,15 +1035,20 @@ class is named):
   iteration. A review the project's pipeline can no longer judge is escalated saying so: the
   pipeline lost its stages, a stage the review holds is not the pipeline's stage in that
   place any more (renamed, removed or retyped while the review ran), or the project's
-  descriptor cannot be read — which is never taken for a project with no pipeline. A build
-  that ends while the descriptor cannot be read gets its review written and escalated for
-  that reason, not a review under the default pipeline and not a stop replayed until the
-  file heals. The descriptor the server reads is replaced in one move
-  (`ProjectDefinitions.write`) by every command that writes it for its project — `project
-  init`, `edit`, `apply`, `rename`, the `add-`/`remove-`/`resources` edits, and sync — so a
-  reader never sees half of one. A file an engineer names with `-f` is theirs and is written
-  in place, so the one move does not hold when `-f` names that same file. An escalation closes
-  any stage still `running`.
+  definition in the catalog cannot be read — which is never taken for a project with no
+  pipeline. A build that ends while the definition cannot be read gets its review written and
+  escalated for that reason, not a review under the default pipeline and not a stop replayed
+  until the row heals; a failure of the store itself is not an unreadable pipeline and is
+  replayed. What runs a project reads its definition from the catalog row (`ProjectReader`,
+  handed to commands as `HostCatalog.definitions`): the loop's pipeline and reviewer, every
+  API lane, Slack and webhook notifications, and `agent watch`, `status`, `report`,
+  `attach`, `context regen` and `run`. None opens `~/.sail/projects/<name>/sail.yaml`, and no
+  row is ever substituted by a file, so a revision that reaches the catalog by sync or by a
+  command is what the next loop event, dispatch and notification use, with nothing else run;
+  a watcher already running keeps the notifications it started with. The file is still
+  written, in one move (`ProjectDefinitions.write`), as a copy nothing running reads; the
+  management commands of `ProjectDefinitions` still read it as their fallback until it is
+  removed. An escalation closes any stage still `running`.
   *`ReviewLoopEveryStateTest.everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated`
   (every review status and error × stage statuses × pipeline as written or changed × spec
   status × serving run × recorded wait, walked on `LoopDecision.next`),
@@ -1056,7 +1067,12 @@ class is named):
   `aDescriptorThatCannotBeReadIsNeverTakenForAPipelineThatChanged`,
   `aBuildThatEndsWhileItsProjectsDescriptorCannotBeReadIsHandedToAPersonNotReplayed`,
   `ProjectDefinitionsTest.aDescriptorIsReplacedInOneMoveKeepingItsModeAndLeavingNothingBeside`,
-  `ReviewWiringTest.aProjectWithNoDescriptorHasNoneAndOneThatCannotBeReadIsAnErrorNamingTheProject`.*
+  `ProjectDefinitionsTest.aDefinitionTheCatalogDidNotTakeIsWrittenNowhereAndOneItTookIsWrittenAfterIt`,
+  `CatalogRevisionBySyncTest.aRevisionAppliedBySyncIsWhatTheNodesNextReadTheLoopAndTheNextNotificationUse`,
+  `ProjectReaderTest.aRowThatDoesNotParseIsUnreadableNamingTheProjectAndWhatTheParserSaid`,
+  `ReviewLoopRecoveryTest.aPipelineRevisionInTheCatalogIsWhatTheNextLoopEventRunsUnderWithNothingElseRun`,
+  `LoopFactsReaderTest.aProjectsPipelineIsNoneStagedOrUnreadable`,
+  `CatalogNotificationsResolverTest.aProjectsNotificationsAreItsCatalogRowsAndARevisionIsWhatTheNextEventIsSentUnder`.*
 - **C5. A review's end is one write.** The review's final status, its reason, its spec's
   status and the room line commit together or not at all (`ReviewStore.pass` and
   `escalate`); a person's sign-off is one write too (`approve`: the stage that waited on
@@ -1807,11 +1823,14 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
 
 ## Design invariants to preserve
 
-- One binary, zero runtime dependencies, fully declarative. `sail.yaml` is the source of
-  truth, and the container is derived state that can be destroyed and recreated.
+- One binary, zero runtime dependencies, fully declarative. A project's definition is the
+  source of truth, and the container is derived state that can be destroyed and recreated.
 - The database is the replicated source of truth for specs, projects, and shared files, and
-  on-disk descriptors are a materialized view. Reads are catalog-first, and writes go through
-  the catalog, so an edit can never diverge or be lost on the next sync.
+  on-disk descriptors are a copy nothing running reads: the loop, the API lanes, notifications
+  and the agent commands read a project's catalog row through `ProjectReader`, with no file
+  fallback. Writes go through the catalog first (`ProjectDefinitions.persist`), and a definition
+  the catalog did not take is not written as the canonical descriptor either, so an edit can
+  never diverge or be lost on the next sync.
 - Every write names who is acting: one bound `Actor`, read by the journal and by every policy,
   never a string or an argument a caller threads through. A write with nothing bound fails.
 - One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once

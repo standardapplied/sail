@@ -138,13 +138,7 @@ class RunLauncherTest {
 
   private RunLauncher launcher(ShellExec shell, RunStore store) {
     return new RunLauncher(
-        shell,
-        "sail.yaml",
-        command -> 0,
-        DispatchOperations.Listener.NONE,
-        null,
-        store,
-        events::add);
+        shell, command -> 0, DispatchOperations.Listener.NONE, null, store, events::add);
   }
 
   private static RunLauncher.RunContext ctx(boolean background) {

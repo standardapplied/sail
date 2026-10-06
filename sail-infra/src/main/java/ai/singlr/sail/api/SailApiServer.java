@@ -74,11 +74,12 @@ public final class SailApiServer implements AutoCloseable {
   }
 
   /**
-   * Full control-plane constructor. {@code specStore} wires the spec-lifecycle reactor and {@code
-   * reviewController} wires the review pipeline. When the review controller is present it owns the
-   * {@code in_progress -> review} transition (and the review that follows), so the lifecycle
-   * reactor — which only performs that transition — is not also subscribed; exactly one handler
-   * advances a stopped agent's spec.
+   * The constructor tests build, which sends no webhooks: as the full one with no notifications
+   * resolver. {@code specStore} wires the spec-lifecycle reactor and {@code reviewController} wires
+   * the review pipeline. When the review controller is present it owns the {@code in_progress ->
+   * review} transition (and the review that follows), so the lifecycle reactor — which only
+   * performs that transition — is not also subscribed; exactly one handler advances a stopped
+   * agent's spec.
    */
   public SailApiServer(
       String host,
@@ -103,14 +104,15 @@ public final class SailApiServer implements AutoCloseable {
         passkeyHandler,
         specStore,
         reviewController,
-        new RateLimitGate());
+        new RateLimitGate(),
+        project -> null);
   }
 
   /**
-   * Constructor seam that lets a caller supply the {@link RateLimitGate}, so tests can pin a tiny
-   * budget. Every context served over TCP is gated by this one instance.
+   * The constructor the server runs: {@code rateLimits} gates every context served over TCP (a test
+   * pins a tiny budget), and {@code notifications} says what each project wants sent by webhook.
    */
-  SailApiServer(
+  public SailApiServer(
       String host,
       int port,
       Operations operations,
@@ -121,14 +123,15 @@ public final class SailApiServer implements AutoCloseable {
       HttpHandler passkeyHandler,
       SpecStore specStore,
       ReviewPipelineController reviewController,
-      RateLimitGate rateLimits)
+      RateLimitGate rateLimits,
+      ProjectNotificationsResolver notifications)
       throws IOException {
     this.eventBus = eventBus;
     this.auditPersister = auditSubscriber instanceof AuditPersister ap ? ap : null;
     this.persisterSubscription =
         eventBus != null && auditSubscriber != null ? eventBus.subscribe(auditSubscriber) : null;
     this.webhookSubscription =
-        eventBus != null ? eventBus.subscribe(WebhookReactor.withDefaultResolver()) : null;
+        eventBus != null ? eventBus.subscribe(WebhookReactor.sending(notifications)) : null;
     this.reviewSubscription =
         eventBus != null && reviewController != null ? eventBus.subscribe(reviewController) : null;
     this.specLifecycleSubscription =

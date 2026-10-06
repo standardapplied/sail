@@ -121,7 +121,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
       var dispatchOps =
           new DispatchOperations(
               shell,
-              yaml.toString(),
+              TestProjects.reading(yaml),
               specStore,
               reviewStore,
               runStore,

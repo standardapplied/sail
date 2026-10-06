@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Lane;
@@ -14,7 +15,6 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.harness.Harness;
@@ -23,7 +23,6 @@ import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -33,6 +32,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -71,11 +71,7 @@ public final class AgentAttachCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--dry-run", description = "Print the exact command instead of attaching.")
   private boolean dryRun;
@@ -87,6 +83,16 @@ public final class AgentAttachCommand implements Runnable {
   private Path socket;
 
   @Spec private CommandSpec commandSpec;
+
+  private final Supplier<HostOperations> operations;
+
+  public AgentAttachCommand() {
+    this(OperationsFactory::open);
+  }
+
+  AgentAttachCommand(Supplier<HostOperations> operations) {
+    this.operations = operations;
+  }
 
   /** What the resume lane opens: the host session, its child, and the room it is pinned to. */
   record ResumePlan(String session, List<String> command, String project, String room) {
@@ -301,7 +307,7 @@ public final class AgentAttachCommand implements Runnable {
     return orRefuse(
         name,
         () -> {
-          try (var operations = OperationsFactory.open()) {
+          try (var operations = this.operations.get()) {
             var node = NodeIdentity.handle();
             var run = operations.dispatching().latestRun(name, node).orElse(null);
             return run == null
@@ -437,15 +443,17 @@ public final class AgentAttachCommand implements Runnable {
     return map;
   }
 
-  private Harness resolveHarness() throws IOException {
-    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (Files.exists(sailYamlPath)) {
-      var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
-      if (config.agent() != null && config.agent().type() != null) {
-        return Harnesses.of(config.agent().type());
-      }
+  Harness resolveHarness() {
+    try (var operations = this.operations.get()) {
+      return operations
+          .catalog()
+          .definitions()
+          .read(name)
+          .map(SailYaml::agent)
+          .map(SailYaml.Agent::type)
+          .map(Harnesses::of)
+          .orElse(Harnesses.DEFAULT);
     }
-    return Harnesses.DEFAULT;
   }
 
   /**

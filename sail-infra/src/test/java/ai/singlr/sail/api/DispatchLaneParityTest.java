@@ -84,7 +84,7 @@ class DispatchLaneParityTest {
   @TempDir Path tempDir;
 
   private record Lane(
-      SpecStore specStore, RunStore runStore, List<Event> events, Sqlite db, String yaml) {}
+      SpecStore specStore, RunStore runStore, List<Event> events, Sqlite db, Path yaml) {}
 
   private Lane lane(String name) throws IOException {
     var yaml = tempDir.resolve(name + "-sail.yaml");
@@ -115,7 +115,7 @@ class DispatchLaneParityTest {
                     List.of())));
     specStore.setContent("auth", "Do auth", "");
     new FdeStore(db).add(HANDLE, null, null, "admin");
-    return new Lane(specStore, new RunStore(db), new CopyOnWriteArrayList<>(), db, yaml.toString());
+    return new Lane(specStore, new RunStore(db), new CopyOnWriteArrayList<>(), db, yaml);
   }
 
   private static StubShell shell() {
@@ -134,7 +134,7 @@ class DispatchLaneParityTest {
     var cliOps =
         new DispatchOperations(
             shell(),
-            cli.yaml(),
+            TestProjects.reading(cli.yaml()),
             cli.specStore(),
             new ReviewStore(cli.db()),
             cli.runStore(),
@@ -194,7 +194,7 @@ class DispatchLaneParityTest {
       var apiOps =
           new SailOperations(
               shell(),
-              api.yaml(),
+              TestProjects.reading(api.yaml()),
               (command, logPath) -> 4242L,
               bus,
               null,

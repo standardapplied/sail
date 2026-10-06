@@ -224,7 +224,7 @@ class WriteAuthorshipTest {
 
   private SailOperations operations(Supplier<SyncConfig> config) {
     return OperationsFactory.create(
-            db, SHELL, "sail.yaml", null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
         .useControlPlane(
             db,
             tempDir,

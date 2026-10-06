@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 
@@ -90,13 +91,9 @@ public final class DispatchCommand implements Runnable {
               + " pending and records a 'restarted' lifecycle event before dispatching.")
   private boolean restart;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
-  @picocli.CommandLine.Mixin private SyncOptions syncOptions;
+  @Mixin private SyncOptions syncOptions;
 
   @picocli.CommandLine.Spec private CommandSpec commandSpec;
 
@@ -129,7 +126,6 @@ public final class DispatchCommand implements Runnable {
     try (var operations =
         OperationsFactory.open(
             shell,
-            file,
             new OperationHooks(
                 this::publishLifecycle,
                 new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
@@ -150,7 +146,6 @@ public final class DispatchCommand implements Runnable {
   static SailOperations operations(
       Sqlite db,
       ShellExec shell,
-      String file,
       DispatchOperations.EventSink events,
       WatcherSpawner watcherSpawner,
       DispatchOperations.Snapshotter snapshotter,
@@ -160,7 +155,6 @@ public final class DispatchCommand implements Runnable {
     return OperationsFactory.create(
         db,
         shell,
-        file,
         new OperationHooks(
             events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
         sessionYield);

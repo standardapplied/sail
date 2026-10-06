@@ -12,6 +12,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventBus;
 import ai.singlr.sail.api.EventSubscriber;
 import ai.singlr.sail.api.LocalApiSocket;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
@@ -20,6 +21,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -72,7 +74,7 @@ class StopGateIT extends AbstractIncusIT {
       var operations =
           new SailOperations(
               new ShellExecutor(false),
-              "sail.yaml",
+              ProjectReader.ofCatalog(new ProjectStore(db)),
               bus,
               null,
               specStore,

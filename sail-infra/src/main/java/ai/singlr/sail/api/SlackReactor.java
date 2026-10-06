@@ -60,12 +60,13 @@ public final class SlackReactor implements EventSubscriber {
   private final SlackPoster poster;
 
   /**
-   * Default reactor: per-project sail.yaml config, spec titles from the store, and the real Slack
-   * client when a token is configured ({@code SAIL_SLACK_TOKEN} or {@code SAIL_SLACK_TOKEN_FILE}).
+   * Default reactor: each project's notifications from {@code resolver}, spec titles from the
+   * store, and the real Slack client when a token is configured ({@code SAIL_SLACK_TOKEN} or {@code
+   * SAIL_SLACK_TOKEN_FILE}).
    */
-  public static SlackReactor withDefaults(SlackThreadStore threads, SpecStore specStore) {
-    return new SlackReactor(
-        new SailYamlNotificationsResolver(), threads, specLookup(specStore), defaultPoster());
+  public static SlackReactor withDefaults(
+      ProjectNotificationsResolver resolver, SlackThreadStore threads, SpecStore specStore) {
+    return new SlackReactor(resolver, threads, specLookup(specStore), defaultPoster());
   }
 
   static Function<String, SpecStore.SpecRow> specLookup(SpecStore specStore) {

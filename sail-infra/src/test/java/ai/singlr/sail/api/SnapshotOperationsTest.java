@@ -408,7 +408,7 @@ class SnapshotOperationsTest {
           agent:
             type: claude-code
           """);
-      return new ProjectLoader(shell, yaml.toString());
+      return new ProjectLoader(shell, TestProjects.reading(yaml));
     } catch (IOException e) {
       throw new IllegalStateException(e);
     }

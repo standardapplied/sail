@@ -167,14 +167,14 @@ public final class StopOperations {
 
   public StopOperations(
       ShellExec shell,
-      String file,
+      ProjectReader definitions,
       SpecStore specStore,
       RunStore runStore,
       DispatchOperations.EventSink events,
       AgentHalter halter,
       Listener listener) {
     this.shell = Objects.requireNonNull(shell, "shell");
-    this.projects = new ProjectLoader(shell, Objects.requireNonNull(file, "file"));
+    this.projects = new ProjectLoader(shell, definitions);
     this.specStore = Objects.requireNonNull(specStore, "specStore");
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.events = Objects.requireNonNull(events, "events");

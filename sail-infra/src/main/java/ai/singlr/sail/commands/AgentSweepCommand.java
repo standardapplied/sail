@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
+import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -69,11 +70,7 @@ public final class AgentSweepCommand implements Runnable {
       description = "Project name (default: the current project).")
   private String name;
 
-  @Option(
-      names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
-      defaultValue = "sail.yaml")
-  private String file;
+  @Mixin private IgnoredFileOption file;
 
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
@@ -141,7 +138,6 @@ public final class AgentSweepCommand implements Runnable {
         };
     return OperationsFactory.open(
         shell,
-        file,
         new OperationHooks(
             event -> {},
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),

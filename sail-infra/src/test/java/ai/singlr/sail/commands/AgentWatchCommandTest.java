@@ -8,14 +8,21 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Event;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.QuietNarrator;
 import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
@@ -26,12 +33,53 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
 class AgentWatchCommandTest {
 
   private static final String RUN_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String STARTED_AT = "2026-10-04T12:00:00Z";
+
+  @TempDir Path dir;
+
+  @Test
+  void theNotificationsAreTheCatalogRowsAndTheArgumentsAServerBuiltWithTheFileStillStart() {
+    var dbPath =
+        seeded(
+            "acme",
+            "name: acme\nagent:\n  type: claude-code\n  notifications:\n"
+                + "    url: https://ntfy.sh/acme\n    events: [guardrail_triggered]\n");
+    var command = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(command)
+        .parseArgs(
+            "acme",
+            "--run",
+            RUN_ID,
+            "--unit",
+            "sail-agent-" + RUN_ID,
+            "--started-at",
+            STARTED_AT,
+            "-f",
+            "/home/uday/.sail/projects/acme/sail.yaml",
+            "--action",
+            "stop");
+
+    assertEquals("https://ntfy.sh/acme", command.notifications().url());
+  }
+
+  @Test
+  void aProjectWithNoRowFailsSayingSoAndOneWithNoNotificationsHasNone() {
+    var dbPath = seeded("quiet", "name: quiet\nagent:\n  type: claude-code\n");
+    var quiet = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(quiet).parseArgs("quiet", "--run", RUN_ID, "--started-at", STARTED_AT);
+    var absent = new AgentWatchCommand(() -> OperationsFactory.open(dbPath));
+    new CommandLine(absent).parseArgs("absent", "--run", RUN_ID, "--started-at", STARTED_AT);
+
+    assertNull(quiet.notifications());
+    var refused = assertThrows(ApiException.class, absent::notifications);
+    assertEquals("Project 'absent' is not in the catalog.", refused.getMessage());
+  }
 
   @Test
   void helpTextIncludes() {
@@ -279,5 +327,14 @@ class AgentWatchCommandTest {
 
     assertNotEquals(0, exitCode);
     assertTrue(err.toString().contains("stop, snapshot-and-stop, notify"), err.toString());
+  }
+
+  private Path seeded(String project, String definition) {
+    var dbPath = dir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(() -> new ProjectStore(db).upsert(project, definition));
+    }
+    return dbPath;
   }
 }

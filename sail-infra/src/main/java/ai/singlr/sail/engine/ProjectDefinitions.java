@@ -117,8 +117,7 @@ public final class ProjectDefinitions {
    */
   public static SailYaml resolveForProvisioning(
       String definitionText, UnaryOperator<String> values) {
-    var resolved = PlaceholderResolver.resolve(definitionText, values);
-    return SailYaml.fromMap(YamlUtil.parseMap(resolved));
+    return SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
   }
 
   /** Writes a definition to the canonical descriptor (the materialized view of the catalog). */
@@ -170,12 +169,22 @@ public final class ProjectDefinitions {
       Files.writeString(explicitFile, definition);
       return;
     }
+    persist(SailPaths.controlPlaneDb(), name, canonicalPath(name), definition, operator);
+  }
+
+  /**
+   * Records the definition in {@code catalog} and then writes it to {@code canonical}, in that
+   * order: a definition the catalog did not take is written nowhere.
+   */
+  static void persist(Path catalog, String name, Path canonical, String definition, Actor operator)
+      throws IOException {
     ProjectCatalog.record(
+        catalog,
         name,
         definition,
         Objects.requireNonNull(
             operator, "A catalog write names the operator the command resolved."));
-    materialize(name, definition);
+    write(canonical, definition);
   }
 
   private static Optional<String> read(Path path) {

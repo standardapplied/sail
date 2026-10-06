@@ -41,9 +41,9 @@ public final class WebhookReactor implements EventSubscriber {
   private final Function<String, WebhookSender> senderFactory;
   private final ConcurrentHashMap<String, WebhookSender> senders = new ConcurrentHashMap<>();
 
-  /** Default reactor using {@link SailYamlNotificationsResolver} and the real HTTP notifier. */
-  public static WebhookReactor withDefaultResolver() {
-    return new WebhookReactor(new SailYamlNotificationsResolver(), WebhookReactor::defaultSender);
+  /** The reactor sending over real HTTP what {@code resolver} says each project wants. */
+  public static WebhookReactor sending(ProjectNotificationsResolver resolver) {
+    return new WebhookReactor(resolver, WebhookReactor::defaultSender);
   }
 
   public WebhookReactor(

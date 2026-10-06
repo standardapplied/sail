@@ -40,6 +40,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.TokenStore;
@@ -48,7 +49,6 @@ import ai.singlr.sail.sync.SyncRpcServer;
 import ai.singlr.sail.sync.SyncTransitionSink;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -95,7 +95,6 @@ class EventPublishersTest {
   private SailOperations serverOperations;
   private SailApiServer server;
   private SailEventPublisher publisher;
-  private String yaml;
   private final List<Event> landed = new CopyOnWriteArrayList<>();
   private final Semaphore delivered = new Semaphore(0);
   private long consumed;
@@ -317,14 +316,13 @@ class EventPublishersTest {
     box = new SyncBox(tempDir, "box");
     new FdeStore(box.db).add(config.handle(), null, null, role);
     var token = new TokenStore(box.db).create(HostToken.NAME, "admin").token();
-    yaml = tempDir.resolve("sail.yaml").toString();
-    Files.writeString(Path.of(yaml), YAML);
+    Acting.system(() -> new ProjectStore(box.db).upsert("acme", YAML));
     bus = new EventBus();
     bus.subscribe(recorder());
     serverOperations =
         TestControlPlane.on(
             OperationsFactory.create(
-                box.db, shell(), yaml, bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                box.db, shell(), bus, null, SyncScheduler.disabled(), SessionYield.NONE),
             box.db,
             tempDir,
             config);
@@ -349,7 +347,6 @@ class EventPublishersTest {
         DispatchCommand.operations(
             box.db,
             shell,
-            yaml,
             this::publish,
             new WatcherSpawner(shell, (command, logPath) -> 4242L),
             (project, config) -> "snap-1",

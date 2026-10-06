@@ -212,7 +212,7 @@ class BuildDispatchCoverageTest {
     Files.writeString(yaml, yamlBody);
     return new DispatchOperations(
         shell,
-        yaml.toString(),
+        TestProjects.reading(yaml),
         new SpecStore(db),
         new ReviewStore(db),
         runStore,

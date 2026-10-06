@@ -103,12 +103,7 @@ public final class WatcherSpawner {
    * does not set is left off, and unlimited.
    */
   public static List<String> watchCommandForRun(
-      String project,
-      Path sailYaml,
-      String runId,
-      String agentUnit,
-      String startedAt,
-      Guardrails guardrails) {
+      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails) {
     var command =
         new ArrayList<>(
             List.of(
@@ -122,8 +117,6 @@ public final class WatcherSpawner {
                 agentUnit,
                 "--started-at",
                 startedAt,
-                "-f",
-                sailYaml.toAbsolutePath().toString(),
                 "--action",
                 guardrails.action()));
     if (guardrails.maxDuration() != null) {
@@ -152,16 +145,11 @@ public final class WatcherSpawner {
    * thread was interrupted mid-ladder, which the caller treats as a launch failure.
    */
   public Spawned spawnForRun(
-      String project,
-      Path sailYaml,
-      String runId,
-      String agentUnit,
-      String startedAt,
-      Guardrails guardrails)
+      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails)
       throws IOException {
     return spawnFresh(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit, startedAt, guardrails),
+        watchCommandForRun(project, runId, agentUnit, startedAt, guardrails),
         watchLogForRun(project, runId));
   }
 
@@ -195,16 +183,11 @@ public final class WatcherSpawner {
    * back to a plain process. Empty means no systemd scope is available.
    */
   public Optional<Unit> spawnUnitForRun(
-      String project,
-      Path sailYaml,
-      String runId,
-      String agentUnit,
-      String startedAt,
-      Guardrails guardrails)
+      String project, String runId, String agentUnit, String startedAt, Guardrails guardrails)
       throws IOException {
     return spawnUnit(
         unitNameForRun(runId),
-        watchCommandForRun(project, sailYaml, runId, agentUnit, startedAt, guardrails),
+        watchCommandForRun(project, runId, agentUnit, startedAt, guardrails),
         watchLogForRun(project, runId));
   }
 

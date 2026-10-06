@@ -738,11 +738,13 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /**
-   * Copies the descriptor and its {@code files/} directory into the canonical project bundle and
-   * records it in the catalog as this box's operator, resolved first so a node that cannot name it
-   * refuses before anything is copied. A dry run must not touch the host filesystem at all — the
-   * plan is computed from the source descriptor, and the sync starts by deleting the canonical
-   * files directory, so running it under dry-run would destroy locally authored project files.
+   * Records the descriptor in the catalog as this box's operator, resolved first so a node that
+   * cannot name it refuses before anything is written, then writes it as the canonical descriptor
+   * and copies its {@code files/} directory beside it ({@link ProjectDefinitions#persist}: a
+   * definition the catalog did not take is written nowhere). A dry run must not touch the host
+   * filesystem at all — the plan is computed from the source descriptor, and the sync starts by
+   * deleting the canonical files directory, so running it under dry-run would destroy locally
+   * authored project files.
    */
   static void persistCanonicalBundle(String name, Path sailYamlPath, boolean dryRun)
       throws Exception {
@@ -750,24 +752,13 @@ public final class ProjectApplyCommand implements Runnable {
       return;
     }
     var operator = CliOperator.current();
-    var projectDir = SailPaths.projectDir(name);
-    Files.createDirectories(projectDir);
-    var canonicalYaml = projectDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
-    syncProjectBundle(sailYamlPath, canonicalYaml);
-    ProjectCatalog.record(name, Files.readString(canonicalYaml), operator);
-  }
-
-  static void syncProjectBundle(Path sourceSailYamlPath, Path canonicalYamlPath) throws Exception {
-    var sourceYaml = sourceSailYamlPath.toAbsolutePath().normalize();
-    var targetYaml = canonicalYamlPath.toAbsolutePath().normalize();
-    if (!sourceYaml.equals(targetYaml)) {
-      ProjectDefinitions.write(targetYaml, Files.readString(sourceYaml));
-    }
+    ProjectDefinitions.persist(name, null, Files.readString(sailYamlPath), operator);
     syncFilesDirectory(
-        sourceYaml.getParent().resolve("files"), targetYaml.getParent().resolve("files"));
+        sailYamlPath.toAbsolutePath().getParent().resolve("files"),
+        SailPaths.projectDir(name).resolve("files"));
   }
 
-  private static void syncFilesDirectory(Path sourceDir, Path targetDir) throws Exception {
+  static void syncFilesDirectory(Path sourceDir, Path targetDir) throws Exception {
     var source = sourceDir.toAbsolutePath().normalize();
     var target = targetDir.toAbsolutePath().normalize();
     if (source.equals(target)) {

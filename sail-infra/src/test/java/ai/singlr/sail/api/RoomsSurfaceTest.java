@@ -62,7 +62,7 @@ class RoomsSurfaceTest {
     ops =
         new SailOperations(
                 new ShellExecutor(false),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
                 null,
@@ -319,7 +319,7 @@ class RoomsSurfaceTest {
     var unwired =
         new SailOperations(
                 new ShellExecutor(false),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
                 null,
@@ -358,7 +358,7 @@ class RoomsSurfaceTest {
     var quiet =
         new SailOperations(
                 new ShellExecutor(false),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
                 null,
@@ -412,7 +412,7 @@ class RoomsSurfaceTest {
     var bare =
         new SailOperations(
             new ShellExecutor(false),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             WatcherSpawner::spawnProcess,
             null,
             null,
@@ -431,7 +431,7 @@ class RoomsSurfaceTest {
     var specless =
         new SailOperations(
                 new ShellExecutor(false),
-                yaml.toString(),
+                TestProjects.reading(yaml),
                 WatcherSpawner::spawnProcess,
                 null,
                 null,

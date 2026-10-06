@@ -131,7 +131,7 @@ class RoomWakeLaunchTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     return new DispatchOperations(
             shell,
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             withRunStore ? runStore : null,
@@ -158,7 +158,7 @@ class RoomWakeLaunchTest {
     var ops =
         new DispatchOperations(
             liveAgentShell(),
-            yaml.toString(),
+            TestProjects.reading(yaml),
             specStore,
             new ReviewStore(db),
             runStore,
@@ -1272,7 +1272,7 @@ class RoomWakeLaunchTest {
       var sailOps =
           new SailOperations(
                   shell,
-                  yaml.toString(),
+                  TestProjects.reading(yaml),
                   (command, logPath) -> 4242L,
                   bus,
                   null,
