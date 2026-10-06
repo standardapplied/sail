@@ -151,14 +151,13 @@ public final class AgentContextRegenCommand implements Runnable {
       HostCatalog catalog, String name, LocalIdentity identity) {
     catalog.definitions().require(name);
     var text = catalog.project(name).orElseThrow().definition();
+    var values = new LinkedHashMap<String, String>();
     for (var field : List.of(PlaceholderResolver.GIT_NAME, PlaceholderResolver.GIT_EMAIL)) {
-      var token = PlaceholderResolver.token(field);
-      var value = text.contains(token) ? identity.gitValue(field).orElse(null) : null;
-      if (value != null) {
-        text = text.replace(token, value);
+      if (text.contains(PlaceholderResolver.token(field))) {
+        identity.gitValue(field).ifPresent(value -> values.put(field, value));
       }
     }
-    return SailYaml.fromMap(YamlUtil.parseMap(text));
+    return SailYaml.fromMap(PlaceholderResolver.substitute(YamlUtil.parseMap(text), values));
   }
 
   /**

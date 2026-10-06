@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -112,6 +113,18 @@ class ProjectDefinitionsTest {
     assertEquals("Mady M", config.git().name());
     assertEquals("mady@example.com", config.git().email());
     assertEquals(workstationKey, config.ssh().authorizedKeys().getFirst());
+  }
+
+  @Test
+  void resolveForProvisioningKeepsAnApostropheInTheBoxsGitNameOutOfTheYaml() {
+    var redacted =
+        PersonalFields.redact("name: acme\ngit:\n  name: Mady O'Neil\n  email: m@x.io\n");
+    var identity =
+        new LocalIdentity(gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"));
+
+    var config = ProjectDefinitions.resolveForProvisioning(redacted, identity);
+
+    assertEquals("Mady O'Neil", config.git().name());
   }
 
   @Test

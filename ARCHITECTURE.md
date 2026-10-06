@@ -554,7 +554,10 @@ Each box resolves the placeholders locally, once, at provision time
 the box's local `git config`. The agent's context, written by `agent context regen` and
 `agent run`, names the same identity: the row's `${GIT_NAME}` and `${GIT_EMAIL}` are replaced
 by the box's git values where it has them and left as they are where it has none, and no
-other placeholder is touched. `${SSH_PUBLIC_KEY}` resolves to the box's registered
+other placeholder is touched. Both paths substitute into the parsed definition, never its
+text (`PlaceholderResolver.substitute`): the redacted row holds its placeholders quoted, so
+a value's own characters, such as the apostrophe in `O'Neil`, land in the value and never in
+the YAML around it. `${SSH_PUBLIC_KEY}` resolves to the box's registered
 workstation key at `~/.sail/workstation_key.pub`, which is the laptop key the box owner
 connects to containers with. This is a different key from the machine sync key that a node
 presents to main. Because each box has a single owner, one workstation key authorizes that

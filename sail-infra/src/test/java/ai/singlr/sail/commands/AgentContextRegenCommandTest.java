@@ -67,6 +67,21 @@ class AgentContextRegenCommandTest {
   }
 
   @Test
+  void anApostropheInTheBoxsGitNameSurvivesTheRowsQuotedPlaceholder() {
+    var dbPath = seeded("acme", "name: acme\ngit:\n  name: Alex Morgan\n  email: a@x.io\n");
+    var identity = identity(Map.of("user.name", "Mady O'Neil", "user.email", "m@x.io"));
+
+    try (var operations = OperationsFactory.open(dbPath)) {
+      var config =
+          AgentContextRegenCommand.definitionWithBoxIdentity(
+              operations.catalog(), "acme", identity);
+
+      assertEquals("Mady O'Neil", config.git().name());
+      assertEquals("m@x.io", config.git().email());
+    }
+  }
+
+  @Test
   void aBoxWithNoGitIdentityLeavesThePlaceholderAndSucceeds() {
     var dbPath = seeded("acme", ACME);
 

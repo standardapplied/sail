@@ -117,8 +117,7 @@ public final class ProjectDefinitions {
    */
   public static SailYaml resolveForProvisioning(
       String definitionText, UnaryOperator<String> values) {
-    var resolved = PlaceholderResolver.resolve(definitionText, values);
-    return SailYaml.fromMap(YamlUtil.parseMap(resolved));
+    return SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
   }
 
   /** Writes a definition to the canonical descriptor (the materialized view of the catalog). */
