@@ -94,9 +94,9 @@ class StageSkillLaunchTest {
     return loop.runs.findById(runId).orElseThrow().task();
   }
 
-  private long pushesInto(String folder) {
+  private long pushesFor(String skill) {
     return loop.container.commandsContaining("incus file push").stream()
-        .filter(command -> command.contains(folder + "."))
+        .filter(command -> command.contains(CODEX_SKILLS + ".sail-stage-build-" + skill + "."))
         .count();
   }
 
@@ -231,7 +231,7 @@ class StageSkillLaunchTest {
     var commands = loop.container.commands().stream().map(c -> String.join(" ", c)).toList();
     var helpers = indexOf(commands, "incus config device add");
     var stamp = indexOf(commands, CODEX_SKILLS + "sail-review/.sail-skill");
-    var placed = indexOf(commands, "mv \"$2\" \"$1\"");
+    var placed = indexOf(commands, "mv -T \"$2\" \"$1\"");
     var staged = indexOf(commands, "/home/dev/.sail/runs/" + reviewer.id());
 
     assertTrue(helpers < stamp, "ensureSailSetup runs first");
@@ -339,12 +339,12 @@ class StageSkillLaunchTest {
     loop.built("auth");
     var first = loop.onlyLive();
 
-    assertEquals(2, pushesInto(folder));
+    assertEquals(2, pushesFor("acme-review"));
 
     loop.finish(first.id(), CLEAN_REVIEW);
     var second = loop.onlyLive();
 
-    assertEquals(2, pushesInto(folder), "the second launch of the same skill writes no file");
+    assertEquals(2, pushesFor("acme-review"), "the second launch of the same skill writes no file");
 
     loop.skillFile("acme-review", "SKILL.md", ACME_REVIEW.replace("acme's way", "a new way"), 0644);
     loop.skillFile("acme-review", "new.md", "New.\n", 0644);
@@ -602,7 +602,7 @@ class StageSkillLaunchTest {
   void anInstallTheContainerRefusesFailsTheLaunchSayingWhichSkillAndWhatToDo() {
     loop = ReviewLoop.staged(tempDir, "codex");
     loop.spec("auth", "api");
-    loop.container.failing("mv \"$2\" \"$1\"", "No space left on device");
+    loop.container.failing("mv -T \"$2\" \"$1\"", "No space left on device");
     var invocation =
         new ReviewLanes.Invocation(
             Lane.REVIEW,

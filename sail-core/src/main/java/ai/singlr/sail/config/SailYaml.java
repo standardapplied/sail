@@ -88,7 +88,9 @@ public record SailYaml(
    * A stage's skill is installed as a folder named for it, beside the skills sail generates: the
    * methodology's, the spec board's, and on Codex one per {@code agent_context.rules} entry. A
    * stage skill under one of those names would replace that folder, so the definition is refused.
-   * This is the one place that holds both the agent block and the rules.
+   * The skills checked are those of the pipeline the loop runs, so a rule cannot take the name of a
+   * default that a missing block or a block with no stages falls back to. This is the one place
+   * that holds both the agent block and the rules.
    */
   private static void requireStageSkillsOfTheirOwn(Agent agent, AgentContext agentContext) {
     if (agent == null) {
@@ -99,10 +101,7 @@ public record SailYaml(
       agentContext.rules().forEach(rule -> taken.add(rule.name()));
     }
     requireOwnName(Agent.BUILD_SKILL_KEY, agent.buildSkill(), taken);
-    var pipeline = agent.reviewPipeline();
-    if (pipeline == null) {
-      return;
-    }
+    var pipeline = ReviewPipelineConfig.resolved(agent.reviewPipeline());
     requireOwnName(ReviewPipelineConfig.FIX_SKILL_KEY, pipeline.fixSkill(), taken);
     for (var stage : pipeline.agentStages()) {
       requireOwnName(ReviewPipelineConfig.stageSkillKey(stage.name()), stage.skill(), taken);

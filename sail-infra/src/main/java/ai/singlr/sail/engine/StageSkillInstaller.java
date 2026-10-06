@@ -21,11 +21,18 @@ import java.util.function.Function;
  * replaces the folder whole.
  *
  * <p>A replacement is built beside the folder, in a folder of the run's own, stamped last and put
- * in place in one step — so a harness never opens a folder half-written, and two launches that
- * install one skill at once each leave a whole, stamped folder, whichever lands last. A launch that
- * fails removes what it built. One that died left its build folder behind, and the next install of
- * that skill removes it once it is old enough that no live launch can still be writing it: a sweep
- * of every build folder would delete the files of a launch building beside this one.
+ * in place in one step — so a harness never opens a folder half-written. Putting it in place is
+ * removing the old folder and renaming the build to it, and a launch does both holding a lock on
+ * the skills directory: two launches that replace one folder at once take turns, each leaves a
+ * whole, stamped folder, and neither build lands inside the other's. The rename is {@code mv -T},
+ * which fails on a folder something else made in between where a plain {@code mv} would move the
+ * build into it.
+ *
+ * <p>A build folder's name starts {@link #BUILD_PREFIX}, which no skill's or rule's name can, so
+ * nothing a project put beside the folder is ever taken for a build. A launch that fails removes
+ * what it built. One that died left its build folder behind, and the next install of that skill
+ * removes it once it is old enough that no live launch can still be writing it: a sweep of every
+ * build folder would delete the files of a launch building beside this one.
  *
  * <p>A skill's name and paths were checked when the {@link StageSkill} was made; here each reaches
  * a shell only as an argument.
@@ -35,10 +42,13 @@ public final class StageSkillInstaller {
   /** How old a build folder is before the launch that made it is taken for dead. */
   static final int STALE_BUILD_MINUTES = 60;
 
+  /** What a build folder's name starts with, before the skill's name and the run's id. */
+  static final String BUILD_PREFIX = ".sail-stage-build-";
+
   private static final String SWEEP =
       "[ ! -d \"$1\" ] || find \"$1\" -maxdepth 1 -name \"$2.*\" -mmin \"+$3\" -exec rm -rf {} +";
   private static final String STAMP = "printf '%s' \"$1\" > \"$2\"";
-  private static final String PLACE = "rm -rf \"$1\" && mv \"$2\" \"$1\"";
+  private static final String PLACE = "rm -rf \"$1\" && mv -T \"$2\" \"$1\"";
 
   private StageSkillInstaller() {}
 
@@ -64,20 +74,15 @@ public final class StageSkillInstaller {
     if (stamp.ok() && stamp.stdout().strip().equals(fingerprint)) {
       return;
     }
+    var skillsDir = parentOf(folder);
+    var builds = BUILD_PREFIX + skill.name();
     run(
         shell,
         project,
         "clear stale builds of",
         skill,
-        List.of(
-            "sh",
-            "-c",
-            SWEEP,
-            "sh",
-            parentOf(folder),
-            skill.name(),
-            String.valueOf(STALE_BUILD_MINUTES)));
-    var build = folder + "." + runId;
+        List.of("sh", "-c", SWEEP, "sh", skillsDir, builds, String.valueOf(STALE_BUILD_MINUTES)));
+    var build = skillsDir + "/" + builds + "." + runId;
     try {
       for (var file : skill.files()) {
         push(shell, project, build + "/" + file.path(), file, content);
@@ -88,7 +93,12 @@ public final class StageSkillInstaller {
           "stamp",
           skill,
           List.of("bash", "-c", STAMP, "bash", fingerprint, build + "/" + StageSkill.STAMP));
-      run(shell, project, "put in place", skill, List.of("sh", "-c", PLACE, "sh", folder, build));
+      run(
+          shell,
+          project,
+          "put in place",
+          skill,
+          List.of("flock", skillsDir, "sh", "-c", PLACE, "sh", folder, build));
     } catch (IOException | InterruptedException | TimeoutException | RuntimeException failure) {
       discard(shell, project, build, failure);
       throw failure;

@@ -268,6 +268,7 @@ final class FakeContainer implements ShellExec {
         yield ok("");
       }
       case "sh" -> sh(inner);
+      case "flock" -> sh(inner.subList(2, inner.size()));
       default -> ok("");
     };
   }
@@ -334,7 +335,7 @@ final class FakeContainer implements ShellExec {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
     }
-    if (!inner.get(2).contains("mv \"$2\" \"$1\"")) {
+    if (!inner.get(2).contains("mv -T \"$2\" \"$1\"")) {
       return ok("");
     }
     var folder = inner.get(inner.size() - 2);

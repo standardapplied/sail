@@ -181,6 +181,27 @@ public record ReviewPipelineConfig(
                 null)));
   }
 
+  /**
+   * The pipeline the loop runs for a project whose {@code review_pipeline} block is {@code
+   * configured}: that block, or {@link #mandatoryDefault()} for none. A block that names no stages
+   * runs the default's stages under the default's limits, and keeps only the skill it names for the
+   * fix agent.
+   */
+  public static ReviewPipelineConfig resolved(ReviewPipelineConfig configured) {
+    var fallback = mandatoryDefault();
+    if (configured == null) {
+      return fallback;
+    }
+    return configured.stages().isEmpty()
+        ? new ReviewPipelineConfig(
+            fallback.maxIterations(),
+            fallback.maxFindingAge(),
+            fallback.stages(),
+            fallback.guardrails(),
+            configured.fixSkill())
+        : configured;
+  }
+
   /** Parses an {@code agent.review_pipeline} block of {@code sail.yaml}. */
   public static ReviewPipelineConfig fromMap(Map<String, Object> map) {
     return fromMap(map, "sail.yaml");

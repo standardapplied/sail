@@ -297,6 +297,42 @@ class StageSkillKeysTest {
   }
 
   @Test
+  void aRuleNamedAsADefaultTheLoopFallsBackToIsRefusedThoughNoBlockNamesIt() {
+    var codex = "install: [claude-code, codex]\n";
+    var review = "agent_context:\n  rules:\n    sail-review:\n      body: Review my way.\n";
+    var fix = "agent_context:\n  rules:\n    sail-fix:\n      body: Fix my way.\n";
+    var reviewRefused = "agent.review_pipeline.stages[review].skill 'sail-review'" + SAILS_OWN;
+    var fixRefused = "agent.review_pipeline.fix_skill 'sail-fix'" + SAILS_OWN;
+
+    assertEquals(reviewRefused, refusal(agent(codex) + review), "no review_pipeline block");
+    assertEquals(fixRefused, refusal(agent(codex) + fix), "no review_pipeline block");
+    assertEquals(
+        reviewRefused,
+        refusal(agent(codex + "review_pipeline:\n  stages: []") + review),
+        "a block with no stages runs the default's");
+    assertEquals(
+        reviewRefused,
+        refusal(agent(codex + "review_pipeline:\n  fix_skill: acme-fix") + review),
+        "a block with only a fix skill runs the default's stages too");
+    assertEquals(fixRefused, refusal(agent(codex + "review_pipeline:\n  max_iterations: 5") + fix));
+    assertEquals(
+        "acme-security",
+        parse(
+                agent(
+                        codex
+                            + "review_pipeline:\n  fix_skill: acme-fix\n  stages:\n"
+                            + "    - name: security\n      skill: acme-security")
+                    + review
+                    + "    sail-fix:\n      body: Fix my way.\n")
+            .agent()
+            .reviewPipeline()
+            .stages()
+            .getFirst()
+            .skill(),
+        "a pipeline that runs neither default leaves both names to the project's rules");
+  }
+
+  @Test
   void aDefinitionWithNoAgentNamesNoSkill() {
     assertNull(parse("name: acme\nagent_context:\n  rules:\n    verify:\n      body: b\n").agent());
   }

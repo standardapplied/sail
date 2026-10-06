@@ -1333,6 +1333,10 @@ command the installer sends against a real shell under a temporary directory;
   is parsed (`SailYaml.fromMap`, so also for a row that arrived by sync): a skill name, the
   key's own default or a name that does not start `sail-`, never one of the skills sail
   generates (`spec`, `spec-board`, `verify`, a Codex rule's), and no skill on a human stage.
+  The skills checked are those of the pipeline the loop runs
+  (`ReviewPipelineConfig.resolved`, the one reading the loop and `sail project skills` share),
+  so a rule cannot be named `sail-review` or `sail-fix` in a project whose missing or
+  stage-less `review_pipeline` falls back to them.
   *`aBuildWhoseSkillTheProjectDoesNotHoldIsRefusedBeforeAnythingIsReservedOrClaimed`,
   `aReviewerWhoseSkillIsMissingErrorsTheReviewThreeTimesAndThenEscalates`,
   `aFixAgentWhoseSkillIsMissingEscalatesAtOnce`,
@@ -1353,19 +1357,26 @@ command the installer sends against a real shell under a temporary directory;
   before the run's files are staged. The folder is stamped (`.sail-skill`) with the
   fingerprint of the skill it holds — every path, content hash and mode — so a launch that
   finds its skill's stamp writes nothing. Otherwise the skill is built beside the folder, in
-  `<folder>.<runId>`, each file pushed under its own mode as the dev user, stamped last, and
-  put in place in one step (`rm -rf "$1" && mv "$2" "$1"`): a harness never opens a folder
-  half-written, and two launches installing one skill at once each leave a whole, stamped
-  folder, whichever lands last. A launch that fails removes what it built; a build folder a
-  dead launch left is removed by the next install of that skill once it is over an hour old —
-  never sooner, because sweeping every `<folder>.*` would delete the files of a launch still
-  building beside this one. Every name and path reaches a shell only as an argument.
+  `.sail-stage-build-<name>.<runId>`, each file pushed under its own mode as the dev user,
+  stamped last, and put in place in one step (`rm -rf "$1" && mv -T "$2" "$1"`) run under
+  `flock` on the skills directory: a harness never opens a folder half-written, and two
+  launches replacing one folder at once take turns, so each leaves a whole, stamped folder and
+  neither build lands inside the other's. `mv -T` fails on a folder something made in between,
+  where a plain `mv` would move the build into it. No skill's or rule's name can start with a
+  dot, so a project's own folder (a Codex rule named `<name>.extra`) is never taken for a
+  build. A launch that fails removes what it built; a build folder a dead launch left is
+  removed by the next install of that skill once it is over an hour old — never sooner,
+  because sweeping every build folder would delete the files of a launch still building beside
+  this one. Every name and path reaches a shell only as an argument.
   *`StageSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,
   `StageSkillInstallerTest.theSameSkillInstalledAgainWritesNothing`,
   `StageSkillInstallerTest.aSkillThatGainedChangedAndLostFilesLeavesExactlyTheNewOnes`,
   `StageSkillInstallerTest.aFileThatChangedUnderTheLaunchFailsItAndLeavesTheInstalledFolderAsItWas`,
   `StageSkillInstallerTest.twoLaunchesInstallingOneSkillAtOnceEachLeaveAWholeStampedFolder`,
   `StageSkillInstallerTest.aBuildFolderADeadLaunchLeftIsRemovedOnceNoLiveLaunchCanBeWritingIt`,
+  `StageSkillInstallerTest.twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers`,
+  `StageSkillInstallerTest.aFolderMadeUnderAReplacementFailsItAndIsNeverBuiltInto`,
+  `StageSkillInstallerTest.aRulesFolderNamedLikeTheSkillWithADotIsNoBuildFolderHoweverOldItIs`,
   `StageSkillInstallerTest.everyNameAndPathReachesTheShellOnlyAsAnArgument`,
   `StageSkillInstallerTest.eachStepThatFailsFailsTheInstallSayingWhichAndRemovesItsBuild`,
   `aProjectSkillsOtherFilesAreInstalledWithTheirModesAndThePromptSaysWhere`,

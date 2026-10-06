@@ -27,18 +27,27 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
  * The installer against a container that is this machine: every command it sends into the container
  * runs here for real, under a temporary directory, so what is asserted is what the scripts did to
- * the folder and not which scripts were sent.
+ * the folder and not which scripts were sent. A container is Linux, and so is what its scripts
+ * call: {@code flock}, and the {@code -T} of GNU {@code mv}.
  */
+@EnabledOnOs(OS.LINUX)
 class StageSkillInstallerTest {
 
   private static final String PROJECT = "acme";
@@ -117,6 +126,17 @@ class StageSkillInstallerTest {
     return files;
   }
 
+  /** Where the launch of {@code runId} builds the skill before putting it in place. */
+  private Path build(String runId) {
+    return skillsDir.resolve(".sail-stage-build-acme-review." + runId);
+  }
+
+  /** Whether a launch holds the lock a replacement is made under. */
+  private boolean replacing() throws IOException, InterruptedException {
+    return new ProcessBuilder("flock", "--nonblock", skillsDir.toString(), "true").start().waitFor()
+        != 0;
+  }
+
   private List<String> besideTheFolder() throws IOException {
     if (!Files.isDirectory(skillsDir)) {
       return List.of();
@@ -167,7 +187,7 @@ class StageSkillInstallerTest {
         "pushed as the dev user's, under its own mode written as four octal digits");
     var stamped = container.indexOf("printf '%s'");
     assertTrue(
-        container.indexOf("file push") < stamped && stamped < container.indexOf("mv \"$2\""),
+        container.indexOf("file push") < stamped && stamped < container.indexOf("mv -T \"$2\""),
         "the stamp is written after the last file and before the folder is put in place");
   }
 
@@ -315,16 +335,17 @@ class StageSkillInstallerTest {
                 }));
 
     assertFalse(Files.exists(folder));
-    assertFalse(Files.exists(Path.of(folder + ".run-1")));
+    assertFalse(Files.exists(build("run-1")));
   }
 
   @Test
   void aBuildFolderADeadLaunchLeftIsRemovedOnceNoLiveLaunchCanBeWritingIt() throws Exception {
-    var dead = Files.createDirectories(Path.of(folder + ".dead-run"));
+    var dead = Files.createDirectories(build("dead-run"));
     Files.writeString(dead.resolve("SKILL.md"), "Half a skill.");
-    var live = Files.createDirectories(Path.of(folder + ".live-run"));
+    var live = Files.createDirectories(build("live-run"));
     Files.writeString(live.resolve("SKILL.md"), "A launch is writing this now.");
-    var neighbour = Files.createDirectories(skillsDir.resolve("acme-review-two.old-run"));
+    var neighbour =
+        Files.createDirectories(skillsDir.resolve(".sail-stage-build-acme-review-two.old-run"));
     var anHourAndABit = Instant.now().minus(Duration.ofMinutes(61));
     Files.setLastModifiedTime(dead, FileTime.from(anHourAndABit));
     Files.setLastModifiedTime(neighbour, FileTime.from(anHourAndABit));
@@ -332,19 +353,35 @@ class StageSkillInstallerTest {
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
     assertEquals(
-        List.of("acme-review", "acme-review-two.old-run", "acme-review.live-run"),
+        List.of(
+            ".sail-stage-build-acme-review-two.old-run",
+            ".sail-stage-build-acme-review.live-run",
+            "acme-review"),
         besideTheFolder(),
         "only this skill's build folders are swept, and only those old enough to be dead");
   }
 
   @Test
+  void aRulesFolderNamedLikeTheSkillWithADotIsNoBuildFolderHoweverOldItIs() throws Exception {
+    var rule = Files.createDirectories(skillsDir.resolve("acme-review.extra"));
+    Files.writeString(rule.resolve("SKILL.md"), "A rule of the project's.");
+    Files.setLastModifiedTime(rule, FileTime.from(Instant.now().minus(Duration.ofHours(2))));
+
+    install("run-1", Source.of("SKILL.md", "Body.\n"));
+
+    assertEquals(List.of("acme-review", "acme-review.extra"), besideTheFolder());
+    assertEquals(Map.of("SKILL.md", "A rule of the project's."), read(rule));
+  }
+
+  @Test
   void aBuildFolderJustUnderTheStaleAgeIsLeft() throws Exception {
-    var recent = Files.createDirectories(Path.of(folder + ".slow-run"));
+    var recent = Files.createDirectories(build("slow-run"));
     Files.setLastModifiedTime(recent, FileTime.from(Instant.now().minus(Duration.ofMinutes(58))));
 
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
-    assertEquals(List.of("acme-review", "acme-review.slow-run"), besideTheFolder());
+    assertEquals(
+        List.of(".sail-stage-build-acme-review.slow-run", "acme-review"), besideTheFolder());
   }
 
   @Test
@@ -363,7 +400,7 @@ class StageSkillInstallerTest {
             try {
               install("run-b", changed);
               beside.add(installed());
-              mine.add(read(Path.of(folder + ".run-a")));
+              mine.add(read(build("run-a")));
             } catch (Exception e) {
               throw new IllegalStateException(e);
             }
@@ -382,6 +419,61 @@ class StageSkillInstallerTest {
     container.commands.clear();
     install("run-c", changed);
     assertEquals(1, container.commands.size(), "the next launch of that skill writes nothing");
+  }
+
+  @Test
+  void twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers()
+      throws Exception {
+    install("run-0", Source.of("SKILL.md", "Old.\n"));
+    var changed = Source.of("SKILL.md", "New.\n", "a.md", "A.\n");
+    var other =
+        new FutureTask<Void>(
+            () -> {
+              install("run-b", changed);
+              return null;
+            });
+    container.stopBeforeMoving(
+        home.resolve("shims"),
+        "run-a",
+        () -> {
+          assertFalse(Files.exists(folder), "this launch removed the folder and has yet to move");
+          assertTrue(replacing(), "and holds the lock while the folder is neither old nor new");
+          Thread.ofVirtual().start(other);
+          assertTrue(
+              container.placing("run-b").await(30, TimeUnit.SECONDS),
+              "the other launch built its own and asks to put it in place");
+        });
+
+    install("run-a", changed);
+    other.get(30, TimeUnit.SECONDS);
+
+    assertEquals(
+        with(changed.contents(), StageSkillInstaller.fingerprint(changed.skill())),
+        installed(),
+        "a whole folder, with no build inside it");
+    assertEquals(List.of("acme-review"), besideTheFolder());
+    assertFalse(replacing(), "the lock is let go once the folder is in place");
+  }
+
+  @Test
+  void aFolderMadeUnderAReplacementFailsItAndIsNeverBuiltInto() throws Exception {
+    install("run-0", Source.of("SKILL.md", "Old.\n"));
+    container.stopBeforeMoving(
+        home.resolve("shims"),
+        "run-a",
+        () -> {
+          Files.createDirectories(folder);
+          Files.writeString(folder.resolve("SKILL.md"), "Made by something else.\n");
+        });
+
+    var failed =
+        assertThrows(IOException.class, () -> install("run-a", Source.of("SKILL.md", "New.\n")));
+
+    assertTrue(
+        failed.getMessage().startsWith("Failed to put in place skill 'acme-review' in acme: "),
+        failed.getMessage());
+    assertEquals(Map.of("SKILL.md", "Made by something else.\n"), installed());
+    assertEquals(List.of("acme-review"), besideTheFolder(), "the build is removed, not nested");
   }
 
   @Test
@@ -419,10 +511,10 @@ class StageSkillInstallerTest {
     var changed = Source.of("SKILL.md", "New.\n", "ref/a.md", "A.\n");
     var steps = new LinkedHashMap<String, String>();
     steps.put("find", "Failed to clear stale builds of skill 'acme-review' in acme: refused");
-    steps.put("mkdir -p", "Failed to create " + folder + ".run-1: refused");
-    steps.put("file push", "Failed to push file to " + folder + ".run-1/SKILL.md: refused");
+    steps.put("mkdir -p", "Failed to create " + build("run-1") + ": refused");
+    steps.put("file push", "Failed to push file to " + build("run-1") + "/SKILL.md: refused");
     steps.put("printf '%s'", "Failed to stamp skill 'acme-review' in acme: refused");
-    steps.put("mv \"$2\"", "Failed to put in place skill 'acme-review' in acme: refused");
+    steps.put("mv -T", "Failed to put in place skill 'acme-review' in acme: refused");
 
     for (var step : steps.entrySet()) {
       container.failing = step.getKey();
@@ -468,12 +560,47 @@ class StageSkillInstallerTest {
 
   /** The container: {@code incus exec} runs its command here, {@code incus file push} copies. */
   private static final class LocalContainer implements ShellExec {
-    private final List<List<String>> commands = new ArrayList<>();
+    private static final String STOPPED = "stopped before moving";
+
+    private final List<List<String>> commands = new CopyOnWriteArrayList<>();
+    private final Map<String, CountDownLatch> placing = new ConcurrentHashMap<>();
+    private Path shims;
+    private Stop stopped;
     private String failing;
     private String throwing;
     private TimeoutException thrown;
     private String alsoThrowing;
     private boolean failingReads;
+
+    /** What a test does while a replacement is stopped between its rm and its mv. */
+    interface Stop {
+      void run() throws IOException, InterruptedException;
+    }
+
+    /**
+     * Stops the replacement of the launch {@code runId} once it has removed the folder and before
+     * it moves its build there, runs {@code then}, and lets it go on: an {@code mv} put ahead of
+     * the container's own says it was reached and waits for its input to close.
+     */
+    void stopBeforeMoving(Path shims, String runId, Stop then) throws IOException {
+      var mv = Files.createDirectories(shims).resolve("mv");
+      Files.writeString(
+          mv,
+          """
+          #!/bin/sh
+          case "$2" in *.%s) echo '%s' >&2; read -r released;; esac
+          exec /bin/mv "$@"
+          """
+              .formatted(runId, STOPPED));
+      WorkspaceFiles.mode(mv, 0755);
+      this.shims = shims;
+      this.stopped = then;
+    }
+
+    /** Opens when the launch {@code runId} asks to put its build in place. */
+    CountDownLatch placing(String runId) {
+      return placing.computeIfAbsent(runId, id -> new CountDownLatch(1));
+    }
 
     static List<String> inner(List<String> command) {
       var boundary = command.indexOf("--");
@@ -521,12 +648,32 @@ class StageSkillInstallerTest {
       }
       assertEquals(List.of("incus", "exec", PROJECT), command.subList(0, 3));
       assertEquals(List.of("--user", "1000", "--group", "1000"), command.subList(3, 7));
-      var process = new ProcessBuilder(inner(command)).start();
+      if (inner(command).getFirst().equals("flock")) {
+        placing(command.getLast().substring(command.getLast().lastIndexOf('.') + 1)).countDown();
+      }
+      var builder = new ProcessBuilder(inner(command));
+      if (shims != null) {
+        builder.environment().compute("PATH", (name, path) -> shims + ":" + path);
+      }
+      var process = builder.start();
+      var stderr = new StringBuilder();
+      try (var lines = process.errorReader(StandardCharsets.UTF_8)) {
+        for (var line = lines.readLine(); line != null; line = lines.readLine()) {
+          if (line.equals(STOPPED)) {
+            try (var input = process.getOutputStream()) {
+              stopped.run();
+            }
+          } else {
+            stderr.append(line).append('\n');
+          }
+        }
+      }
       var stdout = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-      var stderr = new String(process.getErrorStream().readAllBytes(), StandardCharsets.UTF_8);
       var exit = process.waitFor();
       return new Result(
-          failingReads && inner(command).getFirst().equals("cat") ? 1 : exit, stdout, stderr);
+          failingReads && inner(command).getFirst().equals("cat") ? 1 : exit,
+          stdout,
+          stderr.toString());
     }
 
     private static Result push(List<String> command) {

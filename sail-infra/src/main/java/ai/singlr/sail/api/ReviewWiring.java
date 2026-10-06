@@ -64,28 +64,15 @@ public final class ReviewWiring {
   }
 
   /**
-   * Resolves a project's review pipeline: its configured one, or the mandatory default. A block
-   * that names no stages runs the default's stages under the default's limits, and keeps only the
-   * skill it names for the fix agent.
+   * Resolves the review pipeline a project's loop runs, {@link ReviewPipelineConfig#resolved} of
+   * the block its definition holds.
    */
   public static Function<String, ReviewPipelineConfig> configResolver(
       Function<String, SailYaml> loader) {
     return project -> {
       var config = loader.apply(project);
-      var configured =
-          config != null && config.agent() != null ? config.agent().reviewPipeline() : null;
-      var fallback = ReviewPipelineConfig.mandatoryDefault();
-      if (configured == null) {
-        return fallback;
-      }
-      return configured.stages().isEmpty()
-          ? new ReviewPipelineConfig(
-              fallback.maxIterations(),
-              fallback.maxFindingAge(),
-              fallback.stages(),
-              fallback.guardrails(),
-              configured.fixSkill())
-          : configured;
+      return ReviewPipelineConfig.resolved(
+          config != null && config.agent() != null ? config.agent().reviewPipeline() : null);
     };
   }
 
