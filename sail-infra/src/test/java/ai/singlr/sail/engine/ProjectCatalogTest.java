@@ -65,7 +65,7 @@ class ProjectCatalogTest {
     var catalog = dir.resolve("sail.db");
     var mady = new Actor("mady", Role.MEMBER, Actor.Lane.CLI);
 
-    assertTrue(ProjectCatalog.record(catalog, "web", "name: web\n", mady));
+    assertDoesNotThrow(() -> ProjectCatalog.record(catalog, "web", "name: web\n", mady));
 
     try (var db = Sqlite.open(catalog)) {
       assertEquals("mady", new ProjectStore(db).findByName("web").orElseThrow().updatedBy());
@@ -74,10 +74,19 @@ class ProjectCatalogTest {
   }
 
   @Test
-  void aCatalogThatCannotBeOpenedIsABestEffortMiss() throws Exception {
+  void aDefinitionTheCatalogDidNotTakeIsNotRecordedAndTheFailureNamesTheProject() throws Exception {
     var unopenable = Files.createDirectory(dir.resolve("not-a-database"));
 
-    assertFalse(ProjectCatalog.record(unopenable, "web", "name: web\n", Actor.cliOperator("uday")));
+    var failed =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                ProjectCatalog.record(unopenable, "web", "name: web\n", Actor.cliOperator("uday")));
+
+    assertTrue(
+        failed.getMessage().startsWith("Project 'web' was not recorded in the catalog: "),
+        failed.getMessage());
+    assertTrue(failed.getCause() != null, "the cause rides along");
   }
 
   @Test

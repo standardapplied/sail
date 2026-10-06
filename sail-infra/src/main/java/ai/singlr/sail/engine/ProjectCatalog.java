@@ -15,12 +15,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Records a project's definition into the control-plane catalog (the {@code projects} table) so it
- * becomes the shared, replicated source of truth. Best-effort by design: the on-disk {@code
- * sail.yaml} and the container are the operations that must succeed, so a catalog write that fails
- * (DB momentarily unavailable) prints a hint and is recovered by the import migration on the next
- * {@code sail migrate}. Only a node that cannot name its operator refuses, and its commands resolve
- * the operator before they change anything.
+ * Records a project's definition into the control-plane catalog (the {@code projects} table), the
+ * shared, replicated source of truth that everything running a project reads. A definition that
+ * does not reach the catalog is not recorded anywhere: the write fails loud, before the on-disk
+ * copy is written. Only a node that cannot name its operator refuses, and its commands resolve the
+ * operator before they change anything.
  */
 public final class ProjectCatalog {
 
@@ -29,8 +28,8 @@ public final class ProjectCatalog {
   /**
    * Refuses a project name that was pruned, before anything is provisioned under it: a pruned name
    * is spent for good. Reads the catalog without creating or migrating it, so a dry run changes
-   * nothing; a catalog that is missing or cannot be read refuses nothing — recording stays
-   * best-effort.
+   * nothing; a catalog that is missing or cannot be read refuses nothing here, and the write that
+   * follows fails on its own.
    */
   public static void requireUnpruned(String name) {
     requireUnpruned(SailPaths.controlPlaneDb(), name);
@@ -58,26 +57,19 @@ public final class ProjectCatalog {
   /**
    * Records the definition as {@code operator}, this box's operator ({@link CliOperator}), which
    * the caller resolves before it writes anything, so a node that cannot name it refuses the edit
-   * rather than losing it. Returns true if the definition was recorded; false (with a printed hint)
-   * on best-effort miss.
+   * rather than losing it. Throws when the definition was not recorded, naming the cause.
    */
-  public static boolean record(String name, String definition, Actor operator) {
-    return record(SailPaths.controlPlaneDb(), name, definition, operator);
+  public static void record(String name, String definition, Actor operator) {
+    record(SailPaths.controlPlaneDb(), name, definition, operator);
   }
 
-  static boolean record(Path catalog, String name, String definition, Actor operator) {
+  static void record(Path catalog, String name, String definition, Actor operator) {
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
       Actor.run(operator, () -> new ProjectStore(db).upsert(name, definition));
-      return true;
     } catch (Exception e) {
-      System.err.println(
-          "  Note: project '"
-              + name
-              + "' was not recorded in the catalog ("
-              + e.getMessage()
-              + "). Run 'sail migrate' to import it.");
-      return false;
+      throw new IllegalStateException(
+          "Project '" + name + "' was not recorded in the catalog: " + e.getMessage(), e);
     }
   }
 }
