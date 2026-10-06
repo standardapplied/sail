@@ -72,7 +72,7 @@ class DispatchCommandTest {
   }
 
   @Test
-  void aProjectThisBoxDoesNotHoldIsRefusedWhateverFileIsNamed() {
+  void aProjectThisBoxDoesNotHoldIsRefused() {
     var cmd = new CommandLine(new Sail());
 
     var exitCode =

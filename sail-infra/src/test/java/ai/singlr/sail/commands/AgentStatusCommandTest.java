@@ -26,7 +26,7 @@ class AgentStatusCommandTest {
   @TempDir Path dir;
 
   @Test
-  void theListingCountsCommitsInTheRowsReposAndInTheWorkspaceForAProjectWithNoRowOrOneUnreadable() {
+  void theListingReadsReposFromTheRowAndTakesTheWorkspaceForAProjectWithNoRowOrOneUnreadable() {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);

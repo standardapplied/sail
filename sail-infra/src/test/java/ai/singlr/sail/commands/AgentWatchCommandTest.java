@@ -44,7 +44,7 @@ class AgentWatchCommandTest {
   @TempDir Path dir;
 
   @Test
-  void theNotificationsAreTheCatalogRowsAndTheArgumentsAnOlderServerBuiltStillStart() {
+  void theNotificationsAreTheCatalogRowsAndTheArgumentsAServerBuiltWithTheFileStillStart() {
     var dbPath =
         seeded(
             "acme",

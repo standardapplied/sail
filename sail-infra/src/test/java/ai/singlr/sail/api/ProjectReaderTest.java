@@ -99,7 +99,9 @@ class ProjectReaderTest {
       assertTrue(
           unreadable.getMessage().startsWith("The definition of project 'acme' in the catalog"),
           unreadable.getMessage());
-      assertFalse(unreadable.getCause() instanceof ProjectReader.Unreadable);
+      assertTrue(
+          unreadable.getCause().getMessage().contains("requires a name"),
+          unreadable.getCause().getMessage());
     }
   }
 

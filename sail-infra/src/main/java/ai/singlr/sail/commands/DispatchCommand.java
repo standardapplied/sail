@@ -93,7 +93,7 @@ public final class DispatchCommand implements Runnable {
 
   @Mixin private IgnoredFileOption file;
 
-  @picocli.CommandLine.Mixin private SyncOptions syncOptions;
+  @Mixin private SyncOptions syncOptions;
 
   @picocli.CommandLine.Spec private CommandSpec commandSpec;
 
