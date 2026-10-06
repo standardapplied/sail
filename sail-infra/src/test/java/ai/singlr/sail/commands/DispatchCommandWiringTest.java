@@ -23,8 +23,11 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -290,10 +293,16 @@ class DispatchCommandWiringTest {
   static final class StubShell implements ShellExec {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
-    /** Every launch reconciles the in-container sail helpers; answer as already installed. */
+    /**
+     * Every launch reconciles the in-container sail helpers, and a build installs its skill; answer
+     * both as already installed.
+     */
     StubShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
+      on(
+          "/sail-build/" + StageSkill.STAMP,
+          StageSkillInstaller.fingerprint(BuiltInSkills.of(StageSkill.BUILD).orElseThrow()));
     }
 
     StubShell on(String pattern, String stdout) {

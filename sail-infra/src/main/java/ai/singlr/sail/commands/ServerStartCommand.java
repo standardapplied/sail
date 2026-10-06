@@ -23,6 +23,7 @@ import ai.singlr.sail.api.SailApiServer;
 import ai.singlr.sail.api.SessionAwareAuth;
 import ai.singlr.sail.api.SlackReactor;
 import ai.singlr.sail.api.SpecStoreAuditPersister;
+import ai.singlr.sail.api.StageSkills;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.api.TokenAuth;
@@ -229,6 +230,7 @@ public final class ServerStartCommand implements Runnable {
                 bus,
                 ReviewWiring.definitions(reader),
                 operations.reviewLanes(),
+                new StageSkills(operations::projectFiles),
                 syncScheduler::afterWrite,
                 NodeIdentity::handle)
             .useMessages(messageStore);

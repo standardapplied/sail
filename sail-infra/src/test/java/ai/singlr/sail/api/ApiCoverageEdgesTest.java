@@ -152,6 +152,7 @@ class ApiCoverageEdgesTest {
               bus,
               p -> null,
               new NoReviewLanes(),
+              StageSkills.builtInOnly(),
               () -> {},
               () -> null);
       try (var server =

@@ -169,6 +169,7 @@ public final class DispatchOperations {
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
+  private StageSkills stageSkills = StageSkills.builtInOnly();
   private final SessionYield sessionYield;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -214,7 +215,8 @@ public final class DispatchOperations {
         new MembershipService(specStore, () -> roomStore, projects, admission, this.events, shell);
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
-        new RunLauncher(shell, launcher, listener, watcherSpawner, runStore, this.events);
+        new RunLauncher(
+            shell, launcher, listener, watcherSpawner, runStore, this.events, () -> stageSkills);
     this.runReservation = new RunReservation(runStore, shell, listener, sessionYield);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
@@ -242,7 +244,8 @@ public final class DispatchOperations {
             snapshotter,
             listener,
             this.events,
-            shell);
+            shell,
+            () -> stageSkills);
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -253,6 +256,15 @@ public final class DispatchOperations {
   /** Wires the room store — the authoritative home of membership state; returns {@code this}. */
   public DispatchOperations useRooms(RoomStore rooms) {
     this.roomStore = Objects.requireNonNull(rooms, "rooms");
+    return this;
+  }
+
+  /**
+   * Wires where a project's own skills are read from; returns {@code this}. Until then a launch
+   * finds only the skills sail ships, and one that names a project's is refused.
+   */
+  public DispatchOperations useStageSkills(StageSkills skills) {
+    this.stageSkills = Objects.requireNonNull(skills, "skills");
     return this;
   }
 

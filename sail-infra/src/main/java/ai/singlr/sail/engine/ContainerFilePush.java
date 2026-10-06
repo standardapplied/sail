@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeoutException;
@@ -31,16 +32,26 @@ public final class ContainerFilePush {
     var tmpFile = Files.createTempFile("sail-push-", ".tmp");
     try {
       Files.writeString(tmpFile, content);
-      var cmd = new ArrayList<>(List.of("incus", "file", "push"));
-      cmd.addAll(flags);
-      cmd.add(tmpFile.toString());
-      cmd.add(containerName + remotePath);
-      var result = shell.exec(cmd);
-      if (!result.ok()) {
-        throw new IOException("Failed to push file to " + remotePath + ": " + result.stderr());
-      }
+      push(shell, containerName, remotePath, tmpFile, flags);
     } finally {
       Files.deleteIfExists(tmpFile);
+    }
+  }
+
+  /**
+   * Pushes the host file {@code source} to {@code remotePath} inside {@code containerName}, with
+   * {@code flags} as above. The source is the caller's: it is read, never deleted.
+   */
+  public static void push(
+      ShellExec shell, String containerName, String remotePath, Path source, List<String> flags)
+      throws IOException, InterruptedException, TimeoutException {
+    var cmd = new ArrayList<>(List.of("incus", "file", "push"));
+    cmd.addAll(flags);
+    cmd.add(source.toString());
+    cmd.add(containerName + remotePath);
+    var result = shell.exec(cmd);
+    if (!result.ok()) {
+      throw new IOException("Failed to push file to " + remotePath + ": " + result.stderr());
     }
   }
 }

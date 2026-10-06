@@ -37,6 +37,9 @@ public record StageSkill(String name, String body, List<File> files) {
   /** The skill the fix agent runs under when a project names none. */
   public static final String FIX = "sail-fix";
 
+  /** Where a project's own skills live among its files, each in a folder named for it. */
+  public static final String PROJECT_ROOT = ".sail/skills/";
+
   /** The file every skill has: its front matter and instructions. */
   public static final String MANIFEST = "SKILL.md";
 
@@ -66,10 +69,7 @@ public record StageSkill(String name, String body, List<File> files) {
   public record File(String path, String contentHash, long size, int mode) {}
 
   public StageSkill {
-    if (!isName(name)) {
-      throw new IllegalArgumentException(
-          "Skill name '" + name + "' must match " + NAME.pattern() + ".");
-    }
+    requireName(name);
     if (Strings.isBlank(body)) {
       throw new IllegalArgumentException(
           "Skill '" + name + "' has no instructions: its " + MANIFEST + " body is blank.");
@@ -115,6 +115,14 @@ public record StageSkill(String name, String body, List<File> files) {
   /** Whether {@code name} can name a skill: a short lowercase slug, safe as a folder's name. */
   public static boolean isName(String name) {
     return name != null && NAME.matcher(name).matches();
+  }
+
+  /** Refuses a {@code name} that cannot name a skill, before anything is looked up under it. */
+  public static void requireName(String name) {
+    if (!isName(name)) {
+      throw new IllegalArgumentException(
+          "Skill name '" + name + "' must match " + NAME.pattern() + ".");
+    }
   }
 
   /**

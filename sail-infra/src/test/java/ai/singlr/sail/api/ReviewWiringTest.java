@@ -195,6 +195,7 @@ class ReviewWiringTest {
               null,
               p -> null,
               new NoReviewLanes(),
+              StageSkills.builtInOnly(),
               () -> {},
               () -> "node-a");
 

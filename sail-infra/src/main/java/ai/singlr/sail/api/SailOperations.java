@@ -96,6 +96,7 @@ public final class SailOperations implements HostOperations {
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
     this.pty = new HostLanes.Pty(db, roles(), eventStore);
+    dispatchOps.useStageSkills(new StageSkills(this::projectFiles));
     return this;
   }
 

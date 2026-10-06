@@ -112,7 +112,8 @@ final class ReviewLaneLauncher implements ReviewLanes {
                   runId,
                   credential,
                   role,
-                  null));
+                  null,
+                  invocation.skill()));
       runLauncher.finishLaunch(
           new RunLauncher.RunContext(
               project, unit, runId, invocation.specId(), invocation.agent(), role, true),

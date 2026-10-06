@@ -9,6 +9,8 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -34,6 +36,7 @@ final class FakeContainer implements ShellExec {
 
   private final String project;
   private final Map<String, String> files = new ConcurrentHashMap<>();
+  private final Map<String, String> modes = new ConcurrentHashMap<>();
   private final Map<String, Agent> agents = new ConcurrentHashMap<>();
   private final List<String> launched = new CopyOnWriteArrayList<>();
   private final List<List<String>> commands = new CopyOnWriteArrayList<>();
@@ -102,6 +105,16 @@ final class FakeContainer implements ShellExec {
   /** Something in the container — the agent, say — wrote {@code content} to {@code path}. */
   void wroteFile(String path, String content) {
     files.put(path, content);
+  }
+
+  /** The paths of the files the container holds under {@code folder}, in order. */
+  List<String> filesUnder(String folder) {
+    return files.keySet().stream().filter(path -> path.startsWith(folder + "/")).sorted().toList();
+  }
+
+  /** The mode the file at {@code path} was pushed with, as the push's flag wrote it. */
+  String mode(String path) {
+    return modes.get(path);
   }
 
   /** Whether a watcher process for {@code runId} is running on the host. */
@@ -251,9 +264,10 @@ final class FakeContainer implements ShellExec {
       case "systemctl" -> managerDown ? fail("Failed to connect to bus") : systemctl(inner);
       case "git" -> git(inner);
       case "rm" -> {
-        files.remove(inner.get(inner.size() - 1));
+        remove(inner.getLast());
         yield ok("");
       }
+      case "sh" -> sh(inner);
       default -> ok("");
     };
   }
@@ -291,8 +305,58 @@ final class FakeContainer implements ShellExec {
         watchers.add(command.get(command.indexOf("--run") + 1));
         yield ok("");
       }
+      case "incus" ->
+          command.subList(1, 3).equals(List.of("file", "push")) ? pushed(command) : ok("");
       default -> ok("");
     };
+  }
+
+  /** A file pushed from the host lands at its path, holding the source's text under its mode. */
+  private Result pushed(List<String> command) {
+    if (!running || unreachable) {
+      return fail("Error: Instance is not running");
+    }
+    var path = command.getLast().substring(project.length());
+    try {
+      files.put(path, Files.readString(Path.of(command.get(command.size() - 2))));
+    } catch (IOException e) {
+      return fail(e.getMessage());
+    }
+    var mode = command.indexOf("--mode");
+    if (mode >= 0) {
+      modes.put(path, command.get(mode + 1));
+    }
+    return ok("");
+  }
+
+  /** A folder put in place of another in one step: the old one's files go, the new one's move. */
+  private Result sh(List<String> inner) {
+    if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
+      return fail(failingWith);
+    }
+    if (!inner.get(2).contains("mv \"$2\" \"$1\"")) {
+      return ok("");
+    }
+    var folder = inner.get(inner.size() - 2);
+    var build = inner.getLast();
+    remove(folder);
+    for (var path : filesUnder(build)) {
+      var placed = folder + path.substring(build.length());
+      files.put(placed, files.remove(path));
+      Optional.ofNullable(modes.remove(path)).ifPresent(mode -> modes.put(placed, mode));
+    }
+    return ok("");
+  }
+
+  private void remove(String path) {
+    files.remove(path);
+    modes.remove(path);
+    filesUnder(path)
+        .forEach(
+            under -> {
+              files.remove(under);
+              modes.remove(under);
+            });
   }
 
   private Result cat(String path) {

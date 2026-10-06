@@ -1493,6 +1493,54 @@ class ProjectProvisionerTest {
   }
 
   @Test
+  void provisioningLeavesTheProjectsSkillsOutOfTheWorkspace() throws Exception {
+    var filesDir = tempDir.resolve("files");
+    java.nio.file.Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
+    java.nio.file.Files.writeString(
+        filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
+    java.nio.file.Files.writeString(filesDir.resolve("notes.md"), "Notes.");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    java.nio.file.Files.writeString(sailYaml, "name: test");
+    var shell = allSuccessShell();
+    var steps = new ArrayList<String>();
+    var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
+
+    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+
+    assertTrue(
+        steps.stream().anyMatch(s -> s.contains("done:14/") && s.contains("1 workspace file(s)")),
+        steps.toString());
+    assertTrue(
+        shell.invocations().stream()
+            .anyMatch(
+                c -> c.contains("incus file push") && c.endsWith("/home/dev/workspace/notes.md")));
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.contains(".sail/skills")),
+        "nothing under .sail/skills/ reaches ~/workspace");
+  }
+
+  @Test
+  void aProjectWhoseOnlyFilesAreSkillsIsToldItsFilesDirectoryIsEmpty() throws Exception {
+    var filesDir = tempDir.resolve("files");
+    java.nio.file.Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
+    java.nio.file.Files.writeString(
+        filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
+    var sailYaml = tempDir.resolve("sail.yaml");
+    java.nio.file.Files.writeString(sailYaml, "name: test");
+    var shell = allSuccessShell();
+    var steps = new ArrayList<String>();
+    var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
+
+    provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
+
+    assertTrue(
+        steps.stream()
+            .anyMatch(s -> s.contains("skipped:14/") && s.contains("files/ directory is empty")),
+        steps.toString());
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains(".sail/skills")));
+  }
+
+  @Test
   void workspaceFilesSkippedWhenFilesDirEmpty() throws Exception {
     java.nio.file.Files.createDirectories(tempDir.resolve("files"));
     var sailYaml = tempDir.resolve("sail.yaml");

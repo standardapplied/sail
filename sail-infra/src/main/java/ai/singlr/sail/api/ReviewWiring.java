@@ -38,6 +38,7 @@ public final class ReviewWiring {
       EventBus eventBus,
       Function<String, SailYaml> projectLoader,
       ReviewLanes lanes,
+      StageSkills skills,
       Runnable syncTrigger,
       Supplier<String> localHandle) {
     return new ReviewPipelineController(
@@ -47,6 +48,7 @@ public final class ReviewWiring {
         configResolver(projectLoader),
         reviewerResolver(projectLoader),
         lanes,
+        skills,
         eventBus,
         syncTrigger,
         localHandle);

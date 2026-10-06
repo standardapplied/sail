@@ -138,7 +138,13 @@ class RunLauncherTest {
 
   private RunLauncher launcher(ShellExec shell, RunStore store) {
     return new RunLauncher(
-        shell, command -> 0, DispatchOperations.Listener.NONE, null, store, events::add);
+        shell,
+        command -> 0,
+        DispatchOperations.Listener.NONE,
+        null,
+        store,
+        events::add,
+        StageSkills::builtInOnly);
   }
 
   private static RunLauncher.RunContext ctx(boolean background) {

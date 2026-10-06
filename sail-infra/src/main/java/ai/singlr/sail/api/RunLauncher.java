@@ -16,6 +16,8 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.RunStore;
@@ -24,6 +26,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Supplier;
 
 /**
  * The one run-launch engine every lane shares: stage the run-scoped task and session files, build
@@ -42,6 +45,7 @@ public final class RunLauncher {
   private final WatcherSpawner watcherSpawner;
   private final RunStore runStore;
   private final DispatchOperations.EventSink events;
+  private final Supplier<StageSkills> stageSkills;
 
   public RunLauncher(
       ShellExec shell,
@@ -49,13 +53,15 @@ public final class RunLauncher {
       DispatchOperations.Listener listener,
       WatcherSpawner watcherSpawner,
       RunStore runStore,
-      DispatchOperations.EventSink events) {
+      DispatchOperations.EventSink events,
+      Supplier<StageSkills> stageSkills) {
     this.shell = shell;
     this.launcher = launcher;
     this.listener = listener;
     this.watcherSpawner = watcherSpawner;
     this.runStore = runStore;
     this.events = events;
+    this.stageSkills = stageSkills;
   }
 
   record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
@@ -67,7 +73,9 @@ public final class RunLauncher {
    * room a viewer role and no repo reservation; a reviewer and a fix agent the spec they serve.
    * {@code task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused
    * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
-   * {@code runId}: one shape for every lane, so no launch names its own.
+   * {@code runId}: one shape for every lane, so no launch names its own. {@code skill} is the skill
+   * the stage was fired under, installed for the harness before it starts: a build's, a reviewer's
+   * or a fix agent's, and null for an ad-hoc or a room run, which follow none.
    */
   record LaunchSpec(
       String project,
@@ -85,7 +93,8 @@ public final class RunLauncher {
       String runId,
       String runCredential,
       String role,
-      String resumeSessionId) {
+      String resumeSessionId,
+      StageSkill skill) {
 
     AgentUnit unit() {
       return AgentUnit.forRun(runId);
@@ -118,7 +127,8 @@ public final class RunLauncher {
       Spec spec,
       String agentType,
       String runId,
-      String runCredential) {
+      String runCredential,
+      StageSkill skill) {
     return launchSession(
         new LaunchSpec(
             project,
@@ -136,7 +146,8 @@ public final class RunLauncher {
             runId,
             runCredential,
             Lane.BUILD.wire(),
-            null));
+            null,
+            skill));
   }
 
   /**
@@ -179,6 +190,7 @@ public final class RunLauncher {
   LaunchOutcome launchSession(LaunchSpec s) {
     try {
       ensureSailSetup(s.project());
+      installSkill(s);
       var session = new AgentSession(shell);
       session.ensureDirectory(s.project());
       session.writeTaskFile(s.project(), s.task(), s.unit());
@@ -306,6 +318,39 @@ public final class RunLauncher {
           ErrorCode.AGENT_LAUNCH_FAILED,
           "Failed to install the authenticated sail helpers in " + project + ".",
           "Repair the container's sail socket mount and retry the dispatch.",
+          e);
+    }
+  }
+
+  /**
+   * Installs the skill the stage was fired under where its harness looks for skills, from the same
+   * files its prompt was made from. Failure aborts the launch: an agent told of a folder must find
+   * the skill it was told of there, not an older one or none.
+   */
+  private void installSkill(LaunchSpec s) {
+    var skill = s.skill();
+    if (skill == null) {
+      return;
+    }
+    var folder =
+        "/home/"
+            + s.config().sshUser()
+            + "/"
+            + Harnesses.of(s.agentType()).skillsDir()
+            + skill.name();
+    try {
+      StageSkillInstaller.install(
+          shell,
+          s.project(),
+          folder,
+          s.runId(),
+          skill,
+          file -> stageSkills.get().open(s.project(), skill, file));
+    } catch (Exception e) {
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED,
+          "Failed to install skill '" + skill.name() + "' in " + s.project() + ".",
+          "Check the container is running and retry.",
           e);
     }
   }

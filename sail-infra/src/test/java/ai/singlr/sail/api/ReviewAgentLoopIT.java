@@ -21,7 +21,10 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -30,6 +33,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -197,6 +201,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 project -> config,
                 project -> "codex",
                 dispatch.reviewLanes(),
+                StageSkills.builtInOnly(),
                 bus,
                 () -> {},
                 () -> HANDLE)
@@ -227,6 +232,26 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     null,
                     List.of(),
                     List.of())));
+  }
+
+  /**
+   * The files of the installed skill {@code name}, each with its mode and owner: the stamp with
+   * what it holds, any other file with its size.
+   */
+  private List<String> installedSkill(String name) throws Exception {
+    var listed =
+        exec(
+            CONTAINER,
+            List.of(
+                "sh",
+                "-c",
+                "cd \"$1\" && for f in .sail-skill SKILL.md; do"
+                    + " if [ \"$f\" = .sail-skill ]; then v=$(cat \"$f\"); else v=$(wc -c < \"$f\");"
+                    + " fi; echo \"$f $(stat -c '%a %U' \"$f\") $v\"; done",
+                "sh",
+                "/home/dev/.agents/skills/" + name));
+    assertTrue(listed.ok(), listed.stderr());
+    return listed.stdout().lines().toList();
   }
 
   @AfterEach
@@ -260,6 +285,19 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertTrue(
         new AgentSession(shell).unitActive(CONTAINER, AgentUnit.forRun(reviewer.id())),
         "the reviewer runs as its run's systemd unit, like a build");
+    assertEquals(
+        List.of(
+            ".sail-skill 644 dev "
+                + StageSkillInstaller.fingerprint(
+                    BuiltInSkills.of(StageSkill.REVIEW).orElseThrow()),
+            "SKILL.md 644 dev "
+                + BuiltInSkills.text(StageSkill.REVIEW)
+                    .orElseThrow()
+                    .getBytes(StandardCharsets.UTF_8)
+                    .length),
+        installedSkill(StageSkill.REVIEW),
+        "the reviewer's skill is in Codex's skills folder: whole, the dev user's, and stamped");
+    assertTrue(reviewer.task().contains("## How to do this work (skill: sail-review)"));
 
     release();
     watcherObservesTheExitOf(reviewer);
@@ -271,6 +309,10 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
 
     var second = launched("review", "review_stage_started");
     watcherObservesTheExitOf(second);
+    assertEquals(
+        List.of("sail-fix", "sail-review"),
+        exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents/skills")).stdout().lines().toList(),
+        "each stage's skill is installed once, and no build folder is left beside them");
 
     awaitEvent("review_completed");
     assertEquals(

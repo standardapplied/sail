@@ -10,8 +10,6 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
-import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
@@ -34,6 +32,7 @@ final class LoopSteps {
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final ReviewLanes lanes;
+  private final StageSkills skills;
   private final LoopFactsReader reader;
   private final LoopNarrator narrator;
   private final StageVerdicts verdicts;
@@ -44,6 +43,7 @@ final class LoopSteps {
       SpecStore specStore,
       ReviewStore reviewStore,
       ReviewLanes lanes,
+      StageSkills skills,
       LoopFactsReader reader,
       LoopNarrator narrator,
       Runnable syncTrigger,
@@ -51,6 +51,7 @@ final class LoopSteps {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.lanes = lanes;
+    this.skills = skills;
     this.reader = reader;
     this.narrator = narrator;
     this.verdicts = new StageVerdicts(reviewStore, lanes, narrator);
@@ -192,7 +193,8 @@ final class LoopSteps {
    * The stage row turns {@code running} only once its reviewer's claim has landed, before that
    * reviewer's unit starts — so a stage is {@code running} only while a run exists for it ({@link
    * LoopFacts.Rows#stageReviewedBy}). A claim the gate refuses writes nothing of the stage, and the
-   * stage is announced started only once a reviewer is running for it.
+   * stage is announced started only once a reviewer is running for it. The stage's skill is read as
+   * the invocation is made, so a skill that cannot be read is a reviewer that did not start.
    */
   private Optional<LoopTrigger> launchReviewer(LoopFacts facts, LoopStep.LaunchReviewer step) {
     var stage = stagesOf(facts, step.review()).get(step.stage());
@@ -202,6 +204,7 @@ final class LoopSteps {
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
           var carried = reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
+          var skill = skills.resolve(facts.project(), stageConfig.skill());
           var built =
               ReviewPromptBuilder.build(
                   spec.branch(),
@@ -209,7 +212,7 @@ final class LoopSteps {
                   stageConfig.categories(),
                   narrator.roomMessages(specId),
                   carried,
-                  BuiltInSkills.of(StageSkill.REVIEW).orElseThrow().block(""));
+                  StageSkills.block(skill, Harnesses.of(step.agent())));
           return new ReviewLanes.Invocation(
               Lane.REVIEW,
               stage.reviewId(),
@@ -221,7 +224,8 @@ final class LoopSteps {
               spec.repos(),
               null,
               spec.reasoningEffort(),
-              built.renderedMessages().stream().map(MessageRow::id).toList());
+              built.renderedMessages().stream().map(MessageRow::id).toList(),
+              skill);
         };
     return launch(
         invocation,
@@ -342,25 +346,28 @@ final class LoopSteps {
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
           var room = narrator.roomMessages(specId);
+          var agent = spec.agent() != null ? spec.agent() : Harnesses.DEFAULT.yamlName();
+          var skill = skills.resolve(facts.project(), facts.staged().config().fixSkill());
           var built =
               FixTaskBuilder.build(
                   specId,
                   spec.title(),
                   step.findings(),
                   room,
-                  BuiltInSkills.of(StageSkill.FIX).orElseThrow().block(""));
+                  StageSkills.block(skill, Harnesses.of(agent)));
           return new ReviewLanes.Invocation(
               Lane.FIX,
               step.review().id(),
               facts.project(),
               specId,
-              spec.agent() != null ? spec.agent() : Harnesses.DEFAULT.yamlName(),
+              agent,
               built.task(),
               spec.branch(),
               spec.repos(),
               spec.model(),
               spec.reasoningEffort(),
-              built.renderedMessages().stream().map(MessageRow::id).toList());
+              built.renderedMessages().stream().map(MessageRow::id).toList(),
+              skill);
         };
     Runnable started =
         () -> {

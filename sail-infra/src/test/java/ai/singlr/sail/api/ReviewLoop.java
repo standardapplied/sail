@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
 import ai.singlr.sail.config.ReviewPipelineConfig;
@@ -14,11 +15,14 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
+import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -29,7 +33,9 @@ import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncTransitions;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -93,6 +99,7 @@ final class ReviewLoop implements AutoCloseable {
   final ReviewStore reviews;
   final RunStore runs;
   final MessageStore messages;
+  final FileStore files;
   final FakeContainer container = new FakeContainer(PROJECT);
   final List<Event> published = new CopyOnWriteArrayList<>();
   final List<List<String>> launchCommands = new CopyOnWriteArrayList<>();
@@ -102,6 +109,7 @@ final class ReviewLoop implements AutoCloseable {
   ReviewPipelineController controller;
 
   private final ProjectStore projects;
+  private final Path projectsDir;
   private final ProjectReader reader;
   private final Function<String, ReviewPipelineConfig> config;
   private final Function<String, String> reviewer;
@@ -146,6 +154,8 @@ final class ReviewLoop implements AutoCloseable {
     reviews = new ReviewStore(db);
     runs = new RunStore(db);
     messages = new MessageStore(db);
+    files = new FileStore(db);
+    projectsDir = dir.resolve("projects");
     start();
   }
 
@@ -172,7 +182,8 @@ final class ReviewLoop implements AutoCloseable {
                 DispatchOperations.Listener.NONE,
                 SessionYield.NONE)
             .useMessages(messages)
-            .useRooms(new RoomStore(db));
+            .useRooms(new RoomStore(db))
+            .useStageSkills(skills());
     controller =
         new ReviewPipelineController(
                 specs,
@@ -181,6 +192,7 @@ final class ReviewLoop implements AutoCloseable {
                 config,
                 reviewer,
                 operations.reviewLanes(),
+                skills(),
                 started,
                 syncs::incrementAndGet,
                 () -> HANDLE)
@@ -189,6 +201,26 @@ final class ReviewLoop implements AutoCloseable {
     started.subscribe(counted(new RunTracker(runs, SyncScheduler.disabled(), () -> HANDLE)));
     started.subscribe(counted(controller));
     started.subscribe(counted(recorder()));
+  }
+
+  /**
+   * The skills a server reads over this loop's project files: the loop's own instance and the
+   * launcher's are two, as they are in production, over the one store.
+   */
+  StageSkills skills() {
+    return new StageSkills(
+        project -> new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults()));
+  }
+
+  /** Shares {@code content} as the file {@code path} of the project's skill {@code name}. */
+  void skillFile(String name, String path, String content, int mode) {
+    Acting.system(
+        () ->
+            files.put(
+                PROJECT,
+                StageSkill.PROJECT_ROOT + name + "/" + path,
+                new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)),
+                mode));
   }
 
   /**
