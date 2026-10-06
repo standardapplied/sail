@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.gen.ServicePresets;
+import ai.singlr.sail.harness.Harnesses;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -85,6 +86,14 @@ public final class ProjectInitCommand implements Runnable {
             "    @|faint Next:|@ review the file, then run @|bold "
                 + nextApplyCommand(config.name(), outputPath)
                 + "|@"));
+  }
+
+  static String agentTypePrompt() {
+    return "Agent type (" + String.join("/", Harnesses.names()) + "/none)";
+  }
+
+  static String agentCliPrompt() {
+    return "Agent CLI name (" + String.join("/", Harnesses.names()) + ")";
   }
 
   static Path defaultOutputPath(String name) {
@@ -208,8 +217,7 @@ public final class ProjectInitCommand implements Runnable {
 
     out.println();
     var agentType =
-        ConsoleHelper.promptWithDefault(
-            out, ansi, "Agent type (claude-code/codex/helios/none)", "claude-code");
+        ConsoleHelper.promptWithDefault(out, ansi, agentTypePrompt(), Harnesses.DEFAULT.yamlName());
     SailYaml.Agent agent = null;
     if (!"none".equalsIgnoreCase(agentType)) {
       List<String> install = null;
@@ -217,7 +225,7 @@ public final class ProjectInitCommand implements Runnable {
         install = new ArrayList<>();
         install.add(agentType);
         do {
-          var cli = ConsoleHelper.promptRequired(out, ansi, "Agent CLI name (claude-code/codex)");
+          var cli = ConsoleHelper.promptRequired(out, ansi, agentCliPrompt());
           if (!cli.equals(agentType)) {
             install.add(cli);
           }

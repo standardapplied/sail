@@ -714,13 +714,15 @@ public final class AgentSession {
     if (cli.honoursReasoningEffort() || Strings.isBlank(reasoningEffort)) {
       return;
     }
-    var spec = Strings.isBlank(specId) ? "this launch" : "spec " + specId;
+    var target = Strings.isBlank(specId) ? "this launch" : "spec " + specId;
     System.err.println(
-        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='"
+        "  ⚠ "
+            + cli.displayName()
+            + " has no reasoning_effort setting; dropping reasoning_effort='"
             + reasoningEffort
             + "' for "
-            + spec
-            + ". Only Codex honors reasoning_effort.");
+            + target
+            + ".");
   }
 
   /**

@@ -203,9 +203,9 @@ class HarnessGoldenTest {
 
   @Test
   void anUnknownHarnessNameIsRefusedNamingTheKnownOnes() {
-    var ex = assertThrows(IllegalArgumentException.class, () -> Harnesses.of("helios"));
+    var ex = assertThrows(IllegalArgumentException.class, () -> Harnesses.of("unknown-agent"));
     assertEquals(
-        "Unknown agent CLI: 'helios'. Known agents: claude-code, codex.\n"
+        "Unknown agent CLI: 'unknown-agent'. Known agents: claude-code, codex.\n"
             + "  Check the 'install' list in your sail.yaml agent section.",
         ex.getMessage());
   }

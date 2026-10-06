@@ -212,7 +212,7 @@ public final class RunCommand implements Runnable {
             && config.agent().config() != null
             && "full".equals(config.agent().config().get("permissions"));
 
-    var agentType = config.agent() != null ? config.agent().type() : "claude-code";
+    var agentType = config.agent() != null ? config.agent().type() : Harnesses.DEFAULT.yamlName();
     var agentCli = Harnesses.of(agentType);
 
     var label = SnapshotManager.defaultLabel();

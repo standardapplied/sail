@@ -1126,9 +1126,11 @@ class AgentSessionTest {
     assertFalse(joined.contains("reasoning"), "reasoning_effort is dropped for Claude Code");
 
     var warning = captured.toString(java.nio.charset.StandardCharsets.UTF_8);
-    assertTrue(warning.contains("reasoning_effort"), "the drop must never be silent");
-    assertTrue(warning.contains("high"));
-    assertTrue(warning.contains("auth-flow"), "the warning names the spec");
+    assertEquals(
+        "  ⚠ Claude Code has no reasoning_effort setting; dropping reasoning_effort='high' for"
+            + " spec auth-flow.\n",
+        warning,
+        "the drop must never be silent, and the harness says so in its own name");
   }
 
   @Test

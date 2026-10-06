@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.harness.Harnesses;
 import java.io.IOException;
 import org.junit.jupiter.api.Test;
 
@@ -62,7 +63,7 @@ class SailEventHelperTest {
   void scriptReadsSpecFromEnvVar() {
     var content = SailEventHelper.scriptContent();
     assertTrue(content.contains("SPEC_ID=\"${SAIL_SPEC_ID:-}\""));
-    assertTrue(content.contains("AGENT=\"${SAIL_AGENT:-claude-code}\""));
+    assertTrue(content.contains("AGENT=\"${SAIL_AGENT:-" + Harnesses.DEFAULT.yamlName() + "}\""));
   }
 
   @Test
