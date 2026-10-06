@@ -211,11 +211,23 @@ class PtySessionTest {
               createdLongBeforeTheStranger,
               "t",
               true);
-      var session = PtySession.resume(meta, PtyEvents.NONE, pty, journal, files, SdNotify.NONE);
+      var ended = new CountDownLatch(1);
+      var recorder =
+          new PtyEvents() {
+            @Override
+            public void sessionStarted(PtySession.Origin origin) {}
+
+            @Override
+            public void sessionAttached(PtySession.Origin origin, String fde) {}
+
+            @Override
+            public void sessionEnded(PtySession.Origin origin, String reason) {
+              ended.countDown();
+            }
+          };
+      var session = PtySession.resume(meta, recorder, pty, journal, files, SdNotify.NONE);
       try {
-        var client = new Collector();
-        session.attach(client, false, "uday");
-        assertTrue(client.ended.await(30, TimeUnit.SECONDS));
+        assertTrue(ended.await(30, TimeUnit.SECONDS), "the session ends on its own");
         assertEquals(PtySession.STATUS_LOST, session.endedReason());
       } finally {
         session.close();
