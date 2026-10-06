@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectReader;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecCatalog;
@@ -18,15 +20,15 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -40,6 +42,8 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class AgentStatusCommand implements Runnable {
 
+  private static final List<String> DEFAULT_REPO_PATHS = List.of("/home/dev/workspace");
+
   @Parameters(index = "0", description = "Project name (omit for all projects).", arity = "0..1")
   private String name;
 
@@ -48,11 +52,21 @@ public final class AgentStatusCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
   @Spec private CommandSpec spec;
+
+  private final Supplier<HostOperations> operations;
+
+  public AgentStatusCommand() {
+    this(OperationsFactory::open);
+  }
+
+  AgentStatusCommand(Supplier<HostOperations> operations) {
+    this.operations = operations;
+  }
 
   @Override
   public void run() {
@@ -84,17 +98,21 @@ public final class AgentStatusCommand implements Runnable {
       return;
     }
 
-    var agentSession = new AgentSession(shell);
     var checker = new GuardrailChecker(shell);
     var summaries = new ArrayList<AgentSummary>();
+    var sessions = new HashMap<String, AgentSession.SessionInfo>();
+    var repoPaths = new HashMap<String, List<String>>();
+    try (var operations = this.operations.get()) {
+      var definitions = operations.catalog().definitions();
+      for (var container : runningContainers) {
+        sessions.put(container.name(), sessionOrNull(operations, container.name()));
+        repoPaths.put(container.name(), repoPathsOrDefault(definitions, container.name()));
+      }
+    }
 
     for (var container : runningContainers) {
       var projectName = container.name();
-      AgentSession.SessionInfo info = null;
-      try {
-        info = resolveSession(shell, projectName);
-      } catch (Exception ignored) {
-      }
+      var info = sessions.get(projectName);
 
       var statusLabel = "No session";
       var elapsed = "";
@@ -106,8 +124,7 @@ public final class AgentStatusCommand implements Runnable {
           try {
             var started = Instant.parse(info.startedAt());
             elapsed = formatElapsed(Duration.between(started, DateTimeUtils.now()));
-            var repoPaths = resolveRepoPaths(projectName);
-            for (var repoPath : repoPaths) {
+            for (var repoPath : repoPaths.get(projectName)) {
               try {
                 commits += checker.queryGitActivity(projectName, repoPath, started).commitCount();
               } catch (Exception ignored) {
@@ -171,12 +188,11 @@ public final class AgentStatusCommand implements Runnable {
     var state = mgr.queryState(name);
     ContainerStateGuard.requireRunning(state, name);
 
-    var info = resolveSession(shell, name);
-
-    SailYaml config = null;
-    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (Files.exists(sailYamlPath)) {
-      config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
+    AgentSession.SessionInfo info;
+    SailYaml config;
+    try (var operations = this.operations.get()) {
+      info = operations.dispatching().projectSession(name, NodeIdentity.handle());
+      config = operations.catalog().definitions().read(name).orElse(null);
     }
 
     var commitCount = 0;
@@ -204,7 +220,7 @@ public final class AgentStatusCommand implements Runnable {
 
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = this.operations.get()) {
         taskCounts = SpecCatalog.statusCounts(operations.catalog().projectSpecs(name));
       } catch (Exception ignored) {
       }
@@ -243,22 +259,20 @@ public final class AgentStatusCommand implements Runnable {
         name, info, commitCount, lastCommitMinutesAgo, taskCounts, System.out, Ansi.AUTO);
   }
 
-  private List<String> resolveRepoPaths(String projectName) {
+  private static List<String> repoPathsOrDefault(ProjectReader definitions, String projectName) {
     try {
-      var sailYamlPath = SailPaths.resolveSailYaml(projectName, file);
-      if (Files.exists(sailYamlPath)) {
-        var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
-        return config.repoPaths();
-      }
+      return definitions.read(projectName).map(SailYaml::repoPaths).orElse(DEFAULT_REPO_PATHS);
     } catch (Exception ignored) {
+      return DEFAULT_REPO_PATHS;
     }
-    return List.of("/home/dev/workspace");
   }
 
-  private static AgentSession.SessionInfo resolveSession(ShellExecutor shell, String projectName)
-      throws Exception {
-    try (var operations = OperationsFactory.open()) {
+  private static AgentSession.SessionInfo sessionOrNull(
+      HostOperations operations, String projectName) {
+    try {
       return operations.dispatching().projectSession(projectName, NodeIdentity.handle());
+    } catch (Exception ignored) {
+      return null;
     }
   }
 

@@ -16,10 +16,8 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
@@ -45,7 +43,7 @@ public final class AgentReportCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
@@ -82,11 +80,10 @@ public final class AgentReportCommand implements Runnable {
           throw new IllegalStateException("Container error: " + e.message());
     }
 
-    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException("No sail.yaml found at " + file);
+    SailYaml config;
+    try (var operations = this.operations.get()) {
+      config = operations.catalog().definitions().require(name);
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
 
     var reporter = new AgentReporter(shell);
     var report = reporter.generate(name, config, projectSpecs(name), latestSession(name));

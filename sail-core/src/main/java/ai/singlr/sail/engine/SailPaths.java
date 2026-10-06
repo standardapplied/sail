@@ -153,38 +153,6 @@ public final class SailPaths {
   }
 
   /**
-   * Resolves the project descriptor path for a project. Checks in order:
-   *
-   * <ol>
-   *   <li>{@code ~/.sail/projects/<name>/sail.yaml} (canonical location)
-   *   <li>The explicit {@code file} path (from {@code -f} flag)
-   *   <li>{@code <name>/sail.yaml} in the current directory
-   * </ol>
-   *
-   * Returns the first path that exists, or the canonical path for the error message.
-   */
-  public static Path resolveSailYaml(String name, String file) {
-    if (name != null) {
-      var canonical = projectDir(name).resolve(PROJECT_DESCRIPTOR);
-      if (Files.exists(canonical)) {
-        return canonical;
-      }
-    }
-    var path = Path.of(file);
-    if (Files.exists(path)) {
-      return path;
-    }
-    if (name != null) {
-      var namedPath = Path.of(name, PROJECT_DESCRIPTOR);
-      if (Files.exists(namedPath)) {
-        return namedPath;
-      }
-      return projectDir(name).resolve(PROJECT_DESCRIPTOR);
-    }
-    return path;
-  }
-
-  /**
    * Walks up from {@code start} (defaulting to the current working directory) looking for a {@code
    * sail.yaml}. Returns the directory containing it, or empty if none is found before reaching the
    * filesystem root or the user's home directory (whichever comes first). Pure I/O-free helper for

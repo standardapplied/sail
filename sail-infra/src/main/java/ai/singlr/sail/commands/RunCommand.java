@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
+import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -44,6 +45,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -104,13 +106,24 @@ public final class RunCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
+  private final Supplier<HostOperations> operations;
+  private final LocalIdentity identity;
   private SailEventPublisher eventPublisher;
+
+  public RunCommand() {
+    this(OperationsFactory::open, LocalIdentity.detect());
+  }
+
+  RunCommand(Supplier<HostOperations> operations, LocalIdentity identity) {
+    this.operations = operations;
+    this.identity = identity;
+  }
 
   @Override
   public void run() {
@@ -125,14 +138,11 @@ public final class RunCommand implements Runnable {
       Banner.printBranding(System.out, Ansi.AUTO);
     }
 
-    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + sailYamlPath.toAbsolutePath()
-              + "\n  Create a sail.yaml in the current directory, or specify one with --file.");
+    SailYaml config;
+    try (var operations = this.operations.get()) {
+      config =
+          AgentContextRegenCommand.definitionWithBoxIdentity(operations.catalog(), name, identity);
     }
-    var config = SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -178,7 +188,7 @@ public final class RunCommand implements Runnable {
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = this.operations.get()) {
         var nextSpec = SpecCatalog.nextReady(operations.catalog().projectSpecs(name));
         if (nextSpec != null) {
           var specBody =

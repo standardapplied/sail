@@ -7,6 +7,8 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.EventStreamClient;
+import ai.singlr.sail.api.HostOperations;
+import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.RunWatch;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.ServerConnectionConfig;
@@ -14,7 +16,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.Notifications;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentPresence;
 import ai.singlr.sail.engine.AgentSession;
@@ -23,11 +24,9 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
-import java.nio.file.Files;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -116,7 +115,7 @@ public final class AgentWatchCommand implements Runnable {
 
   @Option(
       names = {"-f", "--file"},
-      description = "Path to sail.yaml project descriptor.",
+      description = "Ignored: the project is read from the catalog.",
       defaultValue = "sail.yaml")
   private String file;
 
@@ -127,6 +126,16 @@ public final class AgentWatchCommand implements Runnable {
   private int apiPort;
 
   @Spec private CommandSpec commandSpec;
+
+  private final Supplier<HostOperations> operations;
+
+  public AgentWatchCommand() {
+    this(OperationsFactory::open);
+  }
+
+  AgentWatchCommand(Supplier<HostOperations> operations) {
+    this.operations = operations;
+  }
 
   @Override
   public void run() {
@@ -175,8 +184,7 @@ public final class AgentWatchCommand implements Runnable {
     var shell = new ShellExecutor(dryRun);
     requireRunning(shell);
 
-    var config = loadConfig();
-    var notifications = config.agent() != null ? config.agent().notifications() : null;
+    var notifications = notifications();
     var notifier = buildNotifier(notifications);
 
     var publisher = resolvePublisher();
@@ -327,12 +335,12 @@ public final class AgentWatchCommand implements Runnable {
     ContainerStateGuard.requireRunning(state, name);
   }
 
-  private SailYaml loadConfig() throws Exception {
-    var sailYamlPath = SailPaths.resolveSailYaml(name, file);
-    if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException("No sail.yaml found at " + file);
+  /** The project's notifications as the catalog holds them when the watch starts. */
+  private Notifications notifications() throws Exception {
+    try (var operations = this.operations.get()) {
+      var config = operations.catalog().definitions().require(name);
+      return config.agent() != null ? config.agent().notifications() : null;
     }
-    return SailYaml.fromMap(YamlUtil.parseFile(sailYamlPath));
   }
 
   private static WebhookNotifier buildNotifier(Notifications notifications) {
