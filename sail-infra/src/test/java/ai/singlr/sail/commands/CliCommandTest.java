@@ -63,6 +63,12 @@ class CliCommandTest {
         "The roster is unsynced. Run 'sail sync'.",
         CliCommand.describe(
             new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.")));
+    assertEquals(
+        "Project 'acme' is not in the catalog.",
+        CliCommand.describe(
+            new ApiException(
+                ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, "Project 'acme' is not in the catalog.")),
+        "a refusal that names no fix is its message alone");
     assertEquals("boom", CliCommand.describe(new IllegalStateException("boom")));
     assertEquals("IllegalStateException", CliCommand.describe(new IllegalStateException()));
   }
