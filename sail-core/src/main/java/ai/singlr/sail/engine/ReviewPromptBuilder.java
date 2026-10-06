@@ -10,11 +10,11 @@ import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 
 /**
- * Builds structured review prompts for review agents. The prompt instructs the agent to respond
- * with the verdict envelope — a ruling on every finding carried forward from the previous review,
- * plus any newly discovered findings — as one JSON object. Every finding must include evidence;
- * unsubstantiated reports are explicitly excluded, and a carried finding can only be retired by a
- * verdict with evidence, never by omission.
+ * Builds structured review prompts for review agents. The prompt says what to review, then how the
+ * stage judges it (its skill, which a project may replace), then the verdict envelope, which is
+ * sail's: a ruling on every finding carried forward from the previous review, plus any newly
+ * discovered findings, as one JSON object. A carried finding can only be retired by a verdict with
+ * evidence, never by omission.
  */
 public final class ReviewPromptBuilder {
 
@@ -35,24 +35,31 @@ public final class ReviewPromptBuilder {
    *     are rendered
    * @param carried the previous review's still-open findings, which the reviewer must rule on: one
    *     verdict per carried finding, alongside (not instead of) any new findings
+   * @param skillBlock how this stage judges a change, a {@link StageSkill#block}; the verdict
+   *     contract follows it, and nothing it says replaces that
    */
   public static Built build(
       String branch,
       List<String> repos,
       List<String> categories,
       List<MessageStore.MessageRow> messages,
-      List<Finding> carried) {
+      List<Finding> carried,
+      String skillBlock) {
     var conversation =
         PromptConversation.renderNewest(
             messages, message -> message.author() + ": " + message.body() + "\n\n");
     return new Built(
         (messages.isEmpty() ? "" : "Conversation on this spec:\n\n" + conversation.text())
-            + instructions(branch, repos, categories, carried),
+            + instructions(branch, repos, categories, carried, skillBlock),
         conversation.fullyRendered());
   }
 
   private static String instructions(
-      String branch, List<String> repos, List<String> categories, List<Finding> carried) {
+      String branch,
+      List<String> repos,
+      List<String> categories,
+      List<Finding> carried,
+      String skillBlock) {
     var categoryList =
         categories.isEmpty() ? "any relevant category" : String.join(", ", categories);
     var repoList = repos.isEmpty() ? "the repository in the workspace" : String.join(", ", repos);
@@ -67,6 +74,8 @@ public final class ReviewPromptBuilder {
 
         """
             .formatted(branch, repos.size() == 1 ? "y" : "ies", repoList, categoryList)
+        + skillBlock
+        + "\n\n"
         + carryForward(carried)
         + """
         Respond with exactly one JSON object — the verdict envelope:
@@ -95,13 +104,9 @@ public final class ReviewPromptBuilder {
         - confidence: 0.0 to 1.0 indicating your certainty
 
         Rules:
-        1. Only report genuine issues. Do not flag style preferences or working code.
-        2. Every finding MUST include evidence. If you cannot prove it, do not report it.
-        3. Every finding MUST include a concrete suggestion with before/after code.
-        4. Focus on correctness, security, and reliability — not formatting.
-        5. Rule on EVERY carried finding: a carried finding you do not mention is treated as
+        1. Rule on EVERY carried finding: a carried finding you do not mention is treated as
            still_open, so silence never resolves anything.
-        6. If there are no new issues, "findings" must be an empty array.
+        2. If there are no new issues, "findings" must be an empty array.
 
         Begin the JSON object with ```json and end with ```.
         """;

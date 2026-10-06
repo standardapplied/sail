@@ -19,6 +19,8 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -138,7 +140,11 @@ public final class BuildDispatch {
             ? List.<MessageStore.MessageRow>of()
             : messages.list(nextSpec.id(), null, 20);
     var built =
-        AgentTaskPrompt.build(taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room);
+        AgentTaskPrompt.build(
+            taskSpec,
+            specBody.isBlank() ? nextSpec.title() : specBody,
+            room,
+            BuiltInSkills.of(StageSkill.BUILD).orElseThrow().block(""));
     var task = built.prompt();
     var agentType = taskSpec.agent() != null ? taskSpec.agent() : loaded.config().agent().type();
 

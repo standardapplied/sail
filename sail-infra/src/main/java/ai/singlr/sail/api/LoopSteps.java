@@ -10,6 +10,8 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.FixTaskBuilder;
 import ai.singlr.sail.engine.ReviewPromptBuilder;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
@@ -206,7 +208,8 @@ final class LoopSteps {
                   spec.repos(),
                   stageConfig.categories(),
                   narrator.roomMessages(specId),
-                  carried);
+                  carried,
+                  BuiltInSkills.of(StageSkill.REVIEW).orElseThrow().block(""));
           return new ReviewLanes.Invocation(
               Lane.REVIEW,
               stage.reviewId(),
@@ -339,7 +342,13 @@ final class LoopSteps {
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
           var room = narrator.roomMessages(specId);
-          var built = FixTaskBuilder.build(specId, spec.title(), step.findings(), room);
+          var built =
+              FixTaskBuilder.build(
+                  specId,
+                  spec.title(),
+                  step.findings(),
+                  room,
+                  BuiltInSkills.of(StageSkill.FIX).orElseThrow().block(""));
           return new ReviewLanes.Invocation(
               Lane.FIX,
               step.review().id(),

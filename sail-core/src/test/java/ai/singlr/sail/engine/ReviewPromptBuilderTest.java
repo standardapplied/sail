@@ -8,12 +8,16 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ReviewPromptBuilderTest {
+
+  private static final String SKILL =
+      BuiltInSkills.of(StageSkill.REVIEW).orElseThrow().block("~/.claude/skills/sail-review/");
 
   private static String prompt(String branch, List<String> repos, List<String> categories) {
     return prompt(branch, repos, categories, List.of(), List.of());
@@ -25,7 +29,7 @@ class ReviewPromptBuilderTest {
       List<String> categories,
       List<MessageStore.MessageRow> messages,
       List<Finding> carried) {
-    return ReviewPromptBuilder.build(branch, repos, categories, messages, carried).prompt();
+    return ReviewPromptBuilder.build(branch, repos, categories, messages, carried, SKILL).prompt();
   }
 
   @Test
@@ -222,7 +226,8 @@ class ReviewPromptBuilderTest {
             false);
 
     var built =
-        ReviewPromptBuilder.build("main", List.of("app"), List.of(), List.of(message), List.of());
+        ReviewPromptBuilder.build(
+            "main", List.of("app"), List.of(), List.of(message), List.of(), SKILL);
 
     assertTrue(built.prompt().startsWith("Conversation on this spec:"));
     assertTrue(

@@ -14,6 +14,8 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentTaskPrompt;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -58,6 +60,13 @@ class DispatchCommandTest {
   }
 
   @TempDir Path tempDir;
+
+  private static final String BUILD_SKILL =
+      BuiltInSkills.of(StageSkill.BUILD).orElseThrow().block("~/.claude/skills/sail-build/");
+
+  private static String prompt(Spec spec, String description) {
+    return AgentTaskPrompt.build(spec, description, List.of(), BUILD_SKILL).prompt();
+  }
 
   @Test
   void helpShowsDescription() {
@@ -104,7 +113,7 @@ class DispatchCommandTest {
             null);
     var description = "Build Google OAuth integration with PKCE flow.";
 
-    var prompt = AgentTaskPrompt.build(spec, description);
+    var prompt = prompt(spec, description);
 
     assertTrue(prompt.contains("oauth-flow"));
     assertTrue(prompt.contains("Implement OAuth"));
@@ -128,7 +137,7 @@ class DispatchCommandTest {
             null,
             null);
 
-    var prompt = AgentTaskPrompt.build(spec, "Details");
+    var prompt = prompt(spec, "Details");
 
     assertTrue(prompt.contains("auth"));
     assertTrue(prompt.contains("Details"));
@@ -157,7 +166,7 @@ class DispatchCommandTest {
         - migrations
         """;
 
-    var prompt = AgentTaskPrompt.build(spec, longDescription.strip());
+    var prompt = prompt(spec, longDescription.strip());
 
     assertTrue(prompt.contains("users table"));
     assertTrue(prompt.contains("sessions table"));
@@ -180,7 +189,7 @@ class DispatchCommandTest {
             "high",
             null);
 
-    var prompt = AgentTaskPrompt.build(spec, "Details");
+    var prompt = prompt(spec, "Details");
 
     assertTrue(prompt.contains("Target repo: chorus"));
     assertTrue(prompt.contains("Target agent: codex"));
@@ -204,12 +213,12 @@ class DispatchCommandTest {
             null,
             null);
 
-    var prompt = AgentTaskPrompt.build(spec, "Details");
+    var prompt = prompt(spec, "Details");
 
     assertTrue(
         prompt.contains("## Autonomous Operation"),
         "the autonomous protocol belongs in the dispatch prompt, not the always-loaded context");
-    assertTrue(prompt.contains("open a pull request"));
+    assertTrue(prompt.contains("open a pull\nrequest"));
     assertTrue(
         prompt.contains("not complete until CI is green"),
         "the agent must watch the PR's checks and fix failures — a red-CI PR is unfinished work");
@@ -263,7 +272,8 @@ class DispatchCommandTest {
             null,
             false);
 
-    var prompt = AgentTaskPrompt.build(spec, "Implement the flow", List.of(message)).prompt();
+    var prompt =
+        AgentTaskPrompt.build(spec, "Implement the flow", List.of(message), BUILD_SKILL).prompt();
 
     assertTrue(prompt.contains("## Conversation on this spec"));
     assertTrue(prompt.indexOf("Use PKCE") < prompt.indexOf("Implement the flow"));
@@ -284,7 +294,7 @@ class DispatchCommandTest {
             null,
             null,
             null);
-    assertFalse(AgentTaskPrompt.build(single, "d").contains("spans multiple repos"));
+    assertFalse(prompt(single, "d").contains("spans multiple repos"));
 
     var multi =
         new Spec(
@@ -299,7 +309,7 @@ class DispatchCommandTest {
             null,
             null,
             null);
-    assertTrue(AgentTaskPrompt.build(multi, "d").contains("spans multiple repos"));
+    assertTrue(prompt(multi, "d").contains("spans multiple repos"));
   }
 
   @Test

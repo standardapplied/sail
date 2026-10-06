@@ -17,9 +17,10 @@ import java.util.List;
  * reviewer's exact scenario — with code or a dispute argument, never a bare re-claim. The agent
  * receives actionable instructions, not vague feedback — and a dispute lane: a finding it believes
  * is wrong is argued in the spec room for the re-review to rule on, never coded around and never
- * silently skipped. The task ends at a pushed commit: the fix lane runs under its own time limit
- * ({@code agent.review_pipeline.guardrails}), so it verifies locally and leaves CI to the pull
- * request rather than spending its budget polling checks.
+ * silently skipped. How the agent goes about the fixes is its skill's to say, and a project may
+ * replace it; the dispute lane and the ending are sail's. The task ends at a pushed commit: the fix
+ * lane runs under its own time limit ({@code agent.review_pipeline.guardrails}), so it leaves CI to
+ * the pull request rather than spending its budget polling checks.
  */
 public final class FixTaskBuilder {
 
@@ -49,11 +50,17 @@ public final class FixTaskBuilder {
    */
   public record Built(String task, List<MessageStore.MessageRow> renderedMessages) {}
 
+  /**
+   * The fix task for {@code findings}: the dispute lane, the room, how the fix agent does its work
+   * ({@code skillBlock}, a {@link StageSkill#block}), the findings, and the pushed commit the loop
+   * waits for. A task with no findings carries no skill.
+   */
   public static Built build(
       String specId,
       String specTitle,
       List<Finding> findings,
-      List<MessageStore.MessageRow> messages) {
+      List<MessageStore.MessageRow> messages,
+      String skillBlock) {
     if (findings.isEmpty()) {
       return new Built(
           "No review findings to address for spec \"%s\".".formatted(specTitle), List.of());
@@ -61,24 +68,23 @@ public final class FixTaskBuilder {
 
     var sb = new StringBuilder();
     sb.append(
-        "Your implementation for spec \"%s\" received %d review finding(s).%n"
-            .formatted(specTitle, findings.size()));
-    sb.append("Address each finding below. The reviewer will re-check after you commit.\n");
-    sb.append(
         """
-        Fix what is real. If you believe a finding is wrong, do NOT code around it and do NOT
-        silently skip it: post your argument to the spec room (spec comment %s --body "...")
-        naming the finding's id, and leave that code alone. The re-review reads the room and
-        rules fixed, still_open, or disputed with your argument as evidence — a finding is
-        retired by argument in the open, never by omission.
+        Your implementation for spec "%s" received %d review finding(s).
+        Address each finding below. The reviewer will re-check after you commit.
+        If you believe a finding is wrong, do NOT code around it and do NOT silently skip it: post
+        your argument to the spec room (spec comment %s --body "...") naming the finding's id,
+        and leave that code alone. The re-review reads the room and rules fixed, still_open, or
+        disputed with your argument as evidence — a finding is retired by argument in the open,
+        never by omission.
 
         """
-            .formatted(specId));
+            .formatted(specTitle, findings.size(), specId));
     var conversation = conversation(messages);
     if (!conversation.text().isEmpty()) {
       sb.append("Conversation on this spec — it may carry guidance on the findings below:\n\n");
       sb.append(conversation.text());
     }
+    sb.append(skillBlock).append("\n\n");
 
     for (var i = 0; i < findings.size(); i++) {
       var f = findings.get(i);
@@ -128,12 +134,11 @@ public final class FixTaskBuilder {
 
     sb.append(
         """
-        When every finding is addressed: run the project's verification locally, commit all
-        changes to the current branch with a clear message, push, and end your turn. Do not
-        wait for or watch CI: the re-review judges the branch, and the pull request shows its
-        checks to whoever merges. Never leave uncommitted work in the workspace — the re-review
-        reads the branch, and uncommitted files contaminate the next dispatch in this shared
-        clone.
+        When every finding is addressed: commit all changes to the current branch with a clear
+        message, push, and end your turn. Do not wait for or watch CI: the re-review judges the
+        branch, and the pull request shows its checks to whoever merges. Never leave uncommitted
+        work in the workspace — the re-review reads the branch, and uncommitted files contaminate
+        the next dispatch in this shared clone.
         """);
 
     return new Built(sb.toString(), conversation.fullyRendered());

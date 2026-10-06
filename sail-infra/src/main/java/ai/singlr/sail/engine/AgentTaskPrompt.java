@@ -24,12 +24,13 @@ public final class AgentTaskPrompt {
    */
   public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
 
-  /** Renders the dispatch prompt for {@code spec}, appending the spec description/body. */
-  public static String build(Spec spec, String description) {
-    return build(spec, description, List.of()).prompt();
-  }
-
-  public static Built build(Spec spec, String description, List<MessageStore.MessageRow> messages) {
+  /**
+   * Renders the dispatch prompt for {@code spec}: the spec and its room, the description, how the
+   * build does its work ({@code skillBlock}, a {@link StageSkill#block}), and then the protocol,
+   * which is sail's and follows whatever the skill says.
+   */
+  public static Built build(
+      Spec spec, String description, List<MessageStore.MessageRow> messages, String skillBlock) {
     var targetRepos =
         spec.repos().isEmpty()
             ? ""
@@ -58,6 +59,9 @@ public final class AgentTaskPrompt {
             + "\n"
             + conversationBlock(conversation)
             + description
+            + "\n\n"
+            + skillBlock
+            + "\n"
             + autonomousProtocol(spec);
     return new Built(prompt, conversation.fullyRendered());
   }
@@ -80,8 +84,10 @@ public final class AgentTaskPrompt {
   /**
    * The autonomous-operation protocol, appended to the dispatch prompt only — it applies to a
    * headless dispatched run, not to an engineer's interactive session, so it lives here rather than
-   * in the always-loaded context file. Review is enforced server-side by the review pipeline when
-   * the agent stops, so the prompt stays generic.
+   * in the always-loaded context file. It holds what the loop enforces of a build — a pushed
+   * branch, an open pull request, the room, green CI, nothing left uncommitted — and no skill
+   * replaces it. Review is enforced server-side by the review pipeline when the agent stops, so the
+   * prompt stays generic.
    */
   private static String autonomousProtocol(Spec spec) {
     var multiRepo =
@@ -92,9 +98,8 @@ public final class AgentTaskPrompt {
     return """
 
         ## Autonomous Operation
-        Execute without waiting for confirmation: plan, implement, test, commit. When complete, run
-        the full local verification the project uses (including any coverage or lint gates), commit
-        with a clear message, push the branch, and open a pull request.
+        When the work is complete, commit with a clear message, push the branch, and open a pull
+        request.
 
         Post progress, questions, and your final summary to this spec's room with
         `spec comment <id> --body <text>` (or `--body -` for stdin).
@@ -113,13 +118,8 @@ public final class AgentTaskPrompt {
         on GitHub, `glab ci status --live` on GitLab, or the equivalent on your forge), and if any
         check fails, diagnose it, fix it on the branch, push, and watch again until every check
         passes.
-
-        Never add AI attribution to the work: no Co-Authored-By trailers and no "Generated with"
-        footers in commit messages or pull request descriptions.
         """
         + multiRepo
-        + "If the build fails repeatedly on the same error, or three different approaches fail, stop"
-        + " and report rather than retrying. Never leave work uncommitted — a WIP commit beats lost"
-        + " work.\n";
+        + "\nNever leave work uncommitted — a WIP commit beats lost work.\n";
   }
 }
