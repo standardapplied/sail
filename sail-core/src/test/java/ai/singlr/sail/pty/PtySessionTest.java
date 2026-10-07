@@ -702,6 +702,12 @@ class PtySessionTest {
     }
   }
 
+  /**
+   * The sentinel is the child's last bytes before it blocks on {@code read}: once the writer has
+   * seen it, nothing more will ever be written, so the late attacher's bracket is followed by no
+   * live frame. A sentinel with a line ending after it is not: the pty may deliver the ending in a
+   * read of its own, after the late attach, as a live frame behind {@code ReplayEnd}.
+   */
   @Test
   void aLateAttacherReceivesTheWholeJournalInChunkedFrames() throws Exception {
     var payload = 1_572_864; // 1.5 MiB: past the wire's 1 MiB frame cap
@@ -712,7 +718,7 @@ class PtySessionTest {
             List.of(
                 "sh",
                 "-c",
-                "head -c " + payload + " /dev/zero | tr '\\0' x; echo; echo BIG-DONE; read a"),
+                "head -c " + payload + " /dev/zero | tr '\\0' x; echo; printf BIG-DONE; read a"),
             Map.of("TERM", "dumb"),
             Path.of("/tmp"),
             dir.resolve("big.ring"),
