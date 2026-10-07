@@ -5,9 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import java.util.List;
@@ -15,11 +17,13 @@ import org.junit.jupiter.api.Test;
 
 class FixTaskBuilderTest {
 
+  private static final String SKILL =
+      BuiltInSkills.of(StageSkill.FIX).orElseThrow().block("~/.claude/skills/sail-fix/");
+
   @Test
   void emptyFindingsReturnsNoActionMessage() {
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(), List.of()).task();
-    assertTrue(task.contains("No review findings"));
-    assertTrue(task.contains("OAuth flow"));
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(), List.of(), SKILL).task();
+    assertEquals("No review findings to address for spec \"OAuth flow\".", task);
   }
 
   @Test
@@ -38,7 +42,8 @@ class FixTaskBuilderTest {
                 "db.exec(sql + id)", "db.exec(sql, id)", "Use parameterized queries"),
             0.95);
 
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(finding), List.of()).task();
+    var task =
+        FixTaskBuilder.build("auth", "OAuth flow", List.of(finding), List.of(), SKILL).task();
 
     assertTrue(task.contains("1 review finding(s)"));
     assertTrue(task.contains("[CRITICAL] SECURITY"));
@@ -66,7 +71,8 @@ class FixTaskBuilderTest {
                 0.9)
             .carriedCopy("restart between reserve and claim still double-seeds");
 
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(carried), List.of()).task();
+    var task =
+        FixTaskBuilder.build("auth", "OAuth flow", List.of(carried), List.of(), SKILL).task();
 
     assertTrue(
         task.contains(
@@ -92,7 +98,7 @@ class FixTaskBuilderTest {
             null,
             0.8);
 
-    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(fresh), List.of()).task();
+    var task = FixTaskBuilder.build("auth", "OAuth flow", List.of(fresh), List.of(), SKILL).task();
 
     assertFalse(task.contains("Reviewer's evidence that this remains open"));
     assertFalse(task.contains("reproduction claim"));
@@ -113,7 +119,7 @@ class FixTaskBuilderTest {
             new Finding.Suggestion("", "", "Fix the loop bound"),
             0.8);
 
-    var task = FixTaskBuilder.build("pay", "Payment", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("pay", "Payment", List.of(finding), List.of(), SKILL).task();
     assertTrue(task.contains("Service.java:10-25"));
   }
 
@@ -144,7 +150,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(f1, f2), List.of()).task();
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(f1, f2), List.of(), SKILL).task();
     assertTrue(task.contains("Finding 1"));
     assertTrue(task.contains("Finding 2"));
     assertTrue(task.contains("2 review finding(s)"));
@@ -165,7 +171,7 @@ class FixTaskBuilderTest {
             null,
             0.5);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of(), SKILL).task();
     assertFalse(task.contains("File:"));
   }
 
@@ -184,7 +190,7 @@ class FixTaskBuilderTest {
             null,
             0.7);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of(), SKILL).task();
     assertFalse(task.contains("Fix:"));
   }
 
@@ -203,11 +209,16 @@ class FixTaskBuilderTest {
             null,
             0.9);
 
-    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("spec-1", "Spec", List.of(finding), List.of(), SKILL).task();
 
-    assertTrue(task.contains("commit"), "the fix agent must be told to commit, not just hinted");
-    assertTrue(task.contains("push"));
-    assertTrue(task.contains("Never leave uncommitted work"));
+    var closing =
+        task.substring(task.lastIndexOf("When every finding is addressed:"))
+            .replaceAll("\\s+", " ");
+    assertTrue(
+        closing.contains("commit all changes to the current branch"),
+        "the fix agent must be told to commit, not just hinted");
+    assertTrue(closing.contains("push"));
+    assertTrue(closing.contains("Never leave uncommitted work"));
   }
 
   @Test
@@ -226,7 +237,8 @@ class FixTaskBuilderTest {
             0.3);
 
     var task =
-        FixTaskBuilder.build("pay", "Payment Integration", List.of(finding), List.of()).task();
+        FixTaskBuilder.build("pay", "Payment Integration", List.of(finding), List.of(), SKILL)
+            .task();
     assertTrue(task.contains("\"Payment Integration\""));
   }
 
@@ -245,7 +257,7 @@ class FixTaskBuilderTest {
             null,
             0.9);
 
-    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of(), SKILL).task();
 
     assertTrue(
         task.contains("spec comment auth-spec"),
@@ -341,7 +353,7 @@ class FixTaskBuilderTest {
                 null,
                 false));
 
-    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), messages).task();
+    var task = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), messages, SKILL).task();
 
     assertTrue(task.contains("Conversation on this spec"));
     assertTrue(task.contains("uday: finding 2 is intentional — see the ADR"));
@@ -349,7 +361,8 @@ class FixTaskBuilderTest {
         task.indexOf("Conversation on this spec") < task.indexOf("--- Finding 1"),
         "guidance renders before the findings it may argue about");
 
-    var silent = FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of()).task();
+    var silent =
+        FixTaskBuilder.build("auth-spec", "Spec", List.of(finding), List.of(), SKILL).task();
     assertFalse(silent.contains("Conversation on this spec"), "a silent room renders no section");
   }
 
@@ -367,11 +380,14 @@ class FixTaskBuilderTest {
             "trace",
             new Finding.Suggestion("a", "b", "c"),
             0.9);
-    var task = FixTaskBuilder.build("auth", "Auth", List.of(finding), List.of()).task();
+    var task = FixTaskBuilder.build("auth", "Auth", List.of(finding), List.of(), SKILL).task();
 
-    var closing = task.substring(task.lastIndexOf("When every finding is addressed"));
+    var closing = task.substring(task.lastIndexOf("When every finding is addressed:"));
     var said = closing.replaceAll("\\s+", " ");
-    assertTrue(said.contains("run the project's verification locally"), said);
+    assertTrue(
+        task.contains("run the project's verification locally"),
+        "local verification is the default skill's to ask for");
+    assertFalse(said.contains("verification"), "and so no longer the closing's: " + said);
     assertTrue(said.contains("push, and end your turn"), said);
     assertTrue(said.contains("Do not wait for or watch CI"), said);
     assertTrue(said.contains("Never leave uncommitted work"), said);

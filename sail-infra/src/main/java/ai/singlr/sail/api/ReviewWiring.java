@@ -38,6 +38,7 @@ public final class ReviewWiring {
       EventBus eventBus,
       Function<String, SailYaml> projectLoader,
       ReviewLanes lanes,
+      StageSkills skills,
       Runnable syncTrigger,
       Supplier<String> localHandle) {
     return new ReviewPipelineController(
@@ -47,6 +48,7 @@ public final class ReviewWiring {
         configResolver(projectLoader),
         reviewerResolver(projectLoader),
         lanes,
+        skills,
         eventBus,
         syncTrigger,
         localHandle);
@@ -61,15 +63,16 @@ public final class ReviewWiring {
     return project -> reader.read(project).orElse(null);
   }
 
-  /** Resolves a project's review pipeline: its configured one, or the mandatory default. */
-  static Function<String, ReviewPipelineConfig> configResolver(Function<String, SailYaml> loader) {
+  /**
+   * Resolves the review pipeline a project's loop runs, {@link ReviewPipelineConfig#resolved} of
+   * the block its definition holds.
+   */
+  public static Function<String, ReviewPipelineConfig> configResolver(
+      Function<String, SailYaml> loader) {
     return project -> {
       var config = loader.apply(project);
-      var configured =
-          config != null && config.agent() != null ? config.agent().reviewPipeline() : null;
-      return configured != null && !configured.stages().isEmpty()
-          ? configured
-          : ReviewPipelineConfig.mandatoryDefault();
+      return ReviewPipelineConfig.resolved(
+          config != null && config.agent() != null ? config.agent().reviewPipeline() : null);
     };
   }
 

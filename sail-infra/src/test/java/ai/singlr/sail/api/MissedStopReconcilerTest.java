@@ -738,6 +738,7 @@ class MissedStopReconcilerTest {
                 return List.of();
               }
             },
+            StageSkills.builtInOnly(),
             bus,
             () -> {},
             () -> "node-a");

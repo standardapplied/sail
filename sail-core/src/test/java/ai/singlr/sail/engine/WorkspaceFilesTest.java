@@ -15,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -224,6 +225,28 @@ class WorkspaceFilesTest {
     var paths = entries.stream().map(WorkspaceFiles.FileEntry::relativePath).toList();
     assertTrue(paths.contains(".hidden"));
     assertTrue(paths.contains("visible.txt"));
+  }
+
+  @Test
+  void aProjectsSkillsAreNotWorkspaceFilesAndEveryOtherFileIs() throws IOException {
+    var filesDir = tempDir.resolve("files");
+    Files.createDirectories(filesDir.resolve(".sail/skills/acme-review/scripts"));
+    Files.createDirectories(filesDir.resolve(".sail/notes"));
+    Files.createDirectories(filesDir.resolve("docs/.sail/skills"));
+    Files.writeString(filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
+    Files.writeString(filesDir.resolve(".sail/skills/acme-review/scripts/check.sh"), "true");
+    Files.writeString(filesDir.resolve(".sail/skills.md"), "Beside the skills folder.");
+    Files.writeString(filesDir.resolve(".sail/notes/plan.md"), "Another .sail file.");
+    Files.writeString(filesDir.resolve("docs/.sail/skills/x.md"), "Not at the root.");
+    Files.writeString(filesDir.resolve(".env"), "KEY=VALUE");
+
+    var paths =
+        WorkspaceFiles.listFiles(filesDir).stream()
+            .map(WorkspaceFiles.FileEntry::relativePath)
+            .toList();
+
+    assertEquals(
+        List.of(".env", ".sail/notes/plan.md", ".sail/skills.md", "docs/.sail/skills/x.md"), paths);
   }
 
   @Test

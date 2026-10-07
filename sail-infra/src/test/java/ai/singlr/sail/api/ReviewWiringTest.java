@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -81,6 +82,59 @@ class ReviewWiringTest {
   }
 
   @Test
+  void aBlockWithNoStagesRunsTheDefaultStagesAndKeepsOnlyItsFixSkill() {
+    var sail =
+        yaml(
+            Map.of(
+                "type",
+                "claude-code",
+                "review_pipeline",
+                Map.of(
+                    "fix_skill",
+                    "acme-fix",
+                    "max_iterations",
+                    9,
+                    "max_finding_age",
+                    7,
+                    "guardrails",
+                    Map.of("max_duration", "1h"))));
+    var fallback = ReviewPipelineConfig.mandatoryDefault();
+
+    var config = ReviewWiring.configResolver(p -> sail).apply("acme");
+
+    assertEquals("acme-fix", config.fixSkill());
+    assertEquals(fallback.stages(), config.stages());
+    assertEquals(fallback.maxIterations(), config.maxIterations());
+    assertEquals(fallback.maxFindingAge(), config.maxFindingAge());
+    assertEquals(fallback.guardrails(), config.guardrails());
+    assertEquals("sail-review", config.stages().getFirst().skill());
+  }
+
+  @Test
+  void aBlockWithStagesIsThePipelineWholeFixSkillIncluded() {
+    var sail =
+        yaml(
+            Map.of(
+                "type",
+                "claude-code",
+                "review_pipeline",
+                Map.of(
+                    "fix_skill",
+                    "acme-fix",
+                    "max_iterations",
+                    9,
+                    "stages",
+                    List.of(Map.of("name", "sec", "skill", "acme-security")))));
+
+    var config = ReviewWiring.configResolver(p -> sail).apply("acme");
+
+    assertSame(sail.agent().reviewPipeline(), config);
+    assertEquals("acme-fix", config.fixSkill());
+    assertEquals("acme-security", config.stages().getFirst().skill());
+    assertEquals(9, config.maxIterations());
+  }
+
+  @Test
   void configResolverDefaultsWhenNoAgentOrNoYaml() {
     assertEquals(
         "review",
@@ -141,6 +195,7 @@ class ReviewWiringTest {
               null,
               p -> null,
               new NoReviewLanes(),
+              StageSkills.builtInOnly(),
               () -> {},
               () -> "node-a");
 

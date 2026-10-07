@@ -90,6 +90,7 @@ class LoopStepsTest {
                 return lanes.get().ensureCommitted(project, repos, branch, commitMessage);
               }
             },
+            loop.skills(),
             reader,
             narrator,
             this::sync,

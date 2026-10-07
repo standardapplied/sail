@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,6 +16,7 @@ import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 class ContainerFilePushTest {
 
@@ -59,6 +61,51 @@ class ContainerFilePushTest {
 
     var staged = stagedTempFile(shell.invocations().getFirst());
     assertFalse(Files.exists(staged), "Temp file should be deleted after a successful push");
+  }
+
+  @Test
+  void pushesACallersFileAsItIsAndLeavesItWhereItWas(@TempDir Path dir) throws Exception {
+    var source = Files.writeString(dir.resolve("check.sh"), "#!/bin/sh\ntrue\n");
+    var shell = new ScriptedShellExecutor().onOk("incus file push");
+
+    ContainerFilePush.push(
+        shell,
+        "acme",
+        "/home/dev/.claude/skills/x/check.sh",
+        source,
+        List.of("--uid", "1000", "--gid", "1000", "--mode", "0755"));
+
+    assertEquals(
+        List.of(
+            List.of(
+                "incus",
+                "file",
+                "push",
+                "--uid",
+                "1000",
+                "--gid",
+                "1000",
+                "--mode",
+                "0755",
+                source.toString(),
+                "acme/home/dev/.claude/skills/x/check.sh")),
+        shell.arguments());
+    assertEquals("#!/bin/sh\ntrue\n", Files.readString(source), "the caller's file is its own");
+  }
+
+  @Test
+  void aCallersFileThatCannotBePushedFailsNamingThePathAndIsLeftToo(@TempDir Path dir)
+      throws Exception {
+    var source = Files.writeString(dir.resolve("check.sh"), "true");
+    var shell = new ScriptedShellExecutor().onFail("incus file push", "boom");
+
+    var failed =
+        assertThrows(
+            IOException.class,
+            () -> ContainerFilePush.push(shell, "acme", "/tmp/x", source, List.of()));
+
+    assertEquals("Failed to push file to /tmp/x: boom", failed.getMessage());
+    assertTrue(Files.exists(source));
   }
 
   @Test

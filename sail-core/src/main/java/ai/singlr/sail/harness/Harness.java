@@ -83,6 +83,11 @@ public interface Harness {
    */
   String skillsDir();
 
+  /** The folder of the skill named {@code name}, relative to {@code $HOME}, without a slash. */
+  default String skillFolder(String name) {
+    return skillsDir() + name;
+  }
+
   /**
    * Where a project's language rule named {@code name} lands, relative to the home directory: the
    * harness's native "load only when relevant" channel.

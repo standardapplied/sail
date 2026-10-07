@@ -85,6 +85,20 @@ class FileImporterTest {
   }
 
   @Test
+  void aSkillInTheFilesDirectoryIsImportedAsTheProjectFilesItIs() throws Exception {
+    writeOnDisk("acme", ".sail/skills/acme-review/SKILL.md", "Judge.");
+    writeOnDisk("acme", ".sail/skills/acme-review/scripts/check.sh", "true");
+
+    var report = importer.importAll();
+
+    assertEquals(2, report.imported(), "the importer walks the directory itself");
+    assertEquals(
+        b64("Judge."), ContentFixtures.encoded(files, "acme", ".sail/skills/acme-review/SKILL.md"));
+    assertEquals(
+        "text", files.find("acme", ".sail/skills/acme-review/SKILL.md").orElseThrow().kind());
+  }
+
+  @Test
   void importsSymlinkTargetPermissionsAndPreservesThemAcrossSync() throws Exception {
     var source = Files.writeString(tempDir.resolve("restricted.txt"), "private");
     WorkspaceFiles.mode(source, 0600);

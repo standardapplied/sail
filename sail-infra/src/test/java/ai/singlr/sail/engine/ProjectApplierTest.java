@@ -866,6 +866,44 @@ class ProjectApplierTest {
   }
 
   @Test
+  void applyWorkspaceFilesLeavesTheProjectsSkillsOutOfTheWorkspace() throws Exception {
+    var projectDir = tempDir.resolve("skilled");
+    var filesDir = projectDir.resolve("files");
+    Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
+    Files.writeString(filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
+    Files.writeString(filesDir.resolve("notes.md"), "Notes.");
+    var sailYaml = projectDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    var result = applier(shell).applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+
+    var pushes = shell.invocations().stream().filter(c -> c.contains("incus file push")).toList();
+    assertEquals(1, result.added());
+    assertEquals(1, pushes.size(), pushes.toString());
+    assertTrue(pushes.getFirst().endsWith("/home/dev/workspace/notes.md"), pushes.getFirst());
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.contains(".sail/skills")),
+        "nothing under .sail/skills/ reaches ~/workspace");
+  }
+
+  @Test
+  void applyWorkspaceFilesPushesNothingWhenTheOnlyFilesAreSkills() throws Exception {
+    var projectDir = tempDir.resolve("only-skills");
+    var filesDir = projectDir.resolve("files");
+    Files.createDirectories(filesDir.resolve(".sail/skills/acme-review"));
+    Files.writeString(filesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.");
+    var sailYaml = projectDir.resolve("sail.yaml");
+    Files.writeString(sailYaml, "name: test");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    var result = applier(shell).applyWorkspaceFiles(CONTAINER, sailYaml, "dev");
+
+    assertEquals(0, result.added());
+    assertTrue(shell.invocations().isEmpty(), shell.invocations().toString());
+  }
+
+  @Test
   void applyWorkspaceFilesReturnsEmptyWhenNoFilesDir() throws Exception {
     var sailYaml = tempDir.resolve("sail.yaml");
     Files.writeString(sailYaml, "name: test");

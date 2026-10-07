@@ -342,6 +342,7 @@ class ReviewLoopRecoveryTest {
                 project -> ReviewLoop.stages("codex"),
                 project -> "codex",
                 loop.operations.reviewLanes(),
+                loop.skills(),
                 loop.bus,
                 () -> {},
                 () -> {

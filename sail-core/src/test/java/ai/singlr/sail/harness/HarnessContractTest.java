@@ -140,6 +140,7 @@ class HarnessContractTest {
     assertFalse(harness.homeContextPath().startsWith("/"), harness.homeContextPath());
     assertFalse(harness.skillsDir().startsWith("/"), harness.skillsDir());
     assertTrue(harness.skillsDir().endsWith("/"), "a skill lives at <skillsDir><name>/SKILL.md");
+    assertEquals(harness.skillsDir() + "mine", harness.skillFolder("mine"));
     assertFalse(harness.languageRulePath("java").startsWith("/"));
     assertTrue(harness.languageRulePath("java").contains("java"));
   }

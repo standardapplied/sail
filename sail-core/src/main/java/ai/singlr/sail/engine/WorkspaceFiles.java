@@ -54,8 +54,10 @@ public final class WorkspaceFiles {
   }
 
   /**
-   * Lists all regular files under the given directory, recursively. Returns entries with paths
-   * relative to {@code filesDir} using forward slashes.
+   * Lists the regular files under the given directory that belong in the workspace, recursively.
+   * Returns entries with paths relative to {@code filesDir} using forward slashes. A project's
+   * skills ({@link StageSkill#PROJECT_ROOT}) are left out: they are installed where a harness looks
+   * for skills, at the launch that fires them, and never copied into the workspace.
    *
    * @return an immutable list of file entries sorted by relative path
    */
@@ -68,6 +70,7 @@ public final class WorkspaceFiles {
                 var relStr = rel.toString().replace('\\', '/');
                 return new FileEntry(p, relStr);
               })
+          .filter(entry -> !entry.relativePath().startsWith(StageSkill.PROJECT_ROOT))
           .sorted(Comparator.comparing(FileEntry::relativePath))
           .toList();
     }

@@ -173,6 +173,44 @@ verifies locally, commits and pushes; it does not wait for CI. A passing review 
 `awaiting_merge` — sail never talks to the forge, so you merge the PR there and close the
 loop with `sail spec update <id> --status done`.
 
+### Giving a stage its own skill
+
+The loop is sail's: a build, then review stages, then a fix when a stage fails. How each of
+those agents goes about its work is a skill, a folder with a `SKILL.md` (front matter, then
+instructions) and optional scripts and reference files. Sail ships `sail-build`, `sail-review`
+and `sail-fix`, and a project can replace any of them:
+
+```bash
+sail project skills --project web                     # the skill each stage runs under
+sail project skills show sail-review > SKILL.md       # start from sail's default
+$EDITOR SKILL.md
+sail project files add SKILL.md --project web --as .sail/skills/web-review/SKILL.md
+sail project files add check.sh --project web --as .sail/skills/web-review/scripts/check.sh
+```
+
+Then name it in the project's definition (`sail project edit web`):
+
+```yaml
+agent:
+  build_skill: web-build            # default: sail-build
+  review_pipeline:
+    fix_skill: web-fix              # default: sail-fix
+    stages:
+      - name: security
+        skill: web-review           # default: sail-review
+```
+
+Sail puts the skill's body in the stage's prompt itself, on every launch and on both harnesses,
+and installs its folder where the harness looks for skills (`~/.claude/skills/<name>/`,
+`~/.agents/skills/<name>/`) so its scripts and reference files are there. What the loop parses
+or enforces follows the skill in the prompt and is not yours to replace: the reviewer still
+answers with the verdict envelope, the build still pushes its branch and opens a pull request,
+the fix agent still argues a finding in the room rather than skipping it. A skill is synced like
+any project file, never copied into the workspace, and bounded: a body of at most 32,000
+code points, a folder of at most 32 files and 1 MiB. Names starting `sail-` are sail's own. A
+stage whose skill cannot be read does not start and says which file is missing; `sail project
+skills` shows that before a dispatch does.
+
 Findings the gate let ship don't die in the review store: `sail spec create --from-review
 <spec-id>` drafts a follow-up spec from the latest review's open findings — one actionable
 section per finding, priority derived from the highest severity, repos copied from the
