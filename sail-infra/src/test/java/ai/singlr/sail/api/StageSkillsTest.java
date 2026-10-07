@@ -208,6 +208,27 @@ class StageSkillsTest {
   }
 
   @Test
+  void aFileWhoseContentIsNotOnThisBoxIsRefusedNamingIt() {
+    share(".sail/skills/acme-review/SKILL.md", "Body.");
+    share(".sail/skills/acme-review/reference/rules.md", "Rules.");
+    var skill = skills.resolve("acme", "acme-review");
+    var rules =
+        skill.files().stream()
+            .filter(f -> f.path().equals("reference/rules.md"))
+            .findFirst()
+            .orElseThrow();
+    db.execute("DELETE FROM blobs WHERE hash = ?", rules.contentHash());
+
+    assertEquals(
+        "Skill 'acme-review' of project 'acme' cannot be read: the content of"
+            + " .sail/skills/acme-review/reference/rules.md is not on this box (blob "
+            + rules.contentHash()
+            + " not held).",
+        assertThrows(IllegalStateException.class, () -> skills.open("acme", skill, rules))
+            .getMessage());
+  }
+
+  @Test
   void aNameThatIsNoSkillNameIsRefusedBeforeAnyFileIsLookedUp() {
     var builtInOnly = StageSkills.builtInOnly();
 

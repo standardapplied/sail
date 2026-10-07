@@ -137,7 +137,8 @@ public final class StageSkills {
 
   /**
    * The bytes of {@code file} of {@code skill} as it was resolved. A project file that holds other
-   * content by now is refused: the skill changed under the launch that is installing it.
+   * content by now is refused: the skill changed under the launch that is installing it. So is one
+   * whose content this box does not hold, naming the file.
    */
   public InputStream open(String project, StageSkill skill, StageSkill.File file) {
     var builtIn = BuiltInSkills.text(skill.name());
@@ -158,7 +159,18 @@ public final class StageSkills {
                         "changed while it was being installed: "
                             + path
                             + " is no longer the file that was resolved. Launch again."));
-    return shared.open(row);
+    try {
+      return shared.open(row);
+    } catch (BlobStore.NotHeld notHeld) {
+      throw refused(
+          project,
+          skill.name(),
+          "cannot be read: the content of "
+              + path
+              + " is not on this box ("
+              + notHeld.getMessage()
+              + ").");
+    }
   }
 
   private ProjectFiles filesOf(String project, String name) {

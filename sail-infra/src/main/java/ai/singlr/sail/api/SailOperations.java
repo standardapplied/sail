@@ -721,7 +721,6 @@ public final class SailOperations implements HostOperations {
     return dispatchOps.startRoomRun(project, specId, localHandle);
   }
 
-  /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
   /**
    * Where every stage's skill is read from on this box: the project's files once the control plane
    * is wired, sail's own skills alone before. The loop's controller and the launcher share it.
@@ -730,6 +729,7 @@ public final class SailOperations implements HostOperations {
     return stageSkills;
   }
 
+  /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */
   public ReviewLanes reviewLanes() {
     return dispatchOps.reviewLanes();
   }

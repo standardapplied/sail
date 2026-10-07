@@ -1363,15 +1363,15 @@ command the installer sends against a real shell under a temporary directory;
   stamped last, and put in place in one step (`rm -rf "$1" && mv -T "$2" "$1"`) run under
   `flock` on the skills directory: a harness never opens a folder half-written, and two
   launches replacing one folder at once take turns, so each leaves a whole, stamped folder and
-  neither build lands inside the other's. `mv -T` fails on a folder something made in between,
-  where a plain `mv` would move the build into it. A build folder's name starts with a dot and
+  neither build lands inside the other's. `mv -T` fails on a folder something made and filled in
+  between, where a plain `mv` would move the build into it. A build folder's name starts with a dot and
   `.sail-stage-build-`, which no skill's or rule's name can, so nothing else is ever taken for
   a build, and a harness never finds one among its skills. A launch that fails removes what it
   built; a build folder a dead launch left is removed by the next install of that skill once
   it is a day old — never sooner, because sweeping every build folder would delete the files
   of a launch still building beside this one, and writes into a build's subfolders leave its
-  own modification time alone. A file that changed under the launch fails it in
-  `StageSkills`' words ("changed while it was being installed … Launch again."); a container
+  own modification time alone. A file that changed under the launch, or whose content this box
+  does not hold, fails it in `StageSkills`' words, naming the skill and the file; a container
   that could not take the files fails it saying to check the container. Every name and path
   reaches a shell only as an argument.
   *`StageSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,

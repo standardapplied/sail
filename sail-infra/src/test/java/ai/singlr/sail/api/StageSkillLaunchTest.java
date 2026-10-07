@@ -27,11 +27,13 @@ import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -557,6 +559,29 @@ class StageSkillLaunchTest {
 
     assertEquals("passed", loop.statusOf(loop.reviewOf("auth")));
     assertEquals(SpecStatus.AWAITING_MERGE, loop.specStatus("auth"));
+  }
+
+  @Test
+  void aSkillFileWhoseContentIsNotOnThisBoxFailsTheLaunchNamingIt() {
+    loop = ReviewLoop.of(tempDir, pipeline(null, stage("review", "codex", "acme-review")));
+    loop.skillFile("acme-review", "SKILL.md", ACME_REVIEW, 0644);
+    loop.skillFile("acme-review", "reference/rules.md", "Rules.\n", 0644);
+    loop.db.execute(
+        "DELETE FROM blobs WHERE hash = ?",
+        BlobStore.hash("Rules.\n".getBytes(StandardCharsets.UTF_8)));
+
+    loop.built("auth");
+
+    assertTrue(loop.live().isEmpty(), "no reviewer started");
+    assertEquals(
+        List.of(
+            "reviewer could not start: Skill 'acme-review' of project 'test-project' cannot be"
+                + " read: the content of .sail/skills/acme-review/reference/rules.md is not on this"
+                + " box (blob "
+                + BlobStore.hash("Rules.\n".getBytes(StandardCharsets.UTF_8))
+                + " not held)."),
+        loop.details("review_errored"));
+    assertTrue(loop.container.filesUnder(CODEX_SKILLS).isEmpty());
   }
 
   @Test
