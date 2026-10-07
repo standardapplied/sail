@@ -87,9 +87,9 @@ jobs:
           name: dependency-check-reports
           path: '**/target/dependency-check-report.html'
 
-      # The fleet tests upgrade from the release engineers run today to the binary built here,
-      # so the released binary is a test input: fetched from this repository's latest release
-      # and checked against the checksum published beside it.
+      # The fleet tests upgrade from the release a fleet runs to the binary built here, so the
+      # released binary is a test input: the release .github/released-tag pins, checked against
+      # the checksum published beside it.
       - name: Build and fetch the native binaries
         id: binaries
         uses: ./.github/actions/native-binaries

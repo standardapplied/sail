@@ -105,7 +105,7 @@ jobs:
           incus version
           incus list
 
-      # UpgradeE2EIT upgrades a box from the latest release to the binary built here. The native
+      # UpgradeE2EIT upgrades a box from the pinned release to the binary built here. The native
       # fleet suite needs the same binaries but already runs in the CI workflow, so it is left out
       # here to keep this job inside its timeout.
       - name: Build and fetch the native binaries
