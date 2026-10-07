@@ -1914,9 +1914,10 @@ when its own work does:
 - **A job leaves its evidence.** Each job that runs tests tees its maven log and ends with the
   `test-evidence` action. The job summary holds how many test classes finished, the `Tests run:`
   totals of each module and every `<<< FAILURE!` and `<<< ERROR!` line, also for a maven that was
-  killed before it printed a summary. A job that did not pass uploads its surefire and failsafe
-  reports as the artifact `<job>-test-reports` (`verify`, `native-fleet`, `fleet-integration`,
-  `incus-integration`): `gh run download <runId> -n <job>-test-reports`.
+  killed before it printed a summary; the same lines are the last of the job's log, since a job
+  summary has no API. A job that did not pass, cancelled at its time limit included, uploads its
+  surefire and failsafe reports as the artifact `<job>-test-reports` (`verify`, `native-fleet`,
+  `fleet-integration`, `incus-integration`): `gh run download <runId> -n <job>-test-reports`.
 - **`gh run view --log` truncates.** It shows about the last 5,000 lines of a job, which for
   these jobs can leave out the failure. The complete log is `gh api
   repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, with the job ids from `gh run view <runId>

@@ -1,9 +1,9 @@
 name: Test evidence
 description: >
-  Leaves what a test job's maven run proved where it can be read without the log: the totals and
-  every failed test in the job summary, and, unless the job passed, the surefire and failsafe
-  reports as an artifact. Run it last, with `if: always()`, after a maven step that teed its
-  output to $RUNNER_TEMP/maven.log.
+  Leaves what a test job's maven run proved where it can be read without scrolling the log: the
+  totals and every failed test in the job summary and as the log's last lines, and, unless the
+  job passed, the surefire and failsafe reports as an artifact. Run it last, with `if: always()`,
+  after a maven step that teed its output to $RUNNER_TEMP/maven.log.
 
 inputs:
   job-status:
@@ -14,7 +14,8 @@ runs:
   using: composite
   steps:
     # The classes that finished are counted because a maven killed at the job limit prints no
-    # totals.
+    # totals. The summary is printed too: a job summary has no API, and the end of the log is
+    # what `gh run view --log` keeps.
     - name: Summarize the maven log
       shell: bash
       run: |
@@ -29,7 +30,7 @@ runs:
           else
             echo "Maven never ran: the job stopped before its test step."
           fi
-        } >> "$GITHUB_STEP_SUMMARY"
+        } | tee -a "$GITHUB_STEP_SUMMARY"
 
     - name: Upload the surefire and failsafe reports
       if: inputs.job-status != 'success'
