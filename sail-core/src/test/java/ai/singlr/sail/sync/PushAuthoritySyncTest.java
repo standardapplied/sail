@@ -18,11 +18,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Finding;
@@ -290,6 +292,61 @@ class PushAuthoritySyncTest {
     assertEveryBoxConverged(ADA);
     assertTrue(runs.findById(forged).isEmpty(), "the node settles on main's word");
     assertTrue(main.specs.findById("fresh").isPresent());
+  }
+
+  /**
+   * A run works a spec or a spec-less room, never both: a chat pushed on the pusher's own spec that
+   * also names another member's room would be found by that room's wake as a chat already running
+   * there. It is denied while it runs and once it finishes, and never reaches the room's owner.
+   */
+  @Test
+  void aRunNamingItsOwnSpecAndAnotherMembersRoomIsDeniedAndNeverReachesTheRoomsOwner()
+      throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    room(main, "bob", "den");
+    sync(ada, ADA);
+    sync(bob, BOB);
+    var forged = DateTimeUtils.newId().toString();
+    Acting.unchecked(
+        "ada",
+        () ->
+            new RunStore(ada.db)
+                .reserveDispatch(
+                    forged,
+                    "acme",
+                    "mine",
+                    "den",
+                    "ada",
+                    DispatchGate.ROOM_ROLE,
+                    List.of(),
+                    "claude-code",
+                    null,
+                    "t",
+                    "/log",
+                    "unit",
+                    null));
+
+    var pushed = push(ada, ADA, "run");
+
+    assertEquals(
+        List.of(
+            new SyncSession.Denial(
+                "run",
+                forged,
+                "Run '"
+                    + forged
+                    + "' names both spec 'mine' and room 'den', and a run works one.")),
+        pushed.denials());
+    assertTrue(new RunStore(main.db).findById(forged).isEmpty());
+    sync(bob, BOB);
+    assertEquals(List.of(), new RunStore(bob.db).listForRoom("den"));
+
+    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(forged, "completed", 0));
+    assertEquals(List.of(forged), denied(push(ada, ADA, "run")));
+    assertTrue(
+        new RunStore(ada.db).findById(forged).isEmpty(), "finished, it settles as main says");
+    assertCleanRound(ada, ADA, "run");
+    assertEveryBoxConverged(ADA);
   }
 
   /**

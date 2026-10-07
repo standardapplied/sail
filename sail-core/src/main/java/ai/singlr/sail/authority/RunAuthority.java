@@ -26,11 +26,12 @@ import java.util.stream.Stream;
  * Who may write a run. Every principal a run carries names the run itself ({@link
  * RunStore#namesRun}), and its spec and room never change. On every lane, pushed or not, a run is
  * created by an admin or for the FDE its spec is assigned to, or its room's owner ({@link
- * #worked}), so no box starts or pushes a run on another FDE's work. On this box's lanes a later
- * revision is an admin's or its owners' ({@link #owners}), the rule stop and log access admit by; a
- * run's own principal may report its own session, even on a read-only lane. On {@link
- * Actor.Lane#SYNC} a run is its executing box's: its {@code node} is the pusher before and after,
- * it acts for the pusher, and a deleted run is never brought back.
+ * #worked}), and names a room only when it works no spec ({@link #created}), so no box starts or
+ * pushes a run on another FDE's work. On this box's lanes a later revision is an admin's or its
+ * owners' ({@link #owners}), the rule stop and log access admit by; a run's own principal may
+ * report its own session, even on a read-only lane. On {@link Actor.Lane#SYNC} a run is its
+ * executing box's: its {@code node} is the pusher before and after, it acts for the pusher, and a
+ * deleted run is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
@@ -139,11 +140,26 @@ public final class RunAuthority implements WriteAuthority {
 
   /**
    * Why {@code actor} may not create run {@code id} as {@code next}: a run is created by an admin,
-   * or by an actor acting for the owner of the work it names.
+   * or by an actor acting for the owner of the work it names. It names a spec, or the room of a run
+   * that works none, never both — for an admin too — so a spec the actor may run never carries a
+   * run into a room that is someone else's.
    */
   private Optional<Refusal> created(Actor actor, String id, Map<String, Object> next) {
     var specId = Snapshots.text(next, "spec_id");
-    return access(actor, id, specId, worked(specId, Snapshots.text(next, "room_id"), next));
+    var roomId = Snapshots.text(next, "room_id");
+    if (Strings.isNotBlank(specId) && Strings.isNotBlank(roomId)) {
+      return Refusal.of(
+          Refusal.Kind.FIXED,
+          "Run '"
+              + id
+              + "' names both spec '"
+              + specId
+              + "' and room '"
+              + roomId
+              + "', and a run works one.",
+          "Name a room only on a run that works no spec.");
+    }
+    return access(actor, id, specId, worked(specId, roomId, next));
   }
 
   /**

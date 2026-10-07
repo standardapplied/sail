@@ -191,6 +191,24 @@ class RunAuthorityTest {
             null,
             with(specless, "room_id", "unheard"),
             null),
+        row(
+            "a create naming its own spec and another FDE's room",
+            OWNER_CLI,
+            null,
+            with(born, "room_id", "den"),
+            Kind.FIXED),
+        row(
+            "a box cannot push a birth naming its own spec and another FDE's room",
+            OWNER_SYNC,
+            null,
+            with(born, "room_id", "den"),
+            Kind.FIXED),
+        row(
+            "an admin creates none naming a spec and a room, its own included",
+            ADMIN,
+            null,
+            with(born, "room_id", "lobby"),
+            Kind.FIXED),
         row("a create naming no work is its own FDE's", OWNER_CLI, null, specless, null),
         row("a create naming no work for another FDE", OTHER_API, null, specless, Kind.NOT_OWNER),
         row(
@@ -356,6 +374,18 @@ class RunAuthorityTest {
                 "Run '" + RUN + "' was deleted, and a deleted run cannot be brought back.",
                 null)),
         rule.decide(OWNER_SYNC, RUN, held, held));
+  }
+
+  @Test
+  void aBirthNamingASpecAndARoomSpeaksTheTextClientsSee() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.FIXED,
+                "Run '" + RUN + "' names both spec 'own' and room 'den', and a run works one.",
+                "Name a room only on a run that works no spec.")),
+        rule.decide(
+            OWNER_SYNC, RUN, null, with(with(RUNNING, "spec_id", "own"), "room_id", "den")));
   }
 
   @Test
