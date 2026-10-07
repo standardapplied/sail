@@ -1,7 +1,8 @@
 # Sail Architecture
 
-> Status: living document, reconciled against the code at v0.13.126 (2026-07-01).
-> It captures the positioning and the design decisions behind `sail`.
+> The design and its contracts as they stand on main. Each contract row names the tests that
+> prove it; a change to a contract changes the row and its tests in the same pull request.
+> Working conventions are in `AGENTS.md`, the build, gates and release steps in `CONTRIBUTING.md`.
 
 ## What Sail is
 
@@ -26,8 +27,8 @@ to do it. Every feature is judged by whether it helps coordinate agents.
   back, over pure SSH keys with conflict resolution. There is no GitHub in this loop and no
   central scheduler.
 - **Cross-agent review pipelines.** When one agent writes the code, another can review it.
-- **Remote operation.** Through the CLI (on the box or from a Mac thin client), through
-  a desktop GUI client, and through future mobile clients.
+- **Remote operation.** Through the CLI (on the box or from a Mac thin client) and through
+  Mast, the desktop client.
 
 ### Glossary
 
@@ -42,8 +43,8 @@ to do it. Every feature is judged by whether it helps coordinate agents.
   that the CLI, in-container agents, and GUI clients talk to. It runs as a systemd unit.
 - **Client.** A thin machine, typically a Mac, that drives a box remotely over SSH and runs
   no control plane of its own.
-- **GUI clients.** Desktop clients for FDEs who prefer a GUI connect to a box's API for
-  specs and review, and to its workspaces for execution.
+- **Mast.** The desktop client (a separate repository): a thin client of a box's API and
+  event stream for specs, rooms and reviews, and of its pty host for terminals and files.
 
 ## Topology: one main, many nodes
 
@@ -80,9 +81,9 @@ Three Maven modules, Java 25, one native binary.
 
 | Module | Package roots | Responsibility |
 |---|---|---|
-| `sail-core` | `auth`, `common`, `config`, `engine`, `gen`, `harness`, `ssh`, `store`, `sync`, `webauthn` | Domain model and config records, the Panama-SQLite store, the DB-sync engine and replicas, passkey and WebAuthn primitives, the SSH gateway tokenizer, pure file generators, and shared id, time, and string seams. No CLI, no HTTP, no native binary. Its only external dependency is SnakeYAML Engine. |
-| `sail-harness` | `engine` | The in-container agent harness that runs inside project containers: agent sessions, the guardrail checker, reporting, the in-container `spec` CLI helper, the webhook notifier, and the hook renderer that writes each harness's hook file. |
-| `sail-infra` | `api`, `commands`, `engine` (plus `Main`, `Sail`, `SailVersion`) | The picocli CLI, the loopback HTTP control-plane API and its reactors, and the host-side provisioning engines (Incus, Podman, ZFS, and systemd drivers). It builds the GraalVM native binary `sail`. |
+| `sail-core` | `auth`, `authority`, `common`, `config`, `engine`, `gen`, `harness`, `identity`, `pty`, `ssh`, `store`, `sync`, `webauthn` | Domain model and config records, the write rules (`authority`) and the actor (`identity`), the Panama-SQLite store, the sync engine and replicas, the pty session core, passkey and WebAuthn primitives, the SSH gateway tokenizer, the harness adapters, pure file generators, and the shared id, time and string seams. No CLI, no HTTP, no native binary. Its only external dependency is SnakeYAML Engine. |
+| `sail-harness` | `engine`, `pty` | What runs beside an agent in its container and on the host for it: agent sessions and their halt, the run watcher, the in-container `spec` and event helpers, the hook renderer and the pty host. |
+| `sail-infra` | `api`, `commands`, `engine` (plus `Main`, `Sail`, `SailVersion`) | The picocli CLI, the loopback HTTP control-plane API, the review loop and its reactors, and the host-side provisioning engines (Incus, Podman, ZFS and systemd drivers). It builds the GraalVM native binary `sail`. |
 
 Coverage discipline: `ai.singlr.sail.api.*` is held to 100% line and method coverage under
 JaCoCo, minus a documented exclude list of streaming and socket I/O classes that need fault
@@ -106,23 +107,28 @@ normally runs as the `sail-api` systemd service rather than by hand.
 
 ### The store layer (`ai.singlr.sail.store`)
 
-Sixteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
+Eighteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`:
 
 | Store | Owns | Synced across boxes? |
 |---|---|---|
-| `SpecStore` | `specs` and their dependencies, repos, and content | Yes, entity `spec` |
-| `ProjectStore` | `projects`, the `sail.yaml` descriptor blob plus attribution | Yes, entity `project` |
-| `FileStore` | `project_files`, shared workspace files keyed by project and path | Yes, entity `file` |
+| `SpecStore` | `specs` and their dependencies, repos and content | Yes, entity `spec` |
+| `RoomStore` | `rooms`, the conversations: a spec's identity room and free-standing rooms | Yes, entity `room` |
+| `MessageStore` | `room_messages`, immutable once posted | Yes, entity `message` |
+| `ProjectStore` | `projects`, the definition plus attribution | Yes, entity `project` |
+| `FileStore` | `project_files`, shared workspace files keyed by project and path; `materialized_files`, what this box wrote of each | Yes, entity `file`; the materialized record is local |
+| `RunStore` | `runs`, every agent run with its lane, unit, principal and reservation | Yes, entity `run`, pushed only by the box that executes it |
+| `ReviewStore` | `reviews`, `review_stages`, and `review_findings` as the projection of each review's content | Yes, entity `review`, its findings as content |
+| `BlobStore` | `blobs` and their chunks, the content every synced content field names by hash | Content crosses by hash, fetched on demand |
 | `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
 | `FdeSshKeyStore` | `fde_ssh_keys`, SSH fingerprint to FDE | Local |
 | `EventStore` | `events`, the audit stream persisted from the bus | Local |
-| `ReviewStore` | `reviews`, `review_stages`, and `review_findings` as the projection of each review's content | Yes, entity `review`, its findings as content |
-| `SessionStore` | `agent_sessions`, agent lifecycle | Local |
 | `AuthSessionStore` | `sessions`, login and gateway sessions | Local |
 | `TokenStore` | `api_tokens`, SHA-256 hashed with optional expiry | Local |
+| `BoxCredentialStore` | the box credential interactive container sessions present on the socket | Local |
 | `WebauthnCredentialStore` | `webauthn_credentials`, passkeys | Local |
 | `PendingChallengeStore` | `webauthn_challenges`, single-use ceremony challenges | Local |
 | `EnrollmentTicketStore` | `enrollment_tickets`, one-time passkey enrollment | Local |
+| `SlackThreadStore` | the Slack thread each spec's narration continues in | Local, main only |
 
 The sync and journal support classes live in the same package: `ChangeLog` (the append-only
 revision journal that is the durability spine of sync), `Revisions` (content-addressed
@@ -259,11 +265,7 @@ finding by finding (`ReviewFindingsContent.merge`, the review store's `FieldMerg
 one as a follow-up ships while the owner's review rules on another is no conflict; only one
 finding both changed differently parks one. A review main denies is
 adopted as main's; one main never took is withdrawn, its findings recoverable from the content
-its change-log entries name. The upgrade folds each box's finding rows from before into one
-revision per review (`ReviewFindingsMigration`), which a node's next round pushes; a review
-whose findings never became content — run on a box retired before the upgrade — keeps the
-counts its snapshot replicated in the legacy `finding_counts` column, which nothing writes for
-a review with content.
+its change-log entries name.
 
 One `StoreReplica` adapter implements both `LocalReplica` and `MainReplica` over any synced
 store, so the same box acts as the node when it syncs up and as the authority when another
@@ -447,8 +449,7 @@ What main recorded with no author is adopted with none, and a message is journal
 author it names on every box, whoever posted it there. Equal revisions are converged only under
 one author and one head: a box that adopted a revision under an earlier release's reading of it
 takes main's again, and a box that minted main's revision itself from the same content
-acknowledges it as its base. Every node walks main's heads once more after upgrading to this
-release, so what an earlier release left different heals in one round. When a local write lands
+acknowledges it as its base. When a local write lands
 while the box's own offer is in flight, the version main took becomes the row's merge base with
 the newer row kept on top, and the round offers it, so the box never conflicts with itself. A
 conflict parked on an entity whose base then moves this way is settled, and re-parked only if
@@ -461,12 +462,8 @@ as main holds it. The node's own revision stays in its change log, no conflict i
 carries on, so the next round has nothing to offer again. Each denial is announced as main
 answers it, naming where the node's version is kept, so `sail sync` and a node's running server
 print it even when the round then fails; `sail sync --json` and `GET /v1/sync` list them (type,
-id, reason). On the wire a denial is a `refused` result marked `denied: true`, so
-a 0.46 node reads a refusal and fails that type's round naming the reason: as before for a
-read-only push and a forged author, while a run main may not take from it, which a 0.46 main
-answered as stale, now fails its run type until the node upgrades. A terminal denial carries an
-optional `gone: true`; a node at the same floor that predates it reads a plain denial and removes
-the offer, as before, so nothing new is lost.
+id, reason). On the wire a denial is a `refused` result marked `denied: true`, and a terminal
+denial carries `gone: true`.
 
 A conflict is decided on what the box holds now. Every strategy writes a recorded snapshot, so
 a resolve is refused (`409` over the API) when the live row no longer matches the conflict's
@@ -1046,9 +1043,9 @@ class is named):
   row is ever substituted by a file, so a revision that reaches the catalog by sync or by a
   command is what the next loop event, dispatch and notification use, with nothing else run;
   a watcher already running keeps the notifications it started with. The file is still
-  written, in one move (`ProjectDefinitions.write`), as a copy nothing running reads; the
-  management commands of `ProjectDefinitions` still read it as their fallback until it is
-  removed. An escalation closes any stage still `running`.
+  written, in one move (`ProjectDefinitions.write`), as a copy nothing running reads; only
+  the management commands of `ProjectDefinitions` read it, as their fallback. An escalation
+  closes any stage still `running`.
   *`ReviewLoopEveryStateTest.everyStateTheStoresCanHoldIsOneStepFromServedWaitingOwnedPassedOrEscalated`
   (every review status and error × stage statuses × pipeline as written or changed × spec
   status × serving run × recorded wait, walked on `LoopDecision.next`),
@@ -1187,9 +1184,10 @@ class is named):
   `NotificationsTest.anEmptyListOfEventsIsNoListOfEventsSoItIsWrittenBackAsItWasRead`,
   `YamlUtilTest.aListsItemsSitUnderTheirKeyAndALongValueStaysOnItsLine`.*
 - **C12. One fix agent per review.** No fix agent starts for a review while a process started
-  for that review by a server older than 0.46.4 is alive: such a server exported the review
-  id as `SAIL_RUN_ID`, and `LegacyFixAgent` kills every process carrying exactly that entry
-  after the fix run's claim lands and before its unit starts.
+  for that review by a server from before per-run fix agents is alive: such a server exported
+  the review id as `SAIL_RUN_ID`, and `LegacyFixAgent` kills every process carrying exactly
+  that entry after the fix run's claim lands and before its unit starts. The class names the
+  floor past which it is deleted.
   *`ReviewLanesTest.aFixAgentIsLaunchedOnlyAfterAnyAgentAnOlderServerLeftForItsReviewIsKilled`,
   `LegacyFixAgentTest.aProcessAnOlderServerStartedForTheReviewIsKilled`,
   `LegacyFixAgentTest.aProcessOfAnotherRunIsLeftUntouched`,
@@ -1308,13 +1306,10 @@ command the installer sends against a real shell under a temporary directory;
   `aVerdictInTheEnvelopeUnderThatSkillPassesTheReview`,
   `StagePromptsGoldenTest.aProjectsSkillReplacesTheDefaultsBodyAndNothingElse`,
   `AgentTaskPromptGoldenTest.aProjectsSkillReplacesTheDefaultsBodyAndNothingElse`.*
-- **K4. The defaults say what sail said before.** A project that configures nothing gets
-  `sail-build`, `sail-review` and `sail-fix`, and every sentence of the three prompts as they
-  stood before skills (`ba3fad9b`) is in a default skill or in the envelope, word for word.
-  Two sentences were split between the two: the build's "When complete, run the full local
-  verification … commit … push … open a pull request" and the fix agent's "When every finding
-  is addressed: run the project's verification locally, commit …". The golden tests pin each
-  default prompt whole and hold it, paragraph by paragraph, against the text at `ba3fad9b`.
+- **K4. The defaults are the prompts.** A project that configures nothing gets `sail-build`,
+  `sail-review` and `sail-fix`, and the three prompts they produce are pinned whole by golden
+  tests: the skill holds the advice, the envelope holds what the loop parses or enforces, and
+  the golden tests hold every paragraph of each against the other so neither can drift.
   *`AgentTaskPromptGoldenTest.theDefaultBuildPromptIsThisTextWhole`,
   `AgentTaskPromptGoldenTest.theDefaultBuildPromptSaysEverythingTheBuildPromptSaid`,
   `StagePromptsGoldenTest.theDefaultReviewPromptIsThisTextWhole`,
@@ -1602,7 +1597,7 @@ again (C10). When a spec is stuck: a guardrail-killed or
 failed dispatch leaves the work committed, so `sail spec dispatch --restart` resumes on the
 branch; an escalated review parks in `review` with its findings (in the review store), each
 reviewer's and fix agent's own run log, and every fix commit intact, so the FDE reads it with
-`sail agent review <project>` plus `sail agent log <project> --review` (or `--fix`), then
+`sail agent review <project>` plus `sail agent logs <project> --review` (or `--fix`), then
 resolves with `sail spec update <id> --status done` (accept the work as-is) or `--status
 pending` (send it back to be re-dispatched). Nothing is deleted along the way.
 
@@ -1882,7 +1877,17 @@ these roles distinct is what lets the synced catalog stay identity-free.
   each with a `.sha256` and a keyless-cosign `.cosign.bundle` (Sigstore via GitHub OIDC).
   Every GitHub Action is pinned to a full commit SHA.
 
-See `SECURITY_AUDIT.md` for the full checklist and the accepted risks.
+**Accepted risks**, each a decision rather than a gap:
+
+- Agent install commands are enum-controlled shell snippets. npm-based installs and vendor
+  install scripts are shell-oriented; the strings are sail's, never user input. User-extensible
+  installers would need typed installers first.
+- Dispatch gives a coding agent broad power inside its container by design. Dispatch is an
+  explicit act of an FDE, the container is the isolation boundary, and the agent's output is
+  untrusted.
+- A few flags take secrets as process arguments (`--git-token`, `--token`) as explicit
+  escape hatches; the environment, a token file or a prompt with echo off are the documented
+  ways.
 
 ## Continuous integration
 
@@ -1927,28 +1932,29 @@ when its own work does:
   repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, with the job ids from `gh run view <runId>
   --json jobs`.
 
-## Known gaps and evolution
+## Open edges
 
-These are the deliberate edges between today's tool and the multi-FDE platform that must
-support GUI and direct-API clients:
+Deliberate limits of the current design, each with its consequence:
 
-1. **Project lifecycle is host-privileged, not API-backed.** `project up` and `project
-   create` drive `incus` directly, so they cannot ride the FDE gateway, and provisioning
-   needs admin SSH. The fix is for the control plane, which is already root on the box, to
-   own provisioning and for the CLI to become a pure client. This is the largest gap before a
-   member-role FDE can create containers without host privileges.
+1. **Project lifecycle is host-privileged, not API-backed.** `project apply`, `destroy` and
+   `rename` drive `incus` directly, so they cannot ride the FDE gateway and need admin SSH to
+   the box. A member-role FDE cannot create containers without host privileges; the control
+   plane, already root on the box, would have to own provisioning for the CLI to become a pure
+   client.
 2. **Two remote-config models.** `ClientConfig` (SSH-forward through `host` and `user`) and
    `ServerConnectionConfig` (HTTP API through `server` and `token`) both read
-   `~/.sail/config.yaml` with different keys. SSH-forwarding papers over this today, but a
-   direct-API client (a GUI client, or a future direct-mode CLI) needs them reconciled.
-   `sail login` and `sail enroll` now run their passkey ceremonies from a forwarding client over a
-   supervised SSH tunnel at the canonical origin `http://localhost:7070`, but the stored
-   session token still has no forwarded-command consumer.
+   `~/.sail/config.yaml` with different keys. SSH forwarding covers every command today; a
+   direct-API CLI would need them reconciled. `sail login` and `sail enroll` run their passkey
+   ceremonies from a forwarding client over a supervised SSH tunnel at the canonical origin
+   `http://localhost:7070`, and the stored session token has no forwarded-command consumer.
 3. **FDE removal propagates as `disabled`, not a tombstone.** Revoking an FDE on main locks
    them out everywhere, since every door refuses a disabled FDE and a node disables an FDE
-   main no longer lists, but the row lingers on nodes as disabled rather than disappearing. True delete-propagation is a roster protocol
-   change.
-4. **One platform per OS.** Mac arm64 and Linux amd64 only.
+   main no longer lists, but the row lingers on nodes as disabled. Delete propagation is a
+   roster protocol change.
+4. **One platform per OS.** Linux amd64 hosts; macOS arm64 as a thin client only.
+5. **Sail never talks to the forge.** A passed review parks in `awaiting_merge`; a person
+   merges the pull request and marks the spec done. A merge or release stage behind a forge
+   adapter is the next step of the loop (`sail-check-stage` on the board).
 
 ## The operations seam
 
@@ -1985,8 +1991,8 @@ when a node has never reached main. Health is local and is not another replicate
 policy: 15/30/60/120 seconds with ±20% jitter, then an open circuit at five failures. Reads
 never probe an open circuit; a write, manual sync, or five-minute timer does. The scheduler
 reads stored outcomes, including manual rounds, so a successful manual sync resets its circuit.
-Failure and recovery emit one record event per transition. Slack remains main-only; this brick
-does not introduce a separate transport to report a disconnected node's events to main.
+Failure and recovery emit one record event per transition. Slack is main-only: a disconnected
+node's events reach main only through sync.
 
 Conflict resolution uses the registry for all seven entity types. Web and local credential
 lanes require the node's own FDE (`SyncConfig.handle`) with write access, or an admin. Agents
