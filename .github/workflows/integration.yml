@@ -44,8 +44,15 @@ jobs:
           echo "user manager: $state"
           [ "$state" = running ] || [ "$state" = degraded ]
 
+      # The unit suite and its coverage gates are the CI workflow's verify job; only failsafe
+      # runs here.
       - name: Run multi-node integration tests without incus
-        run: mvn -B -Pintegration -Dsail.it.requireIncus=false verify
+        run: >
+          mvn -B -Pintegration verify
+          -Dsail.it.requireIncus=false
+          -Dtest=NoUnitTests
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
 
   incus-integration:
     name: Incus-backed integration tests
@@ -117,6 +124,9 @@ jobs:
           mvn -B -Pintegration verify
           -Dit.test='*IT,!NativeFleetIT'
           -Dfailsafe.failIfNoSpecifiedTests=false
+          -Dtest=NoUnitTests
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
           -Dsail.it.requireNative=true
           -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
           -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}
