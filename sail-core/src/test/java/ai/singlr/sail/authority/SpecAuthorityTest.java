@@ -394,6 +394,27 @@ class SpecAuthorityTest {
   }
 
   @Test
+  void aSpecBornInAnotherRoomNeverTakesARoomsIdWhoeverAsks() {
+    var elsewhere = projection("title", "Den", "assignee", null, "room_id", "lounge");
+    board.room("lounge", OTHER);
+
+    for (var actor : new Actor[] {OTHER_API, OTHER_SYNC, ADMIN, ADMIN_SYNC}) {
+      assertEquals(
+          Optional.of(
+              new Refusal(
+                  Kind.NOT_OWNER,
+                  "Room 'den' already exists, and a spec's id is reserved for its own room.",
+                  "Pick another spec id.")),
+          rule.decide(actor, "den", null, elsewhere),
+          "room den would answer as lounge to " + actor);
+    }
+    assertEquals(
+        Optional.empty(),
+        rule.decide(OTHER_API, "study", null, elsewhere),
+        "an id no room holds shadows nothing");
+  }
+
+  @Test
   void refusalsSpeakTheTextsClientsSee() {
     assertEquals(
         new Refusal(

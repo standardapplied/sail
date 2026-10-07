@@ -1279,6 +1279,36 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void aSpecBornInAnotherRoomNeverShadowsTheRoomOnItsId() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    for (var id : List.of("auth", "lounge")) {
+      Acting.as(
+          "uday",
+          () ->
+              rooms.create(
+                  new RoomStore.RoomRow(
+                      id, "manatee", id + " talk", "uday", "on", null, null, null, null, null)));
+    }
+
+    for (var actor : List.of(UDAY, ADMIN)) {
+      var shadowing =
+          assertThrows(
+              WriteRefused.class,
+              () ->
+                  Acting.by(actor, () -> withRooms.create(createReq(Map.of("room_id", "lounge")))));
+      assertEquals(
+          new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "Room 'auth' already exists, and a spec's id is reserved for its own room.",
+              "Pick another spec id."),
+          shadowing.refusal(),
+          "room auth would answer as lounge");
+    }
+    assertTrue(specStore.findById("auth").isEmpty(), "a refused birth creates no spec");
+  }
+
+  @Test
   void aRoomLandingOnTheSpecsIdMidBirthFailsTheBirthInsteadOfBeingBorrowed() {
     var rooms = new RoomStore(db);
     Supplier<RoomStore> raced =

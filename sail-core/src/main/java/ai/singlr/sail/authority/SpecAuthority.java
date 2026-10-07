@@ -21,8 +21,9 @@ import java.util.Optional;
  * Who may write a spec. Any writer creates one; a spec born in another room ({@code room_id} not
  * its own id) needs the right to post there ({@link PostingRule}), and a named assignee must pass
  * the claim rule into that room. A spec's id is reserved for its own room, so a create whose id
- * names a room someone else owns is refused: it would take that room over. Changing the assignee of
- * a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
+ * names a room someone else owns is refused: it would take that room over; so is one born in
+ * another room, whoever asks: the room on its id would stop answering to it. Changing the assignee
+ * of a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
  * claim an unassigned spec for the FDE they act as — and, for a spec born in a room, only where
  * they may already post, since its owner gains a voice there. Any other revision, a tombstone or a
  * restore is its owner's ({@link Ownership#ownerOf}, read from {@code held}) or an admin's, and a
@@ -113,20 +114,26 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * Why spec {@code id} may not be born over the room already holding its id, live or deleted: the
-   * room, and the conversation in it, would become the spec's. It may when that moves no ownership
-   * — the room is already its owner's, as when a node's own identity room reaches main before its
-   * spec does — or for an admin. The room's owner is read from the room alone: until this birth it
-   * was no spec's, and the spec being born never names it.
+   * room, and the conversation in it, would become the spec's. It may when it adopts that room and
+   * that moves no ownership — the room is already its owner's, as when a node's own identity room
+   * reaches main before its spec does — or an admin asks. A spec born in another room never may,
+   * whoever asks: a conversation is addressed spec-first, so the room on its id would answer as the
+   * room the spec lives in. The room's owner is read from the room alone: until this birth it was
+   * no spec's, and the spec being born never names it.
    */
   private Optional<Refusal> takenRoom(Actor actor, String id, Map<String, Object> next) {
     var room = rooms.held(id);
-    if (room == null
-        || actor.isAdmin()
-        || Ownership.ownerOf(Snapshots.text(room, ASSIGNEE), Snapshots.text(room, "created_by"))
-            .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)))) {
+    if (room == null || (bornIn(id, next) == null && movesNoOwnership(actor, room, next))) {
       return Optional.empty();
     }
     return Refusal.of(Refusal.Kind.NOT_OWNER, reservedRoom(id), "Pick another spec id.");
+  }
+
+  private static boolean movesNoOwnership(
+      Actor actor, Map<String, Object> room, Map<String, Object> next) {
+    return actor.isAdmin()
+        || Ownership.ownerOf(Snapshots.text(room, ASSIGNEE), Snapshots.text(room, "created_by"))
+            .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)));
   }
 
   /** The refusal text of a spec born over room {@code id}, which holds the spec's reserved id. */

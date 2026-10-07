@@ -1821,7 +1821,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
     main's version, which the type's rule decides with `held` = main's version.
   - **A spec's id is reserved for its own room by the spec rule**, at the door as on main: a
     spec is born over a room holding its id only when that moves no ownership — the room is
-    already its owner's — or by an admin, and it then adopts that room and mints none.
+    already its owner's — or by an admin, and it then adopts that room and mints none. One born
+    in another room never is, whoever asks: a conversation is addressed spec-first, so the room
+    on its id would answer as the room the spec lives in.
   - **Main's commit** (`RevisionJournal`, `ProjectStore`, `MessageStore`, each handed the type's
     rule by `StoreReplica.commit`) asks it for every pushed revision with the pusher as the
     actor. On `SYNC` it also decides whom a revision names: its `_actor` is the pusher, `sail` or
