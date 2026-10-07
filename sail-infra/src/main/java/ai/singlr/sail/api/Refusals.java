@@ -6,13 +6,16 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.identity.Actor;
 import java.util.Optional;
 
 /**
  * The one place a rule's {@link Refusal} becomes the error envelope API clients get: its kind picks
- * the {@link ErrorCode}, and its message and fix are carried verbatim.
+ * the {@link ErrorCode}, and its message and fix are carried verbatim. A write the journal refused
+ * ({@link WriteRefused}) is translated here too, so every door answers a kind with one code.
  */
-final class Refusals {
+public final class Refusals {
 
   private Refusals() {}
 
@@ -32,6 +35,24 @@ final class Refusals {
   /** The exception a door throws for {@code refusal}. */
   static ApiException exception(Refusal refusal) {
     return new ApiException(code(refusal.kind()), refusal.message(), refusal.fix());
+  }
+
+  /**
+   * {@code failure} as a door reports it: a write the journal refused is the exception its kind
+   * maps to, and anything else is itself.
+   */
+  public static Exception translated(Exception failure) {
+    return failure instanceof WriteRefused refused ? exception(refused.refusal()) : failure;
+  }
+
+  /**
+   * Refuses a read-only credential a side effect on this box that no synced row's rule decides — to
+   * {@code act} ("restore snapshots") — with the refusal every rule gives a read-only role.
+   */
+  static void requireWriter(String act) {
+    if (!Actor.current().canWrite()) {
+      throw exception(Refusal.readOnly(act).orElseThrow());
+    }
   }
 
   /** Throws {@code refusal}'s exception, if the rule refused; a no-op when it allowed. */

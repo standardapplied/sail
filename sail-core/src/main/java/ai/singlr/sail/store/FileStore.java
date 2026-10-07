@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.WriteAuthority;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
@@ -47,7 +48,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     this.db = db;
     this.blobs = new BlobStore(db);
     this.changeLog = new ChangeLog(db);
-    this.journal = new RevisionJournal(db, changeLog, new FileSchema());
+    this.journal = new RevisionJournal(db, changeLog, new FileSchema(), this::authority);
     this.materialized = new MaterializedFiles(db);
   }
 
@@ -109,7 +110,13 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     return blobs.open(row.contentHash());
   }
 
+  /**
+   * Stores {@code input} as the file's content. The journal is asked first whether it will take the
+   * bound actor's write ({@link WriteRefused} when it will not), so bytes a rule refuses are never
+   * ingested.
+   */
   public void put(String project, String path, InputStream input, int mode) {
+    journal.admit(idOf(project, path), Map.of("mode", mode));
     try (var scope = blobs.retain()) {
       ingest(project, path, input, mode);
     }
@@ -365,7 +372,7 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     materialized.forget(id);
   }
 
-  /** Who may write files on this box: any writer, as its doors and main's commit decide. */
+  /** Who may write files on this box: any writer, as the journal and main's commit decide. */
   @Override
   public WriterAuthority authority() {
     return new WriterAuthority(db, "files");

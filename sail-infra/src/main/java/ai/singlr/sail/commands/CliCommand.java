@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import java.io.PrintStream;
@@ -44,8 +45,12 @@ final class CliCommand {
     }
   }
 
-  /** A failure as the terminal shows it: its message, then a refusal's fix when it names one. */
-  static String describe(Exception e) {
+  /**
+   * A failure as the terminal shows it: its message, then a refusal's fix when it names one, a
+   * write the journal refused included.
+   */
+  static String describe(Exception failure) {
+    var e = Refusals.translated(failure);
     var message = Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName());
     return e instanceof ApiException refusal && Strings.isNotBlank(refusal.failure().action())
         ? message + " " + refusal.failure().action()

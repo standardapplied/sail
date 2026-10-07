@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.SpecAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -48,7 +49,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     this.db = db;
     this.blobs = new BlobStore(db);
     this.changeLog = new ChangeLog(db);
-    this.journal = new RevisionJournal(db, changeLog, new SpecSchema());
+    this.journal = new RevisionJournal(db, changeLog, new SpecSchema(), this::authority);
   }
 
   public record SpecRow(
@@ -196,6 +197,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * Actor#actingFde}) and last updated by the actor, whatever the row names.
    */
   public void create(SpecRow spec) {
+    create(spec, "", "");
+  }
+
+  /**
+   * As {@link #create(SpecRow)}, born with {@code body} and {@code plan}: one revision, so the
+   * birth is decided once, as a birth, and its content never as an edit by someone the newborn spec
+   * is not assigned to.
+   */
+  public void create(SpecRow spec, String body, String plan) {
     var now = DateTimeUtils.now().toString();
     db.transaction(
         () -> {
@@ -225,10 +235,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
           insertDependencies(spec.id(), spec.dependsOn());
           insertRepos(spec.id(), spec.repos());
           db.execute(
-              "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, '', '', ?)",
+              "INSERT INTO spec_content (spec_id, body, plan, updated_at) VALUES (?, ?, ?, ?)",
               spec.id(),
+              body,
+              plan,
               now);
-          setHashes(spec.id(), "", "");
+          setHashes(spec.id(), body, plan);
           recordRevision(spec.id(), ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -911,7 +923,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return Set.of("body_hash", "plan_hash");
   }
 
-  /** Who may write a spec on this box: the rule every door and main's commit decide by. */
+  /** Who may write a spec on this box: the rule the journal and main's commit decide by. */
   @Override
   public SpecAuthority authority() {
     return new SpecAuthority(db);
@@ -923,6 +935,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    */
   public Map<String, Object> held(String id) {
     return journal.held(id);
+  }
+
+  /**
+   * Why the bound {@link Actor} may not write {@code next} ({@code null} deletes) as this box's own
+   * revision of spec {@code id}; empty if it may. The journal's own decision ({@link
+   * RevisionJournal#decide}), for a door to ask before a side effect the write would follow.
+   */
+  public Optional<Refusal> decide(String id, Map<String, Object> next) {
+    return journal.decide(id, next);
   }
 
   @Override

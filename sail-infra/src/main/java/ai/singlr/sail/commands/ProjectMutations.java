@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
@@ -29,13 +30,18 @@ final class ProjectMutations {
   }
 
   /**
-   * This box's operator, resolved before a command changes anything, for the catalog write that
-   * ends it: a node that cannot name its operator refuses up front, never after cloning, starting
-   * or editing. Null for a dry run or an explicit {@code -f} file, neither of which touches the
-   * catalog.
+   * This box's operator, resolved before a command changes anything, for the catalog write of
+   * project {@code name} that ends it: a node that cannot name its operator, or whose operator the
+   * journal will refuse that write, refuses up front, never after cloning, starting or editing.
+   * Null for a dry run or an explicit {@code -f} file, neither of which touches the catalog.
    */
-  static Actor catalogOperator(Path explicitFile, boolean dryRun) {
-    return dryRun || explicitFile != null ? null : CliOperator.current();
+  static Actor catalogOperator(String name, Path explicitFile, boolean dryRun) {
+    if (dryRun || explicitFile != null) {
+      return null;
+    }
+    var operator = CliOperator.current();
+    ProjectCatalog.requireRecordable(name, operator);
+    return operator;
   }
 
   /**

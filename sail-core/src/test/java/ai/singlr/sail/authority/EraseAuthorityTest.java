@@ -136,9 +136,8 @@ class EraseAuthorityTest {
                     null,
                     "/l",
                     "u"));
-    var plan =
-        Acting.system(
-            () -> new Erasure(board.db).closure(List.of(new Erasure.Target("spec", "solo"))));
+    var spec = List.of(new Erasure.Target("spec", "solo"));
+    var plan = Acting.system(() -> new Erasure(board.db).closure(spec));
 
     assertEquals(
         Optional.of(
@@ -146,10 +145,14 @@ class EraseAuthorityTest {
                 Kind.NOT_PRUNABLE,
                 "Run '" + going + "' has not finished; a prune never erases work going on.",
                 "Stop it first: sail agent stop, then prune.")),
-        rule.idle(plan));
+        rule.idle(spec, plan));
+    assertEquals(
+        Optional.empty(),
+        rule.idle(List.of(new Erasure.Target("project", "acme")), plan),
+        "a project is purged whole, once its container is gone, and never waits for a run");
 
     Acting.system(() -> runs.complete(going, "completed", 0));
-    assertEquals(Optional.empty(), rule.idle(plan));
+    assertEquals(Optional.empty(), rule.idle(spec, plan));
   }
 
   @Test

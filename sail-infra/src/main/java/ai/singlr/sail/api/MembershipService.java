@@ -12,7 +12,6 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
@@ -176,6 +175,7 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
+    authorizeRoster(roomId);
     admission.requireTrustedRoster(localHandle);
     var harness = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -257,6 +257,7 @@ public final class MembershipService {
                     new ApiException(
                         ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
+    authorizeRoster(roomId);
     var standing = Roster.fromJson(room.roster()).standing();
     if (standing == null) {
       return null;
@@ -271,14 +272,14 @@ public final class MembershipService {
   }
 
   /**
-   * Asks the room rule whether the actor may change the roster of {@code roomId}, the room the spec
-   * converses in — its own, or the room it was born in, whoever's that is.
+   * Asks the journal, before any snapshot or launch, whether it will take the actor's change to the
+   * roster of {@code roomId} — a spec's own room, the room it was born in, whoever's that is, or a
+   * room with no spec — so a membership the room rule refuses starts nothing.
    */
   private void authorizeRoster(String roomId) {
     var store = requireRooms();
     var held = store.comparableSnapshot(roomId);
-    Refusals.enforce(
-        store.authority().decide(Actor.current(), roomId, held, held == null ? Map.of() : held));
+    Refusals.enforce(store.decide(roomId, held == null ? Map.of() : held));
   }
 
   private void persistMembership(String specId, Engagement member) {

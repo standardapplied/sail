@@ -10,13 +10,21 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -92,6 +100,39 @@ class ProjectRenamerTest {
         .filter(i -> match.test(commands.get(i)))
         .findFirst()
         .orElse(-1);
+  }
+
+  @Test
+  void aMembersRenameIsRefusedBeforeItsContainerIsTouched() throws Exception {
+    var adasNode = new SyncConfig("node", "sail@main", "ada", "ada");
+    new FdeStore(db).add("ada", null, null, "member");
+    var shell = runningShell();
+    try (var operations =
+        OperationsFactory.create(db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            .useControlPlane(
+                db,
+                tempDir,
+                new SyncOperations(
+                    db,
+                    "ada",
+                    tempDir,
+                    () -> adasNode,
+                    target -> {
+                      throw new IOException("main unavailable");
+                    }))) {
+      var refused =
+          assertThrows(
+              ApiException.class,
+              () -> new ProjectRenamer(operations, shell, projectsDir).rename("old", "renamed"));
+
+      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+      assertEquals("Ask an admin to rename it.", refused.failure().action());
+    }
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.startsWith("incus stop")),
+        "a running container is not stopped for a rename that will be refused");
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.startsWith("incus rename")));
+    assertTrue(new ProjectStore(db).findByName("old").isPresent());
   }
 
   private ProjectRenamer renamer(ScriptedShellExecutor shell) {

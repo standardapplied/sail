@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
@@ -52,7 +53,9 @@ final class LocalApiRouter implements LocalApiHandler {
     try {
       return route(request);
     } catch (ApiException denied) {
-      return problem(denied.status(), denied.getMessage());
+      return ApiResponse.error(denied.failure());
+    } catch (WriteRefused refused) {
+      return ApiResponse.error(Refusals.exception(refused.refusal()).failure());
     } catch (IllegalArgumentException bad) {
       return problem(400, bad.getMessage());
     } catch (RuntimeException unexpected) {

@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -293,17 +295,17 @@ class ReviewOperationsTest {
   }
 
   @Test
-  void createFollowupActsOnTheSourceReviewUnderTheReviewRuleBeforeWritingAnything() {
+  void aFollowupWhoseLinksTheReviewRuleRefusesLeavesNoDraftBehind() {
     seedPassedReviewWithOpenFindings();
     var mady = new Actor("mady", Role.MEMBER, Actor.Lane.API);
 
     var refused =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () ->
                 Acting.by(mady, () -> ops.createFollowup("auth", new FollowupCreateRequest(null))));
 
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertEquals(Refusal.Kind.NOT_OWNER, refused.refusal().kind());
     assertTrue(refused.getMessage().contains("which has no owner"), refused.getMessage());
     assertTrue(specStore.findById("auth-followup").isEmpty());
     assertEquals(List.of(), reviewStore.sourceFindingIds("auth-followup"));

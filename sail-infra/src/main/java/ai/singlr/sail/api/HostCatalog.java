@@ -35,6 +35,12 @@ public interface HostCatalog {
   /** What purging project {@code name} would erase, rehearsed and rolled back, as one line. */
   String purgeSummary(String name);
 
+  /**
+   * Refuses, before a rename stops or renames anything, a rename of project {@code from} the
+   * journal will not take from this box's operator.
+   */
+  void requireRenamable(String from);
+
   Renamed rename(String from, String to);
 
   void undoRename(Renamed renamed);

@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -38,14 +39,17 @@ final class Board implements AutoCloseable {
 
   /** A standalone room {@code id} assigned to and created by {@code owner}. */
   void room(String id, String owner) {
-    db.execute(
-        """
-        INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at)
-        VALUES (?, 'acme', ?, ?, ?, 'now', 'now')""",
-        id,
-        id,
-        owner,
-        owner);
+    room(id, owner, owner);
+  }
+
+  /** A standalone room {@code id} assigned to {@code assignee} and created by {@code creator}. */
+  void room(String id, String assignee, String creator) {
+    Acting.system(
+        () ->
+            new RoomStore(db)
+                .createJournaled(
+                    new RoomStore.RoomRow(
+                        id, "acme", id, assignee, null, null, creator, "now", "now", null)));
   }
 
   /** A spec {@code id} living in {@code roomId}, assigned to {@code assignee}. */

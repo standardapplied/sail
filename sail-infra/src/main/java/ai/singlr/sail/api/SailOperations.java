@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.authority.RunAuthority;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.EngagementMode;
@@ -291,16 +292,20 @@ public final class SailOperations implements HostOperations {
     return new ConflictOperations(controlPlane).mergeTemplate(type, id);
   }
 
+  /**
+   * Settles a parked conflict. Keeping this box's side or merging is an edit, decided by the type's
+   * rule as the journal records it. Adopting main's side decides no row, yet gives up what this box
+   * parked, so a read-only credential is refused that as well.
+   */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
-    var actor = Actor.current();
-    var owner = syncOperations.configuration().handle();
-    if (!actor.isAdmin()
-        && !(actor.canWrite() && Strings.isNotBlank(owner) && actor.actsFor(owner))) {
-      throw new ApiException(
-          ErrorCode.FORBIDDEN, "Only this node's owner or an admin can resolve its conflicts.");
+    Refusals.requireWriter("resolve conflicts");
+    SyncConflicts.Conflict resolved;
+    try {
+      resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
+    } catch (WriteRefused refused) {
+      throw Refusals.exception(refused.refusal());
     }
-    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
   }
@@ -857,11 +862,6 @@ public final class SailOperations implements HostOperations {
     return safeWrite(
         () -> {
           var room = requireRoomOrSpec(roomId);
-          var post = new LinkedHashMap<String, Object>();
-          post.put("room_id", room.id());
-          post.put("author", authorHandle);
-          Refusals.enforce(
-              requireMessageStore().authority().decide(Actor.current(), null, null, post));
           return appendMessage(room.project(), room.id(), request, authorHandle);
         });
   }
@@ -947,14 +947,6 @@ public final class SailOperations implements HostOperations {
               }
               NameValidator.requireValidSpecId(request.id());
               requireValidWake(request.wake());
-              Refusals.enforce(
-                  store
-                      .authority()
-                      .decide(
-                          actor,
-                          request.id(),
-                          null,
-                          Map.of("project", request.project(), "title", request.title())));
               return store.atomically(
                   () -> {
                     requireUnclaimedRoomId(store, request.id());
@@ -1046,14 +1038,6 @@ public final class SailOperations implements HostOperations {
                                     new ApiException(
                                         ErrorCode.ROOM_NOT_FOUND,
                                         "Room '" + roomId + "' was not found."));
-                    Refusals.enforce(
-                        store
-                            .authority()
-                            .decide(
-                                Actor.current(),
-                                row.id(),
-                                store.comparableSnapshot(row.id()),
-                                null));
                     var attached = specIdsOf(roomId);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
@@ -1699,18 +1683,20 @@ public final class SailOperations implements HostOperations {
 
   /**
    * Maps an operation's outcome onto the wire contract the routers already speak: an {@link
-   * ApiException} is a structured refusal, an {@link IllegalArgumentException} is a caller error —
-   * a validation precondition like "repo not configured in sail.yaml" — surfaced as {@code
-   * invalid_request} (400) with its message, the same convention {@code ApiRouter} and {@code
-   * LocalApiRouter} apply to exceptions escaping their own routing. Only a truly unexpected
-   * exception becomes a generic {@code internal} 500, and its stack trace goes to the journal
-   * first.
+   * ApiException} is a structured refusal, a {@link WriteRefused} is the journal's, answered with
+   * its kind's code, an {@link IllegalArgumentException} is a caller error — a validation
+   * precondition like "repo not configured in sail.yaml" — surfaced as {@code invalid_request}
+   * (400) with its message, the same convention {@code ApiRouter} and {@code LocalApiRouter} apply
+   * to exceptions escaping their own routing. Only a truly unexpected exception becomes a generic
+   * {@code internal} 500, and its stack trace goes to the journal first.
    */
   private static <T> Result<T> safe(Supplier<T> supplier) {
     try {
       return Result.success(supplier.get());
     } catch (ApiException e) {
       return e.failure().asFailure();
+    } catch (WriteRefused e) {
+      return Refusals.failure(e.refusal());
     } catch (IllegalArgumentException e) {
       return Result.failure(ErrorCode.INVALID_REQUEST, e.getMessage(), e);
     } catch (Exception e) {
@@ -1884,11 +1870,6 @@ public final class SailOperations implements HostOperations {
           var session = sessionId.strip();
           var sessionSource = Strings.isBlank(source) ? null : source.strip();
           var transcript = Strings.isBlank(transcriptPath) ? null : transcriptPath.strip();
-          var held = runStore.comparableSnapshot(runId);
-          var reported = new LinkedHashMap<>(held);
-          reported.put("session_id", session);
-          reported.put("session_source", sessionSource);
-          Refusals.enforce(runStore.authority().decide(Actor.current(), runId, held, reported));
           runStore.recordSession(runId, session, sessionSource, transcript);
           return new RunSessionResponse(runId, session, sessionSource);
         });

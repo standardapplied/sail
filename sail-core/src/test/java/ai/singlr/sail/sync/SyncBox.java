@@ -372,6 +372,33 @@ public final class SyncBox implements AutoCloseable {
         List.of());
   }
 
+  /** Moves spec {@code id} to {@code assignee} here, as this box's machinery would for an admin. */
+  public void reassign(String id, String assignee) {
+    Acting.system(
+        () -> {
+          var spec = specs.findById(id).orElseThrow();
+          specs.update(
+              new SpecStore.SpecRow(
+                  spec.id(),
+                  spec.project(),
+                  spec.title(),
+                  spec.status(),
+                  assignee,
+                  spec.agent(),
+                  spec.model(),
+                  spec.reasoningEffort(),
+                  spec.branch(),
+                  spec.priority(),
+                  spec.createdBy(),
+                  spec.createdAt(),
+                  spec.updatedAt(),
+                  spec.updatedBy(),
+                  spec.dependsOn(),
+                  spec.repos(),
+                  spec.roomId()));
+        });
+  }
+
   /**
    * Creates {@code row} as this box's FDE — the operator whose handle is the box's id — the only
    * creator main takes a node's create from.

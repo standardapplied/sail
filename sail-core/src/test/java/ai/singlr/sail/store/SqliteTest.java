@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -411,5 +412,42 @@ class SqliteTest {
     assertTrue(db.transaction(() -> db.inScope()));
     assertTrue(db.read(() -> db.inScope()));
     assertFalse(db.inScope());
+  }
+
+  @Test
+  void aDoomedTransactionRollsBackAndThrowsEvenWhenAnInnerScopeSwallowedTheCause() {
+    db.execute("CREATE TABLE doomed (id INTEGER)");
+    var cause = new IllegalStateException("refused");
+
+    var thrown =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                db.transaction(
+                    (Runnable)
+                        () -> {
+                          db.execute("INSERT INTO doomed VALUES (1)");
+                          try {
+                            db.transaction(
+                                (Runnable)
+                                    () -> {
+                                      db.execute("INSERT INTO doomed VALUES (2)");
+                                      throw db.doomed(cause);
+                                    });
+                          } catch (IllegalStateException swallowed) {
+                            db.execute("INSERT INTO doomed VALUES (3)");
+                          }
+                        }));
+
+    assertSame(cause, thrown);
+    assertEquals(
+        0L, db.queryOne("SELECT count(*) FROM doomed", row -> row.integer(0)).orElseThrow());
+    db.transaction(() -> db.execute("INSERT INTO doomed VALUES (4)"));
+    assertEquals(
+        1L,
+        db.queryOne("SELECT count(*) FROM doomed", row -> row.integer(0)).orElseThrow(),
+        "the next transaction is its own");
+    assertSame(cause, db.doomed(cause), "outside a transaction there is nothing to doom");
+    db.transaction(() -> db.execute("INSERT INTO doomed VALUES (5)"));
   }
 }

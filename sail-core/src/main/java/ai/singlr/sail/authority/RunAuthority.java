@@ -7,6 +7,7 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
@@ -23,11 +24,13 @@ import java.util.stream.Stream;
 
 /**
  * Who may write a run. Every principal a run carries names the run itself ({@link
- * RunStore#namesRun}), and its spec and room never change. On this box's lanes a revision is an
- * admin's or its owners' ({@link #owners}), the rule stop and log access admit by; a run's own
- * principal may report its own session, even on a read-only lane. On {@link Actor.Lane#SYNC} a run
- * is its executing box's: its {@code node} is the pusher before and after, it acts for the pusher,
- * and a deleted run is never brought back.
+ * RunStore#namesRun}), and its spec and room never change. On every lane, pushed or not, a run is
+ * created by an admin or for the FDE its spec is assigned to, or its room's owner ({@link
+ * #worked}), so no box starts or pushes a run on another FDE's work. On this box's lanes a later
+ * revision is an admin's or its owners' ({@link #owners}), the rule stop and log access admit by; a
+ * run's own principal may report its own session, even on a read-only lane. On {@link
+ * Actor.Lane#SYNC} a run is its executing box's: its {@code node} is the pusher before and after,
+ * it acts for the pusher, and a deleted run is never brought back.
  */
 public final class RunAuthority implements WriteAuthority {
 
@@ -35,12 +38,14 @@ public final class RunAuthority implements WriteAuthority {
       Set.of("session_id", "session_source", "last_activity_at");
 
   private final SpecStore specs;
+  private final RoomStore rooms;
   private final RunStore runs;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public RunAuthority(Sqlite db) {
     this.specs = new SpecStore(db);
+    this.rooms = new RoomStore(db);
     this.runs = new RunStore(db);
     this.attribution = new Attribution(db);
   }
@@ -111,9 +116,13 @@ public final class RunAuthority implements WriteAuthority {
       }
     }
     if (actor.lane() == Actor.Lane.SYNC) {
-      return executed(actor.handle(), id, held, next);
+      var executed = executed(actor.handle(), id, held, next);
+      return executed.isPresent() || held != null ? executed : created(actor, id, next);
     }
-    if (held == null || ownSession) {
+    if (held == null) {
+      return created(actor, id, next);
+    }
+    if (ownSession) {
       return Optional.empty();
     }
     var specId = Snapshots.text(held, "spec_id");
@@ -126,6 +135,34 @@ public final class RunAuthority implements WriteAuthority {
             specId,
             Snapshots.text(held, "node"),
             spec -> specs.findById(spec).map(SpecStore.SpecRow::owner)));
+  }
+
+  /**
+   * Why {@code actor} may not create run {@code id} as {@code next}: a run is created by an admin,
+   * or by an actor acting for the owner of the work it names.
+   */
+  private Optional<Refusal> created(Actor actor, String id, Map<String, Object> next) {
+    var specId = Snapshots.text(next, "spec_id");
+    return access(actor, id, specId, worked(specId, Snapshots.text(next, "room_id"), next));
+  }
+
+  /**
+   * Whose box runs the work a new run names, as this box holds it: the FDE its spec is assigned to,
+   * live or deleted — a spec executes only on its assignee's box; for a run that names no spec, its
+   * room's owner ({@link RoomStore#ownerOf}); and for a run that names neither, a spec no one is
+   * assigned yet, or work this box holds nothing of, the FDE the run itself acts for. So a run
+   * never lands on a spec or room that is another FDE's, while one that reaches main before the
+   * spec, the room or the claim its own box made — runs sync first — is its box's until they land.
+   */
+  private List<String> worked(String specId, String roomId, Map<String, Object> next) {
+    var owner =
+        Strings.isNotBlank(specId)
+            ? specs.lastKnown(specId).map(SpecStore.LastKnown::assignee).filter(Strings::isNotBlank)
+            : Optional.ofNullable(Strings.isBlank(roomId) ? null : rooms.held(roomId))
+                .map(room -> rooms.ownerOf(roomId, room));
+    return Stream.of(owner.orElseGet(() -> Objects.toString(Snapshots.text(next, "owner"), "")))
+        .filter(Strings::isNotBlank)
+        .toList();
   }
 
   private Optional<Refusal> executed(

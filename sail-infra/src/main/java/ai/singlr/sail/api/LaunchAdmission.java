@@ -5,8 +5,6 @@
 
 package ai.singlr.sail.api;
 
-import ai.singlr.sail.authority.Refusal;
-import ai.singlr.sail.authority.RoomAuthority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.ContainerExec;
@@ -37,10 +35,9 @@ public final class LaunchAdmission {
   }
 
   /**
-   * Refuses when the actor may not act on a spec-less room from this box: no agent lane, node
-   * handle set, this box owns the room (assignee, else creator), and the room-owner rule ({@link
-   * RoomAuthority#owned}). A room its actor does not own is refused as not theirs ({@code
-   * not_your_spec}), as this admission always has.
+   * Refuses when a spec-less room's agents are not this box's to manage: no agent lane, node handle
+   * set, and this box owns the room (assignee, else creator). Whether the actor may change the room
+   * is the room rule's, decided where its roster is written.
    */
   public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
     var actor = Actor.current();
@@ -62,13 +59,6 @@ public final class LaunchAdmission {
           "Room '" + roomId + "' belongs to '" + owner + "', whose box serves its agents.",
           "Manage the room from that box, or have an admin reassign it.");
     }
-    RoomAuthority.owned(actor, roomId, owner)
-        .ifPresent(
-            refusal -> {
-              throw refusal.kind() == Refusal.Kind.NOT_OWNER
-                  ? new ApiException(ErrorCode.NOT_YOUR_SPEC, refusal.message(), refusal.fix())
-                  : Refusals.exception(refusal);
-            });
   }
 
   /**

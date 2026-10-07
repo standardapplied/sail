@@ -91,6 +91,7 @@ public final class ProjectRenamer {
     if (operations.catalog().project(renamed).isPresent()) {
       throw new IllegalStateException("A project named '" + renamed + "' already exists.");
     }
+    operations.catalog().requireRenamable(old);
     if (!(containers.queryState(renamed) instanceof ContainerState.NotCreated)) {
       throw new IllegalStateException("A container named '" + renamed + "' already exists.");
     }

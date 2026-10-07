@@ -10,15 +10,16 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * Who may write one synced type: the one rule every door that writes it asks where it decides, and
- * main's commit asks for every revision a node pushes, so the same edit gets the same answer
- * wherever it is made.
+ * Who may write one synced type: the one rule the journal asks as it records every write of this
+ * box's own, and main's commit asks for every revision a node pushes, so the same edit gets the
+ * same answer wherever it is made. No door asks it.
  *
  * <p>Both sides are the type's synced projection, the comparable snapshot. {@code held} is what
- * this box holds, null for a create; over a tombstone (a restore) it is the last live projection.
- * {@code next} is the revision being written, null for a tombstone. An authority may read this
- * box's database for owners, and never writes; an owner derived from the row being decided is read
- * from {@code held}, never from the database, so a revision never admits itself. {@link
+ * this box holds at the journal's head, null for a create; over a tombstone (a restore) it is the
+ * last live projection. {@code next} is the revision being written, null for a tombstone, or a
+ * tombstone's marks. An authority may read this box's database for owners, and never writes; the
+ * journal asks it after the row is written, so whatever it derives from the row being decided is
+ * read from {@code held}, never from the database, and a revision never admits itself. {@link
  * Actor.Lane#MAIN} and {@link Actor.Lane#SYSTEM} always pass: main has decided, or this box's
  * machinery is writing.
  */

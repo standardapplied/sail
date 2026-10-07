@@ -94,11 +94,10 @@ final class SpecPruner {
     }
     var handle = principal(actor.handle());
     IntFunction<List<Erasure.Target>> select = limit -> roots(request, limit);
-    var idle = request.project() == null;
     if (request.dryRun()) {
-      return rehearse(select, idle);
+      return rehearse(select);
     }
-    return node ? ask(request, handle, select, idle) : apply(select, handle, idle);
+    return node ? ask(request, handle, select) : apply(select, handle);
   }
 
   /**
@@ -123,7 +122,6 @@ final class SpecPruner {
                           Erasure.SPEC,
                           specs.prunableSince(List.of(SpecStatus.ARCHIVED), null, cutoff, limit)),
                   RETENTION,
-                  true,
                   projects));
     }
     if (policy.messages() != null) {
@@ -133,7 +131,6 @@ final class SpecPruner {
               eraseAll(
                   limit -> targets(Erasure.MESSAGE, messages.retiredBefore(cutoff, limit)),
                   RETENTION,
-                  false,
                   projects));
     }
     if (policy.runsAfterFinished() != null) {
@@ -143,7 +140,6 @@ final class SpecPruner {
               eraseAll(
                   limit -> targets(Erasure.RUN, runs.finishedBefore(cutoff, limit)),
                   RETENTION,
-                  false,
                   projects));
     }
     var actor = Actor.current().handle();
@@ -151,18 +147,18 @@ final class SpecPruner {
     return PruneReport.of(result, 0, false, false);
   }
 
-  private PruneReport rehearse(IntFunction<List<Erasure.Target>> select, boolean idle) {
+  private PruneReport rehearse(IntFunction<List<Erasure.Target>> select) {
     return db.rehearse(
         () -> {
           var before = blobs.collectable();
-          var result = eraseAll(select, ChangeLog.Entry.LOCAL, idle, new LinkedHashSet<>());
+          var result = eraseAll(select, ChangeLog.Entry.LOCAL, new LinkedHashSet<>());
           return PruneReport.of(result, blobs.collectable() - before, true, false);
         });
   }
 
-  private PruneReport apply(IntFunction<List<Erasure.Target>> select, String handle, boolean idle) {
+  private PruneReport apply(IntFunction<List<Erasure.Target>> select, String handle) {
     var projects = new LinkedHashSet<String>();
-    var result = eraseAll(select, ChangeLog.Entry.LOCAL, idle, projects);
+    var result = eraseAll(select, ChangeLog.Entry.LOCAL, projects);
     var freed = result.entities().isEmpty() ? 0L : collect();
     projects.forEach(project -> publishBoardUpdated(project, handle));
     return PruneReport.of(result, freed, false, false);
@@ -175,8 +171,8 @@ final class SpecPruner {
    * instead. What was discarded leaves the board and its content is collected at once.
    */
   private PruneReport ask(
-      PruneRequest request, String handle, IntFunction<List<Erasure.Target>> select, boolean idle) {
-    var rehearsed = rehearse(select, idle);
+      PruneRequest request, String handle, IntFunction<List<Erasure.Target>> select) {
+    var rehearsed = rehearse(select);
     var requests = new EraseRequests(db);
     var projects = new LinkedHashSet<String>();
     var discarded = new ArrayList<Erasure.Target>();
@@ -211,14 +207,15 @@ final class SpecPruner {
    * sweep. Every batch erases something new, so the loop ends.
    */
   private Erasure.Result eraseAll(
-      IntFunction<List<Erasure.Target>> select, String origin, boolean idle, Set<String> projects) {
+      IntFunction<List<Erasure.Target>> select, String origin, Set<String> projects) {
     var result = Erasure.Result.NONE;
     while (true) {
       var batch =
           db.transaction(
               () -> {
-                var plan = erasure.closure(select.apply(BATCH));
-                requireIdle(plan, idle);
+                var roots = select.apply(BATCH);
+                var plan = erasure.closure(roots);
+                Refusals.enforce(authority.idle(roots, plan));
                 projects.addAll(projectsOf(plan));
                 return erasure.erase(plan, origin);
               });
@@ -288,12 +285,6 @@ final class SpecPruner {
       }
     }
     return roots;
-  }
-
-  private void requireIdle(List<Erasure.Target> plan, boolean idle) {
-    if (idle) {
-      Refusals.enforce(authority.idle(plan));
-    }
   }
 
   private static List<Erasure.Target> targets(String type, List<String> ids) {

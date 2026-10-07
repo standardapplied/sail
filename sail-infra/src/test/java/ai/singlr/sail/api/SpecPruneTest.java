@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
@@ -439,12 +441,15 @@ class SpecPruneTest {
     assertEquals("old", restored.spec().id());
     assertTrue(specs.findById("old").isPresent());
     assertTrue(rooms.findById("old").isPresent(), "the room it converses in comes back with it");
-    assertRefused(
-        ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-        () -> {
-          Acting.by(UDAY, () -> ops.delete("old"));
-          Acting.by(MADY, () -> ops.restore("old", new SpecRestoreRequest(rev)));
-        });
+    Acting.by(UDAY, () -> ops.delete("old"));
+    assertEquals(
+        Refusal.Kind.NOT_OWNER,
+        assertThrows(
+                WriteRefused.class,
+                () -> Acting.by(MADY, () -> ops.restore("old", new SpecRestoreRequest(rev))))
+            .refusal()
+            .kind());
+    assertTrue(rooms.findById("old").isEmpty(), "a refused restore brings back no room either");
   }
 
   @Test

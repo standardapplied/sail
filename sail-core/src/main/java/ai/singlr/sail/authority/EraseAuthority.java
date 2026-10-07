@@ -18,7 +18,7 @@ import java.util.Optional;
  * ask, each on its own copy. A read-only role erases nothing. A whole project, or a policy's sweep,
  * is an admin's alone. A spec is erased by its owner ({@link SpecStore.LastKnown#owner}) or an
  * admin, once it is archived, cancelled or deleted. Nothing is erased while a run in it has not
- * finished.
+ * finished, bar a project purged whole ({@link #idle}).
  */
 public final class EraseAuthority {
 
@@ -118,8 +118,15 @@ public final class EraseAuthority {
     return Optional.empty();
   }
 
-  /** Why {@code plan} may not be erased yet: a run in it has not finished. */
-  public Optional<Refusal> idle(List<Erasure.Target> plan) {
+  /**
+   * Why {@code plan}, everything erasing {@code roots} removes, may not be erased yet: a run in it
+   * has not finished. A project is purged whole, its runs with it whether finished or not — it is
+   * purged once its container is gone, so nothing in it is going on — and a purge never waits.
+   */
+  public Optional<Refusal> idle(List<Erasure.Target> roots, List<Erasure.Target> plan) {
+    if (roots.stream().anyMatch(root -> Erasure.PROJECT.equals(root.type()))) {
+      return Optional.empty();
+    }
     var unfinished =
         runs.unfinished(
             plan.stream()

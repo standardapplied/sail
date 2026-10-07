@@ -420,21 +420,22 @@ class ApiRouterTest {
   }
 
   @Test
-  void viewerCanReadSyncButCannotResolveOrWriteFiles() throws Exception {
+  void theRouteTierIsReadForEveryRouteAndAdminForTheControlPlaneNeverWrite() throws Exception {
     var operations = new SeamOperations();
     ApiAuth viewer = exchange -> exchange.setAttribute("token.role", "viewer");
     try (var server = serverWith(operations, true, viewer)) {
       assertEquals(200, get(server, "/v1/sync", "token").statusCode());
       assertEquals(200, get(server, "/v1/conflicts", "token").statusCode());
       assertEquals(
-          403,
+          200,
           post(server, "/v1/conflicts/acme/config/resolve", "token", "{\"strategy\":\"mine\"}")
-              .statusCode());
-      assertNull(operations.resolution);
-      assertEquals(403, post(server, "/v1/sync", "token", "{}").statusCode());
-      assertEquals(
-          403, put(server, "/v1/projects/acme/files/config", "token", "data").statusCode());
-      assertTrue(operations.files.isEmpty());
+              .statusCode(),
+          "a write reaches the operation, where its rule decides it");
+      assertEquals(Resolution.Strategy.MINE, operations.resolution.strategy());
+      assertEquals(200, post(server, "/v1/sync", "token", "{}").statusCode());
+      var repointed = post(server, "/v1/sync", "token", "{\"main\":\"sail@elsewhere\"}");
+      assertEquals(403, repointed.statusCode(), "naming another main is an admin's");
+      assertTrue(repointed.body().contains("\"forbidden\""), repointed.body());
     }
   }
 

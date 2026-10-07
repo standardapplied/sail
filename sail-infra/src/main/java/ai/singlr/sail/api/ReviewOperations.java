@@ -13,7 +13,6 @@ import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Review-workflow operations against the {@link ReviewStore}. Split out of {@code SailOperations}
@@ -62,7 +61,6 @@ final class ReviewOperations {
   ReviewApproveResponse approve(String reviewId) {
     requireStore();
     var review = findReviewOrThrow(reviewId);
-    authorize(reviewId);
     var humanStage =
         reviewStore.stagesForReview(reviewId).stream()
             .filter(s -> "human".equals(s.stageType()) && "running".equals(s.status()))
@@ -83,7 +81,9 @@ final class ReviewOperations {
    * review. The draft copies the source spec's project and repos, derives its priority from the
    * highest severity present, and starts in {@code draft} so a human reviews and edits it before
    * promotion — generated work is never auto-dispatched. The findings it was drafted from are
-   * linked, so they are marked resolved when the follow-up reaches {@code done}.
+   * linked, so they are marked resolved when the follow-up reaches {@code done}. The draft, its
+   * body and the links commit together: the links are a revision of the source review, so one the
+   * review rule refuses leaves no follow-up behind.
    */
   FollowupSpecResponse createFollowup(String sourceSpecId, FollowupCreateRequest request) {
     requireStore();
@@ -96,7 +96,6 @@ final class ReviewOperations {
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
     var review =
         reviewStore.latestReviewForSpec(sourceSpecId).orElseThrow(() -> noReview(sourceSpecId));
-    authorize(review.id());
     var findings = reviewStore.openFindingsForReview(review.id());
     if (findings.isEmpty()) {
       throw new ApiException(
@@ -111,31 +110,33 @@ final class ReviewOperations {
           "Spec '" + followupId + "' already exists.",
           "Pass --id <id> to choose a different id for the follow-up spec.");
     }
-    Refusals.enforce(
-        specStore
-            .authority()
-            .decide(Actor.current(), followupId, null, Map.of("room_id", followupId)));
-    specStore.create(
-        new SpecStore.SpecRow(
-            followupId,
-            source.project(),
-            FollowupDraft.title(source.title()),
-            SpecStatus.DRAFT,
-            null,
-            null,
-            null,
-            null,
-            null,
-            FollowupDraft.priority(findings),
-            null,
-            "",
-            "",
-            null,
-            List.of(),
-            source.repos()));
-    specStore.setContent(followupId, FollowupDraft.body(sourceSpecId, review, findings), "");
-    reviewStore.linkSourceFindings(followupId, findings.stream().map(Finding::id).toList());
-    var created = specStore.findById(followupId).orElseThrow();
+    var created =
+        specStore.atomically(
+            () -> {
+              specStore.create(
+                  new SpecStore.SpecRow(
+                      followupId,
+                      source.project(),
+                      FollowupDraft.title(source.title()),
+                      SpecStatus.DRAFT,
+                      null,
+                      null,
+                      null,
+                      null,
+                      null,
+                      FollowupDraft.priority(findings),
+                      null,
+                      "",
+                      "",
+                      null,
+                      List.of(),
+                      source.repos()),
+                  FollowupDraft.body(sourceSpecId, review, findings),
+                  "");
+              reviewStore.linkSourceFindings(
+                  followupId, findings.stream().map(Finding::id).toList());
+              return specStore.findById(followupId).orElseThrow();
+            });
     return new FollowupSpecResponse(
         GlobalSpecView.from(created), sourceSpecId, review.id(), findings.size());
   }
@@ -170,7 +171,6 @@ final class ReviewOperations {
   FindingDismissResponse dismissFinding(String reviewId, String findingId) {
     requireStore();
     findReviewOrThrow(reviewId);
-    authorize(reviewId);
     var finding =
         reviewStore.findingsForReview(reviewId).stream()
             .filter(candidate -> candidate.id().equals(findingId))
@@ -182,12 +182,6 @@ final class ReviewOperations {
                         "Finding '" + findingId + "' is not part of review '" + reviewId + "'."));
     reviewStore.resolveFinding(finding.id(), Finding.Resolution.DISMISSED);
     return new FindingDismissResponse(finding.id(), true);
-  }
-
-  /** Asks the review rule whether the bound actor may act on review {@code reviewId}. */
-  private void authorize(String reviewId) {
-    var held = reviewStore.comparableSnapshot(reviewId);
-    Refusals.enforce(reviewStore.authority().decide(Actor.current(), reviewId, held, held));
   }
 
   /** Attribution for an approval: the acting FDE's handle, or {@code sail} for a machine token. */

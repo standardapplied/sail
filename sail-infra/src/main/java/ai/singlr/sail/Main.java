@@ -6,6 +6,7 @@
 package ai.singlr.sail;
 
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.RemoteCommandRunner;
@@ -30,10 +31,11 @@ public final class Main {
   /**
    * Prints an escaped command failure instead of swallowing it (the old handler returned 1 with no
    * output). The message carries the "what happened AND what to do", and a refusal's fix follows
-   * it; a message-less throwable falls back to its type so the user is never left with a silent
-   * non-zero exit.
+   * it, a write the journal refused included; a message-less throwable falls back to its type so
+   * the user is never left with a silent non-zero exit.
    */
-  static int report(Exception ex, CommandLine commandLine) {
+  static int report(Exception thrown, CommandLine commandLine) {
+    var ex = Refusals.translated(thrown);
     var message = ex.getMessage();
     var err = commandLine.getErr();
     err.println(

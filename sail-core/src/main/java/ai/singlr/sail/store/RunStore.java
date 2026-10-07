@@ -53,7 +53,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public RunStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
-    this.journal = new RevisionJournal(db, changeLog, new RunSchema());
+    this.journal = new RevisionJournal(db, changeLog, new RunSchema(), this::authority);
   }
 
   /**
@@ -626,6 +626,44 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String logPath,
       String unit,
       Duration maxDuration) {
+    return reserveDispatch(
+        id,
+        project,
+        specId,
+        roomId,
+        boxHandle,
+        role,
+        repos,
+        agent,
+        branch,
+        task,
+        logPath,
+        unit,
+        maxDuration,
+        () -> {});
+  }
+
+  /**
+   * As {@link #reserveDispatch(String, String, String, String, String, String, List, String,
+   * String, String, String, String, Duration)}, running {@code alongside} in the reservation's
+   * transaction once the run is reserved: the seam for the spec's claim that a dispatch makes with
+   * it, so a run is never reserved beside a claim that was refused, nor a spec claimed with no run.
+   */
+  public Reservation reserveDispatch(
+      String id,
+      String project,
+      String specId,
+      String roomId,
+      String boxHandle,
+      String role,
+      List<String> repos,
+      String agent,
+      String branch,
+      String task,
+      String logPath,
+      String unit,
+      Duration maxDuration,
+      Runnable alongside) {
     return reserve(
         id,
         project,
@@ -640,7 +678,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         task,
         logPath,
         unit,
-        maxDuration);
+        maxDuration,
+        alongside);
   }
 
   /**
@@ -683,7 +722,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         task,
         logPath,
         unit,
-        maxDuration);
+        maxDuration,
+        () -> {});
   }
 
   private static void requireServesReview(Lane lane) {
@@ -707,7 +747,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
       String task,
       String logPath,
       String unit,
-      Duration maxDuration) {
+      Duration maxDuration,
+      Runnable alongside) {
     var reserved = Objects.requireNonNullElse(repos, List.<String>of());
     var node = stamp(boxHandle);
     return db.transaction(
@@ -746,6 +787,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
           recordPrincipal(id, principalHandle(agent, role, id));
           var credential = mintCredential(id, maxDuration);
           recordRevision(id, ChangeLog.Entry.LOCAL, false);
+          alongside.run();
           return new Reservation.Reserved(credential);
         });
   }
@@ -958,7 +1000,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return json == null ? List.of() : YamlUtil.parseStringList(json);
   }
 
-  /** Who may write a run on this box: the rule every door and main's commit decide by. */
+  /** Who may write a run on this box: the rule the journal and main's commit decide by. */
   @Override
   public RunAuthority authority() {
     return new RunAuthority(db);

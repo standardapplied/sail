@@ -46,6 +46,25 @@ public final class Acting {
     return Actor.call(actor, work);
   }
 
+  /**
+   * Runs {@code work} authored by {@code handle} with no rule deciding it: what a box whose journal
+   * decided nothing holds — an older binary's rows, a tampered database — which main's commit must
+   * still decide when it is pushed.
+   */
+  public static <X extends Throwable> void unchecked(String handle, Work<X> work) throws X {
+    by(undecided(handle), work);
+  }
+
+  /** As {@link #unchecked(String, Work)} for work that returns a value. */
+  public static <T, X extends Throwable> T unchecked(
+      String handle, ScopedValue.CallableOp<T, X> work) throws X {
+    return Actor.call(undecided(handle), work);
+  }
+
+  private static Actor undecided(String handle) {
+    return new Actor(handle, Role.ADMIN, Actor.Lane.SYSTEM);
+  }
+
   /** Runs {@code work} as this box's machinery. */
   public static <X extends Throwable> void system(Work<X> work) throws X {
     by(Actor.system(), work);

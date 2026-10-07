@@ -364,14 +364,8 @@ class SpecAuthorityTest {
   @Test
   void aCreateOnARoomIdIsRefusedUnlessItMovesNoOwnershipOrAnAdminAsks() {
     var create = projection("title", "Den", "assignee", null, "room_id", "den");
-    board.db.execute(
-        """
-        INSERT INTO rooms (id, project, title, assignee, created_by, created_at, updated_at)
-        VALUES ('nook', 'acme', 'nook', ?, ?, 'now', 'now'),
-            ('mine', 'acme', 'mine', NULL, ?, 'now', 'now')""",
-        OTHER,
-        OWNER,
-        OWNER);
+    board.room("nook", OTHER, OWNER);
+    board.room("mine", null, OWNER);
 
     assertEquals(
         Optional.of(

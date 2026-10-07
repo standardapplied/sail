@@ -45,13 +45,10 @@ public final class RoomAuthority implements WriteAuthority {
   }
 
   /**
-   * Why {@code actor} may not change room {@code id}, owned by {@code owner}: the room-owner rule,
-   * which every later revision of a room and every door that manages one decide by.
+   * Why {@code actor}, who may write, may not change room {@code id}, owned by {@code owner}: the
+   * room-owner rule every later revision of a room is decided by.
    */
-  public static Optional<Refusal> owned(Actor actor, String id, String owner) {
-    if (!actor.canWrite()) {
-      return Refusal.readOnly("change rooms");
-    }
+  private static Optional<Refusal> owned(Actor actor, String id, String owner) {
     if (actor.isAdmin() || actor.actsFor(owner)) {
       return Optional.empty();
     }

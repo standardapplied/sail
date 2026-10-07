@@ -283,7 +283,7 @@ class ProjectSyncTest {
     sync(node);
     Acting.as(node.id, () -> node.projects.delete("p"));
     try (var mainBox = opened(main);
-        var nodeBox = opened(node)) {
+        var nodeBox = opened(node).syncsAs(Actor.sync(node.id, Role.ADMIN))) {
       SyncBox.pushLosingTheAnswer(mainBox, nodeBox, "project");
       assertFalse(
           Snapshots.isDeletionMark(main.projects.currentForSync("p")),

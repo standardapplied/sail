@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FilePicker;
@@ -122,6 +123,8 @@ public final class ApiRouter implements HttpHandler {
       write(exchange, response);
     } catch (ApiException e) {
       write(exchange, ApiResponse.error(e.failure()));
+    } catch (WriteRefused e) {
+      write(exchange, ApiResponse.error(Refusals.exception(e.refusal()).failure()));
     } catch (IllegalArgumentException e) {
       write(
           exchange,
@@ -175,7 +178,7 @@ public final class ApiRouter implements HttpHandler {
 
     auth.require(exchange);
     rateLimits.require(exchange);
-    Authorizer.require(exchange, Authorizer.capabilityFor(request.method()));
+    Authorizer.require(exchange, Capability.READ);
     return Actor.call(actorOf(exchange), () -> routeAuthenticated(exchange, request));
   }
 
@@ -446,10 +449,11 @@ public final class ApiRouter implements HttpHandler {
   /**
    * Builds the {@link Actor} for a request from the exchange attributes {@link ApiAuth} stamped:
    * {@code token.fde} is the caller's FDE handle (null for a machine credential owning no FDE) and
-   * {@code token.role} resolves to the caller's {@link Role}. Method-level authorization ({@code
-   * WRITE} for dispatch) has already passed; the aggregate {@code AccessPolicy} classes do the
-   * resource-scoped decision from this actor. Package-private so the SSE {@link AgentLogStreamer}
-   * builds the same actor from the same stamped attributes.
+   * {@code token.role} resolves to the caller's {@link Role}. The route tier has only admitted the
+   * credential to read; whether it may write is decided from this actor where the write is made —
+   * by the type's rule as the journal records it, or by the operation's admission before a side
+   * effect. Package-private so the SSE {@link AgentLogStreamer} builds the same actor from the same
+   * stamped attributes.
    */
   static Actor actorOf(HttpExchange exchange) {
     return new Actor(
