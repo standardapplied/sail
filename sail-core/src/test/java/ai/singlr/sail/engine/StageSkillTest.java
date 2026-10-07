@@ -259,4 +259,9 @@ class StageSkillTest {
         The skill's other files are in ~/.agents/skills/mine/.""",
         skill.block("~/.agents/skills/mine/"));
   }
+
+  @Test
+  void aProjectsSkillLivesInAFolderNamedForItUnderTheSkillsRoot() {
+    assertEquals(".sail/skills/mine/", StageSkill.projectFolder("mine"));
+  }
 }
