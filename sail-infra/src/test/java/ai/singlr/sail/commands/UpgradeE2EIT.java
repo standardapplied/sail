@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SshdKeepalive;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
+import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.OrphanErasure;
 import ai.singlr.sail.store.PersonalRoomErasure;
 import ai.singlr.sail.store.SchemaManager;
@@ -48,8 +49,12 @@ import org.junit.jupiter.api.Timeout;
  * <p>The shared script stands for a box the content migration converted: its row carries the mode
  * the old rule gave a script (0755), its history records none, and the copy an older materializer
  * wrote on disk is 0644 — on main and on the node alike. Main's records of the orphan and the
- * personal-room erasures are dropped before the hop, so the candidate's migrate has data migrations
- * to run and record whichever release it hops from. Main holds uday's personal room in the demo
+ * personal-room erasures, and both boxes' records of what they wrote of each shared file ({@code
+ * materialized_files} and the seed that fills it), are dropped before the hop, so the candidate's
+ * migrate has data migrations to run and record whichever release it hops from: a released box that
+ * already seeds its own copies would otherwise remember writing the script at 0755, and the sync
+ * after the hop would publish the 0644 on disk as a person's chmod. The node runs the installed
+ * binary too, so it is the released one until the hop. Main holds uday's personal room in the demo
  * project as an older sail minted it, and the hop erases it.
  */
 @Timeout(value = 8, unit = TimeUnit.MINUTES)
@@ -167,7 +172,13 @@ class UpgradeE2EIT extends AbstractIncusIT {
               + OrphanErasure.NAME
               + "', '"
               + PersonalRoomErasure.NAME
+              + "', '"
+              + MaterializedFilesMigration.NAME
               + "')");
+      query("DELETE FROM materialized_files");
+      nodeQuery(
+          "DELETE FROM data_migrations WHERE name = '" + MaterializedFilesMigration.NAME + "'");
+      nodeQuery("DELETE FROM materialized_files");
       rootOk(
           "install -d -m 700 "
               + REHEARSAL
