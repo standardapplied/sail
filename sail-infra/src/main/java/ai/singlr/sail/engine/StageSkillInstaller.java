@@ -26,7 +26,7 @@ import java.util.function.Function;
  * the build to it, and a launch does both holding a lock on the skills directory: two launches that
  * replace one folder at once take turns, each leaves a whole, stamped folder, and neither build
  * lands inside the other's. The rename is {@code mv -T}, which fails on a folder something else
- * made in between where a plain {@code mv} would move the build into it.
+ * made and filled in between, where a plain {@code mv} would move the build into it.
  *
  * <p>A build folder's name starts {@link #BUILD_PREFIX}, which no skill's or rule's name can, so
  * nothing else beside the skills directory is ever taken for a build. A launch that fails removes
