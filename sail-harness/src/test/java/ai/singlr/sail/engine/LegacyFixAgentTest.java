@@ -17,7 +17,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 
+/**
+ * The kill script against processes of this machine, run as the container would run it. A container
+ * is Linux, and so is what the script reads: {@code /proc/<pid>/environ}.
+ */
+@EnabledOnOs(OS.LINUX)
 class LegacyFixAgentTest {
 
   private static final String REVIEW = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
