@@ -5,13 +5,16 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  # The unit verdict: this job runs surefire and the coverage gates and nothing else, so its
+  # check resolves when the suite does. No other job runs a unit test.
   verify:
-    name: Verify, security scan, and native build
+    name: Unit tests and quality gates
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -41,6 +44,20 @@ jobs:
           path: |
             **/target/site/jacoco
             **/target/site/jacoco.xml
+
+  # A job of its own, so an NVD refresh that retries for minutes never holds the unit verdict.
+  dependency-scan:
+    name: Dependency scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       # The NVD database is project-independent, so the cache key is keyed only on the OS,
       # never on pom.xml — a version bump must not cold-start the cache. github.run_id makes the
@@ -87,6 +104,19 @@ jobs:
           name: dependency-check-reports
           path: '**/target/dependency-check-report.html'
 
+  native-fleet:
+    name: Native fleet sync tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
       # The fleet tests upgrade from the release a fleet runs to the binary built here, so the
       # released binary is a test input: the release .github/released-tag pins, checked against
       # the checksum published beside it.
@@ -95,8 +125,8 @@ jobs:
         uses: ./.github/actions/native-binaries
 
       # Sync end to end on the native binaries: Podman boxes, a real sshd and the gateway's forced
-      # command. Unit tests already ran above, so only this suite runs here; requireNative turns a
-      # missing binary or an unreachable Podman into a failure instead of a skip.
+      # command. Only this suite runs here; requireNative turns a missing binary or an unreachable
+      # Podman into a failure instead of a skip.
       - name: Native fleet sync tests
         run: >
           mvn -B -Pintegration verify
@@ -107,6 +137,125 @@ jobs:
           -Djacoco.skip=true
           -Dsail.it.requireIncus=false
           -Dsail.it.requireSystemd=false
+          -Dsail.it.requireNative=true
+          -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
+          -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}
+
+  fleet-integration:
+    name: Multi-node control-plane integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable the runner's systemd user manager
+        # The pty host's descriptor-store tests run the real unit under the runner's own
+        # systemd --user. Linger keeps that manager alive without a login session, and the
+        # bus/runtime variables let the test process talk to it. A missing manager fails here,
+        # before maven, with the reason in the log.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for i in $(seq 1 30); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 1
+          done
+          systemctl --version
+          state="$(systemctl --user is-system-running || true)"
+          echo "user manager: $state"
+          [ "$state" = running ] || [ "$state" = degraded ]
+
+      # The unit suite and its coverage gates are the verify job's; only failsafe runs here.
+      - name: Run multi-node integration tests without incus
+        run: >
+          mvn -B -Pintegration verify
+          -Dsail.it.requireIncus=false
+          -Dtest=NoUnitTests
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
+
+  incus-integration:
+    name: Incus-backed integration tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: graalvm/setup-graalvm@bef4b0e916c7dd079bf60fb95d49139f67e32c5f # v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Enable the runner's systemd user manager
+        # The pty host's descriptor-store tests run the real unit under the runner's own
+        # systemd --user. Linger keeps that manager alive without a login session, and the
+        # bus/runtime variables let the test process talk to it. A missing manager fails here,
+        # before maven, with the reason in the log.
+        run: |
+          sudo loginctl enable-linger "$USER"
+          echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+          echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+          export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+          for i in $(seq 1 30); do
+            [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+            sleep 1
+          done
+          systemctl --version
+          state="$(systemctl --user is-system-running || true)"
+          echo "user manager: $state"
+          [ "$state" = running ] || [ "$state" = degraded ]
+
+      - name: Install and initialize incus
+        # incus ships in Ubuntu 24.04 itself. The runner image also carries third-party apt
+        # sources (Chrome, Microsoft, ...) whose index fetches fail on their own schedule, and a
+        # plain update refreshes them all — so only Ubuntu's own sources are refreshed here.
+        run: |
+          sudo find /etc/apt/sources.list.d -type f ! -name ubuntu.sources -delete
+          sudo apt-get update
+          sudo apt-get install -y incus
+          sudo incus admin init --minimal
+          sudo chmod o+rw /var/lib/incus/unix.socket
+
+      - name: Give launched containers outbound internet
+        # The runner's Docker install sets the iptables FORWARD policy to DROP, which silently
+        # drops the incus NAT bridge's egress, so containers can resolve DNS but cannot connect
+        # out (apt/image pulls time out). Allow forwarding so provisioned containers reach the net.
+        run: |
+          sudo sysctl -w net.ipv4.ip_forward=1
+          sudo iptables -P FORWARD ACCEPT
+
+      - name: Verify incus is reachable by the runner
+        run: |
+          which incus
+          incus version
+          incus list
+
+      # UpgradeE2EIT upgrades a box from the pinned release to the binary built here. The native
+      # fleet suite needs the same binaries but runs in a job of its own, so it is left out here
+      # to keep this job inside its timeout.
+      - name: Build and fetch the native binaries
+        id: binaries
+        uses: ./.github/actions/native-binaries
+
+      - name: Run incus integration tests
+        run: >
+          mvn -B -Pintegration verify
+          -Dit.test='*IT,!NativeFleetIT'
+          -Dfailsafe.failIfNoSpecifiedTests=false
+          -Dtest=NoUnitTests
+          -Dsurefire.failIfNoSpecifiedTests=false
+          -Djacoco.skip=true
           -Dsail.it.requireNative=true
           -Dsail.it.nativeBinary=${{ steps.binaries.outputs.candidate }}
           -Dsail.it.releasedBinary=${{ steps.binaries.outputs.released }}
