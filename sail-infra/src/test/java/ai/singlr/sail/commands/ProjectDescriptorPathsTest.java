@@ -126,10 +126,16 @@ class ProjectDescriptorPathsTest {
     Files.writeString(sourceYaml, "name: acme-health\n");
     Files.writeString(sourceFilesDir.resolve("app/.env"), "FOO=bar\n");
     Files.writeString(sourceFilesDir.resolve("scripts/start.sh"), "#!/bin/bash\necho ok\n");
+    Files.createDirectories(sourceFilesDir.resolve(".sail/skills/acme-review"));
+    Files.writeString(sourceFilesDir.resolve(".sail/skills/acme-review/SKILL.md"), "Judge.\n");
 
     ProjectApplyCommand.syncFilesDirectory(sourceFilesDir, canonicalDir.resolve("files"));
 
     assertEquals("FOO=bar\n", Files.readString(canonicalDir.resolve("files/app/.env")));
+    assertEquals(
+        "Judge.\n",
+        Files.readString(canonicalDir.resolve("files/.sail/skills/acme-review/SKILL.md")),
+        "a project's skills are project files, and the directory sync carries them");
     assertEquals(
         "#!/bin/bash\necho ok\n", Files.readString(canonicalDir.resolve("files/scripts/start.sh")));
   }

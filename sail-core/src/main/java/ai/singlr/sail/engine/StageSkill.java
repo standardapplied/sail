@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
@@ -54,6 +55,11 @@ public record StageSkill(String name, String body, List<File> files) {
 
   /** What the name of every skill sail ships starts with, and no project skill's may. */
   public static final String RESERVED = "sail-";
+
+  /** The folder a project's skill named {@code name} lives in among its files, slash-ended. */
+  public static String projectFolder(String name) {
+    return PROJECT_ROOT + name + "/";
+  }
 
   private static final Pattern NAME = Pattern.compile("[a-z0-9][a-z0-9-]{0,63}");
   private static final String FENCE = "---";
@@ -183,7 +189,7 @@ public record StageSkill(String name, String body, List<File> files) {
   private static boolean isRelative(String path) {
     return path != null
         && path.codePoints().noneMatch(Character::isISOControl)
-        && List.of(path.split("/", -1)).stream()
+        && Arrays.stream(path.split("/", -1))
             .noneMatch(segment -> segment.isEmpty() || segment.equals(".") || segment.equals(".."));
   }
 }

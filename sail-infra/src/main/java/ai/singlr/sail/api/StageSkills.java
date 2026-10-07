@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.harness.Harness;
+import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -23,7 +24,8 @@ import java.util.function.Function;
  * not.
  *
  * <p>A skill that cannot be read is an {@link IllegalStateException} naming the project and the
- * skill, with no cause attached: the message is what a room or an operator is told, once.
+ * skill, with no cause attached: the message is what a room or an operator is told, once. A box
+ * with no project files wired knows only sail's own skills.
  */
 public final class StageSkills {
 
@@ -43,7 +45,7 @@ public final class StageSkills {
 
   /** {@code skill} as a prompt carries it to an agent {@code harness} runs. */
   public static String block(StageSkill skill, Harness harness) {
-    return skill.block("~/" + harness.skillsDir() + skill.name() + "/");
+    return skill.block("~/" + harness.skillFolder(skill.name()) + "/");
   }
 
   /** How the skill a stage names stands for a project: what a launch would find. */
@@ -63,9 +65,10 @@ public final class StageSkills {
     record Missing(String manifest) implements Standing {}
 
     /**
-     * A skill the project holds and {@link StageSkill} refuses.
+     * A skill the project holds that cannot be launched under: {@link StageSkill} refuses it, or
+     * its manifest cannot be read, as when its content has not reached this box yet.
      *
-     * @param why what refused it, as {@link StageSkill} says it
+     * @param why what refused it, as {@link StageSkill} or the reading says it
      * @param files how many files the project holds under the skill's folder
      */
     record Invalid(String why, int files) implements Standing {}
@@ -103,7 +106,7 @@ public final class StageSkills {
     try {
       StageSkill.requireName(name);
       var shared = filesOf(project, name);
-      var folder = StageSkill.PROJECT_ROOT + name + "/";
+      var folder = StageSkill.projectFolder(name);
       var rows = shared.list().stream().filter(row -> row.path().startsWith(folder)).toList();
       held = rows.size();
       var manifest =
@@ -127,7 +130,7 @@ public final class StageSkills {
                               row.size(),
                               row.mode()))
                   .toList()));
-    } catch (IllegalArgumentException | IOException unreadable) {
+    } catch (IllegalArgumentException | BlobStore.NotHeld | IOException unreadable) {
       return new Standing.Invalid(unreadable.getMessage(), held);
     }
   }
@@ -142,7 +145,7 @@ public final class StageSkills {
       return new ByteArrayInputStream(builtIn.get().getBytes(StandardCharsets.UTF_8));
     }
     var shared = filesOf(project, skill.name());
-    var path = StageSkill.PROJECT_ROOT + skill.name() + "/" + file.path();
+    var path = StageSkill.projectFolder(skill.name()) + file.path();
     var row =
         shared
             .find(path)

@@ -96,7 +96,7 @@ class StageSkillLaunchTest {
 
   private long pushesFor(String skill) {
     return loop.container.commandsContaining("incus file push").stream()
-        .filter(command -> command.contains(CODEX_SKILLS + ".sail-stage-build-" + skill + "."))
+        .filter(command -> command.contains("/home/dev/.agents/.sail-stage-build-" + skill + "."))
         .count();
   }
 
@@ -427,7 +427,10 @@ class StageSkillLaunchTest {
     var refused = refusedDispatch("auth", false);
 
     assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
-    assertTrue(refused.getMessage().contains("gemini"), refused.getMessage());
+    assertEquals(
+        "Unknown agent CLI: 'gemini'. Known agents: claude-code, codex.\n  Check the 'install'"
+            + " list in your sail.yaml agent section.",
+        refused.getMessage());
     assertEquals(SpecStatus.PENDING, loop.specStatus("auth"));
     assertTrue(loop.runs.listForProject(PROJECT).isEmpty());
   }
@@ -491,13 +494,13 @@ class StageSkillLaunchTest {
     assertTrue(loop.live().isEmpty(), "no fix agent started");
     assertEquals("escalated", loop.statusOf(loop.reviewOf("auth")));
     assertEquals(1, loop.details("review_escalated").size());
-    assertTrue(
-        loop.details("review_escalated")
-            .getFirst()
-            .contains(
-                "Skill 'acme-fix' of project 'test-project' cannot be read:"
-                    + " .sail/skills/acme-fix/SKILL.md is missing"),
-        loop.details("review_escalated").getFirst());
+    assertEquals(
+        List.of(
+            "fix iteration failed — fix agent could not start: Skill 'acme-fix' of project"
+                + " 'test-project' cannot be read: .sail/skills/acme-fix/SKILL.md is missing or is"
+                + " not a text file. Add it with 'sail project files add <file> --as"
+                + " .sail/skills/acme-fix/SKILL.md'.; triage and re-dispatch"),
+        loop.details("review_escalated"));
     assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
   }
 
@@ -575,10 +578,9 @@ class StageSkillLaunchTest {
     assertTrue(loop.live().isEmpty(), "no reviewer started");
     assertEquals(
         List.of(
-            "reviewer could not start: Failed to install skill 'acme-review' in test-project. Skill"
-                + " 'acme-review' of project 'test-project' changed while it was being installed:"
-                + " .sail/skills/acme-review/reference/rules.md is no longer the file that was"
-                + " resolved. Launch again."),
+            "reviewer could not start: Skill 'acme-review' of project 'test-project' changed while"
+                + " it was being installed: .sail/skills/acme-review/reference/rules.md is no longer"
+                + " the file that was resolved. Launch again."),
         loop.details("review_errored"));
     assertTrue(
         loop.container.filesUnder(CODEX_SKILLS).isEmpty(),
@@ -709,6 +711,47 @@ class StageSkillLaunchTest {
             + " files wired.",
         refused.getMessage());
     assertEquals(SpecStatus.PENDING, loop.specStatus("billing"));
+    assertThrows(NullPointerException.class, () -> unwired.useStageSkills(null));
+  }
+
+  @Test
+  void aBuildsAndAFixAgentsSkillWithOtherFilesNameTheFolderOfTheHarnessThatRunsThem() {
+    loop =
+        ReviewLoop.wired(
+            tempDir,
+            ReviewLoop.YAML.replace("agent:\n", "agent:\n  build_skill: acme-build\n")
+                + "  review_pipeline:\n    fix_skill: acme-fix\n");
+    pendingSpec("auth", "codex");
+    loop.skillFile("acme-build", "SKILL.md", "Build it acme's way.\n", 0644);
+    loop.skillFile("acme-build", "notes.md", "Notes.\n", 0644);
+    loop.skillFile("acme-fix", "SKILL.md", "Fix it acme's way.\n", 0644);
+    loop.skillFile("acme-fix", "checklist.md", "Checklist.\n", 0644);
+
+    var build = dispatched("auth");
+
+    assertTrue(
+        build
+            .task()
+            .contains(
+                "Build it acme's way.\n\nThe skill's other files are in"
+                    + " ~/.agents/skills/acme-build/.\n\n## Autonomous"),
+        build.task());
+    assertEquals("Notes.\n", loop.container.file(CODEX_SKILLS + "acme-build/notes.md"));
+    assertTrue(loop.container.filesUnder(CLAUDE_SKILLS).isEmpty());
+
+    loop.finish(build.runId(), "built");
+    loop.finish(loop.onlyLive().id(), CRITICAL_FINDING);
+    var fix = loop.onlyLive();
+
+    assertEquals("fix", fix.role());
+    assertEquals("codex", fix.agent());
+    assertTrue(
+        fix.task()
+            .contains(
+                "Fix it acme's way.\n\nThe skill's other files are in ~/.agents/skills/acme-fix/.\n\n"
+                    + "--- Finding 1"),
+        fix.task());
+    assertEquals("Checklist.\n", loop.container.file(CODEX_SKILLS + "acme-fix/checklist.md"));
   }
 
   @Test

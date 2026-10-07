@@ -20,19 +20,20 @@ import java.util.function.Function;
  * skill it holds: a launch that finds its skill's stamp writes nothing, and any other launch
  * replaces the folder whole.
  *
- * <p>A replacement is built beside the folder, in a folder of the run's own, stamped last and put
- * in place in one step — so a harness never opens a folder half-written. Putting it in place is
- * removing the old folder and renaming the build to it, and a launch does both holding a lock on
- * the skills directory: two launches that replace one folder at once take turns, each leaves a
- * whole, stamped folder, and neither build lands inside the other's. The rename is {@code mv -T},
- * which fails on a folder something else made in between where a plain {@code mv} would move the
- * build into it.
+ * <p>A replacement is built outside the skills directory, beside it in a folder of the run's own,
+ * stamped last and put in place in one step — so a harness never opens a folder half-written and
+ * never finds a build among its skills. Putting it in place is removing the old folder and renaming
+ * the build to it, and a launch does both holding a lock on the skills directory: two launches that
+ * replace one folder at once take turns, each leaves a whole, stamped folder, and neither build
+ * lands inside the other's. The rename is {@code mv -T}, which fails on a folder something else
+ * made in between where a plain {@code mv} would move the build into it.
  *
  * <p>A build folder's name starts {@link #BUILD_PREFIX}, which no skill's or rule's name can, so
- * nothing a project put beside the folder is ever taken for a build. A launch that fails removes
+ * nothing else beside the skills directory is ever taken for a build. A launch that fails removes
  * what it built. One that died left its build folder behind, and the next install of that skill
- * removes it once it is old enough that no live launch can still be writing it: a sweep of every
- * build folder would delete the files of a launch building beside this one.
+ * removes it once it is a day old: a sweep of every build folder would delete the files of a launch
+ * building beside this one, and a younger one may still be a live launch's, since writes into a
+ * build's subfolders leave the build's own modification time alone.
  *
  * <p>A skill's name and paths were checked when the {@link StageSkill} was made; here each reaches
  * a shell only as an argument.
@@ -40,14 +41,13 @@ import java.util.function.Function;
 public final class StageSkillInstaller {
 
   /** How old a build folder is before the launch that made it is taken for dead. */
-  static final int STALE_BUILD_MINUTES = 60;
+  static final int STALE_BUILD_MINUTES = 24 * 60;
 
   /** What a build folder's name starts with, before the skill's name and the run's id. */
   static final String BUILD_PREFIX = ".sail-stage-build-";
 
   private static final String SWEEP =
       "[ ! -d \"$1\" ] || find \"$1\" -maxdepth 1 -name \"$2.*\" -mmin \"+$3\" -exec rm -rf {} +";
-  private static final String STAMP = "printf '%s' \"$1\" > \"$2\"";
   private static final String PLACE = "rm -rf \"$1\" && mv -T \"$2\" \"$1\"";
 
   private StageSkillInstaller() {}
@@ -55,7 +55,8 @@ public final class StageSkillInstaller {
   /**
    * Makes {@code folder} in {@code project}'s container hold exactly {@code skill}.
    *
-   * @param folder the skill's folder, absolute, under the harness's skills directory
+   * @param folder the skill's folder, absolute, directly under the harness's skills directory,
+   *     which is itself directly under the home directory the replacement is built in
    * @param runId the launching run, which names the folder the replacement is built in
    * @param content the bytes of one of the skill's files
    */
@@ -76,23 +77,25 @@ public final class StageSkillInstaller {
     }
     var skillsDir = parentOf(folder);
     var builds = BUILD_PREFIX + skill.name();
+    var buildRoot = parentOf(skillsDir);
     run(
         shell,
         project,
         "clear stale builds of",
         skill,
-        List.of("sh", "-c", SWEEP, "sh", skillsDir, builds, String.valueOf(STALE_BUILD_MINUTES)));
-    var build = skillsDir + "/" + builds + "." + runId;
+        List.of("sh", "-c", SWEEP, "sh", buildRoot, builds, String.valueOf(STALE_BUILD_MINUTES)));
+    var build = buildRoot + "/" + builds + "." + runId;
     try {
       for (var file : skill.files()) {
         push(shell, project, build + "/" + file.path(), file, content);
       }
+      ContainerSailSetup.writeStamp(shell, project, build + "/" + StageSkill.STAMP, fingerprint);
       run(
           shell,
           project,
-          "stamp",
+          "make the skills directory for",
           skill,
-          List.of("bash", "-c", STAMP, "bash", fingerprint, build + "/" + StageSkill.STAMP));
+          List.of("mkdir", "-p", skillsDir));
       run(
           shell,
           project,

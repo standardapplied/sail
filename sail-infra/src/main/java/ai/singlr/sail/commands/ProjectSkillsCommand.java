@@ -72,9 +72,9 @@ public final class ProjectSkillsCommand implements Callable<Integer> {
 
     static Row of(String stage, String skill, Standing standing) {
       return switch (standing) {
-        case Standing.BuiltIn builtIn -> new Row(stage, skill, "built-in", 1);
+        case Standing.BuiltIn ignored -> new Row(stage, skill, "built-in", 1);
         case Standing.Held held -> new Row(stage, skill, "project", held.skill().files().size());
-        case Standing.Missing missing -> new Row(stage, skill, "missing", 0);
+        case Standing.Missing ignored -> new Row(stage, skill, "missing", 0);
         case Standing.Invalid invalid ->
             new Row(stage, skill, "invalid: " + invalid.why(), invalid.files());
       };
@@ -93,7 +93,7 @@ public final class ProjectSkillsCommand implements Callable<Integer> {
     try (var operations = this.operations.get()) {
       var config = operations.catalog().definitions().require(project);
       var files = operations.projectFiles(project);
-      var rows = rows(project, config, new StageSkills(name -> files));
+      var rows = rows(project, config, new StageSkills(operations::projectFiles));
       reserved(files.list()).forEach(System.err::println);
       System.out.print(render(project, rows, json));
       return 0;
@@ -202,8 +202,7 @@ public final class ProjectSkillsCommand implements Callable<Integer> {
       project = CurrentProject.require(project);
       NameValidator.requireValidProjectName(project);
       try (var operations = this.operations.get()) {
-        var files = operations.projectFiles(project);
-        var skills = new StageSkills(ignored -> files);
+        var skills = new StageSkills(operations::projectFiles);
         var skill = skills.resolve(project, name);
         var manifest =
             skill.files().stream()

@@ -1332,7 +1332,8 @@ command the installer sends against a real shell under a temporary directory;
   and refuses a project's saying so. The names a key accepts are checked where the definition
   is parsed (`SailYaml.fromMap`, so also for a row that arrived by sync): a skill name, the
   key's own default or a name that does not start `sail-`, never one of the skills sail
-  generates (`spec`, `spec-board`, `verify`, a Codex rule's), and no skill on a human stage.
+  generates (`spec`, `spec-board`, `verify`, and the project's `agent_context.rules` names,
+  which Codex installs as skills), and no skill on a human stage.
   The skills checked are those of the pipeline the loop runs
   (`ReviewPipelineConfig.resolved`, the one reading the loop and `sail project skills` share),
   so a rule cannot be named `sail-review` or `sail-fix` in a project whose missing or
@@ -1356,18 +1357,23 @@ command the installer sends against a real shell under a temporary directory;
   installs the launch's skill under the harness's `skillsDir()` after sail's own helpers and
   before the run's files are staged. The folder is stamped (`.sail-skill`) with the
   fingerprint of the skill it holds — every path, content hash and mode — so a launch that
-  finds its skill's stamp writes nothing. Otherwise the skill is built beside the folder, in
-  `.sail-stage-build-<name>.<runId>`, each file pushed under its own mode as the dev user,
+  finds its skill's stamp writes nothing. Otherwise the skill is built beside the skills
+  directory, never in it, in `.sail-stage-build-<name>.<runId>`, each file pushed under its own
+  mode as the dev user,
   stamped last, and put in place in one step (`rm -rf "$1" && mv -T "$2" "$1"`) run under
   `flock` on the skills directory: a harness never opens a folder half-written, and two
   launches replacing one folder at once take turns, so each leaves a whole, stamped folder and
   neither build lands inside the other's. `mv -T` fails on a folder something made in between,
-  where a plain `mv` would move the build into it. No skill's or rule's name can start with a
-  dot, so a project's own folder (a Codex rule named `<name>.extra`) is never taken for a
-  build. A launch that fails removes what it built; a build folder a dead launch left is
-  removed by the next install of that skill once it is over an hour old — never sooner,
-  because sweeping every build folder would delete the files of a launch still building beside
-  this one. Every name and path reaches a shell only as an argument.
+  where a plain `mv` would move the build into it. A build folder's name starts with a dot and
+  `.sail-stage-build-`, which no skill's or rule's name can, so nothing else is ever taken for
+  a build, and a harness never finds one among its skills. A launch that fails removes what it
+  built; a build folder a dead launch left is removed by the next install of that skill once
+  it is a day old — never sooner, because sweeping every build folder would delete the files
+  of a launch still building beside this one, and writes into a build's subfolders leave its
+  own modification time alone. A file that changed under the launch fails it in
+  `StageSkills`' words ("changed while it was being installed … Launch again."); a container
+  that could not take the files fails it saying to check the container. Every name and path
+  reaches a shell only as an argument.
   *`StageSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,
   `StageSkillInstallerTest.theSameSkillInstalledAgainWritesNothing`,
   `StageSkillInstallerTest.aSkillThatGainedChangedAndLostFilesLeavesExactlyTheNewOnes`,

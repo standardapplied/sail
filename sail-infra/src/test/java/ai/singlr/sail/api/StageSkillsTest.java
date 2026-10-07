@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -208,16 +209,16 @@ class StageSkillsTest {
 
   @Test
   void aNameThatIsNoSkillNameIsRefusedBeforeAnyFileIsLookedUp() {
-    share(".sail/skills/a/b/SKILL.md", "Reached only through a name with a slash.");
+    var builtInOnly = StageSkills.builtInOnly();
 
-    assertEquals(
-        "Skill 'a/b' of project 'acme' is refused: Skill name 'a/b' must match"
-            + " [a-z0-9][a-z0-9-]{0,63}.",
-        refusal("a/b"));
-    assertEquals(
-        "Skill 'null' of project 'acme' is refused: Skill name 'null' must match"
-            + " [a-z0-9][a-z0-9-]{0,63}.",
-        refusal(null));
+    for (var name : new String[] {"a/b", "Bad Name", null}) {
+      assertEquals(
+          "Skill '%s' of project 'acme' is refused: Skill name '%s' must match [a-z0-9][a-z0-9-]{0,63}."
+              .formatted(name, name),
+          assertThrows(IllegalStateException.class, () -> builtInOnly.resolve("acme", name))
+              .getMessage(),
+          "a box with no files wired refuses the name, not the box");
+    }
   }
 
   @Test
@@ -300,58 +301,89 @@ class StageSkillsTest {
 
   @Test
   void aManifestThatCannotBeReadIsRefusedSayingWhy() {
-    var row =
-        new FileStore.FileRow(
-            "acme", ".sail/skills/acme-review/SKILL.md", hash("Body."), 5, 0644, "text");
     var unreadable =
         new StageSkills(
             project ->
-                new ProjectFiles() {
-                  @Override
-                  public FileLimits limits() {
-                    return FileLimits.defaults();
-                  }
-
-                  @Override
-                  public List<FileStore.FileRow> list() {
-                    return List.of(row);
-                  }
-
-                  @Override
-                  public Optional<FileStore.FileRow> find(String path) {
-                    return Optional.of(row);
-                  }
-
-                  @Override
-                  public InputStream open(FileStore.FileRow opened) {
-                    return new InputStream() {
-                      @Override
-                      public int read() throws IOException {
-                        throw new IOException("blob store is gone");
-                      }
-                    };
-                  }
-
-                  @Override
-                  public String put(String path, InputStream bytes, long size, int mode) {
-                    return path;
-                  }
-
-                  @Override
-                  public boolean remove(String path) {
-                    return false;
-                  }
-
-                  @Override
-                  public FileMaterializer.Report materialize() {
-                    return null;
-                  }
-                });
+                holding(
+                    manifestRow(),
+                    () ->
+                        new InputStream() {
+                          @Override
+                          public int read() throws IOException {
+                            throw new IOException("blob store is gone");
+                          }
+                        }));
 
     assertEquals(
         "Skill 'acme-review' of project 'acme' is refused: blob store is gone",
         assertThrows(IllegalStateException.class, () -> unreadable.resolve("acme", "acme-review"))
             .getMessage());
+  }
+
+  @Test
+  void aManifestWhoseContentHasNotReachedThisBoxIsRefusedSayingSo() {
+    var row = manifestRow();
+    var notYetHeld =
+        new StageSkills(
+            project ->
+                holding(
+                    row,
+                    () -> {
+                      throw new BlobStore.NotHeld(row.contentHash());
+                    }));
+
+    assertEquals(
+        new StageSkills.Standing.Invalid("blob " + row.contentHash() + " not held", 1),
+        notYetHeld.standing("acme", "acme-review"));
+    assertEquals(
+        "Skill 'acme-review' of project 'acme' is refused: blob " + row.contentHash() + " not held",
+        assertThrows(IllegalStateException.class, () -> notYetHeld.resolve("acme", "acme-review"))
+            .getMessage());
+  }
+
+  private static FileStore.FileRow manifestRow() {
+    return new FileStore.FileRow(
+        "acme", ".sail/skills/acme-review/SKILL.md", hash("Body."), 5, 0644, "text");
+  }
+
+  /** A project's files that are {@code row} alone, opened by {@code opener}. */
+  private static ProjectFiles holding(FileStore.FileRow row, Supplier<InputStream> opener) {
+    return new ProjectFiles() {
+      @Override
+      public FileLimits limits() {
+        return FileLimits.defaults();
+      }
+
+      @Override
+      public List<FileStore.FileRow> list() {
+        return List.of(row);
+      }
+
+      @Override
+      public Optional<FileStore.FileRow> find(String path) {
+        return Optional.of(row);
+      }
+
+      @Override
+      public InputStream open(FileStore.FileRow opened) {
+        return opener.get();
+      }
+
+      @Override
+      public String put(String path, InputStream bytes, long size, int mode) {
+        return path;
+      }
+
+      @Override
+      public boolean remove(String path) {
+        return false;
+      }
+
+      @Override
+      public FileMaterializer.Report materialize() {
+        return null;
+      }
+    };
   }
 
   @Test

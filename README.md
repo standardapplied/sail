@@ -207,7 +207,7 @@ or enforces follows the skill in the prompt and is not yours to replace: the rev
 answers with the verdict envelope, the build still pushes its branch and opens a pull request,
 the fix agent still argues a finding in the room rather than skipping it. A skill is synced like
 any project file, never copied into the workspace, and bounded: a body of at most 32,000
-characters, a folder of at most 32 files and 1 MiB. Names starting `sail-` are sail's own. A
+code points, a folder of at most 32 files and 1 MiB. Names starting `sail-` are sail's own. A
 stage whose skill cannot be read does not start and says which file is missing; `sail project
 skills` shows that before a dispatch does.
 

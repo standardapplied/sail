@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -31,12 +32,14 @@ import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
@@ -183,6 +186,65 @@ class DispatchCommandWiringTest {
   }
 
   @Test
+  void theControlPlaneWiresTheProjectsOwnSkillsForEveryStageOnThisBox() throws Exception {
+    var shell =
+        shell()
+            .on("-mmin", "")
+            .on("incus file push", "")
+            .on("mkdir -p /home/dev/.claude", "")
+            .on("flock /home/dev/.claude/skills", "");
+    var operations = cliOperations(shell, new ArrayList<>());
+    new FdeStore(db).add(HANDLE, null, null, "admin");
+    Acting.system(
+        () -> {
+          new ProjectStore(db)
+              .upsert("acme", YAML.replace("agent:\n", "agent:\n  build_skill: acme-build\n"));
+          new FileStore(db)
+              .put(
+                  "acme",
+                  ".sail/skills/acme-build/SKILL.md",
+                  new ByteArrayInputStream("Build it acme's way.\n".getBytes(UTF_8)),
+                  0644);
+        });
+    operations.useControlPlane(
+        db,
+        tempDir,
+        new SyncOperations(
+            db,
+            "box",
+            tempDir,
+            () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
+            target -> {
+              throw new IOException("main unavailable");
+            }));
+
+    assertEquals(
+        "Build it acme's way.",
+        operations.stageSkills().resolve("acme", "acme-build").body(),
+        "the loop's controller reads skills through the same instance the launcher does");
+    assertInstanceOf(
+        DispatchOperations.Dispatched.class,
+        DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
+    var run = new RunStore(db).listForProject("acme").getFirst();
+    assertTrue(
+        run.task()
+            .contains(
+                "## How to do this work (skill: acme-build)\n\nBuild it acme's way.\n\n"
+                    + "## Autonomous Operation"),
+        run.task());
+    assertTrue(
+        shell.invocations.stream()
+            .anyMatch(
+                command ->
+                    command.startsWith("incus file push")
+                        && command.endsWith(
+                            "acme/home/dev/.claude/.sail-stage-build-acme-build."
+                                + run.id()
+                                + "/SKILL.md")),
+        "the build's skill is installed from the project's files: " + shell.invocations);
+  }
+
+  @Test
   void cliConstructionPathRecordsTheRunStampsTheBranchAndAnswersRuns() throws Exception {
     var events = new ArrayList<Event>();
     var operations = cliOperations(shell(), events);
@@ -305,6 +367,8 @@ class DispatchCommandWiringTest {
           StageSkillInstaller.fingerprint(BuiltInSkills.of(StageSkill.BUILD).orElseThrow()));
     }
 
+    final List<String> invocations = new ArrayList<>();
+
     StubShell on(String pattern, String stdout) {
       scripts.put(pattern, new Result(0, stdout, ""));
       return this;
@@ -313,6 +377,7 @@ class DispatchCommandWiringTest {
     @Override
     public Result exec(List<String> command) {
       var joined = String.join(" ", command);
+      invocations.add(joined);
       for (var entry : scripts.entrySet()) {
         if (joined.contains(entry.getKey())) {
           return entry.getValue();

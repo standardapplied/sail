@@ -325,7 +325,9 @@ public final class RunLauncher {
   /**
    * Installs the skill the stage was fired under where its harness looks for skills, from the same
    * files its prompt was made from. Failure aborts the launch: an agent told of a folder must find
-   * the skill it was told of there, not an older one or none.
+   * the skill it was told of there, not an older one or none. A skill whose files changed under the
+   * launch is refused in {@link StageSkills}' words, which say what to do; a container that could
+   * not take the files is told to be checked.
    */
   private void installSkill(LaunchSpec s) {
     var skill = s.skill();
@@ -336,8 +338,7 @@ public final class RunLauncher {
         "/home/"
             + s.config().sshUser()
             + "/"
-            + Harnesses.of(s.agentType()).skillsDir()
-            + skill.name();
+            + Harnesses.of(s.agentType()).skillFolder(skill.name());
     try {
       StageSkillInstaller.install(
           shell,
@@ -346,6 +347,8 @@ public final class RunLauncher {
           s.runId(),
           skill,
           file -> stageSkills.get().open(s.project(), skill, file));
+    } catch (IllegalStateException changed) {
+      throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, changed.getMessage());
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,

@@ -312,7 +312,13 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     assertEquals(
         List.of("sail-fix", "sail-review"),
         exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents/skills")).stdout().lines().toList(),
-        "each stage's skill is installed once, and no build folder is left beside them");
+        "each stage's skill is installed once, and no build folder is left among them");
+    assertTrue(
+        exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents"))
+            .stdout()
+            .lines()
+            .noneMatch(entry -> entry.startsWith(".sail-stage-build-")),
+        "and none is left beside the skills directory, where they are built");
 
     awaitEvent("review_completed");
     assertEquals(

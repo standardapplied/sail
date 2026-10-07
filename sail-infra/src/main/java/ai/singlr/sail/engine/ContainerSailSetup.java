@@ -89,7 +89,7 @@ public final class ContainerSailSetup {
       hooks.install(container, harness);
     }
     new SshdKeepalive(shell).install(container);
-    writeStamp(shell, container, expected);
+    writeStamp(shell, container, STAMP_PATH, expected);
     return Result.UPDATED;
   }
 
@@ -179,17 +179,16 @@ public final class ContainerSailSetup {
     return shell.exec(ContainerExec.asDevUser(container, command)).ok();
   }
 
-  private static void writeStamp(ShellExec shell, String container, String fingerprint)
+  /** Writes {@code fingerprint} to {@code path} in {@code container}, as the dev user. */
+  static void writeStamp(ShellExec shell, String container, String path, String fingerprint)
       throws IOException, InterruptedException, TimeoutException {
     var write =
         shell.exec(
             ContainerExec.asDevUser(
                 container,
-                List.of(
-                    "bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", fingerprint, STAMP_PATH)));
+                List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", fingerprint, path)));
     if (!write.ok()) {
-      throw new IOException(
-          "Failed to stamp " + STAMP_PATH + " in " + container + ": " + write.stderr());
+      throw new IOException("Failed to stamp " + path + " in " + container + ": " + write.stderr());
     }
   }
 }

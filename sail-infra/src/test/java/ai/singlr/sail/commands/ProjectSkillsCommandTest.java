@@ -245,6 +245,36 @@ class ProjectSkillsCommandTest {
   }
 
   @Test
+  void aColumnIsNeverNarrowerThanItsHeader() {
+    define(
+        "acme",
+        """
+        name: acme
+        agent:
+          type: claude-code
+          build_skill: b
+          review_pipeline:
+            fix_skill: f
+            stages:
+              - name: s
+                skill: r
+        """);
+
+    var listed = list("-p", "acme");
+
+    assertEquals(0, listed.exit());
+    assertEquals(
+        """
+          Stage skills: acme
+          STAGE  SKILL  SOURCE
+          build  b      missing
+          s      r      missing
+          fix    f      missing
+        """,
+        listed.out());
+  }
+
+  @Test
   void aPipelineBlockWithOnlyAFixSkillListsTheDefaultStageAndThatSkill() {
     define("acme", DEFAULTS + "  review_pipeline:\n    fix_skill: acme-fix\n");
     share(".sail/skills/acme-fix/SKILL.md", "Fix it acme's way.\n");

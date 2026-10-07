@@ -126,9 +126,12 @@ class StageSkillInstallerTest {
     return files;
   }
 
-  /** Where the launch of {@code runId} builds the skill before putting it in place. */
+  /**
+   * Where the launch of {@code runId} builds the skill before putting it in place: beside the
+   * skills directory, never in it.
+   */
   private Path build(String runId) {
-    return skillsDir.resolve(".sail-stage-build-acme-review." + runId);
+    return home.resolve(".claude/.sail-stage-build-acme-review." + runId);
   }
 
   /** Whether a launch holds the lock a replacement is made under. */
@@ -138,10 +141,21 @@ class StageSkillInstallerTest {
   }
 
   private List<String> besideTheFolder() throws IOException {
-    if (!Files.isDirectory(skillsDir)) {
+    return entriesOf(skillsDir);
+  }
+
+  /** What is beside the skills directory, where builds are made. */
+  private List<String> besideTheSkills() throws IOException {
+    return entriesOf(skillsDir.getParent()).stream()
+        .filter(entry -> !entry.equals("skills"))
+        .toList();
+  }
+
+  private static List<String> entriesOf(Path directory) throws IOException {
+    if (!Files.isDirectory(directory)) {
       return List.of();
     }
-    try (var entries = Files.list(skillsDir)) {
+    try (var entries = Files.list(directory)) {
       return entries.map(entry -> entry.getFileName().toString()).sorted().toList();
     }
   }
@@ -345,20 +359,25 @@ class StageSkillInstallerTest {
     var live = Files.createDirectories(build("live-run"));
     Files.writeString(live.resolve("SKILL.md"), "A launch is writing this now.");
     var neighbour =
-        Files.createDirectories(skillsDir.resolve(".sail-stage-build-acme-review-two.old-run"));
-    var anHourAndABit = Instant.now().minus(Duration.ofMinutes(61));
-    Files.setLastModifiedTime(dead, FileTime.from(anHourAndABit));
-    Files.setLastModifiedTime(neighbour, FileTime.from(anHourAndABit));
+        Files.createDirectories(
+            skillsDir.getParent().resolve(".sail-stage-build-acme-review-two.old-run"));
+    var deeper =
+        Files.createDirectories(skillsDir.resolve("other/.sail-stage-build-acme-review.old-run"));
+    var stale =
+        Instant.now().minus(Duration.ofMinutes(StageSkillInstaller.STALE_BUILD_MINUTES + 1));
+    Files.setLastModifiedTime(dead, FileTime.from(stale));
+    Files.setLastModifiedTime(neighbour, FileTime.from(stale));
+    Files.setLastModifiedTime(deeper, FileTime.from(stale));
 
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
     assertEquals(
         List.of(
-            ".sail-stage-build-acme-review-two.old-run",
-            ".sail-stage-build-acme-review.live-run",
-            "acme-review"),
-        besideTheFolder(),
+            ".sail-stage-build-acme-review-two.old-run", ".sail-stage-build-acme-review.live-run"),
+        besideTheSkills(),
         "only this skill's build folders are swept, and only those old enough to be dead");
+    assertEquals(List.of("acme-review", "other"), besideTheFolder(), "the skills are not swept");
+    assertTrue(Files.isDirectory(deeper), "a build folder's name deeper down is not a build");
   }
 
   @Test
@@ -373,15 +392,27 @@ class StageSkillInstallerTest {
     assertEquals(Map.of("SKILL.md", "A rule of the project's."), read(rule));
   }
 
+  /**
+   * A live launch's build folder keeps its modification time from its last top-level entry, so a
+   * launch slow for hours must still find its build: the age is a day, not an hour.
+   */
   @Test
-  void aBuildFolderJustUnderTheStaleAgeIsLeft() throws Exception {
-    var recent = Files.createDirectories(build("slow-run"));
-    Files.setLastModifiedTime(recent, FileTime.from(Instant.now().minus(Duration.ofMinutes(58))));
+  void aBuildFolderYoungerThanADayIsLeftHoweverSlowItsLaunch() throws Exception {
+    var slow = Files.createDirectories(build("slow-run"));
+    Files.setLastModifiedTime(slow, FileTime.from(Instant.now().minus(Duration.ofHours(3))));
+    var slower = Files.createDirectories(build("slower-run"));
+    Files.setLastModifiedTime(
+        slower,
+        FileTime.from(
+            Instant.now().minus(Duration.ofMinutes(StageSkillInstaller.STALE_BUILD_MINUTES - 2))));
 
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
     assertEquals(
-        List.of(".sail-stage-build-acme-review.slow-run", "acme-review"), besideTheFolder());
+        List.of(
+            ".sail-stage-build-acme-review.slow-run", ".sail-stage-build-acme-review.slower-run"),
+        besideTheSkills());
+    assertEquals(List.of("acme-review"), besideTheFolder());
   }
 
   @Test
@@ -415,6 +446,7 @@ class StageSkillInstallerTest {
         "and deleted nothing of the build the other launch was still writing");
     assertEquals(whole, installed(), "the launch that landed last left a whole folder too");
     assertEquals(List.of("acme-review"), besideTheFolder());
+    assertEquals(List.of(), besideTheSkills(), "and neither build is left");
 
     container.commands.clear();
     install("run-c", changed);
@@ -513,7 +545,10 @@ class StageSkillInstallerTest {
     steps.put("find", "Failed to clear stale builds of skill 'acme-review' in acme: refused");
     steps.put("mkdir -p", "Failed to create " + build("run-1") + ": refused");
     steps.put("file push", "Failed to push file to " + build("run-1") + "/SKILL.md: refused");
-    steps.put("printf '%s'", "Failed to stamp skill 'acme-review' in acme: refused");
+    steps.put("printf '%s'", "Failed to stamp " + build("run-1") + "/.sail-skill in acme: refused");
+    steps.put(
+        "mkdir -p " + skillsDir,
+        "Failed to make the skills directory for skill 'acme-review' in acme: refused");
     steps.put("mv -T", "Failed to put in place skill 'acme-review' in acme: refused");
 
     for (var step : steps.entrySet()) {
@@ -524,6 +559,7 @@ class StageSkillInstallerTest {
       assertEquals(step.getValue(), failed.getMessage());
       assertEquals(before, installed(), "after a failed " + step.getKey());
       assertEquals(List.of("acme-review"), besideTheFolder(), "after a failed " + step.getKey());
+      assertEquals(List.of(), besideTheSkills(), "after a failed " + step.getKey());
     }
   }
 
