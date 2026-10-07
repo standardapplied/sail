@@ -30,6 +30,15 @@ the findings every box now holds as its content. Upgrade main first, then nodes;
 touches data, with an error naming the remedy. Migrations resume after an interruption, and
 startup finishes them before serving requests or syncing.
 
+### The release CI upgrades from
+
+CI rehearses `sail upgrade` from a published release to the build under test (`NativeFleetIT`,
+`UpgradeE2EIT`). That release is the tag written in `.github/released-tag`, never the latest one,
+so publishing a release changes no open pull request's checks. Cutting a release therefore has one
+more step: once `vX` is published and main is green, set `.github/released-tag` to `vX` in a commit
+of its own (`ci: the fleet upgrades from vX`), through a pull request whose checks are the first to
+upgrade from `vX`. Until that commit merges, every branch keeps upgrading from the previous pin.
+
 ## The model: one main, many nodes
 
 An org runs one main box. It holds the team's specs and project definitions in a SQLite

@@ -1884,6 +1884,49 @@ these roles distinct is what lets the synced catalog stay identity-free.
 
 See `SECURITY_AUDIT.md` for the full checklist and the accepted risks.
 
+## Continuous integration
+
+One workflow, `.github/workflows/ci.yml`, runs on a pull request, on a push to main and on
+`workflow_dispatch`. Its five jobs start together and none waits on another, so a check resolves
+when its own work does:
+
+| Check | What it runs | What it needs |
+|---|---|---|
+| `Unit tests and quality gates` | the wildcard-import check, then `mvn clean verify`: every unit test, the JaCoCo gates, spotless | nothing else; it is the unit verdict |
+| `Dependency scan` | OWASP dependency-check, offline against a cached NVD database refreshed best-effort | the NVD cache |
+| `Native fleet sync tests` | `NativeFleetIT`: sync end to end on native binaries in Podman boxes | the candidate and the released binary |
+| `Multi-node control-plane integration tests` | every `*IT` that runs without incus | the runner's systemd user manager |
+| `Incus-backed integration tests` | every `*IT` but `NativeFleetIT`, on a real incus | incus, the candidate and the released binary |
+
+- **Surefire runs in one job.** Every failsafe job passes `-Dtest=NoUnitTests
+  -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit suite and the coverage
+  gates are the unit job's, and a job that ran them again would only delay its own verdict.
+  `sail-infra`, the module with half the suite, runs its tests on two forks
+  (`forkCount=2`, `reuseForks=true` in its pom): measured on one commit, 10.0 → 8.1 minutes for
+  the job, green ten of ten. A test that cannot share a runner with another class belongs to a
+  fork of its own, not to a slower suite.
+- **The native image is built only where a test needs it.** The `native-binaries` action is
+  used by the native fleet job and the incus job, and by no other.
+- **The released binary is pinned.** The two fleet suites upgrade from a published release to the
+  candidate. Which release is the one line of `.github/released-tag`, read by the
+  `native-binaries` action before it builds anything, so a pin that names no release fails in
+  seconds naming the file, and publishing a release changes no branch's checks. The pin follows
+  the previous release, the hop a current fleet makes, and moves in a commit of its own after
+  each release (see the README). It is not the schema floor: `SchemaManager.FLOOR_VERSION`
+  stays the oldest schema an upgrade starts from, and the suites' legacy fixtures reset the
+  state they depend on before the hop, so what they prove does not depend on how old the pin is.
+- **A job leaves its evidence.** Each job that runs tests tees its maven log and ends with the
+  `test-evidence` action. The job summary holds how many test classes finished, the `Tests run:`
+  totals of each module and every `<<< FAILURE!` and `<<< ERROR!` line, also for a maven that was
+  killed before it printed a summary; the same lines are the last of the job's log, since a job
+  summary has no API. A job that did not pass, cancelled at its time limit included, uploads its
+  surefire and failsafe reports as the artifact `<job>-test-reports` (`verify`, `native-fleet`,
+  `fleet-integration`, `incus-integration`): `gh run download <runId> -n <job>-test-reports`.
+- **`gh run view --log` truncates.** It shows about the last 5,000 lines of a job, which for
+  these jobs can leave out the failure. The complete log is `gh api
+  repos/<owner>/<repo>/actions/jobs/<jobId>/logs`, with the job ids from `gh run view <runId>
+  --json jobs`.
+
 ## Known gaps and evolution
 
 These are the deliberate edges between today's tool and the multi-FDE platform that must

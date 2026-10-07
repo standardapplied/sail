@@ -1,0 +1,26 @@
+name: systemd user manager
+description: >
+  Makes the runner's own systemd --user reachable from the test process: the pty host's
+  descriptor-store tests run the real unit under it. Linger keeps that manager alive without a
+  login session, and the bus/runtime variables let the test process talk to it. A missing
+  manager fails here, before maven, with the reason in the log.
+
+runs:
+  using: composite
+  steps:
+    - name: Enable the runner's systemd user manager
+      shell: bash
+      run: |
+        sudo loginctl enable-linger "$USER"
+        echo "XDG_RUNTIME_DIR=/run/user/$(id -u)" >> "$GITHUB_ENV"
+        echo "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$(id -u)/bus" >> "$GITHUB_ENV"
+        export XDG_RUNTIME_DIR="/run/user/$(id -u)"
+        export DBUS_SESSION_BUS_ADDRESS="unix:path=$XDG_RUNTIME_DIR/bus"
+        for i in $(seq 1 30); do
+          [ -S "$XDG_RUNTIME_DIR/bus" ] && break
+          sleep 1
+        done
+        systemctl --version
+        state="$(systemctl --user is-system-running || true)"
+        echo "user manager: $state"
+        [ "$state" = running ] || [ "$state" = degraded ]
