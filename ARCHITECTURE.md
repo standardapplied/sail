@@ -1901,6 +1901,10 @@ when its own work does:
 - **Surefire runs in one job.** Every failsafe job passes `-Dtest=NoUnitTests
   -Dsurefire.failIfNoSpecifiedTests=false -Djacoco.skip=true`: the unit suite and the coverage
   gates are the unit job's, and a job that ran them again would only delay its own verdict.
+  `sail-infra`, the module with half the suite, runs its tests on two forks
+  (`forkCount=2`, `reuseForks=true` in its pom): measured on one commit, 10.0 → 8.1 minutes for
+  the job, green ten of ten. A test that cannot share a runner with another class belongs to a
+  fork of its own, not to a slower suite.
 - **The native image is built only where a test needs it.** The `native-binaries` action is
   used by the native fleet job and the incus job, and by no other.
 - **The released binary is pinned.** The two fleet suites upgrade from a published release to the
