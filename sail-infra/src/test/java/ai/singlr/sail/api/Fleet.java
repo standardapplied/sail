@@ -110,10 +110,15 @@ public final class Fleet implements AutoCloseable {
   }
 
   public Box node(String handle, Box expectedMain) throws Exception {
+    return node(handle, expectedMain, "member");
+  }
+
+  /** A node whose FDE main's roster gives {@code role}. */
+  public Box node(String handle, Box expectedMain, String role) throws Exception {
     if (main == null || main != expectedMain) {
       throw new IllegalArgumentException("Node must reference this fleet's main box");
     }
-    var fde = main.fdes.add(handle, handle, handle + "@example.dev", "member");
+    var fde = main.fdes.add(handle, handle, handle + "@example.dev", role);
     var token = new AuthSessionStore(main.db).create(fde.id(), Duration.ofHours(1)).token();
     var node = createBox(handle, false);
     writeSshShim(node, token);

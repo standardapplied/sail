@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -54,11 +53,10 @@ class AuthorizationTest {
   }
 
   @Test
-  void viewerCannotWrite() throws Exception {
+  void theRouteAdmitsAViewersWriteToTheOperationWhoseRuleDecidesIt() throws Exception {
     var viewer = tokenStore.create("v", "viewer").token();
-    var response = send("POST", "/v1/specs", viewer, "{}");
-    assertEquals(403, response.statusCode());
-    assertTrue(response.body().contains("forbidden"), response.body());
+    assertNotEquals(403, send("POST", "/v1/specs", viewer, "{}").statusCode());
+    assertNotEquals(403, send("POST", "/v1/projects/acme/dispatch", viewer, "{}").statusCode());
   }
 
   @Test
@@ -85,14 +83,6 @@ class AuthorizationTest {
     var member = tokenStore.create("m", "member").token();
     var response = send("POST", "/v1/projects/acme/dispatch", member, "{}");
     assertNotEquals(403, response.statusCode(), response.body());
-  }
-
-  @Test
-  void viewerCannotDispatch() throws Exception {
-    var viewer = tokenStore.create("v", "viewer").token();
-    var response = send("POST", "/v1/projects/acme/dispatch", viewer, "{}");
-    assertEquals(403, response.statusCode(), response.body());
-    assertTrue(response.body().contains("forbidden"), response.body());
   }
 
   @Test

@@ -187,10 +187,10 @@ and the spec that closes it.
 | I2 | On a node only the box's FDE, its runs and FDE-less credentials write; any other credential reads. | `RoleRuleTest`, `NodeWritesTest`, `DeniedSyncTest` |
 | I3 | Main and the node agree who the node is, and one box syncs as each FDE. | `NodeIdentitySyncTest`, `SyncServerCommandTest` (main's own FDE), `FdeCommandTest` (`release-box`) |
 | I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps; never another box's run), `SyncConfigTest` (one handle), `HandleChangeTest`, `JoinCommandTest`, `HostConfigSetCommandTest`, `HostSyncCommandTest`, `RoomWakeLaunchTest` |
-| A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | `OneDecisionTest` (spec edits, posts); open for every door: `sail-journal-authority` |
-| A2 | No code path writes a synced row without its rule deciding it. | open: `sail-journal-authority` |
+| A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | the rules: `SpecAuthorityTest`, `RoomAuthorityTest`, `ReviewAuthorityTest`, `RunAuthorityTest` (a run is created only for the owner of the spec or room it names, on every lane), `MessageAuthorityTest`, `WriterAuthorityTest`, `ProjectAuthorityTest` (a rename is an admin's); the doors: `NodeWritesTest` (one refusal — kind, code, message and fix — through an API token, a passkey session, a gateway session, the box credential, a run and a room run; the terminal keeps its own text), `AuthorityAuditTest` (a viewer's edit over HTTP as on the host CLI; a room's delete and its membership; a spec born over its owner's room at the door as on main; a merged resolve), `SailOperationsSeamTest` (a resolve: adopting main's side decides nothing, keeping or merging is an edit, on the socket and both web lanes), `CatalogAuthorityAuditTest` (the host CLI's catalog edit, project files and rename), `AdhocDispatchTest` (ad-hoc runs), `OneDecisionTest` (spec edits, posts); main: `PushAuthoritySyncTest` (a pushed run on another FDE's spec is denied, and so is one naming its own spec and another member's room; one ahead of a spec its box made lands), `DeniedSyncTest` |
+| A2 | No code path writes a synced row without its rule deciding it: a pushed revision at main's commit, every other write at the journal, each exactly once. | `JournalDecidesEveryWriteTest` (every public store method that reaches the journal, read from the stores' bytecode, is refused on the CLI, API, agent and room lanes and leaves nothing; a revision never admits itself; a refusal swallowed inside a transaction still rolls it back; a pushed revision is not decided twice), `OneDecisionPointTest` (in every module's classes only the journal and the message store append a revision, only they ask a write rule, and only main's commit takes a store's rule), `RevisionJournalTest`, `SqliteTest` (a doomed transaction); an operation's rows commit together or not at all: `GlobalSpecOperationsTest` (an update with its wake; the move to done; a delete), `ReviewOperationsTest` (a follow-up with its links), `BuildDispatchCoverageTest` (a dispatch and a restart: reservation, reset, claim, supersede), `SpecPruneTest` (a restore with its room) |
 | A3 | An event, hook or reactor never makes the machinery do what its sender could not. | the rule: `EventAuthorityTest` (every listed type and rule; every unlisted type refused; a run decides what its event is about and its spec whose it is; only this box's FDE reports what this box observed); both doors with the real subscribers behind them: `EventDoorTest` (a member's stop, completion, failure and review evidence for another member's spec, run or room never reach the bus, so the spec stays, the run stays and the reconciler still rescues; a run a member pushed is no key to another member's spec; an owner is not taken at their word for what this box observed; an owner's retelling and an admin's report land; a run publishes only its hooks; the server's clock, publisher and stored message replace the sender's); every real publisher through its own code path: `EventPublishersTest` (the host CLI's dispatch, restart, ad-hoc run and stop, the watcher's stop, a node's sync announcement, main's sync bridge relaying as the FDE who pushed, and refusing a pushed run on another member's spec); the socket's scoping to the credential's run: `LocalApiRouterTest`, `AgentPrincipalLifecycleTest` |
-| A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest`, `EraseRequestTest`, `SpecPruneTest`; purge case open: `sail-journal-authority` |
+| A4 | Local prune and main's erase-on-request ask one erase rule, and only main writes erasures. | `EraseAuthorityTest` (a project purged whole never waits for a run; anything narrower does), `EraseRequestTest`, `SpecPruneTest` (a purge takes a project's runs, going or not) |
 | T1 | Every box records the same author for the same revision, and a revision names only whom its writer may write as. | `PushAuthoritySyncTest`, `CreatorSyncTest` (a revision main recorded with no author), `WireAuthorSyncTest`, `ConvergenceSyncTest` (a resolve holds main's revision under main's author, a deletion's included), `ConflictOperationsTest`, `MessageSyncTest` and `ReplyChainSyncTest` (a message under its poster), `ProjectSyncTest` (a rename's deletion under its deleter), `NativeFleetIT` (change-log heads) |
 | T2 | A spec's and a room's creator is written once, restores included, and every box holds the same one. | `PushAuthoritySyncTest` (spec and room restores), `ConvergenceSyncTest` (restored and re-created on another box), every sync test through `SyncBox.assertEqualToMain` |
 | L1 | Every offer settles within a bounded number of rounds; no type's round fails forever. | `LivenessAuditTest` (posts, born-in specs, reviews, oversized files, a commit that throws beside an accepted offer, an erased project, a room deleted after or before its sync; every settlement within a stated number of rounds, ending equal to main), `SyncRpcServerTest` (a throwing commit is that offer's refusal), `SyncContentFailureTest` |
@@ -1642,12 +1642,13 @@ missed-stop reconciler finishes its run.
 
 Holding a relayed run to the owner of the spec it works, never to the FDE who pushed it,
 has one cost: a spec an admin reassigns while another FDE's box is still running it loses
-that run's relayed stop on main, since main cannot tell that run from one its pusher wrote
-against a spec they never owned. The run finishes on its own box; main records nothing of
-it, and since that box's move of the spec to review is denied on the sync lane for the same
-reason, the spec stays `in_progress` on both boxes until an admin moves it. A run create rule
-on the sync lane (`sail-journal-authority`) is where a pushed run comes to prove it works a
-spec its owner held when it was reserved.
+that run's relayed stop on main. The run finishes on its own box and main takes its stop as
+that box's; nothing of it is announced there, and since that box's move of the spec to
+review is denied on the sync lane, the spec stays `in_progress` on both boxes until an admin
+moves it. A run itself proves at its birth that its box's FDE owned the spec it names (the
+run rule, below), so no run main holds was ever started against a spec its pusher did not
+own, and the next run that box starts on the reassigned spec is denied on its push, where
+the node sees it.
 
 What each type drives, which is why its sender is checked: `SpecLifecycleReactor` moves a spec
 to `review` on `agent_session_stopped`; `ReviewPipelineController` starts a review on one this
@@ -1748,7 +1749,13 @@ these roles distinct is what lets the synced catalog stay identity-free.
     alike on every box. Owning a spec born in a room is a voice there, never its settings.
   - **Who owns a run** (`RunAuthority.owners`): the FDE the run acts for, and its spec's owner
     (for a spec-less run, the box that ran it). Its owners or an admin read its log, stop it and
-    change it; a run's own FDE keeps it after its spec is reassigned.
+    change it; a run's own FDE keeps it after its spec is reassigned. A run is born only for
+    the owner of the work it names — its spec's owner, a spec-less room's (`RoomStore.ownerOf`),
+    or, naming neither, the FDE it acts for — or by an admin, on this box's lanes and pushed
+    alike. It names a spec or a spec-less room, never both, whoever asks: a run on a spec its
+    pusher owns never enters a room that is someone else's. Runs sync before specs and rooms,
+    so one that reaches main ahead of a spec or room its own box made is that box's until they
+    land.
 
   A spec left without an assignee stays unassigned, and so does its identity room; any member
   may claim it by assigning it to themselves, an agent for the FDE it acts for, and dispatch
@@ -1762,30 +1769,76 @@ these roles distinct is what lets the synced catalog stay identity-free.
   node-born create names none, and fills a creator it never recorded only from that creator's
   own push; a node adopts main's, the pushing node from the creator main names when it accepts
   the push.
-- **One rule per type, asked by the doors and by main's commit.** Who may write a synced row
-  is one `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared by its
-  store (`SyncedStore.authority`): `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
-  `RunAuthority`, `MessageAuthority`, and `WriterAuthority` for files and projects. A rule reads
-  the type's synced projection — `held`, what this box holds (the last live state over a
-  tombstone), and `next`, the revision (null for a tombstone) — may read this box's database for
-  owners, never writes, and reads an owner of the row it decides from `held`, so a revision never
-  admits itself. It answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `ADMIN_ONLY`, `NOT_AUTHOR`,
-  `FIXED`, and the erase rule's `NOT_PRUNABLE`) with the message and fix clients see. `MAIN` and `SYSTEM` always pass; a read-only
-  role is refused, except a run's principal reporting its own session and a room principal
-  posting where the posting rule lets it.
-  - **The doors** ask the rule where they decide today — HTTP, the host CLI, the socket, the
-    terminal — and one translator (`Refusals`) turns a refusal into the error clients get.
-    Admission for side effects keeps its place (`DispatchPolicy`, `LaunchAdmission`,
-    `RoomWakePolicy`, the run-owner rule for stop and logs), reading the same predicates.
+- **One rule per type, and each write decided once.** Who may write a synced row is one
+  `WriteAuthority` per type in sail-core (`ai.singlr.sail.authority`), declared by its store
+  (`SyncedStore.authority`): `SpecAuthority`, `RoomAuthority`, `ReviewAuthority`,
+  `RunAuthority`, `MessageAuthority`, `ProjectAuthority` (any writer; a rename, which moves
+  every spec and file of the project, an admin alone) and `WriterAuthority` for files. A rule
+  reads the type's synced projection — `held`, what this box holds, and `next`, the revision
+  (null for a tombstone, or a tombstone's marks) — may read this box's database for owners,
+  never writes, and reads whatever it derives from the row it decides from `held`, so a
+  revision never admits itself. `held` is the projection at the journal's head
+  (`RevisionJournal.held`: the last live state over a tombstone, nothing over a withdrawal or
+  an erasure), never the row, which the write being decided has already reached. A rule
+  answers a `Refusal` (`READ_ONLY`, `NOT_OWNER`, `ADMIN_ONLY`, `NOT_AUTHOR`, `FIXED`, and the
+  erase rule's `NOT_PRUNABLE`) with the message and fix clients see. `MAIN` and `SYSTEM`
+  always pass; a read-only role is refused, except a run's principal reporting its own
+  session and a room principal posting where the posting rule lets it. A write is decided at
+  exactly one of two points:
+  - **The journal** decides every write that is not a push, as its revision is recorded
+    (`RevisionJournal.recordRevision`, `recordTombstone`, and the chosen side of a resolved
+    conflict; `MessageStore.append` for a post), with the bound `Actor` on the `CLI`, `API`,
+    `AGENT` and `ROOM` lanes. A refusal throws `WriteRefused` and dooms the transaction
+    (`Sqlite.doomed`): everything the operation wrote rolls back, even if a caller in between
+    swallowed the exception. No door decides a row write, so none can forget to
+    (`OneDecisionPointTest`); a new store method that journals is decided without asking.
+    `stampActivity`, `Erasure.discard`, `ChangeLog.purge` and `compact`, and a box re-stamping
+    the runs it made (`RunStore.stamp`, as `SYSTEM`) record no decision of an actor's.
+  - **The doors** admit side effects only — HTTP, the host CLI, the socket, the terminal.
+    `DispatchPolicy`, `LaunchAdmission`'s box and lane checks, `RoomWakePolicy`, the run-owner
+    rule for stop and logs, and the posting rule for the terminal, engage and conversation
+    reports refuse before anything starts. Before a side effect the journal would then refuse
+    to record, a door asks the journal's own decision (`SpecStore.decide`, `RoomStore.decide`,
+    `ProjectStore.decide` and `decideRename`, one method the journal also runs): a stop that would cancel a spec,
+    a membership before its snapshot, a catalog edit before a command clones or starts
+    anything, a rename before its container is stopped, a file before its bytes are ingested. HTTP tiers a route for `READ`, and for
+    `ADMIN` where it administers the control plane, never for `WRITE`; a snapshot restored or
+    deleted, which no row's rule decides, is refused a read-only credential by its own
+    admission with the same refusal. One translator (`Refusals`) turns a refusal, thrown by
+    the journal or answered by an admission, into the error clients get, so a kind has one
+    code at every door: `READ_ONLY` → `read_only_credential`, `NOT_OWNER` →
+    `forbidden_not_assignee`, `ADMIN_ONLY` → `forbidden_admin_only`, `NOT_AUTHOR` →
+    `forbidden_not_author`, `FIXED` → `invalid_request`, `NOT_PRUNABLE` → `spec_not_prunable`,
+    `NOT_PUBLISHABLE` → `forbidden`. The socket answers a thrown refusal in HTTP's envelope
+    (code, message, fix); the terminal keeps its message-and-fix text.
+  - **An operation that writes several rows commits them once**, so a refusal of any row
+    leaves none: a spec's birth with its room, its update with its wake and the findings a
+    move into or out of `done` resolves, its delete and restore with its room, a follow-up
+    with its body and its links to the findings it was drafted from, a dispatch or restart
+    (the run's reservation, the reset, the claim and the superseded reviews), a rename, an
+    approval, the loop's pass and escalate, and a resolve (main's side adopted and the chosen
+    side written over it).
+  - **A resolve is decided like any edit.** Adopting main's side is main's revision and
+    decides no row, yet gives up what this box parked, so a read-only credential is refused it
+    and any that can write may; keeping this box's side or merging writes over main's version,
+    which the type's rule decides with `held` = main's version.
+  - **A spec's id is reserved for its own room by the spec rule**, at the door as on main: a
+    spec is born over a room holding its id only when that moves no ownership — the room is
+    already its owner's — or by an admin, and it then adopts that room and mints none. One born
+    in another room never is, whoever asks: a conversation is addressed spec-first, so the room
+    on its id would answer as the room the spec lives in.
   - **Main's commit** (`RevisionJournal`, `ProjectStore`, `MessageStore`, each handed the type's
     rule by `StoreReplica.commit`) asks it for every pushed revision with the pusher as the
     actor. On `SYNC` it also decides whom a revision names: its `_actor` is the pusher, `sail` or
     a principal of a run the pusher owns (a principal of a run main does not hold yet is refused,
     not denied, until the run lands); a create's creator is the pusher; a message's author is the
     pusher, its runs' principals, or `sail` where a run of its is in the conversation. A run is its
-    executing box's: `node` is the pusher, it acts for the pusher or no one, every principal names
-    the run itself, and a deleted run is never brought back; so a review run acts for the box's
-    own FDE. Blob presence is checked after the rule, not before: a denied offer's content is
+    executing box's: `node` is the pusher, it acts for the pusher, every principal names the run
+    itself, and a deleted run is never brought back; so a review run acts for the box's own FDE.
+    It is born only on a spec or room its pusher owns, by the rule the node's journal decided it
+    by, so a run pushed on another FDE's work is denied; one whose spec or room main holds
+    nothing of yet is its box's, and they follow in the same round. A rename is an admin's on
+    main as on the node. Blob presence is checked after the rule, not before: a denied offer's content is
     never uploaded, so a read-only session's push is denied, not refused for a missing blob, and
     an accepted one still lands only with its blob. A spec born in a room main has never held is
     refused, not denied, like a message there: specs sync before rooms, so the next round decides
@@ -1796,7 +1849,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
     review the node is still running; once it finishes, the denial settles it.
   - **The erase rule** (`EraseAuthority`) is one rule for a local prune and main's decision on a
     node's request: write capability, the owner or an admin, a whole project admin-only, a
-    prunable status, no unfinished run; on a request, only a spec or project main holds.
+    prunable status, no unfinished run — bar a project, which is purged whole once its
+    container is gone, its runs with it, and never waits (`EraseAuthority.idle`, the one place
+    that says so); on a request, only a spec or project main holds.
   - **A node's writes speak for its FDE.** On a node, `RoleRule` caps a credential naming any FDE
     but the box's own at `viewer`: only the box's FDE and the runs acting for it write there,
     because anything else would reach main as that FDE's on the box's session, and be denied.
@@ -2022,9 +2077,10 @@ Review every control-plane change with `CommandsUseTheSeamTest` and these search
   never a string or an argument a caller threads through. A write with nothing bound fails.
 - One owner rule (`Ownership.ownerOf`) and one role rule (`RoleRule`), each implemented once
   and read by every door: a second derivation of either is a bug.
-- One write rule per synced type (`ai.singlr.sail.authority`), implemented once in sail-core and
-  asked by every door that writes the type and by main's commit of every pushed revision: a
-  door that decides a write itself, or a commit that writes without asking, is a bug.
+- One write rule per synced type (`ai.singlr.sail.authority`), implemented once in sail-core,
+  and each write decided once: at main's commit when pushed, at the journal otherwise. A door
+  admits side effects only; a door that decides a row write, or a write that reaches a row
+  around the journal, is a bug.
 - Sync is CAS-safe, idempotent, order-independent, and conflict-parking, so local work is
   never lost. The `SyncEngine` is entity-agnostic, and a new synced entity adds a replica,
   not engine logic.

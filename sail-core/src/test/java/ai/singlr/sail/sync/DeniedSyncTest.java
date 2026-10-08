@@ -341,7 +341,7 @@ class DeniedSyncTest {
           INSERT INTO rooms (id, title, project, assignee, created_at, updated_at)
           VALUES ('home', 'Home', 'acme', 'ada', 'now', 'now')""");
     }
-    main.specs.create(SyncBox.spec("auth", "Auth", "pending"));
+    Acting.as("ada", () -> main.specs.create(SyncBox.spec("auth", "Auth", "pending")));
     round(ADA, "spec");
     for (var box : List.of(main, node)) {
       box.db.execute("UPDATE specs SET room_id = 'home' WHERE id = 'auth'");

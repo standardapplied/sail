@@ -19,6 +19,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -957,8 +958,8 @@ class ConvergenceSyncTest {
     SyncBox.round(main, ada);
     var runId = run(ada, "ada", "s");
     ada.db.execute("INSERT INTO run_principals (run_id, principal) VALUES (?, 'bob')", runId);
-    Acting.as("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
-    Acting.as("ada", () -> new MessageStore(ada.db).append("s", "bob", "as bob", null));
+    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+    Acting.unchecked("ada", () -> new MessageStore(ada.db).append("s", "bob", "as bob", null));
 
     SyncBox.round(main, ada);
 
@@ -976,7 +977,7 @@ class ConvergenceSyncTest {
     var agent =
         Actor.agentPrincipal(new RunStore(ada.db).findById(runId).orElseThrow().principal(), "ada");
     Acting.by(agent, () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
-    Acting.as("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
+    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(runId, "completed", 0));
 
     SyncBox.round(main, ada);
 
@@ -1043,8 +1044,10 @@ class ConvergenceSyncTest {
     Acting.as(as, () -> new ProjectStore(box.db).upsert(name, definition));
   }
 
+  /** Renames as {@code as}, an admin whose box then syncs as one: a rename is an admin's alone. */
   private static void renameProject(SyncBox box, String as, String from, String to) {
     Acting.as(as, () -> new ProjectStore(box.db).rename(from, to, "name: " + to + "\n"));
+    box.syncsAs(Actor.sync(as, Role.ADMIN));
   }
 
   private static String definition(SyncBox box, String name) {

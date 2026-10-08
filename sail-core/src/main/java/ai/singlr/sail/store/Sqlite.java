@@ -61,6 +61,7 @@ public final class Sqlite implements AutoCloseable {
   private final ReentrantLock lock = new ReentrantLock();
   private int transactionDepth;
   private boolean writeLocked;
+  private RuntimeException doom;
   private volatile boolean closed;
   private Path path;
   final BlobRetention contentRetention = new BlobRetention(null);
@@ -267,6 +268,9 @@ public final class Sqlite implements AutoCloseable {
       writeLocked = begin.equals("BEGIN IMMEDIATE");
       try {
         var result = work.get();
+        if (doom != null) {
+          throw doom;
+        }
         execute(commit ? "COMMIT" : "ROLLBACK");
         return result;
       } catch (Exception e) {
@@ -278,7 +282,26 @@ public final class Sqlite implements AutoCloseable {
         throw e;
       } finally {
         transactionDepth = 0;
+        doom = null;
       }
+    } finally {
+      lock.unlock();
+    }
+  }
+
+  /**
+   * Dooms the transaction the calling thread is in, and answers {@code cause} for the caller to
+   * throw: the outermost scope rolls back and throws {@code cause} even when a scope in between
+   * swallowed it, so what was written before a refusal can never commit without what was refused.
+   * Outside a transaction there is nothing to doom.
+   */
+  public <X extends RuntimeException> X doomed(X cause) {
+    lock.lock();
+    try {
+      if (transactionDepth > 0 && doom == null) {
+        doom = cause;
+      }
+      return cause;
     } finally {
       lock.unlock();
     }

@@ -191,6 +191,11 @@ final class HostLanes {
     }
 
     @Override
+    public void requireRenamable(String from) {
+      Refusals.enforce(Actor.call(operator.get(), () -> new ProjectStore(db).decideRename(from)));
+    }
+
+    @Override
     public Renamed rename(String from, String to) {
       return Actor.call(operator.get(), () -> ProjectCatalogRename.rename(db, from, to));
     }

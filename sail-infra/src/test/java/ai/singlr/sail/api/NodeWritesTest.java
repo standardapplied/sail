@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -44,13 +45,27 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * A node's writes speak for its FDE. On Ada's node, Raj — an admin on main — reads through every
  * door and writes through none: his API token, his passkey session, a session his gateway key
- * mints, his box credential and his terminal. Ada, the runs acting for her, and a credential naming
+ * mints, his box credential, a run acting for him and his terminal. Every door but the terminal,
+ * which keeps its own text, answers the spec rule's one refusal — the same kind, code, message and
+ * fix — and so does a room run of Ada's own. Ada, the runs acting for her, and a credential naming
  * no FDE write as before.
  */
 class NodeWritesTest {
 
   private static final SyncConfig ADAS_NODE = new SyncConfig("node", "sail@main", "ada", "ada-box");
   private static final String CREATE = "{\"id\":\"%s\",\"project\":\"acme\",\"title\":\"T\"}";
+
+  /** The spec rule's read-only refusal as every door's envelope carries it: one kind, one code. */
+  private static final Map<String, Object> READ_ONLY =
+      Map.of(
+          "code",
+          "read_only_credential",
+          "message",
+          "Your credential is read-only and cannot change specs.",
+          "action",
+          "Ask an admin for a member or admin credential.",
+          "field_errors",
+          List.of());
 
   private static final ShellExec SHELL =
       new ShellExec() {
@@ -135,15 +150,17 @@ class NodeWritesTest {
       assertEquals(200, http("GET", "/v1/specs", credential, "").statusCode());
       var write = http("POST", "/v1/specs", credential, CREATE.formatted(nextId()));
       assertEquals(403, write.statusCode(), write.body());
-      assertTrue(write.body().contains("lacks the 'write' capability"), write.body());
+      assertEquals(READ_ONLY, YamlUtil.parseMap(write.body()).get("error"), "over HTTP");
     }
-    assertEquals(200, socket("GET", "/v1/specs", boxCredential, "").status());
-    var socket = socket("POST", "/v1/specs", boxCredential, "id=boxed&project=acme&title=T");
-    assertEquals(403, socket.status(), socket.body().toString());
-    assertEquals(
-        "read_only_credential",
-        assertInstanceOf(Map.class, socket.body().get("error")).get("code"),
-        "the spec rule refuses a read-only credential's create on the socket");
+    for (var credential : List.of(boxCredential, reserveRun("raj", "build"))) {
+      assertEquals(200, socket("GET", "/v1/specs", credential, "").status());
+      var write = socket("POST", "/v1/specs", credential, form());
+      assertEquals(403, write.status(), write.body().toString());
+      assertEquals(READ_ONLY, write.body().get("error"), "the same refusal on the socket");
+    }
+    var roomRun = socket("POST", "/v1/specs", reserveRun("ada", "room"), form());
+    assertEquals(403, roomRun.status(), roomRun.body().toString());
+    assertEquals(READ_ONLY, roomRun.body().get("error"), "and for a room run of the box's own FDE");
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
     var identity = access.identity(session, null);
     assertFalse(identity.admin(), "the terminal names no admin");
@@ -166,7 +183,7 @@ class NodeWritesTest {
     assertEquals(
         201,
         socket("POST", "/v1/specs", new BoxCredentialStore(db).replace("ada"), form()).status());
-    assertEquals(201, socket("POST", "/v1/specs", reserveRun(), form()).status());
+    assertEquals(201, socket("POST", "/v1/specs", reserveRun("ada", "build"), form()).status());
     var access = new HostAccess(db, TestAuth.roles(db, ADAS_NODE));
     access.admit("adas", "acme", access.identity(null, "ada"));
     assertEquals(5, count());
@@ -222,7 +239,7 @@ class NodeWritesTest {
                 form.getBytes(StandardCharsets.UTF_8)));
   }
 
-  private String reserveRun() {
+  private String reserveRun(String boxHandle, String role) {
     var id = DateTimeUtils.newId().toString();
     var reservation =
         Acting.system(
@@ -231,9 +248,9 @@ class NodeWritesTest {
                     .reserveDispatch(
                         id,
                         "acme",
-                        "seed",
-                        "ada",
-                        "build",
+                        "seed-" + id,
+                        boxHandle,
+                        role,
                         List.of(),
                         "claude-code",
                         "feat/x",

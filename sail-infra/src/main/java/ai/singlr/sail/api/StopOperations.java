@@ -552,18 +552,18 @@ public final class StopOperations {
   }
 
   /**
-   * Whether this stop cancels {@code spec}: work still in flight, which the stopper may change by
-   * the spec rule. The FDE whose box runs an agent may stop it after its spec moved to someone
-   * else; the run stops and the spec is left to its new owner.
+   * Whether this stop cancels {@code spec}: work still in flight, whose cancellation the journal
+   * will take from the stopper, asked before the run is signalled. The FDE whose box runs an agent
+   * may stop it after its spec moved to someone else; the run stops and the spec is left to its new
+   * owner.
    */
   private boolean mayCancel(SpecStore.SpecRow spec) {
     if (!cancelable(spec)) {
       return false;
     }
-    var held = specStore.held(spec.id());
-    var cancelled = new LinkedHashMap<>(held);
+    var cancelled = new LinkedHashMap<>(specStore.held(spec.id()));
     cancelled.put("status", SpecStatus.CANCELLED.wire());
-    return specStore.authority().decide(Actor.current(), spec.id(), held, cancelled).isEmpty();
+    return specStore.decide(spec.id(), cancelled).isEmpty();
   }
 
   /**

@@ -66,10 +66,10 @@ class SessionAwareAuthTest {
   }
 
   @Test
-  void viewerSessionCanReadButNotWrite() throws Exception {
+  void viewerSessionReadsAndItsWriteIsLeftToTheOperation() throws Exception {
     var session = sessionFor("viewer-fde", "viewer");
     assertEquals(200, send("GET", "/v1/specs/board", session).statusCode());
-    assertEquals(403, send("POST", "/v1/specs", session).statusCode());
+    assertNotEquals(403, send("POST", "/v1/specs", session).statusCode());
   }
 
   @Test

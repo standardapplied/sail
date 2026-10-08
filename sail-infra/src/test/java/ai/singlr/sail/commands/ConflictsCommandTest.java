@@ -239,7 +239,8 @@ class ConflictsCommandTest {
   }
 
   private void parkASpecAndItsRoomUnderOneId() {
-    Acting.system(
+    Acting.as(
+        "node",
         () -> {
           new SpecStore(db).create(SyncBox.spec("auth", "node title", "pending"));
           new RoomStore(db).ensureFor("auth", "proj", "Auth", "uday", "mention");

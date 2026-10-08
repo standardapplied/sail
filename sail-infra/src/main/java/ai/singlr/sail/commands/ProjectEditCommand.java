@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -65,6 +66,7 @@ public final class ProjectEditCommand implements Runnable {
   private void execute() throws Exception {
     NameValidator.requireValidProjectName(name);
     var operator = CliOperator.current();
+    ProjectCatalog.requireRecordable(name, operator);
     var current =
         ProjectDefinitions.definition(name, null)
             .orElseThrow(

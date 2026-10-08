@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -79,6 +81,22 @@ class GlobalSpecOperationsTest {
   void createPersistsAuthenticatedAuthor() {
     Acting.by(UDAY_ADMIN, () -> ops.create(createReq(Map.of())));
     assertEquals("uday", ops.get("auth").spec().createdBy());
+  }
+
+  @Test
+  void aSpecBornWithABodyForSomeoneElseOrByAMachineIsDecidedOnceAsABirth() {
+    Acting.by(
+        UDAY,
+        () -> ops.create(createReq(Map.of("assignee", "alice", "body", "Do it", "plan", "Steps"))));
+    Acting.by(
+        new Actor(null, Role.MEMBER, Actor.Lane.API),
+        () -> ops.create(createReq(Map.of("id", "ci", "body", "From CI"))));
+
+    assertEquals("alice", ops.get("auth").spec().assignee());
+    assertEquals("Do it", ops.get("auth").body());
+    assertEquals("Steps", ops.get("auth").plan());
+    assertEquals("From CI", ops.get("ci").body());
+    assertEquals(1, ops.history("auth").revisions().size(), "a birth is one revision");
   }
 
   @Test
@@ -801,6 +819,77 @@ class GlobalSpecOperationsTest {
   }
 
   @Test
+  void aMoveToDoneWhoseLastRowFailsMovesNothing() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("status", "in_progress"))));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+    db.execute(
+        """
+        CREATE TRIGGER refuse_the_residue BEFORE INSERT ON review_findings
+        BEGIN SELECT RAISE(ABORT, 'the last row is refused'); END""");
+
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                Acting.by(
+                    ADMIN,
+                    () ->
+                        withRooms.update(
+                            "auth",
+                            SpecUpdateRequest.fromMap(
+                                Map.of("status", "done", "title", "Shipped", "wake", "off")))));
+
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
+    var spec = specStore.findById("auth").orElseThrow();
+    assertEquals(SpecStatus.IN_PROGRESS, spec.status(), "the row is not moved");
+    assertEquals("Auth", spec.title());
+    assertNull(rooms.findById("auth").orElseThrow().wake(), "nor its wake written");
+    assertEquals(
+        Finding.Resolution.OPEN, reviewStore.findingsForReview(reviewId).getFirst().resolution());
+  }
+
+  @Test
+  void aDeleteWhoseLastRowFailsDeletesNothing() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("status", "done"))));
+    var reviewId = seedPassedReviewWithOpenFinding("auth");
+    var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
+    Acting.by(
+        ADMIN,
+        () ->
+            withRooms.create(
+                createReq(Map.of("id", "auth-followup", "title", "Follow-up", "status", "done"))));
+    reviewStore.linkSourceFindings("auth-followup", List.of(findingId));
+    db.execute(
+        """
+        CREATE TRIGGER refuse_the_room BEFORE DELETE ON rooms
+        BEGIN SELECT RAISE(ABORT, 'the last row is refused'); END""");
+
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () -> Acting.by(ADMIN, () -> withRooms.delete("auth-followup")));
+
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
+    assertTrue(specStore.findById("auth-followup").isPresent(), "the spec is not deleted");
+    assertEquals(
+        Finding.Resolution.OPEN,
+        reviewStore.findingsForReview(reviewId).getFirst().resolution(),
+        "nor is the finding its shipping fixes resolved on the way out");
+  }
+
+  private static Throwable rootCause(Throwable thrown) {
+    var cause = thrown;
+    while (cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
+  }
+
+  @Test
   void updateWithoutDoneTransitionLeavesFindingsOpen() {
     Acting.by(ADMIN, () -> ops.create(createReq(Map.of("status", "done"))));
     var reviewId = seedPassedReviewWithOpenFinding("auth");
@@ -884,10 +973,10 @@ class GlobalSpecOperationsTest {
 
     var ex =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () -> Acting.by(bob, () -> ops.restore("auth", new SpecRestoreRequest(aliceRev))));
 
-    assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, ex.failure().errorCode());
+    assertEquals(Refusal.Kind.ADMIN_ONLY, ex.refusal().kind());
     assertEquals("bob", ops.get("auth").spec().assignee());
   }
 
@@ -1162,18 +1251,74 @@ class GlobalSpecOperationsTest {
                     null,
                     null,
                     "uday")));
+    var mallory = new Actor("mallory", Role.MEMBER, Actor.Lane.API);
     for (var request : List.of(createReq(Map.of()), createReq(Map.of("room_id", "auth")))) {
       var taken =
-          assertThrows(ApiException.class, () -> Acting.by(ADMIN, () -> withRooms.create(request)));
+          assertThrows(
+              WriteRefused.class, () -> Acting.by(mallory, () -> withRooms.create(request)));
       assertEquals(
-          ErrorCode.CONFLICT,
-          taken.failure().errorCode(),
-          "an existing room on the spec's own id is somebody's room, never a binding target");
-      assertTrue(taken.getMessage().contains("reserved"), taken.getMessage());
+          new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "Room 'auth' already exists, and a spec's id is reserved for its own room.",
+              "Pick another spec id."),
+          taken.refusal(),
+          "an existing room on the spec's own id is somebody's room: the spec rule's refusal");
     }
     assertTrue(specStore.findById("auth").isEmpty());
     assertEquals(
         "Auth talk", rooms.findById("auth").orElseThrow().title(), "the room is untouched");
+  }
+
+  @Test
+  void aSpecBornOverItsOwnersRoomOrByAnAdminAdoptsThatRoomAndMintsNone() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    Acting.as(
+        "uday",
+        () ->
+            rooms.create(
+                new RoomStore.RoomRow(
+                    "auth", "manatee", "Auth talk", "uday", "on", null, null, null, null, null)));
+    var revision = rooms.latestRev("auth");
+
+    Acting.by(UDAY, () -> withRooms.create(createReq(Map.of())));
+
+    assertEquals("auth", specStore.findById("auth").orElseThrow().roomIdOrIdentity());
+    assertEquals("Auth talk", rooms.findById("auth").orElseThrow().title(), "the room it adopts");
+    assertEquals(revision, rooms.latestRev("auth"), "no second room, and no write to this one");
+
+    Acting.by(UDAY, () -> withRooms.delete("auth"));
+    assertTrue(rooms.findById("auth").isEmpty(), "the room is the spec's now, and goes with it");
+  }
+
+  @Test
+  void aSpecBornInAnotherRoomNeverShadowsTheRoomOnItsId() {
+    var rooms = new RoomStore(db);
+    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    for (var id : List.of("auth", "lounge")) {
+      Acting.as(
+          "uday",
+          () ->
+              rooms.create(
+                  new RoomStore.RoomRow(
+                      id, "manatee", id + " talk", "uday", "on", null, null, null, null, null)));
+    }
+
+    for (var actor : List.of(UDAY, ADMIN)) {
+      var shadowing =
+          assertThrows(
+              WriteRefused.class,
+              () ->
+                  Acting.by(actor, () -> withRooms.create(createReq(Map.of("room_id", "lounge")))));
+      assertEquals(
+          new Refusal(
+              Refusal.Kind.NOT_OWNER,
+              "Room 'auth' already exists, and a spec's id is reserved for its own room.",
+              "Pick another spec id."),
+          shadowing.refusal(),
+          "room auth would answer as lounge");
+    }
+    assertTrue(specStore.findById("auth").isEmpty(), "a refused birth creates no spec");
   }
 
   @Test
@@ -1309,7 +1454,7 @@ class GlobalSpecOperationsTest {
 
     var refused =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () ->
                 Acting.by(
                     bob,
@@ -1319,7 +1464,7 @@ class GlobalSpecOperationsTest {
                             SpecUpdateRequest.fromMap(
                                 Map.of("wake", "off", "title", "Bob's retitle")))));
 
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertEquals(Refusal.Kind.NOT_OWNER, refused.refusal().kind());
     assertEquals("Room 'design-room' belongs to 'uday', not you.", refused.getMessage());
     assertEquals("on", rooms.findById("design-room").orElseThrow().wake());
     assertNotEquals(
@@ -1356,19 +1501,19 @@ class GlobalSpecOperationsTest {
 
     var explicit =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () ->
                 Acting.by(
                     mallory,
                     () ->
                         withRooms.create(
                             createReq(Map.of("room_id", "adas-room", "assignee", "mallory")))));
-    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, explicit.failure().errorCode());
+    assertEquals(Refusal.Kind.NOT_OWNER, explicit.refusal().kind());
     assertTrue(specStore.findById("auth").isEmpty(), "a refused binding creates no spec");
 
     var byId =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () ->
                 Acting.by(
                     mallory,
@@ -1376,19 +1521,19 @@ class GlobalSpecOperationsTest {
                         withRooms.create(
                             createReq(Map.of("id", "adas-room", "assignee", "mallory")))));
     assertEquals(
-        ErrorCode.CONFLICT,
-        byId.failure().errorCode(),
-        "a spec whose id collides with an existing room is refused outright");
+        Refusal.Kind.NOT_OWNER,
+        byId.refusal().kind(),
+        "a spec whose id collides with somebody else's room is refused by the spec rule");
     assertTrue(specStore.findById("adas-room").isEmpty());
 
     var viewer = new Actor("ada", Role.VIEWER, Actor.Lane.API);
     var readOnly =
         assertThrows(
-            ApiException.class,
+            WriteRefused.class,
             () ->
                 Acting.by(
                     viewer, () -> withRooms.create(createReq(Map.of("room_id", "adas-room")))));
-    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
+    assertEquals(Refusal.Kind.READ_ONLY, readOnly.refusal().kind());
 
     Acting.by(
         ADMIN,
@@ -1423,7 +1568,11 @@ class GlobalSpecOperationsTest {
         assertThrows(
             ApiException.class,
             () -> Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of()))));
-    assertEquals(ErrorCode.CONFLICT, foreign.failure().errorCode());
+    assertEquals(ErrorCode.INVALID_REQUEST, foreign.failure().errorCode());
+    assertEquals(
+        "Room 'auth' belongs to project 'beta', not 'manatee'.",
+        foreign.getMessage(),
+        "the room a spec would adopt is the home it is born in, held to the project line");
     assertTrue(specStore.findById("auth").isEmpty(), "no spec lands across the project line");
   }
 

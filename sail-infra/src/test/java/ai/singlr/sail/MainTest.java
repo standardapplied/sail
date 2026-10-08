@@ -11,6 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.junit.jupiter.api.Test;
@@ -44,6 +46,19 @@ class MainTest {
     assertEquals(1, code);
     assertTrue(err.toString().contains("The roster is unsynced."), err.toString());
     assertTrue(err.toString().contains("Run 'sail sync'."), err.toString());
+  }
+
+  @Test
+  void reportFollowsAWriteTheJournalRefusedWithItsFix() {
+    var err = new StringWriter();
+    var code =
+        Main.report(
+            new WriteRefused(
+                new Refusal(Refusal.Kind.ADMIN_ONLY, "Renaming is an admin's.", "Ask an admin.")),
+            withCapturedErr(err));
+    assertEquals(1, code);
+    assertTrue(err.toString().contains("Renaming is an admin's."), err.toString());
+    assertTrue(err.toString().contains("Ask an admin."), err.toString());
   }
 
   @Test

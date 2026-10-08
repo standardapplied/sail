@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -476,15 +477,33 @@ class SailOperationsSeamTest {
     }
   }
 
+  /** A conflict on spec {@code auth}, whose owner is {@code owner}: main retitled it. */
+  private static void parkRetitle(SyncBox box, String owner) {
+    Acting.as(owner, () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
+    var local = box.specs.comparableSnapshot("auth");
+    var remote = new LinkedHashMap<>(local);
+    remote.put("title", "remote");
+    box.conflicts.record(
+        "spec",
+        "auth",
+        null,
+        YamlUtil.dumpJson(local),
+        YamlUtil.dumpJson(remote),
+        "9-main",
+        "main",
+        List.of("title"));
+  }
+
   @ParameterizedTest
   @CsvSource({
-    "owner,member,200",
-    "owner,admin,200",
-    "other,member,403",
-    "other,admin,403",
-    "owner,viewer,403"
+    "owner,member,200,",
+    "owner,admin,200,",
+    "other,member,403,read_only_credential",
+    "other,admin,403,read_only_credential",
+    "owner,viewer,403,read_only_credential"
   })
-  void localBoxCredentialsUseTheSameConflictOwnerPolicy(String handle, String role, int expected) {
+  void keepingMineOnTheBoxCredentialIsAnEditTheSpecRuleDecides(
+      String handle, String role, int expected, String code) {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
         var bus = new EventBus()) {
@@ -501,10 +520,8 @@ class SailOperationsSeamTest {
               }));
       new FdeStore(box.db).add(handle, null, null, role);
       var token = new BoxCredentialStore(box.db).replace(handle);
-      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
-      var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
-      box.conflicts.record(
-          "spec", "auth", null, snapshot, snapshot, "9-main", "main", List.of("title"));
+      parkRetitle(box, "owner");
+      var head = box.specs.latestRev("auth");
       var response =
           new LocalApiRouter(operations)
               .handle(
@@ -516,31 +533,27 @@ class SailOperationsSeamTest {
                       "strategy=mine".getBytes(StandardCharsets.UTF_8)));
       assertEquals(expected, response.status(), response.body().toString());
       assertEquals(expected == 200, box.conflicts.pending().isEmpty());
+      if (expected != 200) {
+        assertEquals(code, assertInstanceOf(Map.class, response.body().get("error")).get("code"));
+        assertEquals(head, box.specs.latestRev("auth"), "a refused resolve adopts nothing either");
+      }
     }
   }
 
   @ParameterizedTest
-  @CsvSource({"uday,sailrun_test,200", "other,sailrun_test,403", "uday,sailroom_test,403"})
-  void localRunCredentialsResolveOnlyForTheirOwnerAndWriteLane(
-      String nodeOwner, String credential, int expected) {
+  @CsvSource({
+    "uday,sailrun_test,mine,200,",
+    "other,sailrun_test,mine,403,forbidden_not_assignee",
+    "other,sailrun_test,theirs,200,",
+    "uday,sailroom_test,mine,403,read_only_credential",
+    "uday,sailroom_test,theirs,403,read_only_credential"
+  })
+  void aRunKeepsMineOnlyOnASpecItsFdeOwnsAndARoomLaneResolvesNothing(
+      String specOwner, String credential, String strategy, int expected, String code) {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
         var bus = new EventBus()) {
-      operations.useControlPlane(
-          box.db,
-          tempDir,
-          new SyncOperations(
-              box.db,
-              "node",
-              tempDir,
-              () -> new SyncConfig("node", "main", nodeOwner, "node-box"),
-              target -> {
-                throw new IOException("unused");
-              }));
-      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
-      var snapshot = YamlUtil.dumpJson(box.specs.comparableSnapshot("auth"));
-      box.conflicts.record(
-          "spec", "auth", null, snapshot, snapshot, "9-main", "main", List.of("title"));
+      parkRetitle(box, specOwner);
       var lane =
           new TestOperations() {
             @Override
@@ -561,49 +574,47 @@ class SailOperationsSeamTest {
                           "Bearer " + credential,
                           "content-type",
                           "application/json"),
-                      "{\"strategy\":\"mine\"}".getBytes(StandardCharsets.UTF_8)));
+                      ("{\"strategy\":\"" + strategy + "\"}").getBytes(StandardCharsets.UTF_8)));
       assertEquals(expected, response.status(), response.body().toString());
+      assertEquals(expected == 200, box.conflicts.pending().isEmpty());
+      if (expected != 200) {
+        assertEquals(code, assertInstanceOf(Map.class, response.body().get("error")).get("code"));
+      }
     }
   }
 
   @ParameterizedTest
-  @CsvSource({"owner,member,200", "other,member,403", "other,admin,200", "owner,viewer,403"})
-  void conflictResolutionBelongsToTheBoxOwnerOrAnAdminInBothWebCredentialLanes(
-      String handle, String role, int expected) throws Exception {
+  @CsvSource({
+    "owner,member,mine,200,",
+    "other,member,mine,403,forbidden_not_assignee",
+    "other,admin,mine,200,",
+    "owner,viewer,mine,403,read_only_credential",
+    "other,member,theirs,200,",
+    "other,viewer,theirs,403,read_only_credential"
+  })
+  void adoptingMainsSideDecidesNoRowAndKeepingMineIsAnEditInBothWebCredentialLanes(
+      String handle, String role, String strategy, int expected, String code) throws Exception {
     for (var lane : List.of("token", "session")) {
       try (var box = new SyncBox("node");
           var operations = operations(box.db);
           var server = server(operations, box.db)) {
-        operations.useControlPlane(
-            box.db,
-            tempDir,
-            new SyncOperations(
-                box.db,
-                "node",
-                tempDir,
-                () -> new SyncConfig("node", "main", "owner", "node-box"),
-                target -> {
-                  throw new IOException("unused");
-                }));
-        Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
-        var local = box.specs.comparableSnapshot("auth");
-        var remote = new LinkedHashMap<>(local);
-        remote.put("title", "remote");
-        box.conflicts.record(
-            "spec",
-            "auth",
-            null,
-            YamlUtil.dumpJson(local),
-            YamlUtil.dumpJson(remote),
-            "9-main",
-            "main",
-            List.of("title"));
+        parkRetitle(box, "owner");
         var token = credential(box.db, handle, role, lane);
         var result =
-            send(server, "POST", "/v1/conflicts/auth/resolve", token, "{\"strategy\":\"theirs\"}");
+            send(
+                server,
+                "POST",
+                "/v1/conflicts/auth/resolve",
+                token,
+                "{\"strategy\":\"" + strategy + "\"}");
         assertEquals(expected, result.statusCode(), result.body());
         assertEquals(
-            expected == 200 ? "remote" : "local", box.specs.findById("auth").orElseThrow().title());
+            expected == 200 && strategy.equals("theirs") ? "remote" : "local",
+            box.specs.findById("auth").orElseThrow().title());
+        assertEquals(expected == 200, box.conflicts.pending().isEmpty());
+        if (expected != 200) {
+          assertTrue(result.body().contains("\"" + code + "\""), result.body());
+        }
       }
     }
   }
@@ -651,19 +662,13 @@ class SailOperationsSeamTest {
   }
 
   @ParameterizedTest
-  @CsvSource({
-    "token,mine",
-    "token,theirs",
-    "token,merge",
-    "session,mine",
-    "session,theirs",
-    "session,merge"
-  })
-  void onlyAdminsCanReplaceSpecSnapshotsThroughHttp(String lane, String strategy) throws Exception {
+  @CsvSource({"token,mine", "token,merge", "session,mine", "session,merge"})
+  void aResolveThatMovesTheAssigneeIsAnAdminsAsAnyReassignmentIs(String lane, String strategy)
+      throws Exception {
     try (var box = new SyncBox("node");
         var operations = operations(box.db);
         var server = server(operations, box.db)) {
-      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
+      Acting.as("uday", () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       var remote = new LinkedHashMap<>(local);
       remote.put("title", "remote");
@@ -677,32 +682,35 @@ class SailOperationsSeamTest {
           "9-main",
           "main",
           List.of("title"));
-      var theirs =
+      var merged =
           new LinkedHashMap<>(
               ConflictMerge.parseTemplate(operations.conflictMergeTemplate("spec", "auth")));
-      theirs.putAll(YamlUtil.parseMap(operations.conflict("spec", "auth").remoteSnapshot()));
+      merged.put("title", "merged");
+      merged.put("assignee", "carol");
       var body =
-          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpJson(theirs)));
+          YamlUtil.dumpJson(Map.of("strategy", strategy, "merged", YamlUtil.dumpToString(merged)));
+      var head = box.specs.latestRev("auth");
       for (var handle : List.of("uday", "other")) {
         var member = credential(box.db, handle, "member", lane);
         assertEquals(200, send(server, "GET", "/v1/conflicts/auth", member, "").statusCode());
         var denied = send(server, "POST", "/v1/conflicts/auth/resolve", member, body);
         assertEquals(403, denied.statusCode(), denied.body());
+        assertTrue(denied.body().contains("\"forbidden_admin_only\""), denied.body());
         assertEquals(local, box.specs.comparableSnapshot("auth"));
+        assertEquals(head, box.specs.latestRev("auth"), "main's side is not adopted either");
         assertEquals(1, box.conflicts.pending().size());
       }
 
       var admin = credential(box.db, "admin", "admin", lane);
       var allowed = send(server, "POST", "/v1/conflicts/auth/resolve", admin, body);
       assertEquals(200, allowed.statusCode(), allowed.body());
-      var resolved = new LinkedHashMap<>(box.specs.comparableSnapshot("auth"));
-      var expected = new LinkedHashMap<>(strategy.equals("mine") ? local : remote);
+      var resolved = box.specs.findById("auth").orElseThrow();
+      assertEquals(strategy.equals("mine") ? "local" : "merged", resolved.title());
+      assertEquals(strategy.equals("mine") ? null : "carol", resolved.assignee());
       assertEquals(
-          strategy.equals("mine") ? "admin" : expected.get(Snapshots.ACTOR),
-          resolved.remove(Snapshots.ACTOR),
-          "keeping mine is the resolver's edit; main's version keeps main's author");
-      expected.remove(Snapshots.ACTOR);
-      assertEquals(expected, resolved);
+          "admin",
+          box.specs.comparableSnapshot("auth").get(Snapshots.ACTOR),
+          "keeping or merging is the resolver's edit");
       assertTrue(box.conflicts.pending().isEmpty());
     }
   }

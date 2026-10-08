@@ -85,6 +85,7 @@ final class SnapshotOperations {
   }
 
   SnapshotActionResponse restore(String project, String label, String localHandle) {
+    Refusals.requireWriter("restore snapshots");
     NameValidator.requireValidSnapshotLabel(label);
     projects.loadCreated(project);
     requireSnapshotExists(project, label);
@@ -100,6 +101,7 @@ final class SnapshotOperations {
   }
 
   SnapshotActionResponse delete(String project, String label) {
+    Refusals.requireWriter("delete snapshots");
     NameValidator.requireValidSnapshotLabel(label);
     projects.requireExists(project);
     requireSnapshotExists(project, label);

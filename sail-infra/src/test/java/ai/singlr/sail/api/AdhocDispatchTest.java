@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -350,6 +351,58 @@ class AdhocDispatchTest {
     assertTrue(
         runStore.runningForProjectOnNode("acme", HANDLE).isEmpty(),
         "an agent that never launched must not hold the container reservation");
+  }
+
+  /**
+   * A2, from the audit of 2026-09-29 ({@code AdhocAuthorityAuditTest}): {@code sail agent run} and
+   * {@code sail agent sweep} on a box whose FDE the roster makes a viewer reserved a run and
+   * launched an agent. The run rule now decides the reservation where it is journaled.
+   */
+  @Test
+  void aViewerOperatorCannotStartAnAdhocRun() throws Exception {
+    var launched = new AtomicBoolean();
+    var ops =
+        operations(
+            liveAgentShell(),
+            command -> {
+              launched.set(true);
+              return 0;
+            },
+            true);
+    var viewer = new Actor(HANDLE, Role.VIEWER, Actor.Lane.CLI);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.call(viewer, () -> ops.startAdhoc("acme", background("sweep"), HANDLE)));
+
+    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, refused.failure().errorCode());
+    assertEquals("Your credential is read-only and cannot change runs.", refused.getMessage());
+    assertEquals(List.of(), runStore.listForProject("acme"), "no run row");
+    assertFalse(launched.get(), "and no agent");
+  }
+
+  @Test
+  void aMemberCannotStartAnAdhocRunOnAnotherFdesBox() throws Exception {
+    var launched = new AtomicBoolean();
+    var ops =
+        operations(
+            liveAgentShell(),
+            command -> {
+              launched.set(true);
+              return 0;
+            },
+            true);
+    var visitor = new Actor("bob", Role.MEMBER, Actor.Lane.API);
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () -> Actor.call(visitor, () -> ops.startAdhoc("acme", background("task"), HANDLE)));
+
+    assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, refused.failure().errorCode());
+    assertEquals(List.of(), runStore.listForProject("acme"), "a box's runs act for its own FDE");
+    assertFalse(launched.get());
   }
 
   @Test

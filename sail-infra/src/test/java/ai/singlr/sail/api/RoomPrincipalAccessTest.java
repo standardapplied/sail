@@ -169,7 +169,7 @@ class RoomPrincipalAccessTest {
   }
 
   @Test
-  void everySpecMutationReturns403() {
+  void noSpecMutationLands() {
     assertEquals(403, call("PUT", "/v1/specs/auth", "status=in_progress").status());
     assertEquals(403, call("PUT", "/v1/specs/auth", "priority=9").status());
     assertEquals(403, call("PUT", "/v1/specs/auth/content", "body=rewritten").status());
@@ -181,13 +181,13 @@ class RoomPrincipalAccessTest {
         assertInstanceOf(Map.class, created.body().get("error")).get("code"),
         "the spec rule refuses a room session's create, as every read-only credential's");
     assertEquals(
-        403,
+        404,
         call("POST", "/v1/specs", "id=sneakier&title=New&project=acme&room_id=nowhere").status(),
-        "refused before the room it names is looked up");
+        "a room that is not there is not found, which a read tells this session as well");
     assertEquals(
-        403,
+        409,
         call("POST", "/v1/specs", "id=auth&title=New&project=acme").status(),
-        "refused before the id it takes is checked");
+        "and so is an id already taken");
 
     assertEquals(SpecStatus.DONE, specStore.findById("auth").orElseThrow().status());
     assertTrue(specStore.findById("sneaky").isEmpty(), "no spec was created");

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.RoomAuthority;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -19,6 +20,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 /**
  * Rooms on SQLite: the durable collaboration surface an FDE and their agents converse in. A room
@@ -47,7 +49,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   public RoomStore(Sqlite db) {
     this.db = db;
     this.changeLog = new ChangeLog(db);
-    this.journal = new RevisionJournal(db, changeLog, new RoomSchema());
+    this.journal = new RevisionJournal(db, changeLog, new RoomSchema(), this::authority);
   }
 
   public record RoomRow(
@@ -252,20 +254,35 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * Each owner is named once; empty when no one is known.
    */
   public List<String> owners(String roomId) {
-    return db
-        .query(
+    return owners(roomId, null, null);
+  }
+
+  /**
+   * As {@link #owners(String)} while a revision of spec {@code specId}, born in {@code roomId}, is
+   * being decided (null for none): that spec counts as {@code held}, the projection the journal
+   * holds of it (null when it holds none), never as its row, which the revision being recorded has
+   * already reached — so a spec never gives itself a voice in the room it asks to enter.
+   */
+  public List<String> owners(String roomId, String specId, Map<String, Object> held) {
+    var rows =
+        db.query(
             """
             SELECT assignee, created_by FROM specs
-            WHERE room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1)
+            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1))
+                AND (?2 IS NULL OR id <> ?2)
             UNION ALL
             SELECT assignee, created_by FROM rooms
             WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM specs WHERE id = ?1)""",
             row -> Ownership.ownerOf(row.text(0), row.text(1)),
-            roomId)
-        .stream()
-        .filter(Strings::isNotBlank)
-        .distinct()
-        .toList();
+            roomId,
+            specId);
+    var decided =
+        held != null && roomId.equals(Snapshots.text(held, "room_id"))
+            ? Stream.of(
+                Ownership.ownerOf(
+                    Snapshots.text(held, "assignee"), Snapshots.text(held, Snapshots.CREATOR)))
+            : Stream.<String>empty();
+    return Stream.concat(rows.stream(), decided).filter(Strings::isNotBlank).distinct().toList();
   }
 
   /**
@@ -289,12 +306,24 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .lastKnown(roomId)
         .filter(spec -> spec.roomIdOrIdentity().equals(roomId))
         .map(SpecStore.LastKnown::owner)
-        .orElseGet(
-            () ->
-                held == null
-                    ? ""
-                    : Ownership.ownerOf(
-                        Snapshots.text(held, "assignee"), Snapshots.text(held, "created_by")));
+        .orElseGet(() -> held == null ? "" : ownerOf(held));
+  }
+
+  /**
+   * Whom {@code room}, a room's projection, names as its owner by its own row: its assignee, else
+   * its creator ({@link Ownership#ownerOf}).
+   */
+  public static String ownerOf(Map<String, Object> room) {
+    return Ownership.ownerOf(Snapshots.text(room, "assignee"), Snapshots.text(room, "created_by"));
+  }
+
+  /**
+   * Why the bound {@link Actor} may not write {@code next} ({@code null} deletes) as this box's own
+   * revision of room {@code id}; empty if it may. The journal's own decision ({@link
+   * RevisionJournal#decide}), for a door to ask before a side effect the write would follow.
+   */
+  public Optional<Refusal> decide(String id, Map<String, Object> next) {
+    return journal.decide(id, next);
   }
 
   /**
@@ -338,7 +367,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .orElse(false);
   }
 
-  /** Who may write a room on this box: the rule every door and main's commit decide by. */
+  /** Who may write a room on this box: the rule the journal and main's commit decide by. */
   @Override
   public RoomAuthority authority() {
     return new RoomAuthority(db);

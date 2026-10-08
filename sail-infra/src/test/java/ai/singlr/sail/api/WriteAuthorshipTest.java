@@ -171,7 +171,10 @@ class WriteAuthorshipTest {
                   TestAuth.asOperator(
                       operations, () -> operations.resolveConflict("spec", "auth", mine())),
               "a viewer node is refused, as main would refuse it — never a hard-coded admin");
-      assertEquals(ErrorCode.FORBIDDEN, refused.failure().errorCode());
+      assertEquals(
+          ErrorCode.READ_ONLY_CREDENTIAL,
+          refused.failure().errorCode(),
+          "a read-only credential is refused before any side is looked at");
 
       fdes.update("mady", null, null, "member");
       TestAuth.asOperator(operations, () -> operations.resolveConflict("spec", "auth", mine()));

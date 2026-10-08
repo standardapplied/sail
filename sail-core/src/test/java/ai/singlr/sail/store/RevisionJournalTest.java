@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
@@ -34,6 +35,8 @@ import org.junit.jupiter.api.io.TempDir;
 @ActingAs(Actor.Lane.MAIN)
 class RevisionJournalTest {
 
+  private static final WriteAuthority ALLOW = (actor, id, held, next) -> Optional.empty();
+
   @TempDir Path tempDir;
 
   private Sqlite db;
@@ -46,7 +49,7 @@ class RevisionJournalTest {
     db.execute(
         "CREATE TABLE widgets (id TEXT PRIMARY KEY, value TEXT, updated_by TEXT, rev TEXT,"
             + " base_rev TEXT)");
-    journal = new RevisionJournal(db, new ChangeLog(db), new WidgetSchema(db));
+    journal = new RevisionJournal(db, new ChangeLog(db), new WidgetSchema(db), () -> ALLOW);
   }
 
   private void createWidget(String id, String value, String author) {

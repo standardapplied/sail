@@ -269,28 +269,29 @@ class EventPublishersTest {
   }
 
   @Test
-  void aRunANodePushedOnAnotherMembersSpecIsNotRelayedAsThatSpecsStop() throws Exception {
+  void aRunWhoseSpecMovedToAnotherMemberMidFlightIsNotRelayedAsThatSpecsStop() throws Exception {
     serve(MAIN, "admin");
     relayAs("mady");
     new FdeStore(box.db).add("bob", null, null, "member");
-    seedSpec(box, "theirs", "bob");
+    seedSpec(box, "theirs", "mady");
     Acting.system(
         () -> box.specs.compareAndSetStatus("theirs", SpecStatus.PENDING, SpecStatus.IN_PROGRESS));
     bus.subscribe(new SpecLifecycleReactor(box.specs));
     try (var node = new SyncBox("mady")) {
       SyncBox.round(box, node);
       var runs = new RunStore(node.db);
-      var forged = startRunOn(runs, "theirs");
+      var started = startRunOn(runs, "theirs");
       SyncBox.round(box, node);
+      box.reassign("theirs", "bob");
       forgetLanded();
-      Acting.system(() -> runs.transition(forged, "running", "stopped", 2));
+      Acting.system(() -> runs.transition(started, "running", "stopped", 2));
 
       SyncBox.round(box, node);
 
       assertEquals(
           "stopped",
-          new RunStore(box.db).findById(forged).orElseThrow().status(),
-          "main took the run, so its bridge was handed the transition");
+          new RunStore(box.db).findById(started).orElseThrow().status(),
+          "main took the stop of a run that was mady's to start, so its bridge was handed it");
       assertEquals(List.of(), landedSoFar());
       assertEquals(SpecStatus.IN_PROGRESS, box.specs.findById("theirs").orElseThrow().status());
     }

@@ -5,8 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.ProjectAuthority;
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
-import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Actor;
@@ -41,7 +42,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   public ProjectStore(Sqlite db) {
     this.db = db;
-    this.journal = new RevisionJournal(db, new ChangeLog(db), new ProjectSchema());
+    this.journal = new RevisionJournal(db, new ChangeLog(db), new ProjectSchema(), this::authority);
   }
 
   public record ProjectRow(
@@ -206,10 +207,33 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     journal.eraseRow(id);
   }
 
-  /** Who may write projects on this box: any writer, as its doors and main's commit decide. */
+  /** Who may write projects on this box: any writer, and a rename an admin alone. */
   @Override
-  public WriterAuthority authority() {
-    return new WriterAuthority(db, "projects");
+  public ProjectAuthority authority() {
+    return new ProjectAuthority(db);
+  }
+
+  /** Whether {@code deletion}, a tombstone's marks, is a rename's: it blocks the old name. */
+  public static boolean renames(Map<String, Object> deletion) {
+    return deletion != null && Boolean.TRUE.equals(deletion.get(BLOCKS_RESURRECTION));
+  }
+
+  /**
+   * Why the bound {@link Actor} may not write {@code next} as this box's own revision of project
+   * {@code name}; empty if it may. The journal's own decision ({@link RevisionJournal#decide}), for
+   * a door to ask before a side effect the write would follow.
+   */
+  public Optional<Refusal> decide(String name, Map<String, Object> next) {
+    return journal.decide(name, next);
+  }
+
+  /**
+   * Why the bound {@link Actor} may not rename project {@code name}; empty if it may: the journal's
+   * decision of the deletion a rename records first, for a door to ask before it stops or renames
+   * the project's container.
+   */
+  public Optional<Refusal> decideRename(String name) {
+    return journal.decide(name, BLOCKING);
   }
 
   /** Compare-and-set commit as main through the shared {@link RevisionJournal#commitRevision}. */

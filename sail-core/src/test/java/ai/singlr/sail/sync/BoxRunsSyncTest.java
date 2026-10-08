@@ -163,9 +163,10 @@ class BoxRunsSyncTest {
     var liveAdhoc = reserve(ada, null, null, "adhoc");
     var agent = agentOf(ada, build);
     var posted =
-        Acting.by(
-            agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "on it", null));
-    Acting.by(agent, () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
+        Acting.unchecked(
+            agent.handle(),
+            () -> new MessageStore(ada.db).append("mine", agent.handle(), "on it", null));
+    Acting.unchecked(agent.handle(), () -> ada.specs.updateStatus("mine", SpecStatus.IN_PROGRESS));
 
     for (var report : SyncBox.round(main, ada)) {
       assertEquals(List.of(), report.denials(), report.toString());
@@ -207,7 +208,9 @@ class BoxRunsSyncTest {
                     "u"));
     var agent = Actor.agentPrincipal(runs(ada).findById(ownerless).orElseThrow().principal(), "");
     var posted =
-        Acting.by(agent, () -> new MessageStore(ada.db).append("mine", agent.handle(), "hi", null));
+        Acting.unchecked(
+            agent.handle(),
+            () -> new MessageStore(ada.db).append("mine", agent.handle(), "hi", null));
 
     SyncBox.quiesce(main, ada);
 
@@ -300,6 +303,7 @@ class BoxRunsSyncTest {
         List.of(finishedUnheld, liveUnheld),
         runs(ada).stamp("uday", runs(ada).unacknowledged()),
         "only the unheld");
+    main.reassign("mine", "uday");
     SyncBox.quiesce(main, ada.syncsAs(UDAY));
 
     SyncBox.assertEqualToMain(main, ada);

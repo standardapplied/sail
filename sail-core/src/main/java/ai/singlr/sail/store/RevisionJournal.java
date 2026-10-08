@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
@@ -15,6 +17,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /**
  * The sync protocol every mutable synced store shares, in one place. Given an {@link EntitySchema}
@@ -22,6 +25,11 @@ import java.util.Set;
  * bookkeeping, journals every post-state into the {@link ChangeLog} within the mutating transaction
  * (the no-lost-work spine), performs the main-side compare-and-set commit, and resolves a parked
  * conflict by rebasing onto main and writing the chosen state.
+ *
+ * <p>It is also where a write is decided, exactly once: a revision a node pushes at main's {@link
+ * #commitRevision}, and every write of this box's own as its revision is recorded ({@link
+ * #decide}). No door decides a row write, so none can forget to. Adopting what main decided — a
+ * pull, an acknowledgement, main's side of a conflict — decides nothing here.
  *
  * <p>Extracted from the byte-for-byte copies that lived in {@link SpecStore}, {@link RunStore},
  * {@link ReviewStore}, {@link ProjectStore}, and {@link FileStore}: each now holds one journal and
@@ -35,11 +43,21 @@ public final class RevisionJournal implements ConflictResolver {
   private final Sqlite db;
   private final ChangeLog changeLog;
   private final EntitySchema schema;
+  private final Supplier<? extends WriteAuthority> authority;
 
-  public RevisionJournal(Sqlite db, ChangeLog changeLog, EntitySchema schema) {
+  /**
+   * The journal of {@code schema}'s entity, whose writes {@code authority} decides. The rule is
+   * asked for only when a write is decided: a rule reads the stores, this one included.
+   */
+  public RevisionJournal(
+      Sqlite db,
+      ChangeLog changeLog,
+      EntitySchema schema,
+      Supplier<? extends WriteAuthority> authority) {
     this.db = Objects.requireNonNull(db, "db");
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.schema = Objects.requireNonNull(schema, "schema");
+    this.authority = Objects.requireNonNull(authority, "authority");
   }
 
   /** The schema's {@link EntitySchema#latestWinsFields}, the one place a store's are declared. */
@@ -170,35 +188,80 @@ public final class RevisionJournal implements ConflictResolver {
         .orElse(null);
   }
 
-  /** Appends a revision for the current state of {@code id}, minting a rev from the counter. */
+  /**
+   * Appends a revision for the current state of {@code id} as this box's own write, minting a rev
+   * from the counter, once the type's rule admits it ({@link #decide}).
+   *
+   * @throws WriteRefused when the rule refuses the bound actor; the transaction is rolled back
+   */
   public String recordRevision(String id, String origin, boolean deleted) {
-    return deleted
-        ? recordTombstone(id, origin, Map.of())
-        : recordLive(id, null, null, origin, false);
+    if (deleted) {
+      return recordTombstone(id, origin, Map.of());
+    }
+    var map = schema.snapshotMap(id);
+    if (map == null) {
+      return null;
+    }
+    admit(id, schema.comparable(map));
+    return recordLive(id, map, null, null, origin, false);
   }
 
   /**
-   * Appends this box's own deletion of {@code id}, minting a rev from the counter, its tombstone
-   * keeping the last state, the base the deletion was made from and {@code marks}, reserved keys a
-   * store records beside them. The caller removes the live row in the same transaction.
+   * Appends this box's own deletion of {@code id}, once the type's rule admits it ({@link
+   * #decide}), minting a rev from the counter, its tombstone keeping the last state, the base the
+   * deletion was made from and {@code marks}, reserved keys a store records beside them, which the
+   * rule reads as it does a marked deletion main's commit hands it. The caller removes the live row
+   * in the same transaction.
+   *
+   * @throws WriteRefused when the rule refuses the bound actor; the transaction is rolled back
    */
   public String recordTombstone(String id, String origin, Map<String, Object> marks) {
+    admit(id, marks.isEmpty() ? null : marks);
     return appendTombstone(id, null, origin, baseRevOf(id), marks, null);
   }
 
   /**
-   * Appends a revision for the current live state of {@code id}, authored by the bound actor, and
-   * returns its rev. With {@code explicitRev} null the rev is minted from the entity's latest
-   * entry, tombstones included; otherwise the caller-supplied rev is used verbatim (sync adopting
-   * main's authoritative rev). {@code offeredAuthor} is the {@code _actor} a synced revision
-   * carries. {@code adopted} records that this revision is the new synced ancestor — set only when
-   * adopting from main, never on a local edit. A row written over a tombstone, re-created or
-   * restored, descends from the base that tombstone records ({@link #baseRevOf}), like any revision
-   * after it, and keeps the counter going.
+   * Why the bound {@link Actor} may not write {@code next} ({@code null} deletes) as this box's own
+   * revision of {@code id}; empty if it may. The one decision of every write that is not a push:
+   * the journal asks it as it records the revision, and a door about to start a side effect asks
+   * the same of the write it will then make. {@code held} is the projection at the journal's head
+   * ({@link #held}), which the row being written has not reached yet, so a revision never admits
+   * itself. A revision main decided is not decided again: one pushed ({@link Actor.Lane#SYNC}) was
+   * decided at {@link #commitRevision}, and the rule passes main's own and this box's machinery
+   * ({@link WriteAuthority#decided}).
+   */
+  public Optional<Refusal> decide(String id, Map<String, Object> next) {
+    return WriteAuthority.local(authority.get(), id, held(id), next);
+  }
+
+  /**
+   * Refuses the write of {@code next} as {@code id} the rule decides against, dooming the
+   * transaction it runs in.
+   *
+   * @throws WriteRefused when the rule refuses the bound actor
+   */
+  void admit(String id, Map<String, Object> next) {
+    WriteAuthority.admit(db, decide(id, next));
+  }
+
+  /**
+   * Appends a revision for {@code map}, the current live state of {@code id}, authored by the bound
+   * actor, and returns its rev; null when there is no live row. With {@code explicitRev} null the
+   * rev is minted from the entity's latest entry, tombstones included; otherwise the
+   * caller-supplied rev is used verbatim (sync adopting main's authoritative rev). {@code
+   * offeredAuthor} is the {@code _actor} a synced revision carries. {@code adopted} records that
+   * this revision is the new synced ancestor — set only when adopting from main, never on a local
+   * edit. A row written over a tombstone, re-created or restored, descends from the base that
+   * tombstone records ({@link #baseRevOf}), like any revision after it, and keeps the counter
+   * going.
    */
   private String recordLive(
-      String id, String explicitRev, String offeredAuthor, String origin, boolean adopted) {
-    var map = schema.snapshotMap(id);
+      String id,
+      Map<String, Object> map,
+      String explicitRev,
+      String offeredAuthor,
+      String origin,
+      boolean adopted) {
     if (map == null) {
       return null;
     }
@@ -293,7 +356,8 @@ public final class RevisionJournal implements ConflictResolver {
             eraseRow(id);
           } else {
             schema.apply(id, snapshot);
-            recordLive(id, rev, authorOf(snapshot), ChangeLog.Entry.SYNC, true);
+            recordLive(
+                id, schema.snapshotMap(id), rev, authorOf(snapshot), ChangeLog.Entry.SYNC, true);
           }
           return null;
         });
@@ -434,23 +498,28 @@ public final class RevisionJournal implements ConflictResolver {
           }
           schema.apply(id, snapshot);
           return new PushOutcome.Accepted(
-              recordLive(id, null, authorOf(snapshot), ChangeLog.Entry.SYNC, false));
+              recordLive(
+                  id,
+                  schema.snapshotMap(id),
+                  null,
+                  authorOf(snapshot),
+                  ChangeLog.Entry.SYNC,
+                  false));
         });
   }
 
   /**
-   * What this box holds of {@code id}, as a rule reads it: its comparable snapshot, or for an
-   * entity whose latest word is a tombstone the last live state the tombstone kept, so a restore is
-   * decided against what it restores. Null for an entity this box never held.
+   * What this box holds of {@code id}, as a rule reads it: the projection at the journal's head,
+   * under its author — for an entity whose latest word is a tombstone the last live state the
+   * tombstone kept, so a restore is decided against what it restores. Read from the journal, never
+   * the row, so it is the same before a write and while one is being recorded. Null for an entity
+   * this box never held, one erased, and one withdrawn because main holds nothing of it: a write
+   * over that is a birth here as it is on main.
    */
   public Map<String, Object> held(String id) {
-    var live = comparableSnapshot(id);
-    if (live != null) {
-      return live;
-    }
     return changeLog
         .head(schema.entityType(), id)
-        .filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE)
+        .filter(head -> head.kind() != ChangeLog.Kind.ERASURE && !head.withdrawn())
         .map(head -> authored(schema.comparable(YamlUtil.parseMap(head.snapshot())), head.actor()))
         .orElse(null);
   }
@@ -460,9 +529,10 @@ public final class RevisionJournal implements ConflictResolver {
    * at main's rev and under the author main recorded, as the new merge base — exactly as a pull
    * would have, so the next round can never re-raise the same conflict — and then writing {@code
    * chosen} over it as this box's own revision when it differs. Taking main's side is therefore
-   * main's revision itself; keeping or merging is a forward local edit the next round offers. A
-   * {@code null} side is a deletion. Returns the rev the row now carries. Every state stays in the
-   * {@link ChangeLog}, so no choice loses work.
+   * main's revision itself and decides nothing; keeping or merging is a forward local edit the next
+   * round offers, decided like any edit ({@link #decide}) against main's version, which is the
+   * journal's head by then. A {@code null} side is a deletion. Returns the rev the row now carries.
+   * Every state stays in the {@link ChangeLog}, so no choice loses work.
    */
   @Override
   public String resolveConflict(String id, Map<String, Object> chosen, MainVersion theirs) {
@@ -490,7 +560,7 @@ public final class RevisionJournal implements ConflictResolver {
       return rev;
     }
     schema.apply(id, state);
-    return recordLive(id, null, null, origin, false);
+    return recordRevision(id, origin, false);
   }
 
   private static boolean sameContent(Map<String, Object> a, Map<String, Object> b) {

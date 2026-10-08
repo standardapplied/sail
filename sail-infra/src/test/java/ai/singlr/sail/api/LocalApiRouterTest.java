@@ -7,10 +7,13 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.identity.Acting;
@@ -132,9 +135,46 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void aWriteTheJournalRefusedIsAnsweredInHttpsEnvelopeWithItsKindsCode() {
+    var lane =
+        new LocalApiRouter(
+            new TestOperations() {
+              @Override
+              public SyncConflicts.Conflict resolveConflict(
+                  String type, String id, Resolution resolution) {
+                throw new WriteRefused(
+                    new Refusal(Refusal.Kind.ADMIN_ONLY, "Only an admin may.", "Ask one."));
+              }
+            });
+
+    var refused =
+        lane.handle(
+            new LocalApiRequest(
+                "POST",
+                "/v1/conflicts/auth/resolve",
+                Map.of("type", "spec"),
+                auth(),
+                "strategy=mine".getBytes(StandardCharsets.UTF_8)));
+
+    assertEquals(403, refused.status());
+    assertEquals(
+        Map.of(
+            "code",
+            "forbidden_admin_only",
+            "message",
+            "Only an admin may.",
+            "action",
+            "Ask one.",
+            "field_errors",
+            List.of()),
+        refused.body().get("error"));
+  }
+
+  @Test
   void aMergeSettlesOnlyTheVersionOfTheConflictItWasMadeFrom() {
     try (var box = new SyncBox("node")) {
-      Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
+      Acting.as(
+          TestOperations.OWNER, () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       parkTitle(box, local, "remote");
       var conflicts = new ConflictOperations(box.db);
@@ -168,8 +208,15 @@ class LocalApiRouterTest {
           lane.handle(merge(started.replaceAll("(?m)^" + ConflictMerge.CONFLICT + ": .*\n", "")));
       assertEquals(400, unnamed.status(), unnamed.body().toString());
       assertEquals(
-          "A merged record must start from 'sail conflicts show auth --template'.",
-          unnamed.body().get("error"));
+          Map.of(
+              "code",
+              "bad_request",
+              "message",
+              "A merged record must start from 'sail conflicts show auth --template'.",
+              "field_errors",
+              List.of()),
+          unnamed.body().get("error"),
+          "a refusal thrown on the socket carries HTTP's envelope");
 
       parkTitle(box, local, "remote, revised");
       var parked = box.conflicts.pendingFor("spec", "auth").orElseThrow();
@@ -177,7 +224,7 @@ class LocalApiRouterTest {
       assertEquals(409, moved.status(), moved.body().toString());
       assertEquals(
           "'auth' was re-recorded after this merge was started. Start again from the fresh version.",
-          moved.body().get("error"));
+          assertInstanceOf(Map.class, moved.body().get("error")).get("message"));
       assertEquals(parked, box.conflicts.pendingFor("spec", "auth").orElseThrow());
       assertEquals(rev, box.specs.revOf("auth"));
       assertEquals(local, box.specs.comparableSnapshot("auth"));

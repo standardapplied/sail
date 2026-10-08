@@ -208,7 +208,7 @@ class LaunchAdmissionTest {
   }
 
   @Test
-  void roomAdmissionRefusesEachRuleWithItsOwnReason() {
+  void roomAdmissionRefusesTheLaneAndTheBoxAndLeavesTheActorToTheRoomRule() {
     var agent =
         assertThrows(
             ApiException.class,
@@ -236,24 +236,9 @@ class LaunchAdmissionTest {
                     () -> LaunchAdmission.requireAllowedForRoom("chat", "ada", "uday")));
     assertEquals(ErrorCode.NOT_YOUR_SPEC, foreign.failure().errorCode());
 
-    var readOnly =
-        assertThrows(
-            ApiException.class,
-            () ->
-                Actor.run(
-                    new Actor("uday", Role.VIEWER, Actor.Lane.API, null),
-                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
-    assertEquals(ErrorCode.READ_ONLY_CREDENTIAL, readOnly.failure().errorCode());
-
-    var notOwner =
-        assertThrows(
-            ApiException.class,
-            () ->
-                Actor.run(
-                    new Actor("sam", Role.MEMBER, Actor.Lane.API, null),
-                    () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday")));
-    assertEquals(ErrorCode.NOT_YOUR_SPEC, notOwner.failure().errorCode());
-
+    Actor.run(
+        new Actor("sam", Role.VIEWER, Actor.Lane.API, null),
+        () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));
     Actor.run(
         Actor.cliOperator("uday"),
         () -> LaunchAdmission.requireAllowedForRoom("chat", "uday", "uday"));

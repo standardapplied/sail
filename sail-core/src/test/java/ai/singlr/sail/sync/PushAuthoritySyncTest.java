@@ -18,11 +18,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.Finding;
@@ -148,7 +150,7 @@ class PushAuthoritySyncTest {
     assertEquals("Spec theirs", ada.specs.findById("theirs").orElseThrow().title());
 
     ada.db.execute("UPDATE specs SET room_id = 'lobby' WHERE id = 'theirs'");
-    Acting.as("ada", () -> ada.specs.updateStatus("theirs", SpecStatus.PENDING));
+    Acting.unchecked("ada", () -> ada.specs.updateStatus("theirs", SpecStatus.PENDING));
     assertEquals(List.of("theirs"), denied(push(ada, ADA, "spec")));
     assertMainsAgain("spec", "theirs");
     assertEquals("theirs", ada.specs.findById("theirs").orElseThrow().roomId());
@@ -252,6 +254,126 @@ class PushAuthoritySyncTest {
     assertEveryBoxConverged(ADA);
   }
 
+  /**
+   * The run create rule at main's commit: a pushed run proves, as it is born, that its box's FDE
+   * owned the spec it names. One born ahead of a spec its own box made lands with it — runs sync
+   * first — and one on another FDE's spec is denied, so no box holds a run against work that was
+   * never its own.
+   */
+  @Test
+  void aRunPushedOnAnotherFdesSpecIsDeniedWhileOneOnItsOwnOrAheadOfItsSpecLands()
+      throws IOException {
+    ownSpec(main, "bob", "theirs", "bob");
+    ownSpec(main, "ada", "mine", "ada");
+    sync(ada, ADA);
+    ownSpec(ada, "ada", "fresh", "ada");
+    var runs = new RunStore(ada.db);
+    var forged = run(ada, "ada", "theirs");
+    var own = run(ada, "ada", "mine");
+    var ahead = run(ada, "ada", "fresh");
+    Acting.as(
+        "ada", () -> List.of(forged, own, ahead).forEach(id -> runs.complete(id, "completed", 0)));
+
+    var pushed = push(ada, ADA, "run");
+
+    assertEquals(
+        List.of(
+            new SyncSession.Denial(
+                "run",
+                forged,
+                "Run " + forged + " belongs to spec 'theirs', owned by 'bob', not you.")),
+        pushed.denials());
+    var mains = new RunStore(main.db);
+    assertTrue(mains.findById(forged).isEmpty());
+    assertTrue(mains.findById(own).isPresent());
+    assertTrue(mains.findById(ahead).isPresent(), "its spec follows in the same round");
+    assertCleanRound(ada, ADA, "run");
+    sync(ada, ADA);
+    assertEveryBoxConverged(ADA);
+    assertTrue(runs.findById(forged).isEmpty(), "the node settles on main's word");
+    assertTrue(main.specs.findById("fresh").isPresent());
+  }
+
+  /**
+   * A run works a spec or a spec-less room, never both: a chat pushed on the pusher's own spec that
+   * also names another member's room would be found by that room's wake as a chat already running
+   * there. It is denied while it runs and once it finishes, and never reaches the room's owner.
+   */
+  @Test
+  void aRunNamingItsOwnSpecAndAnotherMembersRoomIsDeniedAndNeverReachesTheRoomsOwner()
+      throws IOException {
+    ownSpec(main, "ada", "mine", "ada");
+    room(main, "bob", "den");
+    sync(ada, ADA);
+    sync(bob, BOB);
+    var forged = DateTimeUtils.newId().toString();
+    Acting.unchecked(
+        "ada",
+        () ->
+            new RunStore(ada.db)
+                .reserveDispatch(
+                    forged,
+                    "acme",
+                    "mine",
+                    "den",
+                    "ada",
+                    DispatchGate.ROOM_ROLE,
+                    List.of(),
+                    "claude-code",
+                    null,
+                    "t",
+                    "/log",
+                    "unit",
+                    null));
+
+    var pushed = push(ada, ADA, "run");
+
+    assertEquals(
+        List.of(
+            new SyncSession.Denial(
+                "run",
+                forged,
+                "Run '"
+                    + forged
+                    + "' names both spec 'mine' and room 'den', and a run works one.")),
+        pushed.denials());
+    assertTrue(new RunStore(main.db).findById(forged).isEmpty());
+    sync(bob, BOB);
+    assertEquals(List.of(), new RunStore(bob.db).listForRoom("den"));
+
+    Acting.unchecked("ada", () -> new RunStore(ada.db).complete(forged, "completed", 0));
+    assertEquals(List.of(forged), denied(push(ada, ADA, "run")));
+    assertTrue(
+        new RunStore(ada.db).findById(forged).isEmpty(), "finished, it settles as main says");
+    assertCleanRound(ada, ADA, "run");
+    assertEveryBoxConverged(ADA);
+  }
+
+  /**
+   * A box claims a spec no one is assigned, runs it and finishes before any of it reaches main:
+   * runs sync first, so the run arrives ahead of the claim. It lands, with its agent's edit and the
+   * claim behind it, and nothing of the offline work is withdrawn.
+   */
+  @Test
+  void aFinishedRunThatReachesMainAheadOfItsBoxsClaimLandsWithIt() throws IOException {
+    ownSpec(main, "bob", "open", null);
+    sync(ada, ADA);
+    assign(ada, "ada", "open", "ada");
+    var runs = new RunStore(ada.db);
+    var offline = run(ada, "ada", "open");
+    var agent = Actor.agentPrincipal(principal(ada, offline), "ada");
+    Acting.by(agent, () -> ada.specs.updateStatus("open", SpecStatus.IN_PROGRESS));
+    Acting.as("ada", () -> runs.complete(offline, "completed", 0));
+
+    sync(ada, ADA);
+
+    assertEveryBoxConverged(ADA);
+    assertEquals("completed", new RunStore(main.db).findById(offline).orElseThrow().status());
+    var claimed = main.specs.findById("open").orElseThrow();
+    assertEquals("ada", claimed.assignee());
+    assertEquals(SpecStatus.IN_PROGRESS, claimed.status());
+  }
+
   @Test
   void aRunNamingAnFdeOrAnotherRunIsDeniedAndSoIsAPostAsThatFde() throws IOException {
     ownSpec(main, "ada", "mine", "ada");
@@ -264,14 +386,15 @@ class PushAuthoritySyncTest {
         namingBob,
         namingAnother,
         "claude/" + namingBob);
-    Acting.as(
+    Acting.unchecked(
         "ada",
         () -> {
           runs.complete(namingBob, "completed", 0);
           runs.complete(namingAnother, "completed", 0);
         });
     var forged =
-        Acting.as("ada", () -> new MessageStore(ada.db).append("mine", "bob", "as bob", null));
+        Acting.unchecked(
+            "ada", () -> new MessageStore(ada.db).append("mine", "bob", "as bob", null));
 
     assertEquals(List.of(namingBob, namingAnother), denied(push(ada, ADA, "run")));
     assertTrue(new RunStore(main.db).findById(namingBob).isEmpty());
@@ -292,8 +415,11 @@ class PushAuthoritySyncTest {
     var agentRun = run(ada, "ada", "mine");
     var agent = principal(ada, agentRun);
     var messages = new MessageStore(ada.db);
-    var allowed = Acting.as("ada", () -> messages.append("also-mine", agent, "here", null));
-    var refused = Acting.as("ada", () -> messages.append("theirs", agent, "there", null));
+    var allowed =
+        Acting.by(
+            Actor.agentPrincipal(agent, "ada"),
+            () -> messages.append("also-mine", agent, "here", null));
+    var refused = Acting.unchecked(agent, () -> messages.append("theirs", agent, "there", null));
 
     push(ada, ADA, "run");
     var report = push(ada, ADA, "message");

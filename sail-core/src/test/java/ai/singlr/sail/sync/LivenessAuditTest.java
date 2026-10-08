@@ -703,7 +703,7 @@ class LivenessAuditTest {
     Acting.as("ada", () -> main.specs.delete("mine"));
     SyncBox.quiesce(main, ada.syncsAs(ADA));
     Acting.as("ada", () -> new RoomStore(ada.db).delete("lab"));
-    Acting.as("ada", () -> ada.specs.create(spec("mine", "ada").withRoomId("lab")));
+    Acting.unchecked("ada", () -> ada.specs.create(spec("mine", "ada").withRoomId("lab")));
 
     assertConvergedWithin(3, ada, ADA);
 

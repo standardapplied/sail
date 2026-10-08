@@ -17,10 +17,10 @@ class ProjectRenameOnNodePropagationIT {
   @TempDir Path root;
 
   @Test
-  void aNodeInitiatedRenamePropagatesToMainAndEveryPeer() throws Exception {
+  void anAdminsNodeInitiatedRenamePropagatesToMainAndEveryPeer() throws Exception {
     try (var fleet = Fleet.of(root)) {
       var main = fleet.main("uday");
-      var sumesh = fleet.node("sumesh", main);
+      var sumesh = fleet.node("sumesh", main, "admin");
       var mady = fleet.node("mady", main);
       main.createProject("p");
       fleet.syncAll(sumesh, mady);

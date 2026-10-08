@@ -93,7 +93,7 @@ public interface SyncedStore {
    */
   void eraseRow(String id);
 
-  /** Who may write this type on this box: the one rule its doors and main's commit decide by. */
+  /** Who may write this type on this box: the one rule its journal and main's commit decide by. */
   WriteAuthority authority();
 
   /**

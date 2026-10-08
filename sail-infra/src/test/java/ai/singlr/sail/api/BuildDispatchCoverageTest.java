@@ -6,7 +6,9 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -35,6 +37,8 @@ import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 /**
  * The build lane's edge behaviors, each asserted through a real dispatch: a project with no agent
@@ -118,6 +122,52 @@ class BuildDispatchCoverageTest {
     var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
 
     assertEquals(ErrorCode.AGENT_NOT_CONFIGURED, thrown.failure().errorCode());
+  }
+
+  @ParameterizedTest
+  @CsvSource({"false,pending", "true,review"})
+  void aDispatchWhoseLastRowFailsLeavesNoRunAndNoClaim(boolean restart, String status)
+      throws IOException {
+    var db = seedDb();
+    var specs = new SpecStore(db);
+    Acting.system(
+        () -> {
+          specs.updateStatus("auth", SpecStatus.fromWire(status));
+          new ReviewStore(db).createReview("auth", 1);
+        });
+    db.execute(
+        """
+        CREATE TRIGGER refuse_the_supersede BEFORE UPDATE ON reviews
+        BEGIN SELECT RAISE(ABORT, 'the last row is refused'); END""");
+    var shell = happyPath();
+    var ops = ops(shell, YAML, db);
+
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, restart),
+                            HANDLE)));
+
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
+    assertEquals(SpecStatus.fromWire(status), specs.findById("auth").orElseThrow().status());
+    assertNull(specs.findById("auth").orElseThrow().branch(), "no claim");
+    assertEquals(List.of(), new RunStore(db).listForProject("acme"), "no reservation");
+    assertFalse(ranContaining(shell, "checkout"), "and nothing started for it");
+  }
+
+  private static Throwable rootCause(Throwable thrown) {
+    var cause = thrown;
+    while (cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
   }
 
   @Test

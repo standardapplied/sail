@@ -187,7 +187,6 @@ class AgentResumeSessionIT extends AbstractIncusIT {
                 CONTAINER,
                 ROOM,
                 "it",
-                "it",
                 "build",
                 List.of(),
                 "claude-code",

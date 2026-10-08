@@ -188,10 +188,9 @@ class ResourceAuthzTest {
   @Test
   void nonAssigneeCannotRestoreButAssigneeReachesThePolicyGate() throws Exception {
     seedSpec("auth", "uday", "uday");
+    var held = "{\"rev\":\"" + specStore.latestRev("auth") + "\"}";
     assertEquals(
-        403,
-        send("POST", "/v1/specs/auth/restore", memberToken("raj"), "{\"rev\":\"1-a\"}")
-            .statusCode());
+        403, send("POST", "/v1/specs/auth/restore", memberToken("raj"), held).statusCode());
     var assignee = send("POST", "/v1/specs/auth/restore", memberToken("uday"), "{\"rev\":\"1-a\"}");
     assertNotEquals(403, assignee.statusCode(), assignee.body());
   }

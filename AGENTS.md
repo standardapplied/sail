@@ -44,7 +44,9 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
   and reaches a shell only as an argument, never interpolated into script text.
 - One rule, one place: ownership (`Ownership.ownerOf`), roles (`RoleRule`), one write rule
   per synced type (`ai.singlr.sail.authority`), one `Actor` bound at each door. A second
-  derivation of any of these is a bug, not a convenience.
+  derivation of any of these is a bug, not a convenience. The journal decides every write as
+  it records the revision; a door never asks a write rule, and a rule never reads from the
+  database the row it is deciding (it has `held`).
 - Prefer deleting over adding. The smallest change in the right place; a duplicated seam is
   a finding to fix in the same change.
 

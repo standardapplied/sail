@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
@@ -78,8 +79,8 @@ public final class RunReservation {
       AgentUnit unit,
       SailYaml config) {
     return reserve(
-        runId, project, specId, null, boxHandle, role, repos, agentType, branch, task, unit,
-        config);
+        runId, project, specId, null, boxHandle, role, repos, agentType, branch, task, unit, config,
+        () -> {});
   }
 
   /** Reservation variant for chat lanes that may serve a spec-less room. */
@@ -96,6 +97,30 @@ public final class RunReservation {
       String task,
       AgentUnit unit,
       SailYaml config) {
+    return reserve(
+        runId, project, specId, roomId, boxHandle, role, repos, agentType, branch, task, unit,
+        config, () -> {});
+  }
+
+  /**
+   * As {@link #reserve(String, String, String, String, String, String, List, String, String,
+   * String, AgentUnit, SailYaml)}, committing {@code alongside} with the reservation: a dispatch's
+   * claim of its spec lands with its run or not at all.
+   */
+  public String reserve(
+      String runId,
+      String project,
+      String specId,
+      String roomId,
+      String boxHandle,
+      String role,
+      List<String> repos,
+      String agentType,
+      String branch,
+      String task,
+      AgentUnit unit,
+      SailYaml config,
+      Runnable alongside) {
     return switch (claim(
         runId,
         project,
@@ -116,7 +141,8 @@ public final class RunReservation {
                 task,
                 unit.logPath(),
                 unit.unitName(),
-                configuredMaxDuration(config, role)))) {
+                configuredMaxDuration(config, role),
+                alongside))) {
       case Claim.Claimed claimed -> claimed.credential();
       case Claim.Held held -> throw overlapRefusal(held.conflict());
     };
@@ -210,6 +236,8 @@ public final class RunReservation {
     RunStore.Reservation reserved;
     try {
       reserved = reservation.get();
+    } catch (WriteRefused refused) {
+      throw Refusals.exception(refused.refusal());
     } catch (RuntimeException e) {
       throw new ApiException(ErrorCode.COMMAND_FAILED, "Failed to record the dispatch run.", e);
     }

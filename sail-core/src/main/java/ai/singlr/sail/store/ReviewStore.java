@@ -60,7 +60,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     this.db = db;
     this.changeLog = new ChangeLog(db);
     this.schema = new ReviewSchema();
-    this.revisions = new RevisionJournal(db, changeLog, schema);
+    this.revisions = new RevisionJournal(db, changeLog, schema, this::authority);
     this.content = new ReviewFindingsContent(db, new BlobStore(db));
   }
 
@@ -143,7 +143,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         : serving.stream().anyMatch(run -> run.liveOn(handle));
   }
 
-  /** Who may write a review on this box: the rule every door and main's commit decide by. */
+  /** Who may write a review on this box: the rule the journal and main's commit decide by. */
   @Override
   public ReviewAuthority authority() {
     return new ReviewAuthority(db);

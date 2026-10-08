@@ -46,10 +46,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 /**
- * The run rule's matrix: on this box's lanes a run is its owners' or an admin's, and its own
- * principal may report its session even read-only; on the sync lane it is only ever its executing
- * box's, acting for that box's FDE, never brought back once deleted; on every lane it carries no
- * principal but its own and never moves to another spec or room.
+ * The run rule's matrix: on every lane a run is created by an admin or for the owner of the spec or
+ * room it names; on this box's lanes a run is its owners' or an admin's, and its own principal may
+ * report its session even read-only; on the sync lane it is only ever its executing box's, acting
+ * for that box's FDE, never brought back once deleted; on every lane it carries no principal but
+ * its own and never moves to another spec or room.
  */
 class RunAuthorityTest {
 
@@ -84,6 +85,8 @@ class RunAuthorityTest {
   void setUp() {
     board = new Board();
     board.spec("auth", "auth", "carol", "carol");
+    board.spec("own", "own", OWNER, OWNER);
+    board.spec("open", "open", null, "carol");
     rule = new RunAuthority(board.db);
   }
 
@@ -114,9 +117,11 @@ class RunAuthorityTest {
     var stopped = with(RUNNING, "status", "stopped");
     var session = with(RUNNING, "session_id", "s-1");
     var carol = new Actor("carol", Role.MEMBER, Actor.Lane.API);
+    var born = with(RUNNING, "spec_id", "own");
+    var specless = with(RUNNING, "spec_id", null);
     var fresh =
         with(
-            with(with(RUNNING, "principal", "claude/" + NEW_RUN), "principals", List.of()),
+            with(with(born, "principal", "claude/" + NEW_RUN), "principals", List.of()),
             "_actor",
             "claude/" + NEW_RUN);
     return Stream.of(
@@ -139,14 +144,117 @@ class RunAuthorityTest {
             RUNNING,
             session,
             Kind.READ_ONLY),
-        row("a local create is any writer's", OWNER_CLI, null, RUNNING, null),
+        row("a local create on its creator's spec", OWNER_CLI, null, born, null),
+        row("a local create on another FDE's spec", OWNER_CLI, null, RUNNING, Kind.NOT_OWNER),
+        row("an agent creates on its FDE's spec", AGENT, null, born, null),
+        row(
+            "a create on a spec no one is assigned is its own FDE's, a claim on its way",
+            OWNER_CLI,
+            null,
+            with(RUNNING, "spec_id", "open"),
+            null),
+        row(
+            "a box pushes a birth ahead of its claim of a spec no one is assigned",
+            OWNER_SYNC,
+            null,
+            with(RUNNING, "spec_id", "open"),
+            null),
+        row("an admin creates on anyone's spec", ADMIN, null, RUNNING, null),
+        row("the machinery creates on anyone's spec", SYSTEM, null, RUNNING, null),
+        row(
+            "a create on a spec this box holds nothing of is its own FDE's",
+            OWNER_CLI,
+            null,
+            with(RUNNING, "spec_id", "unheard"),
+            null),
+        row(
+            "a create for another FDE on a spec this box holds nothing of",
+            OTHER_API,
+            null,
+            with(RUNNING, "spec_id", "unheard"),
+            Kind.NOT_OWNER),
+        row(
+            "a create in its creator's room",
+            OWNER_CLI,
+            null,
+            with(specless, "room_id", "lobby"),
+            null),
+        row(
+            "a create in another FDE's room",
+            OWNER_CLI,
+            null,
+            with(specless, "room_id", "den"),
+            Kind.NOT_OWNER),
+        row(
+            "a create in a room this box holds nothing of is its own FDE's",
+            OWNER_CLI,
+            null,
+            with(specless, "room_id", "unheard"),
+            null),
+        row(
+            "a create naming its own spec and another FDE's room",
+            OWNER_CLI,
+            null,
+            with(born, "room_id", "den"),
+            Kind.FIXED),
+        row(
+            "a box cannot push a birth naming its own spec and another FDE's room",
+            OWNER_SYNC,
+            null,
+            with(born, "room_id", "den"),
+            Kind.FIXED),
+        row(
+            "an admin creates none naming a spec and a room, its own included",
+            ADMIN,
+            null,
+            with(born, "room_id", "lobby"),
+            Kind.FIXED),
+        row("a create naming no work is its own FDE's", OWNER_CLI, null, specless, null),
+        row("a create naming no work for another FDE", OTHER_API, null, specless, Kind.NOT_OWNER),
+        row(
+            "a create naming no work and acting for no one is an admin's",
+            OWNER_CLI,
+            null,
+            with(specless, "owner", null),
+            Kind.NOT_OWNER),
         row("a viewer creates none", VIEWER, null, RUNNING, Kind.READ_ONLY),
         row("an admin deletes it", ADMIN, RUNNING, null, null),
         row("another member cannot delete it", OTHER_API, RUNNING, null, Kind.NOT_OWNER),
         row("its box pushes its progress", OWNER_SYNC, RUNNING, stopped, null),
         row("its box pushes its session", OWNER_SYNC, RUNNING, session, null),
         row("its box pushes its deletion", OWNER_SYNC, RUNNING, null, null),
-        row("its box pushes its birth", OWNER_SYNC, null, RUNNING, null),
+        row("its box pushes its birth", OWNER_SYNC, null, born, null),
+        row(
+            "a box cannot push a birth on another FDE's spec",
+            OWNER_SYNC,
+            null,
+            RUNNING,
+            Kind.NOT_OWNER),
+        row(
+            "an admin's box pushes a birth on anyone's spec",
+            ADMIN_SYNC,
+            null,
+            with(with(RUNNING, "node", OTHER), "owner", OTHER),
+            null),
+        row(
+            "a box pushes a birth ahead of the spec it made",
+            OWNER_SYNC,
+            null,
+            with(RUNNING, "spec_id", "unheard"),
+            null),
+        row(
+            "a box pushes a birth in its own room",
+            OWNER_SYNC,
+            null,
+            with(specless, "room_id", "lobby"),
+            null),
+        row(
+            "a box cannot push a birth in another FDE's room",
+            OWNER_SYNC,
+            null,
+            with(specless, "room_id", "den"),
+            Kind.NOT_OWNER),
+        row("a box pushes a birth naming no work", OWNER_SYNC, null, specless, null),
         row(
             "its box cannot push a birth acting for no one",
             OWNER_SYNC,
@@ -266,6 +374,18 @@ class RunAuthorityTest {
                 "Run '" + RUN + "' was deleted, and a deleted run cannot be brought back.",
                 null)),
         rule.decide(OWNER_SYNC, RUN, held, held));
+  }
+
+  @Test
+  void aBirthNamingASpecAndARoomSpeaksTheTextClientsSee() {
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.FIXED,
+                "Run '" + RUN + "' names both spec 'own' and room 'den', and a run works one.",
+                "Name a room only on a run that works no spec.")),
+        rule.decide(
+            OWNER_SYNC, RUN, null, with(with(RUNNING, "spec_id", "own"), "room_id", "den")));
   }
 
   @Test

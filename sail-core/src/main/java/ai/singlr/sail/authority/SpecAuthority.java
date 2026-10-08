@@ -8,6 +8,7 @@ package ai.singlr.sail.authority;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
@@ -20,8 +21,9 @@ import java.util.Optional;
  * Who may write a spec. Any writer creates one; a spec born in another room ({@code room_id} not
  * its own id) needs the right to post there ({@link PostingRule}), and a named assignee must pass
  * the claim rule into that room. A spec's id is reserved for its own room, so a create whose id
- * names a room someone else owns is refused: it would take that room over. Changing the assignee of
- * a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
+ * names a room someone else owns is refused: it would take that room over; so is one born in
+ * another room, whoever asks: the room on its id would stop answering to it. Changing the assignee
+ * of a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
  * claim an unassigned spec for the FDE they act as — and, for a spec born in a room, only where
  * they may already post, since its owner gains a voice there. Any other revision, a tombstone or a
  * restore is its owner's ({@link Ownership#ownerOf}, read from {@code held}) or an admin's, and a
@@ -72,21 +74,25 @@ public final class SpecAuthority implements WriteAuthority {
         return refused;
       }
     }
-    return claim(actor, id, assignee, assigneeOf(next), bornIn(id, held));
+    return claim(actor, id, held, assigneeOf(next), bornIn(id, held));
   }
 
   /**
-   * Why {@code actor} may not write specs at all: a read-only role. Asked first, before a door
-   * looks at what is being written, so a read-only credential learns nothing else about it.
+   * Why {@code actor} may not write specs at all: a read-only role. Asked first, before what is
+   * being written is looked at, so a read-only credential learns nothing else about it.
    */
-  public static Optional<Refusal> writer(Actor actor) {
+  private static Optional<Refusal> writer(Actor actor) {
     return WriteAuthority.decided(actor) || actor.canWrite()
         ? Optional.empty()
         : Refusal.readOnly("change specs");
   }
 
+  /**
+   * Whether spec {@code id} is being restored from its deletion, read from the journal's head: the
+   * row is already back while its revision is being recorded.
+   */
   private boolean restoring(String id) {
-    return specs.lastKnown(id).filter(spec -> !spec.live()).isPresent();
+    return specs.head(id).filter(head -> head.kind() == ChangeLog.Kind.TOMBSTONE).isPresent();
   }
 
   private Optional<Refusal> birth(Actor actor, String id, Map<String, Object> next) {
@@ -98,7 +104,7 @@ public final class SpecAuthority implements WriteAuthority {
     if (bornIn == null) {
       return Optional.empty();
     }
-    var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn));
+    var posting = PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, null));
     if (posting.isPresent()) {
       return posting;
     }
@@ -108,37 +114,45 @@ public final class SpecAuthority implements WriteAuthority {
 
   /**
    * Why spec {@code id} may not be born over the room already holding its id, live or deleted: the
-   * room, and the conversation in it, would become the spec's. It may when that moves no ownership
-   * — the room is already its owner's ({@link RoomStore#ownerOf}), as when a node's own identity
-   * room reaches main before its spec does — or for an admin.
+   * room, and the conversation in it, would become the spec's. It may when it adopts that room and
+   * that moves no ownership — the room is already its owner's, as when a node's own identity room
+   * reaches main before its spec does — or an admin asks. A spec born in another room never may,
+   * whoever asks: a conversation is addressed spec-first, so the room on its id would answer as the
+   * room the spec lives in. The room's owner is read from the room alone: until this birth it was
+   * no spec's, and the spec being born never names it.
    */
   private Optional<Refusal> takenRoom(Actor actor, String id, Map<String, Object> next) {
     var room = rooms.held(id);
-    if (room == null
-        || actor.isAdmin()
-        || rooms
-            .ownerOf(id, room)
-            .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)))) {
+    if (room == null || (bornIn(id, next) == null && movesNoOwnership(actor, room, next))) {
       return Optional.empty();
     }
     return Refusal.of(Refusal.Kind.NOT_OWNER, reservedRoom(id), "Pick another spec id.");
   }
 
+  private static boolean movesNoOwnership(
+      Actor actor, Map<String, Object> room, Map<String, Object> next) {
+    return actor.isAdmin()
+        || RoomStore.ownerOf(room)
+            .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)));
+  }
+
   /** The refusal text of a spec born over room {@code id}, which holds the spec's reserved id. */
-  public static String reservedRoom(String id) {
+  private static String reservedRoom(String id) {
     return "Room '" + id + "' already exists, and a spec's id is reserved for its own room.";
   }
 
   /**
    * The claim rule: an admin assigns anyone; anyone else may only claim a spec that is unassigned,
    * for the FDE they act as ({@link Actor#actingFde}), and one born in {@code bornIn} only where
-   * they may already post.
+   * they may already post — the spec itself counted as {@code held}, never as the claim would leave
+   * it.
    */
   private Optional<Refusal> claim(
-      Actor actor, String id, String current, String requested, String bornIn) {
+      Actor actor, String id, Map<String, Object> held, String requested, String bornIn) {
     if (actor.isAdmin()) {
       return Optional.empty();
     }
+    var current = held == null ? null : assigneeOf(held);
     var claimant = actor.actingFde();
     if (current != null || Strings.isBlank(claimant) || !claimant.equals(requested)) {
       return Refusal.of(
@@ -150,7 +164,8 @@ public final class SpecAuthority implements WriteAuthority {
               + ".",
           "Ask an admin to reassign it. You may grab a spec only while it is unassigned.");
     }
-    if (bornIn != null && PostingRule.decide(actor, bornIn, rooms.owners(bornIn)).isPresent()) {
+    if (bornIn != null
+        && PostingRule.decide(actor, bornIn, rooms.owners(bornIn, id, held)).isPresent()) {
       return Refusal.of(
           Refusal.Kind.ADMIN_ONLY,
           "Spec '"

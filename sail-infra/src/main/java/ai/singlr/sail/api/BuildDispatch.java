@@ -105,9 +105,10 @@ public final class BuildDispatch {
   /**
    * Executes one dispatch: resolve the spec (honoring {@code restart}), enforce {@link
    * DispatchPolicy}, refuse while an ad-hoc agent is live, atomically reserve the run against the
-   * target repo set (the binding concurrency gate), then claim the spec {@code in_progress} with
-   * its resolved repos and branch persisted, publish the lifecycle events, snapshot and branch as
-   * configured, launch, and arm the guardrail watcher. Every refusal fires before any mutation.
+   * target repo set (the binding concurrency gate) and, in the same transaction, claim the spec
+   * {@code in_progress} with its resolved repos and branch persisted, then publish the lifecycle
+   * events, snapshot and branch as configured, launch, and arm the guardrail watcher. Every refusal
+   * fires before any mutation.
    */
   public DispatchOperations.Outcome dispatch(
       String project, DispatchOperations.Request request, String localHandle) {
@@ -157,10 +158,12 @@ public final class BuildDispatch {
             StageSkills.block(skill, harness));
     var task = built.prompt();
 
+    Runnable claim = () -> claim(resolution, taskSpec, branch);
     if (request.dryRun()) {
       requireNoRepoOverlap(project, localHandle, taskSpec.id(), taskSpec.repos());
+      commit(claim);
       var prepared =
-          claimAndPrepare(
+          prepare(
               project,
               loaded.config(),
               targetRepos,
@@ -197,11 +200,12 @@ public final class BuildDispatch {
             branch,
             task,
             unit,
-            loaded.config());
+            loaded.config(),
+            claim);
     try {
       seedRoomDelivery(runId, built.renderedMessages());
       var prepared =
-          claimAndPrepare(
+          prepare(
               project,
               loaded.config(),
               targetRepos,
@@ -298,13 +302,36 @@ public final class BuildDispatch {
   }
 
   /**
-   * The claim/branch phase, identical on the dry and live lanes: reset a restarted spec, claim it
-   * {@code in_progress} with its resolved repos and branch, supersede stale reviews, publish the
-   * lifecycle events, snapshot as configured, and check out the work branch. On the live lane this
-   * runs only after {@link #reserveRun} has won the repo reservation, so two concurrent dispatches
-   * can never both mutate spec state or race their checkouts in a shared repo.
+   * The claim, identical on the dry and live lanes: reset a restarted spec, claim it {@code
+   * in_progress} with its resolved repos and branch, and supersede stale reviews. On the live lane
+   * it commits in the transaction that reserves the run ({@link #reserveRun}), so a claim the
+   * journal refuses leaves no run, and two concurrent dispatches can never both mutate spec state.
    */
-  private PreparedClaim claimAndPrepare(
+  private void claim(SpecResolution resolution, Spec taskSpec, String branch) {
+    if (resolution.restarted()) {
+      specStore.updateStatus(taskSpec.id(), SpecStatus.PENDING);
+    }
+    specStore.updateReposAndStatus(taskSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
+    if (reviewStore != null) {
+      reviewStore.supersedeForSpec(taskSpec.id());
+    }
+  }
+
+  /** Commits {@code claim} on its own, where no run is reserved with it: one transaction. */
+  private void commit(Runnable claim) {
+    specStore.atomically(
+        () -> {
+          claim.run();
+          return null;
+        });
+  }
+
+  /**
+   * What follows a claim that landed, identical on the dry and live lanes: publish the lifecycle
+   * events, snapshot as configured, and check out the work branch, racing no other dispatch's
+   * checkouts in a shared repo.
+   */
+  private PreparedClaim prepare(
       String project,
       SailYaml config,
       List<SailYaml.Repo> targetRepos,
@@ -313,13 +340,6 @@ public final class BuildDispatch {
       String branch,
       String task,
       String mode) {
-    if (resolution.restarted()) {
-      specStore.updateStatus(taskSpec.id(), SpecStatus.PENDING);
-    }
-    specStore.updateReposAndStatus(taskSpec.id(), taskSpec.repos(), SpecStatus.IN_PROGRESS, branch);
-    if (reviewStore != null) {
-      reviewStore.supersedeForSpec(taskSpec.id());
-    }
     listener.claimed(taskSpec, task);
     if (resolution.restarted()) {
       publish(
@@ -491,8 +511,9 @@ public final class BuildDispatch {
 
   /**
    * Atomically reserves the dispatch as a {@code running} run stamped with this box's handle and
-   * the target repo set, returning the run's bearer credential. A run store is absent only on boxes
-   * that keep no run aggregate, which have nothing to reserve against.
+   * the target repo set, and commits {@code claim} with it, returning the run's bearer credential.
+   * A run store is absent only on boxes that keep no run aggregate, which have nothing to reserve
+   * against and claim on their own.
    */
   private String reserveRun(
       String runId,
@@ -504,14 +525,17 @@ public final class BuildDispatch {
       String branch,
       String task,
       AgentUnit unit,
-      SailYaml config) {
+      SailYaml config,
+      Runnable claim) {
     if (runStore == null) {
+      commit(claim);
       return null;
     }
     return runReservation.reserve(
         runId,
         project,
         specId,
+        null,
         boxHandle,
         Lane.BUILD.wire(),
         repos,
@@ -519,7 +543,8 @@ public final class BuildDispatch {
         branch,
         task,
         unit,
-        config);
+        config,
+        claim);
   }
 
   private void seedRoomDelivery(String runId, List<MessageStore.MessageRow> rendered) {
