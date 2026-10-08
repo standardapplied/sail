@@ -174,7 +174,7 @@ class WriteAuthorshipTest {
       assertEquals(
           ErrorCode.READ_ONLY_CREDENTIAL,
           refused.failure().errorCode(),
-          "keeping its own side is an edit, decided by the spec rule");
+          "a read-only credential is refused before any side is looked at");
 
       fdes.update("mady", null, null, "member");
       TestAuth.asOperator(operations, () -> operations.resolveConflict("spec", "auth", mine()));

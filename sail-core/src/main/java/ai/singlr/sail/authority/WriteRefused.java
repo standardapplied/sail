@@ -16,6 +16,7 @@ public final class WriteRefused extends RuntimeException {
 
   private final transient Refusal refusal;
 
+  /** The refusal of a write, {@code refusal}, as the exception its transaction ends with. */
   public WriteRefused(Refusal refusal) {
     super(Objects.requireNonNull(refusal, "refusal").message());
     this.refusal = refusal;

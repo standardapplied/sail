@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.engine;
 
-import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
@@ -16,7 +15,6 @@ import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
-import java.util.Optional;
 
 /**
  * Records a project's definition into the control-plane catalog (the {@code projects} table), the
@@ -61,8 +59,8 @@ public final class ProjectCatalog {
   /**
    * Refuses, before a command changes anything, a definition of {@code name} the journal will not
    * take from {@code operator}: the project rule's own decision, asked of the catalog as it stands.
-   * A catalog that is missing or cannot be read refuses nothing here, and the write that follows
-   * fails on its own.
+   * A box with no catalog yet refuses nothing here; one whose catalog cannot be read fails here, as
+   * the write that follows would.
    */
   public static void requireRecordable(String name, Actor operator) {
     requireRecordable(SailPaths.controlPlaneDb(), name, operator);
@@ -72,16 +70,14 @@ public final class ProjectCatalog {
     if (!Files.isRegularFile(catalog)) {
       return;
     }
-    Optional<Refusal> refusal;
     try (var db = Sqlite.open(catalog)) {
-      refusal = Actor.call(operator, () -> new ProjectStore(db).decide(name, Map.of()));
-    } catch (Exception e) {
-      return;
+      new SchemaManager(db).migrate();
+      Actor.call(operator, () -> new ProjectStore(db).decide(name, Map.of()))
+          .ifPresent(
+              refused -> {
+                throw new WriteRefused(refused);
+              });
     }
-    refusal.ifPresent(
-        refused -> {
-          throw new WriteRefused(refused);
-        });
   }
 
   /**

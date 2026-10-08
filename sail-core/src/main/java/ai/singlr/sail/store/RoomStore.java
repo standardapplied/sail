@@ -254,21 +254,22 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    * Each owner is named once; empty when no one is known.
    */
   public List<String> owners(String roomId) {
-    return owners(roomId, "", null);
+    return owners(roomId, null, null);
   }
 
   /**
    * As {@link #owners(String)} while a revision of spec {@code specId}, born in {@code roomId}, is
-   * being decided: that spec counts as {@code held}, the projection the journal holds of it (null
-   * when it holds none), never as its row, which the revision being recorded has already reached —
-   * so a spec never gives itself a voice in the room it asks to enter.
+   * being decided (null for none): that spec counts as {@code held}, the projection the journal
+   * holds of it (null when it holds none), never as its row, which the revision being recorded has
+   * already reached — so a spec never gives itself a voice in the room it asks to enter.
    */
   public List<String> owners(String roomId, String specId, Map<String, Object> held) {
     var rows =
         db.query(
             """
             SELECT assignee, created_by FROM specs
-            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1)) AND id <> ?2
+            WHERE (room_id = ?1 OR (coalesce(room_id, '') = '' AND id = ?1))
+                AND (?2 IS NULL OR id <> ?2)
             UNION ALL
             SELECT assignee, created_by FROM rooms
             WHERE id = ?1 AND NOT EXISTS (SELECT 1 FROM specs WHERE id = ?1)""",
@@ -305,12 +306,15 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
         .lastKnown(roomId)
         .filter(spec -> spec.roomIdOrIdentity().equals(roomId))
         .map(SpecStore.LastKnown::owner)
-        .orElseGet(
-            () ->
-                held == null
-                    ? ""
-                    : Ownership.ownerOf(
-                        Snapshots.text(held, "assignee"), Snapshots.text(held, "created_by")));
+        .orElseGet(() -> held == null ? "" : ownerOf(held));
+  }
+
+  /**
+   * Whom {@code room}, a room's projection, names as its owner by its own row: its assignee, else
+   * its creator ({@link Ownership#ownerOf}).
+   */
+  public static String ownerOf(Map<String, Object> room) {
+    return Ownership.ownerOf(Snapshots.text(room, "assignee"), Snapshots.text(room, "created_by"));
   }
 
   /**

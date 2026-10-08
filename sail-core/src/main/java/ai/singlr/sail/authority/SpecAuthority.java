@@ -132,7 +132,7 @@ public final class SpecAuthority implements WriteAuthority {
   private static boolean movesNoOwnership(
       Actor actor, Map<String, Object> room, Map<String, Object> next) {
     return actor.isAdmin()
-        || Ownership.ownerOf(Snapshots.text(room, ASSIGNEE), Snapshots.text(room, "created_by"))
+        || RoomStore.ownerOf(room)
             .equals(Ownership.ownerOf(assigneeOf(next), creatorOf(actor, next)));
   }
 

@@ -213,9 +213,8 @@ final class SpecPruner {
       var batch =
           db.transaction(
               () -> {
-                var roots = select.apply(BATCH);
-                var plan = erasure.closure(roots);
-                Refusals.enforce(authority.idle(roots, plan));
+                var plan = erasure.closure(select.apply(BATCH));
+                Refusals.enforce(authority.idle(plan));
                 projects.addAll(projectsOf(plan));
                 return erasure.erase(plan, origin);
               });

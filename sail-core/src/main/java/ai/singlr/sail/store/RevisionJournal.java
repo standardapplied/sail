@@ -231,10 +231,7 @@ public final class RevisionJournal implements ConflictResolver {
    * ({@link WriteAuthority#decided}).
    */
   public Optional<Refusal> decide(String id, Map<String, Object> next) {
-    var actor = Actor.current();
-    return actor.lane() == Actor.Lane.SYNC
-        ? Optional.empty()
-        : authority.get().decide(actor, id, held(id), next);
+    return WriteAuthority.local(authority.get(), id, held(id), next);
   }
 
   /**
@@ -244,11 +241,7 @@ public final class RevisionJournal implements ConflictResolver {
    * @throws WriteRefused when the rule refuses the bound actor
    */
   void admit(String id, Map<String, Object> next) {
-    decide(id, next)
-        .ifPresent(
-            refusal -> {
-              throw db.doomed(new WriteRefused(refusal));
-            });
+    WriteAuthority.admit(db, decide(id, next));
   }
 
   /**

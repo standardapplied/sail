@@ -119,12 +119,12 @@ public final class EraseAuthority {
   }
 
   /**
-   * Why {@code plan}, everything erasing {@code roots} removes, may not be erased yet: a run in it
-   * has not finished. A project is purged whole, its runs with it whether finished or not — it is
-   * purged once its container is gone, so nothing in it is going on — and a purge never waits.
+   * Why {@code plan}, an erasure's closure, may not be erased yet: a run in it has not finished. A
+   * project is purged whole, its runs with it whether finished or not — it is purged once its
+   * container is gone, so nothing in it is going on — and a purge never waits.
    */
-  public Optional<Refusal> idle(List<Erasure.Target> roots, List<Erasure.Target> plan) {
-    if (roots.stream().anyMatch(root -> Erasure.PROJECT.equals(root.type()))) {
+  public Optional<Refusal> idle(List<Erasure.Target> plan) {
+    if (plan.stream().anyMatch(target -> Erasure.PROJECT.equals(target.type()))) {
       return Optional.empty();
     }
     var unfinished =

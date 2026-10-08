@@ -10,6 +10,8 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -270,11 +272,11 @@ class AuthorityAuditTest {
 
       var refused =
           assertThrows(
-              ApiException.class,
+              WriteRefused.class,
               () ->
                   Actor.call(operator, () -> nodeOps.resolveConflict("spec", "auth", resolution)));
 
-      assertEquals(ErrorCode.FORBIDDEN_ADMIN_ONLY, refused.failure().errorCode());
+      assertEquals(Refusal.Kind.ADMIN_ONLY, refused.refusal().kind());
       assertEquals("ada", node.specs.findById("auth").orElseThrow().assignee());
       assertEquals("auth", node.specs.findById("auth").orElseThrow().title(), "nothing adopted");
       assertTrue(node.conflicts.pendingFor("spec", "auth").isPresent(), "and it stays parked");

@@ -8,7 +8,6 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
-import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
@@ -91,11 +90,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                   question);
           requireReplyTarget(row);
           var snapshot = snapshot(row);
-          decide(snapshot)
-              .ifPresent(
-                  refusal -> {
-                    throw db.doomed(new WriteRefused(refusal));
-                  });
+          WriteAuthority.admit(db, decide(snapshot));
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
           journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);
@@ -105,15 +100,11 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Why the bound {@link Actor} may not post {@code post}, a message's snapshot, as this box's own;
-   * empty if it may. The one decision of every post that is not a push: {@link #append} asks it as
-   * it journals the message, and a door about to start a side effect asks the same of the post it
-   * will then make. A pushed post ({@link Actor.Lane#SYNC}) was decided at {@link #commitRevision}.
+   * empty if it may: the one decision of every post that is not a push, which {@link #append} asks
+   * as it journals the message. A pushed post was decided at {@link #commitRevision}.
    */
-  public Optional<Refusal> decide(Map<String, Object> post) {
-    var actor = Actor.current();
-    return actor.lane() == Actor.Lane.SYNC
-        ? Optional.empty()
-        : authority().decide(actor, null, null, post);
+  private Optional<Refusal> decide(Map<String, Object> post) {
+    return WriteAuthority.local(authority(), null, null, post);
   }
 
   /** Who may post on this box, and as whom: the rule the journal and main's commit decide by. */

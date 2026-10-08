@@ -294,18 +294,13 @@ public final class SailOperations implements HostOperations {
 
   /**
    * Settles a parked conflict. Keeping this box's side or merging is an edit, decided by the type's
-   * rule as the journal records it. Adopting main's side decides no row, yet gives up what this box
-   * parked, so a read-only credential is refused that as well.
+   * rule as the journal records it ({@link WriteRefused}). Adopting main's side decides no row, yet
+   * gives up what this box parked, so a read-only credential is refused that as well.
    */
   @Override
   public SyncConflicts.Conflict resolveConflict(String type, String id, Resolution resolution) {
     Refusals.requireWriter("resolve conflicts");
-    SyncConflicts.Conflict resolved;
-    try {
-      resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
-    } catch (WriteRefused refused) {
-      throw Refusals.exception(refused.refusal());
-    }
+    var resolved = new ConflictOperations(controlPlane).resolve(type, id, resolution);
     triggerSyncAfterWrite();
     return resolved;
   }

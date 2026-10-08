@@ -829,17 +829,19 @@ class GlobalSpecOperationsTest {
         CREATE TRIGGER refuse_the_residue BEFORE INSERT ON review_findings
         BEGIN SELECT RAISE(ABORT, 'the last row is refused'); END""");
 
-    assertThrows(
-        RuntimeException.class,
-        () ->
-            Acting.by(
-                ADMIN,
-                () ->
-                    withRooms.update(
-                        "auth",
-                        SpecUpdateRequest.fromMap(
-                            Map.of("status", "done", "title", "Shipped", "wake", "off")))));
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                Acting.by(
+                    ADMIN,
+                    () ->
+                        withRooms.update(
+                            "auth",
+                            SpecUpdateRequest.fromMap(
+                                Map.of("status", "done", "title", "Shipped", "wake", "off")))));
 
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
     var spec = specStore.findById("auth").orElseThrow();
     assertEquals(SpecStatus.IN_PROGRESS, spec.status(), "the row is not moved");
     assertEquals("Auth", spec.title());
@@ -866,14 +868,25 @@ class GlobalSpecOperationsTest {
         CREATE TRIGGER refuse_the_room BEFORE DELETE ON rooms
         BEGIN SELECT RAISE(ABORT, 'the last row is refused'); END""");
 
-    assertThrows(
-        RuntimeException.class, () -> Acting.by(ADMIN, () -> withRooms.delete("auth-followup")));
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () -> Acting.by(ADMIN, () -> withRooms.delete("auth-followup")));
 
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
     assertTrue(specStore.findById("auth-followup").isPresent(), "the spec is not deleted");
     assertEquals(
         Finding.Resolution.OPEN,
         reviewStore.findingsForReview(reviewId).getFirst().resolution(),
         "nor is the finding its shipping fixes resolved on the way out");
+  }
+
+  private static Throwable rootCause(Throwable thrown) {
+    var cause = thrown;
+    while (cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
   }
 
   @Test

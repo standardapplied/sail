@@ -632,7 +632,7 @@ public final class SyncRpcServer {
                   }
                   if (!erasure.isErased(root)) {
                     var plan = erasure.closure(List.of(root));
-                    var busy = authority.idle(List.of(root), plan).map(Refusal::message);
+                    var busy = authority.idle(plan).map(Refusal::message);
                     if (busy.isPresent()) {
                       return new SyncWire.Refused(offer.id(), busy.get());
                     }

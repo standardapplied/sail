@@ -1819,8 +1819,9 @@ these roles distinct is what lets the synced catalog stay identity-free.
     approval, the loop's pass and escalate, and a resolve (main's side adopted and the chosen
     side written over it).
   - **A resolve is decided like any edit.** Adopting main's side is main's revision and
-    decides nothing, so any credential may; keeping this box's side or merging writes over
-    main's version, which the type's rule decides with `held` = main's version.
+    decides no row, yet gives up what this box parked, so a read-only credential is refused it
+    and any that can write may; keeping this box's side or merging writes over main's version,
+    which the type's rule decides with `held` = main's version.
   - **A spec's id is reserved for its own room by the spec rule**, at the door as on main: a
     spec is born over a room holding its id only when that moves no ownership — the room is
     already its owner's — or by an admin, and it then adopts that room and mints none. One born

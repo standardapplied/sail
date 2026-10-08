@@ -23,7 +23,10 @@ import java.lang.classfile.ClassFile;
 import java.lang.classfile.instruction.InvokeDynamicInstruction;
 import java.lang.classfile.instruction.InvokeInstruction;
 import java.lang.constant.DirectMethodHandleDesc;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayDeque;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -46,7 +49,9 @@ import org.junit.jupiter.params.provider.MethodSource;
  * the host CLI, an HTTP token, a run's agent and a room agent — is refused with the rule's kind and
  * leaves the database exactly as it was; made by this box's machinery, the same write lands. The
  * list is every public store method that reaches the journal, read from the stores' own bytecode,
- * so a write added without a row here fails the test.
+ * so a write added without a row here fails the test, and the stores read are every {@link
+ * SyncedStore}. A write that reaches a row around the journal is {@code OneDecisionPointTest}'s and
+ * the sync tests' to catch, not this one's.
  */
 class JournalDecidesEveryWriteTest {
 
@@ -65,6 +70,16 @@ class JournalDecidesEveryWriteTest {
           new Actor("ada", Role.MEMBER, Actor.Lane.CLI),
           new Actor("ada", Role.MEMBER, Actor.Lane.API),
           Actor.agentPrincipal("claude/" + ADAS_RUN, "ada"));
+
+  private static final List<Class<?>> STORES =
+      List.of(
+          SpecStore.class,
+          RoomStore.class,
+          RunStore.class,
+          ReviewStore.class,
+          FileStore.class,
+          ProjectStore.class,
+          MessageStore.class);
 
   /**
    * The writes a store makes as this box's machinery whoever calls it: a box re-stamping the runs
@@ -369,15 +384,7 @@ class JournalDecidesEveryWriteTest {
   @Test
   void everyStoreMethodThatReachesTheJournalIsInTheList() throws IOException {
     var journaled = new TreeSet<String>();
-    for (var store :
-        List.of(
-            SpecStore.class,
-            RoomStore.class,
-            RunStore.class,
-            ReviewStore.class,
-            FileStore.class,
-            ProjectStore.class,
-            MessageStore.class)) {
+    for (var store : STORES) {
       journaled.addAll(journaledWrites(store));
     }
     var proven =
@@ -386,6 +393,31 @@ class JournalDecidesEveryWriteTest {
 
     assertEquals(journaled, proven);
   }
+
+  @Test
+  void theStoresReadAreEverySyncedStore() throws IOException, URISyntaxException {
+    var root =
+        Path.of(SyncedStore.class.getProtectionDomain().getCodeSource().getLocation().toURI());
+    var synced = new TreeSet<String>();
+    try (var files =
+        Files.list(root.resolve(SyncedStore.class.getPackageName().replace('.', '/')))) {
+      for (var file : files.filter(file -> file.toString().endsWith(".class")).toList()) {
+        var model = ClassFile.of().parse(Files.readAllBytes(file));
+        if (model.interfaces().stream()
+            .anyMatch(implemented -> implemented.asInternalName().equals(SYNCED_STORE))) {
+          synced.add(model.thisClass().asInternalName());
+        }
+      }
+    }
+
+    assertEquals(
+        synced,
+        STORES.stream()
+            .map(store -> store.getName().replace('.', '/'))
+            .collect(Collectors.toCollection(TreeSet::new)));
+  }
+
+  private static final String SYNCED_STORE = SyncedStore.class.getName().replace('.', '/');
 
   @Test
   void aRevisionNeverAdmitsItself() {

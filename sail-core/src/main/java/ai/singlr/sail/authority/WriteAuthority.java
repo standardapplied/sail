@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
 import java.util.Optional;
 
@@ -35,5 +36,29 @@ public interface WriteAuthority {
   /** Whether {@code actor} has already been decided for: main, or this box's own machinery. */
   static boolean decided(Actor actor) {
     return actor.lane() == Actor.Lane.MAIN || actor.lane() == Actor.Lane.SYSTEM;
+  }
+
+  /**
+   * Why the bound {@link Actor} may not write {@code next} over {@code held} for {@code id} as this
+   * box's own, by {@code rule}; empty if it may. The one decision of every write that is not a
+   * push: a pushed revision ({@link Actor.Lane#SYNC}) was decided at main's commit and is not
+   * decided again.
+   */
+  static Optional<Refusal> local(
+      WriteAuthority rule, String id, Map<String, Object> held, Map<String, Object> next) {
+    var actor = Actor.current();
+    return actor.lane() == Actor.Lane.SYNC ? Optional.empty() : rule.decide(actor, id, held, next);
+  }
+
+  /**
+   * Refuses the write {@code refusal} decides against, dooming the transaction it runs in on {@code
+   * db} ({@link Sqlite#doomed}); a no-op when the rule allowed.
+   *
+   * @throws WriteRefused when the rule refused
+   */
+  static void admit(Sqlite db, Optional<Refusal> refusal) {
+    if (refusal.isPresent()) {
+      throw db.doomed(new WriteRefused(refusal.get()));
+    }
   }
 }

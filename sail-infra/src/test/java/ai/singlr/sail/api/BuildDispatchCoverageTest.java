@@ -142,21 +142,32 @@ class BuildDispatchCoverageTest {
     var shell = happyPath();
     var ops = ops(shell, YAML, db);
 
-    assertThrows(
-        RuntimeException.class,
-        () ->
-            Actor.call(
-                ADMIN,
-                () ->
-                    ops.dispatch(
-                        "acme",
-                        new DispatchOperations.Request("auth", "background", false, null, restart),
-                        HANDLE)));
+    var thrown =
+        assertThrows(
+            RuntimeException.class,
+            () ->
+                Actor.call(
+                    ADMIN,
+                    () ->
+                        ops.dispatch(
+                            "acme",
+                            new DispatchOperations.Request(
+                                "auth", "background", false, null, restart),
+                            HANDLE)));
 
+    assertEquals("the last row is refused (sqlite error 19)", rootCause(thrown).getMessage());
     assertEquals(SpecStatus.fromWire(status), specs.findById("auth").orElseThrow().status());
     assertNull(specs.findById("auth").orElseThrow().branch(), "no claim");
     assertEquals(List.of(), new RunStore(db).listForProject("acme"), "no reservation");
     assertFalse(ranContaining(shell, "checkout"), "and nothing started for it");
+  }
+
+  private static Throwable rootCause(Throwable thrown) {
+    var cause = thrown;
+    while (cause.getCause() != null) {
+      cause = cause.getCause();
+    }
+    return cause;
   }
 
   @Test
