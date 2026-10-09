@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ReviewPipelineConfig;
@@ -203,6 +204,52 @@ class ProjectSkillLaunchTest {
     assertNamesNoSkill(build.task());
     assertNamesNoSkill(reviewer.task());
     assertNamesNoSkill(fix.task());
+  }
+
+  private ApiException refusedDispatch(String specId) {
+    return assertThrows(
+        ApiException.class,
+        () ->
+            Actor.call(
+                Actor.cliOperator(HANDLE),
+                () ->
+                    loop.operations.dispatch(
+                        PROJECT,
+                        new DispatchOperations.Request(specId, "background", false, null, false),
+                        HANDLE)));
+  }
+
+  @Test
+  void aBuildForAHarnessSailDoesNotKnowIsABadRequestBeforeTheClaim() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
+    pendingSpec("auth", "gemini");
+
+    var refused = refusedDispatch("auth");
+
+    assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
+    assertEquals(
+        "Unknown agent CLI: 'gemini'. Known agents: claude-code, codex.\n  Check the 'install'"
+            + " list in your sail.yaml agent section.",
+        refused.getMessage());
+    assertEquals(SpecStatus.PENDING, loop.specStatus("auth"));
+    assertTrue(loop.runs.listForProject(PROJECT).isEmpty());
+  }
+
+  @Test
+  void aBuildWithNoAgentNamedAnywhereIsABadRequestSayingWhatToSet() {
+    loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML.replace("  type: claude-code\n", ""));
+    pendingSpec("auth", null);
+    pendingSpec("blank", " ");
+
+    for (var spec : List.of("auth", "blank")) {
+      var refused = refusedDispatch(spec);
+
+      assertEquals(ErrorCode.BAD_REQUEST, refused.failure().errorCode());
+      assertEquals(
+          "Project 'test-project' names no agent; set agent.type or the spec's agent.",
+          refused.getMessage());
+      assertEquals(SpecStatus.PENDING, loop.specStatus(spec));
+    }
   }
 
   @Test

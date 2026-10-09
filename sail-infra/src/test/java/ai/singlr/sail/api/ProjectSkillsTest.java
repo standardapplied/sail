@@ -95,6 +95,7 @@ class ProjectSkillsTest {
   void aProjectWithNoSkillsHoldsNoFolderAndEveryOtherFileIsLeftAlone() {
     share("README.md", "hello");
     share(".sail/other.md", "not a skill");
+    share(".sail/skills/README.md", "a file beside the folders, not in one");
 
     assertEquals(List.of(), skills.all("acme"));
     assertEquals(List.of(), skills.held("acme"));

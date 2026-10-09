@@ -189,6 +189,31 @@ class BuildDispatchCoverageTest {
   }
 
   @Test
+  void aCheckoutTheContainerRefusesFailsWithBranchCreateFailed() throws IOException {
+    var shell = happyPath().on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "");
+    var ops = ops(shell, YAML, seedDb());
+
+    var thrown = assertThrows(ApiException.class, () -> dispatch(ops));
+
+    assertEquals(ErrorCode.BRANCH_CREATE_FAILED, thrown.failure().errorCode());
+    assertEquals("Failed to create branch 'sail/auth' in repo 'app'.", thrown.getMessage());
+  }
+
+  @Test
+  void aDefaultBranchAnsweredWithoutTheOriginPrefixIsForkedFromAsIs() throws IOException {
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --abbrev-ref origin/HEAD", "main\n")
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/auth origin/main", "");
+    var ops = ops(shell, YAML, seedDb());
+
+    assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops));
+
+    assertTrue(ranContaining(shell, REPO + " checkout -b sail/auth origin/main"));
+  }
+
+  @Test
   void aShellFailureWhilePreparingTheCheckoutFailsWithCommandFailed() throws IOException {
     var shell = happyPath().throwOn("test -d /home/dev/workspace/app/.git");
     var ops = ops(shell, YAML, seedDb());
