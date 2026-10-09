@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
@@ -46,13 +47,27 @@ public final class ProjectProvisioner {
   private final ShellExec shell;
   private final ProvisionTracker<ProjectPhase> tracker;
   private final ProvisionListener listener;
+  private final ProjectSkills skills;
   private ProjectPhase currentPhase;
 
   public ProjectProvisioner(
       ShellExec shell, ProvisionTracker<ProjectPhase> tracker, ProvisionListener listener) {
+    this(shell, tracker, listener, ProjectSkills.none());
+  }
+
+  /**
+   * @param skills where the project's skills are read from, installed for every harness the project
+   *     installs; {@link ProjectSkills#none()} installs sail's own alone
+   */
+  public ProjectProvisioner(
+      ShellExec shell,
+      ProvisionTracker<ProjectPhase> tracker,
+      ProvisionListener listener,
+      ProjectSkills skills) {
     this.shell = shell;
     this.tracker = tracker;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
+    this.skills = Objects.requireNonNull(skills, "skills");
   }
 
   /**
@@ -82,7 +97,7 @@ public final class ProjectProvisioner {
       provisionServices(config);
       configurePruneCron(config);
       installAgentTools(config);
-      generateAgentContext(config);
+      installSkills(config);
       recordSpecsPhase();
       writeProjectState(config);
       tracker.cleanup();
@@ -652,6 +667,7 @@ public final class ProjectProvisioner {
       if (!credHelper.ok()) {
         throw new IOException("Failed to configure git credential helper: " + credHelper.stderr());
       }
+      ForgeCliLogin.loginGitHub(shell, name, user, gitTokens, config.repos());
     }
 
     if ("ssh".equals(config.git().auth()) && config.git().sshKey() != null) {
@@ -839,6 +855,7 @@ public final class ProjectProvisioner {
     if (!helperResult.ok()) {
       throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
     }
+    ForgeCliLogin.loginGitHub(shell, containerName, user, gitTokens, config.repos());
   }
 
   private void pushWorkspaceFiles(SailYaml config, Path sailYamlPath) throws Exception {
@@ -1019,10 +1036,15 @@ public final class ProjectProvisioner {
             + ")");
   }
 
-  private void generateAgentContext(SailYaml config) throws Exception {
-    currentPhase = ProjectPhase.CONTEXT_GENERATED;
+  /**
+   * Installs the project's skills and sail's {@code spec-board} into the skills folder of every
+   * harness the project installs. Sail writes no context file: how the codebase is built is the
+   * repository's own {@code AGENTS.md} to say, and the loop's rules are in the prompts.
+   */
+  private void installSkills(SailYaml config) throws Exception {
+    currentPhase = ProjectPhase.SKILLS_INSTALLED;
     if (tracker.isCompleted(currentPhase)) {
-      stepSkipped(18, "agent context already generated");
+      stepSkipped(18, "skills already installed");
       return;
     }
 
@@ -1031,20 +1053,36 @@ public final class ProjectProvisioner {
     execInContainer(config.name(), List.of("mkdir", "-p", workspace));
     execInContainer(config.name(), List.of("chown", user + ":" + user, workspace));
 
-    var result = AgentContextInstaller.install(shell, config.name(), config);
-    tracker.advance(currentPhase);
-
-    if (result.isEmpty()) {
+    var harnesses = installedHarnesses(config);
+    if (harnesses.isEmpty()) {
+      tracker.advance(currentPhase);
       stepSkipped(18, "no agent configured");
       return;
     }
-
-    step(18, "Generating agent context files...");
-    var summary = new StringBuilder("Agent context generated");
-    if (!result.pushed().isEmpty()) {
-      summary.append(" (").append(String.join(", ", baseNames(result.pushed()))).append(")");
+    step(18, "Installing skills...");
+    var detail = "";
+    for (var harness : harnesses) {
+      var report = ProjectSkillInstaller.installProject(shell, config.name(), harness, skills);
+      detail =
+          "Skills installed ("
+              + String.join(", ", report.installed())
+              + ")"
+              + (report.skipped().isEmpty() ? "" : "; " + String.join("; ", report.skipped()));
     }
-    stepDone(18, summary.toString());
+    tracker.advance(currentPhase);
+    stepDone(18, detail);
+  }
+
+  /** The harnesses the project installs: {@code agent.install}, else {@code agent.type}. */
+  public static List<Harness> installedHarnesses(SailYaml config) {
+    if (config.agent() == null) {
+      return List.of();
+    }
+    var install = config.agent().install();
+    if (install != null && !install.isEmpty()) {
+      return install.stream().distinct().map(Harnesses::of).toList();
+    }
+    return config.agent().type() != null ? List.of(Harnesses.of(config.agent().type())) : List.of();
   }
 
   private void recordSpecsPhase() throws Exception {
@@ -1217,10 +1255,6 @@ public final class ProjectProvisioner {
       }
       Thread.sleep(500);
     }
-  }
-
-  private static List<String> baseNames(List<String> paths) {
-    return paths.stream().map(p -> p.substring(p.lastIndexOf('/') + 1)).toList();
   }
 
   /**

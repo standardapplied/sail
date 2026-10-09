@@ -183,7 +183,7 @@ final class ReviewLoop implements AutoCloseable {
                 SessionYield.NONE)
             .useMessages(messages)
             .useRooms(new RoomStore(db))
-            .useStageSkills(skills());
+            .useProjectSkills(skills());
     controller =
         new ReviewPipelineController(
                 specs,
@@ -192,7 +192,6 @@ final class ReviewLoop implements AutoCloseable {
                 config,
                 reviewer,
                 operations.reviewLanes(),
-                skills(),
                 started,
                 syncs::incrementAndGet,
                 () -> HANDLE)
@@ -203,12 +202,9 @@ final class ReviewLoop implements AutoCloseable {
     started.subscribe(counted(recorder()));
   }
 
-  /**
-   * The skills a server reads over this loop's project files: the loop's own instance and the
-   * launcher's are two, as they are in production, over the one store.
-   */
-  StageSkills skills() {
-    return new StageSkills(
+  /** The skills a server reads over this loop's project files, as the launcher reads them. */
+  ProjectSkills skills() {
+    return new ProjectSkills(
         project -> new SharedProjectFiles(files, projectsDir, project, FileLimits.defaults()));
   }
 

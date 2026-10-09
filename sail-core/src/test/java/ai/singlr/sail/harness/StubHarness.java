@@ -53,23 +53,8 @@ public record StubHarness(String yamlName, HookFile hooks, OptionalInt loginTunn
   }
 
   @Override
-  public String homeContextPath() {
-    return "." + yamlName + "/CONTEXT.md";
-  }
-
-  @Override
   public String skillsDir() {
     return "." + yamlName + "/skills/";
-  }
-
-  @Override
-  public String languageRulePath(String name) {
-    return skillsDir() + name + ".md";
-  }
-
-  @Override
-  public String languageRule(String name, List<String> paths, String body) {
-    return body;
   }
 
   @Override

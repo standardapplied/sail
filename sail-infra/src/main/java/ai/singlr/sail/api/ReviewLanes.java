@@ -6,7 +6,6 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.Lane;
-import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
@@ -34,8 +33,6 @@ public interface ReviewLanes {
    *     judged and fixed at {@code xhigh}
    * @param shown the ids of the room messages {@code task} rendered, which the run therefore owes
    *     no second delivery
-   * @param skill the skill {@code task} was built under, installed for {@code agent} before it
-   *     starts
    */
   record Invocation(
       Lane lane,
@@ -48,8 +45,7 @@ public interface ReviewLanes {
       List<String> repos,
       String model,
       String reasoningEffort,
-      List<String> shown,
-      StageSkill skill) {
+      List<String> shown) {
 
     public Invocation {
       repos = List.copyOf(repos);

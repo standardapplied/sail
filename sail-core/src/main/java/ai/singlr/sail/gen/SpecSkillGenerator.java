@@ -5,42 +5,70 @@
 
 package ai.singlr.sail.gen;
 
-import ai.singlr.sail.harness.Harness;
-import java.util.List;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.store.BlobStore;
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
 
 /**
- * Generates the spec-board skill for AI coding agents. Specs live in the Sail database — the
- * shared, synced source of truth — so the skill teaches the agent to manage them through the {@code
- * spec} command ({@code create}/{@code list}/{@code board}/{@code show}/{@code update}), never by
- * editing YAML files on disk. {@code spec} is a tiny in-container helper that reaches the host API
- * over the bind-mounted Unix socket; the agent never needs the {@code sail} binary or a token, and
- * what it creates syncs to every other box.
+ * The one skill sail ships, {@code spec-board}: what an interactive session in a container needs to
+ * find the {@code spec} CLI and manage specs through it. Specs live in the Sail database — the
+ * shared, synced source of truth — so the skill teaches the agent to create, list, show and update
+ * them with {@code spec}, never by editing files on disk. {@code spec} is a tiny in-container
+ * helper that reaches the host API over the bind-mounted Unix socket; the agent never needs the
+ * {@code sail} binary or a token, and what it creates syncs to every other box.
  *
- * <p>Both agents have a skill system with the same {@code SKILL.md} shape, so the skill ships as
- * {@code .claude/skills/spec-board/SKILL.md} for Claude Code and {@code
- * .agents/skills/spec-board/SKILL.md} for Codex, each with a spec body template alongside.
+ * <p>Both harnesses have a skill system with the same {@code SKILL.md} shape, so the skill is
+ * installed whole, with its spec body template alongside, into each harness's skills folder by the
+ * same installer that installs a project's own skills.
  */
 public final class SpecSkillGenerator {
 
+  /** The skill's name, which is its folder's and which no project skill may take. */
+  public static final String NAME = "spec-board";
+
+  private static final int MODE = 0644;
+
+  private static final Map<String, String> FILES =
+      Map.of(StageSkill.MANIFEST, skillMd(), "spec-template.md", specTemplateMd());
+
   private SpecSkillGenerator() {}
 
-  /** Generates the spec skill files for the given agent. */
-  public static List<GeneratedFile> generateFiles(Harness agent, String basePath) {
-    var skillDir = basePath + agent.skillsDir() + "spec-board/";
-    return List.of(
-        new GeneratedFile(skillDir + "SKILL.md", skillMd(), false),
-        new GeneratedFile(skillDir + "spec-template.md", specTemplateMd(), false));
+  /** The {@code spec-board} skill: its {@code SKILL.md} and the spec body template beside it. */
+  public static StageSkill skill() {
+    return StageSkill.of(
+        NAME,
+        skillMd(),
+        FILES.entrySet().stream()
+            .map(
+                entry -> {
+                  var bytes = entry.getValue().getBytes(StandardCharsets.UTF_8);
+                  return new StageSkill.File(
+                      entry.getKey(), BlobStore.hash(bytes), bytes.length, MODE);
+                })
+            .toList());
   }
 
-  private static String skillMd() {
+  /** The bytes of {@code file} of the {@code spec-board} skill. */
+  public static InputStream content(StageSkill.File file) {
+    var text = FILES.get(file.path());
+    if (text == null) {
+      throw new IllegalArgumentException(NAME + " has no file " + file.path() + ".");
+    }
+    return new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8));
+  }
+
+  /** The text of the skill's {@code SKILL.md}. */
+  public static String skillMd() {
     return """
         ---
         name: spec-board
         description: >
-          Manage the project spec board — create specs, list them as a kanban board, update status,
-          show spec details. Only invoked explicitly by the engineer with /spec-board.
+          Use when the engineer asks about specs, the board, what to work on next, or to create or
+          update a spec. Specs live in the Sail database and are managed with the `spec` CLI.
         argument-hint: "[create|list|show|update] [args...]"
-        disable-model-invocation: true
         ---
 
         You are the spec manager for this project. Specs live in the Sail database — the shared,

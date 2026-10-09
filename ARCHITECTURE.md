@@ -548,8 +548,9 @@ deterministic, so every box agrees on an identity-free definition and the engine
 
 Each box resolves the placeholders locally, once, at provision time
 (`ProjectDefinitions.resolveForProvisioning` calling `LocalIdentity`). Git fields come from
-the box's local `git config`. The agent's context, written by `agent context regen` and
-`agent run`, names the same identity: the row's `${GIT_NAME}` and `${GIT_EMAIL}` are replaced
+the box's local `git config`. The definition `agent run` launches under
+(`ProjectDefinitions.definitionWithBoxIdentity`) names the same identity: the row's
+`${GIT_NAME}` and `${GIT_EMAIL}` are replaced
 by the box's git values where it has them and left as they are where it has none, and no
 other placeholder is touched. Both paths substitute into the parsed definition, never its
 text (`PlaceholderResolver.substitute`): a redacted row holds its placeholders quoted, so a
@@ -676,24 +677,14 @@ request, so every write is attributed to the run's minted principal. `sail spec 
 spec whose status is no longer pending, resetting it to pending and recording the restart as
 a lifecycle event.
 
-**Agent context: sail owns the home layer, the engineer owns the workspace**
-(`AgentContextGenerator`): both Claude Code and Codex natively merge a home-level context
-file with project-level files, so sail writes its layer to the home namespace
-(`~/.claude/CLAUDE.md`, `~/.codex/AGENTS.md`) and overwrites it every run, while the engineer
-owns `~/workspace/CLAUDE.md` and `~/workspace/AGENTS.md` outright. Sail never creates or
-touches those, and being closer to the code they override sail's layer on conflict. There is
-no `@import` pointer and no `--force`, and sail only ever overwrites its own home namespace.
-The body encodes project orientation (tech stack, conventions, runtimes, services),
-language-agnostic engineering principles, a short security stance (deeper security review
-belongs in a review-pipeline stage), the spec-driven workflow (DB-authoritative, with no
-`specs/` directory to edit), and the autonomous-operation protocol. Methodology and spec
-skills land under the home skills namespace, and sail ships no hardcoded language standards.
-A project may supply its own through `agent_context.rules`, a map of name to `{paths, body}`.
-Sail materializes each into the agent's native load-only-when-relevant channel: a
-path-scoped Claude rule (`~/.claude/rules/<name>.md` with a `paths:` glob) and a
-description-loaded Codex skill. Java standards then reach the agent only while it edits Java,
-never bloating the always-loaded context. The bodies are project-supplied, and sail ships
-none.
+**Sail writes no context file.** How a codebase is built, tested and verified is the
+repository's own `AGENTS.md` to say, which both harnesses read natively (Claude Code from the
+working directory and every directory above it, Codex from the git root down to the cwd); the
+loop's rules are in the two prompts sail writes (below, *Prompts, briefs and skills*), which
+every harness reads on every run; and what used to be generated from the definition (runtimes,
+repos, services) is discoverable in the container. Sail generates no home-level file, no
+methodology skill and no language rule. The one skill it ships, `spec-board`, is installed
+beside the project's own skills so an interactive session finds the `spec` CLI.
 
 **The harness contract** (`ai.singlr.sail.harness`): sail drives two coding harnesses,
 Claude Code and Codex, and will drive more. Everything that differs between them sits behind
@@ -706,8 +697,7 @@ adapter gives, not a name a caller recognises. Adding a harness is adding one ad
 | `Harness` method | What it answers |
 |---|---|
 | `yamlName()`, `binaryName()`, `displayName()`, `installCommand()` | identity: the `sail.yaml` name, the binary on PATH, the name people read, how to install it |
-| `homeContextPath()`, `skillsDir()` | where the sail-owned context file and skills live under `$HOME` |
-| `languageRulePath(name)`, `languageRule(name, paths, body)` | where a project's language rule lands and what it holds, in the harness's native load-when-relevant channel |
+| `skillsDir()`, `skillFolder(name)` | where skills live under `$HOME`, and the folder of one |
 | `headless(Launch)` | the command for a build, a reviewer, a fix agent or a full chat turn; fresh when the launch's `resumeSessionId` is null, resumed otherwise |
 | `readOnly(Launch)`, `readOnlyRefusal()` | the room lane's harness-restricted command, or why the harness has none |
 | `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
@@ -759,9 +749,9 @@ both hook files as text; `HarnessContractTest` runs what every harness must answ
 
 **Guardrails and rollback:** a guardrails block sets a `max_duration`, a `max_idle` stall
 window, and an action (`snapshot-and-stop`, `stop`, or `notify`), and each lane reads its
-own: `agent.guardrails` bounds a build, an ad-hoc run and a chat turn (default `4h` / `20m`
-/ `stop`), `agent.review_pipeline.guardrails` a reviewer and a fix agent (default `45m` /
-`20m` / `stop`). Both parse through the one `Guardrails` record, which refuses an invalid
+own: `agent.guardrails` bounds a build, a fix run, an ad-hoc run and a chat turn (default
+`4h` / `20m` / `stop`), `agent.review_pipeline.guardrails` a reviewer (default `45m` / `20m`
+/ `stop`). Both parse through the one `Guardrails` record, which refuses an invalid
 duration, a zero limit or an unknown action where the descriptor is read, naming the block,
 the key and the accepted forms. A watcher (`sail agent watch`, started with every run; the
 loop is `RunWatch`) waits on the project's event stream for the sooner of the wall-clock
@@ -934,18 +924,18 @@ watcher):
 - **P4. One hook set.** Every lane's agent runs with the same hooks and the same
   `SAIL_SPEC_ID`, `SAIL_RUN_ID`, `SAIL_RUN_ROLE`, `SAIL_RUN_CREDENTIAL` environment, so
   progress (`agent_tool_*`) resets every lane's stall timer the same way. The one stop gate
-  asks by lane: a build for a clean, pushed tree behind a pull request whose checks it
-  watches; a fix agent for clean and pushed only; a reviewer for nothing, since its last
+  asks by lane: a build, and a fix agent held to the same protocol, for a clean, pushed tree
+  behind a pull request whose checks it watches; a reviewer for nothing, since its last
   message is the verdict the pipeline parses. The pipeline's router, not a missing hook, is
   what keeps a reviewer's stop from starting a review.
-  *`SailStopGateTest.aFixRunIsAskedToCommitAndPushAndNeverToWatchCi`,
+  *`SailStopGateTest.aFixRunIsHeldToTheBuildsProtocolAndToldToWatchItsChecks`,
   `SailStopGateTest.aReviewerIsNeverBlockedByADirtyTreeNorByTheRoom`, and the launch
   environment asserted in P1's first test.*
 - **P5. One guardrails record, per-lane values.** `Guardrails` is the only limits type,
   parsed one way; `SailYaml.Agent.guardrailsFor(lane)` is the one place a lane is mapped to
   its block and its defaults, and `lifetimeFor(lane)` beside it bounds the run's credential.
   The watcher receives its run's limits at spawn.
-  *`aReviewLanesLimitsDefaultTo45MinutesAndAnEditAppliesToTheNextRunOnly`,
+  *`aReviewersLimitsDefaultTo45MinutesAFixRunTakesTheBuildLanesAndAnEditAppliesToTheNextRun`,
   `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
   `SailYamlTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
   `SailYamlTest.aReviewLaneGuardrailsValueThatIsNoBlockIsRefusedRatherThanReadAsTheDefaults`,
@@ -1039,7 +1029,7 @@ class is named):
   replayed. What runs a project reads its definition from the catalog row (`ProjectReader`,
   handed to commands as `HostCatalog.definitions`): the loop's pipeline and reviewer, every
   API lane, Slack and webhook notifications, and `agent watch`, `status`, `report`,
-  `attach`, `context regen` and `run`. None opens `~/.sail/projects/<name>/sail.yaml`, and no
+  `attach` and `run`. None opens `~/.sail/projects/<name>/sail.yaml`, and no
   row is ever substituted by a file, so a revision that reaches the catalog by sync or by a
   command is what the next loop event, dispatch and notification use, with nothing else run;
   a watcher already running keeps the notifications it started with. The file is still
@@ -1245,146 +1235,155 @@ halt): `Ended` finalizes it; `Survived` gives the run back, since its agent is v
 still running; `Unanswered`, or a halt that threw, fails the stop and keeps the claim for the
 operator's retry or the reconciler's interrupted-stop pass, so neither silence nor a signal
 that landed is ever mistaken for the run ending on its own. A stop the reconciler replays carries the reason the watcher recorded
-when it killed the run. A fix agent is told to verify locally, commit and push, and not to
-watch CI: the re-review judges the branch, and the pull request shows its checks to whoever
-merges. A watcher re-armed after its own death takes the lane's limits as the project sets
+when it killed the run. A fix agent reads the build's prompt with the findings added and is
+held to the build's protocol: the project's verification, a commit, a push and the pull
+request's checks to green, under the build lane's limits. A watcher re-armed after its own death takes the lane's limits as the project sets
 them at that moment, and is handed the run row's `started_at`, the anchor its first watcher
 had.
 
-**Stage skills.** The loop is fixed — a build, then review stages, then a fix when a stage
-fails — and what each of those agents is told about *how to do its work* is a skill: a folder
-with a `SKILL.md` (front matter, then instructions) and optional scripts and reference files,
-the shape Claude Code and Codex share. Sail ships one per stage (`BuiltInSkills`: `sail-build`,
-`sail-review`, `sail-fix`) and a project may replace any of them with its own, held as project
-files under `.sail/skills/<name>/` and named in its definition (`agent.build_skill`,
-`agent.review_pipeline.fix_skill`, `agent.review_pipeline.stages[].skill`). A prompt is three
-parts in a fixed order: what the work is (the spec, the branch, the findings), how to do it
-(the skill, `StageSkill.block`), and the envelope — what the loop parses or enforces — which is
-sail's and comes last. The build's envelope is the autonomous protocol (`AgentTaskPrompt`: a
-pushed branch, an open pull request, the room, green CI, nothing uncommitted, which
-`SailStopGate` holds it to); the reviewer's is the verdict contract `FindingParser` reads
-(`ReviewPromptBuilder`); the fix agent's is the dispute lane and the pushed commit the
-re-review judges (`FixTaskBuilder`). `StageSkill` (sail-core) is the validated value and the
-only parser of a `SKILL.md`; `StageSkills` (`ai.singlr.sail.api`) reads one for a project;
-`StageSkillInstaller` puts it where the harness looks. `sail project skills` shows the skill
-each stage of a project runs under and how it stands (`built-in`, `project (n files)`,
-`missing`, `invalid: …`), and `sail project skills show <name>` prints a `SKILL.md` to start
-from. The contract, each row with the tests that prove it (`StageSkillLaunchTest` drives a
-dispatch, a reviewer and a fix agent through the production launch path over the real stores
-and a fake container that keeps what is pushed into it; `StageSkillInstallerTest` runs every
+**Prompts, briefs and skills.** What an agent in the loop is told comes from four kinds of
+text, each with one owner. A *prompt* is text sail writes into the task at launch — the spec,
+the findings, the room protocol, commit and push, CI, the verdict contract — fixed, and no
+project replaces it. A *brief* is the one paragraph of a judging stage that says what that
+stage judges, the project's, as text in its definition
+(`agent.review_pipeline.stages[].brief`), sail's default when a stage names none. `AGENTS.md`
+is how this codebase is built, tested and verified, the project's, in its repo, loaded by the
+harness. A *skill* is a folder with a `SKILL.md` and scripts, the project's, installed where
+the harness looks and invoked when the agent judges it relevant, so no loop rule lives in
+one; a brief that orders a skill ("run the project's `e2e` skill") makes a validation stage.
+The test: if it must happen every run, prompt; if it is about this codebase, `AGENTS.md`; if
+it is a runbook you would hand a new hire, skill. The two prompts are `WorkPrompt`
+(sail-core), read by the build and by the fix run, and `JudgePrompt`, read by every agent
+stage; `StageSkill` is the validated value and the only parser of a `SKILL.md`,
+`ProjectSkills` (`ai.singlr.sail.api`) reads a project's folders, `ProjectSkillInstaller`
+puts them where a harness looks, and `sail project skills ls|add|rm|show` manages them. The
+contract, each row with the tests that prove it (`ProjectSkillLaunchTest` drives a dispatch,
+a reviewer and a fix agent through the production launch path over the real stores and a
+fake container that keeps what is pushed into it; `ProjectSkillInstallerTest` runs every
 command the installer sends against a real shell under a temporary directory;
-`ReviewAgentLoopIT` reads the installed folder back from a real container):
+`ReviewAgentLoopIT` reads the installed folders back from a real container):
 
-- **K1. Sail fires the skill.** Every launch of a build, a reviewer or a fix agent carries its
-  stage's skill body in its prompt, on every harness. A harness loads a skill only when its
-  model decides the description fits, and the loop cannot depend on that: sail holds the text,
-  so sail puts it in the prompt, and the defaults say `disable-model-invocation: true`. An
-  ad-hoc run and a room turn follow no skill.
-  *`aProjectThatConfiguresNothingRunsEveryStageUnderSailsDefaultInstalledForItsHarness`,
-  `aStageThatNamesAProjectSkillCarriesItsBodyInPlaceOfTheDefaultsAndNothingElseDiffers`,
-  `anAdhocRunAndARoomTurnCarryNoSkillAndInstallNone`,
-  `BuiltInSkillsTest.theFrontMatterOfABuiltInNamesItAndKeepsTheHarnessFromLoadingIt`.*
-- **K2. One stored copy.** A project's skill lives once, as project files under
-  `.sail/skills/<name>/`, stored, synced and limited like every project file. The prompt text
-  and the folder installed in the container are both made from the rows read at that launch
-  (`StageSkills.resolve`); `StageSkills.open` refuses a file whose content hash is no longer
-  the one resolved, so a skill that changes under a launch fails it rather than installing
-  files of two versions. The files are never copied into the workspace
-  (`WorkspaceFiles.listFiles` leaves `.sail/skills/` out for the provisioner and `project
-  apply`; the importer and `project apply`'s directory sync still see them).
-  *`StageSkillsTest.aProjectsSkillIsTheFilesUnderItsFolderWithTheirHashesSizesAndModes`,
-  `StageSkillsTest.aFileThatChangedSinceItWasResolvedIsRefused`,
-  `aSkillFileThatChangesBetweenItsResolveAndItsPushFailsTheLaunchAndStampsNothing`,
-  `WorkspaceFilesTest.aProjectsSkillsAreNotWorkspaceFilesAndEveryOtherFileIs`,
-  `ProjectApplierTest.applyWorkspaceFilesLeavesTheProjectsSkillsOutOfTheWorkspace`,
-  `ProjectProvisionerTest.provisioningLeavesTheProjectsSkillsOutOfTheWorkspace`,
-  `FileImporterTest.aSkillInTheFilesDirectoryIsImportedAsTheProjectFilesItIs`.*
-- **K3. The envelope is sail's.** What the loop parses or enforces follows the skill in the
-  prompt, and no configuration replaces it: a reviewer whose skill asks for prose is still read
-  by the verdict contract, and prose is an errored review as it always was.
-  *`aVerdictUnderASkillThatAsksForProseIsStillReadByTheVerdictContract`,
-  `aVerdictInTheEnvelopeUnderThatSkillPassesTheReview`,
-  `StagePromptsGoldenTest.aProjectsSkillReplacesTheDefaultsBodyAndNothingElse`,
-  `AgentTaskPromptGoldenTest.aProjectsSkillReplacesTheDefaultsBodyAndNothingElse`.*
-- **K4. The defaults are the prompts.** A project that configures nothing gets `sail-build`,
-  `sail-review` and `sail-fix`, and the three prompts they produce are pinned whole by golden
-  tests: the skill holds the advice, the envelope holds what the loop parses or enforces, and
-  the golden tests hold every paragraph of each against the other so neither can drift.
-  *`AgentTaskPromptGoldenTest.theDefaultBuildPromptIsThisTextWhole`,
-  `AgentTaskPromptGoldenTest.theDefaultBuildPromptSaysEverythingTheBuildPromptSaid`,
-  `StagePromptsGoldenTest.theDefaultReviewPromptIsThisTextWhole`,
-  `StagePromptsGoldenTest.theDefaultReviewPromptSaysEverythingTheReviewPromptSaid`,
-  `StagePromptsGoldenTest.theDefaultFixTaskIsThisTextWhole`,
-  `StagePromptsGoldenTest.theDefaultFixTaskSaysEverythingTheFixTaskSaid`,
-  `BuiltInSkillsTest` (each `SKILL.md` whole).*
-- **K5. A stage whose skill cannot be read does not start,** and says which file is missing.
-  A name is not checked against the store when the definition is parsed, since a skill's files
-  may arrive by sync after the definition does; it is resolved at launch. A build's dispatch is
-  refused (`bad_request`) before anything is reserved, claimed or checked out, on a dry run
-  too; a reviewer's launch is a reviewer that did not start, so the review errors and is
-  retried within the errored-review budget before it escalates; a fix agent's escalates at
-  once. A box with no project files wired (`StageSkills.builtInOnly`) runs sail's own skills
-  and refuses a project's saying so. The names a key accepts are checked where the definition
-  is parsed (`SailYaml.fromMap`, so also for a row that arrived by sync): a skill name, the
-  key's own default or a name that does not start `sail-`, never one of the skills sail
-  generates (`spec`, `spec-board`, `verify`, and the project's `agent_context.rules` names,
-  which Codex installs as skills), and no skill on a human stage.
-  The skills checked are those of the pipeline the loop runs
-  (`ReviewPipelineConfig.resolved`, the one reading the loop and `sail project skills` share),
-  so a rule cannot be named `sail-review` or `sail-fix` in a project whose missing or
-  stage-less `review_pipeline` falls back to them.
-  *`aBuildWhoseSkillTheProjectDoesNotHoldIsRefusedBeforeAnythingIsReservedOrClaimed`,
-  `aReviewerWhoseSkillIsMissingErrorsTheReviewThreeTimesAndThenEscalates`,
-  `aFixAgentWhoseSkillIsMissingEscalatesAtOnce`,
-  `aBoxWithNoProjectFilesWiredLaunchesSailsOwnSkillAndRefusesAProjects`,
-  `aBuildForAHarnessSailDoesNotKnowIsABadRequestBeforeTheClaim`,
-  `aBuildWithNoAgentNamedAnywhereIsABadRequestSayingWhatToSet`,
-  `aPipelineBlockWithOnlyAFixSkillRunsTheDefaultStagesAndFixesUnderThatSkill`,
-  `StageSkillKeysTest`, `ProjectReaderTest.aRowThatNamesASkillSailRefusesIsUnreadableNamingTheProjectAndTheKey`.*
-- **K6. A skill is bounded.** Its body is at most `PromptConversation.MAX_CODE_POINTS`
-  (32,000) code points; its folder, `SKILL.md` included, at most 32 files and 1 MiB. A name
-  matches `[a-z0-9][a-z0-9-]{0,63}`; a path is relative, with no empty, `.` or `..` segment and
-  no control character, and is never `.sail-skill`. All of it is checked once, in
-  `StageSkill`'s constructor, and refused naming what was passed and the limit.
-  *`StageSkillTest`, `StageSkillsTest.aSkillOverItsBoundsIsRefusedNamingTheLimit`,
-  `aBuildWhoseSkillIsOverItsBoundsIsRefusedNamingTheLimit`.*
-- **K7. The folder a harness sees is the skill that was fired.** `RunLauncher.launchSession`
-  installs the launch's skill under the harness's `skillsDir()` after sail's own helpers and
-  before the run's files are staged. The folder is stamped (`.sail-skill`) with the
-  fingerprint of the skill it holds — every path, content hash and mode — so a launch that
-  finds its skill's stamp writes nothing. Otherwise the skill is built beside the skills
-  directory, never in it, in `.sail-stage-build-<name>.<runId>`, each file pushed under its own
-  mode as the dev user,
-  stamped last, and put in place in one step (`rm -rf "$1" && mv -T "$2" "$1"`) run under
-  `flock` on the skills directory: a harness never opens a folder half-written, and two
-  launches replacing one folder at once take turns, so each leaves a whole, stamped folder and
-  neither build lands inside the other's. `mv -T` fails on a folder something made and filled in
-  between, where a plain `mv` would move the build into it. A build folder's name starts with a dot and
-  `.sail-stage-build-`, which no skill's or rule's name can, so nothing else is ever taken for
-  a build, and a harness never finds one among its skills. A launch that fails removes what it
-  built; a build folder a dead launch left is removed by the next install of that skill once
-  it is a day old — never sooner, because sweeping every build folder would delete the files
-  of a launch still building beside this one, and writes into a build's subfolders leave its
-  own modification time alone. A file that changed under the launch, or whose content this box
-  does not hold, fails it in `StageSkills`' words, naming the skill and the file; a container
-  that could not take the files fails it saying to check the container. Every name and path
-  reaches a shell only as an argument.
-  *`StageSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,
-  `StageSkillInstallerTest.theSameSkillInstalledAgainWritesNothing`,
-  `StageSkillInstallerTest.aSkillThatGainedChangedAndLostFilesLeavesExactlyTheNewOnes`,
-  `StageSkillInstallerTest.aFileThatChangedUnderTheLaunchFailsItAndLeavesTheInstalledFolderAsItWas`,
-  `StageSkillInstallerTest.twoLaunchesInstallingOneSkillAtOnceEachLeaveAWholeStampedFolder`,
-  `StageSkillInstallerTest.aBuildFolderADeadLaunchLeftIsRemovedOnceNoLiveLaunchCanBeWritingIt`,
-  `StageSkillInstallerTest.twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers`,
-  `StageSkillInstallerTest.aFolderMadeUnderAReplacementFailsItAndIsNeverBuiltInto`,
-  `StageSkillInstallerTest.aRulesFolderNamedLikeTheSkillWithADotIsNoBuildFolderHoweverOldItIs`,
-  `StageSkillInstallerTest.everyNameAndPathReachesTheShellOnlyAsAnArgument`,
-  `StageSkillInstallerTest.eachStepThatFailsFailsTheInstallSayingWhichAndRemovesItsBuild`,
-  `aProjectSkillsOtherFilesAreInstalledWithTheirModesAndThePromptSaysWhere`,
-  `theSameSkillLaunchedTwiceIsPushedOnceAndAChangedOneIsReplacedWhole`,
-  `theSkillIsInstalledAfterSailsOwnHelpersAndBeforeTheRunsFilesAreStaged`,
-  `anInstallTheContainerRefusesFailsTheLaunchSayingWhichSkillAndWhatToDo`,
-  `ReviewAgentLoopIT.theReviewLoopReachesAwaitingMergeWithEveryAgentAsItsOwnUnit`.*
+- **P1. Two prompts, sail's, fixed.** The work prompt and the judge prompt are pinned whole
+  by golden tests, and every paragraph of the three prompts and three skills of 0.46.5 is in
+  one of them or named as reworded or deleted by the coverage test. Nothing in a project's
+  definition or files replaces, prepends or appends to either; `FindingParser` and
+  `LoopDecision` are untouched.
+  *`WorkPromptGoldenTest.theBuildPromptIsThisTextWhole`,
+  `JudgePromptGoldenTest.theDefaultJudgePromptIsThisTextWhole`,
+  `PromptCoverageTest.theWorkPromptSaysEverythingTheBuildPromptAndItsSkillSaid`,
+  `PromptCoverageTest.theJudgePromptSaysEverythingTheReviewPromptAndItsSkillSaid`,
+  `PromptCoverageTest.theWorkPromptSaysEverythingTheFixTaskAndItsSkillSaid`,
+  `aProjectThatConfiguresNothingRunsTheLoopUnderTheTwoPromptsAndSailsSkill`.*
+- **P2. Build and fix are one agent reading one prompt, held to one protocol.** The fix
+  run's prompt is the build's with one section added, the findings (rendered with the carried
+  ruling's evidence as a reproduction claim, and the dispute lane: a finding is retired by
+  argument in the room, never by omission). Both end the same way — commit, push, a pull
+  request open, CI green, checked in short polls because the stall guard counts from the
+  agent's last tool call — and `SailStopGate` holds a fix run to the pull-request check and
+  to the build's reason. The fix lane runs under `agent.guardrails` and the lifetime that
+  follows (`SailYaml.Agent.guardrailsFor`, `lifetimeFor`: only `REVIEW` reads
+  `review_pipeline.guardrails`); it keeps its own run row and its own stop.
+  *`WorkPromptGoldenTest.theFixPromptIsTheBuildPromptWithTheFindingsSection`,
+  `SailStopGateTest.aFixRunIsHeldToTheBuildsProtocolAndToldToWatchItsChecks`,
+  `SailStopGateTest.aFixRunIsAskedToOpenAPullRequest`,
+  `SailYamlTest.eachLaneReadsItsOwnGuardrailsAndItsOwnDefaults`,
+  `SailYamlTest.aRunsLifetimeIsItsLanesLimitAndABuildNothingBoundsHasNone`,
+  `ReviewLanesTest.aFixAgentPastItsTimeLimitIsKilledNothingOfItsLandsAndTheRoomIsToldWhy`,
+  `ReviewLanesTest.aReviewersLimitsDefaultTo45MinutesAFixRunTakesTheBuildLanesAndAnEditAppliesToTheNextRun`.*
+- **P3. The brief is the only agent-facing text a project writes,** one per judging stage,
+  at most `PromptConversation.MAX_CODE_POINTS`, refused on a human stage. It goes in the
+  judge prompt where the stage skill's body went; the verdict contract follows it, and a
+  brief that asks for prose is still read by the contract (prose is `review_errored`, as
+  ever). A stage with no brief judges under `JudgePrompt.DEFAULT_BRIEF`.
+  *`JudgePromptGoldenTest.aStagesBriefGoesWhereTheDefaultWentAndNothingElseDiffers`,
+  `aStageWithABriefJudgesUnderItWhereTheDefaultWentAndNothingElseDiffers`,
+  `aVerdictUnderABriefThatAsksForProseIsStillReadByTheVerdictContract`,
+  `SailYamlTest.aBriefIsTextOnAnAgentStageWithinThePromptBudget`.*
+- **P4. The judge reads the spec.** The judge prompt carries the spec's title and body, cut
+  at a markdown section boundary to the prompt budget and saying how many sections it left
+  out, so a stage can find drift from the spec's stated design, bar and non-goals.
+  *`JudgePromptGoldenTest.aBodyLongerThanTheBudgetIsCutAtASectionBoundaryAndSaysSo`,
+  `JudgePromptGoldenTest.aFirstSectionAloneOverTheBudgetIsCutInsideItAndEveryOtherSectionIsCounted`,
+  `JudgePromptGoldenTest.aSpecInOneRepoWithNoRoomNoBodyAndNothingCarried`.*
+- **P5. Skills are installed, never pasted.** Every valid folder under `.sail/skills/` and
+  `spec-board` are installed whole into the skills folder of every harness the project
+  installs (`agent.install`, else `agent.type`): at provisioning (`SKILLS_INSTALLED`), at
+  `project apply` and before every launch, for the launching harness. Each folder is stamped
+  with the fingerprint of its files, so an unchanged skill is not pushed again; a changed one
+  is built beside the skills directory and put in place whole under `flock`; a stamped folder
+  the project no longer holds is removed and an unstamped one is left alone. A folder that is
+  no skill — no `SKILL.md`, over its bounds, a reserved name (`spec-board`, `sail-*`) — is
+  skipped, the valid ones install, and the room is told once which and why; a file whose
+  content changed under the launch or is not on this box fails the launch naming it. No
+  prompt names a skill.
+  *`aProjectSkillIsInstalledWholeForTheLaunchingHarnessAndNeverNamedInThePrompt`,
+  `aSkillLaunchedTwiceIsPushedOnceAChangedOneIsReplacedWholeAndARemovedOneIsRemoved`,
+  `aFolderThatIsNoSkillIsSkippedTheOthersInstallAndTheRoomIsToldOnce`,
+  `aSkillFileWhoseContentIsNotOnThisBoxFailsTheLaunchNamingIt`,
+  `theSkillsAreInstalledAfterSailsOwnHelpersAndBeforeTheRunsFilesAreStaged`,
+  `anAdhocRunAndARoomTurnInstallSailsSkillAndNoPromptNamesIt`,
+  `ProjectSkillInstallerTest.installAllInstallsEverySkillWholeRemovesAStampedFolderNoLongerHeldAndLeavesTheRest`,
+  `ProjectSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,
+  `ProjectSkillInstallerTest.twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers`,
+  `ProjectSkillsTest.everyFolderIsReadWithItsFilesHashesSizesAndModesInNameOrder`,
+  `ProjectSkillsTest.aFolderUnderAReservedNameIsInvalidSayingWhichNamesAreSails`,
+  `ProjectApplierTest.applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNone`,
+  `ProjectApplierTest.applySkillsInstallsForEveryHarnessTheProjectInstalls`,
+  `ProjectProvisionerTest.provisioningInstallsSailsSkillAndWritesNoContextFile`,
+  `ProjectSkillsCommandTest`, `ReviewAgentLoopIT.theReviewLoopReachesAwaitingMergeWithEveryAgentAsItsOwnUnit`.*
+- **P6. Sail writes no context file and generates no rule.** `Harness` names no context
+  path and no rule channel; provisioning, apply and a launch push nothing named `CLAUDE.md`
+  or `AGENTS.md`, in the home or the workspace. `spec-board`'s front matter is pinned whole:
+  a description a model acts on, and nothing keeping the harness from invoking it.
+  *`ProjectApplierTest.applySkillsInstallsSailsSkillForTheProjectsHarnessAndWritesNoContextFile`,
+  `ProjectProvisionerTest.provisioningInstallsSailsSkillAndWritesNoContextFile`,
+  `HarnessContractTest.everyPathAHarnessNamesUnderTheHomeDirectoryIsRelativeToIt`,
+  `SpecSkillGeneratorTest.theFrontMatterSaysWhenToUseTheSkillAndLetsTheHarnessInvokeIt`.*
+- **P7. Zero configuration is the whole loop.** A project with an `agent.type` and nothing
+  else builds under the work prompt, is judged by one stage named `review` under sail's brief
+  by the roster's reviewer, gated `no_critical`, fixed under today's limits, and parks in
+  `awaiting_merge`. A `review_pipeline` block with no stages runs the default's stages under
+  the default's limits.
+  *`aProjectThatConfiguresNothingRunsTheLoopUnderTheTwoPromptsAndSailsSkill`,
+  `ReviewWiringTest.aBlockWithNoStagesRunsTheDefaultStagesUnderTheDefaultsLimits`,
+  `ReviewWiringTest.aBlockWithStagesIsThePipelineWholeBriefIncluded`.*
+- **P8. A deleted key is refused, naming its replacement.** `agent.build_skill`,
+  `agent.review_pipeline.fix_skill`, `stages[].skill`, `stages[].categories`,
+  `agent.methodology` and `agent_context` fail `SailYaml.fromMap` with one sentence each
+  saying where the text now goes, so a row that arrives by sync with one is
+  `ProjectReader.Unreadable` with that sentence. `StagePromptsMigration`
+  (`stages-are-prompts-v1`, in `DataMigrations.ALL`, needing nothing of the box's files)
+  rewrites every definition the catalog holds without those keys through
+  `ProjectStore.upsert`, a journalled revision that syncs, listing per project what it
+  dropped and where it belongs; a second run changes nothing. The refusal is for what comes
+  back afterwards.
+  *`SailYamlTest.aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes`,
+  `ProjectReaderTest.aRowThatSetsADeletedKeyIsUnreadableNamingTheProjectAndWhereTheTextGoes`,
+  `ProjectApplyCommandTest.planTargetRefusesADeletedKeyNamingWhereItsTextGoes`,
+  `ProjectEditCommandTest.rejectsADeletedKeyNamingWhereItsTextGoes`,
+  `StagePromptsMigrationTest.everyDefinitionWithADeletedKeyIsRewrittenWithoutItAsANewRevisionThatSyncs`,
+  `StagePromptsMigrationTest.theReportListsPerProjectWhatItDroppedAndWhereItBelongs`,
+  `StagePromptsMigrationTest.aSecondRunChangesNothing`.*
+- **P9. The forge CLI the prompt relies on is authenticated by sail.** Where provisioning
+  or `project apply` writes a token into `~/.git-credentials` for a GitHub host
+  (`github.com`, or a repo marked `repos[].forge: github`), `ForgeCliLogin` logs `gh` in for
+  that host as the dev user with the token the store resolved
+  (`GitCredentials.resolveTokenForHost`): the token is pushed to a `0600` file under the dev
+  home and consumed on stdin by one command that removes it, success or not, so it is never
+  an argument and never in a process list; a failed login fails the step naming the host.
+  Other forges get nothing: the work prompt's last sentence tells a run with no authenticated
+  forge CLI to say so in the room instead of claiming CI green. The room lane's read-deny
+  rules name `~/.config/gh/**`.
+  *`ProjectApplierTest.applyReposRefreshesCredentialStoreInsteadOfInjectingToken`,
+  `ProjectApplierTest.applyReposLogsGhInForAGitHubEnterpriseHostMarkedAsGitHubAndNotForGitLab`,
+  `ProjectApplierTest.applyReposWithOnlyAGitLabTokenNeverTouchesGh`,
+  `ProjectApplierTest.aFailedGhLoginFailsTheStepNamingTheHost`,
+  `ProjectProvisionerTest.gitConfiguredWithTokenSetsCredentials`,
+  `ProjectProvisionerTest.gitConfiguredWithSshNeverLogsGhIn`,
+  `ProjectProvisionerTest.aFailedGhLoginFailsTheGitStepNamingTheHost`,
+  `GitCredentialsTest.githubHostsAreGithubComAndEveryHostMarkedAsGithub`,
+  `SailYamlTest.aRepoMayBeMarkedAsAGitHubHostAndNothingElse`,
+  `HarnessHooksTest.claudeCodeDeniesReadsOfTheContainerCredentialsAndKeys`, `HarnessHooksGoldenTest`.*
 
 **The loop machine.** From a build's stop to `awaiting_merge`, one pure function decides every
 step of the loop and one class carries each step out. Each part has one job, all in

@@ -102,10 +102,9 @@ services:
   postgres: { image: postgres:16, ports: [5432] }
 agent:
   type: claude-code
-  methodology: { approach: spec-driven, verify: "mvn clean test" }
-  guardrails:  { max_duration: 4h, max_idle: 20m, action: snapshot-and-stop }   # builds
+  guardrails:  { max_duration: 4h, max_idle: 20m, action: snapshot-and-stop }   # builds and fix runs
   review_pipeline:
-    guardrails: { max_duration: 45m, max_idle: 20m, action: stop }              # reviewers, fix agents
+    guardrails: { max_duration: 45m, max_idle: 20m, action: stop }              # reviewers
 ssh:
   authorized_keys: [ ${SSH_PUBLIC_KEY} ]            # per-developer, never synced
 ```
@@ -143,26 +142,47 @@ marking that follow-up done resolves them.
 Every spec has a room. Agents post progress there, read it before deciding, and ask with
 `spec comment <id> --question --body <text>`, which pages the engineer on the board.
 
-### Giving a stage its own skill
+### A stage's brief
 
-The loop is sail's: a build, then review stages, then a fix when a stage fails. How each of
-those agents goes about its work is a skill, a folder with a `SKILL.md` (front matter, then
-instructions) and optional scripts and reference files. Sail ships `sail-build`, `sail-review`
-and `sail-fix`; a project can replace any of them:
+The loop is sail's: a build, then review stages, then a fix when a stage fails. What the
+agents are told comes from two prompts sail writes and no project changes: the *work prompt*,
+read by the build and by the fix run (the spec, the room, the findings, commit and push, a
+pull request, CI green), and the *judge prompt*, read by every review stage (the spec, what to
+review, the verdict contract). How *this codebase* is built, tested and verified is the
+repository's own `AGENTS.md` to say; sail writes no context file.
 
-```bash
-sail project skills --project web                     # the skill each stage runs under
-sail project skills show sail-review > SKILL.md       # start from sail's default
-$EDITOR SKILL.md
-sail project files add SKILL.md --project web --as .sail/skills/web-review/SKILL.md
+The one agent-facing text a project writes is a stage's **brief**: a paragraph saying what
+that stage judges, in the definition (`sail project edit web`). A stage with no brief judges
+under sail's default (the spec first, then correctness, security and tests). A brief that
+orders a skill makes a validation stage without new machinery:
+
+```yaml
+agent:
+  review_pipeline:
+    stages:
+      - name: review
+      - name: validate
+        brief: |
+          Run the project's e2e skill against this branch and report every failure as a
+          finding, with the command and its output as evidence. Pass only on a clean run.
+        gate: all_clear
 ```
 
-Then name it in the definition (`sail project edit web`): `agent.build_skill`,
-`agent.review_pipeline.fix_skill`, or `skill` on a review stage. Sail puts the skill's body in
-the stage's prompt on every launch and installs its folder where the harness looks for skills.
-What the loop parses or enforces follows the skill and is not replaceable: the reviewer still
-answers with the verdict envelope, the build still pushes its branch and opens a pull request,
-the fix agent still argues a finding in the room rather than skipping it.
+### Project skills
+
+A skill is a folder with a `SKILL.md` and optional scripts, installed where both harnesses
+look for skills and invoked when the agent judges it relevant: a runbook you would hand a new
+hire. Share one from a local folder and sail installs it whole, for every harness the project
+installs, at provisioning, at `project apply` and before every launch:
+
+```bash
+sail project skills add ./e2e --project web        # .sail/skills/e2e/<every file>
+sail project skills ls --project web               # name, files, ok or invalid: <why>
+sail project skills show e2e --project web         # its SKILL.md
+sail project skills rm e2e --project web           # the folder goes at the next launch or apply
+```
+
+Sail ships one skill, `spec-board`, so an interactive session finds the `spec` CLI.
 
 ## Going deeper
 

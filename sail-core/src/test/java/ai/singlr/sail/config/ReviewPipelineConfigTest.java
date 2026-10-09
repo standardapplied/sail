@@ -76,8 +76,8 @@ class ReviewPipelineConfigTest {
                         "agent",
                         "agent",
                         "codex",
-                        "categories",
-                        List.of("security", "injection"),
+                        "brief",
+                        "Judge the injection surface.",
                         "gate",
                         "no_critical_or_high"),
                     Map.of("name", "human", "type", "human"))));
@@ -85,7 +85,7 @@ class ReviewPipelineConfigTest {
     assertEquals(2, config.maxIterations());
     assertEquals(2, config.stages().size());
     assertEquals("codex", config.stages().get(0).agent());
-    assertEquals(List.of("security", "injection"), config.stages().get(0).categories());
+    assertEquals("Judge the injection surface.", config.stages().get(0).brief());
     assertEquals(Gate.NO_CRITICAL_OR_HIGH, config.stages().get(0).gate());
     assertEquals(StageType.HUMAN, config.stages().get(1).type());
   }
@@ -381,8 +381,8 @@ class ReviewPipelineConfigTest {
                         "security",
                         "agent",
                         "codex",
-                        "categories",
-                        List.of("security", "injection"),
+                        "brief",
+                        "Judge the injection surface.",
                         "gate",
                         "all_clear"),
                     Map.of("name", "style", "agent", "codex"),
@@ -401,8 +401,7 @@ class ReviewPipelineConfigTest {
         "in one order, so a rewritten descriptor does not shuffle");
     assertFalse(
         written.contains("&") || written.contains("*"),
-        "and with no anchors: stages that name no categories share nothing in the file: "
-            + written);
+        "and with no anchors: stages that name no brief share nothing in the file: " + written);
   }
 
   @Test

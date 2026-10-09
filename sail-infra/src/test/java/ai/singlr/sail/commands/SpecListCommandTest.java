@@ -237,7 +237,6 @@ class SpecListCommandTest {
               "2026-10-04T12:00:00Z"
             },
             new String[] {"agent", "report"},
-            new String[] {"agent", "context", "regen"},
             new String[] {"spec", "dispatch"})) {
       new CommandLine(new Sail()).parseArgs(args);
     }

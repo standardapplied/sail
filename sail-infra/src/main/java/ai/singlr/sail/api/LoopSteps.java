@@ -8,9 +8,10 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.FixTaskBuilder;
-import ai.singlr.sail.engine.ReviewPromptBuilder;
+import ai.singlr.sail.engine.JudgePrompt;
+import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore.MessageRow;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.ReviewStore.ReviewRow;
@@ -32,7 +33,6 @@ final class LoopSteps {
   private final SpecStore specStore;
   private final ReviewStore reviewStore;
   private final ReviewLanes lanes;
-  private final StageSkills skills;
   private final LoopFactsReader reader;
   private final LoopNarrator narrator;
   private final StageVerdicts verdicts;
@@ -43,7 +43,6 @@ final class LoopSteps {
       SpecStore specStore,
       ReviewStore reviewStore,
       ReviewLanes lanes,
-      StageSkills skills,
       LoopFactsReader reader,
       LoopNarrator narrator,
       Runnable syncTrigger,
@@ -51,7 +50,6 @@ final class LoopSteps {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.lanes = lanes;
-    this.skills = skills;
     this.reader = reader;
     this.narrator = narrator;
     this.verdicts = new StageVerdicts(reviewStore, lanes, narrator);
@@ -193,8 +191,8 @@ final class LoopSteps {
    * The stage row turns {@code running} only once its reviewer's claim has landed, before that
    * reviewer's unit starts — so a stage is {@code running} only while a run exists for it ({@link
    * LoopFacts.Rows#stageReviewedBy}). A claim the gate refuses writes nothing of the stage, and the
-   * stage is announced started only once a reviewer is running for it. The stage's skill is read as
-   * the invocation is made, so a skill that cannot be read is a reviewer that did not start.
+   * stage is announced started only once a reviewer is running for it. The judge reads the spec's
+   * body and the stage's brief, sail's default when the stage names none.
    */
   private Optional<LoopTrigger> launchReviewer(LoopFacts facts, LoopStep.LaunchReviewer step) {
     var stage = stagesOf(facts, step.review()).get(step.stage());
@@ -204,15 +202,14 @@ final class LoopSteps {
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
           var carried = reviewStore.carryForwardFindings(specId, stage.reviewId(), stage.name());
-          var skill = skills.resolve(facts.project(), stageConfig.skill());
           var built =
-              ReviewPromptBuilder.build(
-                  spec.branch(),
-                  spec.repos(),
-                  stageConfig.categories(),
+              JudgePrompt.build(
+                  spec.toSpec(),
+                  body(specId),
+                  stage.name(),
+                  stageConfig.brief() != null ? stageConfig.brief() : JudgePrompt.DEFAULT_BRIEF,
                   narrator.roomMessages(specId),
-                  carried,
-                  StageSkills.block(skill, Harnesses.of(step.agent())));
+                  carried);
           return new ReviewLanes.Invocation(
               Lane.REVIEW,
               stage.reviewId(),
@@ -224,8 +221,7 @@ final class LoopSteps {
               spec.repos(),
               null,
               spec.reasoningEffort(),
-              built.renderedMessages().stream().map(MessageRow::id).toList(),
-              skill);
+              built.renderedMessages().stream().map(MessageRow::id).toList());
         };
     return launch(
         invocation,
@@ -233,6 +229,11 @@ final class LoopSteps {
         () -> reviewStore.startStage(stage.id(), step.agent()),
         () -> narrator.publishEvent(facts.project(), specId, "review_stage_started", stage.name()),
         why -> new LoopTrigger.ReviewerNotStarted(step.review().id(), step.stage(), why));
+  }
+
+  /** The spec's body as the prompts carry it; a spec with no content is its title alone. */
+  private String body(String specId) {
+    return specStore.getContent(specId).map(SpecStore.SpecContent::body).orElse("");
   }
 
   /**
@@ -337,37 +338,35 @@ final class LoopSteps {
 
   /**
    * The findings go to the spec's own agent as a fix run that serves the review and acts as itself
-   * ({@code <agent>/fix-<runId>}), so the room attributes its posts to the fix lane. A refused
-   * claim changes nothing but the run the review waits on: the fix is still owed.
+   * ({@code <agent>/fix-<runId>}), so the room attributes its posts to the fix lane. Its prompt is
+   * the build's with the findings added, and it ends as a build does. A refused claim changes
+   * nothing but the run the review waits on: the fix is still owed.
    */
   private Optional<LoopTrigger> launchFix(LoopFacts facts, LoopStep.LaunchFix step) {
     var spec = facts.rows().spec().orElseThrow();
     var specId = facts.specId();
     Supplier<ReviewLanes.Invocation> invocation =
         () -> {
-          var room = narrator.roomMessages(specId);
           var agent = spec.agent() != null ? spec.agent() : Harnesses.DEFAULT.yamlName();
-          var skill = skills.resolve(facts.project(), facts.staged().config().fixSkill());
+          var body = body(specId);
           var built =
-              FixTaskBuilder.build(
-                  specId,
-                  spec.title(),
-                  step.findings(),
-                  room,
-                  StageSkills.block(skill, Harnesses.of(agent)));
+              WorkPrompt.build(
+                  spec.toSpec(),
+                  body.isBlank() ? spec.title() : body,
+                  narrator.roomMessages(specId),
+                  step.findings());
           return new ReviewLanes.Invocation(
               Lane.FIX,
               step.review().id(),
               facts.project(),
               specId,
               agent,
-              built.task(),
+              built.prompt(),
               spec.branch(),
               spec.repos(),
               spec.model(),
               spec.reasoningEffort(),
-              built.renderedMessages().stream().map(MessageRow::id).toList(),
-              skill);
+              built.renderedMessages().stream().map(MessageRow::id).toList());
         };
     Runnable started =
         () -> {
@@ -390,8 +389,7 @@ final class LoopSteps {
       LoopFacts facts, LoopStep.CommitFixLeftovers step) {
     var spec = facts.rows().spec().orElseThrow();
     try {
-      var message =
-          FixTaskBuilder.commitMessage(reviewStore.openFindingsForReview(step.review().id()));
+      var message = commitMessage(reviewStore.openFindingsForReview(step.review().id()));
       var rescued = lanes.ensureCommitted(facts.project(), spec.repos(), spec.branch(), message);
       if (!rescued.isEmpty()) {
         narrator.publishGuardrail(
@@ -404,6 +402,22 @@ final class LoopSteps {
     } catch (Exception e) {
       return Optional.of(new LoopTrigger.FixNotCommitted(step.run(), e.getMessage()));
     }
+  }
+
+  /**
+   * The commit message for a fix iteration's work the guardrail rescue commits, so the PR history
+   * explains what the commit addresses instead of only recording that an agent forgot to commit.
+   */
+  static String commitMessage(List<Finding> findings) {
+    var subject =
+        "fix: address %d review finding%s"
+            .formatted(findings.size(), findings.size() == 1 ? "" : "s");
+    var body =
+        findings.stream()
+            .map(f -> "- [%s] %s".formatted(f.severity(), f.title()))
+            .reduce((a, b) -> a + "\n" + b)
+            .orElse("");
+    return body.isEmpty() ? subject : subject + "\n\n" + body;
   }
 
   /**

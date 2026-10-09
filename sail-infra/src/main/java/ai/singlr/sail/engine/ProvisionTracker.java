@@ -43,15 +43,30 @@ public final class ProvisionTracker<P extends Enum<P>> {
 
   /**
    * Loads existing state from disk, or starts with empty state if no file exists. Call once before
-   * the provisioning loop.
+   * the provisioning loop. A completed phase this version no longer has — a run that stopped at a
+   * phase a later release removed — is read as no progress, so the run resumes from the first
+   * phase, each of which skips what is already done.
    *
    * @return this tracker for fluent chaining
    */
   public ProvisionTracker<P> load() throws IOException {
     if (Files.exists(stateFile)) {
-      this.state = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
+      var loaded = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
+      this.state = isKnownPhase(loaded.completedPhase()) ? loaded : ProvisionState.empty();
     }
     return this;
+  }
+
+  private boolean isKnownPhase(String name) {
+    if (name == null) {
+      return true;
+    }
+    for (var phase : phases) {
+      if (phase.name().equals(name)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

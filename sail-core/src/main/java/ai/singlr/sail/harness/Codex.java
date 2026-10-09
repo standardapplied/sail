@@ -53,32 +53,8 @@ final class Codex implements Harness {
   }
 
   @Override
-  public String homeContextPath() {
-    return ".codex/AGENTS.md";
-  }
-
-  @Override
   public String skillsDir() {
     return ".agents/skills/";
-  }
-
-  /**
-   * A skill {@code ~/.agents/skills/<name>/SKILL.md} Codex loads by its synthesized {@code
-   * description} when the work is relevant; Codex has no path glob.
-   */
-  @Override
-  public String languageRulePath(String name) {
-    return skillsDir() + name + "/SKILL.md";
-  }
-
-  @Override
-  public String languageRule(String name, List<String> paths, String body) {
-    return "---\nname: "
-        + name
-        + "\ndescription: >\n  "
-        + description(name, paths)
-        + "\n---\n\n"
-        + body;
   }
 
   /**
@@ -178,20 +154,6 @@ final class Codex implements Harness {
             new HookFile.Group(
                 "PostToolUse", null, List.of(SailHook.TOOL_FINISHED, SailHook.ROOM_RELAY)),
             new HookFile.Group("Stop", null, List.of(SailHook.STOP_GATE))));
-  }
-
-  private static String description(String name, List<String> paths) {
-    var globs = String.join(", ", paths);
-    var scope = globs.isEmpty() ? "" : " (" + globs + ")";
-    return capitalize(name)
-        + " coding standards for this project. Apply when writing or reviewing "
-        + name
-        + scope
-        + ".";
-  }
-
-  private static String capitalize(String name) {
-    return Character.toUpperCase(name.charAt(0)) + name.substring(1);
   }
 
   private static String modelOptions(String model, String reasoningEffort) {

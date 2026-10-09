@@ -416,36 +416,39 @@ class SailStopGateTest {
   }
 
   @Test
-  void aFixRunIsAskedToCommitAndPushAndNeverToWatchCi() throws Exception {
+  void aFixRunIsHeldToTheBuildsProtocolAndToldToWatchItsChecks() throws Exception {
     var repo = repo("api");
     Files.writeString(repo.resolve("dirty.txt"), "wip");
     writeSessionRole("fix");
 
     var reason = blockReason(runGate(STOP_INPUT, RUN_ID));
 
-    assertTrue(reason.contains("commit your work in api"), reason);
-    assertTrue(reason.contains("Commit and push the fix before ending the turn"), reason);
-    assertTrue(reason.contains("do not wait for CI"), reason);
-    assertFalse(
-        reason.contains("watch its checks to green"),
-        "the fix lane's time limit is not spent polling CI: " + reason);
+    assertEquals(
+        "Not ready to stop: commit your work in api (the worktree is dirty); push main in api (no"
+            + " upstream; git push -u origin main). Finish the dispatch protocol (commit, push, open"
+            + " the PR, watch its checks to green) before ending the turn. If you are genuinely"
+            + " blocked, post the question with spec comment <spec-id> --question --body <text> and"
+            + " stop again.",
+        reason);
   }
 
   @Test
-  void aFixRunIsNotAskedToOpenAPullRequest() throws Exception {
+  void aFixRunIsAskedToOpenAPullRequest() throws Exception {
     var repo = repo("sail");
     git(repo, "checkout", "-q", "-b", "agent/stop-gate");
     pushToFreshOrigin(repo, "agent/stop-gate");
     var bin = fakeGh("no pull requests found for branch agent/stop-gate", 1);
     writeSessionRole("fix");
 
-    var result = runGate(STOP_INPUT, RUN_ID, bin);
+    var reason = blockReason(runGate(STOP_INPUT, RUN_ID, bin));
 
     assertEquals(
-        "",
-        result.stdout(),
-        "a fix agent's branch is clean and pushed: the pull request is its build's to have opened");
-    assertEquals(List.of("agent_session_stopped"), events());
+        "Not ready to stop: open a pull request for agent/stop-gate in sail. Finish the dispatch"
+            + " protocol (commit, push, open the PR, watch its checks to green) before ending the"
+            + " turn. If you are genuinely blocked, post the question with spec comment <spec-id>"
+            + " --question --body <text> and stop again.",
+        reason);
+    assertTrue(events().getFirst().startsWith("agent_stop_nudged"), events().toString());
   }
 
   @Test

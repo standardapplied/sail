@@ -445,8 +445,7 @@ class AgentReporterTest {
         null,
         null,
         null,
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null),
-        null,
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null),
         new SailYaml.Ssh("dev", null));
   }
 }

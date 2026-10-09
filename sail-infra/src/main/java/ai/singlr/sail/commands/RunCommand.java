@@ -20,7 +20,6 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
@@ -30,11 +29,11 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.SpecStore;
@@ -86,11 +85,6 @@ public final class RunCommand implements Runnable {
       defaultValue = "")
   private String path;
 
-  @Option(
-      names = "--no-regen",
-      description = "Skip context regeneration (use existing context files).")
-  private boolean noRegen;
-
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
@@ -137,8 +131,7 @@ public final class RunCommand implements Runnable {
 
     SailYaml config;
     try (var operations = this.operations.get()) {
-      config =
-          AgentContextRegenCommand.definitionWithBoxIdentity(operations.catalog(), name, identity);
+      config = ProjectDefinitions.definitionWithBoxIdentity(operations.catalog(), name, identity);
     }
 
     var shell = new ShellExecutor(dryRun);
@@ -152,35 +145,6 @@ public final class RunCommand implements Runnable {
     }
 
     launchAgent(shell, config);
-  }
-
-  private void regenContext(ShellExecutor shell, SailYaml config) throws Exception {
-    var contextFiles = AgentContextGenerator.generateFiles(config);
-    if (contextFiles.isEmpty()) {
-      return;
-    }
-
-    if (dryRun) {
-      for (var f : contextFiles) {
-        System.out.println(
-            "[dry-run] Would push "
-                + f.remotePath()
-                + " ("
-                + f.content().length()
-                + " bytes"
-                + (f.executable() ? ", executable" : "")
-                + ")");
-      }
-      return;
-    }
-
-    var result = AgentContextInstaller.install(shell, name, config);
-
-    if (!json) {
-      var msg = "Context regenerated (" + result.pushed().size() + " files)";
-      System.out.println(Ansi.AUTO.string("  @|green \u2713|@ " + msg));
-      System.out.println();
-    }
   }
 
   private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
@@ -228,9 +192,6 @@ public final class RunCommand implements Runnable {
     var branchName = branchName(config, label);
 
     if (task == null) {
-      if (!noRegen) {
-        regenContext(shell, config);
-      }
       prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
@@ -319,12 +280,9 @@ public final class RunCommand implements Runnable {
                             name,
                             request,
                             handle,
-                            () -> {
-                              if (!noRegen) {
-                                regenContext(shell, config);
-                              }
-                              prepareContainer(shell, workDir, snapshotTaken, label, branchName);
-                            }));
+                            () ->
+                                prepareContainer(
+                                    shell, workDir, snapshotTaken, label, branchName)));
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null

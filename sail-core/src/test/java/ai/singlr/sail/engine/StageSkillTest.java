@@ -237,30 +237,6 @@ class StageSkillTest {
   }
 
   @Test
-  void theBlockOfASkillWithOnlyItsManifestNamesNoFolder() {
-    var skill = new StageSkill("mine", "Judge it my way.", List.of(MANIFEST));
-
-    assertEquals(
-        "## How to do this work (skill: mine)\n\nJudge it my way.",
-        skill.block("~/.claude/skills/mine/"));
-  }
-
-  @Test
-  void theBlockOfASkillWithOtherFilesSaysWhereTheyAre() {
-    var skill =
-        new StageSkill("mine", "Judge it my way.", List.of(MANIFEST, file("scripts/check.sh", 1)));
-
-    assertEquals(
-        """
-        ## How to do this work (skill: mine)
-
-        Judge it my way.
-
-        The skill's other files are in ~/.agents/skills/mine/.""",
-        skill.block("~/.agents/skills/mine/"));
-  }
-
-  @Test
   void aProjectsSkillLivesInAFolderNamedForItUnderTheSkillsRoot() {
     assertEquals(".sail/skills/mine/", StageSkill.projectFolder("mine"));
   }

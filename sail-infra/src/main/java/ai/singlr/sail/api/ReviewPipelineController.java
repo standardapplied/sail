@@ -68,7 +68,6 @@ public final class ReviewPipelineController implements EventSubscriber {
 
   /**
    * @param reviewerResolver a project's default reviewer, for stages that name none
-   * @param skills where a reviewer's and a fix agent's skill are read from at each launch
    * @param syncTrigger fired after every state change the loop makes, so main, the notification
    *     authority, sees the loop advance at once. A no-op on main and standalone boxes
    * @param localHandle this box's FDE handle: the loop acts only on runs this box executed
@@ -80,7 +79,6 @@ public final class ReviewPipelineController implements EventSubscriber {
       Function<String, ReviewPipelineConfig> configResolver,
       Function<String, String> reviewerResolver,
       ReviewLanes lanes,
-      StageSkills skills,
       EventBus eventBus,
       Runnable syncTrigger,
       Supplier<String> localHandle) {
@@ -92,13 +90,11 @@ public final class ReviewPipelineController implements EventSubscriber {
     Objects.requireNonNull(configResolver, "configResolver");
     Objects.requireNonNull(reviewerResolver, "reviewerResolver");
     Objects.requireNonNull(lanes, "lanes");
-    Objects.requireNonNull(skills, "skills");
     this.pipelines = LoopFactsReader.pipelines(configResolver, reviewerResolver);
     this.reader = new LoopFactsReader(specStore, reviewStore, runStore, localHandle);
     this.narrator = new LoopNarrator(specStore, eventBus, syncTrigger);
     this.steps =
-        new LoopSteps(
-            specStore, reviewStore, lanes, skills, reader, narrator, syncTrigger, localHandle);
+        new LoopSteps(specStore, reviewStore, lanes, reader, narrator, syncTrigger, localHandle);
   }
 
   public ReviewPipelineController useMessages(MessageStore messages) {

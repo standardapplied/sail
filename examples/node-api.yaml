@@ -53,14 +53,6 @@ agent:
   install:
     - claude-code
 
-agent_context:
-  tech_stack: |
-    Runtime: Node.js 22
-    Database: Postgres 16
-    Cache: Redis 7
-  build_commands: |
-    cd api && npm install && npm test
-
 ssh:
   user: dev
   authorized_keys:

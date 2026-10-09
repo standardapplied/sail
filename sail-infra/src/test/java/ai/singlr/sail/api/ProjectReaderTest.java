@@ -59,14 +59,14 @@ class ProjectReaderTest {
   }
 
   @Test
-  void aRowThatNamesASkillSailRefusesIsUnreadableNamingTheProjectAndTheKey() {
+  void aRowThatSetsADeletedKeyIsUnreadableNamingTheProjectAndWhereTheTextGoes() {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var store = new ProjectStore(db);
       Acting.system(() -> store.upsert("acme", ACME));
       db.execute(
           "UPDATE projects SET definition = ? WHERE name = ?",
-          ACME + "  build_skill: verify\n",
+          ACME + "  build_skill: acme-build\n",
           "acme");
 
       var unreadable =
@@ -78,7 +78,8 @@ class ProjectReaderTest {
               .getMessage()
               .startsWith(
                   "The definition of project 'acme' in the catalog could not be read:"
-                      + " agent.build_skill 'verify' is the name of a skill sail installs itself"),
+                      + " agent.build_skill is no longer read: sail's work prompt says how a build"
+                      + " runs."),
           unreadable.getMessage());
     }
   }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
@@ -232,19 +233,31 @@ public final class ProjectApplier {
   }
 
   /**
-   * Regenerates agent context files (per-agent home context + methodology/spec skills + language
-   * rules) via {@link AgentContextInstaller}, so a delta apply keeps engineer-owned files exactly
-   * as {@code project apply} and {@code agent context regen} do.
+   * Installs the project's skills and sail's {@code spec-board} into the skills folder of every
+   * harness the project installs, as {@code skills} reads them now: a folder already holding its
+   * skill is left as it is, a changed one is replaced whole, one the project no longer holds is
+   * removed, and one that is no skill is skipped with a warning saying why.
    */
-  public ApplyResult applyAgentContext(String name, SailYaml config) throws Exception {
-    var result = AgentContextInstaller.install(shell, name, config);
-    if (result.isEmpty()) {
+  public ApplyResult applySkills(String name, SailYaml config, ProjectSkills skills)
+      throws Exception {
+    var harnesses = ProjectProvisioner.installedHarnesses(config);
+    if (harnesses.isEmpty()) {
       return ApplyResult.empty();
     }
-    for (var path : result.pushed()) {
-      out.println("  [apply] Agent context \u2192 " + path);
+    var warnings = new ArrayList<String>();
+    var installed = 0;
+    for (var harness : harnesses) {
+      var report = ProjectSkillInstaller.installProject(shell, name, harness, skills);
+      out.println(
+          "  [apply] Skills \u2192 ~/"
+              + harness.skillsDir()
+              + " ("
+              + String.join(", ", report.installed())
+              + ")");
+      installed += report.installed().size();
+      report.skipped().stream().filter(note -> !warnings.contains(note)).forEach(warnings::add);
     }
-    return new ApplyResult(result.pushed().size(), 0, 0, List.of());
+    return new ApplyResult(installed, 0, 0, List.copyOf(warnings));
   }
 
   /**
@@ -435,7 +448,8 @@ public final class ProjectApplier {
   /**
    * Refreshes the git credential store inside the container so that {@code git clone} can
    * authenticate without embedding the token in the URL (which would leak to /proc/cmdline). Writes
-   * one credential entry per unique HTTPS host found in the repo URLs.
+   * one credential entry per unique HTTPS host found in the repo URLs, and logs {@code gh} in for
+   * each GitHub host among them with the same token.
    */
   private void ensureCredentialStore(
       String name, String sshUser, Map<String, String> gitTokens, List<SailYaml.Repo> repos)
@@ -453,6 +467,7 @@ public final class ProjectApplier {
     if (!helperResult.ok()) {
       throw new IOException("Failed to configure git credential helper: " + helperResult.stderr());
     }
+    ForgeCliLogin.loginGitHub(shell, name, sshUser, gitTokens, repos);
   }
 
   /**

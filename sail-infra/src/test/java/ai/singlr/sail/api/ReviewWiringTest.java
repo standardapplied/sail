@@ -82,7 +82,7 @@ class ReviewWiringTest {
   }
 
   @Test
-  void aBlockWithNoStagesRunsTheDefaultStagesAndKeepsOnlyItsFixSkill() {
+  void aBlockWithNoStagesRunsTheDefaultStagesUnderTheDefaultsLimits() {
     var sail =
         yaml(
             Map.of(
@@ -90,28 +90,21 @@ class ReviewWiringTest {
                 "claude-code",
                 "review_pipeline",
                 Map.of(
-                    "fix_skill",
-                    "acme-fix",
                     "max_iterations",
                     9,
                     "max_finding_age",
                     7,
                     "guardrails",
                     Map.of("max_duration", "1h"))));
-    var fallback = ReviewPipelineConfig.mandatoryDefault();
 
     var config = ReviewWiring.configResolver(p -> sail).apply("acme");
 
-    assertEquals("acme-fix", config.fixSkill());
-    assertEquals(fallback.stages(), config.stages());
-    assertEquals(fallback.maxIterations(), config.maxIterations());
-    assertEquals(fallback.maxFindingAge(), config.maxFindingAge());
-    assertEquals(fallback.guardrails(), config.guardrails());
-    assertEquals("sail-review", config.stages().getFirst().skill());
+    assertEquals(ReviewPipelineConfig.mandatoryDefault(), config);
+    assertNull(config.stages().getFirst().brief(), "the default stage judges under sail's brief");
   }
 
   @Test
-  void aBlockWithStagesIsThePipelineWholeFixSkillIncluded() {
+  void aBlockWithStagesIsThePipelineWholeBriefIncluded() {
     var sail =
         yaml(
             Map.of(
@@ -119,18 +112,15 @@ class ReviewWiringTest {
                 "claude-code",
                 "review_pipeline",
                 Map.of(
-                    "fix_skill",
-                    "acme-fix",
                     "max_iterations",
                     9,
                     "stages",
-                    List.of(Map.of("name", "sec", "skill", "acme-security")))));
+                    List.of(Map.of("name", "sec", "brief", "Judge the security surface.")))));
 
     var config = ReviewWiring.configResolver(p -> sail).apply("acme");
 
     assertSame(sail.agent().reviewPipeline(), config);
-    assertEquals("acme-fix", config.fixSkill());
-    assertEquals("acme-security", config.stages().getFirst().skill());
+    assertEquals("Judge the security surface.", config.stages().getFirst().brief());
     assertEquals(9, config.maxIterations());
   }
 
@@ -195,7 +185,6 @@ class ReviewWiringTest {
               null,
               p -> null,
               new NoReviewLanes(),
-              StageSkills.builtInOnly(),
               () -> {},
               () -> "node-a");
 

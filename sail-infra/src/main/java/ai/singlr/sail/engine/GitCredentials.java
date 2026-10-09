@@ -45,6 +45,25 @@ public final class GitCredentials {
   }
 
   /**
+   * The unique HTTPS hosts of {@code repos} that are GitHub: {@code github.com}, or a host whose
+   * repo is marked {@code forge: github}.
+   */
+  public static List<String> githubHosts(List<SailYaml.Repo> repos) {
+    if (repos == null) {
+      return List.of();
+    }
+    return repos.stream()
+        .filter(repo -> SailYaml.Repo.GITHUB.equals(repo.forge()) || isGithubCom(repo))
+        .flatMap(repo -> extractHttpsHosts(List.of(repo)).stream())
+        .distinct()
+        .toList();
+  }
+
+  private static boolean isGithubCom(SailYaml.Repo repo) {
+    return extractHttpsHosts(List.of(repo)).contains("github.com");
+  }
+
+  /**
    * Extracts unique HTTPS hostnames from repo URLs. Only includes hosts from repos that use HTTPS.
    */
   public static List<String> extractHttpsHosts(List<SailYaml.Repo> repos) {

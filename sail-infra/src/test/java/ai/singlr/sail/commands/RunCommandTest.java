@@ -77,7 +77,6 @@ class RunCommandTest {
     var output = sw.toString();
     assertTrue(output.contains("harness"));
     assertTrue(output.contains("--dry-run"));
-    assertTrue(output.contains("--no-regen"));
     assertTrue(output.contains("--task"));
     assertTrue(output.contains("--background"));
     assertTrue(output.contains("--json"));

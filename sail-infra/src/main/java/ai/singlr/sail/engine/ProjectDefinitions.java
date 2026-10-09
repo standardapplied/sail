@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.HostCatalog;
 import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -17,6 +18,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.UnaryOperator;
@@ -118,6 +121,26 @@ public final class ProjectDefinitions {
   public static SailYaml resolveForProvisioning(
       String definitionText, UnaryOperator<String> values) {
     return SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
+  }
+
+  /**
+   * The project's definition for a run on this box, which names the git identity the agent commits
+   * as: the catalog row, with {@code ${GIT_NAME}} and {@code ${GIT_EMAIL}} replaced by this box's
+   * git identity where the box has one. Any other placeholder, and either of these on a box with no
+   * identity set, is left as the row holds it. A project not in the catalog, or one whose row
+   * cannot be read, fails before anything is replaced.
+   */
+  public static SailYaml definitionWithBoxIdentity(
+      HostCatalog catalog, String name, LocalIdentity identity) {
+    catalog.definitions().require(name);
+    var text = catalog.project(name).orElseThrow().definition();
+    var values = new LinkedHashMap<String, String>();
+    for (var field : List.of(PlaceholderResolver.GIT_NAME, PlaceholderResolver.GIT_EMAIL)) {
+      if (text.contains(PlaceholderResolver.token(field))) {
+        identity.gitValue(field).ifPresent(value -> values.put(field, value));
+      }
+    }
+    return SailYaml.fromMap(PlaceholderResolver.substitute(YamlUtil.parseMap(text), values));
   }
 
   /** Writes a definition to the canonical descriptor (the materialized view of the catalog). */

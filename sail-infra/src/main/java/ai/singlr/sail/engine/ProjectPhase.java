@@ -46,8 +46,10 @@ public enum ProjectPhase {
   PRUNE_CRON_CONFIGURED,
   /** Agent CLI tools (claude, codex) installed inside the container. */
   AGENT_TOOLS_INSTALLED,
-  /** Agent context file (e.g. CLAUDE.md) generated and pushed into workspace. */
-  CONTEXT_GENERATED,
+  /**
+   * The project's skills and sail's spec-board installed for every harness the project installs.
+   */
+  SKILLS_INSTALLED,
   /** Specs scaffold directory created inside workspace. */
   SPECS_SCAFFOLD_CREATED,
   /** Project state written inside container. Provisioning complete. */

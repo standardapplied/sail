@@ -208,8 +208,6 @@ class HarnessesTest {
         "Type /rc inside Claude Code to connect from your phone via Remote Control.",
         CLAUDE_CODE.interactiveTip().orElseThrow());
     assertTrue(CODEX.interactiveTip().isEmpty());
-    assertEquals(".claude/CLAUDE.md", CLAUDE_CODE.homeContextPath());
-    assertEquals(".codex/AGENTS.md", CODEX.homeContextPath());
     assertEquals(".claude/skills/", CLAUDE_CODE.skillsDir());
     assertEquals(".agents/skills/", CODEX.skillsDir());
   }

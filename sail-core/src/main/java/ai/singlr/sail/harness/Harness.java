@@ -6,7 +6,6 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Strings;
-import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.regex.Pattern;
@@ -71,13 +70,6 @@ public interface Harness {
   String installCommand();
 
   /**
-   * The sail-owned context file this harness reads from the home directory, relative to {@code
-   * $HOME}. The harness loads it alongside any project-level file the engineer keeps in the
-   * workspace, so sail owns this path and overwrites it every run without touching the engineer's.
-   */
-  String homeContextPath();
-
-  /**
    * The home-level skills directory, relative to {@code $HOME}, with a trailing slash. A skill
    * lives at {@code <skillsDir><name>/SKILL.md}.
    */
@@ -87,18 +79,6 @@ public interface Harness {
   default String skillFolder(String name) {
     return skillsDir() + name;
   }
-
-  /**
-   * Where a project's language rule named {@code name} lands, relative to the home directory: the
-   * harness's native "load only when relevant" channel.
-   */
-  String languageRulePath(String name);
-
-  /**
-   * The content of the language rule named {@code name} scoped to {@code paths} (empty for an
-   * unscoped rule) over the normalized {@code body}.
-   */
-  String languageRule(String name, List<String> paths, String body);
 
   /** The headless command for a build, a reviewer, a fix agent or a full chat turn. */
   String headless(Launch launch);

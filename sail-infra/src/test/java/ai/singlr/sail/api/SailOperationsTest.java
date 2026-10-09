@@ -15,12 +15,12 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.BuiltInSkills;
+import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -2099,7 +2099,7 @@ class SailOperationsTest {
             "acme",
             "auth",
             "node-a",
-            "fix",
+            "review",
             "codex",
             null,
             "t",
@@ -3387,15 +3387,16 @@ class SailOperationsTest {
     private final List<String> invocations = new ArrayList<>();
 
     /**
-     * Every launch reconciles the in-container sail helpers, and a build installs its skill; answer
-     * both as already installed.
+     * Every launch reconciles the in-container sail helpers and installs sail's skill; answer both
+     * as already installed, and the skills folder as holding nothing else of sail's.
      */
     FakeShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       on(
-          "/sail-build/" + StageSkill.STAMP,
-          StageSkillInstaller.fingerprint(BuiltInSkills.of(StageSkill.BUILD).orElseThrow()));
+          "/spec-board/" + StageSkill.STAMP,
+          ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()));
+      on("for d in", "");
     }
 
     FakeShell on(String pattern, String stdout) {

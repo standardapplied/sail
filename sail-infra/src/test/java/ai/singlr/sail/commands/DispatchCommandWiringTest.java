@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -22,13 +23,13 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.BuiltInSkills;
+import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
@@ -186,7 +187,7 @@ class DispatchCommandWiringTest {
   }
 
   @Test
-  void theControlPlaneWiresTheProjectsOwnSkillsForEveryStageOnThisBox() throws Exception {
+  void theControlPlaneWiresTheProjectsOwnSkillsIntoEveryLaunchOnThisBox() throws Exception {
     var shell =
         shell()
             .on("-mmin", "")
@@ -197,13 +198,12 @@ class DispatchCommandWiringTest {
     new FdeStore(db).add(HANDLE, null, null, "admin");
     Acting.system(
         () -> {
-          new ProjectStore(db)
-              .upsert("acme", YAML.replace("agent:\n", "agent:\n  build_skill: acme-build\n"));
+          new ProjectStore(db).upsert("acme", YAML);
           new FileStore(db)
               .put(
                   "acme",
-                  ".sail/skills/acme-build/SKILL.md",
-                  new ByteArrayInputStream("Build it acme's way.\n".getBytes(UTF_8)),
+                  ".sail/skills/e2e/SKILL.md",
+                  new ByteArrayInputStream("Run the e2e suite.\n".getBytes(UTF_8)),
                   0644);
         });
     operations.useControlPlane(
@@ -219,29 +219,23 @@ class DispatchCommandWiringTest {
             }));
 
     assertEquals(
-        "Build it acme's way.",
-        operations.stageSkills().resolve("acme", "acme-build").body(),
-        "the loop's controller reads skills through the same instance the launcher does");
+        List.of("e2e"),
+        operations.projectSkills().held("acme").stream().map(StageSkill::name).toList(),
+        "the launcher reads the project's skills through the control plane's instance");
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
     var run = new RunStore(db).listForProject("acme").getFirst();
-    assertTrue(
-        run.task()
-            .contains(
-                "## How to do this work (skill: acme-build)\n\nBuild it acme's way.\n\n"
-                    + "## Autonomous Operation"),
-        run.task());
+    assertTrue(run.task().contains("\n## How this run works\n"), run.task());
+    assertFalse(run.task().contains("e2e"), "no prompt names a skill: " + run.task());
     assertTrue(
         shell.invocations.stream()
             .anyMatch(
                 command ->
                     command.startsWith("incus file push")
-                        && command.endsWith(
-                            "acme/home/dev/.claude/.sail-stage-build-acme-build."
-                                + run.id()
-                                + "/SKILL.md")),
-        "the build's skill is installed from the project's files: " + shell.invocations);
+                        && command.contains("acme/home/dev/.claude/.sail-stage-build-e2e.")
+                        && command.endsWith("/SKILL.md")),
+        "the project's skill is installed from its files: " + shell.invocations);
   }
 
   @Test
@@ -356,15 +350,16 @@ class DispatchCommandWiringTest {
     private final Map<String, Result> scripts = new LinkedHashMap<>();
 
     /**
-     * Every launch reconciles the in-container sail helpers, and a build installs its skill; answer
-     * both as already installed.
+     * Every launch reconciles the in-container sail helpers and installs sail's skill; answer both
+     * as already installed, and the skills folder as holding nothing else of sail's.
      */
     StubShell() {
       on("incus config device add", "");
       on("cat " + ContainerSailSetup.STAMP_PATH, ContainerSailSetup.fingerprint());
       on(
-          "/sail-build/" + StageSkill.STAMP,
-          StageSkillInstaller.fingerprint(BuiltInSkills.of(StageSkill.BUILD).orElseThrow()));
+          "/spec-board/" + StageSkill.STAMP,
+          ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()));
+      on("for d in", "");
     }
 
     final List<String> invocations = new ArrayList<>();

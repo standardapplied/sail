@@ -13,13 +13,12 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.AgentTaskPrompt;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -53,7 +52,6 @@ public final class BuildDispatch {
   private final DispatchOperations.Listener listener;
   private final DispatchOperations.EventSink events;
   private final ShellExec shell;
-  private final Supplier<StageSkills> stageSkills;
 
   public BuildDispatch(
       ProjectLoader projects,
@@ -67,8 +65,7 @@ public final class BuildDispatch {
       DispatchOperations.Snapshotter snapshotter,
       DispatchOperations.Listener listener,
       DispatchOperations.EventSink events,
-      ShellExec shell,
-      Supplier<StageSkills> stageSkills) {
+      ShellExec shell) {
     this.projects = projects;
     this.specStore = specStore;
     this.reviewStore = reviewStore;
@@ -81,7 +78,6 @@ public final class BuildDispatch {
     this.listener = listener;
     this.events = events;
     this.shell = shell;
-    this.stageSkills = stageSkills;
   }
 
   /** Outcome of {@link #resolveSpec}: the chosen spec, and whether {@code restart} reset it. */
@@ -148,14 +144,10 @@ public final class BuildDispatch {
           ErrorCode.BAD_REQUEST,
           "Project '" + project + "' names no agent; set agent.type or the spec's agent.");
     }
-    var harness = LaunchAdmission.resolveAgent(agentType);
-    var skill = buildSkill(project, loaded.config().agent().buildSkill());
+    LaunchAdmission.resolveAgent(agentType);
     var built =
-        AgentTaskPrompt.build(
-            taskSpec,
-            specBody.isBlank() ? nextSpec.title() : specBody,
-            room,
-            StageSkills.block(skill, harness));
+        WorkPrompt.build(
+            taskSpec, specBody.isBlank() ? nextSpec.title() : specBody, room, List.of());
     var task = built.prompt();
 
     Runnable claim = () -> claim(resolution, taskSpec, branch);
@@ -225,8 +217,7 @@ public final class BuildDispatch {
               taskSpec,
               agentType,
               runId,
-              credential,
-              skill);
+              credential);
       var status =
           runLauncher.finishLaunch(
               new RunLauncher.RunContext(
@@ -247,18 +238,6 @@ public final class BuildDispatch {
     } catch (RuntimeException e) {
       runReservation.releaseIfAbsent(runId, project, unit);
       throw e;
-    }
-  }
-
-  /**
-   * The skill the build works under, read now: a dispatch whose skill cannot be read is refused
-   * before anything is reserved, claimed or checked out, saying which file is missing.
-   */
-  private StageSkill buildSkill(String project, String name) {
-    try {
-      return stageSkills.get().resolve(project, name);
-    } catch (IllegalStateException unreadable) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, unreadable.getMessage());
     }
   }
 

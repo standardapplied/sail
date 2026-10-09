@@ -161,7 +161,9 @@ class ReviewLanesTest {
     assertEquals("claude/fix-" + fix.id(), fix.principal());
     assertEquals("failed", loop.statusOf(reviewer.reviewId()));
     assertEquals(SpecStatus.IN_PROGRESS, loop.specStatus("auth"));
-    assertTrue(fix.task().contains("wait for or watch CI"), "the fix task ends at a pushed commit");
+    assertTrue(
+        fix.task().contains("The work is not complete until CI is green"),
+        "a fix run ends as a build does: pushed, behind a pull request, CI green");
 
     loop.finish(fix.id(), "fixed and pushed");
 
@@ -196,11 +198,13 @@ class ReviewLanesTest {
         loop.container.commits().isEmpty(),
         "nothing lands after the kill: a killed fix agent's half-done work is not committed");
     assertEquals(
-        List.of("fix agent killed: time limit (45m)"), loop.details("review_iteration_failed"));
+        List.of("fix agent killed: time limit (4h)"),
+        loop.details("review_iteration_failed"),
+        "a fix run is held to the build lane's limits");
     assertEquals("escalated", loop.statusOf(fix.reviewId()));
     assertEquals(SpecStatus.REVIEW, loop.specStatus("auth"));
     assertTrue(
-        loop.details("review_escalated").getFirst().contains("fix agent killed: time limit (45m)"));
+        loop.details("review_escalated").getFirst().contains("fix agent killed: time limit (4h)"));
     assertTrue(loop.live().isEmpty(), "no re-review runs over the code the reviewer just failed");
     assertEquals(1, loop.reviews.reviewsForSpec("auth").size());
   }
@@ -400,7 +404,7 @@ class ReviewLanesTest {
   }
 
   @Test
-  void aReviewLanesLimitsDefaultTo45MinutesAndAnEditAppliesToTheNextRunOnly() {
+  void aReviewersLimitsDefaultTo45MinutesAFixRunTakesTheBuildLanesAndAnEditAppliesToTheNextRun() {
     loop = ReviewLoop.wired(tempDir, ReviewLoop.YAML);
     loop.built("auth");
     var reviewer = loop.onlyLive();
@@ -426,10 +430,9 @@ class ReviewLanesTest {
     var fix = loop.onlyLive();
     assertEquals("fix", fix.role());
     assertTrue(
-        loop.watcherCommandOf(fix.id())
-            .endsWith("--action snapshot-and-stop --max-duration 90m --max-idle 30m"),
-        "the fix run launched after the edit is held to the new review-lane limits, never the"
-            + " build lane's: "
+        loop.watcherCommandOf(fix.id()).endsWith("--action stop --max-duration 6h"),
+        "the fix run launched after the edit is held to the build lane's new limits, never the"
+            + " reviewer's: "
             + loop.watcherCommandOf(fix.id()));
     assertEquals(
         List.of(first), loop.watcherCommandsOf(reviewer.id()), "the first run kept its own");

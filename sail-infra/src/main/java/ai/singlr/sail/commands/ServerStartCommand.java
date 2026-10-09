@@ -229,7 +229,6 @@ public final class ServerStartCommand implements Runnable {
                 bus,
                 ReviewWiring.definitions(reader),
                 operations.reviewLanes(),
-                operations.stageSkills(),
                 syncScheduler::afterWrite,
                 NodeIdentity::handle)
             .useMessages(messageStore);

@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
@@ -430,9 +432,9 @@ public final class ProjectApplyCommand implements Runnable {
       List<String> warnings) {}
 
   /**
-   * The full convergence pass: descriptor state, sail machinery, agent context, hostname. The
-   * {@code observer} always executes, so every state probe sees the live container; only mutations
-   * ride {@code shell}, which a dry run swaps for command narration.
+   * The full convergence pass: descriptor state, sail machinery, skills, hostname. The {@code
+   * observer} always executes, so every state probe sees the live container; only mutations ride
+   * {@code shell}, which a dry run swaps for command narration.
    */
   private Outcome converge(
       ShellExecutor observer, ShellExecutor shell, SailYaml config, Path sailYamlPath)
@@ -463,12 +465,16 @@ public final class ProjectApplyCommand implements Runnable {
             : null;
     results.add(applier.applyAgentTools(project, agentInstall));
     results.add(applier.applyGitConfig(project, config.git(), sshUser));
-    results.add(applier.applyAgentContext(project, config));
+    try (var operations = OperationsFactory.open()) {
+      results.add(
+          applier.applySkills(project, config, new ProjectSkills(operations::projectFiles)));
+    }
     results.add(applier.applyCleanupCron(project, sshUser));
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();
     var removed = results.stream().mapToInt(ProjectApplier.ApplyResult::removed).sum();
     var skipped = results.stream().mapToInt(ProjectApplier.ApplyResult::skipped).sum();
+    results.forEach(result -> warnings.addAll(result.warnings()));
     return new Outcome(added, removed, skipped, machinery, hostnameRealigned, warnings);
   }
 
@@ -570,8 +576,12 @@ public final class ProjectApplyCommand implements Runnable {
 
     var gitTokens = resolveGitTokens(config);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new ProjectProvisioner(shell, tracker, listener);
-    provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
+    try (var operations = OperationsFactory.open()) {
+      var provisioner =
+          new ProjectProvisioner(
+              shell, tracker, listener, new ProjectSkills(operations::projectFiles));
+      provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
+    }
 
     if (!json) {
       System.out.println();

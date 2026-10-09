@@ -134,9 +134,7 @@ class CommandTaxonomyTest {
             .getSubcommands()
             .keySet()
             .containsAll(
-                Set.of(
-                    "run", "status", "stop", "logs", "report", "review", "sweep", "context",
-                    "watch")));
+                Set.of("run", "status", "stop", "logs", "report", "review", "sweep", "watch")));
   }
 
   @Test

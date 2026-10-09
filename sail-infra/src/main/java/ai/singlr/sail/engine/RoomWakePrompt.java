@@ -27,7 +27,7 @@ public final class RoomWakePrompt {
   /**
    * A built chat prompt and the room messages it rendered in full — the exact set the launcher may
    * acknowledge as delivered. Delivery derives from presentation, exactly like {@link
-   * AgentTaskPrompt.Built}.
+   * WorkPrompt.Built}.
    */
   public record Built(String prompt, List<MessageStore.MessageRow> renderedMessages) {}
 

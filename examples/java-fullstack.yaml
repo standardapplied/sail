@@ -74,23 +74,6 @@ agent:
     - claude-code
     - codex
 
-agent_context:
-  tech_stack: |
-    Backend: JDK 25, Helidon 4.3.x, Jackson 3
-    Frontend: React 19, Tailwind 4
-    Database: Postgres 16
-    Search: Meilisearch (keyword + vector)
-    Cache: Redis 7
-  conventions: |
-    - Records for all DTOs
-    - Virtual threads for all I/O
-    - Pattern matching for type checks
-  build_commands: |
-    cd backend && mvn clean package
-    cd webapp && npm install && npm run build
-  project_specific: |
-    Edit this section with project-specific instructions for your AI agent.
-
 ssh:
   user: dev
   authorized_keys:

@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.harness.Harness.Launch;
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -21,10 +20,8 @@ class HarnessGoldenTest {
   private static final String TASK = "/home/dev/.sail/agent-task.txt";
   private static final String PROMPT = " -p \"$(cat " + TASK + ")\"";
   private static final String CODEX_TASK = " \"$(cat " + TASK + ")\"";
-  private static final String HOME = "/home/dev/";
   private static final Harness CLAUDE_CODE = Harnesses.of("claude-code");
   private static final Harness CODEX = Harnesses.of("codex");
-  private static final List<String> JAVA_PATHS = List.of("**/*.java", "pom.xml");
 
   private static final String MALFORMED_ID =
       "Malformed session id; refusing to build a resume command from replicated data.";
@@ -207,55 +204,6 @@ class HarnessGoldenTest {
         "Unknown agent CLI: 'unknown-agent'. Known agents: claude-code, codex.\n"
             + "  Check the 'install' list in your sail.yaml agent section.",
         ex.getMessage());
-  }
-
-  @Test
-  void claudeCodeLanguageRule() {
-    assertEquals(HOME + ".claude/rules/java.md", HOME + CLAUDE_CODE.languageRulePath("java"));
-    assertEquals(
-        """
-        ---
-        paths:
-          - "**/*.java"
-          - "pom.xml"
-        ---
-
-        Use records.
-        """,
-        CLAUDE_CODE.languageRule("java", JAVA_PATHS, "Use records.\n"));
-    assertEquals(
-        HOME + ".claude/rules/security.md", HOME + CLAUDE_CODE.languageRulePath("security"));
-    assertEquals(
-        "Validate input.\n", CLAUDE_CODE.languageRule("security", List.of(), "Validate input.\n"));
-  }
-
-  @Test
-  void codexLanguageRule() {
-    assertEquals(HOME + ".agents/skills/java/SKILL.md", HOME + CODEX.languageRulePath("java"));
-    assertEquals(
-        """
-        ---
-        name: java
-        description: >
-          Java coding standards for this project. Apply when writing or reviewing java (**/*.java, pom.xml).
-        ---
-
-        Use records.
-        """,
-        CODEX.languageRule("java", JAVA_PATHS, "Use records.\n"));
-    assertEquals(
-        HOME + ".agents/skills/security/SKILL.md", HOME + CODEX.languageRulePath("security"));
-    assertEquals(
-        """
-        ---
-        name: security
-        description: >
-          Security coding standards for this project. Apply when writing or reviewing security.
-        ---
-
-        Validate input.
-        """,
-        CODEX.languageRule("security", List.of(), "Validate input.\n"));
   }
 
   @Test

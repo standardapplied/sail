@@ -6,16 +6,17 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
-import ai.singlr.sail.api.ProjectReader;
+import ai.singlr.sail.api.ProjectSkills;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.gen.BuiltInSkills;
+import ai.singlr.sail.engine.SharedProjectFiles;
+import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
@@ -25,6 +26,7 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -32,43 +34,20 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.api.parallel.Execution;
-import org.junit.jupiter.api.parallel.ExecutionMode;
 import picocli.CommandLine;
 
-/**
- * {@code sail project skills} over a real control-plane database: the catalog's definition and the
- * project's shared files, read as a launch reads them.
- */
-@Execution(ExecutionMode.SAME_THREAD)
 class ProjectSkillsCommandTest {
 
-  private static final String DEFAULTS = "name: acme\nagent:\n  type: claude-code\n";
+  private static final String ACME = "name: acme\nagent:\n  type: claude-code\n";
 
-  private static final String NAMED =
-      """
-      name: acme
-      agent:
-        type: claude-code
-        build_skill: acme-build
-        review_pipeline:
-          fix_skill: acme-fix
-          stages:
-            - name: security
-              skill: acme-security
-            - name: style
-            - name: sign-off
-              type: human
-      """;
-
-  private static final String ACME_BUILD =
+  private static final String E2E =
       """
       ---
-      name: acme-build
-      description: How acme builds.
+      name: e2e
+      description: Runs the e2e suite.
       ---
 
-      Build it acme's way.
+      Run the suite.
       """;
 
   @TempDir Path dir;
@@ -80,6 +59,7 @@ class ProjectSkillsCommandTest {
     database = dir.resolve("sail.db");
     db = Sqlite.open(database);
     new SchemaManager(db).migrate();
+    Acting.system(() -> new ProjectStore(db).upsert("acme", ACME));
   }
 
   @AfterEach
@@ -91,23 +71,44 @@ class ProjectSkillsCommandTest {
     return OperationsFactory.open(database);
   }
 
-  private void define(String project, String yaml) {
-    Acting.system(() -> new ProjectStore(db).upsert(project, yaml));
-  }
-
   private void share(String path, String content) {
-    share(path, content.getBytes(StandardCharsets.UTF_8));
+    Acting.system(
+        () ->
+            new FileStore(db)
+                .put(
+                    "acme",
+                    path,
+                    new ByteArrayInputStream(content.getBytes(StandardCharsets.UTF_8)),
+                    0644));
   }
 
-  private void share(String path, byte[] content) {
-    Acting.system(
-        () -> new FileStore(db).put("acme", path, new ByteArrayInputStream(content), 0644));
+  private List<String> shared() {
+    return new FileStore(db).list("acme").stream().map(FileStore.FileRow::path).sorted().toList();
+  }
+
+  private Path localSkill(String name, Map<String, String> files) throws Exception {
+    var folder = dir.resolve("local").resolve(name);
+    for (var entry : files.entrySet()) {
+      var file = folder.resolve(entry.getKey());
+      Files.createDirectories(file.getParent());
+      Files.writeString(file, entry.getValue());
+      WorkspaceFiles.mode(file, entry.getKey().endsWith(".sh") ? 0755 : 0644);
+    }
+    return folder;
   }
 
   private record Ran(int exit, String out, String err, Exception escaped) {}
 
-  private Ran list(String... args) {
-    return run(new ProjectSkillsCommand(this::operations), args);
+  private Ran ls(String... args) {
+    return run(new ProjectSkillsCommand.Ls(this::operations), args);
+  }
+
+  private Ran add(String... args) {
+    return run(new ProjectSkillsCommand.Add(this::operations), args);
+  }
+
+  private Ran rm(String... args) {
+    return run(new ProjectSkillsCommand.Rm(this::operations), args);
   }
 
   private Ran show(String... args) {
@@ -144,277 +145,196 @@ class ProjectSkillsCommandTest {
   }
 
   @Test
-  void theCommandIsAVerbOfProjectWithShowBeneathIt() {
-    var project = new CommandLine(new ProjectCommand());
+  void theCommandIsAVerbOfProjectWithLsAddRmAndShowBeneathIt() {
+    var subcommands = new CommandLine(new ProjectCommand()).getSubcommands();
 
-    assertTrue(project.getSubcommands().containsKey("skills"));
+    assertTrue(subcommands.containsKey("skills"));
     assertEquals(
-        List.of("show"),
-        List.copyOf(project.getSubcommands().get("skills").getSubcommands().keySet()));
-    assertTrue(
-        new CommandLine(new ProjectSkillsCommand()).getUsageMessage().contains("--json"),
-        "and its production constructor is the one picocli builds");
-    assertTrue(
-        new CommandLine(new ProjectSkillsCommand.Show()).getUsageMessage().contains("<name>"));
+        List.of("ls", "add", "rm", "show"),
+        List.copyOf(subcommands.get("skills").getSubcommands().keySet()));
   }
 
   @Test
-  void aProjectThatNamesNoSkillRunsEveryStageUnderSailsOwn() {
-    define("acme", DEFAULTS);
+  void aProjectWithNoSkillsSaysSo() {
+    var ran = ls("-p", "acme");
 
-    var listed = list("-p", "acme");
-
-    assertEquals(0, listed.exit(), String.valueOf(listed.escaped()));
+    assertEquals(0, ran.exit(), ran.err());
     assertEquals(
-        """
-          Stage skills: acme
-          STAGE   SKILL        SOURCE
-          build   sail-build   built-in
-          review  sail-review  built-in
-          fix     sail-fix     built-in
-        """,
-        listed.out());
-    assertEquals("", listed.err());
+        "  No skills: share one with 'sail project skills add <folder>'.\n",
+        CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
 
   @Test
-  void eachStageIsListedInTheOrderItRunsWithHowItsSkillStands() {
-    define("acme", NAMED);
-    share(".sail/skills/acme-build/SKILL.md", ACME_BUILD);
-    share(".sail/skills/acme-build/scripts/check.sh", "true\n");
-    share(".sail/skills/acme-build/reference/rules.md", "Rules.\n");
-    share(".sail/skills/acme-fix/SKILL.md", "---\nname: acme-fix\n---\n");
-    share(".sail/skills/acme-fix/notes.md", "Notes.\n");
+  void lsShowsEachFolderWithItsFilesAndWhetherItIsASkill() {
+    share(".sail/skills/e2e/SKILL.md", E2E);
+    share(".sail/skills/e2e/scripts/run.sh", "#!/bin/sh\n");
+    share(".sail/skills/broken/notes.md", "no manifest");
 
-    var listed = list("--project", "acme");
+    var ran = ls("-p", "acme");
 
-    assertEquals(0, listed.exit(), String.valueOf(listed.escaped()));
+    assertEquals(0, ran.exit(), ran.err());
     assertEquals(
         """
-          Stage skills: acme
-          STAGE     SKILL          SOURCE
-          build     acme-build     project (3 files)
-          security  acme-security  missing
-          style     sail-review    built-in
-          fix       acme-fix       invalid: Skill 'acme-fix' has no instructions: its SKILL.md body is blank.
+          Skills: acme
+          SKILL   FILES  STATUS
+          broken      1  invalid: .sail/skills/broken/SKILL.md is missing or is not a text file.
+          e2e         2  ok
         """,
-        listed.out());
-    assertEquals("", listed.err());
+        CommandLine.Help.Ansi.OFF.string(ran.out()));
   }
 
   @Test
-  void jsonIsTheSameRowsWithTheFileCountOfEach() {
-    define("acme", NAMED);
-    share(".sail/skills/acme-build/SKILL.md", ACME_BUILD);
-    share(".sail/skills/acme-build/scripts/check.sh", "true\n");
-    share(".sail/skills/acme-fix/SKILL.md", "---\nname: acme-fix\n---\n");
-    share(".sail/skills/acme-fix/notes.md", "Notes.\n");
-    share(".sail/skills/acme-security/notes.md", "No manifest.\n");
+  void jsonIsTheSameRows() {
+    share(".sail/skills/e2e/SKILL.md", E2E);
 
-    var listed = list("-p", "acme", "--json");
+    var ran = ls("-p", "acme", "--json");
 
-    assertEquals(0, listed.exit(), String.valueOf(listed.escaped()));
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(
+        List.of(Map.of("name", "e2e", "files", 1, "status", "ok")), YamlUtil.parseList(ran.out()));
+  }
+
+  @Test
+  void addSharesEveryFileUnderTheFolderUnderTheSkillsNameWithItsMode() throws Exception {
+    var folder =
+        localSkill(
+            "e2e",
+            Map.of("SKILL.md", E2E, "scripts/run.sh", "#!/bin/sh\n", "reference/cases.md", "x"));
+
+    var ran = add("-p", "acme", folder.toString());
+
+    assertEquals(0, ran.exit(), ran.err() + ran.escaped());
     assertEquals(
         List.of(
-            Map.of("stage", "build", "skill", "acme-build", "source", "project", "files", 2),
-            Map.of("stage", "security", "skill", "acme-security", "source", "missing", "files", 0),
-            Map.of("stage", "style", "skill", "sail-review", "source", "built-in", "files", 1),
-            Map.of(
-                "stage",
-                "fix",
-                "skill",
-                "acme-fix",
-                "source",
-                "invalid: Skill 'acme-fix' has no instructions: its SKILL.md body is blank.",
-                "files",
-                2)),
-        YamlUtil.parseList(listed.out()));
-    assertTrue(listed.out().endsWith("\n"));
+            ".sail/skills/e2e/SKILL.md",
+            ".sail/skills/e2e/reference/cases.md",
+            ".sail/skills/e2e/scripts/run.sh"),
+        shared());
+    assertEquals(
+        0755,
+        new FileStore(db).find("acme", ".sail/skills/e2e/scripts/run.sh").orElseThrow().mode());
+    assertTrue(ran.out().contains("Shared skill e2e (3 files) on acme"), ran.out());
+    assertEquals("ok", ProjectSkillsCommand.rows("acme", skills()).getFirst().status());
+  }
+
+  private ProjectSkills skills() {
+    return new ProjectSkills(
+        project ->
+            new SharedProjectFiles(
+                new FileStore(db), dir.resolve("projects"), project, FileLimits.defaults()));
   }
 
   @Test
-  void aManifestThatIsNotTextIsAMissingSkill() {
-    define("acme", NAMED);
-    share(".sail/skills/acme-build/SKILL.md", new byte[] {0, 1, 2, 0, (byte) 0xff});
+  void addTakesTheNameGivenOverTheFoldersOwn() throws Exception {
+    var folder = localSkill("my-e2e-draft", Map.of("SKILL.md", E2E));
 
-    var listed = list("-p", "acme", "--json");
+    var ran = add("-p", "acme", folder.toString(), "--name", "e2e");
 
-    assertEquals(
-        Map.of("stage", "build", "skill", "acme-build", "source", "missing", "files", 0),
-        YamlUtil.parseList(listed.out()).getFirst());
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(List.of(".sail/skills/e2e/SKILL.md"), shared());
   }
 
   @Test
-  void aColumnIsNeverNarrowerThanItsHeader() {
-    define(
-        "acme",
-        """
-        name: acme
-        agent:
-          type: claude-code
-          build_skill: b
-          review_pipeline:
-            fix_skill: f
-            stages:
-              - name: s
-                skill: r
-        """);
+  void addRefusesAReservedNameBeforeSharingAnything() throws Exception {
+    var sailX = localSkill("sail-x", Map.of("SKILL.md", E2E));
+    var specBoard = localSkill("spec-board", Map.of("SKILL.md", E2E));
+    var named = localSkill("mine", Map.of("SKILL.md", E2E));
 
-    var listed = list("-p", "acme");
-
-    assertEquals(0, listed.exit());
-    assertEquals(
-        """
-          Stage skills: acme
-          STAGE  SKILL  SOURCE
-          build  b      missing
-          s      r      missing
-          fix    f      missing
-        """,
-        listed.out());
-  }
-
-  @Test
-  void aPipelineBlockWithOnlyAFixSkillListsTheDefaultStageAndThatSkill() {
-    define("acme", DEFAULTS + "  review_pipeline:\n    fix_skill: acme-fix\n");
-    share(".sail/skills/acme-fix/SKILL.md", "Fix it acme's way.\n");
-
-    var listed = list("-p", "acme");
-
-    assertEquals(
-        """
-          Stage skills: acme
-          STAGE   SKILL        SOURCE
-          build   sail-build   built-in
-          review  sail-review  built-in
-          fix     acme-fix     project (1 files)
-        """,
-        listed.out());
-  }
-
-  @Test
-  void aProjectWithNoAgentBlockStillListsTheLoopSailWouldRun() {
-    define("acme", "name: acme\n");
-
-    var listed = list("-p", "acme", "--json");
-
-    assertEquals(
-        List.of("build:sail-build", "review:sail-review", "fix:sail-fix"),
-        YamlUtil.parseList(listed.out()).stream()
-            .map(row -> row.get("stage") + ":" + row.get("skill"))
-            .toList());
-  }
-
-  @Test
-  void filesUnderAReservedNameAreReportedOnStderrOncePerFolder() {
-    define("acme", DEFAULTS);
-    share(".sail/skills/sail-review/SKILL.md", "Mine.\n");
-    share(".sail/skills/sail-review/notes.md", "Notes.\n");
-    share(".sail/skills/sail-mine/scripts/x.sh", "true\n");
-    share(".sail/skills/sail-notes.md", "A file, not a folder.\n");
-    share(".sail/skills/sailing/SKILL.md", "Not reserved.\n");
-
-    var listed = list("-p", "acme");
-
-    assertEquals(0, listed.exit());
-    assertEquals(
+    for (var ran :
         List.of(
-            "  ⚠ .sail/skills/sail-mine/ is reserved and unused: skill names starting sail- are"
-                + " sail's own, so no stage can name it. Move its files under another name.",
-            "  ⚠ .sail/skills/sail-review/ is reserved and unused: skill names starting sail- are"
-                + " sail's own, so no stage can name it. Move its files under another name."),
-        listed.err().lines().toList());
-    assertTrue(listed.out().contains("review  sail-review  built-in"), listed.out());
-  }
-
-  @Test
-  void aProjectNotInTheCatalogExitsNonZeroSayingSo() {
-    var listed = list("-p", "ghost");
-
-    assertEquals(1, listed.exit());
-    assertEquals(
-        "Project 'ghost' is not in the catalog.",
-        assertInstanceOf(ApiException.class, listed.escaped()).getMessage());
-    assertEquals("", listed.out());
-  }
-
-  @Test
-  void aRowThatCannotBeReadExitsNonZeroSayingWhy() {
-    define("acme", DEFAULTS);
-    db.execute(
-        "UPDATE projects SET definition = ? WHERE name = ?",
-        DEFAULTS + "  build_skill: sail-x\n",
-        "acme");
-
-    var listed = list("-p", "acme");
-
-    assertEquals(1, listed.exit());
-    assertTrue(
-        assertInstanceOf(ProjectReader.Unreadable.class, listed.escaped())
-            .getMessage()
-            .startsWith(
-                "The definition of project 'acme' in the catalog could not be read:"
-                    + " agent.build_skill 'sail-x' is not a skill a project can name"),
-        listed.escaped().getMessage());
-    assertEquals("", listed.out());
-  }
-
-  @Test
-  void anInvalidProjectNameIsRefusedBeforeAnythingIsOpened() {
-    var listed = list("-p", "../etc");
-
-    assertEquals(1, listed.exit());
-    assertInstanceOf(IllegalArgumentException.class, listed.escaped());
-  }
-
-  @Test
-  void showPrintsADefaultsSkillMdWholeWithoutNeedingAProject() {
-    for (var name : List.of("sail-build", "sail-review", "sail-fix")) {
-      var shown = show(name);
-
-      assertEquals(0, shown.exit(), String.valueOf(shown.escaped()));
-      assertEquals(BuiltInSkills.text(name).orElseThrow(), shown.out());
-      assertNull(shown.escaped());
+            add("-p", "acme", sailX.toString()),
+            add("-p", "acme", specBoard.toString()),
+            add("-p", "acme", named.toString(), "--name", "sail-mine"))) {
+      assertEquals(1, ran.exit());
+      assertTrue(
+          ran.escaped().getMessage().contains("is sail's own: spec-board and names starting sail-"),
+          ran.escaped().getMessage());
     }
+    assertEquals(List.of(), shared());
+  }
+
+  @Test
+  void addRefusesAFolderThatIsNoSkillBeforeSharingAnything() throws Exception {
+    var noManifest = localSkill("notes", Map.of("notes.md", "x"));
+    var blank = localSkill("blank", Map.of("SKILL.md", "---\nname: blank\n---\n"));
+
+    var ranNoManifest = add("-p", "acme", noManifest.toString());
+    var ranBlank = add("-p", "acme", blank.toString());
+
+    assertEquals("Skill 'notes' has no SKILL.md.", ranNoManifest.escaped().getMessage());
+    assertEquals(
+        "Skill 'blank' has no instructions: its SKILL.md body is blank.",
+        ranBlank.escaped().getMessage());
+    assertEquals(List.of(), shared());
+  }
+
+  @Test
+  void addRefusesWhatIsNotAFolder() throws Exception {
+    var file = dir.resolve("SKILL.md");
+    Files.writeString(file, E2E);
+
+    var ran = add("-p", "acme", file.toString());
+
+    assertEquals(1, ran.exit());
+    assertTrue(ran.err().contains("Not a folder: " + file), ran.err());
+  }
+
+  @Test
+  void rmStopsSharingEveryFileOfTheSkillAndNothingElse() {
+    share(".sail/skills/e2e/SKILL.md", E2E);
+    share(".sail/skills/e2e/scripts/run.sh", "#!/bin/sh\n");
+    share(".sail/skills/release/SKILL.md", "Cut it.\n");
+    share("README.md", "hello");
+
+    var ran = rm("-p", "acme", "e2e");
+
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(List.of(".sail/skills/release/SKILL.md", "README.md"), shared());
+    assertTrue(ran.out().contains("Stopped sharing skill e2e (2 files)"), ran.out());
+  }
+
+  @Test
+  void rmOfASkillNobodyHoldsExitsNonZeroSayingSo() {
+    var ran = rm("-p", "acme", "e2e");
+
+    assertEquals(1, ran.exit());
+    assertTrue(ran.err().contains("No skill 'e2e' on acme."), ran.err());
   }
 
   @Test
   void showPrintsAProjectsSkillMdAsItIsStored() {
-    define("acme", NAMED);
-    share(".sail/skills/acme-build/SKILL.md", ACME_BUILD);
-    share(".sail/skills/acme-build/scripts/check.sh", "true\n");
+    share(".sail/skills/e2e/SKILL.md", E2E);
 
-    var shown = show("acme-build", "-p", "acme");
+    var ran = show("-p", "acme", "e2e");
 
-    assertEquals(0, shown.exit(), String.valueOf(shown.escaped()));
-    assertEquals(ACME_BUILD, shown.out());
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(E2E, ran.out());
   }
 
   @Test
-  void showOfASkillNobodyHoldsExitsNonZeroWithTheResolversMessage() {
-    define("acme", DEFAULTS);
-    share(".sail/skills/blank/SKILL.md", "---\nname: blank\n---\n");
+  void showPrintsSailsOwnSkillMdWithoutNeedingAProject() {
+    var ran = show(SpecSkillGenerator.NAME);
 
-    var unknown = show("acme-review", "-p", "acme");
-    var invalid = show("blank", "-p", "acme");
-    var noName = show("Bad Name", "-p", "acme");
+    assertEquals(0, ran.exit(), ran.err());
+    assertEquals(SpecSkillGenerator.skillMd(), ran.out());
+  }
 
-    assertEquals(1, unknown.exit());
+  @Test
+  void showOfASkillNobodyHoldsExitsNonZeroNamingItsManifest() {
+    var ran = show("-p", "acme", "e2e");
+
+    assertEquals(1, ran.exit());
     assertEquals(
-        "Skill 'acme-review' of project 'acme' cannot be read: .sail/skills/acme-review/SKILL.md is"
-            + " missing or is not a text file. Add it with 'sail project files add <file> --as"
-            + " .sail/skills/acme-review/SKILL.md'.",
-        assertInstanceOf(IllegalStateException.class, unknown.escaped()).getMessage());
-    assertEquals("", unknown.out());
-    assertEquals(1, invalid.exit());
-    assertEquals(
-        "Skill 'blank' of project 'acme' is refused: Skill 'blank' has no instructions: its"
-            + " SKILL.md body is blank.",
-        invalid.escaped().getMessage());
-    assertEquals(1, noName.exit());
-    assertEquals(
-        "Skill 'Bad Name' of project 'acme' is refused: Skill name 'Bad Name' must match"
-            + " [a-z0-9][a-z0-9-]{0,63}.",
-        noName.escaped().getMessage());
+        "No skill 'e2e' on acme: it has no .sail/skills/e2e/SKILL.md.", ran.escaped().getMessage());
+    assertNull(ran.escaped().getCause());
+  }
+
+  @Test
+  void aProjectNotInTheCatalogExitsNonZeroSayingSo() {
+    var ran = ls("-p", "other");
+
+    assertEquals(1, ran.exit());
+    assertTrue(
+        ran.escaped().getMessage().contains("not in the catalog"), ran.escaped().getMessage());
   }
 }

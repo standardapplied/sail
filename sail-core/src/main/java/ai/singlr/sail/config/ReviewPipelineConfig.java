@@ -6,7 +6,7 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,23 +23,38 @@ import java.util.Objects;
  *     escalates it as stuck — a convergence measure, unlike {@code maxIterations}' blind budget: a
  *     loop resolving old findings while new ones surface keeps running; a loop replaying the same
  *     finding stops here
- * @param guardrails the limits every reviewer and fix agent of this pipeline runs under, {@link
+ * @param guardrails the limits every reviewer of this pipeline runs under, {@link
  *     Guardrails#reviewDefaults()} when the block names none
- * @param fixSkill the skill the fix agent works under, {@link StageSkill#FIX} when the block names
- *     none
  */
 public record ReviewPipelineConfig(
-    int maxIterations,
-    int maxFindingAge,
-    List<StageConfig> stages,
-    Guardrails guardrails,
-    String fixSkill) {
+    int maxIterations, int maxFindingAge, List<StageConfig> stages, Guardrails guardrails) {
 
-  static final String FIX_SKILL_KEY = "agent.review_pipeline.fix_skill";
+  /** The key that holds the brief of the stage called {@code stage}. */
+  static String briefKey(String stage) {
+    return "agent.review_pipeline.stages[" + stage + "].brief";
+  }
 
-  /** The key that names the skill of the stage called {@code stage}. */
-  static String stageSkillKey(String stage) {
-    return "agent.review_pipeline.stages[" + stage + "].skill";
+  /** The keys of a stage sail no longer reads, each with where its text now goes. */
+  private static final Map<String, String> DELETED_STAGE_KEYS =
+      Map.of(
+          "skill",
+          "is no longer read: a stage judges under its brief. Put what the skill said in the"
+              + " stage's brief (%s), or keep it as a project skill (sail project skills add) the"
+              + " brief tells the stage to run.",
+          "categories",
+          "is no longer read: what a stage focuses on is its brief. Say it in %s.");
+
+  /**
+   * The one sentence refusing {@code key}, a key sail no longer reads, on the stage called {@code
+   * stage}: which key, and where its text now goes.
+   */
+  public static String deletedStageKey(String stage, String key) {
+    return "agent.review_pipeline.stages["
+        + stage
+        + "]."
+        + key
+        + " "
+        + DELETED_STAGE_KEYS.get(key).formatted(briefKey(stage));
   }
 
   /** How many review iterations a dispatch attempt gets when the project sets none. */
@@ -48,20 +63,13 @@ public record ReviewPipelineConfig(
   /** How many fix iterations a blocking finding may survive when the project sets none. */
   static final int DEFAULT_MAX_FINDING_AGE = 2;
 
-  /** A pipeline under the review lanes' default limits, fixed under sail's own skill. */
+  /** A pipeline under the review lane's default limits. */
   public ReviewPipelineConfig(int maxIterations, int maxFindingAge, List<StageConfig> stages) {
     this(maxIterations, maxFindingAge, stages, Guardrails.reviewDefaults());
   }
 
-  /** A pipeline fixed under sail's own skill. */
-  public ReviewPipelineConfig(
-      int maxIterations, int maxFindingAge, List<StageConfig> stages, Guardrails guardrails) {
-    this(maxIterations, maxFindingAge, stages, guardrails, null);
-  }
-
   public ReviewPipelineConfig {
     Objects.requireNonNull(guardrails, "guardrails");
-    fixSkill = StageSkill.configured(FIX_SKILL_KEY, fixSkill, StageSkill.FIX);
     if (stages.stream().map(StageConfig::name).distinct().count() != stages.size()) {
       throw new IllegalArgumentException(
           "review_pipeline stage names must be unique — carry-forward is keyed by stage name;"
@@ -72,36 +80,47 @@ public record ReviewPipelineConfig(
   /**
    * One stage of the pipeline.
    *
-   * @param skill the skill an agent stage's reviewer judges under, {@link StageSkill#REVIEW} when
-   *     the stage names none; always null on a human stage, which follows no skill
+   * @param brief what an agent stage judges, as the project wrote it, or null for sail's default
+   *     brief; always null on a human stage, which follows no brief
    */
-  public record StageConfig(
-      String name, StageType type, String agent, List<String> categories, Gate gate, String skill) {
+  public record StageConfig(String name, StageType type, String agent, Gate gate, String brief) {
 
     public StageConfig {
-      if (type == StageType.AGENT) {
-        skill = StageSkill.configured(stageSkillKey(name), skill, StageSkill.REVIEW);
-      } else if (skill != null) {
+      if (brief != null && type != StageType.AGENT) {
         throw new IllegalArgumentException(
-            stageSkillKey(name)
-                + " is set on a human stage; a person follows no skill, so remove it.");
+            briefKey(name) + " is set on a human stage; a person follows no brief, so remove it.");
+      }
+      if (brief != null) {
+        if (Strings.isBlank(brief)) {
+          throw new IllegalArgumentException(briefKey(name) + " is blank; write it or remove it.");
+        }
+        var codePoints = brief.codePointCount(0, brief.length());
+        if (codePoints > PromptConversation.MAX_CODE_POINTS) {
+          throw new IllegalArgumentException(
+              "%s is %d code points; the limit is %d."
+                  .formatted(briefKey(name), codePoints, PromptConversation.MAX_CODE_POINTS));
+        }
       }
     }
 
-    @SuppressWarnings("unchecked")
     public static StageConfig fromMap(Map<String, Object> map) {
       var name = (String) map.get("name");
       if (Strings.isBlank(name)) {
         throw new IllegalArgumentException("review_pipeline stage requires a name");
       }
+      for (var key : DELETED_STAGE_KEYS.keySet()) {
+        if (map.containsKey(key)) {
+          throw new IllegalArgumentException(deletedStageKey(name, key));
+        }
+      }
       var type = StageType.parse((String) map.getOrDefault("type", "agent"));
       var agent = (String) map.get("agent");
-      var categories =
-          map.containsKey("categories")
-              ? ((List<String>) map.get("categories")).stream().map(String::strip).toList()
-              : List.<String>of();
       var gate = Gate.parse((String) map.getOrDefault("gate", "no_critical"));
-      return new StageConfig(name, type, agent, categories, gate, (String) map.get("skill"));
+      var brief = map.get("brief");
+      if (brief != null && !(brief instanceof String)) {
+        throw new IllegalArgumentException(briefKey(name) + " must be text.");
+      }
+      return new StageConfig(name, type, agent, gate, (String) brief);
     }
 
     /** This stage as one entry of {@code review_pipeline.stages}, as {@link #fromMap} reads it. */
@@ -112,12 +131,9 @@ public record ReviewPipelineConfig(
       if (agent != null) {
         map.put("agent", agent);
       }
-      if (!categories.isEmpty()) {
-        map.put("categories", categories);
-      }
       map.put("gate", gate.name().toLowerCase(Locale.ROOT));
-      if (skill != null && !skill.equals(StageSkill.REVIEW)) {
-        map.put("skill", skill);
+      if (brief != null) {
+        map.put("brief", brief);
       }
       return map;
     }
@@ -163,43 +179,28 @@ public record ReviewPipelineConfig(
 
   /**
    * The review every dispatched spec gets when {@code sail.yaml} configures no {@code
-   * review_pipeline}: one agent stage whose reviewer is resolved from the project's installed-agent
-   * roster (cross-agent when a second agent is installed, self-review otherwise), gated on no
-   * critical findings. Review is on by default.
+   * review_pipeline}: one agent stage named {@code review}, judged under sail's default brief by
+   * the reviewer resolved from the project's installed-agent roster (cross-agent when a second
+   * agent is installed, self-review otherwise), gated on no critical findings. Review is on by
+   * default.
    */
   public static ReviewPipelineConfig mandatoryDefault() {
     return new ReviewPipelineConfig(
         DEFAULT_MAX_ITERATIONS,
         DEFAULT_MAX_FINDING_AGE,
-        List.of(
-            new StageConfig(
-                "review",
-                StageType.AGENT,
-                null,
-                List.of("security", "correctness"),
-                Gate.NO_CRITICAL,
-                null)));
+        List.of(new StageConfig("review", StageType.AGENT, null, Gate.NO_CRITICAL, null)));
   }
 
   /**
    * The pipeline the loop runs for a project whose {@code review_pipeline} block is {@code
    * configured}: that block, or {@link #mandatoryDefault()} for none. A block that names no stages
-   * runs the default's stages under the default's limits, and keeps only the skill it names for the
-   * fix agent.
+   * runs the default's stages under the default's limits.
    */
   public static ReviewPipelineConfig resolved(ReviewPipelineConfig configured) {
-    var fallback = mandatoryDefault();
-    if (configured == null) {
-      return fallback;
+    if (configured == null || configured.stages().isEmpty()) {
+      return mandatoryDefault();
     }
-    return configured.stages().isEmpty()
-        ? new ReviewPipelineConfig(
-            fallback.maxIterations(),
-            fallback.maxFindingAge(),
-            fallback.stages(),
-            fallback.guardrails(),
-            configured.fixSkill())
-        : configured;
+    return configured;
   }
 
   /** Parses an {@code agent.review_pipeline} block of {@code sail.yaml}. */
@@ -209,6 +210,7 @@ public record ReviewPipelineConfig(
 
   @SuppressWarnings("unchecked")
   static ReviewPipelineConfig fromMap(Map<String, Object> map, String descriptor) {
+    SailYaml.refuseDeleted(map, "agent.review_pipeline.fix_skill", descriptor);
     var maxIterations =
         map.containsKey("max_iterations")
             ? ((Number) map.get("max_iterations")).intValue()
@@ -222,15 +224,13 @@ public record ReviewPipelineConfig(
     var guardrails =
         Guardrails.fromBlock(map.get("guardrails"), Guardrails.REVIEW_BLOCK, descriptor)
             .orElseGet(Guardrails::reviewDefaults);
-    return new ReviewPipelineConfig(
-        maxIterations, maxFindingAge, stages, guardrails, (String) map.get("fix_skill"));
+    return new ReviewPipelineConfig(maxIterations, maxFindingAge, stages, guardrails);
   }
 
   /**
-   * This pipeline as its {@code review_pipeline} block, as {@link #fromMap} reads it. A limit or a
-   * skill that is the default is left out, as a project that never set it left it out: written
-   * down, it would pin that project to today's default the next time anything rewrote its {@code
-   * sail.yaml}.
+   * This pipeline as its {@code review_pipeline} block, as {@link #fromMap} reads it. A limit that
+   * is the default is left out, as a project that never set it left it out: written down, it would
+   * pin that project to today's default the next time anything rewrote its {@code sail.yaml}.
    */
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
@@ -242,9 +242,6 @@ public record ReviewPipelineConfig(
     }
     if (!guardrails.equals(Guardrails.reviewDefaults())) {
       map.put("guardrails", guardrails.toMap());
-    }
-    if (!fixSkill.equals(StageSkill.FIX)) {
-      map.put("fix_skill", fixSkill);
     }
     map.put("stages", stages.stream().map(StageConfig::toMap).toList());
     return map;

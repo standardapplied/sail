@@ -151,18 +151,7 @@ class ReviewPipelineControllerTest {
             "max_iterations",
             3,
             "stages",
-            List.of(
-                Map.of(
-                    "name",
-                    "security",
-                    "type",
-                    "agent",
-                    "agent",
-                    "codex",
-                    "categories",
-                    List.of("security"),
-                    "gate",
-                    gate))));
+            List.of(Map.of("name", "security", "type", "agent", "agent", "codex", "gate", gate))));
   }
 
   private ReviewPipelineConfig twoAgentStages() {
@@ -173,16 +162,7 @@ class ReviewPipelineControllerTest {
             "stages",
             List.of(
                 Map.of(
-                    "name",
-                    "security",
-                    "type",
-                    "agent",
-                    "agent",
-                    "codex",
-                    "categories",
-                    List.of("security"),
-                    "gate",
-                    "no_critical"),
+                    "name", "security", "type", "agent", "agent", "codex", "gate", "no_critical"),
                 Map.of(
                     "name",
                     "correctness",
@@ -190,8 +170,6 @@ class ReviewPipelineControllerTest {
                     "agent",
                     "agent",
                     "codex",
-                    "categories",
-                    List.of("logic"),
                     "gate",
                     "no_critical"))));
   }
@@ -208,18 +186,7 @@ class ReviewPipelineControllerTest {
 
   private ReviewPipelineConfig singleStageNoAgent(String gate) {
     return ReviewPipelineConfig.fromMap(
-        Map.of(
-            "stages",
-            List.of(
-                Map.of(
-                    "name",
-                    "security",
-                    "type",
-                    "agent",
-                    "categories",
-                    List.of("security"),
-                    "gate",
-                    gate))));
+        Map.of("stages", List.of(Map.of("name", "security", "type", "agent", "gate", gate))));
   }
 
   private ReviewLoop controller(ReviewPipelineConfig config, ScriptedAgent agents) {
@@ -1558,7 +1525,8 @@ class ReviewPipelineControllerTest {
         fixPrompt.get().contains("Conversation on this spec"),
         "the fix task renders the room: " + fixPrompt.get());
     assertTrue(
-        fixPrompt.get().contains("uday: the retry finding is intentional"),
+        fixPrompt.get().contains("uday (")
+            && fixPrompt.get().contains("the retry finding is intentional"),
         "human guidance on disputed findings reaches the fix turn");
     var seeded = runStore.deliveredMessageIds(loop.runsIn("auth", "fix").getFirst().id());
     assertTrue(

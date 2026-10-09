@@ -53,7 +53,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -78,7 +77,6 @@ class SailYamlGeneratorTest {
             "ubuntu/24.04",
             null,
             new SailYaml.Runtimes(25, "22", "3.9.9"),
-            null,
             null,
             null,
             null,
@@ -109,7 +107,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -127,7 +124,6 @@ class SailYamlGeneratorTest {
             "ubuntu/24.04",
             null,
             new SailYaml.Runtimes(25, null, null),
-            null,
             null,
             null,
             null,
@@ -158,7 +154,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -180,7 +175,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             new SailYaml.Git("Alice", "alice@example.com", "ssh", "~/.ssh/id_ed25519"),
-            null,
             null,
             null,
             null,
@@ -208,7 +202,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -231,7 +224,6 @@ class SailYamlGeneratorTest {
             List.of(
                 new SailYaml.Repo("https://github.com/acme/backend.git", "backend", "main"),
                 new SailYaml.Repo("https://github.com/acme/frontend.git", "frontend", null)),
-            null,
             null,
             null,
             null,
@@ -280,7 +272,6 @@ class SailYamlGeneratorTest {
             services,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -314,7 +305,6 @@ class SailYamlGeneratorTest {
             services,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -343,7 +333,6 @@ class SailYamlGeneratorTest {
             services,
             null,
             null,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -365,9 +354,7 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            new SailYaml.Agent(
-                "claude-code", true, "agent/", true, null, null, null, null, null, null),
-            null,
+            new SailYaml.Agent("claude-code", true, "agent/", true, null, null, null, null),
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -401,7 +388,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             null,
-            null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 
     var yaml = SailYamlGenerator.generate(config);
@@ -420,7 +406,6 @@ class SailYamlGeneratorTest {
             new SailYaml.Resources(2, "8GB", "50GB"),
             "ubuntu/24.04",
             List.of("htop", "jq"),
-            null,
             null,
             null,
             null,
@@ -477,9 +462,7 @@ class SailYamlGeneratorTest {
             List.of(new SailYaml.Repo("https://github.com/test/repo.git", "repo", "main")),
             services,
             null,
-            new SailYaml.Agent(
-                "claude-code", true, "agent/", true, null, null, null, null, null, null),
-            null,
+            new SailYaml.Agent("claude-code", true, "agent/", true, null, null, null, null),
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 
     var yaml = SailYamlGenerator.generate(config);
@@ -515,10 +498,6 @@ class SailYamlGeneratorTest {
                   events: [agent_session_stopped, guardrail_triggered]
                   slack:
                     channel: "#eng-sail"
-                methodology:
-                  approach: tdd
-                  verify: "mvn clean verify"
-                  lint: "mvn spotless:check"
                 review_pipeline:
                   max_iterations: 4
                   max_finding_age: 5
@@ -530,7 +509,7 @@ class SailYamlGeneratorTest {
                     - name: correctness
                       type: agent
                       agent: codex
-                      categories: [correctness, security]
+                      brief: "Judge correctness and security."
                       gate: all_clear
                     - name: sign-off
                       type: human
@@ -548,7 +527,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             agent,
-            null,
             null);
 
     var yaml = SailYamlGenerator.generate(config);
@@ -579,7 +557,6 @@ class SailYamlGeneratorTest {
             null,
             null,
             services,
-            null,
             null,
             null,
             null);
@@ -651,7 +628,6 @@ class SailYamlGeneratorTest {
         null,
         new SailYaml.Resources(2, "8GB", "50GB"),
         "ubuntu/24.04",
-        null,
         null,
         null,
         null,

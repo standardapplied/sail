@@ -6,15 +6,12 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.engine.NameValidator;
-import ai.singlr.sail.engine.StageSkill;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Root model for {@code sail.yaml} project descriptor. */
@@ -30,15 +27,39 @@ public record SailYaml(
     Map<String, Service> services,
     Map<String, Process> processes,
     Agent agent,
-    AgentContext agentContext,
     Ssh ssh) {
 
-  /** The skills sail generates into every harness's skills folder under these names. */
-  private static final Set<String> GENERATED_SKILLS = Set.of("spec", "spec-board", "verify");
+  /** The keys sail no longer reads, each with the one sentence saying where its text now goes. */
+  public static final Map<String, String> DELETED_KEYS =
+      Map.of(
+          "agent_context",
+          "agent_context is no longer read: sail writes no context file. Put what it said in the"
+              + " repo's AGENTS.md, and a rule in a project skill (sail project skills add).",
+          "agent.methodology",
+          "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
+              + " project's verification. Put the commands in the repo's AGENTS.md.",
+          "agent.build_skill",
+          "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
+              + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail"
+              + " project skills add) the agent invokes when relevant.",
+          "agent.review_pipeline.fix_skill",
+          "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
+              + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
+              + " skill (sail project skills add).");
+
+  /** Refuses a definition that still sets {@code key}, one of {@link #DELETED_KEYS}. */
+  static void refuseDeleted(Map<String, Object> map, String key, String descriptor) {
+    var leaf = key.substring(key.lastIndexOf('.') + 1);
+    if (map.containsKey(leaf)) {
+      throw new IllegalArgumentException(
+          DELETED_KEYS.get(key) + " Then remove `" + key + "` from " + descriptor + ".");
+    }
+  }
 
   @SuppressWarnings("unchecked")
   public static SailYaml fromMap(Map<String, Object> map) {
     var name = (String) map.get("name");
+    refuseDeleted(map, "agent_context", descriptor(name));
     var resourcesRaw = (Map<String, Object>) map.get("resources");
     var runtimesRaw = (Map<String, Object>) map.get("runtimes");
     var gitRaw = (Map<String, Object>) map.get("git");
@@ -46,12 +67,9 @@ public record SailYaml(
     var servicesRaw = (Map<String, Object>) map.get("services");
     var processesRaw = (Map<String, Object>) map.get("processes");
     var agentRaw = (Map<String, Object>) map.get("agent");
-    var agentCtxRaw = (Map<String, Object>) map.get("agent_context");
     var sshRaw = (Map<String, Object>) map.get("ssh");
 
     var agent = agentRaw != null ? Agent.fromMap(agentRaw, descriptor(name)) : null;
-    var agentContext = agentCtxRaw != null ? AgentContext.fromMap(agentCtxRaw) : null;
-    requireStageSkillsOfTheirOwn(agent, agentContext);
     return new SailYaml(
         name,
         (String) map.get("description"),
@@ -80,43 +98,7 @@ public record SailYaml(
                         LinkedHashMap::new))
             : null,
         agent,
-        agentContext,
         sshRaw != null ? Ssh.fromMap(sshRaw) : null);
-  }
-
-  /**
-   * A stage's skill is installed as a folder named for it, beside the skills sail generates: the
-   * methodology's, the spec board's, and on Codex one per {@code agent_context.rules} entry. A
-   * stage skill under one of those names would replace that folder, so the definition is refused.
-   * The skills checked are those of the pipeline the loop runs, so a rule cannot take the name of a
-   * default that a missing block or a block with no stages falls back to. This is the one place
-   * that holds both the agent block and the rules.
-   */
-  private static void requireStageSkillsOfTheirOwn(Agent agent, AgentContext agentContext) {
-    if (agent == null) {
-      return;
-    }
-    var taken = new HashSet<>(GENERATED_SKILLS);
-    if (agentContext != null && agentContext.rules() != null) {
-      agentContext.rules().forEach(rule -> taken.add(rule.name()));
-    }
-    requireOwnName(Agent.BUILD_SKILL_KEY, agent.buildSkill(), taken);
-    var pipeline = ReviewPipelineConfig.resolved(agent.reviewPipeline());
-    requireOwnName(ReviewPipelineConfig.FIX_SKILL_KEY, pipeline.fixSkill(), taken);
-    for (var stage : pipeline.agentStages()) {
-      requireOwnName(ReviewPipelineConfig.stageSkillKey(stage.name()), stage.skill(), taken);
-    }
-  }
-
-  private static void requireOwnName(String key, String skill, Set<String> taken) {
-    if (taken.contains(skill)) {
-      throw new IllegalArgumentException(
-          key
-              + " '"
-              + skill
-              + "' is the name of a skill sail installs itself (spec, spec-board, verify, and one"
-              + " per agent_context.rules entry); give the stage's skill or the rule another name.");
-    }
   }
 
   private static String descriptor(String name) {
@@ -151,7 +133,6 @@ public record SailYaml(
       map.put("processes", procs);
     }
     if (agent != null) map.put("agent", agent.toMap());
-    if (agentContext != null) map.put("agent_context", agentContext.toMap());
     if (ssh != null) map.put("ssh", ssh.toMap());
     return map;
   }
@@ -247,8 +228,28 @@ public record SailYaml(
     }
   }
 
-  /** A source repository to clone into {@code ~/workspace/<path>}. */
-  public record Repo(String url, String path, String branch) {
+  /**
+   * A source repository to clone into {@code ~/workspace/<path>}.
+   *
+   * @param forge {@code github} for a GitHub host that is not {@code github.com} (a GitHub
+   *     Enterprise host), so the forge CLI is logged in for it; null otherwise
+   */
+  public record Repo(String url, String path, String branch, String forge) {
+
+    /** The one forge a repo may be marked as: a GitHub host that is not {@code github.com}. */
+    public static final String GITHUB = "github";
+
+    public Repo {
+      if (forge != null && !forge.equals(GITHUB)) {
+        throw new IllegalArgumentException(
+            "repos[].forge must be '" + GITHUB + "' when set, got: " + forge);
+      }
+    }
+
+    public Repo(String url, String path, String branch) {
+      this(url, path, branch, null);
+    }
+
     public static Repo fromMap(Map<String, Object> map) {
       var url = map.get("url");
       if (!(url instanceof String)) {
@@ -264,7 +265,11 @@ public record SailYaml(
       if (branch != null) {
         NameValidator.requireValidGitRef(branch, "repos[].branch");
       }
-      return new Repo((String) url, (String) path, branch);
+      var forge = map.get("forge");
+      if (forge != null && !(forge instanceof String)) {
+        throw new IllegalArgumentException("repos[].forge must be text when set.");
+      }
+      return new Repo((String) url, (String) path, branch, (String) forge);
     }
 
     public Map<String, Object> toMap() {
@@ -272,6 +277,7 @@ public record SailYaml(
       map.put("url", url);
       map.put("path", path);
       if (branch != null) map.put("branch", branch);
+      if (forge != null) map.put("forge", forge);
       return map;
     }
   }
@@ -335,65 +341,7 @@ public record SailYaml(
       Map<String, String> config,
       Guardrails guardrails,
       Notifications notifications,
-      Methodology methodology,
-      ReviewPipelineConfig reviewPipeline,
-      String buildSkill) {
-
-    static final String BUILD_SKILL_KEY = "agent.build_skill";
-
-    /** The build works under {@link StageSkill#BUILD} when the block names no skill. */
-    public Agent {
-      buildSkill = StageSkill.configured(BUILD_SKILL_KEY, buildSkill, StageSkill.BUILD);
-    }
-
-    /** An agent block whose build works under sail's own skill. */
-    public Agent(
-        String type,
-        boolean autoBranch,
-        String branchPrefix,
-        boolean autoSnapshot,
-        List<String> install,
-        Map<String, String> config,
-        Guardrails guardrails,
-        Notifications notifications,
-        Methodology methodology,
-        ReviewPipelineConfig reviewPipeline) {
-      this(
-          type,
-          autoBranch,
-          branchPrefix,
-          autoSnapshot,
-          install,
-          config,
-          guardrails,
-          notifications,
-          methodology,
-          reviewPipeline,
-          null);
-    }
-
-    public Agent(
-        String type,
-        boolean autoBranch,
-        String branchPrefix,
-        boolean autoSnapshot,
-        List<String> install,
-        Map<String, String> config,
-        Guardrails guardrails,
-        Notifications notifications,
-        Methodology methodology) {
-      this(
-          type,
-          autoBranch,
-          branchPrefix,
-          autoSnapshot,
-          install,
-          config,
-          guardrails,
-          notifications,
-          methodology,
-          null);
-    }
+      ReviewPipelineConfig reviewPipeline) {
 
     public Agent(
         String type,
@@ -413,7 +361,6 @@ public record SailYaml(
           config,
           guardrails,
           notifications,
-          null,
           null);
     }
 
@@ -432,8 +379,9 @@ public record SailYaml(
                 + descriptor
                 + " because specs live in the Sail database.");
       }
+      refuseDeleted(map, "agent.methodology", descriptor);
+      refuseDeleted(map, "agent.build_skill", descriptor);
       var notificationsRaw = (Map<String, Object>) map.get("notifications");
-      var methodologyRaw = (Map<String, Object>) map.get("methodology");
       var reviewPipelineRaw = (Map<String, Object>) map.get("review_pipeline");
       return new Agent(
           (String) map.get("type"),
@@ -445,11 +393,9 @@ public record SailYaml(
           Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK, descriptor)
               .orElse(null),
           notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
-          methodologyRaw != null ? Methodology.fromMap(methodologyRaw) : null,
           reviewPipelineRaw != null
               ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
-              : null,
-          (String) map.get("build_skill"));
+              : null);
     }
 
     public Map<String, Object> toMap() {
@@ -462,19 +408,18 @@ public record SailYaml(
       if (config != null) map.put("config", new LinkedHashMap<>(config));
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
-      if (methodology != null) map.put("methodology", methodology.toMap());
-      if (!buildSkill.equals(StageSkill.BUILD)) map.put("build_skill", buildSkill);
       if (reviewPipeline != null) map.put("review_pipeline", reviewPipeline.toMap());
       return map;
     }
 
     /**
      * The limits a run in {@code lane} is held to: {@code review_pipeline.guardrails} for a
-     * reviewer or a fix agent, {@code guardrails} for every other lane, each lane's own defaults
-     * when its block is absent. The one place a lane is mapped to its limits.
+     * reviewer, {@code guardrails} for every other lane, a fix run included, since it runs the
+     * project's verification and waits on CI exactly as a build does; each lane's own defaults when
+     * its block is absent. The one place a lane is mapped to its limits.
      */
     public Guardrails guardrailsFor(Lane lane) {
-      if (lane != null && lane.servesReview()) {
+      if (lane == Lane.REVIEW) {
         return reviewPipeline != null ? reviewPipeline.guardrails() : Guardrails.reviewDefaults();
       }
       return guardrails != null ? guardrails : Guardrails.defaults();
@@ -482,101 +427,14 @@ public record SailYaml(
 
     /**
      * The hard lifetime the project sets for a run in {@code lane}, which bounds that run's
-     * credential, or null when none does. A reviewer and a fix agent have their lane's — its
-     * default when the project writes no block — and every other lane one only from an {@code
+     * credential, or null when none does. A reviewer has its lane's — its default when the project
+     * writes no block — and every other lane, a fix run included, one only from an {@code
      * agent.guardrails} block the project wrote; a block that names no {@code max_duration} sets
      * none. A run nothing bounds must not lose its credential to a clock mid-work.
      */
     public Duration lifetimeFor(Lane lane) {
-      var bounded = guardrails != null || (lane != null && lane.servesReview());
+      var bounded = guardrails != null || lane == Lane.REVIEW;
       return bounded ? Guardrails.parseDuration(guardrailsFor(lane).maxDuration()) : null;
-    }
-  }
-
-  public record AgentContext(
-      String techStack,
-      String conventions,
-      String buildCommands,
-      String projectSpecific,
-      String security,
-      List<AgentRule> rules) {
-
-    public AgentContext(
-        String techStack, String conventions, String buildCommands, String projectSpecific) {
-      this(techStack, conventions, buildCommands, projectSpecific, null, null);
-    }
-
-    public AgentContext(
-        String techStack,
-        String conventions,
-        String buildCommands,
-        String projectSpecific,
-        String security) {
-      this(techStack, conventions, buildCommands, projectSpecific, security, null);
-    }
-
-    public static AgentContext fromMap(Map<String, Object> map) {
-      return new AgentContext(
-          (String) map.get("tech_stack"),
-          (String) map.get("conventions"),
-          (String) map.get("build_commands"),
-          (String) map.get("project_specific"),
-          (String) map.get("security"),
-          AgentRule.listFromMap(map.get("rules")));
-    }
-
-    public Map<String, Object> toMap() {
-      var map = new LinkedHashMap<String, Object>();
-      if (techStack != null) map.put("tech_stack", techStack);
-      if (conventions != null) map.put("conventions", conventions);
-      if (buildCommands != null) map.put("build_commands", buildCommands);
-      if (projectSpecific != null) map.put("project_specific", projectSpecific);
-      if (security != null) map.put("security", security);
-      if (rules != null && !rules.isEmpty()) map.put("rules", AgentRule.listToMap(rules));
-      return map;
-    }
-  }
-
-  /**
-   * An org-supplied coding-standard rule the agent loads only when it touches matching files. The
-   * {@code body} is supplied verbatim by the project; sail materializes it into each agent's native
-   * path-scoped channel (a Claude {@code .claude/rules/<name>.md} with a {@code paths:} glob, a
-   * Codex skill loaded by description). Sail ships no rule content of its own.
-   */
-  public record AgentRule(String name, List<String> paths, String body) {
-
-    public AgentRule {
-      NameValidator.requireSafePath(name, "agent_context.rules name");
-      paths = paths == null ? List.of() : List.copyOf(paths);
-    }
-
-    @SuppressWarnings("unchecked")
-    static List<AgentRule> listFromMap(Object raw) {
-      if (!(raw instanceof Map<?, ?> map)) {
-        return null;
-      }
-      var rules = new ArrayList<AgentRule>();
-      for (var entry : map.entrySet()) {
-        if (entry.getValue() instanceof Map<?, ?> value) {
-          rules.add(
-              new AgentRule(
-                  (String) entry.getKey(),
-                  (List<String>) value.get("paths"),
-                  (String) value.get("body")));
-        }
-      }
-      return List.copyOf(rules);
-    }
-
-    static Map<String, Object> listToMap(List<AgentRule> rules) {
-      var map = new LinkedHashMap<String, Object>();
-      for (var rule : rules) {
-        var inner = new LinkedHashMap<String, Object>();
-        if (!rule.paths().isEmpty()) inner.put("paths", new ArrayList<>(rule.paths()));
-        if (rule.body() != null) inner.put("body", rule.body());
-        map.put(rule.name(), inner);
-      }
-      return map;
     }
   }
 
@@ -616,7 +474,6 @@ public record SailYaml(
         services,
         processes,
         agent,
-        agentContext,
         ssh);
   }
 
@@ -632,9 +489,7 @@ public record SailYaml(
             agent.config(),
             agent.guardrails(),
             agent.notifications(),
-            agent.methodology(),
-            agent.reviewPipeline(),
-            agent.buildSkill());
+            agent.reviewPipeline());
     return new SailYaml(
         name,
         description,
@@ -647,7 +502,6 @@ public record SailYaml(
         services,
         processes,
         newAgent,
-        agentContext,
         ssh);
   }
 
