@@ -352,8 +352,8 @@ final class FakeContainer implements ShellExec {
     if (!inner.get(2).contains("mv -T \"$2\" \"$1\"")) {
       return ok("");
     }
-    var folder = inner.get(inner.size() - 2);
-    var build = inner.getLast();
+    var folder = inner.get(4);
+    var build = inner.get(5);
     remove(folder);
     for (var path : filesUnder(build)) {
       var placed = folder + path.substring(build.length());

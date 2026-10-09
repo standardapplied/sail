@@ -158,6 +158,48 @@ class StagePromptsMigrationTest {
   }
 
   @Test
+  void aDeletedKeySetToNothingIsStillDroppedSoTheDefinitionReadsAfterwards() {
+    var withEmptyKeys =
+        """
+        name: ops
+        agent:
+          type: claude-code
+          methodology:
+          build_skill: ~
+          review_pipeline:
+            fix_skill: null
+            stages:
+              - name: security
+                skill:
+                categories:
+        agent_context:
+        """;
+    Acting.system(() -> store.upsert("ops", withEmptyKeys));
+    var before = store.latestRev("ops");
+
+    var report = apply();
+
+    assertEquals(3, report.applied());
+    assertEquals(
+        Map.of(
+            "name",
+            "ops",
+            "agent",
+            Map.of(
+                "type",
+                "claude-code",
+                "review_pipeline",
+                Map.of("stages", List.of(Map.of("name", "security"))))),
+        YamlUtil.parseMap(definition("ops")));
+    assertNotEquals(before, store.latestRev("ops"));
+    assertEquals(
+        6,
+        report.notes().stream().filter(note -> note.startsWith("Project 'ops': dropped ")).count(),
+        report.notes().toString());
+    SailYaml.fromMap(YamlUtil.parseMap(definition("ops")));
+  }
+
+  @Test
   void aSecondRunChangesNothing() {
     apply();
     var api = store.latestRev("api");

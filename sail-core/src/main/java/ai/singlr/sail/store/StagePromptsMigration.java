@@ -68,7 +68,7 @@ public final class StagePromptsMigration implements DataMigration {
   @SuppressWarnings("unchecked")
   static List<String> strip(Map<String, Object> map) {
     var dropped = new ArrayList<String>();
-    if (map.remove("agent_context") != null) {
+    if (drop(map, "agent_context")) {
       dropped.add("agent_context. " + SailYaml.DELETED_KEYS.get("agent_context"));
     }
     if (!(map.get("agent") instanceof Map<?, ?> agentRaw)) {
@@ -76,7 +76,7 @@ public final class StagePromptsMigration implements DataMigration {
     }
     var agent = (Map<String, Object>) agentRaw;
     for (var key : List.of("methodology", "build_skill")) {
-      if (agent.remove(key) != null) {
+      if (drop(agent, key)) {
         dropped.add("agent." + key + ". " + SailYaml.DELETED_KEYS.get("agent." + key));
       }
     }
@@ -84,7 +84,7 @@ public final class StagePromptsMigration implements DataMigration {
       return dropped;
     }
     var pipeline = (Map<String, Object>) pipelineRaw;
-    if (pipeline.remove("fix_skill") != null) {
+    if (drop(pipeline, "fix_skill")) {
       dropped.add(
           "agent.review_pipeline.fix_skill. "
               + SailYaml.DELETED_KEYS.get("agent.review_pipeline.fix_skill"));
@@ -99,11 +99,20 @@ public final class StagePromptsMigration implements DataMigration {
       var named = (Map<String, Object>) stage;
       var name = String.valueOf(named.getOrDefault("name", "?"));
       for (var key : List.of("skill", "categories")) {
-        if (named.remove(key) != null) {
+        if (drop(named, key)) {
           dropped.add(ReviewPipelineConfig.deletedStageKey(name, key));
         }
       }
     }
     return dropped;
+  }
+
+  /** Removes {@code key} from {@code map}; true when it was set, to any value, null included. */
+  private static boolean drop(Map<String, Object> map, String key) {
+    if (!map.containsKey(key)) {
+      return false;
+    }
+    map.remove(key);
+    return true;
   }
 }

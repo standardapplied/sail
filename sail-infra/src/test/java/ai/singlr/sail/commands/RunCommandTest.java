@@ -12,17 +12,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.DispatchOperations;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.io.PrintWriter;
@@ -30,7 +34,9 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -161,12 +167,126 @@ class RunCommandTest {
     assertTrue(errOutput.contains("does not exist"), errOutput);
   }
 
+  /** The command against a host whose {@code incus} has no container of any name. */
   private static CommandLine command(Path dbPath) {
+    return command(dbPath, new ScriptedShellExecutor().onOk("incus list", "[]"), command -> 0);
+  }
+
+  private static CommandLine command(
+      Path dbPath, ScriptedShellExecutor shell, DispatchOperations.AgentLauncher terminal) {
     var noGit = new ScriptedShellExecutor();
     return new CommandLine(
         new RunCommand(
             () -> OperationsFactory.open(dbPath),
-            new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"))));
+            new LocalIdentity(noGit, dbPath.resolveSibling("none.pub")),
+            dryRun -> shell,
+            terminal));
+  }
+
+  private static final String E2E =
+      """
+      ---
+      name: e2e
+      description: Runs the e2e suite.
+      ---
+
+      Run the suite.
+      """;
+
+  /** A catalog holding {@code test-proj}, a claude-code project sharing the skill {@code e2e}. */
+  private Path catalogWithASharedSkill() {
+    var dbPath = tempDir.resolve("control-plane.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+      Acting.system(
+          () -> {
+            new ProjectStore(db)
+                .upsert("test-proj", "name: test-proj\nagent:\n  type: claude-code\n");
+            new FileStore(db)
+                .put(
+                    "test-proj",
+                    ".sail/skills/e2e/SKILL.md",
+                    new ByteArrayInputStream(E2E.getBytes(StandardCharsets.UTF_8)),
+                    0644);
+          });
+    }
+    return dbPath;
+  }
+
+  /** A container that is up, whose skills folder holds a stamped {@code old} sail installed. */
+  private static ScriptedShellExecutor runningContainer() {
+    return new ScriptedShellExecutor(new ScriptedShellExecutor.Result(0, "", ""))
+        .onOk("incus list", "[{\"status\": \"Running\"}]")
+        .onOk("basename", "old\n");
+  }
+
+  private static boolean placed(ScriptedShellExecutor shell, String folder) {
+    return shell.arguments().stream()
+        .anyMatch(
+            command ->
+                command.stream().anyMatch(arg -> arg.contains("mv -T"))
+                    && command.contains(folder));
+  }
+
+  @Test
+  void anInteractiveSessionInstallsTheProjectsSkillsForItsHarnessBeforeTheSsh() {
+    var shell = runningContainer();
+    var launched = new ArrayList<List<String>>();
+    var commandsBeforeTheSession = new AtomicInteger(-1);
+    var cmd =
+        command(
+            catalogWithASharedSkill(),
+            shell,
+            command -> {
+              launched.add(command);
+              commandsBeforeTheSession.set(shell.invocations().size());
+              return 0;
+            });
+
+    var exitCode = cmd.execute("test-proj", "--no-snapshot");
+
+    assertEquals(0, exitCode, capturedErr.toString(StandardCharsets.UTF_8));
+    assertTrue(placed(shell, "/home/dev/.claude/skills/e2e"), shell.invocations().toString());
+    assertTrue(
+        placed(shell, "/home/dev/.claude/skills/spec-board"), shell.invocations().toString());
+    assertTrue(
+        shell
+            .arguments()
+            .contains(
+                ContainerExec.asDevUser(
+                    "test-proj", List.of("rm", "-rf", "/home/dev/.claude/skills/old"))),
+        "a stamped folder the project no longer holds is removed: " + shell.invocations());
+    assertEquals(1, launched.size());
+    assertEquals(List.of("ssh", "-t", "dev@test-proj"), launched.getFirst().subList(0, 3));
+    assertEquals(
+        shell.invocations().size(),
+        commandsBeforeTheSession.get(),
+        "every install command ran before the session started");
+  }
+
+  @Test
+  void aPreviewOfAnInteractiveSessionInstallsNothingAndStartsNoSession() {
+    var shell = runningContainer();
+    var launched = new ArrayList<List<String>>();
+    var dbPath = catalogWithASharedSkill();
+
+    var exitCode =
+        command(
+                dbPath,
+                shell,
+                command -> {
+                  launched.add(command);
+                  return 0;
+                })
+            .execute("test-proj", "--no-snapshot", "--dry-run");
+
+    assertEquals(0, exitCode, capturedErr.toString(StandardCharsets.UTF_8));
+    assertTrue(
+        shell.invocations().stream().noneMatch(command -> command.contains("/skills/")),
+        shell.invocations().toString());
+    assertTrue(launched.isEmpty());
+    assertTrue(
+        capturedOut.toString(StandardCharsets.UTF_8).contains("[dry-run] ssh -t dev@test-proj"));
   }
 
   @Test

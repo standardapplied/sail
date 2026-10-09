@@ -1311,7 +1311,12 @@ command the installer sends against a real shell under a temporary directory;
   `project apply` and before every launch, for the launching harness. Each folder is stamped
   with the fingerprint of its files, so an unchanged skill is not pushed again; a changed one
   is built beside the skills directory and put in place whole under `flock`; a stamped folder
-  the project no longer holds is removed and an unstamped one is left alone. A folder that is
+  the project no longer holds is removed and an unstamped one is left alone — and never
+  replaced: a held skill whose folder is unstamped fails the install naming the folder, so a
+  person's own skill under a name the project later takes is not deleted. The one unstamped
+  folder sail replaces is the `spec-board` it wrote before it stamped, known by holding nothing
+  but the skill's own file names. An interactive `agent run` installs the same way before its
+  `ssh`; a preview installs nothing. A folder that is
   no skill — no `SKILL.md`, over its bounds, a reserved name (`spec-board`, `sail-*`) — is
   skipped, the valid ones install, and the room is told once which and why; a file whose
   content changed under the launch or is not on this box fails the launch naming it. No
@@ -1325,6 +1330,9 @@ command the installer sends against a real shell under a temporary directory;
   `ProjectSkillInstallerTest.installAllInstallsEverySkillWholeRemovesAStampedFolderNoLongerHeldAndLeavesTheRest`,
   `ProjectSkillInstallerTest.aSkillIsInstalledWholeWithEachFilesModeAndStampedLast`,
   `ProjectSkillInstallerTest.twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers`,
+  `ProjectSkillInstallerTest.anUnstampedFolderUnderAHeldSkillsNameIsNotReplacedAndTheInstallSaysSo`,
+  `ProjectSkillInstallerTest.theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped`,
+  `RunCommandTest.anInteractiveSessionInstallsTheProjectsSkillsForItsHarnessBeforeTheSsh`,
   `ProjectSkillsTest.everyFolderIsReadWithItsFilesHashesSizesAndModesInNameOrder`,
   `ProjectSkillsTest.aFolderUnderAReservedNameIsInvalidSayingWhichNamesAreSails`,
   `ProjectApplierTest.applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNone`,

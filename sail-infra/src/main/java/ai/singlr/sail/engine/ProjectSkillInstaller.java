@@ -26,7 +26,11 @@ import java.util.function.Function;
  * so the folders a harness sees are the skills the project holds. Each folder carries a stamp, the
  * fingerprint of the skill it holds: an install that finds a skill's stamp writes nothing for it,
  * and any other install replaces the folder whole. A stamped folder whose skill the project no
- * longer holds is removed; a folder without a stamp is not sail's and is left alone.
+ * longer holds is removed; a folder without a stamp is not sail's and is left alone — and one that
+ * stands where a held skill's folder goes is not replaced either: the install fails, naming it, so
+ * a person's own skill under a name the project later takes is never deleted. The one unstamped
+ * folder sail replaces is the {@code spec-board} it wrote before it stamped (0.46 and earlier),
+ * known by its shape: nothing in it but files of the skill's own names.
  *
  * <p>A replacement is built outside the skills directory, beside it in a folder of the install's
  * own, stamped last and put in place in one step — so a harness never opens a folder half-written
@@ -56,7 +60,22 @@ public final class ProjectSkillInstaller {
 
   private static final String SWEEP =
       "[ ! -d \"$1\" ] || find \"$1\" -maxdepth 1 -name \"$2.*\" -mmin \"+$3\" -exec rm -rf {} +";
-  private static final String PLACE = "rm -rf \"$1\" && mv -T \"$2\" \"$1\"";
+  private static final String PLACE =
+      """
+      refuse() {
+        echo "$1 holds a skill sail did not install (no $2 in it). Move it aside, or give the project's skill another name." >&2
+        exit 1
+      }
+      if { [ -e "$1" ] || [ -L "$1" ]; } && [ ! -f "$1/$3" ]; then
+        if [ -z "$4" ] || [ -L "$1" ] || [ ! -d "$1" ]; then refuse "$1" "$3"; fi
+        for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
+          if [ -e "$entry" ] || [ -L "$entry" ]; then
+            case " $4 " in *" ${entry##*/} "*) ;; *) refuse "$1" "$3" ;; esac
+          fi
+        done
+      fi
+      rm -rf "$1" && mv -T "$2" "$1"
+      """;
   private static final String STAMPED =
       "for d in \"$1\"/*/; do [ -f \"$d" + StageSkill.STAMP + "\" ] && basename \"$d\"; done; :";
 
@@ -203,11 +222,32 @@ public final class ProjectSkillInstaller {
           project,
           "put in place",
           skill,
-          List.of("flock", skillsDir, "sh", "-c", PLACE, "sh", folder, build));
+          List.of(
+              "flock",
+              skillsDir,
+              "sh",
+              "-c",
+              PLACE,
+              "sh",
+              folder,
+              build,
+              StageSkill.STAMP,
+              legacyShapeOf(skill)));
     } catch (IOException | InterruptedException | TimeoutException | RuntimeException failure) {
       discard(shell, project, build, failure);
       throw failure;
     }
+  }
+
+  /**
+   * The names an unstamped folder of {@code skill} may hold and still be the one sail wrote before
+   * it stamped: {@code spec-board}'s own file names, and nothing for any other skill.
+   */
+  private static String legacyShapeOf(StageSkill skill) {
+    if (!skill.name().equals(SpecSkillGenerator.NAME)) {
+      return "";
+    }
+    return String.join(" ", skill.files().stream().map(StageSkill.File::path).toList());
   }
 
   /**

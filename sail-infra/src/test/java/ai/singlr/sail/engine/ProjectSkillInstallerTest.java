@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -12,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.BlobStore;
 import java.io.ByteArrayInputStream;
@@ -657,6 +659,85 @@ class ProjectSkillInstallerTest {
   }
 
   @Test
+  void anUnstampedFolderUnderAHeldSkillsNameIsNotReplacedAndTheInstallSaysSo() throws Exception {
+    var e2e = named("e2e", Map.of("SKILL.md", "Run it.\n"));
+    Files.createDirectories(skillsDir.resolve("e2e"));
+    Files.writeString(skillsDir.resolve("e2e/SKILL.md"), "an engineer's own e2e\n");
+    Files.writeString(skillsDir.resolve("e2e/local-only.txt"), "notes\n");
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () ->
+                ProjectSkillInstaller.installAll(
+                    container,
+                    PROJECT,
+                    skillsDir.toString(),
+                    List.of(e2e),
+                    (skill, file) -> new ByteArrayInputStream("Run it.\n".getBytes(UTF_8))));
+
+    assertTrue(
+        refused.getMessage().contains("Failed to put in place skill 'e2e' in acme")
+            && refused
+                .getMessage()
+                .contains(
+                    skillsDir.resolve("e2e")
+                        + " holds a skill sail did not install (no .sail-skill in it)."
+                        + " Move it aside, or give the project's skill another name."),
+        refused.getMessage());
+    assertEquals(
+        Map.of("SKILL.md", "an engineer's own e2e\n", "local-only.txt", "notes\n"),
+        read(skillsDir.resolve("e2e")),
+        "the engineer's files are untouched");
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+  }
+
+  @Test
+  void theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped() throws Exception {
+    var specBoard = SpecSkillGenerator.skill();
+    Files.createDirectories(skillsDir.resolve("spec-board"));
+    Files.writeString(skillsDir.resolve("spec-board/SKILL.md"), "the 0.46 skill\n");
+    Files.writeString(skillsDir.resolve("spec-board/spec-template.md"), "the 0.46 template\n");
+
+    ProjectSkillInstaller.installAll(
+        container,
+        PROJECT,
+        skillsDir.toString(),
+        List.of(specBoard),
+        (skill, file) -> SpecSkillGenerator.content(file));
+
+    var expected = new LinkedHashMap<String, String>();
+    for (var file : specBoard.files()) {
+      expected.put(file.path(), new String(SpecSkillGenerator.content(file).readAllBytes(), UTF_8));
+    }
+    assertEquals(
+        with(expected, ProjectSkillInstaller.fingerprint(specBoard)),
+        read(skillsDir.resolve("spec-board")));
+  }
+
+  @Test
+  void aSpecBoardHoldingAFileSailNeverWroteIsNotSailsAndIsNotReplaced() throws Exception {
+    var specBoard = SpecSkillGenerator.skill();
+    Files.createDirectories(skillsDir.resolve("spec-board"));
+    Files.writeString(skillsDir.resolve("spec-board/SKILL.md"), "someone's own board\n");
+    Files.writeString(skillsDir.resolve("spec-board/notes.md"), "notes\n");
+
+    assertThrows(
+        IOException.class,
+        () ->
+            ProjectSkillInstaller.installAll(
+                container,
+                PROJECT,
+                skillsDir.toString(),
+                List.of(specBoard),
+                (skill, file) -> SpecSkillGenerator.content(file)));
+
+    assertEquals(
+        Map.of("SKILL.md", "someone's own board\n", "notes.md", "notes\n"),
+        read(skillsDir.resolve("spec-board")));
+  }
+
+  @Test
   void installAllOfNothingRemovesEveryStampedFolderAndNeedsNoSkillsDirectory() throws Exception {
     var e2e = named("e2e", Map.of("SKILL.md", "Run it.\n"));
     ProjectSkillInstaller.installAll(
@@ -774,7 +855,12 @@ class ProjectSkillInstallerTest {
       assertEquals(List.of("incus", "exec", PROJECT), command.subList(0, 3));
       assertEquals(List.of("--user", "1000", "--group", "1000"), command.subList(3, 7));
       if (inner(command).getFirst().equals("flock")) {
-        placing(command.getLast().substring(command.getLast().lastIndexOf('.') + 1)).countDown();
+        var build =
+            command.stream()
+                .filter(argument -> argument.contains(ProjectSkillInstaller.BUILD_PREFIX))
+                .findFirst()
+                .orElseThrow();
+        placing(build.substring(build.lastIndexOf('.') + 1)).countDown();
       }
       var builder = new ProcessBuilder(inner(command));
       if (shims != null) {
