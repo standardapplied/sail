@@ -88,19 +88,26 @@ public final class JudgePrompt {
     }
     var cut = cutAtSection(body.strip(), PromptConversation.MAX_CODE_POINTS);
     var text = cut.text();
-    if (cut.omitted() > 0) {
-      text +=
-          "\n\n… (the spec continues; "
-              + cut.omitted()
-              + " section"
-              + (cut.omitted() == 1 ? "" : "s")
-              + " omitted for length)";
+    if (cut.cutInside() || cut.omitted() > 0) {
+      text += "\n\n… (the spec continues; " + leftOut(cut) + " omitted for length)";
     }
     return heading + text + "\n\n";
   }
 
-  /** A body cut to {@code budget} code points, and how many of its sections were left out. */
-  record Cut(String text, int omitted) {}
+  /** What a cut left out, as the notice says it: whole sections, the rest of one, or both. */
+  static String leftOut(Cut cut) {
+    var sections = cut.omitted() + " section" + (cut.omitted() == 1 ? "" : "s");
+    if (!cut.cutInside()) {
+      return sections;
+    }
+    return "the rest of this section" + (cut.omitted() > 0 ? " and " + sections : "");
+  }
+
+  /**
+   * A body cut to {@code budget} code points: the text kept, how many of its sections were left out
+   * whole, and whether the text ends inside a section rather than at the end of one.
+   */
+  record Cut(String text, int omitted, boolean cutInside) {}
 
   /**
    * The body up to the last markdown section that fits the budget whole; the sections after it are
@@ -109,7 +116,7 @@ public final class JudgePrompt {
    */
   static Cut cutAtSection(String body, int budget) {
     if (body.codePointCount(0, body.length()) <= budget) {
-      return new Cut(body, 0);
+      return new Cut(body, 0, false);
     }
     var sections = sections(body);
     var kept = new StringBuilder();
@@ -127,9 +134,10 @@ public final class JudgePrompt {
       var first = sections.getFirst();
       return new Cut(
           first.substring(0, first.offsetByCodePoints(0, budget)).stripTrailing(),
-          sections.size() - 1);
+          sections.size() - 1,
+          true);
     }
-    return new Cut(kept.toString().stripTrailing(), sections.size() - count);
+    return new Cut(kept.toString().stripTrailing(), sections.size() - count, false);
   }
 
   /** The body split before each markdown heading line; the text before the first is a section. */

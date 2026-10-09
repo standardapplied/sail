@@ -9,6 +9,7 @@ import static ai.singlr.sail.engine.WorkPromptGoldenTest.FINDING;
 import static ai.singlr.sail.engine.WorkPromptGoldenTest.MESSAGE;
 import static ai.singlr.sail.engine.WorkPromptGoldenTest.SPEC;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
@@ -188,23 +189,44 @@ class JudgePromptGoldenTest {
   }
 
   @Test
+  void aSpecOfOneSectionOverTheBudgetIsCutInsideItAndSaysSo() {
+    var body =
+        "x".repeat(PromptConversation.MAX_CODE_POINTS)
+            + "\nRequired acceptance criterion at the end.";
+
+    var prompt = judge(SPEC, body, JudgePrompt.DEFAULT_BRIEF, List.of(), List.of());
+
+    assertTrue(
+        prompt.contains(
+            "x".repeat(PromptConversation.MAX_CODE_POINTS)
+                + "\n\n… (the spec continues; the rest of this section omitted for length)\n\n"
+                + "Review the changes on branch"),
+        prompt.substring(prompt.indexOf("…") - 20));
+    assertFalse(prompt.contains("Required acceptance criterion"));
+  }
+
+  @Test
   void aFirstSectionAloneOverTheBudgetIsCutInsideItAndEveryOtherSectionIsCounted() {
     var cut = JudgePrompt.cutAtSection("a".repeat(50) + "\n## Two\nb\n## Three\nc", 10);
 
-    assertEquals(new JudgePrompt.Cut("a".repeat(10), 2), cut);
+    assertEquals(new JudgePrompt.Cut("a".repeat(10), 2, true), cut);
+    assertEquals("the rest of this section and 2 sections", JudgePrompt.leftOut(cut));
+    assertEquals(
+        "the rest of this section and 1 section",
+        JudgePrompt.leftOut(new JudgePrompt.Cut("a", 1, true)));
   }
 
   @Test
   void aBodyWithinTheBudgetIsCarriedWholeAndCountsNothing() {
     assertEquals(
-        new JudgePrompt.Cut("Intro\n## One\nx\n### Two\ny", 0),
+        new JudgePrompt.Cut("Intro\n## One\nx\n### Two\ny", 0, false),
         JudgePrompt.cutAtSection("Intro\n## One\nx\n### Two\ny", 100));
   }
 
   @Test
   void aHashLineThatIsNoHeadingOpensNoSection() {
     assertEquals(
-        new JudgePrompt.Cut("#tag\n#######\nx", 1),
+        new JudgePrompt.Cut("#tag\n#######\nx", 1, false),
         JudgePrompt.cutAtSection("#tag\n#######\nx\n## Two\n" + "y".repeat(20), 14));
   }
 

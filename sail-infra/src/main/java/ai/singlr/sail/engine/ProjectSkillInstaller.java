@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 /**
  * Puts the project's skills, and sail's own {@code spec-board}, where a harness looks for skills,
@@ -30,7 +31,10 @@ import java.util.function.Function;
  * stands where a held skill's folder goes is not replaced either: the install fails, naming it, so
  * a person's own skill under a name the project later takes is never deleted. The one unstamped
  * folder sail replaces is the {@code spec-board} it wrote before it stamped (0.46 and earlier),
- * known by its shape: nothing in it but files of the skill's own names.
+ * known by its content: nothing in it but regular files, no link or folder among them, of the
+ * skill's own names, each holding byte for byte what a release of sail wrote ({@link
+ * SpecSkillGenerator#UNSTAMPED_HASHES}). A file of another content, a name sail never wrote, or a
+ * folder or link under one of its names is someone's, and the folder is refused.
  *
  * <p>A replacement is built outside the skills directory, beside it in a folder of the install's
  * own, stamped last and put in place in one step — so a harness never opens a folder half-written
@@ -70,7 +74,9 @@ public final class ProjectSkillInstaller {
         if [ -z "$4" ] || [ -L "$1" ] || [ ! -d "$1" ]; then refuse "$1" "$3"; fi
         for entry in "$1"/* "$1"/.[!.]* "$1"/..?*; do
           if [ -e "$entry" ] || [ -L "$entry" ]; then
-            case " $4 " in *" ${entry##*/} "*) ;; *) refuse "$1" "$3" ;; esac
+            if [ -L "$entry" ] || [ ! -f "$entry" ]; then refuse "$1" "$3"; fi
+            sum=$(sha256sum < "$entry") || refuse "$1" "$3"
+            case " $4 " in *" ${entry##*/}=${sum%% *} "*) ;; *) refuse "$1" "$3" ;; esac
           fi
         done
       fi
@@ -232,7 +238,7 @@ public final class ProjectSkillInstaller {
               folder,
               build,
               StageSkill.STAMP,
-              legacyShapeOf(skill)));
+              legacyFilesOf(skill)));
     } catch (IOException | InterruptedException | TimeoutException | RuntimeException failure) {
       discard(shell, project, build, failure);
       throw failure;
@@ -240,14 +246,18 @@ public final class ProjectSkillInstaller {
   }
 
   /**
-   * The names an unstamped folder of {@code skill} may hold and still be the one sail wrote before
-   * it stamped: {@code spec-board}'s own file names, and nothing for any other skill.
+   * The files an unstamped folder of {@code skill} may hold and still be the one sail wrote before
+   * it stamped, each as {@code <name>=<sha256>}: {@code spec-board}'s own, and none for any other
+   * skill.
    */
-  private static String legacyShapeOf(StageSkill skill) {
+  private static String legacyFilesOf(StageSkill skill) {
     if (!skill.name().equals(SpecSkillGenerator.NAME)) {
       return "";
     }
-    return String.join(" ", skill.files().stream().map(StageSkill.File::path).toList());
+    return SpecSkillGenerator.UNSTAMPED_HASHES.entrySet().stream()
+        .flatMap(file -> file.getValue().stream().map(hash -> file.getKey() + "=" + hash))
+        .sorted()
+        .collect(Collectors.joining(" "));
   }
 
   /**

@@ -692,19 +692,49 @@ class ProjectSkillInstallerTest {
     assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
   }
 
-  @Test
-  void theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped() throws Exception {
-    var specBoard = SpecSkillGenerator.skill();
-    Files.createDirectories(skillsDir.resolve("spec-board"));
-    Files.writeString(skillsDir.resolve("spec-board/SKILL.md"), "the 0.46 skill\n");
-    Files.writeString(skillsDir.resolve("spec-board/spec-template.md"), "the 0.46 template\n");
+  /** The {@code spec-board} files sail 0.46.5 wrote into a box, unstamped. */
+  private Path legacySpecBoard(String... files) throws Exception {
+    var folder = skillsDir.resolve("spec-board");
+    Files.createDirectories(folder);
+    for (var file : files) {
+      Files.copy(legacyFile(file), folder.resolve(file));
+    }
+    return folder;
+  }
 
+  private InputStream legacyFile(String file) {
+    return getClass().getResourceAsStream("/spec-board-0.46/" + file);
+  }
+
+  private void installSpecBoard() throws Exception {
     ProjectSkillInstaller.installAll(
         container,
         PROJECT,
         skillsDir.toString(),
-        List.of(specBoard),
+        List.of(SpecSkillGenerator.skill()),
         (skill, file) -> SpecSkillGenerator.content(file));
+  }
+
+  private void assertSpecBoardIsNotSailsAndIsLeft(Map<String, String> files) throws Exception {
+    var refused = assertThrows(IOException.class, this::installSpecBoard);
+
+    assertTrue(
+        refused
+            .getMessage()
+            .contains(
+                skillsDir.resolve("spec-board")
+                    + " holds a skill sail did not install (no .sail-skill in it)."),
+        refused.getMessage());
+    assertEquals(files, read(skillsDir.resolve("spec-board")));
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+  }
+
+  @Test
+  void theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped() throws Exception {
+    var specBoard = SpecSkillGenerator.skill();
+    legacySpecBoard("SKILL.md", "spec-template.md");
+
+    installSpecBoard();
 
     var expected = new LinkedHashMap<String, String>();
     for (var file : specBoard.files()) {
@@ -717,24 +747,49 @@ class ProjectSkillInstallerTest {
 
   @Test
   void aSpecBoardHoldingAFileSailNeverWroteIsNotSailsAndIsNotReplaced() throws Exception {
-    var specBoard = SpecSkillGenerator.skill();
+    var folder = legacySpecBoard("SKILL.md", "spec-template.md");
+    Files.writeString(folder.resolve("notes.md"), "notes\n");
+
+    var files = new LinkedHashMap<>(read(folder));
+    assertSpecBoardIsNotSailsAndIsLeft(files);
+  }
+
+  @Test
+  void aSpecBoardOfSailsFileNamesWithSomeoneElsesContentIsNotReplaced() throws Exception {
     Files.createDirectories(skillsDir.resolve("spec-board"));
     Files.writeString(skillsDir.resolve("spec-board/SKILL.md"), "someone's own board\n");
-    Files.writeString(skillsDir.resolve("spec-board/notes.md"), "notes\n");
 
-    assertThrows(
-        IOException.class,
-        () ->
-            ProjectSkillInstaller.installAll(
-                container,
-                PROJECT,
-                skillsDir.toString(),
-                List.of(specBoard),
-                (skill, file) -> SpecSkillGenerator.content(file)));
+    assertSpecBoardIsNotSailsAndIsLeft(Map.of("SKILL.md", "someone's own board\n"));
+  }
 
-    assertEquals(
-        Map.of("SKILL.md", "someone's own board\n", "notes.md", "notes\n"),
-        read(skillsDir.resolve("spec-board")));
+  @Test
+  void aFolderUnderOneOfSailsFileNamesIsNotSailsFileAndWhatItHoldsSurvives() throws Exception {
+    var folder = legacySpecBoard("SKILL.md");
+    Files.createDirectories(folder.resolve("spec-template.md"));
+    Files.writeString(folder.resolve("spec-template.md/personal-draft.md"), "my draft\n");
+
+    assertSpecBoardIsNotSailsAndIsLeft(
+        Map.of(
+            "SKILL.md",
+            Files.readString(folder.resolve("SKILL.md")),
+            "spec-template.md/personal-draft.md",
+            "my draft\n"));
+  }
+
+  @Test
+  void aLinkUnderOneOfSailsFileNamesIsNotSailsFileWhateverItPointsAt() throws Exception {
+    var folder = legacySpecBoard("SKILL.md");
+    var elsewhere = home.resolve("spec-template.md");
+    Files.copy(legacyFile("spec-template.md"), elsewhere);
+    Files.createSymbolicLink(folder.resolve("spec-template.md"), elsewhere);
+
+    assertSpecBoardIsNotSailsAndIsLeft(
+        Map.of(
+            "SKILL.md",
+            Files.readString(folder.resolve("SKILL.md")),
+            "spec-template.md",
+            Files.readString(elsewhere)));
+    assertTrue(Files.isSymbolicLink(folder.resolve("spec-template.md")));
   }
 
   @Test

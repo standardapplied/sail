@@ -11,6 +11,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The one skill sail ships, {@code spec-board}: what an interactive session in a container needs to
@@ -30,6 +31,24 @@ public final class SpecSkillGenerator {
   public static final String NAME = "spec-board";
 
   private static final int MODE = 0644;
+
+  /**
+   * The SHA-256 of each file sail wrote into {@code spec-board} before it stamped the folder
+   * (0.46.5 and earlier), by path: the one spec template, and the {@code SKILL.md} of every release
+   * that changed it. An unstamped folder holding nothing but regular files of these names and
+   * contents is one sail wrote, and the only unstamped folder an install replaces.
+   */
+  public static final Map<String, Set<String>> UNSTAMPED_HASHES =
+      Map.of(
+          StageSkill.MANIFEST,
+          Set.of(
+              "6b9c48f495659704e170ee204e4c79534c1f5a44f2004ceb4ce369cd05ba0d95",
+              "a3309bcef7f830ac174d5cdc2188c2bd1d716198ac99e25fa31ac6247b171233",
+              "093f9ad4cb85d17c93b6053db0b811d29ee164c63488cf72c7fbdfc2569779bd",
+              "7183f543e645cd9324cc8b1c8b0b36c4f807ee2efb97bb31a49afff27682af82",
+              "7496ac254457448ba0440863d3056b54fb855b720c6493fe69ae96c48f5fc78c"),
+          "spec-template.md",
+          Set.of("299a557e66625c8e14a9f784393779f7b3540d8de06ed7f4ceac218251c0c89c"));
 
   private static final Map<String, String> FILES =
       Map.of(StageSkill.MANIFEST, skillMd(), "spec-template.md", specTemplateMd());

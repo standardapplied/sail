@@ -1300,9 +1300,11 @@ command the installer sends against a real shell under a temporary directory;
   `aVerdictUnderABriefThatAsksForProseIsStillReadByTheVerdictContract`,
   `SailYamlTest.aBriefIsTextOnAnAgentStageWithinThePromptBudget`.*
 - **P4. The judge reads the spec.** The judge prompt carries the spec's title and body, cut
-  at a markdown section boundary to the prompt budget and saying how many sections it left
-  out, so a stage can find drift from the spec's stated design, bar and non-goals.
+  at a markdown section boundary to the prompt budget and saying what it left out — the
+  sections omitted whole, and the rest of a section it had to cut inside — so a stage can find
+  drift from the spec's stated design, bar and non-goals, and never takes a cut body for whole.
   *`JudgePromptGoldenTest.aBodyLongerThanTheBudgetIsCutAtASectionBoundaryAndSaysSo`,
+  `JudgePromptGoldenTest.aSpecOfOneSectionOverTheBudgetIsCutInsideItAndSaysSo`,
   `JudgePromptGoldenTest.aFirstSectionAloneOverTheBudgetIsCutInsideItAndEveryOtherSectionIsCounted`,
   `JudgePromptGoldenTest.aSpecInOneRepoWithNoRoomNoBodyAndNothingCarried`.*
 - **P5. Skills are installed, never pasted.** Every valid folder under `.sail/skills/` and
@@ -1314,8 +1316,11 @@ command the installer sends against a real shell under a temporary directory;
   the project no longer holds is removed and an unstamped one is left alone — and never
   replaced: a held skill whose folder is unstamped fails the install naming the folder, so a
   person's own skill under a name the project later takes is not deleted. The one unstamped
-  folder sail replaces is the `spec-board` it wrote before it stamped, known by holding nothing
-  but the skill's own file names. An interactive `agent run` installs the same way before its
+  folder sail replaces is the `spec-board` it wrote before it stamped, known by its content:
+  nothing in it but regular files of the skill's own names, each holding what a release of sail
+  wrote (`SpecSkillGenerator.UNSTAMPED_HASHES`); a file of other content, a name sail never
+  wrote, or a folder or link under one of its names makes it someone's, and it is refused.
+  An interactive `agent run` installs the same way before its
   `ssh`; a preview installs nothing. A folder that is
   no skill — no `SKILL.md`, over its bounds, a reserved name (`spec-board`, `sail-*`) — is
   skipped, the valid ones install, and the room is told once which and why; a file whose
@@ -1332,6 +1337,9 @@ command the installer sends against a real shell under a temporary directory;
   `ProjectSkillInstallerTest.twoLaunchesReplacingTheFolderAtOnceTakeTurnsAndNeitherBuildLandsInTheOthers`,
   `ProjectSkillInstallerTest.anUnstampedFolderUnderAHeldSkillsNameIsNotReplacedAndTheInstallSaysSo`,
   `ProjectSkillInstallerTest.theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped`,
+  `ProjectSkillInstallerTest.aSpecBoardOfSailsFileNamesWithSomeoneElsesContentIsNotReplaced`,
+  `ProjectSkillInstallerTest.aFolderUnderOneOfSailsFileNamesIsNotSailsFileAndWhatItHoldsSurvives`,
+  `ProjectSkillInstallerTest.aLinkUnderOneOfSailsFileNamesIsNotSailsFileWhateverItPointsAt`,
   `RunCommandTest.anInteractiveSessionInstallsTheProjectsSkillsForItsHarnessBeforeTheSsh`,
   `ProjectSkillsTest.everyFolderIsReadWithItsFilesHashesSizesAndModesInNameOrder`,
   `ProjectSkillsTest.aFolderUnderAReservedNameIsInvalidSayingWhichNamesAreSails`,
