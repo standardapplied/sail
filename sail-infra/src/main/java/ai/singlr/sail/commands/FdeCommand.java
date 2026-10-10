@@ -13,13 +13,13 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorAuthorizedKeys;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.WorkstationIdentity;
-import ai.singlr.sail.ssh.OperatorAuthorizedKeys;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.EnrollmentTicketStore;
@@ -33,6 +33,7 @@ import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -459,17 +460,17 @@ public final class FdeCommand implements Runnable {
                 return;
               }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
-              fdeStore.remove(fde.id());
+              var keyLines =
+                  db.transaction(
+                      () -> {
+                        fdeStore.remove(fde.id());
+                        return box.gateway() ? 0 : removeLogin(box, fde.handle());
+                      });
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
                           + " tickets are revoked.|@"));
-              var keyLines =
-                  box.gateway()
-                      ? 0
-                      : new OperatorAuthorizedKeys(box.home())
-                          .removeCommented(pairingComment(fde.handle()));
               if (paired || keyLines > 0) {
                 System.out.println(
                     Ansi.AUTO.string(
@@ -482,6 +483,35 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
+    }
+
+    /**
+     * Removes the FDE's key lines from the operator's login inside the transaction that removes the
+     * FDE, so a login that could not be revoked takes the removal back with it: the FDE and its
+     * pairing's record stay for the next run to finish, instead of a login outliving both.
+     */
+    private static int removeLogin(Box box, String handle) {
+      try {
+        return new OperatorAuthorizedKeys(box.home()).removeCommented(pairingComment(handle));
+      } catch (IOException failure) {
+        throw new UncheckedIOException(
+            "Could not remove "
+                + handle
+                + "'s key line from "
+                + box.operator()
+                + "'s authorized_keys ("
+                + failure.getClass().getSimpleName()
+                + "), so "
+                + handle
+                + " was not removed and its pairing still works. Check that "
+                + box.home().resolve(".ssh")
+                + " is writable by "
+                + box.operator()
+                + ", then run 'sail fde rm "
+                + handle
+                + "' again.",
+            failure);
+      }
     }
 
     private boolean confirmed() {

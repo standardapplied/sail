@@ -3,16 +3,20 @@
  * SPDX-License-Identifier: MIT
  */
 
-package ai.singlr.sail.ssh;
+package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
+import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -58,7 +62,10 @@ class OperatorAuthorizedKeysTest {
         Files.readString(file()));
     assertEquals("rw-------", mode(file()));
     try (var entries = Files.list(home.resolve(".ssh"))) {
-      assertEquals(List.of(file()), entries.toList(), "no staging file is left behind");
+      assertEquals(
+          List.of(file(), file().resolveSibling("authorized_keys.sail.lock")),
+          entries.sorted().toList(),
+          "its lock stays beside the file, and no staging file does");
     }
   }
 
@@ -104,5 +111,34 @@ class OperatorAuthorizedKeysTest {
 
     assertEquals(OPERATOR, Files.readString(file()));
     assertEquals("rw-r--r--", mode(file()));
+  }
+
+  @Test
+  void aRemovalAndAnAppendRunningTogetherBothLand() throws Exception {
+    try (var commands = Executors.newFixedThreadPool(2)) {
+      for (var round = 0; round < 200; round++) {
+        Files.deleteIfExists(file());
+        new OperatorAuthorizedKeys(home).append(ADA, "sail-mast:ada");
+        var start = new CyclicBarrier(2);
+        var removed =
+            commands.submit(
+                () -> {
+                  start.await();
+                  return new OperatorAuthorizedKeys(home).removeCommented("sail-mast:ada");
+                });
+        var appended =
+            commands.submit(
+                () -> {
+                  start.await();
+                  new OperatorAuthorizedKeys(home).append(BOB, "sail-mast:bob");
+                  return null;
+                });
+
+        assertEquals(1, removed.get());
+        appended.get();
+        assertEquals(
+            OPTIONS + keyOf(BOB) + " sail-mast:bob\n", Files.readString(file()), "round " + round);
+      }
+    }
   }
 }

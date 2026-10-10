@@ -568,6 +568,45 @@ class FdeCommandTest {
   }
 
   @Test
+  void aRemovalThatCannotRevokeTheLoginRemovesNothingAndTheNextRunFinishesIt() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var token = (String) decoded(printedCode()).get("token");
+    var line = Files.readString(authorizedKeys());
+    var ssh = home().resolve(".ssh");
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("r-x------"));
+
+    assertEquals(1, fde("rm", "ada", "--force"));
+
+    assertEquals(
+        "Could not remove ada's key line from root's authorized_keys (AccessDeniedException), so"
+            + " ada was not removed and its pairing still works. Check that "
+            + ssh
+            + " is writable by root, then run 'sail fde rm ada' again.",
+        refusal);
+    assertEquals(List.of(), printed());
+    assertEquals(line, Files.readString(authorizedKeys()));
+    assertEquals("ada", handleOf(token));
+    assertEquals(
+        1L,
+        inDb(db -> db.queryOne("SELECT count(*) FROM fde_pairings", row -> row.integer(0)))
+            .orElseThrow());
+
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
+
+    assertEquals(0, fde("rm", "ada", "--force"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ FDE removed: ada",
+            "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
+            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."),
+        printed());
+    assertEquals("", Files.readString(authorizedKeys()));
+    assertNull(handleOf(token));
+    assertTrue(inDb(db -> new FdeStore(db).byHandle("ada")).isEmpty());
+  }
+
+  @Test
   void removingAnFdeThatWasNeverPairedSaysNothingOfAPairing() {
     inDb(db -> new FdeStore(db).add("bob", null, null, "member"));
 

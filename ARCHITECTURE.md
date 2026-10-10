@@ -1744,8 +1744,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   line the pairing made, revokes the token its record names and deletes the record; it is
   idempotent and says what it removed. `sail fde rm <handle>` removes the FDE first, where the
   last-admin refusal happens and the token and record go with the row, then the key lines, so a
-  refused removal leaves the pairing whole. There is one live code per FDE per box: pairing
-  again unpairs first.
+  refused removal leaves the pairing whole. Both happen in one transaction that commits only
+  once the key lines are gone: a login that cannot be removed takes the FDE's removal back
+  with it, so the FDE and its record are still there for the next `rm` to finish, and no login
+  outlives the record that revokes it. There is one live code per FDE per box: pairing again
+  unpairs first.
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers; the command names the projects the catalog holds, whose containers trust it only
@@ -1762,8 +1765,10 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   `no-agent-forwarding,no-X11-forwarding,no-user-rc` (port and unix-socket forwarding stay
   allowed: they are what Mast uses) and the comment `sail-mast:<handle>`, and it removes only
   lines carrying that comment, replacing the file in one rename (`0600`, its directory `0700`
-  when it creates it). A paired person can therefore open a shell on the box as its operator;
-  the box is theirs.
+  when it creates it). Each edit holds `authorized_keys.sail.lock`, beside the file, from its
+  read to its rename (`FileMutex`), so two commands editing together, in one process or two,
+  never write back a line the other removed. A paired person can therefore open a shell on the
+  box as its operator; the box is theirs.
 
 Pairing edits the roster (it adds the FDE when the box holds none), so a node refuses it as it
 refuses `fde add`; it is for a main or a standalone box. A handle, host, email and name are
