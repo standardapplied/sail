@@ -168,6 +168,7 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("DROP TABLE fde_pairings");
     db.execute("ALTER TABLE reviews DROP COLUMN waiting_on");
     db.execute("ALTER TABLE events DROP COLUMN publisher");
     db.execute("DROP TABLE materialized_files");

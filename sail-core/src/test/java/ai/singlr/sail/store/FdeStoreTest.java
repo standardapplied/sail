@@ -45,12 +45,15 @@ class FdeStoreTest {
             ai.singlr.sail.ssh.SshPublicKey.parse(
                 ai.singlr.sail.ssh.TestSshKeys.ed25519("seed", "g@m")));
 
+    new FdePairingStore(db).put(fde.id(), "ssh-ed25519 AAAA sail-mast:ghost", "ghost-token");
+
     store.remove(fde.id());
 
     assertTrue(store.byHandle("ghost").isEmpty());
     assertEquals(0L, count("api_tokens", fde.id()));
     assertEquals(0L, count("sessions", fde.id()));
     assertEquals(0L, count("fde_ssh_keys", fde.id()));
+    assertEquals(0L, count("fde_pairings", fde.id()));
   }
 
   @Test
