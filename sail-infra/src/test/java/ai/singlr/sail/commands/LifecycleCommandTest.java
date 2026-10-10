@@ -593,44 +593,7 @@ class LifecycleCommandTest {
   }
 
   @Test
-  void agentContextRegenHelpShowsDescription() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "context", "regen", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("Regenerate the agent context file"));
-  }
-
-  @Test
-  void agentContextRegenInvalidNameFails() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setErr(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "context", "regen", "INVALID NAME!");
-
-    assertNotEquals(0, exitCode);
-  }
-
-  @Test
-  void agentContextHelpListsRegenSubcommand() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("agent", "context", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("regen"), "Should list 'regen' subcommand");
-  }
-
-  @Test
-  void agentHelpListsContextSubcommand() {
+  void agentHelpListsReviewSubcommand() {
     var cmd = new CommandLine(new Sail());
     var sw = new StringWriter();
     cmd.setOut(new PrintWriter(sw));
@@ -639,7 +602,7 @@ class LifecycleCommandTest {
 
     assertEquals(0, exitCode);
     var output = sw.toString();
-    assertTrue(output.contains("context"), "Should list 'context' subcommand");
+    assertFalse(output.contains("  context "), "the context command is gone");
     assertTrue(output.contains("review"), "Should list 'review' subcommand");
   }
 

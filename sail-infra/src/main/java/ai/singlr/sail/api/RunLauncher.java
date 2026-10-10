@@ -15,9 +15,8 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ShellExec;
-import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.RunStore;
@@ -45,7 +44,16 @@ public final class RunLauncher {
   private final WatcherSpawner watcherSpawner;
   private final RunStore runStore;
   private final DispatchOperations.EventSink events;
-  private final Supplier<StageSkills> stageSkills;
+  private final Supplier<ProjectSkills> projectSkills;
+  private final Room room;
+
+  /** Where a launch says what it skipped: the spec's room, when the run serves a spec. */
+  @FunctionalInterface
+  interface Room {
+    void tell(String specId, String body);
+
+    Room NONE = (specId, body) -> {};
+  }
 
   public RunLauncher(
       ShellExec shell,
@@ -54,14 +62,16 @@ public final class RunLauncher {
       WatcherSpawner watcherSpawner,
       RunStore runStore,
       DispatchOperations.EventSink events,
-      Supplier<StageSkills> stageSkills) {
+      Supplier<ProjectSkills> projectSkills,
+      Room room) {
     this.shell = shell;
     this.launcher = launcher;
     this.listener = listener;
     this.watcherSpawner = watcherSpawner;
     this.runStore = runStore;
     this.events = events;
-    this.stageSkills = stageSkills;
+    this.projectSkills = projectSkills;
+    this.room = room;
   }
 
   record LaunchOutcome(int exitCode, Optional<WatcherSpawner.Spawned> watcher) {}
@@ -73,9 +83,7 @@ public final class RunLauncher {
    * room a viewer role and no repo reservation; a reviewer and a fix agent the spec they serve.
    * {@code task}, {@code branch}, and {@code repoPaths} stage the session file and so are unused
    * when only the launch command is built. The run's unit and files are {@link AgentUnit#forRun} of
-   * {@code runId}: one shape for every lane, so no launch names its own. {@code skill} is the skill
-   * the stage was fired under, installed for the harness before it starts: a build's, a reviewer's
-   * or a fix agent's, and null for an ad-hoc or a room run, which follow none.
+   * {@code runId}: one shape for every lane, so no launch names its own.
    */
   record LaunchSpec(
       String project,
@@ -93,8 +101,7 @@ public final class RunLauncher {
       String runId,
       String runCredential,
       String role,
-      String resumeSessionId,
-      StageSkill skill) {
+      String resumeSessionId) {
 
     AgentUnit unit() {
       return AgentUnit.forRun(runId);
@@ -127,8 +134,7 @@ public final class RunLauncher {
       Spec spec,
       String agentType,
       String runId,
-      String runCredential,
-      StageSkill skill) {
+      String runCredential) {
     return launchSession(
         new LaunchSpec(
             project,
@@ -146,8 +152,7 @@ public final class RunLauncher {
             runId,
             runCredential,
             Lane.BUILD.wire(),
-            null,
-            skill));
+            null));
   }
 
   /**
@@ -190,7 +195,7 @@ public final class RunLauncher {
   LaunchOutcome launchSession(LaunchSpec s) {
     try {
       ensureSailSetup(s.project());
-      installSkill(s);
+      installSkills(s);
       var session = new AgentSession(shell);
       session.ensureDirectory(s.project());
       session.writeTaskFile(s.project(), s.task(), s.unit());
@@ -323,38 +328,30 @@ public final class RunLauncher {
   }
 
   /**
-   * Installs the skill the stage was fired under where its harness looks for skills, from the same
-   * files its prompt was made from. Failure aborts the launch: an agent told of a folder must find
-   * the skill it was told of there, not an older one or none. A skill whose files changed under the
-   * launch is refused in {@link StageSkills}' words, which say what to do; a container that could
-   * not take the files is told to be checked.
+   * Installs the project's skills and sail's {@code spec-board} where the launching harness looks
+   * for skills, from the project's files as they are now; a launch that finds every stamp writes
+   * nothing. A folder that is no skill is skipped, and the spec's room is told which and why; a
+   * file that changed under the launch, or whose content is not on this box, fails the launch in
+   * {@link ProjectSkills}' words, which say what to do; a container that could not take the files
+   * is told to be checked.
    */
-  private void installSkill(LaunchSpec s) {
-    var skill = s.skill();
-    if (skill == null) {
-      return;
-    }
-    var folder =
-        "/home/"
-            + s.config().sshUser()
-            + "/"
-            + Harnesses.of(s.agentType()).skillFolder(skill.name());
+  private void installSkills(LaunchSpec s) {
+    ProjectSkillInstaller.Report report;
     try {
-      StageSkillInstaller.install(
-          shell,
-          s.project(),
-          folder,
-          s.runId(),
-          skill,
-          file -> stageSkills.get().open(s.project(), skill, file));
+      report =
+          ProjectSkillInstaller.installProject(
+              shell, s.project(), Harnesses.of(s.agentType()), projectSkills.get());
     } catch (IllegalStateException changed) {
       throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, changed.getMessage());
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,
-          "Failed to install skill '" + skill.name() + "' in " + s.project() + ".",
+          "Failed to install the project's skills in " + s.project() + ".",
           "Check the container is running and retry.",
           e);
+    }
+    if (!report.skipped().isEmpty() && Strings.isNotBlank(s.specId())) {
+      room.tell(s.specId(), "Not installed for this run: " + String.join(" ", report.skipped()));
     }
   }
 

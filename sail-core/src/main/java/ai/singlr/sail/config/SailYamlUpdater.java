@@ -105,7 +105,6 @@ public final class SailYamlUpdater {
         services,
         c.processes(),
         c.agent(),
-        c.agentContext(),
         c.ssh());
   }
 
@@ -122,7 +121,6 @@ public final class SailYamlUpdater {
         c.services(),
         c.processes(),
         c.agent(),
-        c.agentContext(),
         c.ssh());
   }
 
@@ -139,7 +137,6 @@ public final class SailYamlUpdater {
         c.services(),
         c.processes(),
         c.agent(),
-        c.agentContext(),
         c.ssh());
   }
 }

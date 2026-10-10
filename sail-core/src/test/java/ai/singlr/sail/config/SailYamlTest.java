@@ -82,16 +82,6 @@ class SailYamlTest {
           config:
             permissions: full
 
-        agent_context:
-          tech_stack: |
-            Backend: JDK 25, Helidon 4.3.x
-          conventions: |
-            - Use virtual threads
-          build_commands: |
-            mvn clean package
-          project_specific: |
-            HIPAA compliance is critical.
-
         ssh:
           user: dev
           authorized_keys:
@@ -142,10 +132,6 @@ class SailYamlTest {
     assertEquals("sail/", config.agent().branchPrefix());
     assertTrue(config.agent().autoSnapshot());
     assertEquals("full", config.agent().config().get("permissions"));
-
-    assertNotNull(config.agentContext());
-    assertTrue(config.agentContext().techStack().contains("JDK 25"));
-    assertTrue(config.agentContext().projectSpecific().contains("HIPAA"));
 
     assertEquals("dev", config.ssh().user());
     assertEquals(1, config.ssh().authorizedKeys().size());
@@ -518,75 +504,6 @@ class SailYamlTest {
   }
 
   @Test
-  void agentContextRulesParsedFromYaml() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent_context:
-          rules:
-            java:
-              paths: ["**/*.java", "**/*.kt"]
-              body: |
-                - Records for value types.
-            typescript:
-              paths: ["**/*.ts"]
-              body: |
-                - Strict null checks.
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    var rules = config.agentContext().rules();
-    assertEquals(2, rules.size());
-    var java = rules.getFirst();
-    assertEquals("java", java.name());
-    assertEquals(List.of("**/*.java", "**/*.kt"), java.paths());
-    assertTrue(java.body().contains("Records for value types."));
-    assertEquals("typescript", rules.get(1).name());
-  }
-
-  @Test
-  void agentContextRulesRoundTripThroughToMap() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent_context:
-          rules:
-            java:
-              paths: ["**/*.java"]
-              body: |
-                - Sealed interfaces.
-        """;
-    var original = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    var reparsed = SailYaml.fromMap(original.toMap());
-
-    var rule = reparsed.agentContext().rules().getFirst();
-    assertEquals("java", rule.name());
-    assertEquals(List.of("**/*.java"), rule.paths());
-    assertTrue(rule.body().contains("Sealed interfaces."));
-  }
-
-  @Test
-  void agentContextWithoutRulesParsesToNull() throws Exception {
-    var yaml =
-        """
-        name: test
-        agent_context:
-          tech_stack: Java 25
-        """;
-    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
-
-    assertNull(config.agentContext().rules());
-  }
-
-  @Test
-  void aRuleNameThatTraversesIsRejected() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new SailYaml.AgentRule("../etc/evil", List.of(), "body"));
-  }
-
-  @Test
   void notificationsParsedFromYaml() throws Exception {
     var yaml =
         """
@@ -794,7 +711,7 @@ class SailYamlTest {
                 Map.of("guardrails", Map.of("max_duration", "90m", "max_idle", "30m"))));
 
     for (var lane : Lane.values()) {
-      var review = lane == Lane.REVIEW || lane == Lane.FIX;
+      var review = lane == Lane.REVIEW;
       assertEquals(
           review ? Guardrails.reviewDefaults() : Guardrails.defaults(),
           bare.guardrailsFor(lane),
@@ -830,7 +747,7 @@ class SailYamlTest {
                 Map.of("guardrails", Map.of("max_idle", "30m"))));
 
     for (var lane : Lane.values()) {
-      var review = lane == Lane.REVIEW || lane == Lane.FIX;
+      var review = lane == Lane.REVIEW;
       assertEquals(
           review ? Duration.ofMinutes(45) : null, bare.lifetimeFor(lane), lane + " with no block");
       assertEquals(
@@ -938,8 +855,8 @@ class SailYamlTest {
                             "security",
                             "agent",
                             "codex",
-                            "categories",
-                            List.of("security"),
+                            "brief",
+                            "Judge the security surface.",
                             "gate",
                             "no_critical_or_high"),
                         Map.of("name", "sign-off", "type", "human")))));
@@ -958,5 +875,101 @@ class SailYamlTest {
         agent.reviewPipeline(),
         reinstalled.agent().reviewPipeline(),
         "changing the install list keeps the pipeline, its stages and its limits");
+  }
+
+  @Test
+  void aDeletedKeyIsRefusedInOneSentenceNamingWhereItsTextGoes() {
+    var agent = "name: acme\nagent:\n  type: claude-code\n";
+
+    assertEquals(
+        "agent_context is no longer read: sail writes no context file. Put what it said in the"
+            + " repo's AGENTS.md, and a rule in a project skill (sail project skills add). Then"
+            + " remove `agent_context` from acme/sail.yaml.",
+        refusal(agent + "agent_context:\n  tech_stack: Java\n"));
+    assertEquals(
+        "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
+            + " project's verification. Put the commands in the repo's AGENTS.md. Then remove"
+            + " `agent.methodology` from acme/sail.yaml.",
+        refusal(agent + "  methodology:\n    verify: mvn verify\n"));
+    assertEquals(
+        "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
+            + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail project"
+            + " skills add) the agent invokes when relevant. Then remove `agent.build_skill` from"
+            + " acme/sail.yaml.",
+        refusal(agent + "  build_skill: acme-build\n"));
+    assertEquals(
+        "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
+            + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
+            + " skill (sail project skills add). Then remove `agent.review_pipeline.fix_skill`"
+            + " from acme/sail.yaml.",
+        refusal(agent + "  review_pipeline:\n    fix_skill: acme-fix\n"));
+    assertEquals(
+        "agent.review_pipeline.stages[security].skill is no longer read: a stage judges under its"
+            + " brief. Put what the skill said in the stage's brief"
+            + " (agent.review_pipeline.stages[security].brief), or keep it as a project skill"
+            + " (sail project skills add) the brief tells the stage to run.",
+        refusal(
+            agent + "  review_pipeline:\n    stages:\n      - name: security\n        skill: x\n"));
+    assertEquals(
+        "agent.review_pipeline.stages[security].categories is no longer read: what a stage"
+            + " focuses on is its brief. Say it in agent.review_pipeline.stages[security].brief.",
+        refusal(
+            agent
+                + "  review_pipeline:\n    stages:\n      - name: security\n        categories: [a]\n"));
+  }
+
+  @Test
+  void aBriefIsTextOnAnAgentStageWithinThePromptBudget() {
+    var agent = "name: acme\nagent:\n  type: claude-code\n  review_pipeline:\n    stages:\n";
+
+    assertEquals(
+        "agent.review_pipeline.stages[sign-off].brief is set on a human stage; a person follows no"
+            + " brief, so remove it.",
+        refusal(agent + "      - name: sign-off\n        type: human\n        brief: Look.\n"));
+    assertEquals(
+        "agent.review_pipeline.stages[review].brief is 32001 code points; the limit is 32000.",
+        refusal(agent + "      - name: review\n        brief: " + "x".repeat(32_001) + "\n"));
+    assertEquals(
+        "agent.review_pipeline.stages[review].brief is blank; write it or remove it.",
+        refusal(agent + "      - name: review\n        brief: '  '\n"));
+    assertEquals(
+        "agent.review_pipeline.stages[review].brief must be text.",
+        refusal(agent + "      - name: review\n        brief: [a]\n"));
+    var stage =
+        SailYaml.fromMap(YamlUtil.parseMap(agent + "      - name: review\n        brief: Judge.\n"))
+            .agent()
+            .reviewPipeline()
+            .stages()
+            .getFirst();
+    assertEquals("Judge.", stage.brief());
+    assertEquals(
+        stage,
+        ReviewPipelineConfig.StageConfig.fromMap(stage.toMap()),
+        "a stage with a brief writes it and reads it back");
+  }
+
+  private static String refusal(String yaml) {
+    return assertThrows(
+            IllegalArgumentException.class, () -> SailYaml.fromMap(YamlUtil.parseMap(yaml)))
+        .getMessage();
+  }
+
+  @Test
+  void aRepoMayBeMarkedAsAGitHubHostAndNothingElse() {
+    var yaml =
+        "name: acme\nrepos:\n  - url: https://git.example.com/org/api.git\n    path: api\n"
+            + "    forge: github\n  - url: https://gitlab.com/org/web.git\n    path: web\n";
+
+    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    assertEquals("github", config.repos().getFirst().forge());
+    assertNull(config.repos().getLast().forge());
+    assertEquals(config, SailYaml.fromMap(config.toMap()), "forge round-trips");
+    assertEquals(
+        "repos[].forge must be 'github' when set, got: gitlab",
+        refusal(yaml.replace("forge: github", "forge: gitlab")));
+    assertEquals(
+        "repos[].forge must be text when set.",
+        refusal(yaml.replace("forge: github", "forge: [a]")));
   }
 }

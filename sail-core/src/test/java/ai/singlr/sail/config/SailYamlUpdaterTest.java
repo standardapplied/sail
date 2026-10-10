@@ -204,7 +204,7 @@ class SailYamlUpdaterTest {
   }
 
   @Test
-  void mutateThenSerializePreservesEverySectionIncludingProcessesAndAgentContext() {
+  void mutateThenSerializePreservesEverySectionIncludingProcesses() {
     var full =
         """
         name: my-project
@@ -221,9 +221,6 @@ class SailYamlUpdaterTest {
           type: claude-code
           config:
             model: opus
-        agent_context:
-          tech_stack: "Java 25 + React"
-          conventions: "no inline comments"
         """;
 
     var mutated =
@@ -232,8 +229,6 @@ class SailYamlUpdaterTest {
 
     assertNotNull(reparsed.processes(), "processes survives the mutate-and-serialize round trip");
     assertEquals("npm run dev", reparsed.processes().get("web").command());
-    assertNotNull(reparsed.agentContext(), "agent_context survives the round trip");
-    assertEquals("Java 25 + React", reparsed.agentContext().techStack());
     assertEquals("opus", reparsed.agent().config().get("model"), "agent.config survives too");
     assertEquals("y", reparsed.repos().getFirst().path(), "and the mutation applied");
   }

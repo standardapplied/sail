@@ -21,13 +21,12 @@ import java.util.concurrent.TimeoutException;
  * solely from the watcher's verified exit, with the missed-stop reconciler as the rescue lane.
  *
  * <p>Every sail-launched session carries a non-blank {@code SAIL_RUN_ID} and runs this one gate;
- * what it asks is decided by the lane the run's session file names. A build must leave its repos
- * clean, pushed and behind a pull request, and is told to watch that request's checks. A fix agent
- * (role {@code fix}) is held to clean and pushed only: the pull request already exists, the
- * re-review judges the branch, and the fix lane's time limit is not spent polling CI. A reviewer
- * (role {@code review}) is never blocked: it writes to no branch, and its last message is the
- * verdict the pipeline parses, so a nudge that drew another turn would replace the findings with a
- * reply. An engineer's own session carries no run id and keeps the old publish-and-allow behavior.
+ * what it asks is decided by the lane the run's session file names. A work run — a build, or a fix
+ * agent (role {@code fix}), which is held to the same protocol — must leave its repos clean, pushed
+ * and behind a pull request, and is told to watch that request's checks. A reviewer (role {@code
+ * review}) is never blocked: it writes to no branch, and its last message is the verdict the
+ * pipeline parses, so a nudge that drew another turn would replace the findings with a reply. An
+ * engineer's own session carries no run id and keeps the old publish-and-allow behavior.
  *
  * <p>The dirty/unpushed/PR checks are scoped to the run's spec repos — read from {@code repos} in
  * the run's own session file, {@code ~/.sail/runs/<runId>/agent-session.json}, which dispatch
@@ -83,9 +82,8 @@ public final class SailStopGate {
       # Gated sessions (non-blank SAIL_RUN_ID) must have every workspace repo
       # clean, pushed, and behind a PR before the turn may end, and get one last
       # look at the spec room: the run's undelivered messages block the stop with
-      # their bodies as the reason. A fix run (role "fix") is held to clean and
-      # pushed only, and is not asked to watch CI: the re-review reads the branch.
-      # A reviewer (role "review") is never blocked: its last message is the
+      # their bodies as the reason. A fix run (role "fix") is held to the same
+      # protocol as a build. A reviewer (role "review") is never blocked: its last message is the
       # verdict the pipeline parses. The exact ids shown are acknowledged before
       # the marker is spent or the block emitted; a failed ack drops the room
       # block and leaves the messages undelivered for the relay or a later stop.
@@ -198,7 +196,6 @@ public final class SailStopGate {
           case "$branch" in
             "${default#origin/}"|main|master) continue ;;
           esac
-          [ "$RUN_ROLE" != "fix" ] || continue
           command -v gh >/dev/null 2>&1 || continue
           GH_TIMEOUT=""
           command -v timeout >/dev/null 2>&1 && GH_TIMEOUT="timeout 5"
@@ -272,9 +269,7 @@ public final class SailStopGate {
       fi
 
       REASON=""
-      if [ -n "$REASONS" ] && [ "$RUN_ROLE" = "fix" ]; then
-        REASON="Not ready to stop: $REASONS. Commit and push the fix before ending the turn; do not wait for CI, the re-review reads the branch."
-      elif [ -n "$REASONS" ]; then
+      if [ -n "$REASONS" ]; then
         REASON="Not ready to stop: $REASONS. Finish the dispatch protocol (commit, push, open the PR, watch its checks to green) before ending the turn."
       fi
       if [ -n "$ROOM_REASON" ]; then

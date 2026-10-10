@@ -243,7 +243,7 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void planTargetRefusesAStageSkillSailWouldRefuseNamingItsKey() {
+  void planTargetRefusesADeletedKeyNamingWhereItsTextGoes() {
     var thrown =
         assertThrows(
             IllegalArgumentException.class,
@@ -262,7 +262,9 @@ class ProjectApplyCommandTest {
                             skill: acme-review
                     """));
     assertTrue(
-        thrown.getMessage().startsWith("agent.review_pipeline.stages[sign-off].skill is set"),
+        thrown
+            .getMessage()
+            .startsWith("agent.review_pipeline.stages[sign-off].skill is no longer read"),
         thrown.getMessage());
   }
 

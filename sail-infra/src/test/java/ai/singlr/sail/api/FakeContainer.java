@@ -330,16 +330,30 @@ final class FakeContainer implements ShellExec {
     return ok("");
   }
 
-  /** A folder put in place of another in one step: the old one's files go, the new one's move. */
+  /**
+   * A folder put in place of another in one step: the old one's files go, the new one's move. The
+   * listing of the folders sail stamped answers from the files held under the skills directory.
+   */
   private Result sh(List<String> inner) {
     if (!failingFragment.isEmpty() && String.join(" ", inner).contains(failingFragment)) {
       return fail(failingWith);
     }
+    if (inner.get(2).startsWith("for d in")) {
+      var skillsDir = inner.getLast();
+      var stamped =
+          files.keySet().stream()
+              .filter(path -> path.startsWith(skillsDir + "/") && path.endsWith("/.sail-skill"))
+              .map(path -> path.substring(skillsDir.length() + 1, path.lastIndexOf('/')))
+              .filter(name -> !name.contains("/"))
+              .sorted()
+              .toList();
+      return ok(stamped.isEmpty() ? "" : String.join("\n", stamped) + "\n");
+    }
     if (!inner.get(2).contains("mv -T \"$2\" \"$1\"")) {
       return ok("");
     }
-    var folder = inner.get(inner.size() - 2);
-    var build = inner.getLast();
+    var folder = inner.get(4);
+    var build = inner.get(5);
     remove(folder);
     for (var path : filesUnder(build)) {
       var placed = folder + path.substring(build.length());

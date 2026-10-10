@@ -10,9 +10,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.ProjectSkills;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -263,6 +271,8 @@ class ProjectApplierTest {
             .onOk("incus file push")
             .onOk("chown")
             .onOk("git config")
+            .onOk("mkdir -p /home/dev/.sail")
+            .onOk("gh auth login")
             .onFail("test -d", "not found")
             .onOk("git clone");
     var applier = applier(shell);
@@ -278,6 +288,101 @@ class ProjectApplierTest {
     assertTrue(
         shell.invocations().stream().anyMatch(c -> c.contains("credential.helper")),
         "Should configure credential.helper store");
+    assertGhLoggedIn(shell, "github.com", "ghp_secret123");
+  }
+
+  /**
+   * The forge CLI was logged in for {@code host} as the dev user: the token was pushed to a {@code
+   * 0600} file under the dev home and consumed by the one login command, which removes the file;
+   * the token itself is never an argument.
+   */
+  static void assertGhLoggedIn(ScriptedShellExecutor shell, String host, String token) {
+    var push =
+        shell.invocations().stream()
+            .filter(c -> c.contains("incus file push") && c.contains("/home/dev/.sail/gh-token-"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no token file pushed: " + shell.invocations()));
+    assertTrue(push.contains("--uid 1000 --gid 1000 --mode 0600"), push);
+    var file = push.substring(push.lastIndexOf(CONTAINER) + CONTAINER.length());
+    var login =
+        shell.invocations().stream()
+            .filter(c -> c.contains("gh auth login"))
+            .findFirst()
+            .orElseThrow(() -> new AssertionError("no gh login: " + shell.invocations()));
+    assertTrue(login.contains("--user 1000 --group 1000 "), login);
+    assertTrue(
+        login.endsWith(
+            "-- sh -c gh auth login --hostname \"$1\" --with-token < \"$2\"; s=$?; rm -f \"$2\";"
+                + " exit $s sh "
+                + host
+                + " "
+                + file),
+        login);
+    assertTrue(
+        shell.invocations().stream().noneMatch(c -> c.contains(token)),
+        "the token is never an argument: " + shell.invocations());
+  }
+
+  @Test
+  void applyReposLogsGhInForAGitHubEnterpriseHostMarkedAsGitHubAndNotForGitLab() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
+    var applier = applier(shell);
+
+    applier.applyRepos(
+        CONTAINER,
+        List.of(
+            new SailYaml.Repo("https://git.example.com/org/api.git", "api", null, "github"),
+            new SailYaml.Repo("https://gitlab.com/org/web.git", "web", null)),
+        "dev",
+        Map.of("*", "tok_wild"),
+        null);
+
+    assertGhLoggedIn(shell, "git.example.com", "tok_wild");
+    assertEquals(
+        1,
+        shell.invocations().stream().filter(c -> c.contains("gh auth login")).count(),
+        "gitlab.com gets no gh login");
+  }
+
+  @Test
+  void applyReposWithOnlyAGitLabTokenNeverTouchesGh() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", "")).onFail("test -d", "not found");
+    var applier = applier(shell);
+
+    applier.applyRepos(
+        CONTAINER,
+        List.of(new SailYaml.Repo("https://gitlab.com/org/web.git", "web", null)),
+        "dev",
+        Map.of("gitlab.com", "glpat_x"),
+        null);
+
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh-token-")));
+  }
+
+  @Test
+  void aFailedGhLoginFailsTheStepNamingTheHost() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("gh auth login", "The token in GH_TOKEN is invalid.");
+    var applier = applier(shell);
+
+    var failed =
+        assertThrows(
+            java.io.IOException.class,
+            () ->
+                applier.applyRepos(
+                    CONTAINER,
+                    List.of(new SailYaml.Repo("https://github.com/org/api.git", "api", null)),
+                    "dev",
+                    Map.of("*", "ghp_bad"),
+                    null));
+
+    assertEquals(
+        "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
+        failed.getMessage());
   }
 
   @Test
@@ -395,54 +500,128 @@ class ProjectApplierTest {
   }
 
   @Test
-  void applyAgentContextCreatesParentDirsBeforePush() throws Exception {
+  void applySkillsInstallsSailsSkillForTheProjectsHarnessAndWritesNoContextFile() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
-    var config = minimalConfig("claude-code");
 
-    applier.applyAgentContext(CONTAINER, config);
+    var result = applier.applySkills(CONTAINER, minimalConfig("claude-code"), ProjectSkills.none());
 
-    var invocations = shell.invocations();
-    var mkdirCmds = invocations.stream().filter(c -> c.contains("mkdir -p")).toList();
-    var pushCmds =
-        invocations.stream()
-            .filter(c -> c.contains("incus file push") && c.contains("spec-board/"))
-            .toList();
-    assertFalse(
-        mkdirCmds.isEmpty(), "Should create parent directories before pushing context files");
-    assertFalse(pushCmds.isEmpty(), "Should push skill files");
-  }
-
-  @Test
-  void applyAgentContextPushesClaudeMd() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var applier = applier(shell);
-    var config = minimalConfig("claude-code");
-
-    var result = applier.applyAgentContext(CONTAINER, config);
-
-    assertTrue(result.added() > 0);
+    assertEquals(1, result.added(), "spec-board");
+    var pushes = shell.invocations().stream().filter(c -> c.contains("incus file push")).toList();
     assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("/.claude/CLAUDE.md")));
+        pushes.stream()
+            .anyMatch(
+                c ->
+                    c.contains("/home/dev/.claude/.sail-stage-build-spec-board.")
+                        && c.endsWith("/SKILL.md")),
+        pushes.toString());
+    assertTrue(
+        pushes.stream().noneMatch(c -> c.contains("CLAUDE.md") || c.contains("AGENTS.md")),
+        "sail writes no context file: " + pushes);
+    assertTrue(
+        pushes.stream().noneMatch(c -> c.contains("/workspace/")),
+        "and nothing into the engineer's workspace: " + pushes);
+    assertTrue(
+        shell.invocations().stream().anyMatch(c -> c.contains("flock /home/dev/.claude/skills")),
+        "the folder is put in place under the skills directory's lock");
   }
 
   @Test
-  void applyAgentContextPushesAgentsMdForCodex() throws Exception {
+  void applySkillsInstallsForEveryHarnessTheProjectInstalls() throws Exception {
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var applier = applier(shell);
-    var config = minimalConfig("codex");
+    var config =
+        new SailYaml(
+            "test",
+            null,
+            new SailYaml.Resources(2, "4GB", "50GB"),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new SailYaml.Agent(
+                "claude-code",
+                true,
+                "sail/",
+                true,
+                List.of("claude-code", "codex"),
+                null,
+                null,
+                null,
+                null),
+            null);
 
-    var result = applier.applyAgentContext(CONTAINER, config);
+    var result = applier.applySkills(CONTAINER, config, ProjectSkills.none());
 
-    assertTrue(result.added() > 0);
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("/.codex/AGENTS.md")));
+    assertEquals(2, result.added());
+    for (var dir : List.of("/home/dev/.claude/", "/home/dev/.agents/")) {
+      assertTrue(
+          shell.invocations().stream()
+              .anyMatch(c -> c.contains(dir + ".sail-stage-build-spec-board.")),
+          dir);
+    }
   }
 
   @Test
-  void applyAgentContextSkipsWhenNoAgent() throws Exception {
+  void applySkillsInstallsTheProjectsSkillsAndWarnsOfAFolderThatIsNone() throws Exception {
+    try (var db = Sqlite.open(tempDir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      var files = new FileStore(db);
+      Acting.system(
+          () -> {
+            files.put(
+                "test",
+                ".sail/skills/e2e/SKILL.md",
+                new ByteArrayInputStream("Run the suite.\n".getBytes(StandardCharsets.UTF_8)),
+                0644);
+            files.put(
+                "test",
+                ".sail/skills/e2e/run.sh",
+                new ByteArrayInputStream("#!/bin/sh\n".getBytes(StandardCharsets.UTF_8)),
+                0755);
+            files.put(
+                "test",
+                ".sail/skills/broken/notes.md",
+                new ByteArrayInputStream("no manifest".getBytes(StandardCharsets.UTF_8)),
+                0644);
+          });
+      var skills =
+          new ProjectSkills(
+              project ->
+                  new SharedProjectFiles(
+                      files, tempDir.resolve("projects"), project, FileLimits.defaults()));
+      var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+      var out = new ByteArrayOutputStream();
+      var applier = new ProjectApplier(shell, new PrintStream(out));
+
+      var result = applier.applySkills("test", minimalConfig("codex"), skills);
+
+      assertEquals(2, result.added(), "e2e and spec-board");
+      assertEquals(
+          List.of(
+              "skill folder 'broken' skipped: .sail/skills/broken/SKILL.md is missing or is not a"
+                  + " text file."),
+          result.warnings());
+      assertTrue(
+          shell.invocations().stream()
+              .anyMatch(
+                  c ->
+                      c.contains("--mode 0755")
+                          && c.contains("/home/dev/.agents/.sail-stage-build-e2e.")
+                          && c.endsWith("/run.sh")),
+          shell.invocations().toString());
+      assertTrue(
+          out.toString(StandardCharsets.UTF_8)
+              .contains("[apply] Skills \u2192 ~/.agents/skills/ (e2e, spec-board)"),
+          out.toString(StandardCharsets.UTF_8));
+    }
+  }
+
+  @Test
+  void applySkillsSkipsWhenNoAgent() throws Exception {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var config =
@@ -458,31 +637,12 @@ class ProjectApplierTest {
             null,
             null,
             null,
-            null,
             null);
 
-    var result = applier.applyAgentContext(CONTAINER, config);
+    var result = applier.applySkills(CONTAINER, config, ProjectSkills.none());
 
     assertEquals(0, result.added());
-  }
-
-  @Test
-  void applyAgentContextWritesTheHomeContextNeverTheWorkspace() throws Exception {
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var applier = applier(shell);
-    var config = minimalConfig("claude-code");
-
-    var result = applier.applyAgentContext(CONTAINER, config);
-
-    assertTrue(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("/.claude/CLAUDE.md")),
-        "sail writes its home-level CLAUDE.md");
-    assertFalse(
-        shell.invocations().stream()
-            .anyMatch(c -> c.contains("incus file push") && c.contains("/workspace/")),
-        "sail never writes into the engineer's workspace on a delta apply");
-    assertTrue(result.added() > 0, "sail-owned context and skills refresh every run");
+    assertTrue(shell.invocations().isEmpty());
   }
 
   @Test
@@ -669,10 +829,9 @@ class ProjectApplierTest {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
     var agent =
-        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null, null);
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null, null);
     var config =
-        new SailYaml(
-            "test", null, null, null, null, null, null, null, null, null, agent, null, null);
+        new SailYaml("test", null, null, null, null, null, null, null, null, null, agent, null);
 
     var warnings = applier.checkUnsupportedChanges(config, null);
 
@@ -1085,8 +1244,7 @@ class ProjectApplierTest {
   }
 
   private static SailYaml minimalConfig(String agentType) {
-    var agent =
-        new SailYaml.Agent(agentType, true, "sail/", true, null, null, null, null, null, null);
+    var agent = new SailYaml.Agent(agentType, true, "sail/", true, null, null, null, null, null);
     return new SailYaml(
         "test",
         null,
@@ -1099,7 +1257,6 @@ class ProjectApplierTest {
         null,
         null,
         agent,
-        null,
         null);
   }
 }

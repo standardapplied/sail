@@ -144,7 +144,8 @@ class RunLauncherTest {
         null,
         store,
         events::add,
-        StageSkills::builtInOnly);
+        ProjectSkills::none,
+        RunLauncher.Room.NONE);
   }
 
   private static RunLauncher.RunContext ctx(boolean background) {

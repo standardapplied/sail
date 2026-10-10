@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
@@ -20,19 +21,23 @@ import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.ProjectSkillInstaller;
+import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.engine.StageSkillInstaller;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.BuiltInSkills;
+import ai.singlr.sail.gen.SpecSkillGenerator;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -201,7 +206,6 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                 project -> config,
                 project -> "codex",
                 dispatch.reviewLanes(),
-                StageSkills.builtInOnly(),
                 bus,
                 () -> {},
                 () -> HANDLE)
@@ -235,10 +239,39 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
   }
 
   /**
-   * The files of the installed skill {@code name}, each with its mode and owner: the stamp with
-   * what it holds, any other file with its size.
+   * A project skill, shared as the project's files, is installed whole for both harnesses as {@code
+   * project apply} installs it, and read back from each one's folder.
    */
-  private List<String> installedSkill(String name) throws Exception {
+  private void projectSkillsAreInstalledForBothHarnesses() throws Exception {
+    var files = new FileStore(db);
+    Acting.system(
+        () ->
+            files.put(
+                CONTAINER,
+                StageSkill.PROJECT_ROOT + "e2e/SKILL.md",
+                new ByteArrayInputStream("Run the e2e suite.\n".getBytes(StandardCharsets.UTF_8)),
+                0644));
+    var skills =
+        new ProjectSkills(
+            project ->
+                new SharedProjectFiles(
+                    files, stateDir.resolve("projects"), project, FileLimits.defaults()));
+    for (var harness : Harnesses.all()) {
+      var report = ProjectSkillInstaller.installProject(shell, CONTAINER, harness, skills);
+      assertEquals(List.of("e2e", SpecSkillGenerator.NAME), report.installed());
+      assertEquals(
+          "Run the e2e suite.\n",
+          exec(CONTAINER, List.of("cat", "/home/dev/" + harness.skillFolder("e2e") + "/SKILL.md"))
+              .stdout(),
+          harness.yamlName());
+    }
+  }
+
+  /**
+   * The files of the installed skill at {@code folder}, each with its mode and owner: the stamp
+   * with what it holds, any other file with its size.
+   */
+  private List<String> installedSkill(String folder) throws Exception {
     var listed =
         exec(
             CONTAINER,
@@ -249,7 +282,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
                     + " if [ \"$f\" = .sail-skill ]; then v=$(cat \"$f\"); else v=$(wc -c < \"$f\");"
                     + " fi; echo \"$f $(stat -c '%a %U' \"$f\") $v\"; done",
                 "sh",
-                "/home/dev/.agents/skills/" + name));
+                folder));
     assertTrue(listed.ok(), listed.stderr());
     return listed.stdout().lines().toList();
   }
@@ -287,17 +320,13 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
         "the reviewer runs as its run's systemd unit, like a build");
     assertEquals(
         List.of(
-            ".sail-skill 644 dev "
-                + StageSkillInstaller.fingerprint(
-                    BuiltInSkills.of(StageSkill.REVIEW).orElseThrow()),
+            ".sail-skill 644 dev " + ProjectSkillInstaller.fingerprint(SpecSkillGenerator.skill()),
             "SKILL.md 644 dev "
-                + BuiltInSkills.text(StageSkill.REVIEW)
-                    .orElseThrow()
-                    .getBytes(StandardCharsets.UTF_8)
-                    .length),
-        installedSkill(StageSkill.REVIEW),
-        "the reviewer's skill is in Codex's skills folder: whole, the dev user's, and stamped");
-    assertTrue(reviewer.task().contains("## How to do this work (skill: sail-review)"));
+                + SpecSkillGenerator.skillMd().getBytes(StandardCharsets.UTF_8).length),
+        installedSkill("/home/dev/.agents/skills/" + SpecSkillGenerator.NAME),
+        "sail's skill is in Codex's skills folder: whole, the dev user's, and stamped");
+    assertTrue(reviewer.task().contains("## What this stage judges (stage: security)"));
+    assertFalse(reviewer.task().contains("skill"), "no prompt names a skill: " + reviewer.task());
 
     release();
     watcherObservesTheExitOf(reviewer);
@@ -310,9 +339,20 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
     var second = launched("review", "review_stage_started");
     watcherObservesTheExitOf(second);
     assertEquals(
-        List.of("sail-fix", "sail-review"),
+        List.of(SpecSkillGenerator.NAME),
         exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents/skills")).stdout().lines().toList(),
-        "each stage's skill is installed once, and no build folder is left among them");
+        "sail's skill is installed once, and no build folder is left among them");
+    for (var contextFile : List.of("/home/dev/.claude/CLAUDE.md", "/home/dev/.codex/AGENTS.md")) {
+      assertFalse(
+          exec(CONTAINER, List.of("test", "-e", contextFile)).ok(),
+          "sail writes no context file: " + contextFile);
+    }
+    assertTrue(
+        exec(CONTAINER, List.of("cat", "/home/dev/.sail/claude-settings.json"))
+            .stdout()
+            .contains("Read(/home/dev/.config/gh/**)"),
+        "the room lane's deny rules name the gh token");
+    projectSkillsAreInstalledForBothHarnesses();
     assertTrue(
         exec(CONTAINER, List.of("ls", "-A", "/home/dev/.agents"))
             .stdout()

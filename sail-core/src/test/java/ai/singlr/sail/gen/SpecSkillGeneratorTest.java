@@ -7,128 +7,104 @@ package ai.singlr.sail.gen;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.engine.StageSkill;
+import ai.singlr.sail.store.BlobStore;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class SpecSkillGeneratorTest {
 
-  private static final String BASE = "/home/dev/workspace/";
-
+  /**
+   * The front matter whole: a description a model acts on, so an interactive session that is asked
+   * about specs or the board finds the {@code spec} CLI, and nothing keeping the harness from
+   * invoking it.
+   */
   @Test
-  void claudeCodeGeneratesSkillMdAndTemplate() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
+  void theFrontMatterSaysWhenToUseTheSkillAndLetsTheHarnessInvokeIt() {
+    var text = SpecSkillGenerator.skillMd();
 
-    assertEquals(2, files.size());
-    assertEquals(BASE + ".claude/skills/spec-board/SKILL.md", files.get(0).remotePath());
-    assertEquals(BASE + ".claude/skills/spec-board/spec-template.md", files.get(1).remotePath());
+    assertEquals(
+        """
+        ---
+        name: spec-board
+        description: >
+          Use when the engineer asks about specs, the board, what to work on next, or to create or
+          update a spec. Specs live in the Sail database and are managed with the `spec` CLI.
+        argument-hint: "[create|list|show|update] [args...]"
+        ---
+        """,
+        text.substring(0, text.indexOf("---\n", 4) + 4));
+    assertFalse(text.contains("disable-model-invocation"), text);
   }
 
   @Test
-  void claudeSkillMdHasFrontmatter() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
+  void theSkillIsItsManifestAndTheTemplateAsTheBlobStoreWouldNameThem() throws IOException {
+    var skill = SpecSkillGenerator.skill();
 
-    assertTrue(content.startsWith("---\n"));
-    assertTrue(content.contains("name: spec-board"));
-    assertTrue(content.contains("description:"));
-    assertTrue(content.contains("argument-hint:"));
+    assertEquals("spec-board", skill.name());
+    assertTrue(skill.body().startsWith("You are the spec manager for this project."), skill.body());
+    assertEquals(
+        List.of("SKILL.md", "spec-template.md"),
+        skill.files().stream().map(StageSkill.File::path).toList());
+    for (var file : skill.files()) {
+      var bytes = SpecSkillGenerator.content(file).readAllBytes();
+      assertEquals(BlobStore.hash(bytes), file.contentHash(), file.path());
+      assertEquals(bytes.length, file.size(), file.path());
+      assertEquals(0644, file.mode(), file.path());
+    }
+    assertEquals(
+        SpecSkillGenerator.skillMd(),
+        new String(
+            SpecSkillGenerator.content(skill.files().getFirst()).readAllBytes(),
+            StandardCharsets.UTF_8));
   }
 
   @Test
-  void claudeSkillMdManagesSpecsThroughTheCliNotFiles() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
+  void aFileTheSkillDoesNotHoldIsRefusedNamingIt() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> SpecSkillGenerator.content(new StageSkill.File("other.md", "x", 1, 0644)));
+
+    assertEquals("spec-board has no file other.md.", refused.getMessage());
+  }
+
+  @Test
+  void theManifestManagesSpecsThroughTheCliNotFiles() {
+    var content = SpecSkillGenerator.skillMd();
 
     assertTrue(content.contains("spec create"));
     assertTrue(content.contains("spec board"));
     assertTrue(content.contains("spec update"));
-    assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
-  }
-
-  @Test
-  void claudeSkillMdContainsAllCommands() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
-
-    assertTrue(content.contains("list"), "Should contain list command");
-    assertTrue(content.contains("create"), "Should contain create command");
-    assertTrue(content.contains("show"), "Should contain show command");
-    assertTrue(content.contains("update"), "Should contain update command");
-    assertTrue(content.contains("Bulk creation"), "Should contain bulk creation");
-  }
-
-  @Test
-  void claudeSkillMdContainsKanbanBoard() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
-
-    assertTrue(content.contains("Pending"));
-    assertTrue(content.contains("In Progress"));
-    assertTrue(content.contains("Review"));
-    assertTrue(content.contains("Done"));
-  }
-
-  @Test
-  void claudeSkillMdContainsStatusLifecycle() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
-
-    assertTrue(content.contains("pending"));
-    assertTrue(content.contains("in_progress"));
-    assertTrue(content.contains("review"));
-    assertTrue(content.contains("done"));
-  }
-
-  @Test
-  void claudeTemplateFileContainsSpecStructure() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var template = files.get(1).content();
-
-    assertTrue(template.contains("## Goal"));
-    assertTrue(template.contains("## Requirements"));
-    assertTrue(template.contains("## Approach"));
-    assertTrue(template.contains("## Edge Cases"));
-    assertTrue(template.contains("## Test Strategy"));
-  }
-
-  @Test
-  void codexGetsARealSkillFileNotInlineInstructions() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("codex"), BASE);
-
-    assertEquals(2, files.size());
-    assertEquals(BASE + ".agents/skills/spec-board/SKILL.md", files.get(0).remotePath());
-    assertEquals(BASE + ".agents/skills/spec-board/spec-template.md", files.get(1).remotePath());
-    var content = files.get(0).content();
-    assertTrue(content.contains("name: spec-board"));
-    assertTrue(content.contains("spec create"));
-    assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
-  }
-
-  @Test
-  void filesAreNotExecutable() {
-    var claudeFiles = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-
-    for (var file : claudeFiles) {
-      assertFalse(file.executable());
-    }
-  }
-
-  @Test
-  void claudeSkillReferencesTemplateFile() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
-
-    assertTrue(content.contains("spec-template.md"));
-  }
-
-  @Test
-  void dependencyRulesDocumented() {
-    var files = SpecSkillGenerator.generateFiles(Harnesses.of("claude-code"), BASE);
-    var content = files.get(0).content();
-
+    assertTrue(content.contains("Bulk creation"));
+    assertTrue(content.contains("pending` → `in_progress` → `review` → `awaiting_merge` → `done`"));
     assertTrue(content.contains("depends-on"));
     assertTrue(content.contains("blocked"));
+    assertTrue(content.contains("[spec-template.md](spec-template.md)"));
+    assertFalse(content.contains("spec.yaml"), "specs are DB rows, not files");
+  }
+
+  @Test
+  void theTemplateHasTheSectionsASpecBodyHas() throws IOException {
+    var template = SpecSkillGenerator.skill().files().getLast();
+    var content =
+        new String(SpecSkillGenerator.content(template).readAllBytes(), StandardCharsets.UTF_8);
+
+    for (var section :
+        List.of(
+            "## Goal",
+            "## Background",
+            "## Requirements",
+            "## Approach",
+            "## Edge Cases",
+            "## Test Strategy",
+            "## Out of Scope")) {
+      assertTrue(content.contains(section), section);
+    }
   }
 }

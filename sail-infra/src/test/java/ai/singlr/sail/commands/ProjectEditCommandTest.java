@@ -50,14 +50,15 @@ class ProjectEditCommandTest {
   }
 
   @Test
-  void rejectsAStageSkillSailWouldRefuseNamingItsKey() {
+  void rejectsADeletedKeyNamingWhereItsTextGoes() {
     var error =
         assertThrows(
             IllegalArgumentException.class,
             () ->
                 ProjectEditCommand.validate(
                     "acme", "name: acme\nagent:\n  type: codex\n  build_skill: sail-x\n"));
-    assertTrue(error.getMessage().contains("agent.build_skill 'sail-x'"), error.getMessage());
+    assertTrue(
+        error.getMessage().contains("agent.build_skill is no longer read"), error.getMessage());
   }
 
   @Test

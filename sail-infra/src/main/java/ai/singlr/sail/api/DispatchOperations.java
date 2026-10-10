@@ -169,7 +169,7 @@ public final class DispatchOperations {
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
   private RoomStore roomStore;
-  private StageSkills stageSkills = StageSkills.builtInOnly();
+  private ProjectSkills projectSkills = ProjectSkills.none();
   private final SessionYield sessionYield;
   private final EventSink events;
   private final WatcherSpawner watcherSpawner;
@@ -216,7 +216,14 @@ public final class DispatchOperations {
     this.roomCommitGuard = new RoomCommitGuard(runStore, projects, this.events, shell);
     this.runLauncher =
         new RunLauncher(
-            shell, launcher, listener, watcherSpawner, runStore, this.events, () -> stageSkills);
+            shell,
+            launcher,
+            listener,
+            watcherSpawner,
+            runStore,
+            this.events,
+            () -> projectSkills,
+            this::tellRoom);
     this.runReservation = new RunReservation(runStore, shell, listener, sessionYield);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
@@ -244,8 +251,25 @@ public final class DispatchOperations {
             snapshotter,
             listener,
             this.events,
-            shell,
-            () -> stageSkills);
+            shell);
+  }
+
+  /**
+   * Says {@code body} in the room of {@code specId} as sail, best-effort: a line telling of what a
+   * launch skipped must never fail the launch. Silent on a box that keeps no messages.
+   */
+  private void tellRoom(String specId, String body) {
+    var messages = messageStore;
+    if (messages == null || specStore == null) {
+      return;
+    }
+    try {
+      var room = specStore.findById(specId).map(SpecStore.SpecRow::roomIdOrIdentity).orElse(specId);
+      messages.append(room, MessageStore.SAIL_AUTHOR, MessageStore.fitted(body), null);
+    } catch (RuntimeException e) {
+      System.err.println(
+          "  [api] Warning: could not post to the room of spec " + specId + ": " + e.getMessage());
+    }
   }
 
   public DispatchOperations useMessages(MessageStore messages) {
@@ -261,10 +285,10 @@ public final class DispatchOperations {
 
   /**
    * Wires where a project's own skills are read from; returns {@code this}. Until then a launch
-   * finds only the skills sail ships, and one that names a project's is refused.
+   * installs only the skill sail ships.
    */
-  public DispatchOperations useStageSkills(StageSkills skills) {
-    this.stageSkills = Objects.requireNonNull(skills, "skills");
+  public DispatchOperations useProjectSkills(ProjectSkills skills) {
+    this.projectSkills = Objects.requireNonNull(skills, "skills");
     return this;
   }
 

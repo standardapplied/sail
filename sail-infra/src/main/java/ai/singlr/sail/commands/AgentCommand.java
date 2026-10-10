@@ -21,7 +21,6 @@ import picocli.CommandLine.Command;
       AgentLogCommand.class,
       AgentReviewCommand.class,
       AgentSweepCommand.class,
-      AgentContextCommand.class,
       AgentWatchCommand.class,
       AgentReportCommand.class,
     })

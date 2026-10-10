@@ -9,7 +9,6 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.api.SyncScheduler;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
@@ -134,7 +133,7 @@ public final class ProjectRenamer {
           },
           warnings,
           "restart the container");
-      finish(containers, renamed, newDefinition, warnings);
+      finish(containers, renamed, warnings);
       if (!wasRunning) {
         attempt(() -> containers.stop(renamed), warnings, "stop the container");
       }
@@ -142,14 +141,9 @@ public final class ProjectRenamer {
     return new Result(old, renamed, hasContainer, warnings);
   }
 
-  private void finish(
-      ContainerManager containers, String container, String definition, List<String> warnings) {
+  private void finish(ContainerManager containers, String container, List<String> warnings) {
     attempt(() -> containers.setHostname(container), warnings, "set the container hostname");
     attempt(() -> ContainerSailSetup.ensureInstalled(shell, container), warnings, "re-wire sail");
-    attempt(
-        () -> AgentContextInstaller.install(shell, container, parse(definition)),
-        warnings,
-        "regenerate agent context");
   }
 
   private void moveProjectDir(String from, String to) throws IOException {
@@ -171,10 +165,6 @@ public final class ProjectRenamer {
     var map = YamlUtil.parseMap(definition);
     map.put("name", name);
     return YamlUtil.dumpToString(map);
-  }
-
-  private static SailYaml parse(String definition) {
-    return ProjectDefinitions.resolveForProvisioning(definition);
   }
 
   private static void attempt(Compensation step, List<String> warnings, String what) {

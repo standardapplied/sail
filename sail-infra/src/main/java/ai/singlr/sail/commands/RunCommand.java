@@ -12,6 +12,7 @@ import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationHooks;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.api.SailEventPublisher;
 import ai.singlr.sail.api.StopOperations;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -20,7 +21,6 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecCatalog;
 import ai.singlr.sail.config.YamlUtil;
-import ai.singlr.sail.engine.AgentContextInstaller;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
@@ -30,11 +30,13 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectDefinitions;
+import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import ai.singlr.sail.engine.WatcherSpawner;
-import ai.singlr.sail.gen.AgentContextGenerator;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.SpecStore;
@@ -45,6 +47,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
@@ -86,11 +89,6 @@ public final class RunCommand implements Runnable {
       defaultValue = "")
   private String path;
 
-  @Option(
-      names = "--no-regen",
-      description = "Skip context regeneration (use existing context files).")
-  private boolean noRegen;
-
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
@@ -111,15 +109,32 @@ public final class RunCommand implements Runnable {
 
   private final Supplier<HostOperations> operations;
   private final LocalIdentity identity;
+  private final Function<Boolean, ShellExec> shells;
+  private final DispatchOperations.AgentLauncher terminal;
   private SailEventPublisher eventPublisher;
 
   public RunCommand() {
-    this(OperationsFactory::open, LocalIdentity.detect());
+    this(
+        OperationsFactory::open,
+        LocalIdentity.detect(),
+        ShellExecutor::new,
+        DispatchOperations.terminalLauncher());
   }
 
-  RunCommand(Supplier<HostOperations> operations, LocalIdentity identity) {
+  /**
+   * @param shells the host shell, by whether this is a dry run
+   * @param terminal what runs a foreground agent in this terminal: the interactive session's {@code
+   *     ssh}, and a task session's agent command
+   */
+  RunCommand(
+      Supplier<HostOperations> operations,
+      LocalIdentity identity,
+      Function<Boolean, ShellExec> shells,
+      DispatchOperations.AgentLauncher terminal) {
     this.operations = operations;
     this.identity = identity;
+    this.shells = shells;
+    this.terminal = terminal;
   }
 
   @Override
@@ -137,11 +152,10 @@ public final class RunCommand implements Runnable {
 
     SailYaml config;
     try (var operations = this.operations.get()) {
-      config =
-          AgentContextRegenCommand.definitionWithBoxIdentity(operations.catalog(), name, identity);
+      config = ProjectDefinitions.definitionWithBoxIdentity(operations.catalog(), name, identity);
     }
 
-    var shell = new ShellExecutor(dryRun);
+    var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
@@ -154,36 +168,7 @@ public final class RunCommand implements Runnable {
     launchAgent(shell, config);
   }
 
-  private void regenContext(ShellExecutor shell, SailYaml config) throws Exception {
-    var contextFiles = AgentContextGenerator.generateFiles(config);
-    if (contextFiles.isEmpty()) {
-      return;
-    }
-
-    if (dryRun) {
-      for (var f : contextFiles) {
-        System.out.println(
-            "[dry-run] Would push "
-                + f.remotePath()
-                + " ("
-                + f.content().length()
-                + " bytes"
-                + (f.executable() ? ", executable" : "")
-                + ")");
-      }
-      return;
-    }
-
-    var result = AgentContextInstaller.install(shell, name, config);
-
-    if (!json) {
-      var msg = "Context regenerated (" + result.pushed().size() + " files)";
-      System.out.println(Ansi.AUTO.string("  @|green \u2713|@ " + msg));
-      System.out.println();
-    }
-  }
-
-  private void launchAgent(ShellExecutor shell, SailYaml config) throws Exception {
+  private void launchAgent(ShellExec shell, SailYaml config) throws Exception {
     if (task == null && config.agent() != null) {
       try (var operations = this.operations.get()) {
         var nextSpec = SpecCatalog.nextReady(operations.catalog().projectSpecs(name));
@@ -228,9 +213,6 @@ public final class RunCommand implements Runnable {
     var branchName = branchName(config, label);
 
     if (task == null) {
-      if (!noRegen) {
-        regenContext(shell, config);
-      }
       prepareContainer(shell, workDir, snapshotTaken, label, branchName);
     }
 
@@ -241,7 +223,29 @@ public final class RunCommand implements Runnable {
     if (task != null) {
       launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label);
     } else {
+      installSkills(shell, harness);
       launchInteractive(sshUser, workDir, fullPermissions, harness);
+    }
+  }
+
+  /**
+   * Puts the project's skills in {@code harness}'s skills folder before an interactive session, as
+   * a task launch does on its way through {@link DispatchOperations}: a session after a {@code
+   * skills add}, {@code rm} or an edit sees the folders the project holds now. A preview ({@code
+   * --dry-run}, {@code --json}) installs nothing.
+   */
+  private void installSkills(ShellExec shell, Harness harness) throws Exception {
+    if (dryRun || json) {
+      return;
+    }
+    ProjectSkillInstaller.Report report;
+    try (var operations = this.operations.get()) {
+      report =
+          ProjectSkillInstaller.installProject(
+              shell, name, harness, new ProjectSkills(operations::projectFiles));
+    }
+    for (var skipped : report.skipped()) {
+      System.err.println(Banner.warnLine(skipped, Ansi.AUTO));
     }
   }
 
@@ -256,14 +260,14 @@ public final class RunCommand implements Runnable {
 
   /**
    * The pre-launch container mutations — the snapshot and the work-branch checkout. The task lane
-   * runs this (and the context regeneration, which overwrites the shared home-level agent context)
-   * only through {@link DispatchOperations.AdhocPreparer}, strictly after the whole-container
-   * reservation is won, so a refused launch never disturbs the workspace — or the lazily loaded
-   * instructions and skills — of the agent that owns it; the interactive lane, which reserves
-   * nothing, prepares inline.
+   * runs this (and the skill install, which replaces folders in the shared home-level skills
+   * directory) only through {@link DispatchOperations.AdhocPreparer}, strictly after the
+   * whole-container reservation is won, so a refused launch never disturbs the workspace — or the
+   * lazily loaded skills — of the agent that owns it; the interactive lane, which reserves nothing,
+   * prepares inline.
    */
   private void prepareContainer(
-      ShellExecutor shell, String workDir, boolean snapshotTaken, String label, String branchName)
+      ShellExec shell, String workDir, boolean snapshotTaken, String label, String branchName)
       throws Exception {
     if (snapshotTaken) {
       SnapshotDecision.create(System.out, new SnapshotManager(shell), name, label, json);
@@ -286,13 +290,12 @@ public final class RunCommand implements Runnable {
    * Launches the headless task session as a first-class ad-hoc run through the shared {@link
    * DispatchOperations} launch machinery: a minted run id, a whole-container reservation, a
    * run-scoped unit and log, and — in the background mode — the same run-addressed guardrail
-   * watcher a dispatch gets. The context regeneration, snapshot, and branch checkout ride the
-   * preparer, so they happen only once the reservation is won. {@code --json} and {@code --dry-run}
-   * describe the launch (the command and run-scoped paths) without reserving, preparing, or
-   * executing anything.
+   * watcher a dispatch gets. The skill install, snapshot, and branch checkout ride the preparer, so
+   * they happen only once the reservation is won. {@code --json} and {@code --dry-run} describe the
+   * launch (the command and run-scoped paths) without reserving, preparing, or executing anything.
    */
   private void launchTaskSession(
-      ShellExecutor shell,
+      ShellExec shell,
       SailYaml config,
       String workDir,
       String branchName,
@@ -319,12 +322,9 @@ public final class RunCommand implements Runnable {
                             name,
                             request,
                             handle,
-                            () -> {
-                              if (!noRegen) {
-                                regenContext(shell, config);
-                              }
-                              prepareContainer(shell, workDir, snapshotTaken, label, branchName);
-                            }));
+                            () ->
+                                prepareContainer(
+                                    shell, workDir, snapshotTaken, label, branchName)));
       } catch (ApiException e) {
         if (background
             && snapshotLabel != null
@@ -350,8 +350,7 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private HostOperations operations(
-      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
+  private HostOperations operations(ShellExec shell, AtomicReference<List<String>> launchCommand) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -395,7 +394,7 @@ public final class RunCommand implements Runnable {
             this::publishLifecycle,
             new WatcherSpawner(shell, WatcherSpawner::spawnProcess),
             (project, config) -> "",
-            DispatchOperations.terminalLauncher(),
+            terminal,
             listener,
             StopOperations.Listener.NONE),
         new PtyHostYield());
@@ -509,7 +508,7 @@ public final class RunCommand implements Runnable {
         + " done`. Then pick up the next pending spec and continue working.";
   }
 
-  private void autoRollback(ShellExecutor shell, String snapshotLabel, int exitCode) {
+  private void autoRollback(ShellExec shell, String snapshotLabel, int exitCode) {
     try {
       var rollbackMap = new LinkedHashMap<String, Object>();
       rollbackMap.put("rolled_back_at", DateTimeUtils.now().toString());
@@ -552,10 +551,7 @@ public final class RunCommand implements Runnable {
     if (dryRun) {
       System.out.println("[dry-run] " + String.join(" ", sshCmd));
     } else {
-      var pb = new ProcessBuilder(sshCmd);
-      pb.inheritIO();
-      var process = pb.start();
-      var exitCode = process.waitFor();
+      var exitCode = terminal.launch(sshCmd);
       if (exitCode != 0) {
         System.err.println(
             Banner.errorLine("Agent session exited with code " + exitCode, Ansi.AUTO));

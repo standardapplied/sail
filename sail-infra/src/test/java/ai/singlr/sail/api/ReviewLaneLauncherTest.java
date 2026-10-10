@@ -14,8 +14,6 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentUnit;
-import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.gen.BuiltInSkills;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import java.nio.file.Path;
@@ -61,8 +59,7 @@ class ReviewLaneLauncherTest {
         List.of("api"),
         null,
         "high",
-        shown,
-        BuiltInSkills.of(StageSkill.REVIEW).orElseThrow());
+        shown);
   }
 
   private String launch(ReviewLanes.Invocation invocation) {

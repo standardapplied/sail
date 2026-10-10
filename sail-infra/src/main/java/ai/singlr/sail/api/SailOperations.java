@@ -97,8 +97,8 @@ public final class SailOperations implements HostOperations {
             db, projectStore, specStore, roomStore, schema, pruner, this::cliOperator);
     this.identity = new HostLanes.Identity(db, this::box, roles(), this::cliOperator);
     this.pty = new HostLanes.Pty(db, roles(), eventStore);
-    stageSkills = new StageSkills(this::projectFiles);
-    dispatchOps.useStageSkills(stageSkills);
+    projectSkills = new ProjectSkills(this::projectFiles);
+    dispatchOps.useProjectSkills(projectSkills);
     return this;
   }
 
@@ -328,7 +328,7 @@ public final class SailOperations implements HostOperations {
   private EventDoor door;
   private final ReviewOperations reviewOps;
   private final DispatchOperations dispatchOps;
-  private StageSkills stageSkills = StageSkills.builtInOnly();
+  private ProjectSkills projectSkills = ProjectSkills.none();
   private final StopOperations stopOps;
   private final FdeStore fdeStore;
   private Executor launchExecutor = Executors.newVirtualThreadPerTaskExecutor();
@@ -722,11 +722,11 @@ public final class SailOperations implements HostOperations {
   }
 
   /**
-   * Where every stage's skill is read from on this box: the project's files once the control plane
-   * is wired, sail's own skills alone before. The loop's controller and the launcher share it.
+   * Where a project's skills are read from on this box: the project's files once the control plane
+   * is wired, none before. The launcher, provisioning and apply share it.
    */
-  public StageSkills stageSkills() {
-    return stageSkills;
+  public ProjectSkills projectSkills() {
+    return projectSkills;
   }
 
   /** The review and fix lanes the review pipeline launches through — see {@code reviewLanes}. */

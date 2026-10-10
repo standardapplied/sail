@@ -177,4 +177,19 @@ class GitCredentialsTest {
 
     assertThrows(IllegalArgumentException.class, () -> GitCredentials.extractHttpsHosts(repos));
   }
+
+  @Test
+  void githubHostsAreGithubComAndEveryHostMarkedAsGithub() {
+    var hosts =
+        GitCredentials.githubHosts(
+            List.of(
+                new SailYaml.Repo("https://github.com/org/a.git", "a", null),
+                new SailYaml.Repo("https://github.com/org/b.git", "b", null),
+                new SailYaml.Repo("https://git.example.com/org/c.git", "c", null, "github"),
+                new SailYaml.Repo("https://gitlab.com/org/d.git", "d", null),
+                new SailYaml.Repo("git@github.com:org/e.git", "e", null)));
+
+    assertEquals(List.of("github.com", "git.example.com"), hosts);
+    assertEquals(List.of(), GitCredentials.githubHosts(null));
+  }
 }

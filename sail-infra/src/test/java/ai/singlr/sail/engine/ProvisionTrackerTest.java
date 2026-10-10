@@ -67,6 +67,21 @@ class ProvisionTrackerTest {
   }
 
   @Test
+  void aCompletedPhaseThisVersionNoLongerHasIsReadAsNoProgress() throws Exception {
+    var file = stateFile();
+    Files.writeString(
+        file,
+        "completed_phase: STEP_GONE\nstarted_at: 2026-10-09T00:00:00Z\n"
+            + "updated_at: 2026-10-09T00:00:00Z\n");
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+
+    tracker.load();
+
+    assertFalse(tracker.isCompleted(TestPhase.STEP_ONE));
+    assertEquals(TestPhase.STEP_ONE, tracker.resumePoint().orElseThrow());
+  }
+
+  @Test
   void loadReadsPersistedState() throws Exception {
     var file = stateFile();
     var tracker1 = new ProvisionTracker<>(TestPhase.class, file, false);

@@ -41,9 +41,7 @@ class ProjectProvisionerTest {
         Map.of(
             "postgres", new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
         Map.of("app", new SailYaml.Process("java -jar app.jar", ".")),
-        new SailYaml.Agent(
-            "claude-code", true, "sail/", true, null, Map.of(), null, null, null, null),
-        null,
+        new SailYaml.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
         new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
   }
 
@@ -53,7 +51,6 @@ class ProjectProvisionerTest {
         "Simple project",
         new SailYaml.Resources(2, "4GB", "50GB"),
         "ubuntu/24.04",
-        null,
         null,
         null,
         null,
@@ -341,7 +338,6 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 
     var provisioner = new ProjectProvisioner(shell, tracker(), null);
@@ -591,7 +587,6 @@ class ProjectProvisionerTest {
             null,
             null,
             null,
-            null,
             new SailYaml.Ssh("dev", List.of()));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -622,7 +617,6 @@ class ProjectProvisionerTest {
             "Acme Health",
             new SailYaml.Resources(4, "12GB", "150GB"),
             "ubuntu/24.04",
-            null,
             null,
             null,
             null,
@@ -979,8 +973,7 @@ class ProjectProvisionerTest {
         null,
         null,
         new SailYaml.Git("Acme Eng", "eng@acme.com", auth, null),
-        null,
-        null,
+        List.of(new SailYaml.Repo("https://github.com/acme/api.git", "api", null)),
         null,
         null,
         null,
@@ -1031,6 +1024,35 @@ class ProjectProvisionerTest {
     assertTrue(
         cmds.stream().anyMatch(c -> c.contains("git config --global credential.helper store")),
         "Should configure credential helper store");
+    ProjectApplierTest.assertGhLoggedIn(shell, "github.com", "ghp_test123");
+  }
+
+  @Test
+  void gitConfiguredWithSshNeverLogsGhIn() throws Exception {
+    var shell = shellThroughStep10();
+    var provisioner = new ProjectProvisioner(shell, tracker(), null);
+
+    provisioner.provision(configWithGit("ssh"), hostYaml(), Map.of("*", "ghp_test123"), null);
+
+    assertTrue(shell.invocations().stream().noneMatch(c -> c.contains("gh auth login")));
+  }
+
+  @Test
+  void aFailedGhLoginFailsTheGitStepNamingTheHost() throws Exception {
+    var shell = shellThroughStep10().onFail("gh auth login", "The token in GH_TOKEN is invalid.");
+    var provisioner = new ProjectProvisioner(shell, tracker(), null);
+
+    var failed =
+        assertThrows(
+            IOException.class,
+            () ->
+                provisioner.provision(
+                    configWithGit("token"), hostYaml(), Map.of("*", "ghp_bad"), null));
+
+    assertEquals(
+        "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
+        failed.getMessage());
+    assertEquals(ProjectPhase.GIT_CONFIGURED, tracker().load().resumePoint().orElseThrow());
   }
 
   @Test
@@ -1176,7 +1198,6 @@ class ProjectProvisionerTest {
         null,
         null,
         null,
-        null,
         new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
   }
 
@@ -1188,7 +1209,6 @@ class ProjectProvisionerTest {
         "ubuntu/24.04",
         null,
         new SailYaml.Runtimes(0, null, mavenVersion),
-        null,
         null,
         null,
         null,
@@ -1311,7 +1331,6 @@ class ProjectProvisionerTest {
         null,
         null,
         repos,
-        null,
         null,
         null,
         null,
@@ -1663,7 +1682,6 @@ class ProjectProvisionerTest {
             services,
             null,
             null,
-            null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -1772,17 +1790,7 @@ class ProjectProvisionerTest {
                 new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new SailYaml.Agent(
-                "claude-code",
-                true,
-                "sail/",
-                true,
-                List.of("claude-code"),
-                Map.of(),
-                null,
-                null,
-                null,
-                null),
-            null,
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -1830,17 +1838,7 @@ class ProjectProvisionerTest {
                 new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new SailYaml.Agent(
-                "claude-code",
-                true,
-                "sail/",
-                true,
-                List.of("claude-code"),
-                Map.of(),
-                null,
-                null,
-                null,
-                null),
-            null,
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -1891,10 +1889,7 @@ class ProjectProvisionerTest {
                 List.of("claude-code", "codex"),
                 Map.of(),
                 null,
-                null,
-                null,
                 null),
-            null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -2010,7 +2005,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void contextGenerationWritesTheHomeFileNeverTheWorkspace() throws Exception {
+  void provisioningInstallsSailsSkillAndWritesNoContextFile() throws Exception {
     var config =
         new SailYaml(
             "acme-health",
@@ -2026,17 +2021,7 @@ class ProjectProvisionerTest {
                 new SailYaml.Service("postgres:16", List.of(5432), Map.of(), null, null)),
             null,
             new SailYaml.Agent(
-                "claude-code",
-                true,
-                "sail/",
-                true,
-                List.of("claude-code"),
-                Map.of(),
-                null,
-                null,
-                null,
-                null),
-            null,
+                "claude-code", true, "sail/", true, List.of("claude-code"), Map.of(), null, null),
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -2059,17 +2044,25 @@ class ProjectProvisionerTest {
 
     var cmds = shell.invocations();
     assertTrue(
-        cmds.stream().anyMatch(c -> c.contains("file push") && c.contains("/.claude/CLAUDE.md")),
-        "the sail-owned home context file is installed on provision");
+        cmds.stream()
+            .anyMatch(
+                c ->
+                    c.contains("file push")
+                        && c.contains("/home/dev/.claude/.sail-stage-build-spec-board.")
+                        && c.endsWith("/SKILL.md")),
+        "sail's spec-board skill is installed for the project's harness on provision");
     assertFalse(
         cmds.stream()
             .anyMatch(
                 c ->
                     c.contains("file push")
-                        && (c.contains("/workspace/CLAUDE.md")
-                            || c.contains("/workspace/AGENTS.md")
-                            || c.contains("/workspace/SECURITY.md"))),
-        "sail never generates the engineer's workspace context files on provision");
+                        && (c.contains("CLAUDE.md")
+                            || c.contains("AGENTS.md")
+                            || c.contains("/workspace/"))),
+        "sail writes no context file, in the home or the workspace, on provision");
+    assertTrue(
+        steps.stream().anyMatch(s -> s.startsWith("done:18/") && s.contains("spec-board")),
+        steps.toString());
   }
 
   /** Records all step events for assertion. */

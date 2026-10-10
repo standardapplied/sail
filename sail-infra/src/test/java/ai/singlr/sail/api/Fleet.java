@@ -302,7 +302,6 @@ public final class Fleet implements AutoCloseable {
               project -> REVIEW,
               project -> "codex",
               dispatcher.reviewLanes(),
-              StageSkills.builtInOnly(),
               bus,
               () -> {},
               () -> handle);

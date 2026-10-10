@@ -14,11 +14,10 @@ import java.util.Objects;
 import java.util.regex.Pattern;
 
 /**
- * How one stage of the loop does its work: the instructions sail puts in that stage's prompt, and
- * the folder a harness finds them in. A skill is a folder with a {@code SKILL.md} (front matter,
- * then instructions) and optional scripts and reference files; sail ships one per stage and a
- * project may hold its own. Sail fires the skill itself, by rendering {@link #block} into the
- * prompt, so no launch depends on a harness deciding to load it.
+ * A skill: a folder with a {@code SKILL.md} (front matter, then instructions) and optional scripts
+ * and reference files, the shape Claude Code and Codex share, installed where a harness looks for
+ * skills and invoked when the agent judges it relevant. A project holds its own among its files,
+ * and sail ships one, {@code spec-board}.
  *
  * <p>A skill's name, paths and body are untrusted input, checked here once: a value of this type is
  * bounded and names only files inside its own folder.
@@ -28,15 +27,6 @@ import java.util.regex.Pattern;
  * @param files every file of the folder, {@code SKILL.md} included, in path order
  */
 public record StageSkill(String name, String body, List<File> files) {
-
-  /** The skill the build runs under when a project names none. */
-  public static final String BUILD = "sail-build";
-
-  /** The skill an agent review stage runs under when a project names none. */
-  public static final String REVIEW = "sail-review";
-
-  /** The skill the fix agent runs under when a project names none. */
-  public static final String FIX = "sail-fix";
 
   /** Where a project's own skills live among its files, each in a folder named for it. */
   public static final String PROJECT_ROOT = ".sail/skills/";
@@ -53,7 +43,7 @@ public record StageSkill(String name, String body, List<File> files) {
   /** The most bytes a skill's folder may hold, {@code SKILL.md} included. */
   public static final long MAX_BYTES = 1024 * 1024;
 
-  /** What the name of every skill sail ships starts with, and no project skill's may. */
+  /** What no project skill's name may start with: those names are sail's. */
   public static final String RESERVED = "sail-";
 
   /** The folder a project's skill named {@code name} lives in among its files, slash-ended. */
@@ -132,28 +122,6 @@ public record StageSkill(String name, String body, List<File> files) {
   }
 
   /**
-   * The skill a project's definition names under {@code key}: {@code fallback}, the skill sail
-   * ships for that stage, when it names none. A key accepts its own default or a name the project
-   * can hold a skill under, so every other name starting {@code sail-} is refused: those are
-   * sail's.
-   */
-  public static String configured(String key, String name, String fallback) {
-    if (name == null) {
-      return fallback;
-    }
-    if (!isName(name)) {
-      throw new IllegalArgumentException(
-          "%s '%s' is not a skill name: it must match %s.".formatted(key, name, NAME.pattern()));
-    }
-    if (name.startsWith(RESERVED) && !name.equals(fallback)) {
-      throw new IllegalArgumentException(
-          "%s '%s' is not a skill a project can name: names starting %s are sail's, and this key's is %s."
-              .formatted(key, name, RESERVED, fallback));
-    }
-    return name;
-  }
-
-  /**
    * The skill a {@code SKILL.md} describes, and the only reader of one. A leading byte-order mark
    * is dropped and line endings are read as {@code \n}. When the first line is exactly {@code ---}
    * the front matter runs to the next such line and the body is what follows, stripped; front
@@ -173,17 +141,6 @@ public record StageSkill(String name, String body, List<File> files) {
     }
     var body = lines.subList(closing + 2, lines.size());
     return new StageSkill(name, String.join("\n", body).strip(), files);
-  }
-
-  /**
-   * This skill as a prompt carries it, ending without a newline: the one rendering of a skill.
-   *
-   * @param folder where the harness that runs the prompt finds the skill's folder, named only when
-   *     the skill has a file besides {@code SKILL.md}
-   */
-  public String block(String folder) {
-    var block = "## How to do this work (skill: " + name + ")\n\n" + body;
-    return files.size() > 1 ? block + "\n\nThe skill's other files are in " + folder + "." : block;
   }
 
   private static boolean isRelative(String path) {

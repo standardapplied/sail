@@ -13,9 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
-import ai.singlr.sail.engine.AgentTaskPrompt;
-import ai.singlr.sail.engine.StageSkill;
-import ai.singlr.sail.gen.BuiltInSkills;
+import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -61,11 +59,8 @@ class DispatchCommandTest {
 
   @TempDir Path tempDir;
 
-  private static final String BUILD_SKILL =
-      BuiltInSkills.of(StageSkill.BUILD).orElseThrow().block("~/.claude/skills/sail-build/");
-
   private static String prompt(Spec spec, String description) {
-    return AgentTaskPrompt.build(spec, description, List.of(), BUILD_SKILL).prompt();
+    return WorkPrompt.build(spec, description, List.of(), List.of()).prompt();
   }
 
   @Test
@@ -216,16 +211,16 @@ class DispatchCommandTest {
     var prompt = prompt(spec, "Details");
 
     assertTrue(
-        prompt.contains("## Autonomous Operation"),
-        "the autonomous protocol belongs in the dispatch prompt, not the always-loaded context");
-    assertTrue(prompt.contains("open a pull\nrequest"));
+        prompt.contains("## How this run works"),
+        "the loop's rules belong in the work prompt, not in a context file");
+    assertTrue(prompt.contains("make sure a pull\nrequest is open for it"));
     assertTrue(
         prompt.contains("not complete until CI is green"),
-        "the agent must watch the PR's checks and fix failures — a red-CI PR is unfinished work");
+        "the agent must check the PR's checks and fix failures — a red-CI PR is unfinished work");
     assertTrue(
-        prompt.contains("the CLI of the forge hosting the repo"),
-        "CI-watching guidance must be forge-neutral so GitLab/Bitbucket agents reach for their"
-            + " own forge CLI");
+        prompt.contains("or your forge's\nequivalent"),
+        "CI guidance must be forge-neutral so GitLab/Bitbucket agents reach for their own forge"
+            + " CLI");
     assertTrue(prompt.contains("gh pr checks"), "GitHub stays as one concrete example");
     assertTrue(
         prompt.contains("no Co-Authored-By trailers"),
@@ -272,8 +267,7 @@ class DispatchCommandTest {
             null,
             false);
 
-    var prompt =
-        AgentTaskPrompt.build(spec, "Implement the flow", List.of(message), BUILD_SKILL).prompt();
+    var prompt = WorkPrompt.build(spec, "Implement the flow", List.of(message), List.of()).prompt();
 
     assertTrue(prompt.contains("## Conversation on this spec"));
     assertTrue(prompt.indexOf("Use PKCE") < prompt.indexOf("Implement the flow"));

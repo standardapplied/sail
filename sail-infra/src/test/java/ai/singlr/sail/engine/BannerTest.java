@@ -413,7 +413,6 @@ class BannerTest {
             null,
             null,
             null,
-            null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var out = new ByteArrayOutputStream();
     Banner.printProjectSummary(config, new PrintStream(out), Ansi.OFF);
@@ -436,7 +435,6 @@ class BannerTest {
             "test-proj",
             null,
             new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
             null,
             null,
             null,
@@ -833,9 +831,7 @@ class BannerTest {
             null,
             services,
             null,
-            new SailYaml.Agent(
-                "claude-code", true, "sail/", true, null, null, null, null, null, null),
-            null,
+            new SailYaml.Agent("claude-code", true, "sail/", true, null, null, null, null),
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
     var state = new ContainerState.Running("10.0.0.42");
     var out = new ByteArrayOutputStream();
@@ -872,7 +868,6 @@ class BannerTest {
             null,
             null,
             null,
-            null,
             null);
     var state = new ContainerState.Stopped();
     var out = new ByteArrayOutputStream();
@@ -889,7 +884,6 @@ class BannerTest {
             "minimal",
             null,
             new SailYaml.Resources(2, "4GB", "50GB"),
-            null,
             null,
             null,
             null,
@@ -925,9 +919,7 @@ class BannerTest {
             null,
             null,
             null,
-            new SailYaml.Agent(
-                "claude-code", false, null, true, null, null, null, null, null, null),
-            null,
+            new SailYaml.Agent("claude-code", false, null, true, null, null, null, null),
             new SailYaml.Ssh("dev", null));
     var state = new ContainerState.Running("10.0.0.1");
     var out = new ByteArrayOutputStream();

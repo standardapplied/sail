@@ -23,7 +23,8 @@ public final class DataMigrations {
           new RoomsBackfillMigration(),
           new OrphanErasure(),
           new PersonalRoomErasure(),
-          new MaterializedFilesMigration(SailPaths.projectsDir()));
+          new MaterializedFilesMigration(SailPaths.projectsDir()),
+          new StagePromptsMigration());
 
   private DataMigrations() {}
 

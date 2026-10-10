@@ -109,8 +109,7 @@ public final class ProjectInitCommand implements Runnable {
         }
       } while (ConsoleHelper.confirmNo("Add another?"));
     }
-    return new SailYaml.Agent(
-        agentType, true, "agent/", true, install, null, null, null, null, null);
+    return new SailYaml.Agent(agentType, true, "agent/", true, install, null, null, null, null);
   }
 
   static String agentTypePrompt() {
@@ -255,7 +254,6 @@ public final class ProjectInitCommand implements Runnable {
         services,
         null,
         agent,
-        null,
         ssh);
   }
 

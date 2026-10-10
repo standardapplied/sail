@@ -55,35 +55,8 @@ final class ClaudeCode implements Harness {
   }
 
   @Override
-  public String homeContextPath() {
-    return ".claude/CLAUDE.md";
-  }
-
-  @Override
   public String skillsDir() {
     return ".claude/skills/";
-  }
-
-  /**
-   * A path-scoped rule {@code ~/.claude/rules/<name>.md} whose {@code paths:} frontmatter loads it
-   * only when a matching file enters context, or a session-start rule when the project gives no
-   * globs.
-   */
-  @Override
-  public String languageRulePath(String name) {
-    return ".claude/rules/" + name + ".md";
-  }
-
-  @Override
-  public String languageRule(String name, List<String> paths, String body) {
-    if (paths.isEmpty()) {
-      return body;
-    }
-    var sb = new StringBuilder("---\npaths:\n");
-    for (var glob : paths) {
-      sb.append("  - \"").append(glob).append("\"\n");
-    }
-    return sb.append("---\n\n").append(body).toString();
   }
 
   /**
@@ -231,20 +204,22 @@ final class ClaudeCode implements Harness {
    * a read of any path outside it (verified empirically), so the container's secrets, all of which
    * live outside {@code ~/workspace}, are unreadable by default even without a rule. These denies
    * harden the box FDE {@code box.credential}, the box SSH identity ({@code ~/.ssh}, the Sail CLI
-   * identity), and the {@code ~/.git-credentials} token explicitly on top of that, so the
-   * protection does not rest solely on the cwd heuristic. Claude Code applies a {@code Read(path)}
-   * deny to a Bash command that reads that path (verified), deny outranks every allow rule, and the
-   * room invocation pins {@code --setting-sources ""} so no ambient settings file can shadow these.
-   * A full (YOLO) agent skips permission rules by design: it is the trusted member lane. Spec-CLI
-   * auth is untouched: the helper reads the credential at the OS level, not through a tool.
-   * Residual (a secret committed inside the workspace, a kernel escape, a harness-enforcement bug)
-   * is owned by the room-lane hardening follow-up, a read-only-disk sidecar, not this denylist.
+   * identity), the {@code ~/.git-credentials} token and the {@code gh} token under {@code
+   * ~/.config/gh} explicitly on top of that, so the protection does not rest solely on the cwd
+   * heuristic. Claude Code applies a {@code Read(path)} deny to a Bash command that reads that path
+   * (verified), deny outranks every allow rule, and the room invocation pins {@code
+   * --setting-sources ""} so no ambient settings file can shadow these. A full (YOLO) agent skips
+   * permission rules by design: it is the trusted member lane. Spec-CLI auth is untouched: the
+   * helper reads the credential at the OS level, not through a tool. Residual (a secret committed
+   * inside the workspace, a kernel escape, a harness-enforcement bug) is owned by the room-lane
+   * hardening follow-up, a read-only-disk sidecar, not this denylist.
    */
   private static List<String> readDenyRules() {
     return List.of(
         boxCredentialReadDeny(),
         "Read(" + ContainerExec.DEV_HOME + "/.ssh/**)",
-        "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)");
+        "Read(" + ContainerExec.DEV_HOME + "/.git-credentials)",
+        "Read(" + ContainerExec.DEV_HOME + "/.config/gh/**)");
   }
 
   private static String boxCredentialReadDeny() {

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -12,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.gen.SpecSkillGenerator;
+import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.store.BlobStore;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -33,6 +36,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.BeforeEach;
@@ -48,7 +52,7 @@ import org.junit.jupiter.api.io.TempDir;
  * call: {@code flock}, and the {@code -T} of GNU {@code mv}.
  */
 @EnabledOnOs(OS.LINUX)
-class StageSkillInstallerTest {
+class ProjectSkillInstallerTest {
 
   private static final String PROJECT = "acme";
 
@@ -106,7 +110,7 @@ class StageSkillInstallerTest {
   private void install(
       String runId, StageSkill skill, Function<StageSkill.File, InputStream> content)
       throws Exception {
-    StageSkillInstaller.install(container, PROJECT, folder.toString(), runId, skill, content);
+    ProjectSkillInstaller.install(container, PROJECT, folder.toString(), runId, skill, content);
   }
 
   private Map<String, String> installed() throws IOException {
@@ -189,7 +193,7 @@ class StageSkillInstallerTest {
                 "SKILL.md", "Judge it acme's way.\n",
                 "reference/deep/rules.md", "Rules.\n",
                 "scripts/check.sh", "#!/bin/sh\nmvn -q verify\n"),
-            StageSkillInstaller.fingerprint(source.skill())),
+            ProjectSkillInstaller.fingerprint(source.skill())),
         installed());
     assertEquals("rw-r--r--", mode(folder.resolve("SKILL.md")));
     assertEquals("rwxr-xr-x", mode(folder.resolve("scripts/check.sh")));
@@ -225,7 +229,7 @@ class StageSkillInstallerTest {
     var source = Source.of("SKILL.md", "Body.\n");
     install("run-1", source);
     Files.writeString(
-        folder.resolve(".sail-skill"), StageSkillInstaller.fingerprint(source.skill()) + "\n");
+        folder.resolve(".sail-skill"), ProjectSkillInstaller.fingerprint(source.skill()) + "\n");
     container.commands.clear();
 
     install("run-2", source);
@@ -244,7 +248,7 @@ class StageSkillInstallerTest {
 
     assertEquals(1, container.pushes().size(), "the skill is installed again");
     assertEquals(
-        with(Map.of("SKILL.md", "Body.\n"), StageSkillInstaller.fingerprint(source.skill())),
+        with(Map.of("SKILL.md", "Body.\n"), ProjectSkillInstaller.fingerprint(source.skill())),
         installed());
   }
 
@@ -259,7 +263,7 @@ class StageSkillInstallerTest {
     assertEquals(
         with(
             Map.of("SKILL.md", "Two.\n", "added/new.md", "New.\n", "kept.md", "Kept.\n"),
-            StageSkillInstaller.fingerprint(changed.skill())),
+            ProjectSkillInstaller.fingerprint(changed.skill())),
         installed());
     assertFalse(Files.exists(folder.resolve("dropped")), "nothing of the old folder is left");
     assertEquals(List.of("acme-review"), besideTheFolder());
@@ -278,7 +282,7 @@ class StageSkillInstallerTest {
   @Test
   void theFingerprintIsOfEveryPathHashAndModeUnderTheSkillsName() {
     var base = Source.of("SKILL.md", "Body.\n", "a.md", "A.\n").skill();
-    var fingerprint = StageSkillInstaller.fingerprint(base);
+    var fingerprint = ProjectSkillInstaller.fingerprint(base);
     var files = new LinkedHashMap<String, String>();
     files.put("acme-review/SKILL.md", BlobStore.hash("Body.\n".getBytes()) + " 0644");
     files.put("acme-review/a.md", BlobStore.hash("A.\n".getBytes()) + " 0644");
@@ -286,17 +290,19 @@ class StageSkillInstallerTest {
     assertEquals(ContainerSailSetup.fingerprintOf(files), fingerprint);
     assertNotEquals(
         fingerprint,
-        StageSkillInstaller.fingerprint(Source.of("SKILL.md", "Body.\n", "b.md", "A.\n").skill()));
+        ProjectSkillInstaller.fingerprint(
+            Source.of("SKILL.md", "Body.\n", "b.md", "A.\n").skill()));
     assertNotEquals(
         fingerprint,
-        StageSkillInstaller.fingerprint(Source.of("SKILL.md", "Body.\n", "a.md", "B.\n").skill()));
+        ProjectSkillInstaller.fingerprint(
+            Source.of("SKILL.md", "Body.\n", "a.md", "B.\n").skill()));
     assertNotEquals(
         fingerprint,
-        StageSkillInstaller.fingerprint(
+        ProjectSkillInstaller.fingerprint(
             Source.of("SKILL.md", "Body.\n", "a.md", "A.\n").mode("a.md", 0600).skill()));
     assertNotEquals(
         fingerprint,
-        StageSkillInstaller.fingerprint(new StageSkill("acme-other", base.body(), base.files())),
+        ProjectSkillInstaller.fingerprint(new StageSkill("acme-other", base.body(), base.files())),
         "the same files under another skill's name are another skill");
   }
 
@@ -325,7 +331,7 @@ class StageSkillInstallerTest {
     assertEquals(
         with(
             Map.of("SKILL.md", "One.\n", "rules.md", "Rules one.\n"),
-            StageSkillInstaller.fingerprint(first.skill())),
+            ProjectSkillInstaller.fingerprint(first.skill())),
         installed(),
         "nothing half-installed is in place, and the stamp still names what is");
     assertEquals(List.of("acme-review"), besideTheFolder(), "the failed build is removed");
@@ -364,7 +370,7 @@ class StageSkillInstallerTest {
     var deeper =
         Files.createDirectories(skillsDir.resolve("other/.sail-stage-build-acme-review.old-run"));
     var stale =
-        Instant.now().minus(Duration.ofMinutes(StageSkillInstaller.STALE_BUILD_MINUTES + 1));
+        Instant.now().minus(Duration.ofMinutes(ProjectSkillInstaller.STALE_BUILD_MINUTES + 1));
     Files.setLastModifiedTime(dead, FileTime.from(stale));
     Files.setLastModifiedTime(neighbour, FileTime.from(stale));
     Files.setLastModifiedTime(deeper, FileTime.from(stale));
@@ -404,7 +410,8 @@ class StageSkillInstallerTest {
     Files.setLastModifiedTime(
         slower,
         FileTime.from(
-            Instant.now().minus(Duration.ofMinutes(StageSkillInstaller.STALE_BUILD_MINUTES - 2))));
+            Instant.now()
+                .minus(Duration.ofMinutes(ProjectSkillInstaller.STALE_BUILD_MINUTES - 2))));
 
     install("run-1", Source.of("SKILL.md", "Body.\n"));
 
@@ -419,7 +426,7 @@ class StageSkillInstallerTest {
   void twoLaunchesInstallingOneSkillAtOnceEachLeaveAWholeStampedFolder() throws Exception {
     install("run-0", Source.of("SKILL.md", "Old.\n"));
     var changed = Source.of("SKILL.md", "New.\n", "a.md", "A.\n", "b.md", "B.\n", "c/d.md", "D.\n");
-    var whole = with(changed.contents(), StageSkillInstaller.fingerprint(changed.skill()));
+    var whole = with(changed.contents(), ProjectSkillInstaller.fingerprint(changed.skill()));
     var beside = new ArrayList<Map<String, String>>();
     var mine = new ArrayList<Map<String, String>>();
 
@@ -480,7 +487,7 @@ class StageSkillInstallerTest {
     other.get(30, TimeUnit.SECONDS);
 
     assertEquals(
-        with(changed.contents(), StageSkillInstaller.fingerprint(changed.skill())),
+        with(changed.contents(), ProjectSkillInstaller.fingerprint(changed.skill())),
         installed(),
         "a whole folder, with no build inside it");
     assertEquals(List.of("acme-review"), besideTheFolder());
@@ -519,7 +526,7 @@ class StageSkillInstallerTest {
     assertEquals(
         with(
             Map.of("SKILL.md", "Body.\n", hostile, "Reference.\n"),
-            StageSkillInstaller.fingerprint(source.skill())),
+            ProjectSkillInstaller.fingerprint(source.skill())),
         installed());
     try (Stream<Path> walk = Files.walk(home)) {
       assertEquals(
@@ -592,6 +599,224 @@ class StageSkillInstallerTest {
     assertSame(gone, failed);
     assertEquals(1, failed.getSuppressed().length, "the discard that could not run is kept");
     assertEquals("discard refused", failed.getSuppressed()[0].getMessage());
+  }
+
+  private static StageSkill named(String name, Map<String, String> contents) {
+    var source = Source.of();
+    contents.forEach((path, content) -> source.contents().put(path, content));
+    var base = source.skill();
+    return new StageSkill(name, base.body(), base.files());
+  }
+
+  @Test
+  void installAllInstallsEverySkillWholeRemovesAStampedFolderNoLongerHeldAndLeavesTheRest()
+      throws Exception {
+    var e2e = named("e2e", Map.of("SKILL.md", "Run it.\n", "scripts/run.sh", "#!/bin/sh\n"));
+    var release = named("release", Map.of("SKILL.md", "Cut it.\n"));
+    var gone = named("gone", Map.of("SKILL.md", "Old.\n"));
+    Map<String, Map<String, String>> contents =
+        Map.of(
+            "e2e", Map.of("SKILL.md", "Run it.\n", "scripts/run.sh", "#!/bin/sh\n"),
+            "release", Map.of("SKILL.md", "Cut it.\n"),
+            "gone", Map.of("SKILL.md", "Old.\n"));
+    BiFunction<StageSkill, StageSkill.File, InputStream> content =
+        (skill, file) ->
+            new ByteArrayInputStream(
+                contents.get(skill.name()).get(file.path()).getBytes(StandardCharsets.UTF_8));
+    Files.createDirectories(skillsDir.resolve("mine"));
+    Files.writeString(skillsDir.resolve("mine/SKILL.md"), "an engineer's own\n");
+
+    ProjectSkillInstaller.installAll(
+        container, PROJECT, skillsDir.toString(), List.of(gone), content);
+    assertEquals(
+        with(Map.of("SKILL.md", "Old.\n"), ProjectSkillInstaller.fingerprint(gone)),
+        read(skillsDir.resolve("gone")));
+
+    ProjectSkillInstaller.installAll(
+        container, PROJECT, skillsDir.toString(), List.of(e2e, release), content);
+
+    assertEquals(List.of("e2e", "mine", "release"), besideTheFolder());
+    assertEquals(
+        with(
+            Map.of("SKILL.md", "Run it.\n", "scripts/run.sh", "#!/bin/sh\n"),
+            ProjectSkillInstaller.fingerprint(e2e)),
+        read(skillsDir.resolve("e2e")));
+    assertEquals(
+        with(Map.of("SKILL.md", "Cut it.\n"), ProjectSkillInstaller.fingerprint(release)),
+        read(skillsDir.resolve("release")));
+    assertEquals(
+        Map.of("SKILL.md", "an engineer's own\n"),
+        read(skillsDir.resolve("mine")),
+        "a folder without a stamp is not sail's and is left alone");
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+
+    var pushesBefore = container.pushes().size();
+    ProjectSkillInstaller.installAll(
+        container, PROJECT, skillsDir.toString(), List.of(e2e, release), content);
+
+    assertEquals(pushesBefore, container.pushes().size(), "every stamp was found: nothing pushed");
+    assertEquals(List.of("e2e", "mine", "release"), besideTheFolder());
+  }
+
+  @Test
+  void anUnstampedFolderUnderAHeldSkillsNameIsNotReplacedAndTheInstallSaysSo() throws Exception {
+    var e2e = named("e2e", Map.of("SKILL.md", "Run it.\n"));
+    Files.createDirectories(skillsDir.resolve("e2e"));
+    Files.writeString(skillsDir.resolve("e2e/SKILL.md"), "an engineer's own e2e\n");
+    Files.writeString(skillsDir.resolve("e2e/local-only.txt"), "notes\n");
+
+    var refused =
+        assertThrows(
+            IOException.class,
+            () ->
+                ProjectSkillInstaller.installAll(
+                    container,
+                    PROJECT,
+                    skillsDir.toString(),
+                    List.of(e2e),
+                    (skill, file) -> new ByteArrayInputStream("Run it.\n".getBytes(UTF_8))));
+
+    assertTrue(
+        refused.getMessage().contains("Failed to put in place skill 'e2e' in acme")
+            && refused
+                .getMessage()
+                .contains(
+                    skillsDir.resolve("e2e")
+                        + " holds a skill sail did not install (no .sail-skill in it)."
+                        + " Move it aside, or give the project's skill another name."),
+        refused.getMessage());
+    assertEquals(
+        Map.of("SKILL.md", "an engineer's own e2e\n", "local-only.txt", "notes\n"),
+        read(skillsDir.resolve("e2e")),
+        "the engineer's files are untouched");
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+  }
+
+  /** The {@code spec-board} files sail 0.46.5 wrote into a box, unstamped. */
+  private Path legacySpecBoard(String... files) throws Exception {
+    var folder = skillsDir.resolve("spec-board");
+    Files.createDirectories(folder);
+    for (var file : files) {
+      Files.copy(legacyFile(file), folder.resolve(file));
+    }
+    return folder;
+  }
+
+  private InputStream legacyFile(String file) {
+    return getClass().getResourceAsStream("/spec-board-0.46/" + file);
+  }
+
+  private void installSpecBoard() throws Exception {
+    ProjectSkillInstaller.installAll(
+        container,
+        PROJECT,
+        skillsDir.toString(),
+        List.of(SpecSkillGenerator.skill()),
+        (skill, file) -> SpecSkillGenerator.content(file));
+  }
+
+  private void assertSpecBoardIsNotSailsAndIsLeft(Map<String, String> files) throws Exception {
+    var refused = assertThrows(IOException.class, this::installSpecBoard);
+
+    assertTrue(
+        refused
+            .getMessage()
+            .contains(
+                skillsDir.resolve("spec-board")
+                    + " holds a skill sail did not install (no .sail-skill in it)."),
+        refused.getMessage());
+    assertEquals(files, read(skillsDir.resolve("spec-board")));
+    assertEquals(List.of("skills"), entriesOf(skillsDir.getParent()), "no build is left beside");
+  }
+
+  @Test
+  void theSpecBoardSailWroteBeforeItStampedIsReplacedWholeAndStamped() throws Exception {
+    var specBoard = SpecSkillGenerator.skill();
+    legacySpecBoard("SKILL.md", "spec-template.md");
+
+    installSpecBoard();
+
+    var expected = new LinkedHashMap<String, String>();
+    for (var file : specBoard.files()) {
+      expected.put(file.path(), new String(SpecSkillGenerator.content(file).readAllBytes(), UTF_8));
+    }
+    assertEquals(
+        with(expected, ProjectSkillInstaller.fingerprint(specBoard)),
+        read(skillsDir.resolve("spec-board")));
+  }
+
+  @Test
+  void aSpecBoardHoldingAFileSailNeverWroteIsNotSailsAndIsNotReplaced() throws Exception {
+    var folder = legacySpecBoard("SKILL.md", "spec-template.md");
+    Files.writeString(folder.resolve("notes.md"), "notes\n");
+
+    var files = new LinkedHashMap<>(read(folder));
+    assertSpecBoardIsNotSailsAndIsLeft(files);
+  }
+
+  @Test
+  void aSpecBoardOfSailsFileNamesWithSomeoneElsesContentIsNotReplaced() throws Exception {
+    Files.createDirectories(skillsDir.resolve("spec-board"));
+    Files.writeString(skillsDir.resolve("spec-board/SKILL.md"), "someone's own board\n");
+
+    assertSpecBoardIsNotSailsAndIsLeft(Map.of("SKILL.md", "someone's own board\n"));
+  }
+
+  @Test
+  void aFolderUnderOneOfSailsFileNamesIsNotSailsFileAndWhatItHoldsSurvives() throws Exception {
+    var folder = legacySpecBoard("SKILL.md");
+    Files.createDirectories(folder.resolve("spec-template.md"));
+    Files.writeString(folder.resolve("spec-template.md/personal-draft.md"), "my draft\n");
+
+    assertSpecBoardIsNotSailsAndIsLeft(
+        Map.of(
+            "SKILL.md",
+            Files.readString(folder.resolve("SKILL.md")),
+            "spec-template.md/personal-draft.md",
+            "my draft\n"));
+  }
+
+  @Test
+  void aLinkUnderOneOfSailsFileNamesIsNotSailsFileWhateverItPointsAt() throws Exception {
+    var folder = legacySpecBoard("SKILL.md");
+    var elsewhere = home.resolve("spec-template.md");
+    Files.copy(legacyFile("spec-template.md"), elsewhere);
+    Files.createSymbolicLink(folder.resolve("spec-template.md"), elsewhere);
+
+    assertSpecBoardIsNotSailsAndIsLeft(
+        Map.of(
+            "SKILL.md",
+            Files.readString(folder.resolve("SKILL.md")),
+            "spec-template.md",
+            Files.readString(elsewhere)));
+    assertTrue(Files.isSymbolicLink(folder.resolve("spec-template.md")));
+  }
+
+  @Test
+  void installAllOfNothingRemovesEveryStampedFolderAndNeedsNoSkillsDirectory() throws Exception {
+    var e2e = named("e2e", Map.of("SKILL.md", "Run it.\n"));
+    ProjectSkillInstaller.installAll(
+        container,
+        PROJECT,
+        skillsDir.toString(),
+        List.of(e2e),
+        (skill, file) -> new ByteArrayInputStream("Run it.\n".getBytes(StandardCharsets.UTF_8)));
+
+    ProjectSkillInstaller.installAll(
+        container, PROJECT, skillsDir.toString(), List.of(), (skill, file) -> null);
+
+    assertEquals(List.of(), besideTheFolder());
+    ProjectSkillInstaller.installAll(
+        container, PROJECT, home.resolve(".agents/skills").toString(), List.of(), (s, f) -> null);
+    assertEquals(List.of(), entriesOf(home.resolve(".agents/skills")), "a missing one is fine");
+  }
+
+  @Test
+  void theSkillsDirectoryOfAHarnessIsUnderTheDevHomeWithoutATrailingSlash() {
+    assertEquals(
+        "/home/dev/.claude/skills", ProjectSkillInstaller.skillsDirOf(Harnesses.of("claude-code")));
+    assertEquals(
+        "/home/dev/.agents/skills", ProjectSkillInstaller.skillsDirOf(Harnesses.of("codex")));
   }
 
   /** The container: {@code incus exec} runs its command here, {@code incus file push} copies. */
@@ -685,7 +910,12 @@ class StageSkillInstallerTest {
       assertEquals(List.of("incus", "exec", PROJECT), command.subList(0, 3));
       assertEquals(List.of("--user", "1000", "--group", "1000"), command.subList(3, 7));
       if (inner(command).getFirst().equals("flock")) {
-        placing(command.getLast().substring(command.getLast().lastIndexOf('.') + 1)).countDown();
+        var build =
+            command.stream()
+                .filter(argument -> argument.contains(ProjectSkillInstaller.BUILD_PREFIX))
+                .findFirst()
+                .orElseThrow();
+        placing(build.substring(build.lastIndexOf('.') + 1)).countDown();
       }
       var builder = new ProcessBuilder(inner(command));
       if (shims != null) {
