@@ -39,24 +39,32 @@ import java.security.GeneralSecurityException;
 import java.security.KeyPairGenerator;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
 
 class FdeCommandTest {
 
-  private static final String KEY_OPTIONS = "no-agent-forwarding,no-X11-forwarding,no-user-rc ";
+  private static final String KEY_OPTIONS = "no-agent-forwarding,no-X11-forwarding,no-user-rc";
+  private static final DateTimeFormatter SSHD_UTC =
+      DateTimeFormatter.ofPattern("yyyyMMddHHmmss'Z'").withZone(ZoneOffset.UTC);
   private static final SshPublicKey HOST_KEY =
       SshPublicKey.parse(TestSshKeys.ed25519("host", "root@box"));
   private static final SshPublicKey LAPTOP =
@@ -116,6 +124,10 @@ class FdeCommandTest {
   private int fde(String... args) {
     out.reset();
     refusal = null;
+    return fdeCommand().execute(args);
+  }
+
+  private CommandLine fdeCommand() {
     var command =
         new CommandLine(
             new FdeCommand(
@@ -133,7 +145,7 @@ class FdeCommandTest {
           refusal = failure.getMessage();
           return 1;
         });
-    return command.execute(args);
+    return command;
   }
 
   private List<String> printed() {
@@ -161,8 +173,56 @@ class FdeCommandTest {
     }
   }
 
-  private static String keyLine(SshPublicKey key, String handle) {
-    return KEY_OPTIONS + key.type() + " " + key.blob() + " sail-mast:" + handle + "\n";
+  /** The line a pairing writes: its login ends when its token does, to the second, in UTC. */
+  private static String keyLine(SshPublicKey key, String handle, String expiresAt) {
+    var deadline =
+        expiresAt == null
+            ? ""
+            : ",expiry-time=\"" + SSHD_UTC.format(Instant.parse(expiresAt)) + "\"";
+    return KEY_OPTIONS
+        + deadline
+        + " "
+        + key.type()
+        + " "
+        + key.blob()
+        + " sail-mast:"
+        + handle
+        + "\n";
+  }
+
+  /** The key blobs of the logins {@code handle}'s pairings hold in the operator's file. */
+  private List<String> loginsOf(String handle) throws IOException {
+    return Files.readAllLines(authorizedKeys()).stream()
+        .map(line -> line.split(" "))
+        .filter(fields -> fields[fields.length - 1].equals("sail-mast:" + handle))
+        .map(fields -> fields[2])
+        .toList();
+  }
+
+  private List<String> pairedKeys() {
+    return inDb(
+        db ->
+            db.query(
+                "SELECT public_key FROM fde_pairings",
+                row -> SshPublicKey.parse(row.text(0)).blob()));
+  }
+
+  /** Standard output that holds the command printing {@code line} there until released. */
+  private PrintStream pausingAt(String line, CountDownLatch reached, CountDownLatch released) {
+    return new PrintStream(out, true, StandardCharsets.UTF_8) {
+      @Override
+      public void println(String printed) {
+        if (printed.contains(line)) {
+          reached.countDown();
+          try {
+            released.await();
+          } catch (InterruptedException interrupted) {
+            throw new IllegalStateException(interrupted);
+          }
+        }
+        super.println(printed);
+      }
+    };
   }
 
   private List<TokenStore.TokenInfo> tokens() {
@@ -311,7 +371,6 @@ class FdeCommandTest {
     assertEquals("member", ada.role());
     assertEquals("ada@x.com", ada.email());
     var key = keygen.made.getFirst();
-    assertEquals(keyLine(key, "ada"), Files.readString(authorizedKeys()));
     assertEquals("rwx------", mode(home().resolve(".ssh")));
     assertEquals("rw-------", mode(authorizedKeys()));
     assertEquals(key.line() + "\n", Files.readString(workstationKey()));
@@ -321,6 +380,10 @@ class FdeCommandTest {
     assertEquals("mast-ada", token.name());
     assertEquals("member", token.role());
     assertEquals("ada", token.fdeHandle());
+    assertEquals(
+        keyLine(key, "ada", token.expiresAt()),
+        Files.readString(authorizedKeys()),
+        "sshd refuses the code's key from the moment the box refuses its token");
     var lifetime = Duration.between(Instant.now(), Instant.parse(token.expiresAt()));
     assertEquals(364, lifetime.toDays(), "a code lives a year unless the operator says otherwise");
     var pairing = inDb(db -> new FdePairingStore(db).find(ada.id())).orElseThrow();
@@ -400,7 +463,9 @@ class FdeCommandTest {
     assertEquals(0, exit, refusal);
     var second = keygen.made.getLast();
     assertEquals(2, keygen.made.size());
-    assertEquals(keyLine(second, "ada"), Files.readString(authorizedKeys()));
+    assertEquals(
+        keyLine(second, "ada", tokens().getFirst().expiresAt()),
+        Files.readString(authorizedKeys()));
     assertEquals(
         second.line() + "\n",
         Files.readString(workstationKey()),
@@ -567,31 +632,32 @@ class FdeCommandTest {
     assertEquals("admin", tokens().getFirst().role(), "the code carries its FDE's role");
   }
 
-  @Test
-  void aRemovalThatCannotRevokeTheLoginRemovesNothingAndTheNextRunFinishesIt() throws Exception {
+  @ParameterizedTest
+  @ValueSource(strings = {"r-x------", "rw-------"})
+  void aRemovalThatCannotRevokeTheLoginRemovesNothingAndTheNextRunFinishesIt(String mode)
+      throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     var token = (String) decoded(printedCode()).get("token");
     var line = Files.readString(authorizedKeys());
     var ssh = home().resolve(".ssh");
-    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("r-x------"));
-
-    assertEquals(1, fde("rm", "ada", "--force"));
-
-    assertEquals(
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString(mode));
+    var refused =
         "Could not remove ada's key line from root's authorized_keys (AccessDeniedException), so"
-            + " ada was not removed and its pairing still works. Check that "
+            + " nothing of ada was removed and its pairing still works. Check that "
             + ssh
-            + " is writable by root, then run 'sail fde rm ada' again.",
-        refusal);
-    assertEquals(List.of(), printed());
-    assertEquals(line, Files.readString(authorizedKeys()));
-    assertEquals("ada", handleOf(token));
-    assertEquals(
-        1L,
-        inDb(db -> db.queryOne("SELECT count(*) FROM fde_pairings", row -> row.integer(0)))
-            .orElseThrow());
+            + " is writable by root, then run the command again.";
+
+    for (var command : List.of(List.of("rm", "ada", "--force"), List.of("unpair", "ada"))) {
+      assertEquals(1, fde(command.toArray(String[]::new)));
+
+      assertEquals(refused, refusal);
+      assertEquals(List.of(), printed());
+      assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
+    }
 
     Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
+    assertEquals(line, Files.readString(authorizedKeys()));
+    assertEquals("ada", handleOf(token));
 
     assertEquals(0, fde("rm", "ada", "--force"), refusal);
 
@@ -604,6 +670,33 @@ class FdeCommandTest {
     assertEquals("", Files.readString(authorizedKeys()));
     assertNull(handleOf(token));
     assertTrue(inDb(db -> new FdeStore(db).byHandle("ada")).isEmpty());
+  }
+
+  @ParameterizedTest
+  @Timeout(60)
+  @CsvSource({"pair ada --host 34.1.2.3, 1", "unpair ada, 0", "rm ada --force, 0"})
+  void aCommandThatStartsWhileAPairingIsHalfMadeWaitsForItAndTheLoginsStayTheRecords(
+      String later, int pairings) throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var halfMade = new CountDownLatch(1);
+    var finish = new CountDownLatch(1);
+    System.setOut(pausingAt("Unpaired ada first", halfMade, finish));
+    var first = new FutureTask<>(() -> fdeCommand().execute("pair", "ada", "--host", "34.1.2.3"));
+    var second = new FutureTask<>(() -> fdeCommand().execute(later.split(" ")));
+
+    Thread.ofPlatform().start(first);
+    halfMade.await();
+    var waiting = Thread.ofPlatform().start(second);
+    while (waiting.isAlive() && waiting.getState() != Thread.State.WAITING) {
+      Thread.onSpinWait();
+    }
+    finish.countDown();
+
+    assertEquals(0, first.get(), refusal);
+    assertEquals(0, second.get(), refusal);
+    assertEquals(pairedKeys(), loginsOf("ada"), "every login is one a record can revoke");
+    assertEquals(pairings, pairedKeys().size());
+    assertEquals(pairings, tokens().size());
   }
 
   @Test
@@ -747,10 +840,15 @@ class FdeCommandTest {
   }
 
   @Test
-  void anFdeThisBoxHoldsKeepsItsRoleAndEmailUnlessTheOptionsSayOtherwise() {
+  void anFdeThisBoxHoldsKeepsItsRoleAndEmailUnlessTheOptionsSayOtherwise() throws Exception {
     inDb(db -> new FdeStore(db).add("ada", "Ada", "ada@x.com", "admin"));
 
     assertEquals(0, fde("pair", "ada", "--host", "box", "--no-expiry"), refusal);
+
+    assertEquals(
+        keyLine(keygen.made.getFirst(), "ada", null),
+        Files.readString(authorizedKeys()),
+        "a code that never expires carries a login that never does");
 
     var kept = inDb(db -> new FdeStore(db).byHandle("ada")).orElseThrow();
     assertEquals(
@@ -837,7 +935,9 @@ class FdeCommandTest {
     assertEquals(0, fde("pair", "ada", "--host", "box", "--email", "ada@x.com"), refusal);
 
     assertEquals("ubuntu", decoded(printedCode()).get("user"));
-    assertEquals(keyLine(keygen.made.getFirst(), "ada"), Files.readString(authorizedKeys()));
+    assertEquals(
+        keyLine(keygen.made.getFirst(), "ada", tokens().getFirst().expiresAt()),
+        Files.readString(authorizedKeys()));
     assertEquals(keygen.made.getFirst().line() + "\n", Files.readString(workstationKey()));
     assertEquals(
         "  ✓ Paired ada: Mast logs in as ubuntu@box. The code expires "

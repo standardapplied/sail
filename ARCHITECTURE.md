@@ -1745,10 +1745,26 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   idempotent and says what it removed. `sail fde rm <handle>` removes the FDE first, where the
   last-admin refusal happens and the token and record go with the row, then the key lines, so a
   refused removal leaves the pairing whole. Both happen in one transaction that commits only
-  once the key lines are gone: a login that cannot be removed takes the FDE's removal back
-  with it, so the FDE and its record are still there for the next `rm` to finish, and no login
-  outlives the record that revokes it. There is one live code per FDE per box: pairing again
-  unpairs first.
+  once the key lines are gone. There is one live code per FDE per box: pairing again unpairs
+  first. Revoking the token alone (`sail server token revoke mast-<handle>`) leaves the login;
+  `unpair` is the revocation.
+
+  A pairing is a key line in a file and a record in the database, and no transaction spans the
+  two, so two rules keep **a login from ever outliving the record that revokes it**:
+  - *The record is written before its line and forgotten after it.* `pair` mints the token and
+    the record, then appends the line; `unpair` and `rm` remove the lines, then the record. A
+    command that stops between the two leaves a record without a login, which the next run
+    clears. A line that cannot be removed fails the command before anything is forgotten
+    ("Could not remove ada's key line from root's authorized_keys (AccessDeniedException), so
+    nothing of ada was removed and its pairing still works. Check that /root/.ssh is writable
+    by root, then run the command again."), and a file that cannot be looked at is that failure,
+    never "no such line" (`OperatorAuthorizedKeys.present`).
+  - *One pairing command runs at a time.* `pair`, `unpair` and `rm` each hold
+    `<database>.pairings.lock` (`FileMutex`, beside the database as the sync rounds' lock is, so
+    the gateway's account takes it too) from their first read to their last write. Without it a
+    command reading between another's two steps forgets the record of a login just written, or
+    writes a login for an FDE just removed. `rm` asks its confirmation before it takes the lock,
+    so an unanswered prompt holds nobody.
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers; the command names the projects the catalog holds, whose containers trust it only
@@ -1759,13 +1775,17 @@ operator's login and home are the JVM's `user.name` and `user.home`.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:
   no file, no log line, no exception message. Its private key has no passphrase, so Mast can
   use it unattended. Its lifetime is its token's: 365 days unless `--ttl-days` or `--no-expiry`
-  says otherwise.
+  says otherwise. Both halves of it end together: the key line carries the token's deadline as
+  sshd's own `expiry-time="YYYYMMDDHHMMSSZ"` (UTC, cut to the second, so never later than the
+  token), and sshd refuses the key from then on; `--no-expiry` writes no deadline. The UTC form
+  is the one Ubuntu 24.04's OpenSSH 9.6 reads. sshd checks the deadline when a session logs in,
+  so one already open ends when it closes.
 - **C6. The operator's login stays theirs.** `OperatorAuthorizedKeys` is the only writer of the
   operator's own `authorized_keys`. It appends one line per pairing, with the options
   `no-agent-forwarding,no-X11-forwarding,no-user-rc` (port and unix-socket forwarding stay
-  allowed: they are what Mast uses) and the comment `sail-mast:<handle>`, and it removes only
-  lines carrying that comment, replacing the file in one rename (`0600`, its directory `0700`
-  when it creates it). Each edit holds `authorized_keys.sail.lock`, beside the file, from its
+  allowed: they are what Mast uses), the deadline (C5) and the comment `sail-mast:<handle>`, and
+  it removes only lines carrying that comment, replacing the file in one rename (`0600`, its
+  directory `0700` when it creates it). Each edit holds `authorized_keys.sail.lock`, beside the file, from its
   read to its rename (`FileMutex`), so two commands editing together, in one process or two,
   never write back a line the other removed. A paired person can therefore open a shell on the
   box as its operator; the box is theirs.

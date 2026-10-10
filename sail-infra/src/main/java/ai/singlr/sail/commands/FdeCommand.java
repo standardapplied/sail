@@ -12,6 +12,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
 import ai.singlr.sail.engine.SailPaths;
@@ -38,6 +39,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -164,12 +166,52 @@ public final class FdeCommand implements Runnable {
   }
 
   /**
+   * Holds off every other command that makes or revokes a pairing on this box until closed. A
+   * pairing is a key line in the operator's login and a record in the control plane, and no
+   * transaction spans the two: a command that read one while another stood between them would
+   * forget the record of a login just written, or write a login for an FDE just removed. Each such
+   * command holds this from its first read to its last write. It is a lock file beside the
+   * database, as the sync rounds' is, so the gateway's account takes it too.
+   */
+  private static FileMutex holdPairings(Box box) throws IOException {
+    var database = box.database();
+    return FileMutex.acquire(database.resolveSibling(database.getFileName() + ".pairings.lock"));
+  }
+
+  /**
+   * Removes {@code handle}'s key lines from the operator's login, and returns how many. A login
+   * that cannot be removed fails the command here, before it forgets the FDE, the token or the
+   * record: a login must never outlive what revokes it.
+   */
+  private static int revokeLogin(Box box, String handle) {
+    try {
+      return new OperatorAuthorizedKeys(box.home()).removeCommented(pairingComment(handle));
+    } catch (IOException failure) {
+      throw new UncheckedIOException(
+          "Could not remove "
+              + handle
+              + "'s key line from "
+              + box.operator()
+              + "'s authorized_keys ("
+              + failure.getClass().getSimpleName()
+              + "), so nothing of "
+              + handle
+              + " was removed and its pairing still works. Check that "
+              + box.home().resolve(".ssh")
+              + " is writable by "
+              + box.operator()
+              + ", then run the command again.",
+          failure);
+    }
+  }
+
+  /**
    * Revokes {@code handle}'s pairing: every key line made for it in the operator's login, the token
    * the pairing names and its record. Returns what it removed, or empty when there was no pairing.
    * The lines go by their comment, so a pairing whose FDE is already gone is still revoked.
    */
-  private static Optional<String> unpair(Box box, Sqlite db, String handle) throws IOException {
-    var keyLines = new OperatorAuthorizedKeys(box.home()).removeCommented(pairingComment(handle));
+  private static Optional<String> unpair(Box box, Sqlite db, String handle) {
+    var keyLines = revokeLogin(box, handle);
     var pairing =
         new FdeStore(db).byHandle(handle).flatMap(fde -> new FdePairingStore(db).find(fde.id()));
     if (keyLines == 0 && pairing.isEmpty()) {
@@ -444,7 +486,12 @@ public final class FdeCommand implements Runnable {
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Removing an FDE");
-            try (var db = Sqlite.open(box.database())) {
+            if (!confirmed()) {
+              System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
+              return;
+            }
+            try (var held = holdPairings(box);
+                var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               var fde =
                   fdeStore
@@ -455,16 +502,12 @@ public final class FdeCommand implements Runnable {
               if (paired) {
                 requireOperator(box, "rm " + handle);
               }
-              if (!confirmed()) {
-                System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
-                return;
-              }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
               var keyLines =
                   db.transaction(
                       () -> {
                         fdeStore.remove(fde.id());
-                        return box.gateway() ? 0 : removeLogin(box, fde.handle());
+                        return box.gateway() ? 0 : revokeLogin(box, fde.handle());
                       });
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
@@ -483,35 +526,6 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
-    }
-
-    /**
-     * Removes the FDE's key lines from the operator's login inside the transaction that removes the
-     * FDE, so a login that could not be revoked takes the removal back with it: the FDE and its
-     * pairing's record stay for the next run to finish, instead of a login outliving both.
-     */
-    private static int removeLogin(Box box, String handle) {
-      try {
-        return new OperatorAuthorizedKeys(box.home()).removeCommented(pairingComment(handle));
-      } catch (IOException failure) {
-        throw new UncheckedIOException(
-            "Could not remove "
-                + handle
-                + "'s key line from "
-                + box.operator()
-                + "'s authorized_keys ("
-                + failure.getClass().getSimpleName()
-                + "), so "
-                + handle
-                + " was not removed and its pairing still works. Check that "
-                + box.home().resolve(".ssh")
-                + " is writable by "
-                + box.operator()
-                + ", then run 'sail fde rm "
-                + handle
-                + "' again.",
-            failure);
-      }
     }
 
     private boolean confirmed() {
@@ -582,7 +596,8 @@ public final class FdeCommand implements Runnable {
       validate();
       requireOperator(box, "pair " + handle);
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
-      try (var db = Sqlite.open(box.database())) {
+      try (var held = holdPairings(box);
+          var db = Sqlite.open(box.database())) {
         var fdes = new FdeStore(db);
         var existing = fdes.byHandle(handle);
         var address = address(existing);
@@ -610,9 +625,13 @@ public final class FdeCommand implements Runnable {
                     System.out.println(
                         Ansi.AUTO.string(
                             "  @|green ✓|@ Unpaired " + handle + " first: " + removed)));
-        new OperatorAuthorizedKeys(box.home()).append(key.publicKey(), pairingComment(handle));
-        HostConfigSetCommand.writeWorkstationKey(box.workstationKey(), key.publicKey().line());
         var token = mintToken(db, fde, key.publicKey(), ttl);
+        new OperatorAuthorizedKeys(box.home())
+            .append(
+                key.publicKey(),
+                pairingComment(handle),
+                Optional.ofNullable(token.expiresAt()).map(Instant::parse));
+        HostConfigSetCommand.writeWorkstationKey(box.workstationKey(), key.publicKey().line());
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Paired "
@@ -794,7 +813,8 @@ public final class FdeCommand implements Runnable {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
             requireOperator(box, "unpair " + handle);
-            try (var db = Sqlite.open(box.database())) {
+            try (var held = holdPairings(box);
+                var db = Sqlite.open(box.database())) {
               System.out.println(
                   Ansi.AUTO.string(
                       unpair(box, db, handle)

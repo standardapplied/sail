@@ -78,8 +78,10 @@ sail fde unpair ada                                         # revokes it
 
 The code is everything Mast needs: where the box is and its host key, a login key made for this
 pairing, and an API token for `ada`. It is a secret that opens a shell on the box, so send it as
-you would a password. The pairing's key also becomes the workstation key the box's containers
-trust; a box that already has one refuses unless `--as-workstation-key` says to replace it.
+you would a password. It lasts a year unless `--ttl-days` or `--no-expiry` says otherwise, and
+its login and its token end together. The pairing's key also becomes the workstation key the
+box's containers trust; a box that already has one refuses unless `--as-workstation-key` says
+to replace it.
 
 On a Mac or other thin client, `sail client <host>` points the local CLI at a box. Commands are
 forwarded over SSH; no control plane runs locally.
