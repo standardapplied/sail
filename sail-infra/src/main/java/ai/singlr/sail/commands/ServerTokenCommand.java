@@ -88,6 +88,11 @@ public final class ServerTokenCommand implements Runnable {
 
     /** Resolves the requested lifetime; {@code null} never expires. Visible for tests. */
     static Duration resolveTtl(boolean noExpiry, Integer ttlDays) {
+      return resolveTtl(noExpiry, ttlDays, TokenStore.DEFAULT_TTL);
+    }
+
+    /** As above, with the lifetime a command grants when the operator names none. */
+    static Duration resolveTtl(boolean noExpiry, Integer ttlDays, Duration unspecified) {
       if (noExpiry && ttlDays != null) {
         throw new IllegalArgumentException("Pass --ttl-days or --no-expiry, not both.");
       }
@@ -95,7 +100,7 @@ public final class ServerTokenCommand implements Runnable {
         return null;
       }
       if (ttlDays == null) {
-        return TokenStore.DEFAULT_TTL;
+        return unspecified;
       }
       if (ttlDays <= 0) {
         throw new IllegalArgumentException("--ttl-days must be a positive number of days.");

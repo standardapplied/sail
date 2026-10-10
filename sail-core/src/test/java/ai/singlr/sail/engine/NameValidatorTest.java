@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -258,6 +259,102 @@ class NameValidatorTest {
   @Test
   void nullFdeHandleIsInvalid() {
     assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(null));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "34.1.2.3",
+        "box.acme.dev",
+        "devbox",
+        "a",
+        "::1",
+        "2001:db8::1",
+        "::ffff:10.0.0.1"
+      })
+  void validHosts(String host) {
+    assertDoesNotThrow(() -> NameValidator.requireValidHost(host));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "",
+        "root@box",
+        "box:22",
+        "http://box",
+        "box/path",
+        "two words",
+        "-oProxyCommand=x",
+        "box.",
+        "line\nbreak",
+        ":"
+      })
+  void invalidHosts(String host) {
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidHost(host));
+    assertEquals(
+        "Invalid host: '" + host + "'. Must be a DNS name or an IP address, with no port.",
+        ex.getMessage());
+  }
+
+  @Test
+  void aNullOrOverlongHostIsInvalid() {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidHost(null));
+    assertDoesNotThrow(() -> NameValidator.requireValidHost("a".repeat(253)));
+    assertThrows(
+        IllegalArgumentException.class, () -> NameValidator.requireValidHost("a".repeat(254)));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"ada@x.com", "ada.lovelace+box@example.co.uk", "a@b"})
+  void validEmails(String email) {
+    assertDoesNotThrow(() -> NameValidator.requireValidEmail(email));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", "ada", "@x.com", "ada@", "a@b@c", "ada @x.com", "ada@x.com\nbcc: z"})
+  void invalidEmails(String email) {
+    var ex =
+        assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidEmail(email));
+    assertEquals(
+        "Invalid email: '" + email + "'. Must be one address, like ada@example.com.",
+        ex.getMessage());
+  }
+
+  @Test
+  void aNullOrOverlongEmailIsInvalid() {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidEmail(null));
+    assertDoesNotThrow(() -> NameValidator.requireValidEmail("a".repeat(252) + "@b"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> NameValidator.requireValidEmail("a".repeat(253) + "@b"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"Ada Lovelace", "José Ñ.", "a"})
+  void validDisplayNames(String name) {
+    assertDoesNotThrow(() -> NameValidator.requireValidDisplayName(name));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"", "   ", "two\nlines", "bell\u0007"})
+  void invalidDisplayNames(String name) {
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> NameValidator.requireValidDisplayName(name));
+    assertEquals(
+        "Invalid name: must be 1 to 128 characters on one line, with no control characters.",
+        ex.getMessage());
+  }
+
+  @Test
+  void aNullOrOverlongDisplayNameIsInvalid() {
+    assertThrows(IllegalArgumentException.class, () -> NameValidator.requireValidDisplayName(null));
+    assertDoesNotThrow(() -> NameValidator.requireValidDisplayName("a".repeat(128)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> NameValidator.requireValidDisplayName("a".repeat(129)));
   }
 
   @ParameterizedTest

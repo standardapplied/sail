@@ -31,7 +31,7 @@ public final class WorkstationIdentity {
     return registeredAt(SailPaths.workstationPublicKeyPath());
   }
 
-  static Optional<SshPublicKey> registeredAt(Path path) {
+  public static Optional<SshPublicKey> registeredAt(Path path) {
     if (!Files.isRegularFile(path)) {
       return Optional.empty();
     }

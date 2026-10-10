@@ -121,6 +121,7 @@ Eighteen `*Store` classes plus the sync and journal machinery, all over `Sqlite`
 | `BlobStore` | `blobs` and their chunks, the content every synced content field names by hash | Content crosses by hash, fetched on demand |
 | `FdeStore` | `fdes`, the human principals and roles | One-way, main to node roster pull |
 | `FdeSshKeyStore` | `fde_ssh_keys`, SSH fingerprint to FDE | Local |
+| `FdePairingStore` | `fde_pairings`, the public key and token name of each FDE's Mast pairing | Local |
 | `EventStore` | `events`, the audit stream persisted from the bus | Local |
 | `AuthSessionStore` | `sessions`, login and gateway sessions | Local |
 | `TokenStore` | `api_tokens`, SHA-256 hashed with optional expiry | Local |
@@ -1717,6 +1718,87 @@ main for the sync lane. An FDE's gateway key (stored in `fde_ssh_keys` and pinne
 gateway. A box's workstation key (`~/.sail/workstation_key.pub`) is authorized into that
 box's project containers so its owner can SSH from their laptop into a container. Keeping
 these roles distinct is what lets the synced catalog stay identity-free.
+
+**Pairing.** Mast reaches a box as an FDE with one string, the connect code, which `sail fde
+pair <handle> --host <ip-or-dns>` mints and `sail fde unpair <handle>` revokes (`FdeCommand`).
+It is no third identity door: the code carries an ordinary API token bound to the FDE, so
+`RoleRule` decides what it may do as for any token. What it adds is a login. Mast needs a
+`direct-tcpip` channel to the API on loopback, a `direct-streamlocal` channel to
+`~/.sail/pty.sock` and one `exec`, all three of which the `sail` gateway user's
+`command="…",restrict` lines forbid, so a paired Mast logs in as the box's operator: the account
+`sail-api` runs as, root on a SYSTEM-mode box. The command runs as that account, and the
+operator's login and home are the JVM's `user.name` and `user.home`.
+
+- **C1. One string is the whole setup.** The code is `sail1.` followed by unpadded base64url of
+  one JSON object: `v` (1), `handle`, `email`, `host`, `port` (22), `user` (the operator's
+  login), `host_key` (the box's `/etc/ssh/ssh_host_ed25519_key.pub`, type and blob, which Mast
+  pins), `key` (an OpenSSH private key made for this pairing), `token` and `server` (the API's
+  loopback address, which Mast forwards to). Mast asks for nothing else. The prefix names the
+  format; `v` is for the next shape.
+- **C2. The box mints it once and shows it once.** The key pair is made by `ssh-keygen` in a
+  temporary directory that is gone before anything else is written, and the token's plaintext
+  exists only in the code. What stays is what verifies: the public key line in the operator's
+  `authorized_keys`, the token's hash, and the pairing's record (`fde_pairings`: the public key
+  and the token's name, box-local, removed with its FDE).
+- **C3. A pairing is revocable in one command.** `sail fde unpair <handle>` removes every key
+  line the pairing made, revokes the token its record names and deletes the record; it is
+  idempotent and says what it removed. `sail fde rm <handle>` removes the FDE first, where the
+  last-admin refusal happens and the token and record go with the row, then the key lines, so a
+  refused removal leaves the pairing whole. Both happen in one transaction that commits only
+  once the key lines are gone. There is one live code per FDE per box: pairing again unpairs
+  first. Revoking the token alone (`sail server token revoke mast-<handle>`) leaves the login;
+  `unpair` is the revocation.
+
+  A pairing is a key line in a file and a record in the database, and no transaction spans the
+  two, so two rules keep **a login from ever outliving the record that revokes it**:
+  - *The record is written before its line and forgotten after it.* `pair` mints the token and
+    the record, then appends the line; `unpair` and `rm` remove the lines, then the record. A
+    command that stops between the two leaves a record without a login, which the next run
+    clears. A line that cannot be removed fails the command before anything is forgotten
+    ("Could not remove ada's key line from root's authorized_keys (AccessDeniedException), so
+    nothing of ada was removed and its pairing still works. Check that /root/.ssh is writable
+    by root, then run the command again."), and a file that cannot be looked at is that failure,
+    never "no such line" (`OperatorAuthorizedKeys.present`).
+  - *One pairing command runs at a time.* `pair`, `unpair` and `rm` each hold
+    `<database>.pairings.lock` (`FileMutex`, beside the database as the sync rounds' lock is, so
+    the gateway's account takes it too) from their first read to their last write. Without it a
+    command reading between another's two steps forgets the record of a login just written, or
+    writes a login for an FDE just removed. `rm` asks its confirmation before it takes the lock,
+    so an unanswered prompt holds nobody.
+- **C4. Containers trust the paired key.** The pairing's public key becomes the box's
+  workstation key (above), so every project provisioned or applied afterwards lets it into its
+  containers; the command names the projects the catalog holds, whose containers trust it only
+  after their next `project apply`. A box trusts one workstation key: a pairing replaces the
+  key of the same FDE's earlier pairing, and refuses to replace any other, naming its
+  fingerprint and comment, unless `--as-workstation-key` is passed. Unpairing leaves the
+  workstation key as it is.
+- **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:
+  no file, no log line, no exception message. Its private key has no passphrase, so Mast can
+  use it unattended. Its lifetime is its token's: 365 days unless `--ttl-days` or `--no-expiry`
+  says otherwise. Both halves of it end together: the key line carries the token's deadline as
+  sshd's own `expiry-time="YYYYMMDDHHMMSSZ"` (UTC, cut to the second, so never later than the
+  token), and sshd refuses the key from then on; `--no-expiry` writes no deadline. The UTC form
+  is the one Ubuntu 24.04's OpenSSH 9.6 reads. sshd checks the deadline when a session logs in,
+  so one already open ends when it closes.
+- **C6. The operator's login stays theirs.** `OperatorAuthorizedKeys` is the only writer of the
+  operator's own `authorized_keys`. It appends one line per pairing, with the options
+  `no-agent-forwarding,no-X11-forwarding,no-user-rc` (port and unix-socket forwarding stay
+  allowed: they are what Mast uses), the deadline (C5) and the comment `sail-mast:<handle>`, and
+  it removes only lines carrying that comment, replacing the file in one rename (`0600`, its
+  directory `0700` when it creates it). Each edit holds `authorized_keys.sail.lock`, beside the file, from its
+  read to its rename (`FileMutex`), so two commands editing together, in one process or two,
+  never write back a line the other removed. A paired person can therefore open a shell on the
+  box as its operator; the box is theirs.
+
+Pairing edits the roster (it adds the FDE when the box holds none), so a node refuses it as it
+refuses `fde add`; it is for a main or a standalone box. A handle, host, email and name are
+validated where they enter (`NameValidator`), and nothing reaches a shell but as an argument.
+
+An admin's `fde` commands also arrive through the gateway, where they run as the `sail` user,
+whose `authorized_keys` is the forced-command file and must never take a login, and who cannot
+reach the operator's. So that account refuses `fde pair` and `fde unpair`, and refuses `fde rm`
+of a paired FDE before removing anything: each names the command to run on the host. An FDE with
+no pairing is removed through the gateway as before, and no key file is touched.
 
 - **Roles and Authorizer.** The roles are `admin`, `member`, and `viewer`, enforced at the
   API boundary: GET maps to READ, mutating verbs to WRITE, and sensitive routes to ADMIN. An

@@ -362,6 +362,29 @@ class SchemaManagerTest {
   }
 
   @Test
+  void pairingsMigrateFromThe0_46_5ReleaseKeepingEveryFdeAndItsToken() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE fde_pairings");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    var ada = new FdeStore(db).add("ada", null, "ada@x.com", "member");
+    var token = new TokenStore(db).create("mast-ada", "member", ada.id(), null).token();
+
+    new SchemaManager(db).migrate();
+
+    var pairings = new FdePairingStore(db);
+    assertTrue(pairings.find(ada.id()).isEmpty(), "an FDE from before pairings has none");
+    pairings.put(ada.id(), "ssh-ed25519 AAAA sail-mast:ada", "mast-ada");
+    assertEquals("mast-ada", pairings.find(ada.id()).orElseThrow().tokenName());
+    assertEquals("ada", new TokenStore(db).validate(token).orElseThrow().fdeHandle());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
   void aConflictParkedBeforeConflictsKeptMainsRevisionMigratesNamingNone() {
     stageAtBaseline();
     var prior = migrationIndex("ALTER TABLE sync_conflicts ADD COLUMN remote_rev");

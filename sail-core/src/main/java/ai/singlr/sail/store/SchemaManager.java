@@ -88,9 +88,10 @@ public final class SchemaManager {
    * {@code run_delivered_messages} (delivery bookkeeping), {@code room_guard} (the room commit
    * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
    * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
-   * record of the one box each FDE syncs from) and {@code materialized_files} (the versions of each
-   * shared file this box wrote to disk or published) are local-only as well — none of the six ever
-   * joins a sync snapshot.
+   * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
+   * shared file this box wrote to disk or published) and {@code fde_pairings} (the key and token
+   * this box made for each FDE's Mast) are local-only as well — none of the seven ever joins a sync
+   * snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
@@ -708,7 +709,14 @@ public final class SchemaManager {
           "CREATE INDEX idx_runs_spec ON runs(spec_id)",
           "CREATE INDEX idx_runs_room ON runs(room_id)",
           "CREATE INDEX idx_runs_review ON runs(review_id)",
-          "ALTER TABLE reviews ADD COLUMN waiting_on TEXT");
+          "ALTER TABLE reviews ADD COLUMN waiting_on TEXT",
+          """
+          CREATE TABLE fde_pairings (
+              fde_id TEXT PRIMARY KEY REFERENCES fdes(id) ON DELETE CASCADE,
+              public_key TEXT NOT NULL,
+              token_name TEXT NOT NULL,
+              created_at TEXT NOT NULL
+          )""");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

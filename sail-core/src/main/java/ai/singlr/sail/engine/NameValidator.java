@@ -23,6 +23,14 @@ public final class NameValidator {
   private static final Pattern SERVICE_NAME = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._-]*$");
   private static final Pattern POSIX_USERNAME = Pattern.compile("^[a-z_][a-z0-9_-]*$");
   private static final Pattern FDE_HANDLE = Pattern.compile("^[A-Za-z0-9][A-Za-z0-9._-]*$");
+  private static final Pattern HOST =
+      Pattern.compile(
+          "^(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|[0-9A-Fa-f]*:[0-9A-Fa-f:]*:[0-9A-Fa-f:.]*)$");
+  private static final Pattern EMAIL = Pattern.compile("^[^@\\s\\p{Cntrl}]+@[^@\\s\\p{Cntrl}]+$");
+  private static final Pattern CONTROL = Pattern.compile("\\p{Cntrl}");
+  private static final int MAX_HOST_LENGTH = 253;
+  private static final int MAX_EMAIL_LENGTH = 254;
+  private static final int MAX_DISPLAY_NAME_LENGTH = 128;
   private static final int MAX_USERNAME_LENGTH = 32;
   private static final Pattern VERSION = Pattern.compile("^\\d+(\\.\\d+)*$");
   private static final Pattern SAFE_PATH = Pattern.compile("^[a-zA-Z0-9][a-zA-Z0-9._/-]*$");
@@ -101,6 +109,35 @@ public final class NameValidator {
               + "'. Must match [A-Za-z0-9][A-Za-z0-9._-]*, max "
               + MAX_LENGTH
               + " characters.");
+    }
+  }
+
+  /** Validates the address a client reaches a box at: a DNS name or an IP literal, no port. */
+  public static void requireValidHost(String host) {
+    if (host == null || host.length() > MAX_HOST_LENGTH || !HOST.matcher(host).matches()) {
+      throw new IllegalArgumentException(
+          "Invalid host: '" + host + "'. Must be a DNS name or an IP address, with no port.");
+    }
+  }
+
+  /** Validates an email address: one {@code @} with something on each side, and no whitespace. */
+  public static void requireValidEmail(String email) {
+    if (email == null || email.length() > MAX_EMAIL_LENGTH || !EMAIL.matcher(email).matches()) {
+      throw new IllegalArgumentException(
+          "Invalid email: '" + email + "'. Must be one address, like ada@example.com.");
+    }
+  }
+
+  /** Validates a person's display name: something printable on one line. */
+  public static void requireValidDisplayName(String name) {
+    if (name == null
+        || name.isBlank()
+        || name.length() > MAX_DISPLAY_NAME_LENGTH
+        || CONTROL.matcher(name).find()) {
+      throw new IllegalArgumentException(
+          "Invalid name: must be 1 to "
+              + MAX_DISPLAY_NAME_LENGTH
+              + " characters on one line, with no control characters.");
     }
   }
 
