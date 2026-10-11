@@ -327,8 +327,13 @@ final class LiveRoom implements AutoCloseable {
 
   /** Dismisses the room's member through the door Mast uses. */
   void dismiss(String conversation) {
-    Actor.call(owner(), () -> sail.removeRoomMember(conversation, HANDLE)).orThrow();
+    vacate(conversation);
     settle();
+  }
+
+  /** As {@link #dismiss}, from inside a reaction to an event: nothing is waited for. */
+  void vacate(String conversation) {
+    Actor.call(owner(), () -> sail.removeRoomMember(conversation, HANDLE)).orThrow();
   }
 
   /** The box's FDE posts {@code body} in the room; returns once the room has reacted to it. */
@@ -363,9 +368,11 @@ final class LiveRoom implements AutoCloseable {
     var ids = List.of(messageIds);
     return LiveStream.userMessage(
         LiveMemberPrompt.messages(
-            messages.list(roomId, null, 50).stream()
-                .filter(message -> ids.contains(message.id()))
-                .toList()));
+                messages.list(roomId, null, 50).stream()
+                    .filter(message -> ids.contains(message.id()))
+                    .toList())
+            .getFirst()
+            .text());
   }
 
   /** The turn number of every turn end told so far. */

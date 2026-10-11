@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.PromptConversation.Rendered;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
@@ -123,7 +124,7 @@ class LiveMemberPromptGoldenTest {
 
             """
             + CONVERSATION,
-        LiveMemberPrompt.fresh(spec(), "Build the OAuth flow.", conversation(), true));
+        only(LiveMemberPrompt.fresh(spec(), "Build the OAuth flow.", conversation(), true)));
   }
 
   @Test
@@ -144,7 +145,7 @@ class LiveMemberPromptGoldenTest {
 
             """
             + CONVERSATION,
-        LiveMemberPrompt.fresh(spec(), "Build the OAuth flow.", conversation(), false));
+        only(LiveMemberPrompt.fresh(spec(), "Build the OAuth flow.", conversation(), false)));
   }
 
   @Test
@@ -165,7 +166,7 @@ class LiveMemberPromptGoldenTest {
 
             """
             + CONVERSATION,
-        LiveMemberPrompt.freshForRoom("lounge", "Lounge", conversation(), true));
+        only(LiveMemberPrompt.freshForRoom("lounge", "Lounge", conversation(), true)));
   }
 
   @Test
@@ -179,7 +180,7 @@ class LiveMemberPromptGoldenTest {
         """
             + ROOM.formatted("lounge")
             + READ_ONLY,
-        LiveMemberPrompt.freshForRoom("lounge", "Lounge", List.of(), false));
+        only(LiveMemberPrompt.freshForRoom("lounge", "Lounge", List.of(), false)));
   }
 
   @Test
@@ -191,7 +192,120 @@ class LiveMemberPromptGoldenTest {
 
         claude/room-7 (2026-08-11T12:00:00Z):
         The token refresh.""",
-        LiveMemberPrompt.messages(conversation()));
-    assertEquals("", LiveMemberPrompt.messages(List.of()));
+        only(LiveMemberPrompt.messages(conversation())));
+    assertEquals(List.of(), LiveMemberPrompt.messages(List.of()));
+  }
+
+  @Test
+  void aPromptNamesTheMessagesItHandsOverWhole() {
+    assertEquals(
+        List.of(conversation()),
+        LiveMemberPrompt.messages(conversation()).stream().map(Rendered::fullyRendered).toList());
+    assertEquals(
+        List.of(conversation()),
+        LiveMemberPrompt.fresh(spec(), "Build the OAuth flow.", conversation(), true).stream()
+            .map(Rendered::fullyRendered)
+            .toList());
+    assertEquals(
+        List.of(List.of()),
+        LiveMemberPrompt.freshForRoom("lounge", "Lounge", List.of(), false).stream()
+            .map(Rendered::fullyRendered)
+            .toList());
+  }
+
+  @Test
+  void messagesFillPromptsOldestFirstAndNoneIsCutOrLeftOut() {
+    var first = message("m1", "uday", "a".repeat(15_000));
+    var second = message("m2", "uday", "b".repeat(15_000));
+    var third = message("m3", "uday", "c".repeat(15_000));
+
+    var pages = LiveMemberPrompt.messages(List.of(first, second, third));
+
+    assertEquals(
+        List.of(
+            new Rendered<>(
+                BY + "a".repeat(15_000) + "\n\n" + BY + "b".repeat(15_000), List.of(first, second)),
+            new Rendered<>(BY + "c".repeat(15_000), List.of(third))),
+        pages);
+  }
+
+  @Test
+  void aMessageLongerThanAPromptContinuesInTheNextAndIsWholeOnlyWhereItEnds() {
+    var brief = message("m1", "uday", "before the long one");
+    var huge = message("m2", "uday", "a".repeat(70_000) + " and the last instruction");
+    var after = message("m3", "uday", "after");
+    var written = BY + "a".repeat(70_000) + " and the last instruction";
+
+    var pages = LiveMemberPrompt.messages(List.of(brief, huge, after));
+
+    assertEquals(
+        List.of(
+            new Rendered<>(BY + "before the long one", List.of(brief)),
+            new Rendered<>(written.substring(0, SLICE) + CONTINUES, List.of()),
+            new Rendered<>(CONTINUED + written.substring(SLICE, 2 * SLICE) + CONTINUES, List.of()),
+            new Rendered<>(
+                CONTINUED + written.substring(2 * SLICE) + "\n\n" + BY + "after",
+                List.of(huge, after))),
+        pages);
+    assertEquals(
+        List.of(48, 31_961, 31_998, 6_267),
+        pages.stream().map(page -> page.text().codePointCount(0, page.text().length())).toList(),
+        "a slice fills its prompt to the budget of 32,000 before its trailing blank line goes");
+  }
+
+  @Test
+  void aSliceSharesAPromptWithWhatCameBeforeWhenItFits() {
+    var brief = message("m1", "uday", "before");
+    var huge = message("m2", "uday", "a".repeat(40_000));
+    var written = BY + "a".repeat(40_000);
+
+    assertEquals(
+        List.of(
+            new Rendered<>(
+                BY + "before\n\n" + written.substring(0, SLICE) + CONTINUES, List.of(brief)),
+            new Rendered<>(CONTINUED + written.substring(SLICE), List.of(huge))),
+        LiveMemberPrompt.messages(List.of(brief, huge)));
+  }
+
+  @Test
+  void aSliceNeverSplitsACodePoint() {
+    var emoji = message("m1", "uday", "😀".repeat(40_000));
+
+    assertEquals(
+        List.of(
+            new Rendered<>(BY + "😀".repeat(SLICE - 29) + CONTINUES, List.of()),
+            new Rendered<>(CONTINUED + "😀".repeat(40_000 - (SLICE - 29)), List.of(emoji))),
+        LiveMemberPrompt.messages(List.of(emoji)));
+  }
+
+  @Test
+  void aFreshSessionsRoomFollowsItsOpeningPageByPage() {
+    var first = message("m1", "uday", "a".repeat(20_000));
+    var second = message("m2", "claude/room-7", "b".repeat(20_000));
+
+    var pages = LiveMemberPrompt.freshForRoom("lounge", "Lounge", List.of(first, second), false);
+
+    assertEquals(
+        List.of(
+            new Rendered<>(
+                only(LiveMemberPrompt.freshForRoom("lounge", "Lounge", List.of(), false))
+                    + "## Conversation in this room\n\n"
+                    + BY
+                    + "a".repeat(20_000),
+                List.of(first)),
+            new Rendered<>(
+                "claude/room-7 (2026-08-11T12:00:00Z):\n" + "b".repeat(20_000), List.of(second))),
+        pages);
+  }
+
+  private static final String BY = "uday (2026-08-11T12:00:00Z):\n";
+  private static final String CONTINUES = "\n[continues in the next prompt]";
+  private static final String CONTINUED = "[continued from the previous prompt]\n";
+  private static final int SLICE = 31_930;
+
+  /** The text of a prompt that is the only one. */
+  private static String only(List<Rendered<MessageStore.MessageRow>> pages) {
+    assertEquals(1, pages.size());
+    return pages.getFirst().text();
   }
 }

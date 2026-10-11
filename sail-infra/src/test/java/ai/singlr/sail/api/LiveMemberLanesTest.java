@@ -85,10 +85,12 @@ class LiveMemberLanesTest {
         List.of(
             LiveStream.userMessage(
                 LiveMemberPrompt.fresh(
-                    room.specs.findById(SPEC).orElseThrow(),
-                    "Live spec",
-                    room.messages.list(SPEC, null, 20),
-                    false))),
+                        room.specs.findById(SPEC).orElseThrow(),
+                        "Live spec",
+                        room.messages.list(SPEC, null, 20),
+                        false)
+                    .getFirst()
+                    .text())),
         process.written);
     assertEquals(1, baselines(run.id()), "saved before the first prompt");
 
@@ -163,7 +165,9 @@ class LiveMemberLanesTest {
         List.of(
             LiveStream.userMessage(
                 LiveMemberPrompt.freshForRoom(
-                    "lounge", "Lounge", room.messages.list("lounge", null, 20), true))),
+                        "lounge", "Lounge", room.messages.list("lounge", null, 20), true)
+                    .getFirst()
+                    .text())),
         process.written);
 
     room.says(process, Lines.init("sess-9"), Lines.delta("Here."), Lines.result(""));

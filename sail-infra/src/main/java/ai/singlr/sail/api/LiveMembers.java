@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.LiveMemberPrompt;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -78,6 +79,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   /** How long a process whose output ended is given to report its exit code. */
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
 
+  private static final String MEMBERSHIP_CHANGED = "membership changed";
   private static final int ROOM_TAIL = 20;
   private static final int DELTA_CODE_POINTS = 8_000;
   private static final int REASON_CODE_POINTS = 500;
@@ -240,7 +242,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * with no member, or whose member's conversation a terminal holds, is left alone; so is one with
    * nothing unread, which is what a replayed announcement finds.
    *
-   * @throws ApiException when the member could not be started, a claim on its repos included
+   * @throws ApiException when the member could not be started: a claim on its repos, or a session
+   *     host that could not say whether a terminal holds its conversation
    */
   @Override
   public void deliver(String conversation, String localHandle) {
@@ -259,8 +262,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         if (unread.isEmpty()) {
           return;
         }
-        if (live.prompt(LiveMemberPrompt.messages(unread))) {
-          markDelivered(live.runId, unread);
+        if (hand(live, LiveMemberPrompt.messages(unread))) {
           return;
         }
         if (!live.over(timing.grace().whole())) {
@@ -289,6 +291,22 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /**
+   * Writes {@code pages} to {@code member} in order, recording as delivered what each page ended
+   * once it is written: a message a page left unfinished, or one in a page the process never took,
+   * stays unread for the next prompt. Answers whether every page was written.
+   */
+  private boolean hand(
+      Member member, List<PromptConversation.Rendered<MessageStore.MessageRow>> pages) {
+    for (var page : pages) {
+      if (!member.prompt(page.text())) {
+        return false;
+      }
+      markDelivered(member.runId, page.fullyRendered());
+    }
+    return true;
+  }
+
+  /**
    * The conversation a new process picks up: the newest run of this room's member, in the same
    * lane, that recorded a session off its own stream. A wake's session, or one from before the
    * member was live, was told to post its own answers, and one from the other lane was told its
@@ -308,17 +326,22 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         .findFirst();
   }
 
-  /** Whether a terminal resumed on {@code run}'s conversation is open: it holds that session. */
+  /**
+   * Whether a terminal resumed on {@code run}'s conversation is open: it holds that session. A host
+   * that could not be asked has not said the conversation is free, and a second process on a held
+   * one would corrupt it, so that is a refusal to start, never a no.
+   */
   private boolean terminalHolds(RunStore.RunRow run) {
     try {
       return terminals.live(SessionYield.resumeSession(run.id()));
     } catch (IOException unreachable) {
-      System.err.println(
-          "  [live] Warning: could not ask the session host about run "
+      throw new ApiException(
+          ErrorCode.COMMAND_FAILED,
+          "Could not ask the session host whether a terminal holds the conversation of run "
               + run.id()
-              + ": "
-              + unreachable.getMessage());
-      return false;
+              + ", so no process was started over it.",
+          "Check the sail-pty-host service on this box; the room's next message tries again.",
+          unreachable);
     }
   }
 
@@ -343,7 +366,8 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     if (resumed.isPresent() && (unread.isEmpty() || terminalHolds(resumed.get()))) {
       return;
     }
-    var prompt = resumed.isPresent() ? LiveMemberPrompt.messages(unread) : fresh(seat, tail, full);
+    var pages = resumed.isPresent() ? LiveMemberPrompt.messages(unread) : fresh(seat, tail, full);
+    var prompt = pages.getFirst().text();
     var command =
         Harnesses.of(member.agent())
             .live(
@@ -422,11 +446,34 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         new Member(seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full);
     members.put(seat.roomId(), started);
     Thread.ofVirtual().name("sail-live-" + runId).start(started::read);
-    started.prompt(prompt);
-    markDelivered(runId, tail);
+    var lost = lostInLaunch(seat, runId, handle);
+    if (lost.isPresent()) {
+      started.end(lost.get(), timing.grace().result());
+      return;
+    }
+    markDelivered(runId, tail.stream().filter(message -> !unread.contains(message)).toList());
+    hand(started, pages);
   }
 
-  private String fresh(Seat seat, List<MessageStore.MessageRow> tail, boolean full) {
+  /**
+   * Why a member that has just started is ended before it is prompted, or empty when it may work:
+   * its run was ended while it was starting, by a claim on its repos or a terminal on its
+   * conversation, or its seat was vacated or taken. Asked once the member is registered, so
+   * whatever ends a run or changes a seat was either seen here or finds the member. Stamping the
+   * process on the run is the same compare a launched run is verified by ({@link
+   * RunStore#updateProcess}): it lands only while the run is still {@code running}.
+   */
+  private Optional<String> lostInLaunch(Seat seat, String runId, AgentProcess.Handle handle) {
+    var pid = handle.pid();
+    if (!runStore.updateProcess(runId, pid.isPresent() ? pid.getAsInt() : null, null, null)) {
+      return Optional.of("run ended during launch");
+    }
+    var seated = seat(seat.conversation()).map(Seat::member).orElse(null);
+    return seat.member().equals(seated) ? Optional.empty() : Optional.of(MEMBERSHIP_CHANGED);
+  }
+
+  private List<PromptConversation.Rendered<MessageStore.MessageRow>> fresh(
+      Seat seat, List<MessageStore.MessageRow> tail, boolean full) {
     if (seat.spec() == null) {
       return LiveMemberPrompt.freshForRoom(seat.roomId(), seat.title(), tail, full);
     }
@@ -466,7 +513,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         () ->
             seat(conversation)
                 .map(seat -> members.get(seat.roomId()))
-                .ifPresent(member -> member.end("membership changed", timing.grace().result())));
+                .ifPresent(member -> member.end(MEMBERSHIP_CHANGED, timing.grace().result())));
   }
 
   /**

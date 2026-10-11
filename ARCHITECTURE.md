@@ -1009,10 +1009,20 @@ class is `LiveMemberTest`'s):
   one on that message; a message that arrives during a turn is written at once and starts the
   next turn; the member's own reply prompts nothing. What is written is the room's human
   messages the run was not yet handed, so a message that arrived while the member could not
-  start is in its next prompt.
+  start is in its next prompt. Messages are written oldest first, as many to a prompt as
+  `PromptConversation.MAX_CODE_POINTS` holds and none cut or left out: what does not fit is
+  the next prompt, written straight after, and a message longer than a prompt is written
+  across several, each part saying that more follows (`LiveMemberPrompt.messages`). A message
+  is recorded as delivered to the run only once the prompt that ends it was written, so one a
+  process took part of, or never took, is handed whole to the next; a fresh session's room
+  follows its opening the same way.
   *`aHumanMessageStartsOneLiveProcessAndIsItsFirstPrompt`,
   `aMessageDuringATurnIsWrittenAtOnceAndStartsTheNextTurn`,
   `aMessageAfterATurnGoesToTheSameProcess`,
+  `LiveMemberEdgesTest.aMessageLongerThanAPromptIsWrittenAcrossPromptsAndIsDeliveredOnceAllOfItIs`,
+  `LiveMemberEdgesTest.aMessageAProcessTookOnlyPartOfIsHandedWholeToTheNext`,
+  `LiveMemberEdgesTest.aFreshSessionIsShownARoomLongerThanAPromptOnePromptAfterAnother`,
+  `LiveMemberPromptGoldenTest` (pages),
   `RoomWakeReactorTest.aRoomWhoseMemberIsLiveIsPromptedAtOnceAndNeverWoken`,
   `RoomWakeReactorTest.aLiveMemberIsPromptedOnlyByWhatWouldWakeIt`,
   `LiveStreamTest.aPromptIsOneUserMessageLine`.*
@@ -1062,7 +1072,12 @@ class is `LiveMemberTest`'s):
   answer, with the end of its log as the reason) as one compare-and-set that revokes the credential, then the
   `agent_session_stopped` its watcher would have published, `source` `live`. The next message
   starts a process that resumes the newest session a live run of the same member and lane
-  recorded. On start, `LiveMembers.reclaim` finishes the live runs a previous sail left.
+  recorded. On start, `LiveMembers.reclaim` finishes the live runs a previous sail left. A
+  process is prompted only for a run that still holds what it reserved and a seat that is
+  still its member's: once it is registered, its process is stamped on the run with the
+  compare a launched run is verified by (`RunStore.updateProcess`, which lands only on a
+  `running` row) and the room's seat is read again, and a run that was ended or a seat that
+  changed while it started ends the process with nothing written to it.
   *`anIdleMemberEndsAndTheNextMessageResumesItsConversation`,
   `theGraceEachEndWaitsWithIsPinned`,
   `aProcessThatDiesMidTurnFailsItsRunAndTheNextMessageResumes`,
@@ -1074,6 +1089,8 @@ class is `LiveMemberTest`'s):
   `LiveMemberLanesTest.theMissedStopReconcilerLeavesALiveTurnAlone`,
   `LiveMemberLanesTest.aMemberInAnotherLaneOrFromAWakeIsNotResumed`,
   `LiveMemberEdgesTest.aMemberThatWillNotEndTakesNoPromptAndNothingStartsBesideIt`,
+  `LiveMemberEdgesTest.aMemberDismissedWhileItStartedIsEndedBeforeItIsPrompted`,
+  `LiveMemberDisplacementTest.aMemberWhoseRunAClaimEndedWhileItStartedIsNeverPrompted`,
   `ContainerAgentProcessTest`,
   `ReviewAgentLoopIT.aLiveMembersProcessStartsUnderItsInvocationAndIsPromptedOverItsStdin`.*
 - **L5. A claim or an attach displaces a live member; nothing else does.** A build, ad-hoc,
@@ -1083,13 +1100,15 @@ class is `LiveMemberTest`'s):
   are refused as before. `sail agent attach` on the member's run ends the member and then
   opens the terminal on its session, and while that terminal is live no process is started
   over the same session; the pty host's dispatch authority may list sessions for that
-  question. The member resumes on the room's next message once its repos, or its session, are
+  question, and a host that is there and cannot be asked has not said the session is free: the
+  member is not started, any claim it made is given back, and the room's next message asks
+  again. The member resumes on the room's next message once its repos, or its session, are
   free. A process is owned by the sail that started it: another process on the box (a CLI
   dispatch, the attach) cannot close its stdin and ends it by signal through its pid file, and
   whichever sees it gone finishes its run.
   *`LiveMemberDisplacementTest` (an idle member, a turn that answers, one that never does, a
   member that will not end, a build's hold, another room's member, a fix claim, a terminal,
-  the race with one, another process), `RunReservationTest.aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs`,
+  the race with one, a session host that cannot be asked, another process), `RunReservationTest.aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs`,
   `RunReservationTest.aChatLanesClaimAndAClaimAnotherRunHoldsDisplaceNoOne`,
   `AgentAttachCommandTest.aLiveMembersRunIsTakenOverNotRefused`,
   `PtyHostYieldTest.aSessionIsLiveWhoeverOpenedItAndNoHostMeansNoSession`.*

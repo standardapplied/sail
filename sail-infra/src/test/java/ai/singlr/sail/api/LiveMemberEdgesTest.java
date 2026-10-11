@@ -14,6 +14,8 @@ import ai.singlr.sail.api.LiveRoom.Lines;
 import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.AgentProcess;
+import ai.singlr.sail.engine.LiveMemberPrompt;
+import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.MessageStore;
@@ -23,6 +25,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -245,6 +249,108 @@ class LiveMemberEdgesTest {
     assertEquals(2, room.processes.starts.size(), "the message is for whoever comes next");
     assertEquals(List.of(room.promptOf(SPEC, second)), room.processes.latest().written);
     assertEquals(List.of("running", "stopped"), statuses());
+  }
+
+  private static final int SLICE = 31_930;
+  private static final String CONTINUES = "\n[continues in the next prompt]";
+  private static final String CONTINUED = "[continued from the previous prompt]\n";
+
+  /** The two prompts a message of 40,000 characters and a last instruction is written as. */
+  private List<String> acrossTwoPrompts(String messageId) {
+    var message = room.messages.findById(messageId).orElseThrow();
+    var written = message.author() + " (" + message.createdAt() + "):\n" + message.body();
+    return List.of(
+        LiveStream.userMessage(written.substring(0, SLICE) + CONTINUES),
+        LiveStream.userMessage(CONTINUED + written.substring(SLICE)));
+  }
+
+  private Set<String> everyMessage() {
+    return room.messages.list(SPEC, null, 20).stream()
+        .map(MessageStore.MessageRow::id)
+        .collect(Collectors.toSet());
+  }
+
+  @Test
+  void aMessageLongerThanAPromptIsWrittenAcrossPromptsAndIsDeliveredOnceAllOfItIs() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result(""));
+
+    var huge = room.says(SPEC, "a".repeat(40_000) + " FINAL_INSTRUCTION");
+
+    assertEquals(acrossTwoPrompts(huge), process.written.subList(1, process.written.size()));
+    assertEquals(
+        Set.of(room.messages.list(SPEC, null, 20).getFirst().id(), huge),
+        room.runs.deliveredMessageIds(process.runId));
+  }
+
+  @Test
+  void aMessageAProcessTookOnlyPartOfIsHandedWholeToTheNext() {
+    var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result(""));
+    process.onWrite(line -> process.breaksStdin());
+
+    var huge = room.says(SPEC, "a".repeat(40_000) + " FINAL_INSTRUCTION");
+
+    assertEquals(
+        acrossTwoPrompts(huge).subList(0, 1),
+        process.written.subList(1, process.written.size()),
+        "its stdin broke after the first of the two");
+    assertFalse(
+        room.runs.deliveredMessageIds(process.runId).contains(huge),
+        "a message is not delivered by its beginning");
+    assertEquals(2, room.processes.starts.size());
+    assertEquals(
+        LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
+        room.processes.starts.getLast().command());
+    assertEquals(acrossTwoPrompts(huge), room.processes.latest().written);
+    assertEquals(everyMessage(), room.runs.deliveredMessageIds(room.processes.latest().runId));
+  }
+
+  @Test
+  void aFreshSessionIsShownARoomLongerThanAPromptOnePromptAfterAnother() {
+    var first = room.says(SPEC, "a".repeat(20_000));
+    var second = room.says(SPEC, "b".repeat(20_000));
+
+    var process = room.prompted(SPEC, "full", "what do you make of those?");
+
+    var third = room.messages.list(SPEC, null, 20).getLast().id();
+    var opening =
+        LiveMemberPrompt.fresh(
+                room.specs.findById(SPEC).orElseThrow(),
+                "Live spec",
+                room.messages.list(SPEC, null, 20).subList(0, 1),
+                true)
+            .getFirst()
+            .text();
+    assertEquals(
+        List.of(LiveStream.userMessage(opening), room.promptOf(SPEC, second, third)),
+        process.written,
+        "who it is and the oldest message, then the rest: nothing of the room is dropped");
+    assertEquals(Set.of(first, second, third), room.runs.deliveredMessageIds(process.runId));
+  }
+
+  @Test
+  void aMemberDismissedWhileItStartedIsEndedBeforeItIsPrompted() {
+    room.engage(SPEC, "claude-code", "full");
+    room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
+    room.live.useProcesses(
+        (container, workDir, env, command, pidFile, logFile) -> {
+          room.vacate(SPEC);
+          room.live.membershipChanged(SPEC);
+          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+        });
+
+    room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    assertEquals(List.of(), process.written, "nobody sits in the room: nothing is asked of it");
+    assertTrue(
+        process.stdinClosed(), "the change that found no member to end is seen at the start");
+    assertEquals(List.of(), process.signals);
+    assertEquals(List.of("stopped"), statuses());
+    assertEquals("membership changed", room.stopOf(process.runId).data().get("reason"));
+    assertEquals(List.of(), room.data(Event.WellKnownTypes.AGENT_TURN_ENDED));
+    assertEquals(Set.of(), room.runs.deliveredMessageIds(process.runId));
   }
 
   @Test

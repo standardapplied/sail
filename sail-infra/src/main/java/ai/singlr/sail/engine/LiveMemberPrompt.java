@@ -5,8 +5,11 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.PromptConversation.Rendered;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -15,67 +18,128 @@ import java.util.List;
  * later prompt, and the first of a resumed session, is the new messages alone, since the session
  * already holds the rest.
  *
+ * <p>Messages are handed over as pages: oldest first, as many to a prompt as {@link
+ * PromptConversation#MAX_CODE_POINTS} holds, none cut short and none left out. A message longer
+ * than a prompt continues in the next, and a page names in {@link Rendered#fullyRendered} only the
+ * messages it ends, so one is acknowledged as delivered only once all of it was written.
+ *
  * <p>The contract differs from a wake's in one way that everything else follows from: sail reads
  * the member's process and posts what it says, so the member never posts its own answer, and it is
  * never told to end its turn or that it will be resumed, because it does not leave.
  */
 public final class LiveMemberPrompt {
 
+  private static final String CONTINUES = "\n[continues in the next prompt]\n\n";
+  private static final String CONTINUED = "[continued from the previous prompt]\n";
+  private static final int SLICE_CODE_POINTS =
+      PromptConversation.MAX_CODE_POINTS - CONTINUED.length() - CONTINUES.length();
+
   private LiveMemberPrompt() {}
 
-  /** The first prompt of a fresh session in the room of {@code spec}. */
-  public static String fresh(
+  /** The prompts of a fresh session in the room of {@code spec}: who it is, then the room. */
+  public static List<Rendered<MessageStore.MessageRow>> fresh(
       SpecStore.SpecRow spec,
       String body,
       List<MessageStore.MessageRow> conversation,
       boolean full) {
-    return "You are the engaged agent of spec \""
-        + spec.title()
-        + "\" (id: "
-        + spec.id()
-        + ", status: "
-        + spec.status().wire()
-        + "): a member of its room. Humans post here and you answer, and the conversation"
-        + " continues across turns in this one session.\n\n"
-        + room(spec.id())
-        + (full ? fullLane(specWork(spec.id())) : readOnlyLane())
-        + "## Spec body\n\n"
-        + body
-        + "\n\n"
-        + conversationBlock(conversation);
+    return opening(
+        "You are the engaged agent of spec \""
+            + spec.title()
+            + "\" (id: "
+            + spec.id()
+            + ", status: "
+            + spec.status().wire()
+            + "): a member of its room. Humans post here and you answer, and the conversation"
+            + " continues across turns in this one session.\n\n"
+            + room(spec.id())
+            + (full ? fullLane(specWork(spec.id())) : readOnlyLane())
+            + "## Spec body\n\n"
+            + body
+            + "\n\n",
+        conversation);
   }
 
-  /** The first prompt of a fresh session in a room with no spec. */
-  public static String freshForRoom(
+  /** The prompts of a fresh session in a room with no spec. */
+  public static List<Rendered<MessageStore.MessageRow>> freshForRoom(
       String roomId, String title, List<MessageStore.MessageRow> conversation, boolean full) {
-    return "You are a member of the room \""
-        + title
-        + "\" (id: "
-        + roomId
-        + "). Humans and agents talk here; no spec is attached — this is a conversation, not a"
-        + " work-item. Humans post and you answer, and the conversation continues across turns"
-        + " in this one session.\n\n"
-        + room(roomId)
-        + (full ? fullLane(ROOM_WORK) : readOnlyLane())
-        + conversationBlock(conversation);
+    return opening(
+        "You are a member of the room \""
+            + title
+            + "\" (id: "
+            + roomId
+            + "). Humans and agents talk here; no spec is attached — this is a conversation, not a"
+            + " work-item. Humans post and you answer, and the conversation continues across turns"
+            + " in this one session.\n\n"
+            + room(roomId)
+            + (full ? fullLane(ROOM_WORK) : readOnlyLane()),
+        conversation);
   }
 
-  /** A prompt that is {@code messages} alone: what was posted since the member's last turn. */
-  public static String messages(List<MessageStore.MessageRow> messages) {
-    return render(messages).strip();
+  /** The prompts that are {@code messages} alone: what was posted since the member's last turn. */
+  public static List<Rendered<MessageStore.MessageRow>> messages(
+      List<MessageStore.MessageRow> messages) {
+    var pages = new ArrayList<Rendered<MessageStore.MessageRow>>();
+    var text = new StringBuilder();
+    var ended = new ArrayList<MessageStore.MessageRow>();
+    var left = PromptConversation.MAX_CODE_POINTS;
+    for (var message : messages) {
+      for (var part : parts(message)) {
+        var size = part.codePointCount(0, part.length());
+        if (size > left) {
+          pages.add(page(text, ended));
+          left = PromptConversation.MAX_CODE_POINTS;
+        }
+        text.append(part);
+        left -= size;
+      }
+      ended.add(message);
+    }
+    if (!text.isEmpty()) {
+      pages.add(page(text, ended));
+    }
+    return List.copyOf(pages);
   }
 
-  private static String conversationBlock(List<MessageStore.MessageRow> conversation) {
-    var rendered = render(conversation);
-    return rendered.isEmpty() ? "" : "## Conversation in this room\n\n" + rendered.strip();
+  /** The page gathered so far, which is then started again. */
+  private static Rendered<MessageStore.MessageRow> page(
+      StringBuilder text, List<MessageStore.MessageRow> ended) {
+    var page = new Rendered<>(text.toString().strip(), List.copyOf(ended));
+    text.setLength(0);
+    ended.clear();
+    return page;
   }
 
-  private static String render(List<MessageStore.MessageRow> messages) {
-    return PromptConversation.renderNewest(
-            messages,
-            message ->
-                message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n")
-        .text();
+  /**
+   * {@code message} as it is written: whole when a prompt holds it, otherwise in slices that each
+   * fill one, every slice but the last saying that more follows.
+   */
+  private static List<String> parts(MessageStore.MessageRow message) {
+    var whole = message.author() + " (" + message.createdAt() + "):\n" + message.body() + "\n\n";
+    if (whole.codePointCount(0, whole.length()) <= PromptConversation.MAX_CODE_POINTS) {
+      return List.of(whole);
+    }
+    var parts = new ArrayList<String>();
+    var rest = whole;
+    while (!rest.isEmpty()) {
+      var slice = Strings.clip(rest, SLICE_CODE_POINTS);
+      rest = rest.substring(slice.length());
+      parts.add((parts.isEmpty() ? "" : CONTINUED) + slice + (rest.isEmpty() ? "" : CONTINUES));
+    }
+    return parts;
+  }
+
+  /** {@code preamble}, then the first page of {@code conversation}; its other pages follow. */
+  private static List<Rendered<MessageStore.MessageRow>> opening(
+      String preamble, List<MessageStore.MessageRow> conversation) {
+    var pages = new ArrayList<>(messages(conversation));
+    if (pages.isEmpty()) {
+      return List.of(new Rendered<>(preamble, List.of()));
+    }
+    var first = pages.removeFirst();
+    pages.addFirst(
+        new Rendered<>(
+            preamble + "## Conversation in this room\n\n" + first.text(), first.fullyRendered()));
+    return List.copyOf(pages);
   }
 
   private static String room(String roomId) {

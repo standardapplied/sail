@@ -85,10 +85,12 @@ class LiveMemberTest {
     assertEquals(List.of("api"), run.repos());
     var fresh =
         LiveMemberPrompt.fresh(
-            room.specs.findById(SPEC).orElseThrow(),
-            "Live spec",
-            room.messages.list(SPEC, null, 20),
-            true);
+                room.specs.findById(SPEC).orElseThrow(),
+                "Live spec",
+                room.messages.list(SPEC, null, 20),
+                true)
+            .getFirst()
+            .text();
     assertEquals(List.of(LiveStream.userMessage(fresh)), room.processes.latest().written);
     assertTrue(fresh.endsWith(":\nwhat does the api do?"), fresh);
     assertEquals(

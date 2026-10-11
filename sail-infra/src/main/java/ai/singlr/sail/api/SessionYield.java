@@ -65,7 +65,8 @@ public interface SessionYield {
   /**
    * Whether the host runs a session named {@code session} now. A live member asks before it starts
    * over a recorded conversation: a terminal resumed on that conversation holds it, and two
-   * processes on one conversation would corrupt it. A seam with no host runs no session.
+   * processes on one conversation would corrupt it. A seam with no host runs no session; a host
+   * that is there and could not be asked throws, and the member takes that as no answer.
    */
   default boolean live(String session) throws IOException {
     return false;

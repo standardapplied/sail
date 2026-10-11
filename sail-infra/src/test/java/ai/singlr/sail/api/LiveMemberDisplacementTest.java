@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -25,6 +26,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -362,11 +364,13 @@ class LiveMemberDisplacementTest {
   }
 
   @Test
-  void aSessionHostThatCannotBeAskedHoldsNothing() {
+  void aSessionHostThatCannotBeAskedHasNotSaidTheConversationIsFree() {
     var process = idleMember();
     process.onClose(() -> process.exits(0));
     room.sail.dispatching().endLiveMember(process.runId, "displaced by a terminal");
     room.awaitStopped(process);
+    var asked = new AtomicReference<>(0);
+    var refusedAt = new AtomicReference<>(1);
     room.terminals(
         new SessionYield() {
           @Override
@@ -379,13 +383,94 @@ class LiveMemberDisplacementTest {
 
           @Override
           public boolean live(String name) throws IOException {
-            throw new IOException("the host socket refused");
+            if (asked.updateAndGet(count -> count + 1).equals(refusedAt.get())) {
+              throw new IOException("the host refused the dispatch credential");
+            }
+            return false;
           }
         });
 
-    room.says(SPEC, "anyone?");
+    var unanswered = room.says(SPEC, "anyone?");
 
-    assertEquals(2, room.processes.starts.size(), "a host that is down runs no terminal");
+    assertEquals(1, room.processes.starts.size(), "no answer is not a no: nothing is started");
+    assertEquals(
+        List.of("stopped"),
+        room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
+        "and nothing was claimed for it");
+    asked.set(0);
+    var refused = assertThrows(ApiException.class, () -> room.live.deliver(SPEC, HANDLE));
+    assertEquals(ErrorCode.COMMAND_FAILED, refused.failure().errorCode());
+    assertEquals(
+        "Could not ask the session host whether a terminal holds the conversation of run "
+            + process.runId
+            + ", so no process was started over it.",
+        refused.getMessage());
+    assertEquals(
+        "Check the sail-pty-host service on this box; the room's next message tries again.",
+        refused.failure().action());
+    assertEquals("the host refused the dispatch credential", refused.getCause().getMessage());
+
+    asked.set(0);
+    refusedAt.set(2);
+    var between = room.says(SPEC, "the host goes quiet between the member's two looks");
+
+    assertEquals(1, room.processes.starts.size());
+    assertEquals(
+        List.of("failed", "stopped"),
+        room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList(),
+        "the claim made between the two looks is given back");
+
+    asked.set(0);
+    refusedAt.set(0);
+    var answered = room.says(SPEC, "and now?");
+
+    assertEquals(2, room.processes.starts.size(), "a host that answers no frees the conversation");
+    assertEquals(
+        LiveRoom.invocation("--dangerously-skip-permissions", "--resume", "sess-1"),
+        room.processes.starts.getLast().command());
+    assertEquals(
+        List.of(room.promptOf(SPEC, unanswered, between, answered)),
+        room.processes.latest().written,
+        "what was posted while the host could not be asked was never lost");
+  }
+
+  @Test
+  void aMemberWhoseRunAClaimEndedWhileItStartedIsNeverPrompted() {
+    room.engage(SPEC, "claude-code", "full");
+    var cli = room.elsewhere().dispatching();
+    room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
+    room.live.useProcesses(
+        (container, workDir, env, command, pidFile, logFile) -> {
+          assertTrue(
+              cli.endLiveMember(env.get("SAIL_RUN_ID"), "displaced by a build"),
+              "nothing runs yet, so another process finds the run's agent gone and frees it");
+          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+        });
+
+    var first = room.says(SPEC, "first");
+
+    var lost = room.processes.latest();
+    assertEquals(List.of(), lost.written, "a run that holds nothing is given no work");
+    assertTrue(lost.stdinClosed(), "and its process is ended");
+    assertEquals(List.of(), lost.signals);
+    assertEquals("stopped", room.run(lost.runId).status());
+    assertNull(room.run(lost.runId).pid(), "an ended run takes no process");
+    assertEquals("displaced by a build", room.stopOf(lost.runId).data().get("reason"));
+    assertEquals(1, stops(lost.runId));
+    assertEquals(Set.of(), room.runs.deliveredMessageIds(lost.runId));
+
+    room.live.useProcesses(room.processes);
+    var second = room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size());
+    assertEquals(
+        Set.of(first, second),
+        room.runs.deliveredMessageIds(room.processes.latest().runId),
+        "the message it was never handed is in the next process's first prompt");
+    assertEquals(
+        Integer.valueOf(room.processes.latest().pid().getAsInt()),
+        room.memberRun().pid(),
+        "a run that is still its member's records the process it is");
   }
 
   private long stops(String runId) {
