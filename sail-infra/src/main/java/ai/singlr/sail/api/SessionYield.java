@@ -61,4 +61,13 @@ public interface SessionYield {
    * live.
    */
   void end(List<String> sessions, String reason) throws IOException;
+
+  /**
+   * Whether the host runs a session named {@code session} now. A live member asks before it starts
+   * over a recorded conversation: a terminal resumed on that conversation holds it, and two
+   * processes on one conversation would corrupt it. A seam with no host runs no session.
+   */
+  default boolean live(String session) throws IOException {
+    return false;
+  }
 }

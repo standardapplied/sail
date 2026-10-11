@@ -36,6 +36,12 @@ public interface HostDispatching {
 
   AgentSession.SessionInfo projectSession(String project, String node) throws Exception;
 
+  /**
+   * Ends the live member whose run is {@code runId}, so a terminal can take its conversation.
+   * Returns whether the run is over; a run that is not a live member's answers {@code false}.
+   */
+  boolean endLiveMember(String runId, String why);
+
   /** The newest run of {@code project} this box executed in {@code lane}, or empty. */
   Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane);
 }

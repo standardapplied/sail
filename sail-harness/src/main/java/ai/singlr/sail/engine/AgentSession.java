@@ -220,7 +220,7 @@ public final class AgentSession {
                     PRESENCE_SCRIPT,
                     "bash",
                     unit.pidPath(),
-                    Strings.isBlank(unit.unitName()) ? "" : unit.service())));
+                    unit.systemd() ? unit.service() : "")));
     return switch (asked.ok() ? asked.stdout().strip() : "") {
       case "gone" -> new Presence.Gone();
       case "alive" -> {
@@ -243,7 +243,7 @@ public final class AgentSession {
     var pidCmd = ContainerExec.asDevUser(containerName, List.of("cat", unit.pidPath()));
     var pidResult = shell.exec(pidCmd);
     var pid = pidResult.ok() ? parsePid(pidResult.stdout()) : null;
-    if (pid == null && !Strings.isBlank(unit.unitName())) {
+    if (pid == null && unit.systemd()) {
       pid = querySystemdPid(containerName, unit);
     }
     if (pid == null) {
@@ -370,9 +370,7 @@ public final class AgentSession {
    */
   public Halt killAgent(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    return Strings.isBlank(unit.unitName())
-        ? killByPidFile(containerName, unit)
-        : killUnit(containerName, unit);
+    return unit.systemd() ? killUnit(containerName, unit) : killByPidFile(containerName, unit);
   }
 
   private Halt killUnit(String containerName, AgentUnit unit)
@@ -427,7 +425,7 @@ public final class AgentSession {
 
   private Halt ended(String containerName, AgentUnit unit)
       throws IOException, InterruptedException, TimeoutException {
-    if (!Strings.isBlank(unit.unitName())) {
+    if (unit.systemd()) {
       shell.exec(
           ContainerExec.asDevUser(
               containerName, List.of("systemctl", "--user", "reset-failed", unit.service())));

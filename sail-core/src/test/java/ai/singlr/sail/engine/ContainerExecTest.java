@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -79,6 +80,40 @@ class ContainerExecTest {
     assertEquals("bash", cmd.get(17));
     assertEquals("-l", cmd.get(18));
     assertEquals(19, cmd.size());
+  }
+
+  @Test
+  void asDevUserOverPipesOpensInItsDirectoryWithItsEnvAndNoPty() {
+    var env = new LinkedHashMap<String, String>();
+    env.put("SAIL_RUN_ID", "run-1");
+    env.put("SAIL_RUN_ROLE", "room");
+
+    assertEquals(
+        List.of(
+            "incus",
+            "exec",
+            "acme",
+            "--user",
+            "1000",
+            "--group",
+            "1000",
+            "--cwd",
+            "/home/dev/workspace/api",
+            "--env",
+            "HOME=/home/dev",
+            "--env",
+            "XDG_RUNTIME_DIR=/run/user/1000",
+            "--env",
+            "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+            "--env",
+            "SAIL_RUN_ID=run-1",
+            "--env",
+            "SAIL_RUN_ROLE=room",
+            "--",
+            "claude",
+            "--print"),
+        ContainerExec.asDevUser(
+            "acme", "/home/dev/workspace/api", env, List.of("claude", "--print")));
   }
 
   @Test

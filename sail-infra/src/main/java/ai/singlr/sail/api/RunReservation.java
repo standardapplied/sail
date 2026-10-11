@@ -41,20 +41,48 @@ import java.util.stream.Collectors;
  */
 public final class RunReservation {
 
+  /** How many live members one claim ends, each holding it in turn, before it is refused. */
+  static final int MAX_DISPLACED = 3;
+
+  /**
+   * The reservation's door onto live members. A live member holds its repos only so that nothing
+   * else works them while it might; ending it loses nothing, so a working lane's claim that it
+   * alone holds ends it and is tried again.
+   */
+  @FunctionalInterface
+  public interface Displaceable {
+
+    Displaceable NONE = (runId, why) -> false;
+
+    /** Ends the live member whose run is {@code runId}; whether that run is now over. */
+    boolean endHolder(String runId, String why);
+  }
+
   private final RunStore runStore;
   private final ShellExec shell;
   private final DispatchOperations.Listener listener;
   private final SessionYield sessionYield;
+  private final Displaceable displaceable;
 
   public RunReservation(
       RunStore runStore,
       ShellExec shell,
       DispatchOperations.Listener listener,
       SessionYield sessionYield) {
+    this(runStore, shell, listener, sessionYield, Displaceable.NONE);
+  }
+
+  public RunReservation(
+      RunStore runStore,
+      ShellExec shell,
+      DispatchOperations.Listener listener,
+      SessionYield sessionYield,
+      Displaceable displaceable) {
     this.runStore = runStore;
     this.shell = shell;
     this.listener = listener;
     this.sessionYield = Objects.requireNonNull(sessionYield, "sessionYield");
+    this.displaceable = Objects.requireNonNull(displaceable, "displaceable");
   }
 
   /**
@@ -202,11 +230,41 @@ public final class RunReservation {
   }
 
   /**
-   * The one claim every lane makes: under the project's claim lock, the reservation is decided and
-   * its row written in one transaction, and the conversations a claim that landed displaces yield.
-   * A claim a run holds reserves nothing and displaces no one.
+   * The one claim every lane makes. A working lane's claim that a live member holds ends that
+   * member, outside the lock, and is made again — for as many as {@link #MAX_DISPLACED} members in
+   * turn — so a build, an ad-hoc session, a reviewer and a fix agent never wait on a conversation.
+   * A claim any other run holds, a chat lane's own claim, and a member that would not end are
+   * answered {@link Claim.Held} as they always were.
    */
   private Claim claim(
+      String runId,
+      String project,
+      String specId,
+      String role,
+      List<String> repos,
+      Supplier<RunStore.Reservation> reservation) {
+    var claim = claimOnce(runId, project, specId, role, repos, reservation);
+    for (var ended = 0;
+        ended < MAX_DISPLACED && claim instanceof Claim.Held held && displaced(runId, role, held);
+        ended++) {
+      claim = claimOnce(runId, project, specId, role, repos, reservation);
+    }
+    return claim;
+  }
+
+  private boolean displaced(String runId, String role, Claim.Held held) {
+    var holder = held.conflict().run().runId();
+    return !Lane.of(role).map(Lane::isChat).orElse(false)
+        && runStore.findById(holder).filter(LiveMembers::liveRun).isPresent()
+        && displaceable.endHolder(holder, "displaced by run " + runId + " claiming its repos");
+  }
+
+  /**
+   * One attempt at the claim: under the project's claim lock, the reservation is decided and its
+   * row written in one transaction, and the conversations a claim that landed displaces yield. A
+   * claim a run holds reserves nothing and displaces no one.
+   */
+  private Claim claimOnce(
       String runId,
       String project,
       String specId,

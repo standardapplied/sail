@@ -69,6 +69,16 @@ final class PtyHostYield implements SessionYield {
     }
   }
 
+  @Override
+  public boolean live(String session) throws IOException {
+    if (!Files.exists(socket)) {
+      return false;
+    }
+    try (var client = SessionClient.connect(socket, dispatchCredential())) {
+      return client.list().stream().anyMatch(info -> info.live() && session.equals(info.name()));
+    }
+  }
+
   private String dispatchCredential() throws IOException {
     var path = PtySessionHost.dispatchCredentialOf(socket);
     try {

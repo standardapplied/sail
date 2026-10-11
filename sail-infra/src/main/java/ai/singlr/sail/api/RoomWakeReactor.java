@@ -39,6 +39,12 @@ import java.util.function.Supplier;
  * launch itself rides the same atomic reservation as dispatch, so a race that slips past these
  * checks is refused by the gate, never doubled.
  *
+ * <p>A room whose member's harness has a live mode is not woken at all: its human messages go to
+ * {@link Live#deliver} the moment they land, with no debounce and no cooldown, and a change of its
+ * membership ends the process that served the old one. Everything else here — the debounce, the
+ * owed-turn refire, the engagement sweep — serves a spec's own agent and a member whose harness is
+ * started once per turn.
+ *
  * <p>The reactor also hears {@code room}-role stop signals: a wake turn that somehow moved a repo
  * is a guardrail event, and {@link Guard#guard} performs that check for runs this box owns.
  *
@@ -71,6 +77,34 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     void guard(String project, String runId) throws Exception;
   }
 
+  /** The live-member seam, implemented by {@link LiveMembers}. */
+  public interface Live {
+
+    /** No member is live: every room is woken one process per turn. */
+    Live NONE =
+        new Live() {
+          @Override
+          public boolean serves(String agent) {
+            return false;
+          }
+
+          @Override
+          public void deliver(String conversation, String localHandle) {}
+
+          @Override
+          public void membershipChanged(String conversation) {}
+        };
+
+    /** Whether a member running {@code agent} is served by a live process. */
+    boolean serves(String agent);
+
+    /** Hands the room's unread human messages to its live member, starting it when none is up. */
+    void deliver(String conversation, String localHandle);
+
+    /** Ends the room's live member: its seat was vacated or taken by another. */
+    void membershipChanged(String conversation);
+  }
+
   /** The debounce pause, injectable so tests never sleep. */
   @FunctionalInterface
   public interface Delay {
@@ -79,6 +113,13 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   private static final Set<String> LIVE_STATUSES = Set.of("running", "stopping");
 
+  private static final Set<String> HEARD =
+      Set.of(
+          Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
+          Event.WellKnownTypes.AGENT_SESSION_STOPPED,
+          Event.WellKnownTypes.SPEC_ENGAGED,
+          Event.WellKnownTypes.SPEC_DISENGAGED);
+
   private final SpecStore specStore;
   private final RoomStore roomStore;
   private final RunStore runStore;
@@ -86,6 +127,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   private final Supplier<String> localHandle;
   private final Waker waker;
   private final Guard guard;
+  private final Live live;
   private final Duration debounce;
   private final Duration engagedDebounce;
   private final Duration cooldown;
@@ -103,7 +145,8 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       MessageStore messageStore,
       Supplier<String> localHandle,
       Waker waker,
-      Guard guard) {
+      Guard guard,
+      Live live) {
     this(
         specStore,
         roomStore,
@@ -112,6 +155,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
         localHandle,
         waker,
         guard,
+        live,
         DEBOUNCE,
         ENGAGED_DEBOUNCE,
         COOLDOWN,
@@ -128,6 +172,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
       Supplier<String> localHandle,
       Waker waker,
       Guard guard,
+      Live live,
       Duration debounce,
       Duration engagedDebounce,
       Duration cooldown,
@@ -141,6 +186,7 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     this.localHandle = Objects.requireNonNull(localHandle, "localHandle");
     this.waker = Objects.requireNonNull(waker, "waker");
     this.guard = Objects.requireNonNull(guard, "guard");
+    this.live = Objects.requireNonNull(live, "live");
     this.debounce = debounce;
     this.engagedDebounce = engagedDebounce;
     this.cooldown = cooldown;
@@ -156,20 +202,16 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
 
   @Override
   public Predicate<Event> filter() {
-    return e ->
-        (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(e.type())
-                || Event.WellKnownTypes.AGENT_SESSION_STOPPED.equals(e.type()))
-            && e.spec() != null
-            && !e.spec().isBlank();
+    return e -> HEARD.contains(e.type()) && e.spec() != null && !e.spec().isBlank();
   }
 
   @Override
   public void onEvent(Event event) {
     try {
-      if (Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(event.type())) {
-        handleMessage(event);
-      } else {
-        handleStop(event);
+      switch (event.type()) {
+        case Event.WellKnownTypes.SPEC_MESSAGE_POSTED -> handleMessage(event);
+        case Event.WellKnownTypes.AGENT_SESSION_STOPPED -> handleStop(event);
+        default -> executor.execute(() -> seatChanged(event.spec()));
       }
     } catch (Exception e) {
       System.err.println(
@@ -208,6 +250,11 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     }
   }
 
+  /** Whether the room's member is served by a live process rather than woken per turn. */
+  private boolean liveMember(Target target) {
+    return target.state().standing() != null && live.serves(target.state().standing().agent());
+  }
+
   private Target resolveTarget(String id) {
     var spec = specStore.findById(id).orElse(null);
     if (spec != null) {
@@ -244,7 +291,29 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
     if (!wakes(target, message)) {
       return;
     }
+    if (liveMember(target)) {
+      executor.execute(() -> deliver(event.spec()));
+      return;
+    }
     schedule(event.spec(), message, engaged);
+  }
+
+  private void deliver(String conversation) {
+    try {
+      live.deliver(conversation, localHandle.get());
+    } catch (Exception e) {
+      System.err.println(
+          "room-wake: live member of " + conversation + " was not prompted: " + e.getMessage());
+    }
+  }
+
+  private void seatChanged(String conversation) {
+    try {
+      live.membershipChanged(conversation);
+    } catch (Exception e) {
+      System.err.println(
+          "room-wake: live member of " + conversation + " was not ended: " + e.getMessage());
+    }
   }
 
   /** Whether {@code message} wakes the target: someone to wake, and the effective mode agrees. */
@@ -325,14 +394,18 @@ public final class RoomWakeReactor implements EventSubscriber, AutoCloseable {
   }
 
   /**
-   * The stop edge of the engaged loop: a message that landed in a turn's tail — after the relay's
-   * last check — or a full turn deferred behind a build's repo claim gets its turn when any run of
-   * the spec stops. The owed check is derived, never bookkept: the newest human message arrived
-   * after the newest chat turn started, so no turn has read it.
+   * The stop edge of the per-turn engaged loop (a live member is prompted as each message lands and
+   * owes nothing): a message that landed in a turn's tail — after the relay's last check — or a
+   * full turn deferred behind a build's repo claim gets its turn when any run of the spec stops.
+   * The owed check is derived, never bookkept: the newest human message arrived after the newest
+   * chat turn started, so no turn has read it.
    */
   private void refireOwedTurn(String specId) {
     var target = resolveTarget(specId);
-    if (target == null || !target.owned() || target.state().standing() == null) {
+    if (target == null
+        || !target.owned()
+        || target.state().standing() == null
+        || liveMember(target)) {
       return;
     }
     var owed = owedMessage(specId, target);

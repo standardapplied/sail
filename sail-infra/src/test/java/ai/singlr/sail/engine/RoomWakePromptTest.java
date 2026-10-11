@@ -60,7 +60,7 @@ class RoomWakePromptTest {
     assertTrue(built.prompt().contains("read-only chat session, and the harness enforces it"));
     assertTrue(built.prompt().contains("sail spec dispatch auth --restart"));
     assertTrue(
-        built.prompt().contains("spec comment auth --question --body"),
+        built.prompt().contains("spec comment auth --body <text> --question"),
         "the wake lane teaches the question verb for what it cannot answer alone");
     assertEquals(List.of(question), built.renderedMessages());
   }

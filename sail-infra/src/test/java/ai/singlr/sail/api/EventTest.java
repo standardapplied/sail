@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class EventTest {
@@ -239,6 +240,20 @@ class EventTest {
     assertEquals(
         Event.RetentionClass.EPHEMERAL,
         Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_PRESENCE));
+  }
+
+  @Test
+  void aLiveMembersStreamIsEphemeralAndNothingElseIs() {
+    assertEquals(
+        Set.of("agent_presence", "agent_text_delta", "agent_tool_call", "agent_turn_ended"),
+        Event.WellKnownTypes.EPHEMERAL_TYPES);
+    for (var type : Event.WellKnownTypes.EPHEMERAL_TYPES) {
+      assertEquals(Event.RetentionClass.EPHEMERAL, Event.WellKnownTypes.retentionClass(type), type);
+      assertFalse(Event.WellKnownTypes.progress(type), type);
+    }
+    assertEquals(
+        Event.RetentionClass.RECORD,
+        Event.WellKnownTypes.retentionClass(Event.WellKnownTypes.AGENT_SESSION_STOPPED));
   }
 
   @Test

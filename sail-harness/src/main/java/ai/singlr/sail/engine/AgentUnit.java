@@ -44,6 +44,32 @@ public record AgentUnit(
   }
 
   /**
+   * Prefix of a live member's unit: {@code live-<runId>}, a name systemd never knows. A live member
+   * is a process the node drives over pipes, not a unit, so nothing arms a watcher for it; the name
+   * only marks the run as one.
+   */
+  public static final String LIVE_UNIT_PREFIX = "live-";
+
+  /** A live member's identity: the files every run has, under a unit that is not systemd's. */
+  public static AgentUnit live(String runId) {
+    return recorded(runId, LIVE_UNIT_PREFIX + Ids.requireUuid(runId));
+  }
+
+  /** Whether {@code unitName} is a live member's: what a run row's recorded unit says of it. */
+  public static boolean isLive(String unitName) {
+    return unitName != null && unitName.startsWith(LIVE_UNIT_PREFIX);
+  }
+
+  /**
+   * Whether systemd owns this run's process. A foreground session with no unit and a live member do
+   * not have one: their wrapper wrote its own pid and {@code exec}'d into the agent, so the pid
+   * file names the whole story.
+   */
+  public boolean systemd() {
+    return unitName != null && !unitName.isBlank() && !isLive(unitName);
+  }
+
+  /**
    * Rebuilds a run's identity from its recorded unit name: systemd is addressed by exactly the unit
    * the run was launched as, while the file paths derive from the canonical run id — run rows
    * replicate over sync, so a persisted path is untrusted input that must never select a file.

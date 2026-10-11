@@ -15,6 +15,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -64,14 +65,33 @@ public final class HarnessHooks {
     return YamlUtil.dumpJson(root);
   }
 
-  /** Idempotently writes the hook file of {@code harness} at its declared path in the container. */
+  /**
+   * The JSON content of the settings file a live member of {@code harness} runs under, or empty for
+   * a harness with no live mode. Its entries and nothing else: a live member's file has no {@code
+   * hooks} key at all, which is why {@link #render} does not write it.
+   */
+  public static Optional<String> renderLive(Harness harness) {
+    return harness.liveSettings().map(settings -> YamlUtil.dumpJson(settings.entries()));
+  }
+
+  /**
+   * Idempotently writes the hook file of {@code harness} at its declared path in the container, and
+   * its live member's settings file when it has one.
+   */
   public void install(String container, Harness harness)
       throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
     var file = harness.hooks();
-    var path = file.path();
-    var dir = file.directory();
+    write(container, file.directory(), file.path(), render(file, harness));
+    var live = harness.liveSettings();
+    if (live.isPresent()) {
+      write(
+          container, live.get().directory(), live.get().path(), renderLive(harness).orElseThrow());
+    }
+  }
 
+  private void write(String container, String dir, String path, String content)
+      throws IOException, InterruptedException, TimeoutException {
     var mkdir = shell.exec(ContainerExec.asDevUser(container, List.of("mkdir", "-p", dir)));
     if (!mkdir.ok()) {
       throw new IOException("Failed to create " + dir + " in " + container + ": " + mkdir.stderr());
@@ -81,13 +101,7 @@ public final class HarnessHooks {
         shell.exec(
             ContainerExec.asDevUser(
                 container,
-                List.of(
-                    "bash",
-                    "-c",
-                    "printf '%s' \"$1\" > \"$2\"",
-                    "bash",
-                    render(file, harness),
-                    path)));
+                List.of("bash", "-c", "printf '%s' \"$1\" > \"$2\"", "bash", content, path)));
     if (!write.ok()) {
       throw new IOException("Failed to write " + path + " in " + container + ": " + write.stderr());
     }

@@ -54,6 +54,7 @@ class RoomWakeReactorTest {
   private RunStore runStore;
   private MessageStore messageStore;
   private RecordingLauncher launcher;
+  private RecordingLive live;
   private final AtomicReference<String> handle = new AtomicReference<>("uday");
   private final AtomicReference<Instant> now =
       new AtomicReference<>(Instant.parse("2026-08-11T12:00:00Z"));
@@ -78,6 +79,35 @@ class RoomWakeReactorTest {
         throw failWith;
       }
       guarded.add(project + "/" + runId);
+    }
+  }
+
+  /** A live-member seam that serves the agents it is told to and records what it is asked. */
+  private static final class RecordingLive implements RoomWakeReactor.Live {
+    final List<String> served = new ArrayList<>();
+    final List<String> delivered = new ArrayList<>();
+    final List<String> changed = new ArrayList<>();
+    RuntimeException failWith;
+
+    @Override
+    public boolean serves(String agent) {
+      return served.contains(agent);
+    }
+
+    @Override
+    public void deliver(String conversation, String localHandle) {
+      if (failWith != null) {
+        throw failWith;
+      }
+      delivered.add(conversation + "@" + localHandle);
+    }
+
+    @Override
+    public void membershipChanged(String conversation) {
+      if (failWith != null) {
+        throw failWith;
+      }
+      changed.add(conversation);
     }
   }
 
@@ -128,6 +158,7 @@ class RoomWakeReactorTest {
     runStore = new RunStore(db);
     messageStore = new MessageStore(db);
     launcher = new RecordingLauncher();
+    live = new RecordingLive();
   }
 
   @AfterEach
@@ -152,6 +183,7 @@ class RoomWakeReactorTest {
         handle::get,
         launcher,
         launcher,
+        live,
         Duration.ZERO,
         Duration.ZERO,
         RoomWakeReactor.COOLDOWN,
@@ -587,6 +619,7 @@ class RoomWakeReactorTest {
             handle::get,
             launcher,
             launcher,
+            live,
             Duration.ZERO,
             Duration.ZERO,
             RoomWakeReactor.COOLDOWN,
@@ -667,6 +700,7 @@ class RoomWakeReactorTest {
             handle::get,
             launcher,
             launcher,
+            live,
             Duration.ofSeconds(30),
             Duration.ofSeconds(5),
             RoomWakeReactor.COOLDOWN,
@@ -921,7 +955,7 @@ class RoomWakeReactorTest {
     assertEquals(Duration.ofMinutes(10), RoomWakeReactor.COOLDOWN);
     try (var reactor =
         new RoomWakeReactor(
-            specStore, roomStore, runStore, messageStore, handle::get, launcher, launcher)) {
+            specStore, roomStore, runStore, messageStore, handle::get, launcher, launcher, live)) {
       assertEquals("room-wake", reactor.name());
     }
   }
@@ -932,12 +966,24 @@ class RoomWakeReactorTest {
         NullPointerException.class,
         () ->
             new RoomWakeReactor(
-                null, roomStore, runStore, messageStore, handle::get, launcher, launcher));
+                null, roomStore, runStore, messageStore, handle::get, launcher, launcher, live));
     assertThrows(
         NullPointerException.class,
         () ->
             new RoomWakeReactor(
-                specStore, roomStore, runStore, messageStore, handle::get, null, launcher));
+                specStore, roomStore, runStore, messageStore, handle::get, null, launcher, live));
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            new RoomWakeReactor(
+                specStore,
+                roomStore,
+                runStore,
+                messageStore,
+                handle::get,
+                launcher,
+                launcher,
+                null));
   }
 
   @Test
@@ -1131,5 +1177,123 @@ class RoomWakeReactorTest {
     reactor.onEvent(message("auth", "uday", "hello"));
 
     assertEquals(1, launcher.woken.size(), "the room's wake mode is the decision");
+  }
+
+  private Event seat(String type, String conversation) {
+    return Event.of("acme", conversation, type, "sail", "host", Map.of("agent", "claude-code"));
+  }
+
+  @Test
+  void aRoomWhoseMemberIsLiveIsPromptedAtOnceAndNeverWoken() {
+    live.served.add("claude-code");
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var run = chatRun("chat", "room-full", "completed", now.get().minus(Duration.ofSeconds(90)));
+    finishAt(run, now.get().minusSeconds(30));
+    var paused = new ArrayList<Duration>();
+    var reactor =
+        new RoomWakeReactor(
+            specStore,
+            roomStore,
+            runStore,
+            messageStore,
+            handle::get,
+            launcher,
+            launcher,
+            live,
+            Duration.ofSeconds(30),
+            Duration.ofSeconds(5),
+            RoomWakeReactor.COOLDOWN,
+            new DirectExecutorService(),
+            paused::add,
+            now::get);
+
+    reactor.onEvent(message("chat", "uday", "hello"));
+    reactor.onEvent(message("chat", "uday", "and another thing"));
+
+    assertEquals(List.of("chat@uday", "chat@uday"), live.delivered);
+    assertEquals(List.of(), paused, "no debounce stands between a message and a live member");
+    assertEquals(List.of(), launcher.woken, "a live member is no wake: no second run is started");
+  }
+
+  @Test
+  void aLiveMemberIsPromptedOnlyByWhatWouldWakeIt() {
+    live.served.add("claude-code");
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    seed("muted", "draft", "uday", "off");
+    engage("muted", "claude-code", "full");
+    seed("theirs", "draft", "mady", null);
+    engage("theirs", "claude-code", "full");
+
+    reactor().onEvent(message("chat", "claude/room-1", "my own answer"));
+    reactor().onEvent(message("chat", "sail", "narration"));
+    reactor().onEvent(message("muted", "uday", "hello"));
+    reactor().onEvent(message("theirs", "mady", "hello"));
+
+    assertEquals(List.of(), live.delivered, "the wake policy and ownership still decide");
+  }
+
+  @Test
+  void aMemberWhoseHarnessHasNoLiveModeKeepsThePerTurnWake() {
+    live.served.add("claude-code");
+    seed("chat", "draft", "uday", null);
+    engage("chat", "codex", "full");
+
+    reactor().onEvent(message("chat", "uday", "hello"));
+
+    assertEquals(List.of("acme/chat"), launcher.woken);
+    assertEquals(List.of(), live.delivered);
+  }
+
+  @Test
+  void aLiveMembersRoomOwesNoTurnOnAStopOrASweep() {
+    live.served.add("claude-code");
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var turn = chatRun("chat", "room-full", "completed", now.get().minus(Duration.ofMinutes(5)));
+    Acting.system(() -> messageStore.append("chat", "uday", "posted while it was away", null));
+    var reactor = reactor();
+
+    reactor.onEvent(roomStop("chat", turn));
+    reactor.sweepEngagedRooms();
+
+    assertEquals(List.of(), launcher.woken, "the next human message resumes it, nothing else");
+    assertEquals(List.of(), live.delivered);
+  }
+
+  @Test
+  void aChangeOfSeatEndsTheRoomsLiveMember() {
+    var reactor = reactor();
+
+    reactor.onEvent(seat(Event.WellKnownTypes.SPEC_DISENGAGED, "chat"));
+    reactor.onEvent(seat(Event.WellKnownTypes.SPEC_ENGAGED, "lounge"));
+
+    assertEquals(List.of("chat", "lounge"), live.changed);
+    assertTrue(reactor.filter().test(seat(Event.WellKnownTypes.SPEC_ENGAGED, "chat")));
+    assertFalse(reactor.filter().test(seat(Event.WellKnownTypes.SPEC_ENGAGE_FAILED, "chat")));
+  }
+
+  @Test
+  void aLiveSeamThatFailsIsLoggedAndTheReactorCarriesOn() {
+    live.served.add("claude-code");
+    live.failWith = new IllegalStateException("repos are held");
+    seed("chat", "draft", "uday", null);
+    engage("chat", "claude-code", "full");
+    var reactor = reactor();
+
+    reactor.onEvent(message("chat", "uday", "hello"));
+    reactor.onEvent(seat(Event.WellKnownTypes.SPEC_DISENGAGED, "chat"));
+    live.failWith = null;
+    reactor.onEvent(message("chat", "uday", "again"));
+
+    assertEquals(List.of("chat@uday"), live.delivered);
+  }
+
+  @Test
+  void noLiveSeamServesNoMember() {
+    assertFalse(RoomWakeReactor.Live.NONE.serves("claude-code"));
+    RoomWakeReactor.Live.NONE.deliver("chat", "uday");
+    RoomWakeReactor.Live.NONE.membershipChanged("chat");
   }
 }

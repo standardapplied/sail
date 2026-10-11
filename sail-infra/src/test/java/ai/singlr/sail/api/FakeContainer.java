@@ -259,6 +259,7 @@ final class FakeContainer implements ShellExec {
     var inner = command.subList(boundary + 1, command.size());
     return switch (inner.get(0)) {
       case "cat" -> cat(inner.get(1));
+      case "tail" -> cat(inner.getLast());
       case "kill" -> kill(inner);
       case "bash" -> bash(inner);
       case "systemctl" -> managerDown ? fail("Failed to connect to bus") : systemctl(inner);
@@ -404,11 +405,24 @@ final class FakeContainer implements ShellExec {
     if (ScriptedShellExecutor.reachableContainer(String.join(" ", inner)).isPresent()) {
       return presence(inner.get(inner.size() - 2), inner.getLast());
     }
+    if (inner.get(2).startsWith("kill \"$1\" || exit 1")) {
+      return halt(inner.get(4));
+    }
     var script = inner.stream().filter(arg -> arg.contains("printf '%s' \"$1\" >")).findFirst();
     if (script.isPresent()) {
       files.put(inner.get(inner.size() - 1), inner.get(inner.size() - 2));
     }
     return ok("");
+  }
+
+  /**
+   * The pid-file halt of a process that is no unit: it is signalled, and the script says whether it
+   * is {@code gone} or still {@code alive}.
+   */
+  private Result halt(String pid) {
+    var agent = agents.values().stream().filter(a -> String.valueOf(a.pid).equals(pid)).findFirst();
+    agent.ifPresent(this::end);
+    return ok(agent.filter(found -> found.alive).isPresent() ? "alive" : "gone");
   }
 
   /**

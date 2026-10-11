@@ -165,6 +165,7 @@ public final class DispatchOperations {
   private final RunReservation runReservation;
   private final AdhocRunner adhocRunner;
   private final RoomWakeLauncher roomWakeLauncher;
+  private final LiveMembers liveMembers;
   private final ReviewLanes reviewLanes;
   private final BuildDispatch buildDispatch;
   private MessageStore messageStore;
@@ -224,7 +225,8 @@ public final class DispatchOperations {
             this.events,
             () -> projectSkills,
             this::tellRoom);
-    this.runReservation = new RunReservation(runStore, shell, listener, sessionYield);
+    this.runReservation =
+        new RunReservation(runStore, shell, listener, sessionYield, this::endLiveHolder);
     this.adhocRunner = new AdhocRunner(projects, runLauncher, runReservation, runStore, listener);
     this.roomWakeLauncher =
         new RoomWakeLauncher(
@@ -236,6 +238,19 @@ public final class DispatchOperations {
             runReservation,
             runLauncher,
             roomCommitGuard);
+    this.liveMembers =
+        new LiveMembers(
+            projects,
+            specStore,
+            () -> roomStore,
+            () -> messageStore,
+            runStore,
+            runReservation,
+            runLauncher,
+            roomCommitGuard,
+            shell,
+            this.events,
+            sessionYield);
     this.reviewLanes =
         new ReviewLaneLauncher(projects, runStore, runReservation, runLauncher, shell);
     this.buildDispatch =
@@ -342,6 +357,18 @@ public final class DispatchOperations {
    */
   public String startRoomRun(String project, String specId, String localHandle) {
     return roomWakeLauncher.wake(project, specId, localHandle);
+  }
+
+  /**
+   * The live members of this box's rooms: the engaged agents whose harness stays up between turns.
+   * A room whose member has no live mode is woken through {@link #startRoomRun} instead.
+   */
+  public LiveMembers liveMembers() {
+    return liveMembers;
+  }
+
+  private boolean endLiveHolder(String runId, String why) {
+    return liveMembers.endHolder(runId, why);
   }
 
   /**

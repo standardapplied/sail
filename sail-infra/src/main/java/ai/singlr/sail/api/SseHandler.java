@@ -27,9 +27,10 @@ import java.util.function.Predicate;
  * Server-Sent Events handler for {@code GET /v1/events/stream}.
  *
  * <p>Each accepted connection subscribes to the {@link EventBus} (optionally filtered by {@code
- * project} / {@code type} query parameters) and streams matching events to the client until the
- * client disconnects or the server shuts down. A semaphore caps concurrent SSE connections —
- * over-capacity requests get HTTP 503 with {@code Retry-After}.
+ * project} / {@code room} / {@code type} query parameters; a room's events are those whose {@code
+ * spec} is the room id, which is what its messages and its live member's stream carry) and streams
+ * matching events to the client until the client disconnects or the server shuts down. A semaphore
+ * caps concurrent SSE connections — over-capacity requests get HTTP 503 with {@code Retry-After}.
  *
  * <p>Wire format follows the SSE spec: each event is emitted as
  *
@@ -200,6 +201,10 @@ public final class SseHandler implements HttpHandler {
     var projectFilter = values.get("project");
     if (Strings.isNotBlank(projectFilter)) {
       result = result.and(EventSubscriber.byProject(projectFilter));
+    }
+    var roomFilter = values.get("room");
+    if (Strings.isNotBlank(roomFilter)) {
+      result = result.and(e -> roomFilter.equals(e.spec()));
     }
     var typeFilter = values.get("type");
     if (Strings.isNotBlank(typeFilter)) {

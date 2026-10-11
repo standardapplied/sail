@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.harness.Harness.Launch;
+import ai.singlr.sail.harness.Harness.LiveLaunch;
+import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -179,6 +182,104 @@ class HarnessGoldenTest {
             IllegalArgumentException.class,
             () -> codexHeadless(true, null, null, "a; rm -rf /", true));
     assertEquals(MALFORMED_ID, codex.getMessage());
+  }
+
+  @Test
+  void claudeCodeLiveFullMember() {
+    assertEquals(
+        List.of(
+            "claude",
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompts",
+            "none",
+            "--settings",
+            "/home/dev/.sail/claude-live.json",
+            "--dangerously-skip-permissions"),
+        CLAUDE_CODE.live(new LiveLaunch(true, null, null)).orElseThrow());
+    assertEquals(
+        List.of(
+            "claude",
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompts",
+            "none",
+            "--settings",
+            "/home/dev/.sail/claude-live.json",
+            "--dangerously-skip-permissions",
+            "--model",
+            "opus",
+            "--resume",
+            "sess-1"),
+        CLAUDE_CODE.live(new LiveLaunch(true, "opus", "sess-1")).orElseThrow());
+  }
+
+  @Test
+  void claudeCodeLiveReadOnlyMember() {
+    assertEquals(
+        List.of(
+            "claude",
+            "--print",
+            "--input-format",
+            "stream-json",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--include-partial-messages",
+            "--permission-prompts",
+            "none",
+            "--settings",
+            "/home/dev/.sail/claude-live.json",
+            "--setting-sources",
+            "",
+            "--strict-mcp-config",
+            "--tools",
+            "Bash,Read,Grep,Glob",
+            "--allowedTools",
+            "Bash(spec:*)",
+            "Bash(cd:*)",
+            "--resume",
+            "sess-1"),
+        CLAUDE_CODE.live(new LiveLaunch(false, null, "sess-1")).orElseThrow());
+  }
+
+  @Test
+  void aLiveLaunchRefusesAMalformedSessionId() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> CLAUDE_CODE.live(new LiveLaunch(true, null, "-p; rm -rf /")));
+
+    assertEquals(MALFORMED_ID, thrown.getMessage());
+  }
+
+  @Test
+  void claudeCodeLiveSettingsCarryTheReadDeniesAndNoHook() {
+    var settings = CLAUDE_CODE.liveSettings().orElseThrow();
+
+    assertEquals("/home/dev/.sail/claude-live.json", settings.path());
+    assertEquals("/home/dev/.sail", settings.directory());
+    assertEquals(
+        "{includeCoAuthoredBy=false, permissions={deny=[Read(//var/lib/sail/run/box.credential),"
+            + " Read(/home/dev/.ssh/**), Read(/home/dev/.git-credentials),"
+            + " Read(/home/dev/.config/gh/**)]}}",
+        settings.entries().toString());
+  }
+
+  @Test
+  void codexHasNoLiveMode() {
+    assertEquals(Optional.empty(), CODEX.live(new LiveLaunch(true, null, null)));
+    assertEquals(Optional.empty(), CODEX.liveSettings());
   }
 
   @Test

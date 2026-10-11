@@ -8,11 +8,14 @@ package ai.singlr.sail.harness;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.SailPaths;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.SequencedMap;
+import java.util.stream.Collectors;
 
 /** Claude Code: {@code claude}, launched headless with sail's own settings file of hooks. */
 final class ClaudeCode implements Harness {
@@ -27,12 +30,27 @@ final class ClaudeCode implements Harness {
   private static final String SETTINGS_PATH =
       ContainerExec.DEV_HOME + "/.sail/claude-settings.json";
 
-  private static final String READ_ONLY_TOOLS = " --tools \"Bash,Read,Grep,Glob\"";
+  /**
+   * The settings file of a live member, passed via {@code --settings} to the one process sail reads
+   * instead of hooking: the read-deny rules and nothing that runs a script.
+   */
+  private static final String LIVE_SETTINGS_PATH =
+      ContainerExec.DEV_HOME + "/.sail/claude-live.json";
 
-  private static final String READ_ONLY_ALLOWED_TOOLS =
-      " --allowedTools \"Bash(spec:*)\" \"Bash(cd:*)\"";
-
-  private static final String READ_ONLY_ISOLATION = " --setting-sources \"\" --strict-mcp-config";
+  /**
+   * What makes a session read-only, as argv: ambient settings and MCP configs excluded, the tool
+   * set cut, and the two allow-rules. Every read-only lane is built from this one list.
+   */
+  private static final List<String> READ_ONLY_ARGS =
+      List.of(
+          "--setting-sources",
+          "",
+          "--strict-mcp-config",
+          "--tools",
+          "Bash,Read,Grep,Glob",
+          "--allowedTools",
+          "Bash(spec:*)",
+          "Bash(cd:*)");
 
   @Override
   public String yamlName() {
@@ -122,13 +140,49 @@ final class ClaudeCode implements Harness {
   public String readOnly(Launch launch) {
     var resume = resumeOption(launch);
     return invocation(launch)
-        + READ_ONLY_ISOLATION
-        + READ_ONLY_TOOLS
-        + READ_ONLY_ALLOWED_TOOLS
+        + readOnlyOptions()
         + modelOption(launch.model())
         + resume
         + " -p "
         + launch.task();
+  }
+
+  /**
+   * Claude Code's streaming mode: prompts are JSON lines on stdin, and every step of a turn is a
+   * JSON line on stdout, text as it is written ({@code --include-partial-messages}). A read-only
+   * member runs under exactly the isolation, tool cut and allow-rules of {@link #readOnly}; a full
+   * one skips permissions as {@link #headless} does. {@code --permission-prompts none} denies every
+   * prompt either way: nobody is there to answer one.
+   */
+  @Override
+  public Optional<List<String>> live(LiveLaunch launch) {
+    var command =
+        new ArrayList<>(
+            List.of(
+                BINARY,
+                "--print",
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--include-partial-messages",
+                "--permission-prompts",
+                "none",
+                "--settings",
+                LIVE_SETTINGS_PATH));
+    command.addAll(
+        launch.fullPermissions() ? List.of("--dangerously-skip-permissions") : READ_ONLY_ARGS);
+    if (launch.model() != null) {
+      command.addAll(List.of("--model", launch.model()));
+    }
+    launch.resume().ifPresent(id -> command.addAll(List.of("--resume", id)));
+    return Optional.of(List.copyOf(command));
+  }
+
+  @Override
+  public Optional<LiveSettings> liveSettings() {
+    return Optional.of(new LiveSettings(LIVE_SETTINGS_PATH, settings()));
   }
 
   @Override
@@ -179,12 +233,9 @@ final class ClaudeCode implements Harness {
    */
   @Override
   public HookFile hooks() {
-    var settings = new LinkedHashMap<String, Object>();
-    settings.put("includeCoAuthoredBy", false);
-    settings.put("permissions", Map.of("deny", readDenyRules()));
     return new HookFile(
         SETTINGS_PATH,
-        settings,
+        settings(),
         List.of(
             new HookFile.Group("SessionStart", "startup", List.of(SailHook.SESSION_STARTED)),
             new HookFile.Group("SessionStart", null, List.of(SailHook.SESSION_REPORT)),
@@ -195,6 +246,14 @@ final class ClaudeCode implements Harness {
             new HookFile.Group("PostToolBatch", null, List.of(SailHook.BATCH_RESOLVED)),
             new HookFile.Group("Stop", null, List.of(SailHook.STOP_GATE)),
             new HookFile.Group("SessionEnd", null, List.of(SailHook.SESSION_ENDED))));
+  }
+
+  /** What every settings file sail hands Claude Code carries, whichever lane reads it. */
+  private static SequencedMap<String, Object> settings() {
+    var settings = new LinkedHashMap<String, Object>();
+    settings.put("includeCoAuthoredBy", false);
+    settings.put("permissions", Map.of("deny", readDenyRules()));
+    return settings;
   }
 
   /**
@@ -230,6 +289,13 @@ final class ClaudeCode implements Harness {
   private static String invocation(Launch launch) {
     var streamFormat = launch.stream() ? " --output-format stream-json --verbose" : "";
     return BINARY + " --print" + streamFormat + " --settings " + SETTINGS_PATH;
+  }
+
+  /** {@link #READ_ONLY_ARGS} as shell text: each option as it is, each value double-quoted. */
+  private static String readOnlyOptions() {
+    return READ_ONLY_ARGS.stream()
+        .map(arg -> arg.startsWith("--") ? " " + arg : " \"" + arg + "\"")
+        .collect(Collectors.joining());
   }
 
   private static String resumeOption(Launch launch) {

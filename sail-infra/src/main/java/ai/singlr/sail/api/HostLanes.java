@@ -96,6 +96,11 @@ final class HostLanes {
     }
 
     @Override
+    public boolean endLiveMember(String runId, String why) {
+      return dispatchOps.liveMembers().endHolder(runId, why);
+    }
+
+    @Override
     public Optional<RunStore.RunRow> latestRunInLane(String project, String node, Lane lane) {
       return runs.listForProject(project).stream()
           .filter(run -> lane.matches(run.role()))

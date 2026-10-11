@@ -703,6 +703,7 @@ public final class SailOperations implements HostOperations {
             hooks.launcher(),
             hooks.dispatchListener(),
             sessionYield);
+    this.dispatchOps.liveMembers().useRoom(this::postAsRun);
     this.stopOps =
         specStore != null && runStore != null
             ? new StopOperations(
@@ -714,6 +715,38 @@ public final class SailOperations implements HostOperations {
                 StopOperations.sessionHalter(shell),
                 hooks.stopListener())
             : null;
+  }
+
+  /** The live members of this box's rooms — see {@link DispatchOperations#liveMembers}. */
+  public LiveMembers liveMembers() {
+    return dispatchOps.liveMembers();
+  }
+
+  /**
+   * A live member's reply, posted as {@code run}'s principal through the door the {@code spec} CLI
+   * posts through, under the actor that CLI would be given: the message rule, the announcement and
+   * the sync trigger are the same. Returns the id of the message.
+   *
+   * @throws ApiException when the run's FDE holds no role any more, or the room refuses the post
+   */
+  private String postAsRun(RunStore.RunRow run, String roomId, String text) {
+    var actor =
+        runActor(run)
+            .orElseThrow(
+                () ->
+                    new ApiException(
+                        ErrorCode.FORBIDDEN,
+                        "Run " + run.id() + " acts for nobody this box knows, so it cannot post."));
+    var posted =
+        Actor.call(
+            actor,
+            () ->
+                postRoomMessage(roomId, new SpecMessageRequest(text, null, false), actor.handle()));
+    return switch (posted) {
+      case Result.Success<SpecMessageResponse> landed -> landed.value().message().id();
+      case Result.Failure<SpecMessageResponse> refused ->
+          throw new ApiException(refused.errorCode(), refused.errorMessage());
+    };
   }
 
   /** Launches a room wake through the shared dispatch executor — see {@code startRoomRun} there. */
@@ -1931,10 +1964,7 @@ public final class SailOperations implements HostOperations {
   }
 
   private static String preview(String body) {
-    var normalized = body.replaceAll("\\s+", " ").strip();
-    return normalized.codePointCount(0, normalized.length()) <= 160
-        ? normalized
-        : normalized.substring(0, normalized.offsetByCodePoints(0, 160));
+    return Strings.clip(body.replaceAll("\\s+", " ").strip(), 160);
   }
 
   @Override

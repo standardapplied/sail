@@ -14,6 +14,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
@@ -219,6 +221,62 @@ class AgentAttachCommandTest {
             AgentAttachCommand.requireStillLatestAndIdle(
                 completed, latest(completed, elsewhere, wake), "acme"),
         "a disjoint repo and the read-only lane hold nothing the resume would take");
+  }
+
+  /**
+   * The room's live member is the one live run an attach does not refuse: its conversation is taken
+   * by ending it first, so its own claim is not what stands in the way of resuming it.
+   */
+  @Test
+  void aLiveMembersRunIsTakenOverNotRefused(@TempDir Path dir) {
+    try (var db = Sqlite.open(dir.resolve("t.db"))) {
+      new SchemaManager(db).migrate();
+      var runs = new RunStore(db);
+      var id = DateTimeUtils.newId().toString();
+      Acting.system(
+          () ->
+              runs.reserveDispatch(
+                  id,
+                  "acme",
+                  "chat",
+                  "it",
+                  DispatchGate.ROOM_FULL_ROLE,
+                  List.of("app"),
+                  "claude-code",
+                  null,
+                  "t",
+                  "l",
+                  AgentUnit.live(id).unitName()));
+      var member = runs.findById(id).orElseThrow();
+      var itself =
+          new DispatchGate.RunningRun(id, "chat", DispatchGate.ROOM_FULL_ROLE, List.of("app"));
+      var build = running("build", "build", List.of("app"));
+
+      assertTrue(AgentAttachCommand.takesFromMember(member, "sess-1"));
+      assertFalse(
+          AgentAttachCommand.takesFromMember(member, null),
+          "a member that recorded no session has no conversation to take");
+      assertFalse(AgentAttachCommand.takesFromMember(null, "sess-1"));
+      assertFalse(AgentAttachCommand.takesFromMember(row("r1", "running"), "sess-1"));
+      assertEquals(List.of(build), AgentAttachCommand.besides(member, List.of(itself, build)));
+      assertDoesNotThrow(
+          () ->
+              AgentAttachCommand.requireNoLiveConflict(
+                  member, AgentAttachCommand.besides(member, List.of(itself)), "acme"));
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              AgentAttachCommand.requireNoLiveConflict(
+                  member, AgentAttachCommand.besides(member, List.of(itself, build)), "acme"),
+          "any other run over its repos still refuses");
+
+      Acting.system(() -> runs.transition(id, "running", "stopped", 0));
+      assertFalse(
+          AgentAttachCommand.takesFromMember(runs.findById(id).orElseThrow(), "sess-1"),
+          "a member already over is resumed as any finished run is");
+    }
+    assertEquals(
+        "displaced by a terminal on its conversation", AgentAttachCommand.MEMBER_DISPLACED);
   }
 
   private static AgentAttachCommand.Latest latest(

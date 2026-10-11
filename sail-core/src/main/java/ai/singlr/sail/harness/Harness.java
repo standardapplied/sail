@@ -6,8 +6,12 @@
 package ai.singlr.sail.harness;
 
 import ai.singlr.sail.common.Strings;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.SequencedMap;
 import java.util.regex.Pattern;
 
 /**
@@ -54,6 +58,40 @@ public interface Harness {
     /** The prompt argument: the task read from its file inside the container. */
     public String task() {
       return "\"$(cat " + taskFile + ")\"";
+    }
+  }
+
+  /**
+   * One live member's launch: whether every action is auto-approved, an optional model and the
+   * recorded conversation to resume ({@code null} for a fresh session). There is no task: a live
+   * process is prompted over its stdin, one message at a time.
+   */
+  record LiveLaunch(boolean fullPermissions, String model, String resumeSessionId) {
+
+    /**
+     * The recorded session this launch resumes, or empty for a fresh session.
+     *
+     * @throws IllegalArgumentException when the id is not {@link #requireSafeSessionId safe}
+     */
+    public Optional<String> resume() {
+      return Optional.ofNullable(resumeSessionId).map(Harness::requireSafeSessionId);
+    }
+  }
+
+  /**
+   * The settings file a live member runs under: where it lives inside the container and its
+   * entries, in order. It names no hook: sail reads a live process, nothing in it reports back.
+   */
+  record LiveSettings(String path, SequencedMap<String, Object> entries) {
+
+    public LiveSettings {
+      Strings.requireNonBlank(path, "path");
+      entries = Collections.unmodifiableSequencedMap(new LinkedHashMap<>(entries));
+    }
+
+    /** The directory the file lives in. */
+    public String directory() {
+      return path.substring(0, path.lastIndexOf('/'));
     }
   }
 
@@ -105,6 +143,23 @@ public interface Harness {
    * mode; it buys its authority with the per-turn repo reservation, not a sandbox.
    */
   Optional<String> readOnlyRefusal();
+
+  /**
+   * The argv of a live member: one process that stays up, takes each prompt as a JSON line on its
+   * stdin and writes what it does as JSON lines on its stdout. Empty for a harness with no such
+   * mode, whose members are woken one process per turn instead.
+   *
+   * @throws IllegalArgumentException when the launch resumes an id that is not {@link
+   *     #requireSafeSessionId safe}
+   */
+  default Optional<List<String>> live(LiveLaunch launch) {
+    return Optional.empty();
+  }
+
+  /** The settings file {@link #live} runs under, or empty for a harness with no live mode. */
+  default Optional<LiveSettings> liveSettings() {
+    return Optional.empty();
+  }
 
   /** The command for an interactive (TTY) session. */
   String interactive(boolean fullPermissions);

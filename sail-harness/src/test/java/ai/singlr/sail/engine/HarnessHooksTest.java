@@ -226,10 +226,10 @@ class HarnessHooksTest {
 
     var cmds = shell.invocations();
     assertEquals(
-        2,
+        4,
         cmds.size(),
-        "one hooks layer only: lanes are expressed by SAIL_SPEC_ID/SAIL_RUN_ID at launch, never"
-            + " by a second settings file");
+        "one hooks layer only: lanes are expressed by SAIL_SPEC_ID/SAIL_RUN_ID at launch; the"
+            + " second file is the live member's, which names no hook");
     assertTrue(cmds.get(0).endsWith(" mkdir -p /home/dev/.sail"), cmds.get(0));
     assertEquals(
         List.of(
@@ -244,6 +244,20 @@ class HarnessHooksTest {
             .get(1)
             .subList(shell.arguments().get(1).size() - 6, shell.arguments().get(1).size()),
         "the rendered file is the content written, and its declared path is where it goes");
+    assertTrue(cmds.get(2).endsWith(" mkdir -p /home/dev/.sail"), cmds.get(2));
+    assertEquals(
+        List.of(
+            "bash",
+            "-c",
+            "printf '%s' \"$1\" > \"$2\"",
+            "bash",
+            HarnessHooksGoldenTest.CLAUDE_CODE_LIVE_SETTINGS,
+            "/home/dev/.sail/claude-live.json"),
+        shell
+            .arguments()
+            .get(3)
+            .subList(shell.arguments().get(3).size() - 6, shell.arguments().get(3).size()),
+        "the live member's settings are written whole beside the hooks file");
   }
 
   @Test
