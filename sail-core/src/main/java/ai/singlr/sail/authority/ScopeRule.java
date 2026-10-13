@@ -16,11 +16,11 @@ import java.util.Optional;
 
 /**
  * Whether a write of one synced type stays inside the projects its actor may see ({@link
- * ProjectScope#admits}): the state it writes must belong to one, and so must what it writes over. A
- * deletion names no project of its own and is decided by what it deletes. Asked ahead of the type's
- * own rule on every lane ({@link #before}), so an actor learns nothing of a row outside its scope
- * but that its id is taken; an actor that sees every project — every one before an FDE is scoped,
- * main's own and this box's machinery — is never refused.
+ * ProjectScope#admits}): the state it writes must belong to one, and what it writes over must be
+ * filed under one. A deletion names no project of its own and is decided by what it deletes. Asked
+ * ahead of the type's own rule on every lane ({@link #before}), so an actor learns nothing of a row
+ * outside its scope but that its id is taken; an actor that sees every project — every one before
+ * an FDE is scoped, main's own and this box's machinery — is never refused.
  */
 public final class ScopeRule {
 
@@ -56,7 +56,7 @@ public final class ScopeRule {
     if (scope.unrestricted()) {
       return Optional.empty();
     }
-    if (held != null && !scope.admits(changeLog.projectOf(type, id, held))) {
+    if (held != null && !scope.admits(filed(id, held))) {
       return taken(id);
     }
     var project = changeLog.projectOf(type, id, next);
@@ -86,6 +86,15 @@ public final class ScopeRule {
             || scope.admits(changeLog.headProject(type, id).orElse(null))
         ? Optional.empty()
         : taken(id);
+  }
+
+  /**
+   * The project what this box holds as {@code id} is filed under: its head's, which a review or a
+   * message keeps from its first write wherever its parent has moved since, so a write over one is
+   * decided as a read of it and a push over it are; {@code held}'s own where the head names none.
+   */
+  private String filed(String id, Map<String, Object> held) {
+    return changeLog.headProject(type, id).orElseGet(() -> changeLog.projectOf(type, id, held));
   }
 
   /** Whether a write of {@code next}, belonging to {@code project}, stays inside {@code scope}. */

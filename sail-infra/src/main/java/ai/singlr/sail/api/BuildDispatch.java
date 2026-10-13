@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkPrompt;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -128,6 +129,7 @@ public final class BuildDispatch {
       return new DispatchOperations.NoSpecs();
     }
     var nextSpec = resolution.spec();
+    requireEarlierReviewsInScope(nextSpec.id());
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
@@ -278,6 +280,26 @@ public final class BuildDispatch {
       case RestartResolution.Restarted restarted ->
           SpecResolution.restarted(spec, restarted.previousStatus());
     };
+  }
+
+  /**
+   * A dispatch closes every review of the spec's earlier attempts ({@link
+   * ReviewStore#supersedeForSpec}), or the loop would read the last of them as this attempt's. So
+   * it is refused whole while one of them is filed outside the caller's scope, left in the project
+   * the spec moved from, and the refusal names none of it.
+   */
+  private void requireEarlierReviewsInScope(String specId) {
+    if (reviewStore == null) {
+      return;
+    }
+    var earlier =
+        reviewStore.reviewsForSpec(specId).stream().filter(review -> !review.superseded()).toList();
+    if (Scoped.rows(Actor.reader(), earlier, reviewStore::projectOf).size() < earlier.size()) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Dispatching spec '" + specId + "' would close a review outside your project scope.",
+          "Ask an admin to dispatch it.");
+    }
   }
 
   /**

@@ -52,6 +52,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentSkipListSet;
@@ -262,6 +263,7 @@ class ScopedReadsTest {
   private Sqlite db;
   private AuditPersister recent;
   private HttpServer server;
+  private SailOperations operations;
   private String sam;
   private String ada;
   private String alphaReview;
@@ -291,7 +293,7 @@ class ScopedReadsTest {
         });
     var specs = new SpecStore(db);
     var runs = new RunStore(db);
-    var operations =
+    operations =
         TestControlPlane.standalone(
             new SailOperations(
                     new BoxShell(),
@@ -788,6 +790,223 @@ class ScopedReadsTest {
         ask(sam, "/v1/reviews/" + bravoReview).substring(0, 3),
         "rewritten after the move, the review is still filed where it was written");
     assertEquals("200", ask(ada, "/v1/reviews/" + bravoReview).substring(0, 3));
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeBringsNoneOfTheTalkHeldInTheProjectItLeft() throws Exception {
+    Acting.system(this::bravoArrives);
+    var messages = new MessageStore(db);
+    var asked =
+        Acting.system(
+            () -> messages.append("bravo-spec", "claude-code/" + B_RUN, "Bravo's?", null, true));
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\", \"assignee\": \"sam\"}")
+            .substring(0, 3));
+    assertEquals(
+        "201",
+        send(
+                ada,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"quiet\", \"project\": \"alpha\", \"title\": \"t\"}")
+            .substring(0, 3));
+    assertEquals(
+        Optional.of("bravo"), new ChangeLog(db).headProject("message", asked.id()), "it stayed");
+
+    for (var page : List.of("", "?limit=1", "?after=" + asked.id(), "?before=" + asked.id())) {
+      assertEquals(
+          ask(sam, "/v1/rooms/quiet/messages" + page).replace("quiet", "bravo-spec"),
+          ask(sam, "/v1/rooms/bravo-spec/messages" + page),
+          page + ": to sam the conversation is one nobody has spoken in");
+    }
+    var all = ask(ada, "/v1/rooms/bravo-spec/messages");
+    assertEquals(true, all.contains("Talk in the bravo spec") && all.contains(asked.id()), all);
+    for (var read : List.of("/v1/specs/bravo-spec", "/v1/specs?project=alpha", "/v1/specs")) {
+      var asSam = ask(sam, read);
+      assertEquals(false, asSam.contains(asked.id()), read + ": " + asSam);
+      assertEquals(false, asSam.contains(asked.createdAt()), read + ": " + asSam);
+      assertEquals(true, ask(ada, read).contains(asked.id()), read);
+    }
+
+    var said = send(sam, "POST", "/v1/rooms/bravo-spec/messages", "{\"body\": \"Said in alpha\"}");
+    assertEquals("201", said.substring(0, 3), said);
+    var asSam = ask(sam, "/v1/rooms/bravo-spec/messages?limit=2");
+    assertEquals(true, asSam.contains("Said in alpha") && asSam.contains("\"total\": 1"), asSam);
+    assertEquals(true, ask(ada, "/v1/rooms/bravo-spec/messages").contains("\"total\": 3"));
+    assertEquals(
+        false,
+        ask(sam, "/v1/specs/bravo-spec").contains("needs_reply"),
+        "a person's answer sam can read does not turn up the question sam cannot");
+  }
+
+  @Test
+  void aRunIsDeliveredNothingOfAProjectItsFdeNoLongerHolds() throws Exception {
+    var runs = new RunStore(db);
+    var messages = new MessageStore(db);
+    var local = new LocalApiRouter(operations);
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    var reserved =
+        Acting.system(
+            () ->
+                runs.reserveDispatch(
+                    run,
+                    "alpha",
+                    "alpha-spec",
+                    "sam",
+                    "build",
+                    List.of(),
+                    "claude-code",
+                    "b",
+                    "t",
+                    "/log",
+                    "u"));
+    var bearer =
+        Map.of(
+            "authorization", "Bearer " + ((RunStore.Reservation.Reserved) reserved).credential());
+    var talk = messages.list("alpha-spec", null, 1).getFirst();
+    var inbox = new LocalApiRequest("GET", "/v1/run/messages", Map.of(), bearer, new byte[0]);
+
+    var held = local.handle(inbox);
+    assertEquals(200, held.status());
+    assertEquals(true, held.body().toString().contains("Talk in the alpha spec"), "" + held.body());
+
+    Acting.system(() -> new FdeStore(db).revoke("sam", "alpha"));
+
+    var gone =
+        "404 {schema_version=1, error={code=run_not_found, message=Run '"
+            + run
+            + "' was not found., field_errors=[]}}";
+    for (var asked :
+        List.of(
+            inbox,
+            form(bearer, "/v1/run/messages", "delivered=" + talk.id()),
+            form(bearer, "/v1/run/session", "session_id=a-session"))) {
+      var answer = local.handle(asked);
+      assertEquals(gone, answer.status() + " " + answer.body(), asked.method() + asked.path());
+    }
+    var room =
+        local.handle(
+            new LocalApiRequest(
+                "GET", "/v1/specs/alpha-spec/messages", Map.of(), bearer, new byte[0]));
+    assertEquals(
+        "404 {schema_version=1, error={code=room_not_found, message=Room 'alpha-spec' was not"
+            + " found., field_errors=[]}}",
+        room.status() + " " + room.body());
+    assertEquals(Set.of(), runs.deliveredMessageIds(run));
+    assertEquals(null, runs.findById(run).orElseThrow().sessionId());
+
+    Acting.system(() -> new FdeStore(db).grant("sam", "alpha"));
+    assertEquals(held.body(), local.handle(inbox).body(), "granted again, it is delivered again");
+  }
+
+  private static LocalApiRequest form(Map<String, String> bearer, String path, String body) {
+    return new LocalApiRequest(
+        "POST", path, Map.of(), bearer, body.getBytes(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aRunOnASpecMovedIntoTheScopeIsDeliveredNoneOfTheTalkItLeftInAnotherProject()
+      throws Exception {
+    Acting.system(this::bravoArrives);
+    var runs = new RunStore(db);
+    var messages = new MessageStore(db);
+    var left = messages.list("bravo-spec", null, 1).getFirst();
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\", \"assignee\": \"sam\"}")
+            .substring(0, 3));
+    var here = Acting.system(() -> messages.append("bravo-spec", "ada", "Said in alpha", null));
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    Acting.system(
+        () ->
+            runs.create(
+                run,
+                "alpha",
+                "bravo-spec",
+                "sam",
+                "build",
+                "claude-code",
+                "b",
+                "t",
+                null,
+                null,
+                "/log",
+                "u"));
+    var sams = operations.runActor(runs.findById(run).orElseThrow()).orElseThrow();
+
+    var inbox = Acting.by(sams, () -> operations.runInbox(run));
+    var acked = Acting.by(sams, () -> operations.ackRunMessages(run, List.of(left.id())));
+    var missing = Acting.by(sams, () -> operations.ackRunMessages(run, List.of(NO_SUCH_RUN)));
+
+    assertEquals(
+        List.of(here.id()),
+        ((Result.Success<RunInboxResponse>) inbox)
+            .value().messages().stream().map(SpecMessageView::id).toList());
+    assertEquals(
+        missing, acked, "a message filed under bravo is, to the run, one its room does not hold");
+    assertEquals(
+        "delivered must name messages on spec 'bravo-spec'.",
+        ((Result.Failure<RunAckResponse>) acked).errorMessage());
+    assertEquals(Set.of(), runs.deliveredMessageIds(run));
+    assertEquals(
+        List.of(left.id(), here.id()),
+        ((Result.Success<RunInboxResponse>) Acting.system(() -> operations.runInbox(run)))
+            .value().messages().stream().map(SpecMessageView::id).toList(),
+        "the box's own machinery is still delivered all of it");
+  }
+
+  @Test
+  void aScopedOwnersWriteOnItsSpecRewritesNoReviewFiledOutsideItsScope() throws Exception {
+    var bravoReview = Acting.system(this::bravoArrives);
+    var reviews = new ReviewStore(db);
+    Acting.system(
+        () -> {
+          reviews.addFinding(
+              reviews.createStage(bravoReview, "security", "agent"),
+              new Finding(
+                  "bravo-confidential",
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "Bravo.java",
+                  1,
+                  1,
+                  "Bravo confidential details",
+                  "d",
+                  "e",
+                  new Finding.Suggestion("", "", ""),
+                  1.0,
+                  Finding.Resolution.OPEN,
+                  null,
+                  null,
+                  null));
+          reviews.pass(bravoReview, () -> {});
+        });
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\", \"assignee\": \"sam\"}")
+            .substring(0, 3));
+    var written = new ChangeLog(db).history("review", bravoReview).size();
+
+    var done = send(sam, "PUT", "/v1/specs/bravo-spec", "{\"status\": \"done\"}");
+
+    assertEquals("200", done.substring(0, 3), done);
+    assertEquals(
+        Finding.Resolution.OPEN,
+        reviews.findFinding("bravo-confidential").orElseThrow().resolution(),
+        "what a review sam cannot read still holds open is not sam's to close");
+    assertEquals(written, new ChangeLog(db).history("review", bravoReview).size());
+
+    for (var status : List.of("review", "done")) {
+      assertEquals(
+          "200",
+          send(ada, "PUT", "/v1/specs/bravo-spec", "{\"status\": \"" + status + "\"}")
+              .substring(0, 3));
+    }
+    assertEquals(
+        Finding.Resolution.SHIPPED,
+        reviews.findFinding("bravo-confidential").orElseThrow().resolution(),
+        "an admin, who reads the review, closes it");
   }
 
   @Test

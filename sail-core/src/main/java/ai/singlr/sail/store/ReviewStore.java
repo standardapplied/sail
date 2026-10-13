@@ -10,6 +10,7 @@ import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -787,12 +788,20 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   /**
    * Applies {@code changes}, fields to set per finding id, to the content of every review holding
    * one of the findings: one revision per review whose content changes, none for a review whose
-   * findings already read so. A finding this box does not hold changes nothing.
+   * findings already read so. A finding this box does not hold changes nothing, and neither does
+   * one of a review filed outside the bound actor's scope: a write that reaches findings through
+   * their spec or their follow-up passes over a review its actor could not read.
    */
   private void amend(Map<String, Map<String, Object>> changes) {
+    var scope = Actor.reader().scope();
     var reviews = new LinkedHashSet<String>();
     for (var findingId : changes.keySet()) {
-      reviewOfFinding(findingId).ifPresent(reviews::add);
+      reviewOfFinding(findingId)
+          .filter(
+              review ->
+                  scope.unrestricted()
+                      || scope.admits(changeLog.headProject(ENTITY, review).orElse(null)))
+          .ifPresent(reviews::add);
     }
     for (var reviewId : reviews) {
       var amended = new ArrayList<Map<String, Object>>();

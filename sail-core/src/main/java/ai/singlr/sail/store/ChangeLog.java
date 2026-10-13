@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -351,6 +352,28 @@ public final class ChangeLog {
         project,
         entityType,
         entityId);
+  }
+
+  /**
+   * The SQL condition that the head of the {@code entityType} row whose id the expression {@code
+   * id} names is filed under a project of the scope bound as argument {@code ?arg} ({@link
+   * #scopeArgument}): {@link ProjectScope#admits} asked inside a query, for a read whose limit or
+   * aggregate must count only what its reader sees.
+   */
+  static String filedInside(String entityType, String id, int arg) {
+    return """
+        (?%3$d IS NULL OR EXISTS (SELECT 1 FROM change_heads filed
+            WHERE filed.entity_type = '%1$s' AND filed.entity_id = %2$s
+            AND filed.project IN (SELECT value FROM json_each(?%3$d))))"""
+        .formatted(entityType, id, arg);
+  }
+
+  /**
+   * {@code scope} as the argument {@link #filedInside} reads: null when it admits every project,
+   * otherwise its projects.
+   */
+  static String scopeArgument(ProjectScope scope) {
+    return scope.unrestricted() ? null : YamlUtil.dumpJson(List.copyOf(scope.projects()));
   }
 
   /** Every project a head of this box carries: the projects it holds anything of. */

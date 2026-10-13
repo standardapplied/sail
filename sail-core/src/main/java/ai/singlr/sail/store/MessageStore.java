@@ -14,6 +14,7 @@ import ai.singlr.sail.common.Ids;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CodingErrorAction;
@@ -120,6 +121,26 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return new MessageAuthority(db);
   }
 
+  /**
+   * The condition every read of a conversation carries: a message is its reader's only when the
+   * project it is filed under ({@link #projectOf}) is in the reader's scope, bound as {@code ?arg}.
+   * A conversation is not one project's: a spec that moved leaves what was said before in the
+   * project it left. Asked inside the query, so a page is as long as its limit of what the reader
+   * sees.
+   */
+  private static String readable(String id, int arg) {
+    return ChangeLog.filedInside(ENTITY, id, arg);
+  }
+
+  /** The scope of whoever reads ({@link Actor#reader}), as {@link #readable} takes it. */
+  private static String reader() {
+    return ChangeLog.scopeArgument(Actor.reader().scope());
+  }
+
+  /**
+   * The newest {@code limit} messages of {@code roomId} its reader may see, older than {@code
+   * before} when one is named, oldest first.
+   */
   public List<MessageRow> list(String roomId, String before, int limit) {
     if (before != null) {
       Ids.requireUuid(before);
@@ -127,35 +148,18 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
-    var newest =
-        before == null
-            ? db.query(
-                "SELECT "
-                    + COLUMNS
-                    + " FROM room_messages WHERE room_id = ?"
-                    + " ORDER BY id DESC LIMIT ?",
-                MessageStore::map,
-                roomId,
-                limit)
-            : db.query(
-                "SELECT "
-                    + COLUMNS
-                    + " FROM room_messages WHERE room_id = ? AND id < ?"
-                    + " ORDER BY id DESC LIMIT ?",
-                MessageStore::map,
-                roomId,
-                before,
-                limit);
+    var newest = page(roomId, "<", before, "DESC", limit);
     var oldest = new ArrayList<>(newest);
     Collections.reverse(oldest);
     return List.copyOf(oldest);
   }
 
   /**
-   * Messages of {@code roomId} strictly newer than {@code after} (a message id, or null for all),
-   * oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id > ?} is mint-time
-   * order — a forward paging cursor for room reads. Not a delivery primitive: mint order is not
-   * arrival order across synced boxes, so delivery goes through {@link #listUndelivered}.
+   * Messages of {@code roomId} its reader may see, strictly newer than {@code after} (a message id,
+   * or null for all), oldest first, capped at {@code limit}. Ids are UUIDv7 strings, so {@code id >
+   * ?} is mint-time order — a forward paging cursor for room reads. Not a delivery primitive: mint
+   * order is not arrival order across synced boxes, so delivery goes through {@link
+   * #listUndelivered}.
    */
   public List<MessageRow> listAfter(String roomId, String after, int limit) {
     if (after != null) {
@@ -164,28 +168,34 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive");
     }
-    if (after == null) {
-      return db.query(
-          "SELECT " + COLUMNS + " FROM room_messages WHERE room_id = ? ORDER BY id ASC LIMIT ?",
-          MessageStore::map,
-          roomId,
-          limit);
-    }
-    return db.query(
-        "SELECT "
-            + COLUMNS
-            + " FROM room_messages WHERE room_id = ? AND id > ? ORDER BY id ASC LIMIT ?",
-        MessageStore::map,
-        roomId,
-        after,
-        limit);
+    return page(roomId, ">", after, "ASC", limit);
   }
 
   /**
-   * Messages of {@code roomId} absent from {@code runId}'s delivery ledger and not authored by
-   * {@code excludeAuthor} (a run is never told its own story), oldest first, capped at {@code
-   * limit}. Delivery is by exact identity, so a message that synchronized in with an older id after
-   * newer messages were already delivered still appears here.
+   * Up to {@code limit} messages of {@code roomId} its reader may see, in id order {@code order},
+   * on the {@code side} of message {@code cursor} when one is named.
+   */
+  private List<MessageRow> page(
+      String roomId, String side, String cursor, String order, int limit) {
+    var sql =
+        "SELECT "
+            + COLUMNS
+            + " FROM room_messages WHERE room_id = ?1 AND "
+            + readable("room_messages.id", 2)
+            + (cursor == null ? "" : " AND id " + side + " ?4")
+            + " ORDER BY id "
+            + order
+            + " LIMIT ?3";
+    return cursor == null
+        ? db.query(sql, MessageStore::map, roomId, reader(), limit)
+        : db.query(sql, MessageStore::map, roomId, reader(), limit, cursor);
+  }
+
+  /**
+   * Messages of {@code roomId} its reader may see, absent from {@code runId}'s delivery ledger and
+   * not authored by {@code excludeAuthor} (a run is never told its own story), oldest first, capped
+   * at {@code limit}. Delivery is by exact identity, so a message that synchronized in with an
+   * older id after newer messages were already delivered still appears here.
    */
   public List<MessageRow> listUndelivered(
       String roomId, String runId, String excludeAuthor, int limit) {
@@ -195,14 +205,16 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     return db.query(
         "SELECT "
             + COLUMNS
-            + " FROM room_messages WHERE room_id = ? AND author != ?"
+            + " FROM room_messages WHERE room_id = ?1 AND author != ?2"
             + " AND NOT EXISTS (SELECT 1 FROM run_delivered_messages"
-            + " WHERE run_id = ? AND message_id = room_messages.id)"
-            + " ORDER BY id ASC LIMIT ?",
+            + " WHERE run_id = ?3 AND message_id = room_messages.id) AND "
+            + readable("room_messages.id", 4)
+            + " ORDER BY id ASC LIMIT ?5",
         MessageStore::map,
         roomId,
         excludeAuthor,
         runId,
+        reader(),
         limit);
   }
 
@@ -216,10 +228,10 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
 
   /**
    * Each room whose latest agent-authored question is still unanswered, mapped to that question's
-   * message id — one aggregate query. A question is answered by any later human message in the
-   * room; the author classes are structural, mirroring {@code RoomWakePolicy.humanAuthor}: an agent
-   * principal always carries a {@code /}, the orchestrator posts as the literal {@code sail}, and
-   * FDE handles contain neither.
+   * message id — one aggregate query, over the messages its reader may see ({@link #readable}). A
+   * question is answered by any later human message in the room; the author classes are structural,
+   * mirroring {@code RoomWakePolicy.humanAuthor}: an agent principal always carries a {@code /},
+   * the orchestrator posts as the literal {@code sail}, and FDE handles contain neither.
    *
    * <p>"Later" is message-id order, which is origin-mint order, so this is content-deterministic
    * and consistent across boxes at sync-freshness. Known edge: a human message posted in the room
@@ -231,16 +243,24 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * edge.
    */
   public Map<String, String> openQuestions() {
+    return openQuestions(Actor.reader().scope());
+  }
+
+  /** {@link #openQuestions()} as a reader of {@code scope} sees the questions and their answers. */
+  private Map<String, String> openQuestions(ProjectScope scope) {
     var open = new LinkedHashMap<String, String>();
     for (var entry :
         db.query(
             "SELECT q.room_id, MAX(q.id) FROM room_messages q"
-                + " WHERE q.question != 0 AND q.author LIKE '%/%'"
+                + " WHERE q.question != 0 AND q.author LIKE '%/%' AND "
+                + readable("q.id", 1)
                 + " AND NOT EXISTS (SELECT 1 FROM room_messages h"
                 + " WHERE h.room_id = q.room_id AND h.id > q.id"
-                + " AND h.author NOT LIKE '%/%' AND h.author != 'sail')"
-                + " GROUP BY q.room_id",
-            row -> Map.entry(row.text(0), row.text(1)))) {
+                + " AND h.author NOT LIKE '%/%' AND h.author != 'sail' AND "
+                + readable("h.id", 1)
+                + ") GROUP BY q.room_id",
+            row -> Map.entry(row.text(0), row.text(1)),
+            ChangeLog.scopeArgument(scope))) {
       open.put(entry.getKey(), entry.getValue());
     }
     return open;
@@ -252,7 +272,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
    * agent's question still waiting for its answer, or the messages that question replies to.
    */
   public List<String> retiredBefore(Instant cutoff, int limit) {
-    var open = YamlUtil.dumpJson(List.copyOf(openQuestions().values()));
+    var open = YamlUtil.dumpJson(List.copyOf(openQuestions(ProjectScope.all()).values()));
     return db.query(
         """
         WITH RECURSIVE kept(id) AS (
@@ -274,13 +294,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         limit);
   }
 
-  /** Each room's newest message timestamp — one aggregate query, keyed by spec id. */
+  /**
+   * Each room's newest message timestamp among the messages its reader may see — one aggregate
+   * query, keyed by spec id.
+   */
   public Map<String, String> latestByRoom() {
     var latest = new LinkedHashMap<String, String>();
     for (var entry :
         db.query(
-            "SELECT room_id, MAX(created_at) FROM room_messages GROUP BY room_id",
-            row -> Map.entry(row.text(0), row.text(1)))) {
+            "SELECT room_id, MAX(created_at) FROM room_messages WHERE "
+                + readable("room_messages.id", 1)
+                + " GROUP BY room_id",
+            row -> Map.entry(row.text(0), row.text(1)),
+            reader())) {
       latest.put(entry.getKey(), entry.getValue());
     }
     return latest;

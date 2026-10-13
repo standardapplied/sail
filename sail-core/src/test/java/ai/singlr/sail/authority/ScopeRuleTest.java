@@ -20,6 +20,7 @@ import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -175,6 +176,66 @@ class ScopeRuleTest {
                     new ByteArrayInputStream("x".getBytes(StandardCharsets.UTF_8)),
                     0644));
     assertEquals("x", ContentFixtures.text(new FileStore(db), "alpha", "notes.md"));
+  }
+
+  @Test
+  void aWriteOverAReviewIsDecidedByWhereTheReviewIsFiledNotWhereItsSpecIsNow() {
+    var log = new ChangeLog(db);
+    var reviews = new ReviewStore(db);
+    var arrived = reviews.createReview("beta-work", 1);
+    var left = reviews.createReview("alpha-work", 1);
+    specs.update(spec("beta-work", "alpha", "nia"));
+    specs.update(spec("alpha-work", "beta", "nia"));
+    assertEquals(Optional.of("beta"), log.headProject("review", arrived));
+    var taken =
+        new Refusal(
+            Refusal.Kind.OUT_OF_SCOPE,
+            "Review '" + arrived + "' already exists.",
+            "Pick another id.");
+    var held = reviews.comparableSnapshot(arrived);
+
+    assertEquals(Optional.of(taken), new ScopeRule(log, "review").decide(NIA, arrived, held, held));
+    for (Acting.Work<RuntimeException> write :
+        List.<Acting.Work<RuntimeException>>of(
+            () -> reviews.supersedeForSpec("beta-work"),
+            () -> reviews.updateReviewStatus(arrived, "failed"),
+            () -> reviews.approve(arrived, "nia", () -> {}))) {
+      assertEquals(taken, assertThrows(WriteRefused.class, () -> Acting.by(NIA, write)).refusal());
+    }
+    var untouched = reviews.findReview(arrived).orElseThrow();
+    assertEquals("running", untouched.status());
+    assertEquals(false, untouched.superseded());
+    assertEquals(1, log.history("review", arrived).size(), "and nothing of it was journaled");
+
+    assertEquals(
+        new Refusal(
+            Refusal.Kind.OUT_OF_SCOPE,
+            "Review '" + left + "' is in no project this FDE is granted.",
+            GRANT),
+        assertThrows(
+                WriteRefused.class,
+                () -> Acting.by(NIA, () -> reviews.updateReviewStatus(left, "failed")))
+            .refusal(),
+        "a review nia may read is still not nia's to write once its spec left the scope");
+
+    var later = reviews.createReview("beta-work", 1);
+    Acting.by(NIA, () -> reviews.updateReviewStatus(later, "failed"));
+    assertEquals("failed", reviews.findReview(later).orElseThrow().status());
+    Acting.by(Actors.ADMIN, () -> reviews.supersedeForSpec("beta-work"));
+    assertEquals(true, reviews.findReview(arrived).orElseThrow().superseded());
+  }
+
+  @Test
+  void aHeadThatNamesNoProjectIsDecidedByTheStateItHolds() {
+    db.execute("UPDATE change_heads SET project = NULL WHERE entity_type = 'spec'");
+
+    assertEquals(
+        Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' already exists.", "Pick another id."),
+        rule.decide(NIA, "beta-work", Map.of("project", "beta"), Map.of("project", "alpha")));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(NIA, "alpha-work", Map.of("project", "alpha"), Map.of("project", "alpha")));
   }
 
   @Test

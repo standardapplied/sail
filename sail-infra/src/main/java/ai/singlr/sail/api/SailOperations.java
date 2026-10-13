@@ -1947,8 +1947,7 @@ public final class SailOperations implements HostOperations {
           for (var messageId : delivered) {
             var onSpec =
                 !Strings.isBlank(messageId)
-                    && store
-                        .findById(messageId)
+                    && Scoped.row(Actor.reader(), store.findById(messageId), store::projectOf)
                         .filter(message -> message.roomId().equals(runRoomId(run)))
                         .isPresent();
             if (!onSpec) {
@@ -2018,14 +2017,18 @@ public final class SailOperations implements HostOperations {
         });
   }
 
+  /**
+   * The run a delivery or a session report addresses; {@code RUN_NOT_FOUND} when there is none, or
+   * its project is outside the caller's scope: a run's credential outlives a revoked grant, and the
+   * scope it is resolved with each request does not.
+   */
   private RunStore.RunRow requireRun(String runId) {
     if (runStore == null) {
       throw new ApiException(
           ErrorCode.INTERNAL,
           "Run store not available. Start the server with 'sail server start'.");
     }
-    return runStore
-        .findById(runId)
+    return Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
         .orElseThrow(
             () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "Run '" + runId + "' was not found."));
   }
