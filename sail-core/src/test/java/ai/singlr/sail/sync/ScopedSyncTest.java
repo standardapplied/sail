@@ -198,6 +198,153 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aScopedOfferNamesOnlyContentItsSessionSentOrWasServed() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    var ours = bodyHash(main, "alpha-work");
+    var secret = bodyHash(main, "beta-work");
+    var rev = new ChangeLog(main.db).head("spec", "alpha-work").orElseThrow().rev();
+    var forged = new LinkedHashMap<>(main.replicas().get("spec").current("alpha-work"));
+    forged.put("body_hash", secret);
+    var push = new SyncWire.Push("spec", List.of(new MainReplica.Offer("alpha-work", forged, rev)));
+
+    var answered =
+        serve(
+            main.server(scoped(ONLY_A)),
+            HELLO,
+            push,
+            new SyncWire.Need("spec", List.of("alpha-work")),
+            new SyncWire.Fetch(List.of(secret)));
+
+    assertEquals(
+        new SyncWire.Refused(
+            "alpha-work",
+            "This offer names content the session neither sent nor was served; announce it first."),
+        only(answered.get(1)));
+    assertEquals(ours, bodyHash(main, "alpha-work"), "nothing was written");
+    assertEquals(
+        new SyncWire.Failed(
+            "fetch: blob " + secret + " is not content main served this session", "refused"),
+        answered.getLast());
+
+    var manifest = new BlobStore(main.db).manifest(secret);
+    var asked =
+        serve(
+            main.server(scoped(ONLY_A)),
+            HELLO,
+            new SyncWire.Announce(List.of(secret)),
+            new SyncWire.Manifest(manifest),
+            new SyncWire.Done(),
+            push);
+    assertEquals(
+        new SyncWire.Lack(List.of(secret)),
+        asked.get(1),
+        "main asks a scoped session for a blob it holds, as for one it does not");
+    assertEquals(
+        new SyncWire.Lack(manifest.chunkHashes()),
+        asked.get(2),
+        "and for every chunk of it, so the bytes are the session's own");
+    assertInstanceOf(SyncWire.Failed.class, asked.getLast());
+    assertEquals(ours, bodyHash(main, "alpha-work"));
+
+    assertEquals(
+        new SyncWire.Lack(List.of()),
+        serve(
+                main.server(Actor.sync("uma", Role.MEMBER)),
+                HELLO,
+                new SyncWire.Announce(List.of(secret)))
+            .get(1),
+        "an unscoped session is asked only for what main lacks, as it always has");
+    assertInstanceOf(
+        SyncWire.Accepted.class,
+        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, push).get(1)),
+        "and names content by hash as it always has");
+  }
+
+  @Test
+  void aScopedNodeSendsContentMainAlreadyHoldsAndItsOfferIsTaken() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia);
+    var theirs = "a body only " + B + " holds";
+
+    Acting.as("nia", () -> nia.specs.setContent("alpha-work", theirs, "the plan of " + A));
+    SyncBox.quiesce(main, nia);
+
+    assertEquals(bodyHash(main, "beta-work"), bodyHash(main, "alpha-work"));
+
+    retitle(nia, "alpha-work");
+    SyncBox.quiesce(main, nia);
+
+    assertEquals(
+        "retitled",
+        main.specs.findById("alpha-work").orElseThrow().title(),
+        "an edit that changes no content sends the content it names again");
+    assertEquals(bodyHash(main, "beta-work"), bodyHash(main, "alpha-work"));
+  }
+
+  @Test
+  void aReadOnlyScopedOfferStillReachesMainsDecision() throws Exception {
+    seed(main, A, "nia");
+    var rev = new ChangeLog(main.db).head("spec", "alpha-work").orElseThrow().rev();
+    var offer = main.replicas().get("spec").current("alpha-work");
+
+    var denied =
+        only(
+            serve(
+                    main.server(Actor.sync("nia", Role.VIEWER).withScope(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push(
+                        "spec", List.of(new MainReplica.Offer("alpha-work", offer, rev))))
+                .getLast());
+
+    assertEquals(
+        "Your credential is read-only and cannot change specs.",
+        assertInstanceOf(SyncWire.Denied.class, denied).reason(),
+        "its announcement was answered lacking nothing, so no offer of it names content it sent");
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeIsItsOwnersToEditThoughTheRoomOnItsIdIsNot() {
+    seed(main, B, "nia");
+    Acting.system(() -> main.specs.update(spec("beta-work", A, "nia")));
+    SyncBox.quiesce(main, nia);
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM rooms"));
+
+    retitle(nia, "beta-work");
+    SyncBox.quiesce(main, nia);
+
+    assertEquals("retitled", main.specs.findById("beta-work").orElseThrow().title());
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+  }
+
+  private static void retitle(SyncBox box, String id) {
+    var held = box.specs.findById(id).orElseThrow();
+    Acting.as(
+        held.assignee(),
+        () ->
+            box.specs.update(
+                new SpecStore.SpecRow(
+                    held.id(),
+                    held.project(),
+                    "retitled",
+                    held.status(),
+                    held.assignee(),
+                    held.agent(),
+                    held.model(),
+                    held.reasoningEffort(),
+                    held.branch(),
+                    held.priority(),
+                    held.createdBy(),
+                    held.createdAt(),
+                    held.updatedAt(),
+                    held.updatedBy(),
+                    held.dependsOn(),
+                    held.repos(),
+                    held.roomId())));
+  }
+
+  @Test
   void aVersionMainTookInAProjectSinceRevokedIsNeitherHandedBackNorItsContentServed()
       throws Exception {
     seed(main, A, "nia");
@@ -454,6 +601,65 @@ class ScopedSyncTest {
     SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
     SyncBox.quiesce(main, nia);
     SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+  }
+
+  @Test
+  void aReplyIsFiledWithTheMessageItAnswersSoAThreadArrivesAndLeavesWhole() {
+    seed(main, A, "nia");
+    seed(main, B, "nia");
+    var messages = new MessageStore(main.db);
+    var asked = messages.append("beta-work", "nia", "asked in beta", null);
+    moveRoom(main, "beta-work", A);
+    var answered = messages.append("beta-work", "nia", "answered after the move", asked.id());
+    var further = messages.append("beta-work", "nia", "and again", answered.id());
+    var fresh = messages.append("beta-work", "nia", "said after the move", null);
+    var thread = List.of(asked.id(), answered.id(), further.id());
+    var changes = new ChangeLog(main.db);
+    for (var id : thread) {
+      assertEquals(
+          B, changes.headProject("message", id).orElseThrow(), "a thread is one project's");
+    }
+    assertEquals(A, changes.headProject("message", fresh.id()).orElseThrow());
+
+    SyncBox.quiesce(main, nia);
+
+    assertEquals(List.of(fresh.id()), movedRoomTalk(nia), "a node of alpha alone");
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+
+    assertEquals(List.of(asked.id(), answered.id(), further.id(), fresh.id()), movedRoomTalk(nia));
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ONLY_A)));
+
+    assertEquals(List.of(fresh.id()), movedRoomTalk(nia), "beta revoked: the thread left with it");
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+
+    var onlyB = ProjectScope.of(List.of(B));
+    SyncBox.quiesce(main, uma.syncsAs(Actor.sync("uma", Role.MEMBER).withScope(onlyB)));
+
+    assertEquals(thread, movedRoomTalk(uma), "a node of beta alone holds the thread and no room");
+    SyncBox.assertScopedToMain(main, uma, onlyB);
+  }
+
+  private static List<String> movedRoomTalk(SyncBox box) {
+    return box.db.query(
+        "SELECT id FROM room_messages WHERE room_id = 'beta-work'"
+            + " AND body NOT LIKE 'a % in beta' ORDER BY id",
+        row -> row.text(0));
+  }
+
+  private static void moveRoom(SyncBox box, String id, String project) {
+    var rooms = new RoomStore(box.db);
+    var moved = new LinkedHashMap<>(rooms.comparableSnapshot(id));
+    moved.put("project", project);
+    Acting.system(
+        () ->
+            rooms.commitRevision(
+                id,
+                moved,
+                new ChangeLog(box.db).head("room", id).orElseThrow().rev(),
+                rooms.authority()));
   }
 
   @Test
@@ -714,6 +920,113 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aRowIsBornNamingOnlyWhatItsPusherMaySee() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    new RoomStore(main.db).create(room("beta-own", B, "nia"));
+    main.specs.create(spec("beta-roomless", B, "uma"));
+    var spec = snapshot(nia, () -> nia.create(spec("mine", A, "nia")), "spec", "mine");
+    var room =
+        snapshot(
+            nia,
+            () -> Acting.as("nia", () -> new RoomStore(nia.db).create(room("mine", A, "nia"))),
+            "room",
+            "mine");
+    var runId = DateTimeUtils.newId().toString();
+    var run =
+        snapshot(
+            nia,
+            () ->
+                new RunStore(nia.db)
+                    .create(
+                        runId, A, "mine", "nia", "build", "claude", "b", "t", null, null, "/l",
+                        "u"),
+            "run",
+            runId);
+    var heads = count(main.db, "SELECT count(*) FROM change_heads");
+
+    assertEquals(
+        "Room 'beta-work' was not found.",
+        born("spec", "mine", with(spec, "room_id", "beta-work")),
+        "a room of beta, owned by uma");
+    assertEquals(
+        "Room 'beta-roomless' was not found.",
+        born("spec", "mine", with(spec, "room_id", "beta-roomless")),
+        "a conversation of beta that is a spec's alone");
+    assertEquals(
+        "Spec 'beta-own' already exists.",
+        born("spec", "beta-own", with(spec, "room_id", "beta-own")),
+        "the pusher's own room, in beta: its id is taken and it is not adopted");
+    assertEquals(
+        "Room 'beta-roomless' already exists.",
+        born("room", "beta-roomless", room),
+        "a room over the id of beta's spec");
+    assertEquals(
+        "Spec 'beta-work' was not found.", born("run", runId, with(run, "spec_id", "beta-work")));
+    assertEquals(
+        "Room 'beta-own' was not found.",
+        born("run", runId, with(with(run, "spec_id", null), "room_id", "beta-own")));
+    assertEquals(heads, count(main.db, "SELECT count(*) FROM change_heads"), "nothing was written");
+
+    assertEquals(
+        "room 'nowhere', which spec 'mine' is born in, is not held here yet; it syncs in its own"
+            + " page, so the next round settles this",
+        born("spec", "mine", with(spec, "room_id", "nowhere")),
+        "a room nobody holds is still awaited");
+    assertEquals(
+        null,
+        born("run", runId, with(run, "spec_id", "unheard-of")),
+        "a run of a spec main has not heard of is taken as it always was");
+    assertEquals(null, born("room", "mine", room));
+    assertEquals(null, born("spec", "mine", spec));
+  }
+
+  /**
+   * Why main denies or refuses a scoped pusher the birth of {@code state} as {@code id}, null when
+   * it takes it. The session first sends the content the state names, none of it more than a
+   * manifest.
+   */
+  private String born(String type, String id, Map<String, Object> state) throws IOException {
+    var requests = new ArrayList<SyncWire.Request>(List.of(HELLO));
+    var content =
+        BlobStore.referenced(
+            List.of(state), SyncedEntities.require(type).store(nia.db).contentFields());
+    if (!content.isEmpty()) {
+      requests.add(new SyncWire.Announce(List.copyOf(content)));
+      content.forEach(
+          hash -> requests.add(new SyncWire.Manifest(new BlobStore(nia.db).manifest(hash))));
+      requests.add(new SyncWire.Done());
+      requests.add(new SyncWire.Done());
+    }
+    requests.add(new SyncWire.Push(type, List.of(new MainReplica.Offer(id, state, null))));
+    var result =
+        only(
+            serve(main.server(scoped(ONLY_A)), requests.toArray(SyncWire.Request[]::new))
+                .getLast());
+    return switch (result) {
+      case SyncWire.Denied denied -> denied.reason();
+      case SyncWire.Refused refused -> refused.reason();
+      default -> accepted(result);
+    };
+  }
+
+  private static String accepted(SyncWire.Result result) {
+    assertInstanceOf(SyncWire.Accepted.class, result);
+    return null;
+  }
+
+  private static Map<String, Object> with(Map<String, Object> state, String field, Object value) {
+    var changed = new LinkedHashMap<>(state);
+    changed.put(field, value);
+    return changed;
+  }
+
+  private static RoomStore.RoomRow room(String id, String project, String owner) {
+    return new RoomStore.RoomRow(
+        id, project, "the " + id + " room", owner, null, null, owner, null, null, owner);
+  }
+
+  @Test
   void anIdTakenInAnotherProjectIsDeniedAsExistingAndTheNodeWithdrawsItsOwn() {
     seed(main, A, "nia");
     seed(main, B, "uma");
@@ -754,6 +1067,7 @@ class ScopedSyncTest {
                 serve(
                         main.server(scoped(ONLY_A)),
                         HELLO,
+                        new SyncWire.Need("spec", List.of("alpha-work")),
                         new SyncWire.Push(
                             "spec",
                             List.of(new MainReplica.Offer("alpha-work", edited, head.rev()))))

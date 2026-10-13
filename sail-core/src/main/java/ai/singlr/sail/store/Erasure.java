@@ -224,7 +224,8 @@ public final class Erasure {
    * sends nothing of it again, so nothing may stay to be offered or matched against a page. What
    * the walk reaches that history files under another project stays: the room and the runs a spec
    * left behind when it moved here are that project's, which main still sends this box and would
-   * never send again. Journals nothing and names no actor. Returns what went.
+   * never send again. A thread is never split so: a reply is filed with the message it answers
+   * ({@link ChangeLog#projectOf}). Journals nothing and names no actor. Returns what went.
    */
   public Result dropLocal(String project) {
     return db.transaction(

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -838,6 +839,20 @@ class ScopedReadsTest {
         false,
         ask(sam, "/v1/specs/bravo-spec").contains("needs_reply"),
         "a person's answer sam can read does not turn up the question sam cannot");
+
+    var nobodys = DateTimeUtils.newId().toString();
+    var answer = "{\"body\": \"An answer\", \"reply_to\": \"%s\"}";
+    assertEquals(
+        send(sam, "POST", "/v1/rooms/bravo-spec/messages", answer.formatted(nobodys)),
+        send(sam, "POST", "/v1/rooms/bravo-spec/messages", answer.formatted(asked.id())),
+        "to sam the question is one nobody asked");
+    var answered = send(ada, "POST", "/v1/rooms/bravo-spec/messages", answer.formatted(asked.id()));
+    assertEquals("201", answered.substring(0, 3), answered);
+    assertEquals(
+        true,
+        ask(sam, "/v1/rooms/bravo-spec/messages").contains("\"total\": 1"),
+        "an answer is filed with its question, in the project sam does not hold");
+    assertEquals(true, ask(ada, "/v1/rooms/bravo-spec/messages").contains("\"total\": 4"));
   }
 
   @Test

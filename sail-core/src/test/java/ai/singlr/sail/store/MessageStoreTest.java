@@ -134,6 +134,40 @@ class MessageStoreTest {
         "retention decides by every message, whoever is bound: no question still waits");
   }
 
+  @Test
+  void aReplyAnswersOnlyAMessageItsWriterMayReadAndIsFiledWithIt() {
+    var specs = new SpecStore(db);
+    specs.create(spec("mover", "beta"));
+    var asked = messages.append("mover", "bea", "asked in beta", null);
+    specs.update(spec("mover", "alpha"));
+    var ann = reader("alpha");
+    var nobodys = DateTimeUtils.newId().toString();
+
+    var hidden =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Acting.by(ann, () -> messages.append("mover", "ann", "an answer", asked.id())));
+    var missing =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Acting.by(ann, () -> messages.append("mover", "ann", "an answer", nobodys)));
+
+    assertEquals("reply_to must reference a message in room 'mover'", missing.getMessage());
+    assertEquals(missing.getMessage(), hidden.getMessage());
+    var answered = messages.append("mover", "bea", "answered after the move", asked.id());
+    var further = messages.append("mover", "bea", "and again", answered.id());
+    assertEquals("beta", messages.projectOf(answered), "a reply is filed with what it answers");
+    assertEquals("beta", messages.projectOf(further));
+    assertEquals(List.of(), ids(Acting.by(ann, () -> messages.list("mover", null, 10))));
+    var ada = new Actor("ada", Role.MEMBER, Actor.Lane.API).withScope(ann.scope());
+    var said = Acting.by(ada, () -> messages.append("mover", "ada", "said in alpha", null));
+    var reply = Acting.by(ada, () -> messages.append("mover", "ada", "answered", said.id()));
+    assertEquals("alpha", messages.projectOf(reply));
+    assertEquals(
+        List.of(said.id(), reply.id()),
+        ids(Acting.by(ann, () -> messages.list("mover", null, 10))));
+  }
+
   private static Actor reader(String project) {
     return new Actor("ann", Role.MEMBER, Actor.Lane.API)
         .withScope(ProjectScope.of(List.of(project)));

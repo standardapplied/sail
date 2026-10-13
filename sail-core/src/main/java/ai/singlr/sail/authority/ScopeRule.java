@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
@@ -17,15 +18,27 @@ import java.util.Optional;
 /**
  * Whether a write of one synced type stays inside the projects its actor may see ({@link
  * ProjectScope#admits}): the state it writes must belong to one, and what it writes over must be
- * filed under one. A deletion names no project of its own and is decided by what it deletes. Asked
- * ahead of the type's own rule on every lane ({@link #before}), so an actor learns nothing of a row
- * outside its scope but that its id is taken; an actor that sees every project — every one before
- * an FDE is scoped, main's own and this box's machinery — is never refused.
+ * filed under one. A deletion names no project of its own and is decided by what it deletes. A row
+ * is born naming only rows inside the scope too ({@link #bornBeyond}): the type's rule reads who
+ * owns the conversation a spec is born in and the work a run does, and would say so. Asked ahead of
+ * the type's own rule on every lane ({@link #before}), so an actor learns nothing of a row outside
+ * its scope but that its id is taken; an actor that sees every project — every one before an FDE is
+ * scoped, main's own and this box's machinery — is never refused.
  */
 public final class ScopeRule {
 
   private static final String GRANT =
       "Ask an admin on main for the project: sail fde grant <handle> <project>.";
+  private static final String SPEC = "spec";
+  private static final String ROOM = "room";
+
+  /**
+   * The rows a state is born naming beside its project, by the field naming each and the type it
+   * names. A review's spec and a message's conversation are not here: each gives its child its
+   * project, which is asked already.
+   */
+  private static final Map<String, Map<String, String>> NAMED =
+      Map.of(SPEC, Map.of("room_id", ROOM), "run", Map.of("spec_id", SPEC, "room_id", ROOM));
 
   private final ChangeLog changeLog;
   private final String type;
@@ -61,11 +74,47 @@ public final class ScopeRule {
     }
     var project = changeLog.projectOf(type, id, next);
     if (inside(scope, project, next)) {
-      return Optional.empty();
+      return held == null && next != null ? bornBeyond(scope, id, next) : Optional.empty();
     }
     return project != null && (project.equals(id) || project.equals(next.get("project")))
         ? Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Project '" + project + "' was not found.", GRANT)
         : unplaced(id);
+  }
+
+  /**
+   * Why {@code next} may not be born as {@code id} though its own project is inside {@code scope}:
+   * a row it names lies outside, answered as one that was not found, or its id is that of a
+   * conversation outside — a spec and the room on its id are one conversation, so the birth of
+   * either takes the id of both — answered as an id that is taken.
+   */
+  private Optional<Refusal> bornBeyond(ProjectScope scope, String id, Map<String, Object> next) {
+    for (var naming : NAMED.getOrDefault(type, Map.of()).entrySet()) {
+      var named = Snapshots.text(next, naming.getKey());
+      if (Strings.isNotBlank(named)
+          && !named.equals(id)
+          && beyond(scope, naming.getValue(), named)) {
+        return Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE,
+            named(naming.getValue(), named) + " was not found.",
+            "Name one in a project this FDE is granted.");
+      }
+    }
+    return (SPEC.equals(type) || ROOM.equals(type)) && beyond(scope, ROOM, id)
+        ? taken(id)
+        : Optional.empty();
+  }
+
+  /**
+   * Whether this box files {@code named}, a row of type {@code of}, outside {@code scope}: a room
+   * by its conversation's project, which is its spec's where no room was minted, any other by its
+   * head's. A row this box does not hold is outside nothing.
+   */
+  private boolean beyond(ProjectScope scope, String of, String named) {
+    var project =
+        ROOM.equals(of)
+            ? changeLog.conversationProject(named)
+            : changeLog.headProject(of, named).orElse(null);
+    return project != null && !scope.admits(project);
   }
 
   /**
@@ -104,15 +153,17 @@ public final class ScopeRule {
 
   private Optional<Refusal> unplaced(String id) {
     return Refusal.of(
-        Refusal.Kind.OUT_OF_SCOPE, named(id) + " is in no project this FDE is granted.", GRANT);
+        Refusal.Kind.OUT_OF_SCOPE,
+        named(type, id) + " is in no project this FDE is granted.",
+        GRANT);
   }
 
   private Optional<Refusal> taken(String id) {
     return Refusal.of(
-        Refusal.Kind.OUT_OF_SCOPE, named(id) + " already exists.", "Pick another id.");
+        Refusal.Kind.OUT_OF_SCOPE, named(type, id) + " already exists.", "Pick another id.");
   }
 
-  private String named(String id) {
+  private static String named(String type, String id) {
     return type.substring(0, 1).toUpperCase(Locale.ROOT) + type.substring(1) + " '" + id + "'";
   }
 }

@@ -402,10 +402,12 @@ public final class ChangeLog {
    * spec, room or run names, the one a file's id begins with — a file's synced state is its content
    * alone — a project's own id, the project of a review's spec and of a message's conversation — a
    * room, or the spec living in it — each read from the parent's head, so a parent since deleted or
-   * pruned still answers. The one derivation every scope decision reads, the head's column
-   * included. A spec, room or run is filed anew whenever it names another project; a review or a
-   * message names none itself, so its head keeps the project its parent had when it was first
-   * written, and a parent that moves leaves it where it was.
+   * pruned still answers. A reply belongs to the project of the message it answers before that of
+   * its conversation: a thread is one project's wherever its room has moved since, so no box is
+   * ever sent a reply without the message it answers. The one derivation every scope decision
+   * reads, the head's column included. A spec, room or run is filed anew whenever it names another
+   * project; a review or a message names none itself, so its head keeps the project its parent had
+   * when it was first written, and a parent that moves leaves it where it was.
    */
   public String projectOf(String entityType, String entityId, String snapshot) {
     return db.queryOne(PROJECT_OF, row -> row.text(0), entityType, entityId, snapshot)
@@ -416,6 +418,14 @@ public final class ChangeLog {
   /** {@link #projectOf(String, String, String)} of a state held as a map; null maps name none. */
   public String projectOf(String entityType, String entityId, Map<String, Object> snapshot) {
     return projectOf(entityType, entityId, snapshot == null ? null : YamlUtil.dumpJson(snapshot));
+  }
+
+  /**
+   * The project of conversation {@code roomId} — a room, or the spec living in it — as a message
+   * posted there now is filed; null when this box holds no such conversation.
+   */
+  public String conversationProject(String roomId) {
+    return projectOf("message", roomId, Map.of("room_id", roomId));
   }
 
   /**
@@ -446,6 +456,8 @@ public final class ChangeLog {
             WHEN 'review' THEN (SELECT p.project FROM change_heads p
                 WHERE p.entity_type = 'spec' AND p.entity_id = json_extract(%3$s, '$.spec_id'))
             WHEN 'message' THEN (SELECT COALESCE(
+                    (SELECT p.project FROM change_heads p WHERE p.entity_type = 'message'
+                        AND p.entity_id = json_extract(%3$s, '$.reply_to')),
                     (SELECT p.project FROM change_heads p
                         WHERE p.entity_type = 'room' AND p.entity_id = c.id),
                     (SELECT s.project FROM specs s WHERE s.room_id = c.id OR s.id = c.id LIMIT 1),

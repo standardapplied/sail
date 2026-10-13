@@ -584,10 +584,19 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
     }
   }
 
+  /**
+   * Whether {@code row} answers nothing, or a message of its own room that whoever writes it may
+   * read: a message outside the writer's scope is answered as one this box does not hold.
+   */
   private boolean holdsReplyTarget(MessageRow row) {
     return row.replyTo() == null
-        || findById(row.replyTo())
-            .filter(parent -> parent.roomId().equals(row.roomId()))
+        || db.queryOne(
+                "SELECT 1 FROM room_messages WHERE id = ?1 AND room_id = ?3 AND "
+                    + readable("room_messages.id", 2),
+                found -> true,
+                row.replyTo(),
+                reader(),
+                row.roomId())
             .isPresent();
   }
 

@@ -22,6 +22,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -80,8 +81,8 @@ public final class SyncRpcServer {
   private boolean erasedInSession;
   private boolean deniedInSession;
   private MainBox mainBox;
-  private final Set<String> servedBlobs = new HashSet<>();
-  private final Set<String> servedChunks = new HashSet<>();
+  private final Set<String> sharedBlobs = new HashSet<>();
+  private final Set<String> sharedChunks = new HashSet<>();
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(
@@ -189,8 +190,8 @@ public final class SyncRpcServer {
     }
     erasedInSession = false;
     deniedInSession = false;
-    servedBlobs.clear();
-    servedChunks.clear();
+    sharedBlobs.clear();
+    sharedChunks.clear();
     try (var scope = blobs.retain()) {
       serveSession(in, out, frame);
     } finally {
@@ -255,16 +256,16 @@ public final class SyncRpcServer {
       throws IOException {
     switch (content) {
       case SyncWire.Fetch fetch -> {
-        requireServed("blob", fetch.hashes(), servedBlobs);
+        requireServed("blob", fetch.hashes(), sharedBlobs);
         for (var hash : fetch.hashes()) {
           var manifest = blobs.manifest(hash);
-          servedChunks.addAll(manifest.chunkHashes());
+          sharedChunks.addAll(manifest.chunkHashes());
           reply(out, new SyncWire.Manifest(manifest));
         }
         reply(out, new SyncWire.Done());
       }
       case SyncWire.FetchChunks fetch -> {
-        requireServed("chunk", fetch.hashes(), servedChunks);
+        requireServed("chunk", fetch.hashes(), sharedChunks);
         for (var hash : fetch.hashes()) SyncWire.writeChunk(out, hash, blobs.chunk(hash));
         reply(out, new SyncWire.Done());
       }
@@ -282,9 +283,10 @@ public final class SyncRpcServer {
   }
 
   /**
-   * Refuses a scoped session content main never named to it: a blob is this session's to fetch only
-   * once an entry main admitted referenced it ({@link #serving}), and a chunk only once a manifest
-   * it was served listed it. An unscoped session fetches by hash as it always has.
+   * Refuses a scoped session content it has not shared with main: a blob is this session's to fetch
+   * only once an entry main admitted referenced it ({@link #serving}) or the session sent it whole
+   * ({@link #receiveContent}), and a chunk only once a manifest it was served listed it. An
+   * unscoped session fetches by hash as it always has.
    */
   private void requireServed(String what, List<String> hashes, Set<String> served) {
     if (principal.scope().unrestricted()) {
@@ -307,7 +309,7 @@ public final class SyncRpcServer {
     if (principal.scope().unrestricted()) {
       return;
     }
-    servedBlobs.addAll(
+    sharedBlobs.addAll(
         BlobStore.referenced(snapshots, SyncedEntities.require(type).store(db).contentFields()));
   }
 
@@ -344,9 +346,18 @@ public final class SyncRpcServer {
     return changeLog == null ? null : changeLog.headProject(type, id).orElse(null);
   }
 
+  /**
+   * Takes the content a session announces. Main asks an unscoped session only for what it lacks. A
+   * scoped session is asked for every blob and chunk it has not shared with main this session, held
+   * here or not: holding a hash is no proof of holding its bytes, and main saying which hashes it
+   * holds would tell the session of content outside its scope. What it then sends is its own to
+   * reference in an offer ({@link #unshared}).
+   */
   private void receiveContent(
       SyncWire.Announce announce, InputStream in, OutputStream out, int frame) throws IOException {
-    var missing = blobs.missing(announce.hashes());
+    var scoped = !principal.scope().unrestricted();
+    var missing =
+        scoped ? without(announce.hashes(), sharedBlobs) : blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
     if (missing.isEmpty()) return;
     var receiver = new ContentReceiver(in, () -> readContent(in, frame), blobs, "blobs " + missing);
@@ -375,12 +386,38 @@ public final class SyncRpcServer {
     }
     var chunks = new LinkedHashSet<String>();
     manifests.values().forEach(manifest -> chunks.addAll(manifest.chunkHashes()));
-    var requested = blobs.missingChunks(chunks);
+    var requested = scoped ? without(chunks, sharedChunks) : blobs.missingChunks(chunks);
     reply(out, new SyncWire.Lack(List.copyOf(requested)));
     receiver.chunks(
         requested, manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum());
     manifests.values().forEach(blobs::assemble);
+    if (scoped) {
+      sharedBlobs.addAll(manifests.keySet());
+    }
     reply(out, new SyncWire.Done());
+  }
+
+  private static Set<String> without(Collection<String> hashes, Set<String> shared) {
+    var rest = new LinkedHashSet<>(hashes);
+    rest.removeAll(shared);
+    return rest;
+  }
+
+  /**
+   * The content {@code offer} references that a scoped, writing session has neither been served nor
+   * sent: a hash it could only have learned elsewhere, which main must not turn into content it
+   * then serves. Empty for a session that sees every project, and for one that may not write, whose
+   * offer main's own rule denies.
+   */
+  private Set<String> unshared(String type, MainReplica.Offer offer) {
+    if (principal.scope().unrestricted() || !principal.canWrite()) {
+      return Set.of();
+    }
+    return without(
+        BlobStore.referenced(
+            Collections.singletonList(offer.snapshot()),
+            SyncedEntities.require(type).store(db).contentFields()),
+        sharedBlobs);
   }
 
   private static SyncWire.Content readContent(InputStream input, int frame) {
@@ -766,6 +803,11 @@ public final class SyncRpcServer {
           offer.id(),
           "This sync session has no node handle, so a run cannot be attributed to it; "
               + "set the node's sync handle before pushing runs.");
+    }
+    if (!unshared(type, offer).isEmpty()) {
+      return new SyncWire.Refused(
+          offer.id(),
+          "This offer names content the session neither sent nor was served; announce it first.");
     }
     var before = main.current(offer.id());
     CommitOutcome outcome;

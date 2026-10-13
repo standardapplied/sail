@@ -95,6 +95,47 @@ class ScopeRuleTest {
   }
 
   @Test
+  void aRowIsBornNamingOnlyRowsInsideTheScope() {
+    var log = new ChangeLog(db);
+    specs.create(spec("beta-roomless", "beta", "uma"));
+    var hint = "Name one in a project this FDE is granted.";
+    var room = Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Room 'beta-work' was not found.", hint);
+
+    assertEquals(room, rule.decide(NIA, "new", null, born("room_id", "beta-work")));
+    assertEquals(
+        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Room 'beta-roomless' was not found.", hint),
+        rule.decide(NIA, "new", null, born("room_id", "beta-roomless")),
+        "a conversation that is its spec's alone");
+    assertEquals(Optional.empty(), rule.decide(NIA, "new", null, born("room_id", "alpha-work")));
+    assertEquals(Optional.empty(), rule.decide(NIA, "new", null, born("room_id", "nobodys")));
+    assertEquals(Optional.empty(), rule.decide(NIA, "new", null, born("room_id", "new")));
+    assertEquals(
+        Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE, "Room 'beta-roomless' already exists.", "Pick another id."),
+        new ScopeRule(log, "room").decide(NIA, "beta-roomless", null, born("title", "t")),
+        "a room over the id of a spec outside the scope");
+    var run = new ScopeRule(log, "run");
+    assertEquals(
+        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", hint),
+        run.decide(NIA, "r", null, born("spec_id", "beta-work")));
+    assertEquals(room, run.decide(NIA, "r", null, born("room_id", "beta-work")));
+    assertEquals(Optional.empty(), run.decide(NIA, "r", null, born("spec_id", "alpha-work")));
+    assertEquals(Optional.empty(), run.decide(NIA, "r", null, born("spec_id", "nobodys")));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(NIA, "never-held", null, null),
+        "a deletion of nothing names nothing");
+    assertEquals(
+        Optional.empty(),
+        rule.decide(Actors.OWNER_API, "new", null, born("room_id", "beta-work")),
+        "an actor that sees every project is left to the type's rule");
+  }
+
+  private static Map<String, Object> born(String field, String value) {
+    return Map.of("project", "alpha", field, value);
+  }
+
+  @Test
   void aWriteOverARowInAHiddenProjectSaysOnlyThatTheIdIsTaken() {
     var taken =
         Refusal.of(
