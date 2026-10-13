@@ -495,8 +495,18 @@ final class GlobalSpecOperations {
         .sum();
   }
 
+  /**
+   * The open findings {@code specId} shipped with, counted only where the reader may see the review
+   * that holds them: one filed under another project counts for nothing here.
+   */
   private int openFindingCount(String specId) {
-    return reviewStore == null ? 0 : reviewStore.openFindingsAfterPass(specId).size();
+    if (reviewStore == null) {
+      return 0;
+    }
+    return Scoped.row(
+            Actor.reader(), reviewStore.latestReviewForSpec(specId), reviewStore::projectOf)
+        .map(seen -> reviewStore.openFindingsAfterPass(specId).size())
+        .orElse(0);
   }
 
   /**

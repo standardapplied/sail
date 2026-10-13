@@ -24,6 +24,7 @@ import ai.singlr.sail.authority.Refusal.Kind;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
@@ -156,6 +157,65 @@ class EraseAuthorityTest {
 
     Acting.system(() -> runs.complete(going, "completed", 0));
     assertEquals(Optional.empty(), rule.idle(plan));
+  }
+
+  @Test
+  void aScopedOwnerErasesASpecOnlyWhenAllThatBelongsToItIsInsideTheScope() {
+    var scoped = OWNER_API.withScope(ProjectScope.of(List.of("acme")));
+    Acting.system(
+        () -> {
+          var specs = new SpecStore(board.db);
+          specs.create(row("whole", "acme"));
+          specs.create(row("moved", "other"));
+          run("019fee00-0000-7000-8000-0000000000d1", "acme", "whole");
+          run("019fee00-0000-7000-8000-0000000000d2", "other", "moved");
+          specs.update(row("moved", "acme"));
+        });
+    var specs = new SpecStore(board.db);
+
+    assertEquals(Optional.empty(), rule.spec(scoped, specs.lastKnown("whole").orElseThrow()));
+    assertEquals(
+        Optional.of(
+            new Refusal(
+                Kind.NOT_PRUNABLE,
+                "Pruning spec 'moved' would erase work outside your project scope.",
+                "Ask an admin to prune it.")),
+        rule.spec(scoped, specs.lastKnown("moved").orElseThrow()));
+    assertEquals(
+        Optional.empty(),
+        rule.spec(OWNER_API, specs.lastKnown("moved").orElseThrow()),
+        "an owner main never scoped erases it whole");
+    assertEquals(
+        Optional.of(Kind.NOT_PRUNABLE),
+        rule.requested(Actor.sync(OWNER, Role.MEMBER).withScope(scoped.scope()), "spec", "moved")
+            .map(Refusal::kind),
+        "and main answers a scoped node's request by the same rule");
+  }
+
+  private static SpecStore.SpecRow row(String id, String project) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        id,
+        SpecStatus.ARCHIVED,
+        OWNER,
+        null,
+        null,
+        null,
+        null,
+        0,
+        OWNER,
+        "",
+        "",
+        OWNER,
+        List.of(),
+        List.of());
+  }
+
+  private void run(String id, String project, String spec) {
+    var runs = new RunStore(board.db);
+    runs.create(id, project, spec, OWNER, "build", "claude-code", "b", "t", null, null, "/l", "u");
+    runs.complete(id, "completed", 0);
   }
 
   @Test

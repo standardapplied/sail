@@ -29,7 +29,8 @@ import java.util.function.Supplier;
  * clients see it. The announcement names the message and nothing more; it is decided on the
  * conversation that message is in, never on a run or a room its sender names beside it, and the
  * event is rebuilt whole from the stored row, exactly as the messages route emits it for a local
- * post.
+ * post: under the project the message is filed in ({@link MessageStore#projectOf}), its room's,
+ * which is not its spec's once that spec has moved, and only for a sender whose scope admits it.
  */
 final class EventDoor {
 
@@ -68,7 +69,8 @@ final class EventDoor {
   }
 
   private Event announcement(Event offered) {
-    var message = messages.findById(announced(offered));
+    var message =
+        Scoped.row(Actor.current(), messages.findById(announced(offered)), messages::projectOf);
     var about =
         seen(
             authority.subject(
@@ -78,15 +80,16 @@ final class EventDoor {
     var subject = about.orElseGet(() -> unheld(offered.project(), offered.spec()));
     var publisher = publisher(offered, subject);
     var held = message.filter(found -> about.isPresent()).orElseThrow(() -> unheld(offered));
+    var project = Objects.requireNonNullElse(messages.projectOf(held), subject.project());
     return SyncTransitionEvents.messagePosted(
-            subject.project(),
+            project,
             held.roomId(),
             held.id(),
             held.author(),
             held.body(),
             held.question(),
             offered.host())
-        .admitted(subject.project(), held.roomId(), publisher, DateTimeUtils.now());
+        .admitted(project, held.roomId(), publisher, DateTimeUtils.now());
   }
 
   /**

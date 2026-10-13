@@ -41,6 +41,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -453,6 +454,44 @@ class ScopedSyncTest {
     SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
     SyncBox.quiesce(main, nia);
     SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeComesWithoutItsEarlierReviewAndIsNotTheNodesToErase()
+      throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    Acting.system(() -> main.specs.update(spec("beta-work", A, "nia")));
+    archive(main, "beta-work");
+    var review =
+        main.db
+            .queryOne("SELECT id FROM reviews WHERE spec_id = 'beta-work'", row -> row.text(0))
+            .orElseThrow();
+    Acting.system(() -> new ReviewStore(main.db).supersedeForSpec("beta-work"));
+    assertEquals(
+        Optional.of(B),
+        new ChangeLog(main.db).headProject("review", review),
+        "rewritten after the move, the review is still filed where it was written");
+
+    SyncBox.quiesce(main, nia);
+
+    assertEquals(1, count(nia.db, "SELECT count(*) FROM specs WHERE id = 'beta-work'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM reviews WHERE spec_id = 'beta-work'"));
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+    var before = count(main.db, "SELECT count(*) FROM change_log");
+    var erase = new SyncWire.Push("spec", List.of(MainReplica.Offer.erasure("beta-work")));
+    assertEquals(
+        new SyncWire.Refused(
+            "beta-work", "Pruning spec 'beta-work' would erase work outside your project scope."),
+        only(serve(main.server(scoped(ONLY_A)), HELLO, erase).getLast()));
+    assertEquals(before, count(main.db, "SELECT count(*) FROM change_log"));
+    assertEquals(1, count(main.db, "SELECT count(*) FROM reviews WHERE id = ?", review));
+
+    assertInstanceOf(
+        SyncWire.Accepted.class,
+        only(serve(main.server(Actor.sync("nia", Role.MEMBER)), HELLO, erase).getLast()),
+        "the same owner, unscoped, erases the spec and all that belongs to it");
+    assertTrue(new ChangeLog(main.db).isErased("review", review));
   }
 
   private List<Long> held(List<String> tables, String work) {

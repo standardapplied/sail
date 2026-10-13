@@ -155,6 +155,15 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
   }
 
   /**
+   * The project {@code review} is filed under, null when its head names none: the one its spec had
+   * when the review was first written, which a later move of the spec leaves as it was. What a read
+   * through any door, sync's pages and a revocation all decide by.
+   */
+  public String projectOf(ReviewRow review) {
+    return changeLog.headProject(ENTITY, review.id()).orElse(null);
+  }
+
+  /**
    * The latest review of the spec's <em>current</em> dispatch attempt, or empty when none exists
    * yet or a re-dispatch superseded them all. Superseded rows are history, not pipeline state: the
    * controller keys its already-running guard and its iteration count off this, so excluding them

@@ -20,7 +20,8 @@ import java.util.Optional;
  * is an admin's alone. A spec is erased by its owner ({@link SpecStore.LastKnown#owner}) or an
  * admin, once it is archived, cancelled or deleted. Nothing is erased while a run in it has not
  * finished, bar a project purged whole ({@link #idle}). An actor scoped to its granted projects
- * erases only inside them: what lies outside is, to it, not there.
+ * erases only inside them: what lies outside is, to it, not there, and a spec with anything
+ * belonging to it outside them is not its to erase.
  */
 public final class EraseAuthority {
 
@@ -98,6 +99,15 @@ public final class EraseAuthority {
   }
 
   /**
+   * Whether this box holds {@code target} outside {@code actor}'s scope. What it holds no history
+   * of — the room a spec would have minted and never did — is nothing an erasure takes from anyone.
+   */
+  private boolean beyond(Actor actor, Erasure.Target target) {
+    return changeLog.head(target.type(), target.id()).isPresent()
+        && !sees(actor, target.type(), target.id());
+  }
+
+  /**
    * The refusal of a request to erase what main holds nothing of, and, in the same words, what it
    * holds outside the requester's scope.
    */
@@ -117,7 +127,10 @@ public final class EraseAuthority {
 
   /**
    * Why {@code actor} may not erase {@code spec}, as this box last knew it. A spec outside the
-   * actor's scope is one it cannot find.
+   * actor's scope is one it cannot find. One inside it is erased with everything that belongs to it
+   * ({@link Erasure#closure}), so it is refused whole while any of that — a run, a review, the room
+   * it minted, left in the project the spec moved from — is filed outside the scope, and the
+   * refusal names none of it.
    */
   public Optional<Refusal> spec(Actor actor, SpecStore.LastKnown spec) {
     var denied = request(actor, false);
@@ -139,6 +152,14 @@ public final class EraseAuthority {
               + spec.status().wire()
               + ": only archived, cancelled or deleted specs are pruned.",
           "Archive it first: sail spec update " + spec.id() + " --status archived.");
+    }
+    if (!actor.scope().unrestricted()
+        && erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, spec.id()))).stream()
+            .anyMatch(target -> beyond(actor, target))) {
+      return Refusal.of(
+          Refusal.Kind.NOT_PRUNABLE,
+          "Pruning spec '" + spec.id() + "' would erase work outside your project scope.",
+          "Ask an admin to prune it.");
     }
     return Optional.empty();
   }

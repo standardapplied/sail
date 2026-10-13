@@ -127,6 +127,39 @@ class ScopedHeadsTest {
   }
 
   @Test
+  void aReviewAndAMessageStayFiledWhereTheyWereFirstWrittenWhenTheirSpecMoves() {
+    specs.create(spec("mover", "alpha"));
+    var reviews = new ReviewStore(db);
+    var review = reviews.createReview("mover", 1);
+    var message = new MessageStore(db).append("mover", "ada", "said in alpha", null);
+
+    specs.reproject("alpha", "beta");
+    reviews.supersedeForSpec("mover");
+    log.append("message", message.id(), "2-again", "local", false, "{\"spec_id\": \"mover\"}");
+    var later = reviews.createReview("mover", 1);
+
+    assertEquals("beta", log.projectOf("review", review, Map.of("spec_id", "mover")));
+    assertEquals(Optional.of("alpha"), log.headProject("review", review));
+    assertEquals(Optional.of("alpha"), log.headProject("message", message.id()));
+    assertEquals(
+        Optional.of("beta"),
+        log.headProject("review", later),
+        "what is first written after the move is the new project's");
+  }
+
+  @Test
+  void aHeadFiledUnderNoProjectTakesTheOneItsNextEntryNames() {
+    var reviews = new ReviewStore(db);
+    specs.create(spec("late", "alpha"));
+    var review = reviews.createReview("late", 1);
+    db.execute("UPDATE change_heads SET project = NULL WHERE entity_type = 'review'");
+
+    reviews.supersedeForSpec("late");
+
+    assertEquals(Optional.of("alpha"), log.headProject("review", review));
+  }
+
+  @Test
   void forgettingAnEntityLeavesNoEntryHeadOrOfferOfIt() {
     seed("alpha");
     log.recordOffer("spec", "alpha-work", Map.of("title", "t"), null);

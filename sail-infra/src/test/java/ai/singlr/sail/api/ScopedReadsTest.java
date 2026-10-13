@@ -17,9 +17,11 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -578,6 +580,23 @@ class ScopedReadsTest {
       assertEquals(true, ask(sam, board).contains("\"needs_reply\": 0"), board);
       assertEquals(true, ask(ada, board).contains("\"needs_reply\": 1"), board);
     }
+
+    var retold = send(ada, "POST", "/v1/events", announcement(asked.id()));
+    assertEquals("20", retold.substring(0, 2), retold);
+    assertEquals(
+        true,
+        retold.contains("\"project\": \"bravo\""),
+        "a message is announced under the project it is filed in, its room's: " + retold);
+    assertEquals(
+        send(sam, "POST", "/v1/events", announcement(NO_SUCH_RUN)).replace(NO_SUCH_RUN, asked.id()),
+        send(sam, "POST", "/v1/events", announcement(asked.id())),
+        "and to sam it is a message nobody holds");
+    var toBravo = announcement(asked.id()).replace("\"alpha\"", "\"bravo\"");
+    assertEquals(
+        send(sam, "POST", "/v1/events", toBravo.replace(asked.id(), NO_SUCH_RUN))
+            .replace(NO_SUCH_RUN, asked.id()),
+        send(sam, "POST", "/v1/events", toBravo),
+        "whichever project the announcement is addressed to");
   }
 
   @Test
@@ -654,6 +673,121 @@ class ScopedReadsTest {
       assertEquals("403", refused.substring(0, 3), door + ": " + refused);
       assertEquals(false, refused.contains("ada"), door + ": " + refused);
     }
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeIsNotItsOwnersToPruneWhileWorkOfItStaysInAnotherProject()
+      throws Exception {
+    var bravoReview = Acting.system(this::bravoArrives);
+    for (var change :
+        List.of("\"project\": \"alpha\"", "\"assignee\": \"sam\"", "\"status\": \"archived\"")) {
+      assertEquals(
+          "200", send(ada, "PUT", "/v1/specs/bravo-spec", "{" + change + "}").substring(0, 3));
+    }
+    var before = entries();
+
+    for (var dryRun : List.of(true, false)) {
+      assertEquals(
+          """
+          409 {"schema_version": 1, "error": {"code": "spec_not_prunable", "message": "Pruning spec 'bravo-spec' would erase work outside your project scope.", "action": "Ask an admin to prune it.", "field_errors": []}}""",
+          send(
+              sam,
+              "POST",
+              "/v1/specs:prune",
+              "{\"ids\": [\"bravo-spec\"], \"dry_run\": " + dryRun + "}"),
+          "dry run " + dryRun);
+    }
+
+    assertEquals(before, entries(), "nothing was erased, and nothing rehearsed was kept");
+    assertEquals(true, new RunStore(db).findById(B_RUN).isPresent(), "bravo's run stays");
+    assertEquals(true, new ReviewStore(db).findReview(bravoReview).isPresent(), "and its review");
+    var erased =
+        send(ada, "POST", "/v1/specs:prune", "{\"ids\": [\"bravo-spec\"], \"dry_run\": false}");
+    assertEquals("200", erased.substring(0, 3), erased);
+    assertEquals(false, new RunStore(db).findById(B_RUN).isPresent(), "an admin prunes all of it");
+    for (var step :
+        List.of(
+            List.of(
+                "POST", "/v1/specs", "{\"id\": \"own\", \"project\": \"alpha\", \"title\": \"t\"}"),
+            List.of("PUT", "/v1/specs/own", "{\"status\": \"archived\"}"),
+            List.of("POST", "/v1/specs:prune", "{\"ids\": [\"own\"], \"dry_run\": false}"))) {
+      var done = send(sam, step.get(0), step.get(1), step.get(2));
+      assertEquals("20", done.substring(0, 2), step + ": a spec wholly in alpha is sam's: " + done);
+    }
+    assertEquals(true, new ChangeLog(db).isErased("spec", "own"));
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeBringsNoneOfTheReviewsWrittenInTheProjectItLeft() throws Exception {
+    var bravoReview = Acting.system(this::bravoArrives);
+    var reviews = new ReviewStore(db);
+    Acting.system(
+        () -> {
+          reviews.addFinding(
+              reviews.createStage(bravoReview, "security", "agent"),
+              new Finding(
+                  "bravo-confidential",
+                  Finding.Severity.HIGH,
+                  Finding.Category.SECURITY,
+                  "Bravo.java",
+                  1,
+                  1,
+                  "Bravo confidential details",
+                  "d",
+                  "e",
+                  new Finding.Suggestion("", "", ""),
+                  1.0,
+                  Finding.Resolution.OPEN,
+                  null,
+                  null,
+                  null));
+          reviews.pass(bravoReview, () -> {});
+        });
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\"}").substring(0, 3));
+    assertEquals(
+        "201",
+        send(
+                ada,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"unreviewed\", \"project\": \"alpha\", \"title\": \"t\"}")
+            .substring(0, 3));
+
+    assertEquals(
+        true, ask(sam, "/v1/specs/bravo-spec").contains("\"project\": \"alpha\""), "sam's spec");
+    for (var door :
+        List.of(
+            List.of("GET", "/v1/reviews/{review}", ""),
+            List.of("POST", "/v1/reviews/{review}/approve", ""),
+            List.of("POST", "/v1/reviews/{review}/dismiss/bravo-confidential", ""))) {
+      assertEquals(
+          send(sam, door.get(0), door.get(1).replace("{review}", NO_SUCH_REVIEW), door.get(2))
+              .replace(NO_SUCH_REVIEW, bravoReview),
+          send(sam, door.get(0), door.get(1).replace("{review}", bravoReview), door.get(2)),
+          door + ": a review written in bravo is one sam's box does not hold");
+    }
+    assertEquals(
+        """
+        200 {"schema_version": 1, "spec_id": "bravo-spec", "reviews": []}""",
+        ask(sam, "/v1/specs/bravo-spec/reviews"));
+    assertEquals(true, ask(ada, "/v1/specs/bravo-spec/reviews").contains(bravoReview));
+    assertEquals(false, ask(sam, "/v1/specs/bravo-spec").contains("open_findings"));
+    assertEquals(true, ask(ada, "/v1/specs/bravo-spec").contains("\"open_findings\": 1"));
+    assertEquals(
+        send(sam, "POST", "/v1/specs/unreviewed/followup", "{}")
+            .replace("unreviewed", "bravo-spec"),
+        send(sam, "POST", "/v1/specs/bravo-spec/followup", "{}"),
+        "a spec whose reviews sam does not hold is, to sam, one never reviewed");
+    assertEquals(false, ask(sam, "/v1/specs").contains("followup"), "no follow-up was drafted");
+
+    Acting.as("ada", () -> reviews.supersedeForSpec("bravo-spec"));
+    assertEquals(
+        "404",
+        ask(sam, "/v1/reviews/" + bravoReview).substring(0, 3),
+        "rewritten after the move, the review is still filed where it was written");
+    assertEquals("200", ask(ada, "/v1/reviews/" + bravoReview).substring(0, 3));
   }
 
   @Test

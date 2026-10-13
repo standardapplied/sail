@@ -291,6 +291,14 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
         "SELECT " + COLUMNS + " FROM room_messages WHERE id = ?", MessageStore::map, id);
   }
 
+  /**
+   * The project {@code message} is filed under, null when its head names none: its room's, which a
+   * spec living in that room and since moved to another project is no longer of.
+   */
+  public String projectOf(MessageRow message) {
+    return changeLog.headProject(ENTITY, message.id()).orElse(null);
+  }
+
   @Override
   public Set<String> latestWinsFields() {
     return Set.of();

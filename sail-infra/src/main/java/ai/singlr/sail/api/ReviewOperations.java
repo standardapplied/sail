@@ -34,7 +34,7 @@ final class ReviewOperations {
   ReviewListResponse listForSpec(String specId) {
     requireStore();
     var views =
-        Scoped.rows(Actor.reader(), reviewStore.reviewsForSpec(specId), this::projectOf).stream()
+        readable(specId).stream()
             .map(
                 r -> {
                   var stageViews =
@@ -94,7 +94,11 @@ final class ReviewOperations {
                     new ApiException(
                         ErrorCode.SPEC_NOT_FOUND, "Spec '" + sourceSpecId + "' was not found."));
     var review =
-        reviewStore.latestReviewForSpec(sourceSpecId).orElseThrow(() -> noReview(sourceSpecId));
+        Scoped.row(
+                Actor.reader(),
+                reviewStore.latestReviewForSpec(sourceSpecId),
+                reviewStore::projectOf)
+            .orElseThrow(() -> noReview(sourceSpecId));
     var findings = reviewStore.openFindingsForReview(review.id());
     if (findings.isEmpty()) {
       throw new ApiException(
@@ -141,7 +145,7 @@ final class ReviewOperations {
   }
 
   private ApiException noReview(String sourceSpecId) {
-    if (reviewStore.reviewsForSpec(sourceSpecId).isEmpty()) {
+    if (readable(sourceSpecId).isEmpty()) {
       return new ApiException(
           ErrorCode.NOT_FOUND,
           "Spec '" + sourceSpecId + "' has no reviews.",
@@ -190,21 +194,22 @@ final class ReviewOperations {
   }
 
   /**
-   * The review an operation addresses, to read or to decide: one of a spec outside the caller's
-   * scope is answered as one that is not there.
+   * The review an operation addresses, to read or to decide: one filed under a project outside the
+   * caller's scope ({@link ReviewStore#projectOf}) is answered as one that is not there, wherever
+   * its spec is now.
    */
   private ReviewStore.ReviewRow findReviewOrThrow(String reviewId) {
-    return Scoped.row(Actor.reader(), reviewStore.findReview(reviewId), this::projectOf)
+    return Scoped.row(Actor.reader(), reviewStore.findReview(reviewId), reviewStore::projectOf)
         .orElseThrow(() -> notFound(reviewId));
+  }
+
+  /** The reviews of {@code specId} the caller may see, oldest first. */
+  private List<ReviewStore.ReviewRow> readable(String specId) {
+    return Scoped.rows(Actor.reader(), reviewStore.reviewsForSpec(specId), reviewStore::projectOf);
   }
 
   private static ApiException notFound(String reviewId) {
     return new ApiException(ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found.");
-  }
-
-  /** A review is of its spec's project, and of no known project once its spec is gone. */
-  private String projectOf(ReviewStore.ReviewRow review) {
-    return specStore.findById(review.specId()).map(SpecStore.SpecRow::project).orElse(null);
   }
 
   private void requireStore() {

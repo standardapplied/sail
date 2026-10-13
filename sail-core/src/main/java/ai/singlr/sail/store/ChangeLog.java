@@ -380,7 +380,9 @@ public final class ChangeLog {
    * alone — a project's own id, the project of a review's spec and of a message's conversation — a
    * room, or the spec living in it — each read from the parent's head, so a parent since deleted or
    * pruned still answers. The one derivation every scope decision reads, the head's column
-   * included.
+   * included. A spec, room or run is filed anew whenever it names another project; a review or a
+   * message names none itself, so its head keeps the project its parent had when it was first
+   * written, and a parent that moves leaves it where it was.
    */
   public String projectOf(String entityType, String entityId, String snapshot) {
     return db.queryOne(PROJECT_OF, row -> row.text(0), entityType, entityId, snapshot)
@@ -609,7 +611,10 @@ public final class ChangeLog {
               INSERT INTO change_heads (entity_type, entity_id, seq, project)
               VALUES (?, ?, last_insert_rowid(), COALESCE(?, ?))
               ON CONFLICT(entity_type, entity_id) DO UPDATE SET
-                  seq = excluded.seq, project = COALESCE(excluded.project, project)""",
+                  seq = excluded.seq,
+                  project = CASE WHEN excluded.entity_type IN ('review', 'message')
+                      THEN COALESCE(project, excluded.project)
+                      ELSE COALESCE(excluded.project, project) END""",
               entityType,
               entityId,
               projectOf(entityType, entityId, snapshot),
