@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.48.0
+
+- **A live member's turn says when it begins.** Nothing was published between a prompt reaching a live member and the first text or tool step of its answer, so a room showed nothing while the member thought. `agent_turn_began` is published at the first line of every turn, a thinking one included, carrying the `run_id`, `room_id`, `principal` and `turn` every live event does; like them it is never persisted and no client may publish it. A client names it in the room stream's `type=` list.
+
 ## 0.47.0
 
 - **An engaged agent is one live process, and every turn streams into the room.** An engaged agent's answer was a new process per turn: a 5 s debounce, a `systemd-run` launch behind a dozen container execs, a hook on every tool call, a relay that read the room at most every 15 s, and the agent posting its own reply with `spec comment`. Nothing streamed. A member whose harness has a streaming mode (Claude Code; Codex has none and keeps the per-turn wake unchanged) is now one process that stays up: sail starts `claude --print --input-format stream-json --output-format stream-json --verbose --include-partial-messages --permission-prompts none --settings ~/.sail/claude-live.json` over pipes, writes each human message to its stdin the moment it lands, and reads what it writes.

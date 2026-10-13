@@ -65,6 +65,7 @@ class SpecStoreAuditPersisterTest {
   void aLiveMembersStreamIsNeverPersisted() {
     for (var type :
         List.of(
+            Event.WellKnownTypes.AGENT_TURN_BEGAN,
             Event.WellKnownTypes.AGENT_TEXT_DELTA,
             Event.WellKnownTypes.AGENT_TOOL_CALL,
             Event.WellKnownTypes.AGENT_TURN_ENDED)) {

@@ -655,6 +655,10 @@ class LiveMemberEdgesTest {
         room.data(Event.WellKnownTypes.AGENT_TURN_ENDED),
         "the prompt it never began to answer is a turn it left open");
     assertEquals(
+        List.of(LiveRoom.live(failed, SPEC, 1, Map.of())),
+        room.data(Event.WellKnownTypes.AGENT_TURN_BEGAN),
+        "and that turn's beginning is told before its end");
+    assertEquals(
         "error: unknown option '--permission-prompts'",
         room.stopOf(process.runId).data().get("reason"));
 

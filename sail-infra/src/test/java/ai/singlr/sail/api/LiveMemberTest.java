@@ -206,6 +206,46 @@ class LiveMemberTest {
   }
 
   @Test
+  void aTurnsBeginningIsToldBeforeAnythingOfItIsAndOnceForEachTurn() {
+    var process = room.prompted(SPEC, "full", "first");
+    var run = room.memberRun();
+
+    room.says(process, Lines.init("sess-1"));
+    assertEquals(
+        List.of(), room.data(Event.WellKnownTypes.AGENT_TURN_BEGAN), "a session is not a turn");
+
+    room.says(process, "{\"type\":\"stream_event\",\"event\":{\"type\":\"message_start\"}}");
+    assertEquals(
+        List.of(LiveRoom.live(run, SPEC, 1, Map.of())),
+        room.data(Event.WellKnownTypes.AGENT_TURN_BEGAN),
+        "told while the member is working and has written nothing");
+    room.events(Event.WellKnownTypes.AGENT_TURN_BEGAN)
+        .forEach(event -> assertEquals(SPEC, event.spec()));
+
+    room.says(process, Lines.delta("One"), Lines.result("One"));
+    room.says(SPEC, "second");
+    room.says(process, Lines.delta("Two"), Lines.result("Two"));
+
+    var turnTypes =
+        Set.of(
+            Event.WellKnownTypes.AGENT_TURN_BEGAN,
+            Event.WellKnownTypes.AGENT_TEXT_DELTA,
+            Event.WellKnownTypes.AGENT_TURN_ENDED);
+    assertEquals(
+        List.of(
+            "agent_turn_began:1",
+            "agent_text_delta:1",
+            "agent_turn_ended:1",
+            "agent_turn_began:2",
+            "agent_text_delta:2",
+            "agent_turn_ended:2"),
+        room.published.stream()
+            .filter(event -> turnTypes.contains(event.type()))
+            .map(event -> event.type() + ":" + event.data().get("turn"))
+            .toList());
+  }
+
+  @Test
   void aMessageAfterATurnGoesToTheSameProcess() {
     var process = room.prompted(SPEC, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("One"), Lines.result("One"));

@@ -429,6 +429,7 @@ class EventAuthorityTest {
         "agent_session_completed",
         "agent_log_chunk",
         "agent_presence",
+        "agent_turn_began",
         "agent_text_delta",
         "agent_tool_call",
         "agent_turn_ended",

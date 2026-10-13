@@ -929,6 +929,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       turnOpen = true;
       prompted = false;
       turn++;
+      tell(Event.WellKnownTypes.AGENT_TURN_BEGAN, Map.of());
     }
 
     /**
