@@ -79,6 +79,14 @@ public interface MainReplica {
   }
 
   /**
+   * The project main files {@code id} under, when it said: what a node files a deletion under,
+   * which names none of its own. Null when main named none.
+   */
+  default String project(String id) {
+    return null;
+  }
+
+  /**
    * Samples {@link #current} and {@link #currentRev} as one atomic read. A writer landing between
    * two separate reads would pair an old snapshot with the newer rev; a node handed that pair
    * merges against stale content yet offers the fresh rev as its expectation, and the CAS lets it

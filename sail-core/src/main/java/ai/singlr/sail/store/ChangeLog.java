@@ -335,6 +335,22 @@ public final class ChangeLog {
         });
   }
 
+  /**
+   * Files the head of an entity under {@code project}, the one main names for it: how a deletion or
+   * an erasure of a row this box never held, which names no project itself, still leaves with the
+   * project ({@link Erasure#dropLocal}). A null project — main named none — changes nothing.
+   */
+  public void fileUnder(String entityType, String entityId, String project) {
+    if (project == null) {
+      return;
+    }
+    db.execute(
+        "UPDATE change_heads SET project = ? WHERE entity_type = ? AND entity_id = ?",
+        project,
+        entityType,
+        entityId);
+  }
+
   /** Every project a head of this box carries: the projects it holds anything of. */
   public List<String> heldProjects() {
     return db.query(

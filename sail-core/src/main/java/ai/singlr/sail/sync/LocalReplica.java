@@ -108,13 +108,13 @@ public interface LocalReplica {
    * overwritten. Returns {@code false} when the row moved; the caller re-reconciles instead.
    */
   default boolean adoptIfCurrent(
-      String id, String expectedRev, Map<String, Object> snapshot, String rev) {
+      String id, String expectedRev, Map<String, Object> snapshot, String rev, String project) {
     return atomically(
         () -> {
           if (!Objects.equals(currentRev(id), expectedRev)) {
             return false;
           }
-          adopt(id, snapshot, rev);
+          adopt(id, snapshot, rev, project);
           return true;
         });
   }
@@ -130,8 +130,12 @@ public interface LocalReplica {
   /** Latest local revision (including a tombstone); {@code null} if unknown. */
   String currentRev(String id);
 
-  /** Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). */
-  void adopt(String id, Map<String, Object> snapshot, String rev);
+  /**
+   * Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). A deletion
+   * names no project of its own, so it is filed under {@code project}, the one main names for it;
+   * null when main names none.
+   */
+  void adopt(String id, Map<String, Object> snapshot, String rev, String project);
 
   /**
    * Parks a conflict for human resolution against {@code remote}, main's side at its rev and

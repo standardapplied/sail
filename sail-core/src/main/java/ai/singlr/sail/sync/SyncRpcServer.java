@@ -324,7 +324,24 @@ public final class SyncRpcServer {
    */
   private boolean admits(String type, String id) {
     var scope = principal.scope();
-    return scope.unrestricted() || scope.admits(changeLog.headProject(type, id).orElse(null));
+    return scope.unrestricted() || scope.admits(headProject(type, id));
+  }
+
+  /**
+   * Whether the session may see {@code version}, an earlier state main holds of {@code id}: the
+   * project that state names is in the session's scope, wherever the id's head has moved since. A
+   * version that kept no state names no project and says nothing of one.
+   */
+  private boolean admits(String type, String id, MainReplica.State version) {
+    var scope = principal.scope();
+    return scope.unrestricted()
+        || version.snapshot() == null
+        || scope.admits(changeLog.projectOf(type, id, version.snapshot()));
+  }
+
+  /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
+  private String headProject(String type, String id) {
+    return changeLog == null ? null : changeLog.headProject(type, id).orElse(null);
   }
 
   private void receiveContent(
@@ -571,7 +588,7 @@ public final class SyncRpcServer {
         next = head.seq();
         continue;
       }
-      var entry = entryOf(main, head.entityId(), head.seq());
+      var entry = entryOf(head.entityId(), main.state(head.entityId()), head.seq(), head.project());
       var length = SyncWire.encodedLength(entry);
       if (!budget.canEverAdmit(length)) {
         return oversize(entry.id(), length, frame);
@@ -592,7 +609,9 @@ public final class SyncRpcServer {
    * Main's current rows for the ids the node changed locally, in request order, as many as fit the
    * frame; {@code next} counts the ids consumed so the node continues from there. An id main has
    * never seen is consumed and omitted, and so is one main holds outside the session's scope: the
-   * node offers it as new, and main's denial of that offer withdraws it there.
+   * node offers it as new, and main's denial of that offer withdraws it there. What main took from
+   * the node earlier is handed back only when that version is itself of a project in the scope: a
+   * row that moved into the scope since is answered with its current state alone.
    */
   private SyncWire.Response current(SyncWire.Need need, int frame) {
     var main = replicas.get(need.type());
@@ -613,12 +632,13 @@ public final class SyncRpcServer {
         continue;
       }
       var state = main.state(id);
-      var entry = need.acceptedOnly() ? null : entryOf(id, state, 0);
+      var entry = need.acceptedOnly() ? null : entryOf(id, state, 0, headProject(need.type(), id));
       var took =
           state.kind() == ChangeLog.Kind.ERASURE
               ? Optional.<SyncWire.Entry>empty()
               : main.acceptedFrom(id, principal.peer(), need.bases().get(id))
-                  .map(version -> entryOf(id, version, 0));
+                  .filter(version -> admits(need.type(), id, version))
+                  .map(version -> entryOf(id, version, 0, null));
       var length =
           (entry == null ? 0 : SyncWire.encodedLength(entry))
               + took.map(SyncWire::encodedLength).orElse(0);
@@ -642,11 +662,11 @@ public final class SyncRpcServer {
     return page;
   }
 
-  private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
-    return entryOf(id, main.state(id), seq);
-  }
-
-  private static SyncWire.Entry entryOf(String id, MainReplica.State state, long seq) {
+  /**
+   * {@code state} of {@code id} as an entry, naming the {@code project} main's head files it in.
+   */
+  private static SyncWire.Entry entryOf(
+      String id, MainReplica.State state, long seq, String project) {
     return new SyncWire.Entry(
         seq,
         id,
@@ -654,7 +674,8 @@ public final class SyncRpcServer {
         state.snapshot() == null,
         state.snapshot(),
         state.kind(),
-        state.author());
+        state.author(),
+        project);
   }
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {

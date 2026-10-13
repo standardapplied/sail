@@ -353,8 +353,8 @@ class SyncTransportTest {
     }
 
     @Override
-    public void adopt(String id, Map<String, Object> snapshot, String rev) {
-      inner.adopt(id, snapshot, rev);
+    public void adopt(String id, Map<String, Object> snapshot, String rev, String project) {
+      inner.adopt(id, snapshot, rev, project);
     }
 
     @Override

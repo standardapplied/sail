@@ -373,7 +373,7 @@ public final class PagedSyncSession implements SyncSession {
         var id = batch.get(i);
         switch (results.results().get(i)) {
           case SyncWire.Accepted accepted when accepted.id().equals(id) -> {
-            if (adoptErasure(type, id, accepted.rev(), accepted.author())) applied++;
+            if (adoptErasure(type, id, accepted.rev(), accepted.author(), null)) applied++;
             eraseRequests.drop(type, id);
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
@@ -411,7 +411,7 @@ public final class PagedSyncSession implements SyncSession {
             type + " " + entry.id() + ": an erasure arrived on a session with no store",
             null);
       }
-      if (adoptErasure(type, entry.id(), entry.rev(), entry.author())) {
+      if (adoptErasure(type, entry.id(), entry.rev(), entry.author(), entry.project())) {
         adopted++;
       } else {
         remaining.add(entry);
@@ -420,9 +420,13 @@ public final class PagedSyncSession implements SyncSession {
     return remaining;
   }
 
-  /** Applies main's erasure of {@code id} at {@code rev}, recording the author main recorded. */
-  private boolean adoptErasure(String type, String id, String rev, String author) {
-    return Actor.call(Actor.main(author), () -> erasure.adopt(type, id, rev));
+  /**
+   * Applies main's erasure of {@code id} at {@code rev}, recording the author main recorded and
+   * filing it under the {@code project} main names; main's answer to this node's own prune names
+   * none, and that erasure keeps the project the row had here.
+   */
+  private boolean adoptErasure(String type, String id, String rev, String author, String project) {
+    return Actor.call(Actor.main(author), () -> erasure.adopt(type, id, rev, project));
   }
 
   /**
@@ -883,6 +887,12 @@ public final class PagedSyncSession implements SyncSession {
       var entry = entries.get(entityId);
       return new State(
           current(entityId), currentRev(entityId), entry == null ? null : entry.author());
+    }
+
+    @Override
+    public String project(String entityId) {
+      var entry = entries.get(entityId);
+      return entry == null ? null : entry.project();
     }
 
     @Override

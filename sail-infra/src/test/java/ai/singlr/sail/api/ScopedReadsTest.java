@@ -382,6 +382,134 @@ class ScopedReadsTest {
   }
 
   @Test
+  void aSpecIsNeitherBornIntoNorOverARoomOutsideTheScopeNorToldThatRoomsProject() throws Exception {
+    Acting.system(this::bravoArrives);
+    var before = entries();
+
+    var intoBravo =
+        send(
+            sam,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"sneak\", \"project\": \"alpha\", \"title\": \"t\","
+                + " \"room_id\": \"bravo-room\"}");
+    var intoNothing =
+        send(
+            sam,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"sneak\", \"project\": \"alpha\", \"title\": \"t\","
+                + " \"room_id\": \"ghost-room\"}");
+
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "room_not_found", "message": "Room 'bravo-room' was not found.", "field_errors": []}}""",
+        intoBravo);
+    assertEquals(intoNothing.replace("ghost", "bravo"), intoBravo);
+    assertEquals(
+        """
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'bravo-room' already exists, and a spec's id is reserved for its own room.", "action": "Pick another spec id.", "field_errors": []}}""",
+        send(
+            sam,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"bravo-room\", \"project\": \"alpha\", \"title\": \"t\"}"));
+    assertEquals(before, entries(), "nothing of any refused birth was recorded");
+    assertEquals(
+        """
+        422 {"schema_version": 1, "error": {"code": "invalid_request", "message": "Room 'bravo-room' belongs to project 'bravo', not 'alpha'.", "action": "A spec is born only into a room of its own project.", "field_errors": []}}""",
+        send(
+            ada,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"sneak\", \"project\": \"alpha\", \"title\": \"t\","
+                + " \"room_id\": \"bravo-room\"}"),
+        "a caller who sees the room is still told why it is not the spec's");
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeShowsNothingOfTheRoomAndRunItLeftInAnotherProject() throws Exception {
+    Acting.system(this::bravoArrives);
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    assertEquals(
+        "201",
+        send(
+                ada,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"wander\", \"project\": \"bravo\", \"title\": \"t\"}")
+            .substring(0, 3));
+    Acting.system(
+        () -> {
+          var runs = new RunStore(db);
+          runs.create(
+              run,
+              "bravo",
+              "wander",
+              "elsewhere",
+              "build",
+              "claude-code",
+              "b",
+              "t",
+              null,
+              null,
+              "/log",
+              "u");
+          runs.complete(run, "completed", 0);
+        });
+    assertEquals(
+        "200", send(ada, "PUT", "/v1/specs/wander", "{\"project\": \"alpha\"}").substring(0, 3));
+    assertEquals("200", send(ada, "PUT", "/v1/specs/wander", "{\"wake\": \"on\"}").substring(0, 3));
+    assertEquals(
+        "bravo", new RoomStore(db).findById("wander").orElseThrow().project(), "the room stayed");
+
+    for (var read : List.of("/v1/specs/wander", "/v1/specs?project=alpha", "/v1/specs")) {
+      var asSam = ask(sam, read);
+      assertEquals("200", asSam.substring(0, 3), read);
+      assertEquals(true, asSam.contains("\"id\": \"wander\""), read + ": " + asSam);
+      assertEquals(false, asSam.contains("\"wake\""), read + ": " + asSam);
+      assertEquals(true, ask(ada, read).contains("\"wake\": \"on\""), read);
+    }
+    assertEquals(false, ask(sam, "/v1/specs/wander").contains(run));
+    assertEquals(true, ask(ada, "/v1/specs/wander").contains(run));
+  }
+
+  @Test
+  void aRoomThatCannotBeDeletedForItsSpecsNamesOnlyTheOnesItsReaderSees() throws Exception {
+    Acting.system(this::bravoArrives);
+    for (var spec : List.of("seen", "unseen")) {
+      assertEquals(
+          "201",
+          send(
+                  ada,
+                  "POST",
+                  "/v1/specs",
+                  "{\"id\": \""
+                      + spec
+                      + "\", \"project\": \"alpha\", \"title\": \"t\","
+                      + " \"room_id\": \"alpha-room\"}")
+              .substring(0, 3));
+    }
+    assertEquals(
+        "200", send(ada, "PUT", "/v1/specs/unseen", "{\"project\": \"bravo\"}").substring(0, 3));
+
+    assertEquals(
+        """
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Delete or re-home its specs first: seen", "field_errors": []}}""",
+        send(sam, "DELETE", "/v1/rooms/alpha-room", ""));
+    assertEquals(
+        """
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Delete or re-home its specs first: seen, unseen", "field_errors": []}}""",
+        send(ada, "DELETE", "/v1/rooms/alpha-room", ""));
+    assertEquals(
+        "200", send(ada, "PUT", "/v1/specs/seen", "{\"project\": \"bravo\"}").substring(0, 3));
+    assertEquals(
+        """
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Ask an admin to re-home its specs: none is in a project this FDE is granted.", "field_errors": []}}""",
+        send(sam, "DELETE", "/v1/rooms/alpha-room", ""));
+  }
+
+  @Test
   void aRunOnMainSeesNoMoreThanTheScopedFdeItActsFor() throws Exception {
     var runs = new RunStore(db);
     var operations =

@@ -115,15 +115,20 @@ final class GlobalSpecOperations {
   }
 
   /**
-   * The spec's most recent run as a compact summary (id, node, status, exit code), or null when it
-   * has never been dispatched. Lets a client gate its "open logs" button on provenance up front —
-   * one call, no second round-trip to find where the run executed.
+   * The spec's most recent run the reader may see as a compact summary (id, node, status, exit
+   * code), or null when there is none. A run is of the project it ran in, which a spec moved since
+   * is no longer of. Lets a client gate its "open logs" button on provenance up front — one call,
+   * no second round-trip to find where the run executed.
    */
   private RunSummary latestRun(String specId) {
     if (runStore == null) {
       return null;
     }
-    return runStore.listForSpec(specId).stream().findFirst().map(RunSummary::from).orElse(null);
+    return Scoped.rows(Actor.reader(), runStore.listForSpec(specId), RunStore.RunRow::project)
+        .stream()
+        .findFirst()
+        .map(RunSummary::from)
+        .orElse(null);
   }
 
   GlobalSpecCreatedResponse create(SpecCreateRequest request) {
@@ -170,7 +175,8 @@ final class GlobalSpecOperations {
    * home-room admission, the row, and the identity mint commit together or not at all. A room
    * already holding the spec's own id is the home it is born in: whether it may be — the room, and
    * the conversation in it, become the spec's — is the spec rule's, decided as the row is
-   * journaled, here as on main, and the spec then adopts that room and mints none.
+   * journaled, here as on main, and the spec then adopts that room and mints none. A room outside
+   * the caller's scope is never one to be born into, and is refused before anything is said of it.
    */
   private SpecStore.SpecRow birth(SpecStore.SpecRow row, SpecCreateRequest request) {
     var home =
@@ -200,8 +206,9 @@ final class GlobalSpecOperations {
 
   /**
    * The room a spec is explicitly born into — a brainstorm's {@code SAIL_ROOM_ID}, an epic's room —
-   * must already exist. A spec with a home room mints no identity room: the room it was born in is
-   * its conversation.
+   * must already exist, and be one the caller may see: a room outside its scope is the room that
+   * was not found. A spec with a home room mints no identity room: the room it was born in is its
+   * conversation.
    */
   private RoomStore.RoomRow requireHomeRoom(String roomId) {
     NameValidator.requireValidSpecId(roomId);
@@ -212,8 +219,7 @@ final class GlobalSpecOperations {
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
           "Start the server with 'sail server start' or omit the room.");
     }
-    return store
-        .findById(roomId)
+    return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
         .orElseThrow(
             () ->
                 new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
@@ -302,17 +308,39 @@ final class GlobalSpecOperations {
     return specStore.findById(updated.id()).orElseThrow();
   }
 
-  /** The row as a wire view, wake and roster decorated from its room — the fields' only home. */
+  /**
+   * The row as a wire view, wake and roster decorated from its room — the fields' only home — when
+   * the reader may see that room. A room is of its own project, which a spec moved since has left:
+   * such a spec reads as one whose room has not arrived.
+   */
   private GlobalSpecView viewOf(SpecStore.SpecRow row) {
     var store = rooms.get();
-    return GlobalSpecView.from(
-        row, store == null ? null : store.findById(row.roomIdOrIdentity()).orElse(null));
+    var room =
+        store == null
+            ? null
+            : Scoped.row(
+                    Actor.reader(),
+                    store.findById(row.roomIdOrIdentity()),
+                    RoomStore.RoomRow::project)
+                .orElse(null);
+    return GlobalSpecView.from(row, room);
   }
 
-  /** The room already holding spec id {@code specId}, which a spec born under it adopts. */
+  /**
+   * The room already holding spec id {@code specId}, which a spec born under it adopts. One outside
+   * the caller's scope is refused as the spec rule refuses a room that is not the caller's to
+   * adopt: the id is taken, and nothing else is said of what holds it.
+   */
   private RoomStore.RoomRow identityRoom(String specId) {
     var store = rooms.get();
-    return store == null ? null : store.findById(specId).orElse(null);
+    var held = store == null ? null : store.findById(specId).orElse(null);
+    if (held != null && !Actor.reader().scope().admits(held.project())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Room '" + specId + "' already exists, and a spec's id is reserved for its own room.",
+          "Pick another spec id.");
+    }
+    return held;
   }
 
   /**

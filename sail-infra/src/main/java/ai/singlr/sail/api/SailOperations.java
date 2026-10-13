@@ -1100,12 +1100,12 @@ public final class SailOperations implements HostOperations {
                   () -> {
                     Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
                         .orElseThrow(() -> roomNotFound(roomId));
-                    var attached = specIdsOf(roomId);
+                    var attached = specsIn(roomId);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
                           ErrorCode.CONFLICT,
                           "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
-                          "Delete or re-home its specs first: " + String.join(", ", attached));
+                          rehoming(attached));
                     }
                     store.delete(roomId);
                     return new RoomDeletedResponse(roomId);
@@ -1134,8 +1134,15 @@ public final class SailOperations implements HostOperations {
     return RoomView.from(row, specs.stream().map(SpecStore.SpecRow::id).toList());
   }
 
-  private List<String> specIdsOf(String roomId) {
-    return specsIn(roomId).stream().map(SpecStore.SpecRow::id).toList();
+  /** What to do about {@code attached}, naming only the specs the reader may see. */
+  private static String rehoming(List<SpecStore.SpecRow> attached) {
+    var seen =
+        Scoped.rows(Actor.reader(), attached, SpecStore.SpecRow::project).stream()
+            .map(SpecStore.SpecRow::id)
+            .toList();
+    return seen.isEmpty()
+        ? "Ask an admin to re-home its specs: none is in a project this FDE is granted."
+        : "Delete or re-home its specs first: " + String.join(", ", seen);
   }
 
   private List<SpecStore.SpecRow> specsIn(String roomId) {

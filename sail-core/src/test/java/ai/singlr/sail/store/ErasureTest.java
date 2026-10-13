@@ -292,7 +292,7 @@ class ErasureTest {
     room("old", "proj");
     var unpushed = messages.append("old", "uday", "never reached main", null);
 
-    assertTrue(erasure.adopt("spec", "old", "7-mainsrev"));
+    assertTrue(erasure.adopt("spec", "old", "7-mainsrev", null));
 
     assertEquals(0, count("SELECT count(*) FROM room_messages"));
     assertEquals(
@@ -302,7 +302,8 @@ class ErasureTest {
         db.query(
             "SELECT entity_type || ':' || entity_id || ':' || rev FROM change_log",
             row -> row.text(0)));
-    assertFalse(erasure.adopt("spec", "old", "7-mainsrev"), "adopting it twice changes nothing");
+    assertFalse(
+        erasure.adopt("spec", "old", "7-mainsrev", null), "adopting it twice changes nothing");
   }
 
   @Test
@@ -318,14 +319,14 @@ class ErasureTest {
     var reply = messages.append("old", "uday", "a reply main has too", acknowledged.id());
     db.execute("UPDATE room_messages SET base_rev = rev WHERE id = ?", reply.id());
 
-    erasure.adopt("spec", "old", "7-mainsrev");
+    erasure.adopt("spec", "old", "7-mainsrev", null);
 
     assertTrue(runs.findById(synced).isPresent(), "main's own erasure of it arrives in its page");
     assertTrue(runs.findById(local).isEmpty());
     assertTrue(rooms.findById("old").isPresent());
     assertTrue(messages.findById(acknowledged.id()).isPresent());
 
-    erasure.adopt("message", acknowledged.id(), "3-mainsrev");
+    erasure.adopt("message", acknowledged.id(), "3-mainsrev", null);
 
     assertTrue(messages.findById(reply.id()).isEmpty(), "a reply cannot outlive its message");
   }
@@ -356,17 +357,33 @@ class ErasureTest {
   void adoptingTheErasureOfASpecHeardOfOnlyAsDeletedRecordsItsRow() {
     specs.applyRevision("gone", null, "3-deleted-on-main");
 
-    assertTrue(erasure.adopt("spec", "gone", "4-erased-on-main"));
+    assertTrue(erasure.adopt("spec", "gone", "4-erased-on-main", null));
     assertTrue(erasure.isErased(spec("gone")));
     assertEquals(Set.of("spec:gone"), names(erasure.closure(List.of(spec("gone")))));
   }
 
   @Test
   void adoptingTheErasureOfAnEntityNeverHeldRecordsOnlyTheRow() {
-    assertTrue(erasure.adopt("spec", "never-held", "3-rev"));
+    assertTrue(erasure.adopt("spec", "never-held", "3-rev", null));
 
     assertEquals(1, count("SELECT count(*) FROM change_log"));
     assertTrue(erasure.isErased(spec("never-held")));
+  }
+
+  @Test
+  void anErasureOfAnEntityNeverHeldIsFiledUnderTheProjectMainNamesAndLeavesWithIt() {
+    assertTrue(erasure.adopt("spec", "never-held", "3-rev", "alpha"));
+    assertTrue(erasure.adopt("spec", "theirs", "4-rev", "beta"));
+    assertTrue(erasure.adopt("spec", "unfiled", "5-rev", null));
+
+    assertEquals(List.of("alpha", "beta"), new ChangeLog(db).heldProjects());
+    erasure.dropLocal("alpha");
+
+    assertEquals(
+        2, count("SELECT count(*) FROM change_log"), "what is of no known project is left alone");
+    assertFalse(erasure.isErased(spec("never-held")));
+    assertTrue(erasure.isErased(spec("theirs")));
+    assertTrue(erasure.isErased(spec("unfiled")));
   }
 
   @Test
@@ -375,7 +392,7 @@ class ErasureTest {
     new SyncConflicts(db).record("spec", "old", "{}", "{}", "{}", null, null, List.of("title"));
     new EraseRequests(db).request("spec", "old", "uday");
 
-    erasure.adopt("spec", "old", "5-x");
+    erasure.adopt("spec", "old", "5-x", null);
 
     assertEquals(0, count("SELECT count(*) FROM sync_conflicts"));
     assertEquals(List.of(), new EraseRequests(db).pending("spec"));
@@ -386,8 +403,8 @@ class ErasureTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> erasure.closure(List.of(new Erasure.Target("widget", "x"))));
-    assertThrows(IllegalArgumentException.class, () -> erasure.adopt("widget", "x", "1-a"));
-    assertThrows(IllegalArgumentException.class, () -> erasure.adopt("spec", "x", " "));
+    assertThrows(IllegalArgumentException.class, () -> erasure.adopt("widget", "x", "1-a", null));
+    assertThrows(IllegalArgumentException.class, () -> erasure.adopt("spec", "x", " ", null));
     assertThrows(IllegalArgumentException.class, () -> new Erasure.Target("spec", ""));
   }
 

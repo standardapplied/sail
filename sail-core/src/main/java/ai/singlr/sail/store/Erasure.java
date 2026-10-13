@@ -170,9 +170,10 @@ public final class Erasure {
    * removes the entity with what belongs to it that main never acknowledged. What main held leaves
    * with its own erasure row, in its own page. Returns whether anything changed; an erasure this
    * box already holds changes nothing, and one of an entity this box never held records only the
-   * row.
+   * row, filed under the {@code project} main names for it — null when it names none — so it leaves
+   * with that project ({@link #dropLocal}).
    */
-  public boolean adopt(String type, String id, String rev) {
+  public boolean adopt(String type, String id, String rev, String project) {
     requireKnownType(type);
     Strings.requireNonBlank(rev, "An adopted erasure carries main's rev");
     return db.transaction(
@@ -186,6 +187,7 @@ public final class Erasure {
             remove(target);
             if (target.equals(root)) {
               changeLog.erase(type, id, rev, ChangeLog.Entry.SYNC);
+              changeLog.fileUnder(type, id, project);
             } else {
               changeLog.purge(target.type(), target.id());
             }

@@ -105,6 +105,7 @@ public final class SyncWire {
   private static final String KIND = "kind";
   private static final String ERASE = "erase";
   private static final String AUTHOR = "author";
+  private static final String PROJECT = "project";
   private static final String CREATOR = "creator";
   private static final String GONE = "gone";
 
@@ -393,7 +394,9 @@ public final class SyncWire {
    * snapshot; {@code kind} says which, so no reader infers one from the other. Having no snapshot
    * to name its author in, a tombstone or an erasure carries the {@code author} main recorded, so
    * the node records the same one; an older main sends none. A revision's author rides in its
-   * snapshot.
+   * snapshot. For the same reason a tombstone or an erasure carries the {@code project} main's head
+   * files it in, so a node that never held the row files it there too and it leaves with the
+   * project; an older main sends none, and a version outside any page names none.
    */
   public record Entry(
       long seq,
@@ -402,7 +405,8 @@ public final class SyncWire {
       boolean deleted,
       Map<String, Object> snapshot,
       ChangeLog.Kind kind,
-      String author) {
+      String author,
+      String project) {
     public Entry {
       if (kind == null) {
         throw new IllegalArgumentException("Entry " + id + " names no kind");
@@ -427,6 +431,18 @@ public final class SyncWire {
           snapshot,
           snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION,
           author);
+    }
+
+    /** An entry naming no project: a revision, or what a main before scopes sent. */
+    public Entry(
+        long seq,
+        String id,
+        String rev,
+        boolean deleted,
+        Map<String, Object> snapshot,
+        ChangeLog.Kind kind,
+        String author) {
+      this(seq, id, rev, deleted, snapshot, kind, author, null);
     }
 
     public boolean erased() {
@@ -799,8 +815,13 @@ public final class SyncWire {
     map.put(KIND, entry.kind().wire());
     if (!entry.deleted()) {
       map.put(SNAPSHOT, entry.snapshot());
-    } else if (entry.author() != null) {
+      return map;
+    }
+    if (entry.author() != null) {
       map.put(AUTHOR, entry.author());
+    }
+    if (entry.project() != null) {
+      map.put(PROJECT, entry.project());
     }
     return map;
   }
@@ -813,7 +834,8 @@ public final class SyncWire {
         bool(map, DELETED),
         snapshot(map, SNAPSHOT),
         ChangeLog.Kind.of(string(map, KIND)),
-        string(map, AUTHOR));
+        string(map, AUTHOR),
+        string(map, PROJECT));
   }
 
   private static Map<String, Object> offerMap(MainReplica.Offer offer) {

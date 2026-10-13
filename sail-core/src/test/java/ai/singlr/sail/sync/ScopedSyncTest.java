@@ -197,6 +197,91 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aVersionMainTookInAProjectSinceRevokedIsNeitherHandedBackNorItsContentServed()
+      throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "nia");
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+    Acting.as("nia", () -> nia.specs.setContent("alpha-work", "alpha told", "plan"));
+    Acting.as("nia", () -> nia.specs.setContent("beta-work", "beta secret", "plan"));
+    SyncBox.quiesce(main, nia);
+    var told = bodyHash(main, "alpha-work");
+    var secret = bodyHash(main, "beta-work");
+    Acting.system(
+        () -> {
+          main.specs.update(spec("beta-work", A, "nia"));
+          main.specs.setContent("alpha-work", "alpha moved on", "plan");
+          main.specs.setContent("beta-work", "alpha public", "plan");
+        });
+    var ids = List.of("alpha-work", "beta-work");
+
+    var answered =
+        serve(
+            main.server(scoped(ONLY_A)),
+            HELLO,
+            new SyncWire.Need("spec", ids),
+            new SyncWire.Fetch(List.of(told)),
+            new SyncWire.Fetch(List.of(secret)));
+
+    var page = assertInstanceOf(SyncWire.Page.class, answered.get(1));
+    assertEquals(ids, page.entries().stream().map(SyncWire.Entry::id).toList());
+    assertEquals(
+        List.of("alpha-work"),
+        page.accepted().stream().map(SyncWire.Entry::id).toList(),
+        "what main took of beta-work was a row of beta");
+    assertEquals(
+        told, assertInstanceOf(SyncWire.Manifest.class, answered.get(2)).manifest().hash());
+    assertEquals(
+        new SyncWire.Failed(
+            "fetch: blob " + secret + " is not content main served this session", "refused"),
+        answered.getLast());
+    assertEquals(
+        ids,
+        assertInstanceOf(
+                SyncWire.Page.class,
+                serve(
+                        main.server(Actor.sync("nia", Role.MEMBER)),
+                        HELLO,
+                        new SyncWire.Need("spec", ids))
+                    .get(1))
+            .accepted()
+            .stream()
+            .map(SyncWire.Entry::id)
+            .toList(),
+        "an unscoped session is handed what main took as it always has");
+  }
+
+  @Test
+  void whatWasErasedOrDeletedBeforeTheNodeFirstSyncedStillLeavesWithItsProject() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    main.specs.create(spec("alpha-short-lived", A, "nia"));
+    Acting.as("nia", () -> main.specs.delete("alpha-short-lived"));
+    archive(main, "alpha-work");
+    var erased = prune(main, "alpha-work");
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+
+    for (var target : erased.entities()) {
+      assertTrue(new ChangeLog(nia.db).isErased(target.type(), target.id()), target.toString());
+      assertEquals(
+          A,
+          new ChangeLog(nia.db).headProject(target.type(), target.id()).orElse(null),
+          target + ": an erasure this box only heard of is filed under the project main names");
+    }
+    assertEquals(A, new ChangeLog(nia.db).headProject("spec", "alpha-short-lived").orElse(null));
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(B)))));
+
+    assertEquals(
+        0,
+        count(nia.db, "SELECT count(*) FROM change_heads WHERE project IS NOT 'beta'"),
+        "nothing of alpha stays, what this box never held live included");
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log WHERE entity_id LIKE 'alpha%'"));
+    SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+  }
+
+  @Test
   void aScopedNodesOwnWorkInItsProjectIsCommittedAsToday() {
     seed(main, A, "nia");
     SyncBox.quiesce(main, nia);

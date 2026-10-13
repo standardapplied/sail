@@ -234,8 +234,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
    * answer was never heard: main's version is the answer.
    */
   @Override
-  public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
+  public void adopt(String entityId, Map<String, Object> snapshot, String rev, String project) {
     store.adoptForSync(entityId, snapshot, rev);
+    if (snapshot == null) {
+      changeLog.fileUnder(store.entityType(), entityId, project);
+    }
     conflicts.settle(store.entityType(), entityId, rev);
     changeLog.settleOffer(store.entityType(), entityId);
   }
