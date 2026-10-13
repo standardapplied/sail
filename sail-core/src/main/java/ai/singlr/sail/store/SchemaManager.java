@@ -89,10 +89,10 @@ public final class SchemaManager {
    * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
    * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
    * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
-   * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token
-   * this box made for each FDE's Mast), {@code project_grants} (the projects main granted each
-   * scoped FDE) and {@code sync_scope} (the scope main last named for this node) are local-only as
-   * well — none of the nine ever joins a sync snapshot.
+   * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
+   * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
+   * FDE) and {@code sync_scope} (the scope main last named for this node) are local-only as well —
+   * none of the nine ever joins a sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
