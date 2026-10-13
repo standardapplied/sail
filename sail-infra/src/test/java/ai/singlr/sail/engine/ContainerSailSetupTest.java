@@ -216,6 +216,7 @@ class ContainerSailSetupTest {
             SpecCliHelper.SCRIPT_PATH,
             SpecCliHelper.PROFILE_PATH,
             Harnesses.of("claude-code").hooks().path(),
+            "/home/dev/.sail/claude-live.json",
             Harnesses.of("codex").hooks().path(),
             SshdKeepalive.DROP_IN_PATH),
         java.util.List.copyOf(files.keySet()),
@@ -229,6 +230,10 @@ class ContainerSailSetupTest {
           files.get(harness.hooks().path()),
           "each harness's hook file holds its own hooks");
     }
+    assertEquals(
+        HarnessHooks.renderLive(Harnesses.of("claude-code")).orElseThrow(),
+        files.get("/home/dev/.sail/claude-live.json"),
+        "the live member's settings ride the same fingerprint and byte-for-byte verify");
   }
 
   @Test

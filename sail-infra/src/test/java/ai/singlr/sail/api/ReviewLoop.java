@@ -42,11 +42,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
@@ -113,10 +110,7 @@ final class ReviewLoop implements AutoCloseable {
   private final ProjectReader reader;
   private final Function<String, ReviewPipelineConfig> config;
   private final Function<String, String> reviewer;
-  private final AtomicLong offered = new AtomicLong();
-  private final AtomicLong handled = new AtomicLong();
-  private final ReentrantLock lock = new ReentrantLock();
-  private final Condition idle = lock.newCondition();
+  private final Settling settling = new Settling();
   private volatile ScriptedAgent script;
   private volatile boolean refusing;
   private volatile Consumer<String> launched = runId -> {};
@@ -725,22 +719,7 @@ final class ReviewLoop implements AutoCloseable {
 
   /** Blocks until every subscriber has handled every event published so far. */
   void settle() {
-    lock.lock();
-    try {
-      var remaining = TimeUnit.SECONDS.toNanos(BusTesting.DELIVERY_TIMEOUT_SECONDS);
-      while (offered.get() != handled.get()) {
-        if (remaining <= 0) {
-          throw new AssertionError(
-              "the loop did not settle: " + offered.get() + " offered, " + handled.get());
-        }
-        remaining = idle.awaitNanos(remaining);
-      }
-    } catch (InterruptedException e) {
-      Thread.currentThread().interrupt();
-      throw new AssertionError("interrupted while the loop settled", e);
-    } finally {
-      lock.unlock();
-    }
+    settling.settle();
   }
 
   /** Every launch from now on is refused by the container: the launch command exits non-zero. */
@@ -784,38 +763,7 @@ final class ReviewLoop implements AutoCloseable {
   }
 
   private EventSubscriber counted(EventSubscriber delegate) {
-    return new EventSubscriber() {
-      @Override
-      public String name() {
-        return delegate.name();
-      }
-
-      @Override
-      public Predicate<Event> filter() {
-        return event -> {
-          var matches = delegate.filter().test(event);
-          if (matches) {
-            offered.incrementAndGet();
-          }
-          return matches;
-        };
-      }
-
-      @Override
-      public void onEvent(Event event) throws Exception {
-        try {
-          delegate.onEvent(event);
-        } finally {
-          lock.lock();
-          try {
-            handled.incrementAndGet();
-            idle.signalAll();
-          } finally {
-            lock.unlock();
-          }
-        }
-      }
-    };
+    return settling.counted(delegate);
   }
 
   @Override

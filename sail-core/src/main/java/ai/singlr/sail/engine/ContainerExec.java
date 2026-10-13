@@ -50,6 +50,15 @@ public final class ContainerExec {
   }
 
   /**
+   * As {@link #asDevUser(String, List)}, opening in {@code cwd} with {@code env} exported into the
+   * container process and no pseudo-terminal: the form a process driven over pipes is started in.
+   */
+  public static List<String> asDevUser(
+      String containerName, String cwd, Map<String, String> env, List<String> args) {
+    return devUser(containerName, false, cwd, env, args);
+  }
+
+  /**
    * Builds an interactive {@code incus exec -t} command as the dev user, opening in the workspace.
    * Unlike {@link #asDevUser}, this requests a container-side pseudo-terminal ({@code -t}) so the
    * child sees a real tty — required for a login shell driven by the pty session host, which

@@ -285,7 +285,14 @@ class PtySessionHostTest {
           assertInstanceOf(
               PtyMessage.Err.class,
               PtyWire.read(dispatch),
-              "the dispatch authority yields and does nothing else");
+              "the dispatch authority yields and lists, and does nothing else");
+          PtyWire.write(dispatch, new PtyMessage.ListSessions("", PtyMessage.PAGE_LIMIT));
+          var listed = assertInstanceOf(PtyMessage.Sessions.class, PtyWire.read(dispatch));
+          assertEquals(
+              List.of("resume-1"),
+              listed.sessions().stream().map(PtyMessage.SessionInfo::name).toList(),
+              "it sees every session, whoever opened it: what a live member asks before it"
+                  + " starts over a conversation");
           PtyWire.write(dispatch, new PtyMessage.Yield("ghost", "yielded to dispatch 2"));
           assertInstanceOf(
               PtyMessage.Ok.class,

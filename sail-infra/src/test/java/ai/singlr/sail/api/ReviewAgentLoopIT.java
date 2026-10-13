@@ -17,16 +17,21 @@ import ai.singlr.sail.config.Guardrails;
 import ai.singlr.sail.config.ReviewPipelineConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AbstractIncusIT;
+import ai.singlr.sail.engine.AgentPresence;
+import ai.singlr.sail.engine.AgentProcess;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.LiveStream;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.gen.SpecSkillGenerator;
+import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
@@ -44,8 +49,10 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.OptionalInt;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -371,6 +378,110 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
       assertEquals("stopped", ended.status(), ended.role());
       assertEquals(0, ended.exitCode(), ended.role());
       assertFalse(logOf(run).isBlank(), "each run wrote its own log: " + ended.role());
+    }
+  }
+
+  /**
+   * A stand-in for {@code claude} in its streaming mode: it records the argv, environment and
+   * directory it was started with, names a session, and answers every line it reads on stdin with a
+   * result, until its stdin ends.
+   */
+  private static final String FAKE_LIVE_AGENT =
+      """
+      #!/usr/bin/env bash
+      printf '%s\\n' "$@" > "$HOME/.sail/live-argv"
+      printf '%s|%s|%s|%s|%s\\n' "$SAIL_SPEC_ID" "$SAIL_AGENT" "$SAIL_RUN_ID" "$SAIL_RUN_CREDENTIAL" "$SAIL_RUN_ROLE" > "$HOME/.sail/live-env"
+      pwd > "$HOME/.sail/live-cwd"
+      printf 'warming up\\n' >&2
+      printf '{"type":"system","subtype":"init","session_id":"it-session"}\\n'
+      while IFS= read -r line; do
+        printf '%s\\n' "$line" >> "$HOME/.sail/live-stdin"
+        printf '{"type":"result","subtype":"success","is_error":false,"result":"heard"}\\n'
+      done
+      """;
+
+  private String fileOf(String path) throws Exception {
+    var read = shell.exec(ContainerExec.asDevUser(CONTAINER, List.of("cat", path)));
+    assertTrue(read.ok(), path + ": " + read.stderr());
+    return read.stdout();
+  }
+
+  /** The next line of {@code handle} that says something, as the member's reader takes it. */
+  private static LiveStream.Step nextStep(AgentProcess.Handle handle) throws Exception {
+    while (true) {
+      var line = handle.stdout().read();
+      if (line == null) {
+        throw new AssertionError("the process ended before it said anything");
+      }
+      if (!(LiveStream.read(line) instanceof LiveStream.Step.Other)) {
+        return LiveStream.read(line);
+      }
+    }
+  }
+
+  /**
+   * A live member's process against a real container: started over pipes under the pinned live
+   * invocation, as the dev user, in its work directory, with the run's environment; its pid file
+   * names the agent itself, its stderr is the run's log, a prompt written to its stdin arrives as
+   * one line whatever it contains, and closing its stdin ends it. {@code claude} itself is not run.
+   */
+  @Test
+  void aLiveMembersProcessStartsUnderItsInvocationAndIsPromptedOverItsStdin() throws Exception {
+    ContainerFilePush.push(
+        shell, CONTAINER, "/usr/local/bin/claude", FAKE_LIVE_AGENT, List.of("--mode", "0755"));
+    var runId = DateTimeUtils.newId().toString();
+    var unit = AgentUnit.live(runId);
+    assertTrue(
+        shell
+            .exec(
+                ContainerExec.asDevUser(CONTAINER, List.of("mkdir", "-p", AgentUnit.runDir(runId))))
+            .ok());
+    var command =
+        Harnesses.of("claude-code").live(new Harness.LiveLaunch(false, "opus", null)).orElseThrow();
+    var env = new LinkedHashMap<String, String>();
+    env.put("SAIL_SPEC_ID", "auth");
+    env.put("SAIL_AGENT", "claude-code");
+    env.put("SAIL_RUN_ID", runId);
+    env.put("SAIL_RUN_CREDENTIAL", "it-credential");
+    env.put("SAIL_RUN_ROLE", "room");
+    var presence = new AgentPresence(shell);
+
+    var handle =
+        new ContainerAgentProcess(shell)
+            .start(CONTAINER, "/home/dev/workspace", env, command, unit.pidPath(), unit.logPath());
+    try {
+      assertEquals(new LiveStream.Step.Init("it-session"), nextStep(handle));
+      var prompt =
+          LiveStream.userMessage("what does \"auth\" do?\nsecond line; $(touch /tmp/pwned) `id`");
+      handle.stdin().write(prompt);
+      assertEquals(new LiveStream.Step.Result(false, null, "heard"), nextStep(handle));
+
+      assertEquals(
+          String.join("\n", command.subList(1, command.size())) + "\n",
+          fileOf("/home/dev/.sail/live-argv"),
+          "every argument arrives as itself, the empty one included");
+      assertEquals(prompt + "\n", fileOf("/home/dev/.sail/live-stdin"));
+      assertEquals(
+          "auth|claude-code|" + runId + "|it-credential|room\n",
+          fileOf("/home/dev/.sail/live-env"));
+      assertEquals("/home/dev/workspace\n", fileOf("/home/dev/.sail/live-cwd"));
+      assertEquals("warming up\n", fileOf(unit.logPath()), "stderr is the run's log");
+      assertFalse(exec(CONTAINER, List.of("test", "-e", "/tmp/pwned")).ok(), "a prompt is data");
+      var pid = handle.pid().orElseThrow();
+      assertEquals(String.valueOf(pid), fileOf(unit.pidPath()).strip());
+      assertTrue(
+          fileOf("/proc/" + pid + "/cmdline").contains("/usr/local/bin/claude"),
+          "the wrapper exec'd into the agent: the pid file names it");
+      assertFalse(
+          presence.gone(CONTAINER, unit), "a live member probes alive through its pid file");
+
+      handle.stdin().close();
+
+      assertNull(handle.stdout().read(), "stdin closed: the agent finishes and its stdout ends");
+      assertEquals(OptionalInt.of(0), handle.waitFor(PATIENCE));
+      assertTrue(presence.gone(CONTAINER, unit));
+    } finally {
+      handle.signal(AgentProcess.Signal.TERM);
     }
   }
 

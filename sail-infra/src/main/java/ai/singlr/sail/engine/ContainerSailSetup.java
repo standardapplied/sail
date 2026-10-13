@@ -128,6 +128,10 @@ public final class ContainerSailSetup {
     files.put(SpecCliHelper.PROFILE_PATH, SpecCliHelper.profileLine());
     for (var harness : Harnesses.all()) {
       files.put(harness.hooks().path(), HarnessHooks.render(harness));
+      harness
+          .liveSettings()
+          .ifPresent(
+              live -> files.put(live.path(), HarnessHooks.renderLive(harness).orElseThrow()));
     }
     files.put(SshdKeepalive.DROP_IN_PATH, SshdKeepalive.content());
     return files;

@@ -51,4 +51,12 @@ class StringsTest {
       assertTrue(ex.getMessage().contains("project"), ex.getMessage());
     }
   }
+
+  @Test
+  void clipKeepsAShortTextAndCutsALongOneBetweenCodePoints() {
+    assertEquals("abc", Strings.clip("abc", 3));
+    assertEquals("ab", Strings.clip("abc", 2));
+    assertEquals("a\uD83D\uDE00", Strings.clip("a\uD83D\uDE00b", 2));
+    assertEquals("", Strings.clip("abc", 0));
+  }
 }

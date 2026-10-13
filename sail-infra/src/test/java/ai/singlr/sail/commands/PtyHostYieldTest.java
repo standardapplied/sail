@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,6 +89,32 @@ class PtyHostYieldTest {
       new PtyHostYield(dir.resolve("h.sock")).end(List.of("resume-1", "resume-2"), "r");
 
       assertEquals(0, host.sessionCount(), "both ended, mady's included");
+    }
+  }
+
+  /**
+   * A live member asks whether a terminal holds the conversation it would resume. The answer covers
+   * every FDE's sessions, since the terminal may be anyone's, and a box with no host holds none.
+   */
+  @Test
+  void aSessionIsLiveWhoeverOpenedItAndNoHostMeansNoSession() throws Exception {
+    assertFalse(new PtyHostYield(dir.resolve("absent.sock")).live("resume-1"));
+
+    try (var host =
+        PtyHostCommand.startHost(
+            dir.resolve("h.sock"), dir.resolve("s"), RESOLVER, PtyRooms.NONE, PtyEvents.NONE)) {
+      try (var mady = SessionClient.connect(dir.resolve("h.sock"), "tok-mady")) {
+        mady.create("resume-1", List.of("sh", "-c", "read a"), "/tmp", "", "", 80, 24);
+      }
+      var yield = new PtyHostYield(dir.resolve("h.sock"));
+
+      assertTrue(yield.live("resume-1"), "another FDE's terminal still holds the conversation");
+      assertFalse(yield.live("resume-2"));
+
+      yield.end(List.of("resume-1"), "r");
+
+      assertFalse(yield.live("resume-1"), "a session that ended holds nothing");
+      assertEquals(0, host.sessionCount());
     }
   }
 

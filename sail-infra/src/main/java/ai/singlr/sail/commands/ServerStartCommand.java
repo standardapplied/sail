@@ -96,6 +96,9 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class ServerStartCommand implements Runnable {
 
+  /** How often live members are held to their lanes' idle window and lifetime. */
+  private static final Duration LIVE_MEMBER_SWEEP = Duration.ofSeconds(10);
+
   @Option(
       names = "--host",
       description = "Host to bind. Defaults to loopback; use 0.0.0.0 to expose on the network.",
@@ -242,10 +245,11 @@ public final class ServerStartCommand implements Runnable {
             messageStore,
             NodeIdentity::handle,
             (project, specId) -> operations.startRoomRun(project, specId, NodeIdentity.handle()),
-            operations::guardRoomRun);
+            operations::guardRoomRun,
+            operations.liveMembers());
     bus.subscribe(roomWake);
     roomWake.startSweep(Duration.ofSeconds(60));
-    shutdown.register(roomWake);
+    shutdown.register(roomWake).register(operations.liveMembers());
     if (narratesSlack(HostSync.config())) {
       bus.subscribe(SlackReactor.withDefaults(notifications, new SlackThreadStore(db), specStore));
     } else {
@@ -329,6 +333,25 @@ public final class ServerStartCommand implements Runnable {
       retentionSweeper.start();
       ptyEventBridge.start(PtyEventBridge.INTERVAL);
       reconciler.start();
+      var reclaimed = operations.liveMembers().reclaim(NodeIdentity.handle());
+      if (reclaimed.ended() > 0) {
+        System.out.println(
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Ended "
+                    + reclaimed.ended()
+                    + " live member(s) left from before the restart; each resumes on its room's"
+                    + " next message"));
+      }
+      for (var runId : reclaimed.held()) {
+        System.err.println(
+            Ansi.AUTO.string(
+                "  @|red ✗|@ Could not confirm that the live member of run "
+                    + runId
+                    + " left from before the restart has stopped, so what it reserved stays held."
+                    + " Check that its container is running and reachable; the run is finished"
+                    + " once the container answers that its process is gone."));
+      }
+      operations.liveMembers().startSweep(LIVE_MEMBER_SWEEP);
       var replayed = missedStops.sweep();
       if (replayed > 0) {
         System.out.println(

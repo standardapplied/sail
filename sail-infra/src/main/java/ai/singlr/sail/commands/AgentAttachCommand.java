@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.HostOperations;
+import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
 import ai.singlr.sail.config.Lane;
@@ -64,6 +65,8 @@ import picocli.CommandLine.Spec;
 public final class AgentAttachCommand implements Runnable {
 
   private static final Set<String> LIVE_STATUSES = Set.of("running", "stopping");
+
+  static final String MEMBER_DISPLACED = "displaced by a terminal on its conversation";
 
   @Parameters(
       index = "0",
@@ -130,17 +133,18 @@ public final class AgentAttachCommand implements Runnable {
 
     var latest = latest();
     var run = latest.run();
-    if (run != null && LIVE_STATUSES.contains(run.status())) {
+    var sessionId = validatedSessionId(run);
+    var member = takesFromMember(run, sessionId);
+    if (run != null && LIVE_STATUSES.contains(run.status()) && !member) {
       throw new IllegalStateException(refusal(run, name));
     }
     var harness = run != null ? Harnesses.of(run.agent()) : resolveHarness();
-    var sessionId = validatedSessionId(run);
     var command = buildResumeCommand(harness, sessionId);
     if (sessionId == null) {
       attachFresh(run, harness, buildIncusExecWithTty(name, command));
       return;
     }
-    requireNoLiveConflict(run, latest.running(), name);
+    requireNoLiveConflict(run, besides(run, latest.running()), name);
     var plan = new ResumePlan(SessionYield.resumeSession(run.id()), command, name, latest.room());
     if (json) {
       System.out.println(YamlUtil.dumpJson(plan(run, harness, sessionId, plan)));
@@ -158,6 +162,9 @@ public final class AgentAttachCommand implements Runnable {
     }
     announceResume(run, harness, sessionId, plan);
     requireRunning();
+    if (member) {
+      endMember(run);
+    }
     var size = Stty.size(new int[] {24, 80});
     var hostSocket = SessionCommand.socketOrDefault(socket);
     try (var client = SessionClient.connect(hostSocket)) {
@@ -173,6 +180,42 @@ public final class AgentAttachCommand implements Runnable {
                       + " (Ctrl-] detaches).|@"));
       SessionCommand.attachTerminal(client, plan.session(), true);
     }
+  }
+
+  /**
+   * Whether attaching to {@code run} takes its conversation from the room's live member: the run is
+   * a live member's, still up, and has recorded the session a terminal would resume. Such a run is
+   * not refused as a live run is; its member is ended first.
+   */
+  static boolean takesFromMember(RunStore.RunRow run, String sessionId) {
+    return run != null && sessionId != null && LiveMembers.liveRun(run);
+  }
+
+  /** Every run of {@code running} but {@code run} itself: what else is live beside it. */
+  static List<DispatchGate.RunningRun> besides(
+      RunStore.RunRow run, List<DispatchGate.RunningRun> running) {
+    return running.stream().filter(other -> !other.runId().equals(run.id())).toList();
+  }
+
+  /**
+   * Ends the room's live member before a terminal takes its conversation: two processes on one
+   * conversation would corrupt it, and the member loses nothing — it resumes on the room's next
+   * message once the terminal is closed.
+   */
+  private void endMember(RunStore.RunRow run) {
+    try (var operations = this.operations.get()) {
+      if (!operations.dispatching().endLiveMember(run.id(), MEMBER_DISPLACED)) {
+        throw new IllegalStateException(
+            "Run "
+                + run.id()
+                + " is the room's live member and could not be ended, so its conversation is not"
+                + " free to resume. Dismiss the member from the room, then attach again.");
+      }
+    }
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|faint Ended the room's live member; it resumes on the room's next message once"
+                + " this session is closed.|@"));
   }
 
   /**

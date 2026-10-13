@@ -40,4 +40,14 @@ public final class Strings {
     }
     return value;
   }
+
+  /**
+   * {@code text} itself when it is at most {@code maxCodePoints} long, otherwise its beginning, cut
+   * between code points so a surrogate pair is never split.
+   */
+  public static String clip(String text, int maxCodePoints) {
+    return text.codePointCount(0, text.length()) <= maxCodePoints
+        ? text
+        : text.substring(0, text.offsetByCodePoints(0, maxCodePoints));
+  }
 }

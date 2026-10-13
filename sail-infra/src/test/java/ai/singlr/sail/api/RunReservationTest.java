@@ -417,4 +417,143 @@ class RunReservationTest {
         "bookkeeping must never propagate a store error out of the launch cleanup");
     assertFalse(db == null);
   }
+
+  /** A live member's run of {@code specId} over {@code repos}, as {@code LiveMembers} reserves. */
+  private String liveMember(String specId, List<String> repos) {
+    var id = DateTimeUtils.newId().toString();
+    Acting.system(
+        () ->
+            runStore.reserveDispatch(
+                id,
+                "acme",
+                specId,
+                "node",
+                "room-full",
+                repos,
+                "claude-code",
+                null,
+                "task",
+                AgentUnit.live(id).logPath(),
+                AgentUnit.live(id).unitName()));
+    return id;
+  }
+
+  private RunReservation displacing(RunReservation.Displaceable displaceable) {
+    return new RunReservation(
+        runStore, quietShell(), DispatchOperations.Listener.NONE, sessionYield, displaceable);
+  }
+
+  private String claim(RunReservation reservation, String role) {
+    return reservation.reserve(
+        RUN_ID,
+        "acme",
+        "spec",
+        "node",
+        role,
+        List.of("app"),
+        "codex",
+        null,
+        "task",
+        AgentUnit.forRun(RUN_ID),
+        CONFIG);
+  }
+
+  @Test
+  void aWorkingClaimEndsTheLiveMemberThatHoldsItAndLands() {
+    var member = liveMember("chat", List.of("app"));
+    var asked = new ArrayList<String>();
+
+    var credential =
+        claim(
+            displacing(
+                (runId, why) -> {
+                  asked.add(runId + ": " + why);
+                  return Acting.system(() -> runStore.transition(runId, "running", "stopped"));
+                }),
+            "build");
+
+    assertNotNull(credential);
+    assertEquals(List.of(member + ": displaced by run " + RUN_ID + " claiming its repos"), asked);
+    assertEquals("running", runStore.findById(RUN_ID).orElseThrow().status());
+  }
+
+  @Test
+  void aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs() {
+    var first = liveMember("chat", List.of("app"));
+    var ended = new ArrayList<String>();
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                claim(
+                    displacing(
+                        (runId, why) -> {
+                          ended.add(runId);
+                          Acting.system(() -> runStore.transition(runId, "running", "stopped"));
+                          liveMember("chat", List.of("app"));
+                          return true;
+                        }),
+                    "adhoc"));
+
+    assertEquals(RunReservation.MAX_DISPLACED, ended.size());
+    assertEquals(first, ended.getFirst());
+    assertEquals(ErrorCode.AGENT_ALREADY_RUNNING, refused.failure().errorCode());
+    assertTrue(runStore.findById(RUN_ID).isEmpty(), "nothing was reserved");
+  }
+
+  @Test
+  void aMemberThatDoesNotEndLeavesTheClaimHeld() {
+    liveMember("chat", List.of("app"));
+    var asked = new ArrayList<String>();
+
+    assertThrows(
+        ApiException.class,
+        () ->
+            claim(
+                displacing(
+                    (runId, why) -> {
+                      asked.add(runId);
+                      return false;
+                    }),
+                "fix"));
+
+    assertEquals(1, asked.size(), "asked once, and its answer is taken");
+  }
+
+  @Test
+  void aChatLanesClaimAndAClaimAnotherRunHoldsDisplaceNoOne() {
+    liveMember("chat", List.of("app"));
+    var asked = new ArrayList<String>();
+    RunReservation.Displaceable recording =
+        (runId, why) -> {
+          asked.add(runId);
+          return true;
+        };
+
+    assertThrows(ApiException.class, () -> claim(displacing(recording), "room-full"));
+    Acting.system(
+        () ->
+            runStore
+                .listForProject("acme")
+                .forEach(run -> runStore.transition(run.id(), "running", "stopped")));
+    Acting.system(
+        () ->
+            runStore.reserveDispatch(
+                DateTimeUtils.newId().toString(),
+                "acme",
+                "other",
+                "node",
+                "build",
+                List.of("app"),
+                "codex",
+                null,
+                "task",
+                "log",
+                "sail-agent-x"));
+    assertThrows(ApiException.class, () -> claim(displacing(recording), "build"));
+
+    assertEquals(List.of(), asked, "a conversation never ends another, and a build is never ended");
+    assertFalse(RunReservation.Displaceable.NONE.endHolder("run", "why"));
+  }
 }

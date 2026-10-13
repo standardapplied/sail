@@ -486,8 +486,12 @@ public final class PtySessionHost implements AutoCloseable {
         }
         while (true) {
           var message = PtyWire.read(channel);
-          if (who.dispatchAuthority() && !(message instanceof PtyMessage.Yield)) {
-            reply(channel, new PtyMessage.Err("The dispatch authority may only yield sessions."));
+          if (who.dispatchAuthority()
+              && !(message instanceof PtyMessage.Yield)
+              && !(message instanceof PtyMessage.ListSessions)) {
+            reply(
+                channel,
+                new PtyMessage.Err("The dispatch authority may only yield and list sessions."));
             continue;
           }
           switch (message) {
@@ -769,17 +773,19 @@ public final class PtySessionHost implements AutoCloseable {
   }
 
   /**
-   * One name-ordered page of the caller's sessions. A page is bounded by {@link
-   * PtyMessage#PAGE_LIMIT} entries of at most {@link PtyMessage#MAX_COMMAND_BYTES} of encoded
-   * command each (names are file names, so a filesystem bounds them), which keeps every page well
-   * under the wire's frame cap no matter how many sessions the host holds.
+   * One name-ordered page of the caller's sessions, or of every session for the dispatch authority:
+   * a live member must not start over a conversation a terminal holds, whoever opened it. A page is
+   * bounded by {@link PtyMessage#PAGE_LIMIT} entries of at most {@link
+   * PtyMessage#MAX_COMMAND_BYTES} of encoded command each (names are file names, so a filesystem
+   * bounds them), which keeps every page well under the wire's frame cap no matter how many
+   * sessions the host holds.
    */
   private PtyMessage listSessions(PtyIdentity who, PtyMessage.ListSessions request) {
     var after = java.util.Objects.toString(request.after(), "");
     var limit = Math.clamp(request.limit(), 1, PtyMessage.PAGE_LIMIT);
     var mine =
         sessions.values().stream()
-            .filter(session -> admitted(who, session))
+            .filter(session -> who.dispatchAuthority() || admitted(who, session))
             .filter(session -> session.name().compareTo(after) > 0)
             .sorted(java.util.Comparator.comparing(PtySession::name))
             .toList();

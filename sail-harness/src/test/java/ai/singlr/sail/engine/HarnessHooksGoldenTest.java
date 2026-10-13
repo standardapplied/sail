@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.harness.Harnesses;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -53,6 +54,24 @@ class HarnessHooksGoldenTest {
       {"type": "command", "command": "/home/dev/.sail/bin/sail-room-relay", "timeout": 15}]}], \
       "Stop": [{"hooks": [\
       {"type": "command", "command": "/home/dev/.sail/bin/sail-stop-gate", "timeout": 15}]}]}}""";
+
+  static final String CLAUDE_CODE_LIVE_SETTINGS =
+      """
+      {"includeCoAuthoredBy": false, \
+      "permissions": {"deny": ["Read(//var/lib/sail/run/box.credential)", \
+      "Read(/home/dev/.ssh/**)", "Read(/home/dev/.git-credentials)", "Read(/home/dev/.config/gh/**)"]}}""";
+
+  @Test
+  void claudeCodeLiveSettingsNameNoHook() {
+    assertEquals(
+        Optional.of(CLAUDE_CODE_LIVE_SETTINGS),
+        HarnessHooks.renderLive(Harnesses.of("claude-code")));
+  }
+
+  @Test
+  void codexHasNoLiveSettings() {
+    assertEquals(Optional.empty(), HarnessHooks.renderLive(Harnesses.of("codex")));
+  }
 
   @Test
   void claudeCodeHookFile() {

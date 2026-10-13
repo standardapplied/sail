@@ -25,6 +25,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 
 /**
@@ -192,23 +193,43 @@ public final class RunLauncher {
     return status;
   }
 
+  /**
+   * Stages everything a run needs in its container before its process starts: sail's helpers and
+   * settings files, the skills its harness reads, and the run's own task and session files, which
+   * are what let the {@code spec} CLI speak for it. A live member, which is started over pipes
+   * rather than as a unit, stages exactly as a launched run does.
+   */
+  void stage(LaunchSpec s) {
+    try {
+      staged(s);
+    } catch (ApiException e) {
+      throw e;
+    } catch (Exception e) {
+      throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, "Failed to launch agent.", e);
+    }
+  }
+
+  private void staged(LaunchSpec s) throws IOException, InterruptedException, TimeoutException {
+    ensureSailSetup(s.project());
+    installSkills(s);
+    var session = new AgentSession(shell);
+    session.ensureDirectory(s.project());
+    session.writeTaskFile(s.project(), s.task(), s.unit());
+    session.writeSession(
+        s.project(),
+        s.task(),
+        Objects.requireNonNullElse(s.branch(), ""),
+        s.specId(),
+        s.agentType(),
+        s.runId(),
+        s.role(),
+        s.repoPaths(),
+        s.unit());
+  }
+
   LaunchOutcome launchSession(LaunchSpec s) {
     try {
-      ensureSailSetup(s.project());
-      installSkills(s);
-      var session = new AgentSession(shell);
-      session.ensureDirectory(s.project());
-      session.writeTaskFile(s.project(), s.task(), s.unit());
-      session.writeSession(
-          s.project(),
-          s.task(),
-          Objects.requireNonNullElse(s.branch(), ""),
-          s.specId(),
-          s.agentType(),
-          s.runId(),
-          s.role(),
-          s.repoPaths(),
-          s.unit());
+      staged(s);
       var command = launchCommand(s);
       listener.launching(s.background(), redactCredential(command, s.runCredential()));
       var exitCode = launcher.launch(command);

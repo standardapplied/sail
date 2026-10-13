@@ -94,6 +94,26 @@ class SseHandlerTest {
   }
 
   @Test
+  void parseFilterScopesByRoomBesideProjectAndType() {
+    var filter =
+        SseHandler.parseFilter(
+            URI.create(
+                "http://x/v1/events/stream?room=lounge"
+                    + "&type=agent_text_delta,agent_tool_call,agent_turn_ended"));
+    assertTrue(filter.test(Event.of("p", "lounge", "agent_text_delta", "a", "h")));
+    assertTrue(filter.test(Event.of("p", "lounge", "agent_turn_ended", "a", "h")));
+    assertFalse(filter.test(Event.of("p", "lounge", "spec_message_posted", "a", "h")));
+    assertFalse(filter.test(Event.of("p", "kitchen", "agent_text_delta", "a", "h")));
+    assertFalse(filter.test(Event.of("p", null, "agent_text_delta", "a", "h")));
+
+    var scoped =
+        SseHandler.parseFilter(URI.create("http://x/v1/events/stream?project=light&room=lounge"));
+    assertTrue(scoped.test(Event.of("light", "lounge", "spec_message_posted", "a", "h")));
+    assertFalse(scoped.test(Event.of("dark", "lounge", "spec_message_posted", "a", "h")));
+    assertFalse(scoped.test(Event.of("light", "kitchen", "spec_message_posted", "a", "h")));
+  }
+
+  @Test
   void parseFilterIgnoresBlankParameterValues() {
     var filter = SseHandler.parseFilter(URI.create("http://x/v1/events/stream?project=&type="));
     assertTrue(filter.test(Event.of("anything", null, "anything", "a", "h")));

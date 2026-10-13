@@ -701,6 +701,7 @@ adapter gives, not a name a caller recognises. Adding a harness is adding one ad
 | `skillsDir()`, `skillFolder(name)` | where skills live under `$HOME`, and the folder of one |
 | `headless(Launch)` | the command for a build, a reviewer, a fix agent or a full chat turn; fresh when the launch's `resumeSessionId` is null, resumed otherwise |
 | `readOnly(Launch)`, `readOnlyRefusal()` | the room lane's harness-restricted command, or why the harness has none |
+| `live(LiveLaunch)`, `liveSettings()` | the argv of a live member (one process prompted over stdin, read over stdout) and the settings file it runs under, or empty for a harness with no live mode |
 | `interactive(fullPermissions)`, `attach(sessionId)` | the TTY session, fresh or resuming a recorded conversation exactly by id |
 | `honoursReasoningEffort()`, `loginTunnelPort()`, `interactiveTip()` | whether a reasoning effort means anything, which port the login flow needs forwarded, what to tell an engineer before an interactive session |
 | `hooks()` | the harness's `HookFile`: which of its events run which of sail's `SailHook`s |
@@ -735,7 +736,9 @@ harness in `Harnesses.all()`.
 | `SessionEnd` | none | `SESSION_ENDED` |
 
 The file also carries `includeCoAuthoredBy: false` and the `permissions.deny` read rules that
-belt-and-brace the room lane's top credentials.
+belt-and-brace the room lane's top credentials. A live member runs under a second file,
+`~/.sail/claude-live.json`, with those two entries and no `hooks` key: sail reads a live
+process, so nothing in it reports back.
 
 | Codex event (`~/.codex/hooks.json`) | Matcher | Hooks |
 |---|---|---|
@@ -890,7 +893,9 @@ watcher):
   under `~/.sail/runs/<runId>/`), launched through `RunLauncher.launchSession` with a
   `LaunchSpec` naming its lane. A reviewer's and a fix agent's run rows name the review they
   serve (`runs.review_id`); the review id is not a run id. No lane runs an agent through a
-  blocking exec, and no lane has a log, unit or pid path of its own shape.
+  blocking exec, and no lane has a log, unit or pid path of its own shape. The one run that is
+  not a unit is a live room member's (below): the same row and the same files, under a unit
+  name systemd never knows.
   *`aReviewerThatCompletesHasItsStopRoutedByLaneAndItsStageResolvedFromItsOwnLog`,
   `twoSpecsPipelinesInOneContainerEachAdvanceOnlyOnTheirOwnRunsStop`,
   `RunStoreTest.aReviewerAndAFixAgentAreEachTheirOwnRunNamingTheReviewTheyServe`,
@@ -981,6 +986,188 @@ watcher):
   `ReviewLoopRecoveryTest.aKilledReviewersHalfWrittenVerdictNeverPassesItsReview`,
   `ReviewLoopRecoveryTest.aCrashedFixAgentNoWatcherCoversIsReconciledWithTheExitCodeItsUnitStillHolds`,
   `ReviewAgentLoopIT.aKilledReviewerLeavesNoAgentProcessBehindAndItsReviewErrorsWithTheReason`.*
+
+**Live room members.** A human posts in a room and its engaged agent answers. Where the
+agent's harness has a live mode (`Harness.live`, Claude Code's streaming mode; Codex has none)
+the member is one process that stays up between turns: `LiveMembers` starts it over pipes
+(`AgentProcess`, in production `ContainerAgentProcess`: one `incus exec` client whose stdin
+and stdout are the agent's), writes each prompt to its stdin as a JSON line the moment a
+message lands, and reads every line it writes (`LiveStream`). Sail is the only thing that
+speaks for it: the member runs no hook and posts no answer of its own. The words: the
+*member* is the agent on the room's roster (`Engagement`); the *live member* is the process
+serving it while it is awake; a *turn* is one prompt (or several queued) up to its `result`;
+a *wake* is the one-off run of a spec's own agent when nobody is engaged, and of a member
+whose harness has no live mode. The contract, each row with the tests that prove it
+(`LiveMemberTest`, `LiveMemberLanesTest`, `LiveMemberDisplacementTest` and
+`LiveMemberEdgesTest` drive the production `SailOperations`, `RoomWakeReactor`, `RunTracker`
+and bus over a fake container shell, a fake process and a fake clock; a test named without a
+class is `LiveMemberTest`'s):
+
+- **L1. One live member per room with a member, prompted at once.** `RoomWakeReactor` hands a
+  human message in such a room to `LiveMembers.deliver` with no debounce and no cooldown, under
+  the same `wakeable()` and `RoomWakePolicy` that decide a wake. A member with no process gets
+  one on that message; a message that arrives during a turn is written at once and starts the
+  next turn; the member's own reply prompts nothing. What is written is the room's human
+  messages the run was not yet handed, so a message that arrived while the member could not
+  start is in its next prompt. Messages are written oldest first, as many to a prompt as
+  `PromptConversation.MAX_CODE_POINTS` holds and none cut or left out: what does not fit is
+  the next prompt, written straight after, and a message longer than a prompt is written
+  across several, each part saying that more follows (`LiveMemberPrompt.messages`). A message
+  is recorded as delivered to the run only once the prompt that ends it was written, so one a
+  process took part of, or never took, is handed whole to the next; a fresh session's room
+  follows its opening the same way.
+  *`aHumanMessageStartsOneLiveProcessAndIsItsFirstPrompt`,
+  `aMessageDuringATurnIsWrittenAtOnceAndStartsTheNextTurn`,
+  `aMessageAfterATurnGoesToTheSameProcess`,
+  `LiveMemberEdgesTest.aMessageLongerThanAPromptIsWrittenAcrossPromptsAndIsDeliveredOnceAllOfItIs`,
+  `LiveMemberEdgesTest.aMessageAProcessTookOnlyPartOfIsHandedWholeToTheNext`,
+  `LiveMemberEdgesTest.aFreshSessionIsShownARoomLongerThanAPromptOnePromptAfterAnother`,
+  `LiveMemberPromptGoldenTest` (pages),
+  `RoomWakeReactorTest.aRoomWhoseMemberIsLiveIsPromptedAtOnceAndNeverWoken`,
+  `RoomWakeReactorTest.aLiveMemberIsPromptedOnlyByWhatWouldWakeIt`,
+  `LiveStreamTest.aPromptIsOneUserMessageLine`.*
+- **L2. Sail reads the process; the agent's reply is its text.** `system/init` records the
+  session on the run (`session_source` `stream-json`) and publishes `agent_session_started`;
+  a `text_delta` becomes `agent_text_delta`, fragments within 50 ms of one another told as
+  one; a `tool_use` block becomes `agent_tool_call` `started` with the tool and its first
+  string argument clipped to 120 code points, its `tool_result` the `finished`; `result` ends
+  the turn: the turn's text is posted through `postRoomMessage` as the run's principal under
+  the run's actor — the door and the actor the `spec` CLI gets, so the message rule, the
+  announcement and the sync trigger are the same — and `agent_turn_ended` names the message.
+  Every live event's `spec` is the room id and its data carries `run_id`, `room_id`,
+  `principal` and `turn`. A subagent's lines, a line over 1 MiB and a line that is not one of
+  these say nothing. The member's settings file (`~/.sail/claude-live.json`) carries the
+  read-deny rules and `includeCoAuthoredBy: false` and names no hook; it is installed and
+  fingerprinted beside the hooks file.
+  *`sailReadsTheProcessAndPostsTheTurnsTextAsTheMember`, `LiveStreamTest`,
+  `LiveMemberEdgesTest.textBlocksAreParagraphsAndLinesThatSayNothingAreIgnored`,
+  `LiveMemberEdgesTest.aTurnThatStreamedNothingPostsItsResultAndAnEmptyOnePostsNothing`,
+  `LiveMemberEdgesTest.whatTheAgentWritesIsBoundedWhereItEnters`,
+  `LiveMemberEdgesTest.aFragmentHeldBackIsToldWhenItsWindowElapses`,
+  `LiveMemberEdgesTest.aRoomThatRefusesTheReplyEndsTheTurnInError`,
+  `LiveMemberPromptGoldenTest`, `HarnessGoldenTest.claudeCodeLiveFullMember`,
+  `HarnessHooksGoldenTest.claudeCodeLiveSettingsNameNoHook`,
+  `ContainerSailSetupTest.fingerprintCoversEveryInstalledFile`.*
+- **L3. The room is the record.** `agent_text_delta`, `agent_tool_call` and `agent_turn_ended`
+  are `EPHEMERAL`: on the bus and the stream, never persisted, and no client may publish one
+  (they are absent from `EventAuthority`'s list, so an admin's and a run's publish are both
+  refused). `GET /v1/events/stream?room=<id>` scopes a stream to one room beside `project` and
+  `type`.
+  *`EventTest.aLiveMembersStreamIsEphemeralAndNothingElseIs`,
+  `SpecStoreAuditPersisterTest.aLiveMembersStreamIsNeverPersisted`,
+  `EventDoorTest.aTypeTheRuleDoesNotListIsRefusedFromEveryone`,
+  `EventDoorTest.aRunPublishesNothingButItsHooksOverTheSocket`,
+  `EventAuthorityTest.aTypeTheRuleDoesNotListIsNoClients`,
+  `SseHandlerTest.parseFilterScopesByRoomBesideProjectAndType`.*
+- **L4. A live member is one run.** One row (`room` or `room-full`), one credential, one
+  reservation and one pid file for the life of the process, under `AgentUnit.live(runId)`
+  (`live-<runId>`), so no watcher is armed for it and the missed-stop reconciler, which reads
+  the pid file first, leaves it alone while it lives. `LiveMembers.sweep` ends it when nothing
+  was written or read for the lane's `max_idle` (a turn open that long is a `stall`) or at the
+  lane's `max_duration`; a change of the room's seat, a restart or stop of sail and L5 end it
+  too. Ending closes its stdin, so it finishes and exits; it is given 60 s to exit when it was
+  only idle, 30 s to answer an open turn otherwise, then `kill -INT`, 10 s, `kill -TERM`. A
+  turn cut short is posted as far as it got and told with `is_error` and the reason. Every end
+  is `running` to `stopped` (or `failed`, for a process that died unasked while it owed an
+  answer or before its run recorded its pid, with the end of its log as the reason) as one
+  compare-and-set that revokes the credential, then the `agent_session_stopped` its watcher
+  would have published, `source` `live`. The next message starts a process that resumes the
+  newest session a live run of the same member and lane recorded. A process is prompted only
+  for a run that still holds what it reserved and a seat that is still its member's: once it
+  is registered, sail waits up to 30 s for the pid its wrapper writes, stamps it on the run
+  with the compare a launched run is verified by (`RunStore.updateProcess`, which lands only
+  on a `running` row) and reads the room's seat again; a process that wrote no pid, a run that
+  was ended or a seat that changed while it started ends the process with nothing written to
+  it, and one that wrote no pid has its run ended at once, as a launch that failed. So a live
+  run that records no pid was never prompted, and one that records a pid has a
+  pid file to be asked through. What a run reserved is freed on those two facts alone, by
+  whoever does not hold its process: a run with no pid is ended by a compare the stamp loses
+  to (`RunStore.transitionUnstarted`), and a run with one only when its container answers that
+  the process is gone. On start, `LiveMembers.reclaim` ends by that rule the live runs reserved
+  before this sail started (run ids are time-ordered, so a run this sail reserved as a message
+  landed during start is its own, registered or not); a run whose process it cannot prove gone
+  stays `running` with its reservation, is named on the server's stderr, and is finished by the
+  missed-stop reconciler once its container says the process is gone. A prompt is written
+  outside the member's lock, so a process that stopped reading its stdin is still read and still
+  ended, its stdin closed on a thread of its own while the signals go on; the reader finishes
+  the run only when no prompt is mid-write. A member whose output ended is over and gone from
+  its room whatever its last look or its finish met: a guard that cannot look loses that look
+  alone, and a run a store refused to finish is left to the claim that displaces it or the
+  sweep that finds its process gone, never behind a member that takes no prompt.
+  *`anIdleMemberEndsAndTheNextMessageResumesItsConversation`,
+  `theGraceEachEndWaitsWithIsPinned`,
+  `aProcessThatDiesMidTurnFailsItsRunAndTheNextMessageResumes`,
+  `LiveMemberEdgesTest.aProcessThatExitsBeforeItAnswersFailsItsRunAndSaysWhy`,
+  `LiveMemberEdgesTest.aPromptNobodyAnswersForTheIdleWindowIsAStall`,
+  `LiveMemberDisplacementTest.aMemberPastItsLifetimeIsCutShortAndResumes`,
+  `LiveMemberDisplacementTest.aTurnSilentForTheIdleWindowIsAStall`,
+  `LiveMemberLanesTest.aRestartOfSailFinishesTheMembersItLeftAndTheyResume`,
+  `LiveMemberLanesTest.aRestartKeepsTheRunOfAMemberItCannotProveGone`,
+  `LiveMemberLanesTest.aRunLeftWithNoProcessRecordedIsReclaimedWithoutAskingItsContainer`,
+  `LiveMemberLanesTest.aRunThisSailReservedIsNotOneItReclaims`,
+  `LiveMemberLanesTest.aReadOnlyMemberWhoseGuardCannotLookAsItExitsIsStillFinishedAndGone`,
+  `LiveMemberLanesTest.theMissedStopReconcilerLeavesALiveTurnAlone`,
+  `LiveMemberLanesTest.aMemberInAnotherLaneOrFromAWakeIsNotResumed`,
+  `LiveMemberEdgesTest.aMemberThatWillNotEndTakesNoPromptAndNothingStartsBesideIt`,
+  `LiveMemberEdgesTest.aMemberDismissedWhileItStartedIsEndedBeforeItIsPrompted`,
+  `LiveMemberDisplacementTest.aMemberWhoseRunAClaimEndedWhileItStartedIsNeverPrompted`,
+  `LiveMemberEdgesTest.aMemberIsPromptedOnlyOnceItsRunRecordsThePidItsWrapperWrote`,
+  `LiveMemberEdgesTest.aProcessThatNeverWritesItsPidIsEndedUnpromptedAndItsRunIsFreedAtOnce`,
+  `LiveMemberEdgesTest.aProcessThatEndsBeforeItWritesItsPidFailsItsRunAndSaysWhy`,
+  `LiveMemberEdgesTest.aMemberWhoseStartFailsIsEndedAndNeverPrompted`,
+  `LiveMemberDisplacementTest.aMemberThatStoppedReadingItsStdinIsStillReadAndIsStillEnded`,
+  `RunStoreTest.aRunThatRecordedNoProcessIsEndedAsUnstartedAndItsStampThenLosesTheCompare`,
+  `RunStoreTest.aRunThatRecordedItsProcessIsNotEndedAsUnstarted`,
+  `ContainerAgentProcessTest`,
+  `ReviewAgentLoopIT.aLiveMembersProcessStartsUnderItsInvocationAndIsPromptedOverItsStdin`.*
+- **L5. A claim or an attach displaces a live member; nothing else does.** A build, ad-hoc,
+  reviewer or fix claim that a live member's run holds ends that member
+  (`RunReservation.Displaceable`, outside the claim lock) and is made again, for up to three
+  holders; a chat lane's own claim, a claim another run holds and a member that would not end
+  are refused as before. `sail agent attach` on the member's run ends the member and then
+  opens the terminal on its session, and while that terminal is live no process is started
+  over the same session; the pty host's dispatch authority may list sessions for that
+  question, and a host that is there and cannot be asked has not said the session is free: the
+  member is not started, any claim it made is given back, and the room's next message asks
+  again. The member resumes on the room's next message once its repos, or its session, are
+  free. A process is owned by the sail that started it: another process on the box (a CLI
+  dispatch, the attach) cannot close its stdin and ends it by signal through its pid file, and
+  whichever sees it gone finishes its run. It frees the run by L4's two facts: a member that
+  has written no pid yet is ended as never started, and its owner, whose stamp then fails,
+  ends the process unprompted; a member that recorded its pid is signalled and its run kept
+  until the container answers that it is gone.
+  *`LiveMemberDisplacementTest` (an idle member, a turn that answers, one that never does, a
+  member that will not end, a build's hold, another room's member, a fix claim, a terminal,
+  the race with one, a session host that cannot be asked, another process, one that displaces
+  a member before its pid is written, and one as it is first prompted),
+  `RunReservationTest.aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs`,
+  `RunReservationTest.aChatLanesClaimAndAClaimAnotherRunHoldsDisplaceNoOne`,
+  `AgentAttachCommandTest.aLiveMembersRunIsTakenOverNotRefused`,
+  `PtyHostYieldTest.aSessionIsLiveWhoeverOpenedItAndNoHostMeansNoSession`.*
+- **L6. The lane's guard is the lane's, per turn.** A read-only member runs under the
+  read-only invocation with every prompt denied (`--permission-prompts none`); its commit
+  baseline is saved before each prompt, and as a turn opens that no prompt armed, and consumed
+  by `guardRoomRun` at each `result` and at the run's end, so a change is caught in the turn
+  it happened in. A full member holds its repo reservation.
+  *`LiveMemberLanesTest.aReadOnlyMemberIsGuardedTurnByTurn`,
+  `LiveMemberLanesTest.aTurnAQueuedMessageStartsIsGuardedFromItsFirstLine`,
+  `LiveMemberLanesTest.aReadOnlyMemberThatEndsMidTurnIsStillLookedAt`,
+  `HarnessGoldenTest.claudeCodeLiveReadOnlyMember`.*
+- **L7. Spec-less rooms are rooms.** A member of a room with no spec has a live member keyed
+  by the room id: its run names the room, its session is found through the room's runs, and
+  its events and stop carry the room id.
+  *`LiveMemberLanesTest.aRoomWithNoSpecHasALiveMemberKeyedByTheRoom`.*
+- **L8. The wake lane is untouched.** A spec whose agent is not engaged is woken as before:
+  the debounce, `RoomWakePrompt`, the hooks, the relay and the stop gate.
+  *`RoomWakeReactorTest`, `RoomWakeLaunchTest`, `RoomWakePromptTest`,
+  `aMemberDismissedMidTurnIsCutShortAndTheRoomFallsBackToItsWake`.*
+- **L9. A member whose harness has no live mode is woken per turn.** A Codex member keeps the
+  whole per-turn engaged path: the short debounce, the engaged prompt, the resumed session,
+  the owed-turn refire and the engagement sweep, none of which a live member's room uses.
+  *`LiveMemberLanesTest.aCodexMemberKeepsThePerTurnWake`,
+  `RoomWakeReactorTest.aMemberWhoseHarnessHasNoLiveModeKeepsThePerTurnWake`,
+  `RoomWakeReactorTest.aLiveMembersRoomOwesNoTurnOnAStopOrASweep`,
+  `HarnessGoldenTest.codexHasNoLiveMode`.*
 
 The loop closes: every wait is recorded, every review ends, and every stop says only what
 happened. Each clause with the tests that prove it (`ReviewLoopRecoveryTest` unless another
@@ -1670,7 +1857,9 @@ What each type drives, which is why its sender is checked: `SpecLifecycleReactor
 to `review` on `agent_session_stopped`; `ReviewPipelineController` starts a review on one this
 box observed; `RunTracker` finishes the run it names, revoking its credential and releasing
 its repos, on `agent_session_stopped` and `agent_session_completed`; `RoomWakeReactor`
-launches a wake on `spec_message_posted` and runs the room commit guard on a room run's stop;
+prompts a room's live member or launches a wake on `spec_message_posted`, ends the live member
+of a room whose seat changed on `spec_engaged` and `spec_disengaged`, and runs the room commit
+guard on a room run's stop;
 `RunActivityStamper` and the watcher's stall timer read the tool and log-chunk types as
 progress; `SlackReactor` and `WebhookReactor` notify on the dispatch, stop, failure, nudge,
 snapshot, guardrail, sync-health and review types; and the audit persisters record every

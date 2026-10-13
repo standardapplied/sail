@@ -296,6 +296,9 @@ class EventDoorTest {
         "spec_engaged",
         "guardrail_triggered",
         "sync_degraded",
+        "agent_text_delta",
+        "agent_tool_call",
+        "agent_turn_ended",
         "made_up"
       })
   void aTypeTheRuleDoesNotListIsRefusedFromEveryone(String type) throws Exception {
@@ -508,6 +511,9 @@ class EventDoorTest {
         "spec_message_posted",
         "board_updated",
         "spec_status_changed",
+        "agent_text_delta",
+        "agent_tool_call",
+        "agent_turn_ended",
         "made_up"
       })
   void aRunPublishesNothingButItsHooksOverTheSocket(String type) throws Exception {

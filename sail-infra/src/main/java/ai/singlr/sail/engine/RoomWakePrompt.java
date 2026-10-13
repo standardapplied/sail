@@ -133,7 +133,7 @@ public final class RoomWakePrompt {
         and Grep tools for files. Do not fight a denial; work within the lane. When the
         conversation shapes real work, describe the spec it deserves — a human (or a
         full-access turn) can create it. For a question only a human can settle, use
-        `spec comment %s --question --body <text>`.
+        `spec comment %s --body <text> --question`.
 
         This is one turn of a continuing conversation. Replies posted while you work are
         delivered into your context automatically after a tool call finishes, and unread
@@ -166,7 +166,7 @@ public final class RoomWakePrompt {
         that changes code — describe what a re-dispatch (`sail spec dispatch %s --restart`)
         or a follow-up spec should do instead of doing it here. If the
         conversation asks something you cannot answer or decide alone, post it back with
-        `spec comment %s --question --body <text>` — the flag pages the engineer on the
+        `spec comment %s --body <text> --question` — the flag pages the engineer on the
         board until a human replies.
 
         The room stays live while you work: replies posted in the meantime are delivered
@@ -190,7 +190,7 @@ public final class RoomWakePrompt {
         Do not fight a denial; work within the lane. If the conversation asks for code
         changes, describe them in the room — a human can dispatch, or re-engage you with
         full access. For a question only a human can settle, use
-        `spec comment %s --question --body <text>` — the flag pages the engineer on the
+        `spec comment %s --body <text> --question` — the flag pages the engineer on the
         board until a human replies.
 
         This is one turn of a continuing conversation. Replies posted while you work are

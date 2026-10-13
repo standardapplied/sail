@@ -12,8 +12,9 @@ import java.io.IOException;
  * credential by the host's {@link Resolver} — never from anything the client claims: a session
  * token minted by the gateway, or the box's ambient owner when the connection carries none. The one
  * non-FDE principal is {@link #DISPATCH}: the host's own dispatch authority, admitted by the
- * credential the host mints at start, allowed exactly one verb — yielding a session a reservation
- * displaced, whoever opened it — and nothing an FDE may do.
+ * credential the host mints at start, allowed two verbs — yielding a session a reservation
+ * displaced, and listing which sessions are live, whoever opened them — and nothing else an FDE may
+ * do.
  */
 public record PtyIdentity(String fde, boolean admin, boolean dispatchAuthority) {
 

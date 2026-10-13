@@ -163,6 +163,15 @@ public record Event(
 
     public static final String AGENT_PRESENCE = "agent_presence";
 
+    /** A live member wrote a fragment of its reply; {@code data.text} is the fragment. */
+    public static final String AGENT_TEXT_DELTA = "agent_text_delta";
+
+    /** A live member called a tool ({@code data.status} started) or had it answer (finished). */
+    public static final String AGENT_TOOL_CALL = "agent_tool_call";
+
+    /** A live member's turn ended; {@code data.message_id} is the reply sail posted for it. */
+    public static final String AGENT_TURN_ENDED = "agent_turn_ended";
+
     /** A host-owned terminal session started; emitted by the pty host, room-scoped when bound. */
     public static final String PTY_SESSION_STARTED = "pty_session_started";
 
@@ -200,14 +209,20 @@ public record Event(
     public static final Set<String> TELEMETRY_TYPES =
         Set.of(AGENT_TOOL_STARTED, AGENT_TOOL_FINISHED, AGENT_LOG_CHUNK);
 
+    /**
+     * The {@link RetentionClass#EPHEMERAL} types: on the bus and the stream only, never persisted.
+     * Presence, and what a live member's stream is made of — its text as it is written, its tool
+     * calls and its turn ends — which exist to be watched as they happen; what a reader sees
+     * afterwards is the message the turn became.
+     */
+    public static final Set<String> EPHEMERAL_TYPES =
+        Set.of(AGENT_PRESENCE, AGENT_TEXT_DELTA, AGENT_TOOL_CALL, AGENT_TURN_ENDED);
+
     public static RetentionClass retentionClass(String type) {
       if (TELEMETRY_TYPES.contains(type)) {
         return RetentionClass.TELEMETRY;
       }
-      return switch (type) {
-        case AGENT_PRESENCE -> RetentionClass.EPHEMERAL;
-        default -> RetentionClass.RECORD;
-      };
+      return EPHEMERAL_TYPES.contains(type) ? RetentionClass.EPHEMERAL : RetentionClass.RECORD;
     }
 
     /**
@@ -241,6 +256,9 @@ public record Event(
 
     /** {@link #SOURCE} value: the guardrail watcher, which observed the process exit code. */
     public static final String SOURCE_WATCHER = "watcher";
+
+    /** {@link #SOURCE} value: sail itself, which held a live member's process and saw it end. */
+    public static final String SOURCE_LIVE = "live";
 
     /** {@link #SOURCE} value: a deliberate operator cancel through the clean-stop lane. */
     public static final String SOURCE_OPERATOR = "operator";
@@ -322,6 +340,15 @@ public record Event(
      * Absent on an ad-hoc (non-dispatch) session that minted no run.
      */
     public static final String RUN_ID = "run_id";
+
+    /** The room a live member's event belongs to, beside the event's own {@code spec}. */
+    public static final String ROOM_ID = "room_id";
+
+    /** The principal a live member speaks as: the author of the message its turn becomes. */
+    public static final String PRINCIPAL = "principal";
+
+    /** Which turn of its process a live member's event belongs to, counted from 1. */
+    public static final String TURN = "turn";
 
     /** The id of the message a {@code spec_message_posted} event announces. */
     public static final String MESSAGE_ID = "message_id";

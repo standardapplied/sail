@@ -187,7 +187,7 @@ public final class RoomWakeLauncher {
    * The refusal of a wake whose target moved off this box between the reactor's check and the
    * launch: a run acts for its box's FDE, and main takes a run's work only for what that FDE owns.
    */
-  private static ApiException notThisBoxs(String target, String owner, String localHandle) {
+  static ApiException notThisBoxs(String target, String owner, String localHandle) {
     return new ApiException(
         ErrorCode.NOT_YOUR_SPEC,
         target

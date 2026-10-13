@@ -13,6 +13,7 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +59,18 @@ class SpecStoreAuditPersisterTest {
         persister
             .filter()
             .test(Event.of("proj", "spec-1", Event.WellKnownTypes.AGENT_PRESENCE, "sail", "host")));
+  }
+
+  @Test
+  void aLiveMembersStreamIsNeverPersisted() {
+    for (var type :
+        List.of(
+            Event.WellKnownTypes.AGENT_TEXT_DELTA,
+            Event.WellKnownTypes.AGENT_TOOL_CALL,
+            Event.WellKnownTypes.AGENT_TURN_ENDED)) {
+      assertFalse(
+          persister.filter().test(Event.of("proj", "room-1", type, "claude-code", "host")), type);
+    }
   }
 
   @Test
