@@ -221,14 +221,22 @@ public final class Erasure {
    * main's full walk, then whatever else its history files under the project — each live row, its
    * conflicts and box-local rows, and every entry, head and offer of it, erasures included. How a
    * project that left a node's scope leaves the node, whatever main had acknowledged of it: main
-   * sends nothing of it again, so nothing may stay to be offered or matched against a page.
-   * Journals nothing and names no actor. Returns what went.
+   * sends nothing of it again, so nothing may stay to be offered or matched against a page. What
+   * the walk reaches that history files under another project stays: the room and the runs a spec
+   * left behind when it moved here are that project's, which main still sends this box and would
+   * never send again. Journals nothing and names no actor. Returns what went.
    */
   public Result dropLocal(String project) {
     return db.transaction(
         () -> {
           deferReplyConstraint();
           var entities = new LinkedHashSet<>(closure(List.of(new Target(PROJECT, project))));
+          entities.removeIf(
+              target ->
+                  changeLog
+                      .headProject(target.type(), target.id())
+                      .filter(filed -> !project.equals(filed))
+                      .isPresent());
           entities.addAll(
               db.query(
                   "SELECT entity_type, entity_id FROM change_heads WHERE project = ? ORDER BY seq",

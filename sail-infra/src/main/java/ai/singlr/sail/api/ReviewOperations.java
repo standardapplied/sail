@@ -88,8 +88,7 @@ final class ReviewOperations {
   FollowupSpecResponse createFollowup(String sourceSpecId, FollowupCreateRequest request) {
     requireStore();
     var source =
-        specStore
-            .findById(sourceSpecId)
+        Scoped.row(Actor.reader(), specStore.findById(sourceSpecId), SpecStore.SpecRow::project)
             .orElseThrow(
                 () ->
                     new ApiException(

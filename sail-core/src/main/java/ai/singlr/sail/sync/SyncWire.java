@@ -394,9 +394,11 @@ public final class SyncWire {
    * snapshot; {@code kind} says which, so no reader infers one from the other. Having no snapshot
    * to name its author in, a tombstone or an erasure carries the {@code author} main recorded, so
    * the node records the same one; an older main sends none. A revision's author rides in its
-   * snapshot. For the same reason a tombstone or an erasure carries the {@code project} main's head
-   * files it in, so a node that never held the row files it there too and it leaves with the
-   * project; an older main sends none, and a version outside any page names none.
+   * snapshot. Every entry carries the {@code project} main's head files it in, and the node files
+   * its own head there: a tombstone or an erasure has no snapshot to name one, and a review or a
+   * message names none either, so a node left to work it out from the parent it holds could file
+   * the row elsewhere than main does and drop, or keep, what main does not. An older main sends
+   * none, and a version outside any page names none.
    */
   public record Entry(
       long seq,
@@ -433,7 +435,7 @@ public final class SyncWire {
           author);
     }
 
-    /** An entry naming no project: a revision, or what a main before scopes sent. */
+    /** An entry naming no project: a version outside any page, or what an older main sent. */
     public Entry(
         long seq,
         String id,
@@ -813,15 +815,13 @@ public final class SyncWire {
     map.put(REV, entry.rev());
     map.put(DELETED, entry.deleted());
     map.put(KIND, entry.kind().wire());
-    if (!entry.deleted()) {
-      map.put(SNAPSHOT, entry.snapshot());
-      return map;
-    }
-    if (entry.author() != null) {
-      map.put(AUTHOR, entry.author());
-    }
     if (entry.project() != null) {
       map.put(PROJECT, entry.project());
+    }
+    if (!entry.deleted()) {
+      map.put(SNAPSHOT, entry.snapshot());
+    } else if (entry.author() != null) {
+      map.put(AUTHOR, entry.author());
     }
     return map;
   }

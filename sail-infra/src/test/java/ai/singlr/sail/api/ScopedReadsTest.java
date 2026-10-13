@@ -44,6 +44,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -183,6 +184,74 @@ class ScopedReadsTest {
           "recordRunSession",
           "recordRoomConversation");
 
+  /** The id bravo's run is asked under where a write is addressed to a run nobody holds. */
+  private static final String NO_SUCH_RUN = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+
+  /**
+   * The writes that address something by id — method, route and body — each asked of bravo's and of
+   * something nobody holds. Held complete like the reads: every operation no {@code GET} reaches is
+   * reached by a write of this table or by a birth the test makes beside it, or is declared one
+   * HTTP never addresses to a row.
+   */
+  private static final List<List<String>> ADDRESSED_WRITES =
+      List.of(
+          List.of("PUT", "/v1/specs/{spec}", "{\"title\": \"taken over\"}"),
+          List.of("DELETE", "/v1/specs/{spec}", ""),
+          List.of("PUT", "/v1/specs/{spec}/content", "{\"body\": \"b\"}"),
+          List.of("POST", "/v1/specs/{spec}/restore", "{\"rev\": \"1-main\"}"),
+          List.of("POST", "/v1/specs/{spec}/followup", "{}"),
+          List.of("POST", "/v1/specs:prune", "{\"ids\": [\"{spec}\"]}"),
+          List.of("POST", "/v1/rooms/{room}/messages", "{\"body\": \"hello\"}"),
+          List.of("POST", "/v1/rooms/{spec}/messages", "{\"body\": \"hello\"}"),
+          List.of("POST", "/v1/rooms/{room}/members", "{\"agent\": \"claude-code\"}"),
+          List.of("POST", "/v1/rooms/{spec}/members", "{\"agent\": \"claude-code\"}"),
+          List.of("DELETE", "/v1/rooms/{room}/members", ""),
+          List.of("DELETE", "/v1/rooms/{spec}/members", ""),
+          List.of("DELETE", "/v1/rooms/{room}", ""),
+          List.of("POST", "/v1/reviews/{review}/approve", ""),
+          List.of("POST", "/v1/reviews/{review}/dismiss/a-finding", ""),
+          List.of("POST", "/v1/runs/{run}/stop", ""),
+          List.of("POST", "/v1/conflicts/{spec}/resolve?type=spec", "{\"strategy\": \"mine\"}"),
+          List.of("POST", "/v1/events", event("{project}", "\"spec\": \"{spec}\", ", "")),
+          List.of("POST", "/v1/events", event("alpha", "\"spec\": \"{spec}\", ", "")),
+          List.of("POST", "/v1/events", event("alpha", "", ", \"run_id\": \"{run}\"")),
+          List.of("POST", "/v1/projects/{project}/dispatch", "{}"),
+          List.of("POST", "/v1/projects/{project}/snapshots/a-label/restore", ""),
+          List.of("DELETE", "/v1/projects/{project}/snapshots/a-label", ""));
+
+  /** A retold {@code spec_dispatched} addressed to {@code project} and what {@code about} names. */
+  private static String event(String project, String spec, String run) {
+    return "{\"ts\": \"2026-10-13T00:00:00Z\", \"project\": \""
+        + project
+        + "\", "
+        + spec
+        + "\"type\": \"spec_dispatched\", \"agent\": \"sam\", \"host\": \"laptop\","
+        + " \"data\": {\"source\": \"sync\""
+        + run
+        + "}}";
+  }
+
+  /** A retold announcement of message {@code id}, addressed to alpha. */
+  private static String announcement(String id) {
+    return "{\"ts\": \"2026-10-13T00:00:00Z\", \"project\": \"alpha\","
+        + " \"type\": \"spec_message_posted\", \"agent\": \"sam\", \"host\": \"laptop\","
+        + " \"data\": {\"source\": \"sync\", \"message_id\": \""
+        + id
+        + "\"}}";
+  }
+
+  /** The operations HTTP never addresses to a row: a round of sync, and the local socket's. */
+  private static final Set<String> NEVER_ADDRESSED_OVER_HTTP =
+      Set.of(
+          "sync",
+          "runForCredential",
+          "runActor",
+          "boxActorForCredential",
+          "runInbox",
+          "ackRunMessages",
+          "recordRunSession",
+          "recordRoomConversation");
+
   @TempDir Path tempDir;
 
   private final List<String> containers = new CopyOnWriteArrayList<>();
@@ -226,7 +295,7 @@ class ScopedReadsTest {
                     new BoxShell(),
                     ProjectReader.ofCatalog(new ProjectStore(db)),
                     (command, logPath) -> 4242L,
-                    null,
+                    new EventBus(),
                     recent,
                     specs,
                     new ReviewStore(db),
@@ -242,12 +311,7 @@ class ScopedReadsTest {
             db,
             tempDir.resolve("projects"));
     var auth = TestAuth.tokens(db);
-    var streamer =
-        new AgentLogStreamer(
-            auth,
-            runs::findById,
-            spec -> specs.findById(spec).map(SpecStore.SpecRow::owner),
-            () -> "main");
+    var streamer = new AgentLogStreamer(auth, runs::findById, specs::findById, () -> "main");
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/",
@@ -327,7 +391,7 @@ class ScopedReadsTest {
 
   @Test
   void aScopedCallersWriteOutsideItsScopeIsAnsweredAsOneOnWhatDoesNotExist() throws Exception {
-    Acting.system(this::bravoArrives);
+    var bravoReview = Acting.system(this::bravoArrives);
     var before = entries();
 
     assertEquals(
@@ -346,23 +410,47 @@ class ScopedReadsTest {
             "POST",
             "/v1/specs",
             "{\"id\": \"bravo-spec\", \"project\": \"alpha\", \"title\": \"t\"}"));
-    for (var write :
-        List.of(
-            List.of("PUT", "/v1/specs/{spec}", "{\"title\": \"taken over\"}"),
-            List.of("DELETE", "/v1/specs/{spec}", ""),
-            List.of("PUT", "/v1/specs/{spec}/content", "{\"body\": \"b\"}"),
-            List.of("POST", "/v1/rooms/{room}/messages", "{\"body\": \"hello\"}"),
-            List.of("DELETE", "/v1/rooms/{room}", ""),
-            List.of("POST", "/v1/projects/{project}/dispatch", "{}"))) {
+    var told = new ArrayList<String>();
+    for (var write : ADDRESSED_WRITES) {
       var onBravo =
           send(
-              sam, write.get(0), addressed(write.get(1), "bravo", B_RUN, "", B_FILE), write.get(2));
+              sam,
+              write.get(0),
+              addressed(write.get(1), "bravo", B_RUN, bravoReview, B_FILE),
+              addressed(write.get(2), "bravo", B_RUN, bravoReview, B_FILE));
       var onNothing =
           send(
-              sam, write.get(0), addressed(write.get(1), "ghost", B_RUN, "", B_FILE), write.get(2));
-      assertEquals("404", onBravo.substring(0, 3), write + ": " + onBravo);
-      assertEquals(onNothing.replace("ghost", "bravo"), onBravo, write.toString());
+                  sam,
+                  write.get(0),
+                  addressed(write.get(1), "ghost", NO_SUCH_RUN, NO_SUCH_REVIEW, B_FILE),
+                  addressed(write.get(2), "ghost", NO_SUCH_RUN, NO_SUCH_REVIEW, B_FILE))
+              .replace("ghost", "bravo")
+              .replace(NO_SUCH_RUN, B_RUN)
+              .replace(NO_SUCH_REVIEW, bravoReview);
+      if (!onBravo.equals(onNothing) || !onBravo.startsWith("4")) {
+        told.add(write.get(0) + " " + write.get(1) + "\n  " + onBravo + "\n  " + onNothing);
+      }
     }
+    assertEquals(List.of(), told, "a write on bravo's is answered as one on what nobody holds");
+    var said =
+        db.queryOne(
+                "SELECT id FROM room_messages WHERE room_id = 'bravo-room' LIMIT 1",
+                row -> row.text(0))
+            .orElseThrow();
+    var announced = send(sam, "POST", "/v1/events", announcement(said));
+    assertEquals("403", announced.substring(0, 3), announced);
+    assertEquals(
+        send(sam, "POST", "/v1/events", announcement(NO_SUCH_RUN)).replace(NO_SUCH_RUN, said),
+        announced,
+        "a message in bravo's room is announced as one nobody holds");
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sail fde grant <handle> <project>.", "field_errors": []}}""",
+        send(
+            sam,
+            "POST",
+            "/v1/rooms",
+            "{\"id\": \"sneak-room\", \"project\": \"bravo\", \"title\": \"t\"}"));
     assertEquals(
         "404", send(sam, "PUT", "/v1/projects/bravo/files/notes.md", "sneaked in").substring(0, 3));
     assertEquals(before, entries(), "nothing of any refused write was recorded");
@@ -379,6 +467,11 @@ class ScopedReadsTest {
         "200",
         send(ada, "PUT", "/v1/specs/bravo-spec", "{\"title\": \"an admin edits it\"}")
             .substring(0, 3));
+    var writes = new TreeSet<>(NOT_READ_OVER_HTTP);
+    writes.removeAll(NEVER_ADDRESSED_OVER_HTTP);
+    assertEquals(
+        writes,
+        reached.stream().filter(writes::contains).collect(Collectors.toCollection(TreeSet::new)));
   }
 
   @Test
@@ -472,6 +565,95 @@ class ScopedReadsTest {
     }
     assertEquals(false, ask(sam, "/v1/specs/wander").contains(run));
     assertEquals(true, ask(ada, "/v1/specs/wander").contains(run));
+
+    var asked =
+        Acting.system(
+            () ->
+                new MessageStore(db).append("wander", "claude-code/" + run, "Which?", null, true));
+    for (var read : List.of("/v1/specs/wander", "/v1/specs?project=alpha", "/v1/specs")) {
+      assertEquals(false, ask(sam, read).contains(asked.id()), read);
+      assertEquals(true, ask(ada, read).contains(asked.id()), read);
+    }
+    for (var board : List.of("/v1/specs/board", "/v1/specs/board?project=alpha")) {
+      assertEquals(true, ask(sam, board).contains("\"needs_reply\": 0"), board);
+      assertEquals(true, ask(ada, board).contains("\"needs_reply\": 1"), board);
+    }
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeIsNeitherSeatedInNorRestoredToWhatItLeftInAnotherProject()
+      throws Exception {
+    Acting.system(this::bravoArrives);
+    assertEquals(
+        "201",
+        send(
+                ada,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"wander\", \"project\": \"bravo\", \"title\": \"t\"}")
+            .substring(0, 3));
+    assertEquals(
+        "200", send(ada, "PUT", "/v1/specs/wander", "{\"project\": \"alpha\"}").substring(0, 3));
+    var inBravo =
+        new SpecStore(db)
+            .history("wander").stream()
+                .filter(
+                    revision ->
+                        "bravo".equals(YamlUtil.parseMap(revision.snapshot()).get("project")))
+                .findFirst()
+                .orElseThrow()
+                .rev();
+    var before = entries();
+
+    for (var seat :
+        List.of(List.of("POST", "{\"agent\": \"claude-code\"}"), List.of("DELETE", ""))) {
+      assertEquals(
+          """
+          404 {"schema_version": 1, "error": {"code": "room_not_found", "message": "Room 'wander' was not found.", "field_errors": []}}""",
+          send(sam, seat.get(0), "/v1/rooms/wander/members", seat.get(1)),
+          seat.get(0) + ": the spec is sam's to see, the room it lives in is not");
+    }
+    assertEquals(
+        send(sam, "POST", "/v1/specs/wander/restore", "{\"rev\": \"1-nobody\"}")
+            .replace("1-nobody", inBravo),
+        send(sam, "POST", "/v1/specs/wander/restore", "{\"rev\": \"" + inBravo + "\"}"),
+        "a revision made in bravo is one sam's history of the spec does not hold");
+    assertEquals(before, entries(), "nothing of any refused write was recorded");
+    assertEquals("200", ask(ada, "/v1/rooms/wander/members").substring(0, 3), "ada sees the room");
+  }
+
+  @Test
+  void aRunWhoseSpecLeftTheScopeNeverSaysWhoOwnsThatSpecNow() throws Exception {
+    Acting.system(this::bravoArrives);
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    Acting.system(
+        () ->
+            new RunStore(db)
+                .create(
+                    run,
+                    "alpha",
+                    "bravo-spec",
+                    "main",
+                    "build",
+                    "claude-code",
+                    "b",
+                    "t",
+                    null,
+                    null,
+                    "/log",
+                    "u"));
+    assertEquals(
+        true, ask(sam, "/v1/runs/" + run).contains("bravo-spec"), "the run is sam's to see");
+
+    for (var door :
+        List.of(
+            List.of("GET", "/v1/runs/" + run + "/log"),
+            List.of("GET", "/v1/runs/" + run + "/stream"),
+            List.of("POST", "/v1/runs/" + run + "/stop"))) {
+      var refused = send(sam, door.get(0), door.get(1), "");
+      assertEquals("403", refused.substring(0, 3), door + ": " + refused);
+      assertEquals(false, refused.contains("ada"), door + ": " + refused);
+    }
   }
 
   @Test

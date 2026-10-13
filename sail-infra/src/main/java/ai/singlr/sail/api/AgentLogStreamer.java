@@ -58,22 +58,22 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
-  private final Function<String, Optional<String>> specOwner;
+  private final Function<String, Optional<SpecStore.SpecRow>> specLookup;
   private final Supplier<String> localHandle;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
-    this(auth, AgentLogStreamer::lookupFromDb, AgentLogStreamer::ownerFromDb, NodeIdentity::handle);
+    this(auth, AgentLogStreamer::lookupFromDb, AgentLogStreamer::specFromDb, NodeIdentity::handle);
   }
 
   AgentLogStreamer(
       ApiAuth auth,
       Function<String, Optional<RunStore.RunRow>> runLookup,
-      Function<String, Optional<String>> specOwner,
+      Function<String, Optional<SpecStore.SpecRow>> specLookup,
       Supplier<String> localHandle) {
     this.auth = auth;
     this.runLookup = runLookup;
-    this.specOwner = specOwner;
+    this.specLookup = specLookup;
     this.localHandle = localHandle;
   }
 
@@ -85,9 +85,9 @@ public final class AgentLogStreamer implements HttpHandler {
     }
   }
 
-  private static Optional<String> ownerFromDb(String specId) {
+  private static Optional<SpecStore.SpecRow> specFromDb(String specId) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::owner);
+      return new SpecStore(db).findById(specId);
     } catch (RuntimeException e) {
       return Optional.empty();
     }
@@ -124,7 +124,11 @@ public final class AgentLogStreamer implements HttpHandler {
       }
       var refusal =
           RunAuthority.access(
-              actor, run.id(), StopOperations.specIdOf(run), RunAuthority.owners(run, specOwner));
+              actor,
+              run.id(),
+              StopOperations.specIdOf(run),
+              RunAuthority.owners(
+                  run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
       if (refusal.isPresent()) {
         var refused = refusal.get();
         var code = Refusals.code(refused.kind());

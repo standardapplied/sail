@@ -1372,11 +1372,15 @@ public final class SailOperations implements HostOperations {
     return served.apply(run);
   }
 
-  /** The current owner of {@code specId}, empty when the spec is absent or the store not wired. */
+  /**
+   * The current owner of {@code specId}, empty when the spec is absent or the store not wired, and
+   * when the reader may not see the spec: a run stays in the project it ran in, so the spec it
+   * worked may have moved to one outside the reader's scope, and its owner is not the run's to say.
+   */
   private Optional<String> specOwner(String specId) {
     return specStore == null
         ? Optional.empty()
-        : specStore.findById(specId).map(SpecStore.SpecRow::owner);
+        : StopOperations.ownerSeen(Actor.reader(), specStore.findById(specId));
   }
 
   private RunStore requireRunStore() {
@@ -1864,7 +1868,7 @@ public final class SailOperations implements HostOperations {
               detail.plan(),
               detail.openFindings(),
               detail.latestRun(),
-              messageStore.openQuestions().get(detail.spec().roomId()));
+              ofReadableRooms(messageStore.openQuestions()).get(detail.spec().roomId()));
         });
   }
 
@@ -2074,7 +2078,7 @@ public final class SailOperations implements HostOperations {
           if (messageStore == null) {
             return board;
           }
-          var open = messageStore.openQuestions().keySet();
+          var open = ofReadableRooms(messageStore.openQuestions()).keySet();
           var count =
               globalSpecOps
                   .readable(new SpecStore.SpecFilter(project, null, null, null, null))

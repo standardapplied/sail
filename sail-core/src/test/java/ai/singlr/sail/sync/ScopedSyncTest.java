@@ -423,6 +423,45 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aRevocationTakesWhatMainFilesUnderTheProjectAndLeavesWhatAMovedSpecLeftInAnother() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    Acting.system(() -> main.specs.update(spec("beta-work", A, "uma")));
+    Acting.system(() -> main.specs.update(spec("alpha-work", B, "nia")));
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+    var left =
+        List.of(
+            "specs WHERE id = '%s-work'",
+            "rooms WHERE id = '%s-work'",
+            "room_messages WHERE room_id = '%s-work'",
+            "runs WHERE spec_id = '%s-work'",
+            "reviews WHERE spec_id = '%s-work'");
+    assertEquals(List.of(1L, 1L, 2L, 1L, 1L), held(left, "alpha"));
+    assertEquals(List.of(1L, 1L, 2L, 1L, 1L), held(left, "beta"));
+
+    SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of(B)))));
+
+    assertEquals(
+        List.of(1L, 0L, 0L, 0L, 0L),
+        held(left, "alpha"),
+        "the spec moved to beta stays, and what it left in alpha goes with alpha");
+    assertEquals(
+        List.of(0L, 1L, 2L, 1L, 1L),
+        held(left, "beta"),
+        "the spec moved to alpha goes, and what it left in beta stays");
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM change_heads WHERE project = 'alpha'"));
+    SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+    SyncBox.quiesce(main, nia);
+    SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+  }
+
+  private List<Long> held(List<String> tables, String work) {
+    return tables.stream()
+        .map(table -> count(nia.db, "SELECT count(*) FROM " + table.formatted(work)))
+        .toList();
+  }
+
+  @Test
   void aProjectWithARunUnderWayHereIsKeptUntilTheRunEnds() {
     seed(main, A, "nia");
     SyncBox.quiesce(main, nia);

@@ -13,10 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
@@ -80,7 +82,31 @@ class AgentLogStreamerTest {
       java.util.function.Function<String, Optional<RunStore.RunRow>> lookup,
       java.util.function.Function<String, Optional<String>> assignee,
       String localHandle) {
-    return new AgentLogStreamer(exchange -> {}, lookup, assignee, () -> localHandle);
+    return new AgentLogStreamer(
+        exchange -> {},
+        lookup,
+        id -> assignee.apply(id).map(owner -> specOf(id, owner)),
+        () -> localHandle);
+  }
+
+  private static SpecStore.SpecRow specOf(String id, String assignee) {
+    return new SpecStore.SpecRow(
+        id,
+        "acme",
+        "t",
+        SpecStatus.IN_PROGRESS,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        "",
+        "",
+        null,
+        List.of(),
+        List.of());
   }
 
   @Test

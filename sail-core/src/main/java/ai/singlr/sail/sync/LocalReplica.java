@@ -131,9 +131,9 @@ public interface LocalReplica {
   String currentRev(String id);
 
   /**
-   * Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). A deletion
-   * names no project of its own, so it is filed under {@code project}, the one main names for it;
-   * null when main names none.
+   * Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete), filed under
+   * {@code project}, the one main's head names for it, so this box and main agree on which project
+   * the row leaves with; null when main names none, and the state then files itself.
    */
   void adopt(String id, Map<String, Object> snapshot, String rev, String project);
 

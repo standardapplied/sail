@@ -734,6 +734,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     return changeLog.head(ENTITY, id);
   }
 
+  /** The project the head of spec {@code id} carries, which outlives its row and its erasure. */
+  public Optional<String> headProject(String id) {
+    return changeLog.headProject(ENTITY, id);
+  }
+
   private Map<String, Object> snapshotMap(SpecRow spec) {
     var hashes =
         db.queryOne(

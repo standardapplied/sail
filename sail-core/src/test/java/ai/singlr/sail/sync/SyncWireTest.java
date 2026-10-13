@@ -23,7 +23,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -363,7 +362,7 @@ class SyncWireTest {
   }
 
   @Test
-  void aProjectTravelsOnlyWhereNoSnapshotCanNameIt() {
+  void anEntryCarriesTheProjectMainFilesItUnderWhateverItsKind() {
     var entries =
         List.of(
             new SyncWire.Entry(
@@ -380,10 +379,7 @@ class SyncWireTest {
                 SyncWire.decodeResponse(SyncWire.encode(new SyncWire.Page(entries, 4, true, 4))))
             .entries();
 
-    assertEquals(
-        Arrays.asList(null, "alpha", "alpha", null),
-        decoded.stream().map(SyncWire.Entry::project).toList());
-    assertEquals(entries.subList(1, 4), decoded.subList(1, 4));
+    assertEquals(entries, decoded);
     assertFalse(
         SyncWire.encode(new SyncWire.Page(entries.subList(3, 4), 4, true, 4)).contains("project"),
         "an entry main names no project for reads as one an earlier main sent");

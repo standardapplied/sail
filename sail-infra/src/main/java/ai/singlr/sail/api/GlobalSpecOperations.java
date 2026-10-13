@@ -548,26 +548,29 @@ final class GlobalSpecOperations {
 
   /**
    * The spec a restore targets, live or deleted with its tombstone retained. A pruned spec is gone
-   * with its history, and the refusal says so; an id never recorded is not found.
+   * with its history, and the refusal says so; an id never recorded is not found, and neither is
+   * one whose head is of a project outside the caller's scope, whatever became of it.
    */
   private SpecStore.LastKnown restorable(String specId) {
     var head =
-        specStore
-            .head(specId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+        Scoped.row(
+                Actor.reader(),
+                specStore.head(specId),
+                found -> specStore.headProject(specId).orElse(null))
+            .orElseThrow(() -> notFound(specId));
     if (head.kind() == ChangeLog.Kind.ERASURE) {
       throw new ApiException(ErrorCode.SPEC_PRUNED, specStore.pruned(specId));
     }
     return specStore.lastKnown(specId).orElseThrow();
   }
 
-  /** Revision {@code rev} of spec {@code specId} as the spec rule reads it. */
+  /**
+   * Revision {@code rev} of spec {@code specId} as the spec rule reads it. One made in a project
+   * outside the caller's scope, which the history hides from it, is one its history does not hold.
+   */
   private Map<String, Object> revision(String specId, String rev) {
     var revision = specStore.comparableAtRev(specId, rev);
-    if (revision == null) {
+    if (revision == null || !Actor.reader().scope().admits(Snapshots.text(revision, "project"))) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev));
     }
     return revision;

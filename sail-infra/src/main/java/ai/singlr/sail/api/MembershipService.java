@@ -92,13 +92,39 @@ public final class MembershipService {
    * outside the reader's scope reads as one that is not there.
    */
   public java.util.List<Engagement> members(String roomId) {
-    var store = rooms.get();
+    return Roster.fromJson(readable(rooms.get(), roomId).roster()).members();
+  }
+
+  /**
+   * The room a membership addresses, to read or to change: one outside the caller's scope is
+   * answered as one that is not there, before any rule can say whose it is.
+   */
+  private static RoomStore.RoomRow readable(RoomStore store, String roomId) {
     var held = store == null ? Optional.<RoomStore.RoomRow>empty() : store.findById(roomId);
-    var room = Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project).orElse(null);
-    if (room == null) {
-      throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+    return Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
+        .orElseThrow(() -> roomNotFound(roomId));
+  }
+
+  /**
+   * {@code spec} when the caller's scope admits it and the room it lives in, which a spec moved
+   * between projects left behind in another; otherwise the room that was not found under its id.
+   */
+  private SpecStore.SpecRow readable(SpecStore.SpecRow spec) {
+    var reader = Actor.reader();
+    var store = rooms.get();
+    var room =
+        store == null
+            ? Optional.<RoomStore.RoomRow>empty()
+            : store.findById(spec.roomIdOrIdentity());
+    if (Scoped.row(reader, Optional.of(spec), SpecStore.SpecRow::project).isEmpty()
+        || (room.isPresent() && Scoped.row(reader, room, RoomStore.RoomRow::project).isEmpty())) {
+      throw roomNotFound(spec.id());
     }
-    return Roster.fromJson(room.roster()).members();
+    return spec;
+  }
+
+  private static ApiException roomNotFound(String roomId) {
+    return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
   /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */
@@ -125,7 +151,7 @@ public final class MembershipService {
       String model,
       boolean takeSnapshot,
       String localHandle) {
-    var spec = specStore.findById(specId).orElse(null);
+    var spec = specStore.findById(specId).map(this::readable).orElse(null);
     if (spec == null) {
       return engageSpecless(specId, agentYamlName, mode, model, localHandle);
     }
@@ -173,13 +199,7 @@ public final class MembershipService {
   private EngageLaunch engageSpecless(
       String roomId, String agentYamlName, String mode, String model, String localHandle) {
     var store = requireRooms();
-    var room =
-        store
-            .findById(roomId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    var room = readable(store, roomId);
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     admission.requireTrustedRoster(localHandle);
@@ -234,7 +254,7 @@ public final class MembershipService {
 
   /** Dismisses the room's standing member. Idempotent: dismissing an empty room is a no-op. */
   public String disengage(String specId, String localHandle) {
-    var spec = specStore.findById(specId).orElse(null);
+    var spec = specStore.findById(specId).map(this::readable).orElse(null);
     if (spec == null) {
       return disengageSpecless(specId, localHandle);
     }
@@ -255,13 +275,7 @@ public final class MembershipService {
 
   private String disengageSpecless(String roomId, String localHandle) {
     var store = requireRooms();
-    var room =
-        store
-            .findById(roomId)
-            .orElseThrow(
-                () ->
-                    new ApiException(
-                        ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+    var room = readable(store, roomId);
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
     var standing = Roster.fromJson(room.roster()).standing();

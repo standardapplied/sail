@@ -336,8 +336,8 @@ public final class SyncEngine {
     /**
      * Adopts main's version at {@code rev} if the local row still sits at {@code expectedLocalRev},
      * as main recording {@code author} — so a tombstone, which has no snapshot to name its author
-     * in, records the same author on this box as on main, and is filed under the project main names
-     * for it.
+     * in, records the same author on this box as on main — filed under the project main names for
+     * it.
      */
     private boolean adopt(
         String id,

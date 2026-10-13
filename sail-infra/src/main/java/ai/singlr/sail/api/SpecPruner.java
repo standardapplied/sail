@@ -250,23 +250,21 @@ final class SpecPruner {
   /**
    * Up to {@code limit} entities the request still has to erase. A spec named by id must be the
    * actor's to prune and prunable; one already pruned is nothing to do, one never recorded is not
-   * found. A project is a root only when this box holds something of it, so a name nobody used is
-   * never spent.
+   * found, and neither is one whose head is of a project outside the actor's scope, pruned or not.
+   * A project is a root only when this box holds something of it, so a name nobody used is never
+   * spent.
    */
   private List<Erasure.Target> roots(PruneRequest request, int limit) {
     var roots = new ArrayList<Erasure.Target>();
     for (var id : request.ids()) {
       var target = new Erasure.Target(Erasure.SPEC, id);
+      if (!Actor.current().scope().admits(specs.headProject(id).orElse(null))) {
+        throw notFound(id);
+      }
       if (erasure.isErased(target)) {
         continue;
       }
-      var spec =
-          specs
-              .lastKnown(id)
-              .orElseThrow(
-                  () ->
-                      new ApiException(
-                          ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found."));
+      var spec = specs.lastKnown(id).orElseThrow(() -> notFound(id));
       Refusals.enforce(authority.spec(Actor.current(), spec));
       roots.add(target);
     }
@@ -284,6 +282,10 @@ final class SpecPruner {
       }
     }
     return roots;
+  }
+
+  private static ApiException notFound(String id) {
+    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found.");
   }
 
   private static List<Erasure.Target> targets(String type, List<String> ids) {

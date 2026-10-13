@@ -336,9 +336,11 @@ public final class ChangeLog {
   }
 
   /**
-   * Files the head of an entity under {@code project}, the one main names for it: how a deletion or
-   * an erasure of a row this box never held, which names no project itself, still leaves with the
-   * project ({@link Erasure#dropLocal}). A null project — main named none — changes nothing.
+   * Files the head of an entity under {@code project}, the one main's head names for it, so what a
+   * node adopts leaves with the project main sends it under ({@link Erasure#dropLocal}): a deletion
+   * or an erasure of a row this box never held names no project itself, and a review or a message
+   * is filed by its parent's head, which may be elsewhere here than it was on main when main wrote
+   * the row. A null project — main named none — changes nothing.
    */
   public void fileUnder(String entityType, String entityId, String project) {
     if (project == null) {

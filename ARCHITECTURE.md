@@ -206,9 +206,9 @@ and the spec that closes it.
 | C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, by its owner's act, or with a project an admin revoked from the box (S4), announced and not kept. | a gone dependency's offer, re-homed or withdrawn and announced (`Settlement.Settled`): `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content; a member's and an admin's child of a pruned room re-homed and landed); a review main never took, withdrawn with its findings kept in the change log and announced, and a node's legacy findings denied after a reassign: `ReviewFindingsSyncTest`; files: no box republishes a stale copy or resurrects a deleted file by mistaking its own output for a person's edit, nor overwrites a person's edit by the reverse, and a person's copy is published once: `FilesAuditTest`, `FileImporterTest`, `FilesUpgradeCliTest`; an erased file's copy stays with its project and its record goes with main's erase, a node's adoption and a node's prune: `FilesAuditTest` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
 | S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other; a version main took in a project since revoked is neither handed back nor its content served), `ScopedSyncServerTest` (the roster of those who share a project, no email but the node's own, no assignee disabled), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
-| S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a prune), `ScopedSyncTest` (a forged push, a project row, an erase request), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind; a room's refusal names only the specs its reader sees), `ScopedTest`, `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
+| S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a prune), `ScopedSyncTest` (a forged push, a project row, an erase request), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope; a spec is born neither into nor over a hidden room; a spec moved into the scope shows nothing of the room and run it left behind; a room's refusal names only the specs its reader sees; every write route that addresses a row answers one of a hidden project as one nobody holds, held complete against `Operations`; a moved spec is neither seated in nor restored to what it left behind, and shows no question asked in the room it left; a run never names the owner of a spec that left the scope), `ScopedTest`, `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
 | S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; the backfill), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
-| S4 | A grant shows after the next round; a revocation removes the project in the same round, unpushed work included, announced. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project), `SyncScopeTest`, `NativeFleetIT` |
+| S4 | A grant shows after the next round; a revocation removes the project in the same round, unpushed work included, announced. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope), `SyncScopeTest`, `NativeFleetIT` |
 | S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
 | S6 | Versions degrade to an unscoped fleet, never to an error: an older node ignores the scope main names, and a node reads an older main's silence as every project. | `SyncWireTest` (a welcome naming no scope; a key this build does not know), `ScopedSyncTest` (a welcome naming none after one naming an empty scope pages everything), `NativeFleetIT` (a node of the last release is sent only its scope, and drops nothing on a revoke) |
 | S7 | Scope fails closed: an FDE added scoped sees nothing until granted, a session naming no FDE receives nothing, and a head of unknown project reaches unscoped nodes only. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped) |
@@ -244,10 +244,13 @@ file's id begins with (a file's synced state is its content alone), a project's 
 for a review or a message the project of its parent's head, its spec's or its conversation's.
 A state that names none (a withdrawal, a deletion of a row the box never held) keeps the
 project the head already has, and `erase` and `purge` carry it across the erasure row, which
-has no snapshot to read. A node that never held the row has no head to keep a project from,
-so a tombstone or an erasure crosses the wire naming the project of main's head
-(`SyncWire.Entry.project`) and the node files its own head there as it adopts it
-(`ChangeLog.fileUnder`): what a node only ever heard of as gone still leaves with its project.
+has no snapshot to read. A node files what it adopts under the project main's head names,
+which every entry carries across the wire (`SyncWire.Entry.project`, `ChangeLog.fileUnder`),
+and never under one it works out itself: a tombstone or an erasure of a row it never held
+gives it no head to keep a project from, and a review's project is its spec's at the moment
+main wrote the review, which is not where the node finds that spec once it has moved. So a
+node and main agree, head for head, on which project a row leaves with. An older main names
+none and the node files the state itself.
 A column and not a join, because a pruned row has no row to join, yet
 its erasure must reach the nodes that held it and never one that did not. `scoped-heads-v1`
 fills the heads written before; one whose entity was already pruned stays unknown. Every
@@ -283,7 +286,10 @@ anything is offered or adopted. Every project it holds a head of that the welcom
 does not admit is dropped whole (`Erasure.dropLocal`: main's full walk and whatever else its
 history files under the project, each row with its conflicts, box-local rows, entries, head
 and offer, erasures included; nothing is journalled), and the round's collection frees the
-content. It is decided from what the box holds, never from what it was last told, so a drop
+content. What the walk reaches that a head files under another project stays: a spec moved
+into the dropped project left its room, its thread and its runs in the one it came from,
+which main still sends the node and, their heads being behind its checkpoints, would never
+send again. It is decided from what the box holds, never from what it was last told, so a drop
 put off by a failed round or by a run still under way here happens on the next round that
 finds it. A scope that admits a project the recorded one (`sync_scope`) did not resets the
 node's checkpoints (`SyncState.reset`), since the project's history sits below them. A
@@ -292,12 +298,18 @@ welcome naming no scope records every project: an older main scopes no one.
 **Main's API** has no single read seam, so one helper (`Scoped`) is applied in each read:
 a row outside the caller's scope is the same not-found a missing row is, a list leaves it
 out, and the event stream filters by the scope the connection opened with. The lookup an
-operation addresses a row by is the same for a read and a write, so a write addressed to a
-hidden row meets a missing one before the journal is ever asked. A row shown with another
-row's fields is not that row's licence to them: a spec's wake and engagement are its room's
-and its latest run is a run's, each of its own project, which a spec moved between projects
-left behind, so each is read through the helper too, and a spec is born into a room only
-when its caller may see that room. A read reads as the actor
+operation addresses a row by is the same for a read and a write, and comes before any rule
+that would say whose the row is, so a write addressed to a hidden row meets a missing one,
+code and message, before the journal is ever asked: seating or dismissing a room's member,
+stopping a run, drafting a follow-up, restoring a spec or pruning one. An event a client
+publishes about work outside its scope is decided as one about work this box does not hold
+(`EventDoor`). A row shown with another row's fields is not that row's licence to them: a
+spec's wake, engagement and open question are its room's and its latest run is a run's, each
+of its own project, which a spec moved between projects left behind, so each is read through
+the helper too; a member is seated through a spec only when its caller may see the room the
+spec lives in, a spec is born into a room only when its caller may see that room, a revision
+made in another project is one the spec's history does not hold, and a run names the owner
+of the spec it worked only to a reader who may see that spec. A read reads as the actor
 its door bound (`Actor.reader`); one no door bound an actor to is the box's own, its root CLI
 describing what the box holds, and sees every project. The HTTP and local-socket routers bind
 their caller before they route, and a run's principal carries its owning FDE's scope.
