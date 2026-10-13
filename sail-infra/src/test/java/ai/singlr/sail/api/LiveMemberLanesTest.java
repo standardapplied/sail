@@ -24,6 +24,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,8 @@ class LiveMemberLanesTest {
 
   private static final String SPEC = "live-spec";
   private static final String HANDLE = LiveRoom.HANDLE;
+
+  private static final LiveMembers.Reclaimed NOTHING = new LiveMembers.Reclaimed(0, List.of());
 
   @TempDir Path dir;
   private LiveRoom room;
@@ -150,6 +153,27 @@ class LiveMemberLanesTest {
   }
 
   @Test
+  void aReadOnlyMemberWhoseGuardCannotLookAsItExitsIsStillFinishedAndGone() {
+    var process = room.prompted(SPEC, "read-only", "first");
+    var run = room.memberRun();
+    room.says(process, Lines.init("sess-1"), Lines.delta("One"));
+    room.shell.unanswered("git");
+
+    process.exits(1);
+    room.awaitStopped(process);
+
+    assertEquals("failed", room.run(run.id()).status(), "finished whatever the guard's look met");
+    assertEquals(0, baselines(run.id()), "the look consumed its baseline before it failed");
+    assertEquals(List.of(), room.events(Event.WellKnownTypes.GUARDRAIL_TRIGGERED));
+    room.shell.unanswered("");
+
+    room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size(), "no member is left behind to take the message");
+    assertEquals(1, room.processes.latest().written.size());
+  }
+
+  @Test
   void aRoomWithNoSpecHasALiveMemberKeyedByTheRoom() {
     room.room("lounge");
     var process = room.prompted("lounge", "full", "anyone here?");
@@ -248,14 +272,16 @@ class LiveMemberLanesTest {
             () -> HANDLE,
             room.sail::relaunchWatcher);
     assertEquals(0, rearmer.rearm(), "a live member is no unit: no watcher is armed for it");
-    assertEquals(0, room.live.reclaim(HANDLE), "its own process is behind it: nothing to reclaim");
+    assertEquals(
+        NOTHING, room.live.reclaim(HANDLE), "its own process is behind it: nothing to reclaim");
 
     room.restart();
-    assertEquals(0, room.live.reclaim("another-box"), "another box's runs are not this one's");
+    assertEquals(
+        NOTHING, room.live.reclaim("another-box"), "another box's runs are not this one's");
     var reclaimed = room.live.reclaim(HANDLE);
     room.settle();
 
-    assertEquals(1, reclaimed);
+    assertEquals(new LiveMembers.Reclaimed(1, List.of()), reclaimed);
     assertEquals("stopped", room.run(process.runId).status());
     assertFalse(
         room.container.alive(process.runId), "its process is signalled through its pid file");
@@ -268,7 +294,7 @@ class LiveMemberLanesTest {
             "run_id", process.runId,
             "run_role", "room-full"),
         stop.data());
-    assertEquals(0, room.live.reclaim(HANDLE), "finished once");
+    assertEquals(NOTHING, room.live.reclaim(HANDLE), "finished once");
 
     var next = room.says(SPEC, "back?");
 
@@ -280,38 +306,107 @@ class LiveMemberLanesTest {
   }
 
   @Test
-  void aRestartFinishesAMemberWhoseContainerDoesNotAnswer() {
+  void aRestartKeepsTheRunOfAMemberItCannotProveGone() {
     var process = room.prompted(SPEC, "full", "first");
+    room.says(process, Lines.init("sess-1"), Lines.delta("Still writing"));
     room.restart();
-    room.container.unreachable(true);
+    var held = new LiveMembers.Reclaimed(0, List.of(process.runId));
 
-    assertEquals(1, room.live.reclaim(HANDLE));
+    room.container.survivesKill(true);
+    assertEquals(held, room.live.reclaim(HANDLE), "its process outlived its signals");
+    room.container.survivesKill(false);
+    room.container.unreachable(true);
+    assertEquals(held, room.live.reclaim(HANDLE), "its container did not answer");
     room.container.unreachable(false);
 
+    assertEquals(
+        "running",
+        room.run(process.runId).status(),
+        "nothing is freed under a turn that may still be writing");
+    assertTrue(room.container.alive(process.runId));
+    assertNull(room.stopOf(process.runId));
+    assertEquals(0, reconciler().finishDeadSessions(Set.of()), "nor while its process is there");
+
+    room.container.exited(process.runId, "", 0);
+
+    assertEquals(1, reconciler().finishDeadSessions(Set.of()), "its turn ended and it exited");
     assertEquals("stopped", room.run(process.runId).status());
+    assertEquals(NOTHING, room.live.reclaim(HANDLE));
+  }
+
+  @Test
+  void aRunLeftWithNoProcessRecordedIsReclaimedWithoutAskingItsContainer() {
+    room.engage(SPEC, "claude-code", "full");
+    var reclaimed = new AtomicReference<LiveMembers.Reclaimed>();
+    room.processes.onStart(starting -> starting.onClose(() -> starting.exits(0)));
+    room.live.useProcesses(
+        (container, workDir, env, command, pidFile, logFile) -> {
+          var restarted = room.elsewhere().liveMembers();
+          room.container.unreachable(true);
+          reclaimed.set(restarted.reclaim(HANDLE));
+          room.container.unreachable(false);
+          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+        });
+
+    room.says(SPEC, "first");
+
+    var left = room.processes.latest();
+    assertEquals(
+        new LiveMembers.Reclaimed(1, List.of()),
+        reclaimed.get(),
+        "a run that records no process was never given work: there is nothing to ask about");
+    assertEquals("stopped", room.run(left.runId).status());
+    assertNull(room.run(left.runId).pid());
+    assertEquals("sail restarted", room.stopOf(left.runId).data().get("reason"));
+    assertEquals(List.of(), left.written, "and the sail that reserved it never prompts it");
+  }
+
+  @Test
+  void aRunThisSailReservedIsNotOneItReclaims() {
+    room.engage(SPEC, "claude-code", "full");
+    var reclaimed = new AtomicReference<LiveMembers.Reclaimed>();
+    room.live.useProcesses(
+        (container, workDir, env, command, pidFile, logFile) -> {
+          reclaimed.set(room.live.reclaim(HANDLE));
+          return room.processes.start(container, workDir, env, command, pidFile, logFile);
+        });
+
+    var first = room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    assertEquals(
+        NOTHING,
+        reclaimed.get(),
+        "a run reserved since this sail started is its own, registered or not");
+    assertEquals("running", room.run(process.runId).status());
+    assertEquals(1, process.written.size(), "so a message that lands as sail starts is answered");
+    assertEquals(Set.of(first), room.runs.deliveredMessageIds(process.runId));
   }
 
   @Test
   void theMissedStopReconcilerLeavesALiveTurnAlone() {
     var process = room.prompted(SPEC, "full", "first");
     room.says(process, Lines.init("sess-1"), Lines.delta("Working"));
-    var reconciler =
-        new MissedStopReconciler(
-            room.specs,
-            room.runs,
-            new EventStore(room.db),
-            room.reviews,
-            room.bus,
-            MissedStopReconciler.systemdUnitProbe(room.shell),
-            WatcherCoverage.of(new WatcherSpawner(room.shell, null)),
-            () -> HANDLE,
-            () -> Instant.now().plus(Duration.ofMinutes(3)));
 
-    var finished = reconciler.finishDeadSessions(Set.of());
+    var finished = reconciler().finishDeadSessions(Set.of());
 
     assertEquals(0, finished, "its pid file answers: the run is its member's to finish");
     assertEquals(
         List.of("running"),
         room.runs.listForSpec(SPEC).stream().map(RunStore.RunRow::status).toList());
+  }
+
+  /** The sweep of runs whose process is gone, three minutes on: past its launch grace. */
+  private MissedStopReconciler reconciler() {
+    return new MissedStopReconciler(
+        room.specs,
+        room.runs,
+        new EventStore(room.db),
+        room.reviews,
+        room.bus,
+        MissedStopReconciler.systemdUnitProbe(room.shell),
+        WatcherCoverage.of(new WatcherSpawner(room.shell, null)),
+        () -> HANDLE,
+        () -> Instant.now().plus(Duration.ofMinutes(3)));
   }
 }

@@ -1485,13 +1485,35 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     return transition(id, expected, status, exitCode, () -> {});
   }
 
+  /**
+   * Ends a run that recorded no process: {@code running → status}, only while its pid is still
+   * unset. A live member is prompted only once its process is stamped on its run ({@link
+   * #updateProcess}), and both writes compare the same row, so at most one of them lands: whoever
+   * wins this one has ended a run that was never given work and never will be, whatever its
+   * container holds.
+   */
+  public boolean transitionUnstarted(String id, String status) {
+    return transition(id, "running", status, null, () -> {}, " AND pid IS NULL");
+  }
+
   private boolean transition(
       String id, String expected, String status, Integer exitCode, Runnable alongside) {
+    return transition(id, expected, status, exitCode, alongside, "");
+  }
+
+  private boolean transition(
+      String id,
+      String expected,
+      String status,
+      Integer exitCode,
+      Runnable alongside,
+      String alsoWhere) {
     return db.transaction(
         () -> {
           db.execute(
               "UPDATE runs SET status = ?, completed_at = ?, exit_code = COALESCE(?, exit_code)"
-                  + " WHERE id = ? AND status = ?",
+                  + " WHERE id = ? AND status = ?"
+                  + alsoWhere,
               status,
               RunStatus.isTerminal(status) ? DateTimeUtils.now().toString() : null,
               exitCode != null ? exitCode.longValue() : null,

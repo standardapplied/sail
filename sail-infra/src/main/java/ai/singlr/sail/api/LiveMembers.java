@@ -35,6 +35,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -64,6 +65,12 @@ import java.util.function.Supplier;
  * <p>The process is owned by whichever sail process started it. Another process on the box — a CLI
  * dispatch, {@code sail agent attach} — cannot close its stdin, so from there a member is ended by
  * signal through the container, and whoever sees it gone first finishes its run.
+ *
+ * <p>What a run reserved is freed only on a fact. A member is prompted only once the pid its
+ * wrapper wrote is recorded on its run, so a run that records none was never given work, and is
+ * ended by a compare that recording loses to ({@link RunStore#transitionUnstarted}); a run that
+ * records one has a pid file to be asked through, and is ended by anyone but its owner only when
+ * the container answers that the process is gone.
  */
 public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
@@ -78,6 +85,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
 
   /** How long a process whose output ended is given to report its exit code. */
   private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
+
+  /** How long a started process is given to write its pid. */
+  static final Duration PID_PATIENCE = Duration.ofSeconds(30);
+
+  /** How long sail waits between two asks for that pid. */
+  private static final Duration PID_ASK_GAP = Duration.ofMillis(100);
 
   private static final String MEMBERSHIP_CHANGED = "membership changed";
   private static final int ROOM_TAIL = 20;
@@ -118,6 +131,12 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
   }
 
+  /**
+   * What a restart made of the live members left from before it: how many runs it finished, and the
+   * runs it could not, whose processes nothing proved gone.
+   */
+  public record Reclaimed(int ended, List<String> held) {}
+
   private final ProjectLoader projects;
   private final SpecStore specStore;
   private final Supplier<RoomStore> rooms;
@@ -136,6 +155,13 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   private volatile AgentProcess processes;
   private volatile Room room;
   private volatile Timing timing = Timing.real();
+
+  /**
+   * Run ids are time-ordered and strictly increasing within a process, so every run this sail
+   * reserves has an id after this one, and a live run with an earlier id was reserved by the sail
+   * before it.
+   */
+  private final String born = DateTimeUtils.newId().toString();
 
   LiveMembers(
       ProjectLoader projects,
@@ -446,11 +472,22 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         new Member(seat, config, runStore.findById(runId).orElseThrow(), unit, handle, full);
     members.put(seat.roomId(), started);
     Thread.ofVirtual().name("sail-live-" + runId).start(started::read);
-    var lost = lostInLaunch(seat, runId, handle);
+    Optional<String> lost;
+    try {
+      lost = lostInLaunch(seat, started);
+    } catch (RuntimeException failed) {
+      var why = "not started: " + failed.getMessage();
+      if (runStore.transitionUnstarted(runId, "stopped")) {
+        tellStopped(started.run, null, why);
+      }
+      started.end(why, timing.grace().result());
+      throw failed;
+    }
     if (lost.isPresent()) {
       started.end(lost.get(), timing.grace().result());
       return;
     }
+    started.admit();
     markDelivered(runId, tail.stream().filter(message -> !unread.contains(message)).toList());
     hand(started, pages);
   }
@@ -461,15 +498,37 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * conversation, or its seat was vacated or taken. Asked once the member is registered, so
    * whatever ends a run or changes a seat was either seen here or finds the member. Stamping the
    * process on the run is the same compare a launched run is verified by ({@link
-   * RunStore#updateProcess}): it lands only while the run is still {@code running}.
+   * RunStore#updateProcess}): it lands only while the run is still {@code running}. The pid is
+   * waited for because the stamp is what the rest of the box reads: before it the run was never
+   * prompted, and after it the pid file the wrapper wrote is there to ask the container through.
+   *
+   * @throws ApiException when the process wrote no pid: it did not start
    */
-  private Optional<String> lostInLaunch(Seat seat, String runId, AgentProcess.Handle handle) {
-    var pid = handle.pid();
-    if (!runStore.updateProcess(runId, pid.isPresent() ? pid.getAsInt() : null, null, null)) {
+  private Optional<String> lostInLaunch(Seat seat, Member started) {
+    var pid = started.awaitPid();
+    if (pid.isEmpty()) {
+      throw new ApiException(
+          ErrorCode.AGENT_LAUNCH_FAILED,
+          "The room's live member did not start: its process wrote no pid.",
+          "Check that the project's container is running and answers; the room's next message"
+              + " starts the member again.");
+    }
+    if (!runStore.updateProcess(started.runId, pid.getAsInt(), null, null)) {
       return Optional.of("run ended during launch");
     }
     var seated = seat(seat.conversation()).map(Seat::member).orElse(null);
     return seat.member().equals(seated) ? Optional.empty() : Optional.of(MEMBERSHIP_CHANGED);
+  }
+
+  /** Waits out {@code pause}; {@code false} when interrupted instead, the interrupt kept. */
+  private boolean waited(Duration pause) {
+    try {
+      timing.delay().pause(pause);
+      return true;
+    } catch (InterruptedException stopping) {
+      Thread.currentThread().interrupt();
+      return false;
+    }
   }
 
   private List<PromptConversation.Rendered<MessageStore.MessageRow>> fresh(
@@ -529,13 +588,34 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
               members.values().stream().filter(member -> member.runId.equals(runId)).findFirst();
           return mine.isPresent()
               ? mine.get().end(why, timing.grace().result())
-              : runStore
-                  .findById(runId)
-                  .filter(run -> AgentUnit.isLive(run.unit()))
-                  .filter(run -> !liveRun(run) || halted(run))
-                  .map(run -> finish(run, "stopped", null, why))
-                  .isPresent();
+              : endUnheld(runId, why);
         });
+  }
+
+  /**
+   * Ends the live member's run {@code runId} that no member of this process is, and answers whether
+   * it is over. A run that records no process was never prompted, so nothing in its container needs
+   * asking: it is ended as unstarted, a compare its owner's stamp loses to. A run that compare did
+   * not end is read after it. One that is no longer {@code running} is over, or is whoever claimed
+   * it's to finish. One that still is records its process: its pid file was written before the
+   * stamp, so what the container says of it is the truth, and only its answer that the process is
+   * gone ends the run.
+   */
+  private boolean endUnheld(String runId, String why) {
+    var run = runStore.findById(runId).filter(row -> AgentUnit.isLive(row.unit())).orElse(null);
+    if (run == null) {
+      return false;
+    }
+    if (runStore.transitionUnstarted(runId, "stopped")) {
+      tellStopped(run, null, why);
+      return true;
+    }
+    var recorded = runStore.findById(runId).orElseThrow();
+    if (liveRun(recorded) && !halted(recorded)) {
+      return false;
+    }
+    finish(recorded, "stopped", null, why);
+    return true;
   }
 
   /** Whether {@code run} is a live member's that has not ended. */
@@ -544,26 +624,32 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
   }
 
   /**
-   * Finishes every live member's run this box left running with no process of this one behind it:
-   * what a restart of sail finds. Their processes lost their stdin with the sail that held it, so
-   * most have exited; any that has not is signalled where its container answers. Returns how many
-   * runs were finished.
+   * Finishes the live members' runs this box left running from before this sail started: what a
+   * restart finds. A run reserved by this sail, registered or not yet, is its own and is left
+   * alone. A run that records no process was never prompted and is ended without a look. The others
+   * lost their stdin with the sail that held it, so most have exited, and any that has not is
+   * signalled; one whose process nothing proved gone — its container did not answer, or the process
+   * outlived its signals — is left {@code running}: a turn it has open may still be writing the
+   * repos it reserved. Such a run is finished by the sweep of runs whose process is gone, once its
+   * container says so.
    */
-  public int reclaim(String localHandle) {
+  public Reclaimed reclaim(String localHandle) {
     return Actor.call(
         Actor.system(),
         () -> {
-          var held = members.values().stream().map(member -> member.runId).toList();
           var orphans =
               runStore.running().stream()
                   .filter(run -> run.ownedBy(localHandle) && run.chatRole() && liveRun(run))
-                  .filter(run -> !held.contains(run.id()))
+                  .map(RunStore.RunRow::id)
+                  .filter(runId -> runId.compareTo(born) < 0)
                   .toList();
-          for (var run : orphans) {
-            halted(run);
-            finish(run, "stopped", null, "sail restarted");
+          var held = new ArrayList<String>();
+          for (var runId : orphans) {
+            if (!endUnheld(runId, "sail restarted")) {
+              held.add(runId);
+            }
           }
-          return orphans.size();
+          return new Reclaimed(orphans.size() - held.size(), List.copyOf(held));
         });
   }
 
@@ -584,21 +670,23 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
    * the stop its watcher would have published, for whoever wins it. Finishing the row is what
    * revokes its credential and frees what it reserved.
    */
-  private RunStore.RunRow finish(
-      RunStore.RunRow run, String status, Integer exitCode, String reason) {
+  private void finish(RunStore.RunRow run, String status, Integer exitCode, String reason) {
     if (runStore.transition(run.id(), "running", status, exitCode)) {
-      events.publish(
-          RunStops.of(
-              Event.WellKnownData.SOURCE_LIVE,
-              run.project(),
-              run.conversationId(),
-              run.agent(),
-              run.id(),
-              run.role(),
-              exitCode,
-              reason));
+      tellStopped(run, exitCode, reason);
     }
-    return run;
+  }
+
+  private void tellStopped(RunStore.RunRow run, Integer exitCode, String reason) {
+    events.publish(
+        RunStops.of(
+            Event.WellKnownData.SOURCE_LIVE,
+            run.project(),
+            run.conversationId(),
+            run.agent(),
+            run.id(),
+            run.role(),
+            exitCode,
+            reason));
   }
 
   /** Ends every member that reached a limit of its lane: its lifetime, or its idle window. */
@@ -632,6 +720,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private final boolean full;
     private final Guardrails limits;
     private final Instant startedAt;
+    private final Object pipe = new Object();
     private final StringBuilder said = new StringBuilder();
     private final StringBuilder unsent = new StringBuilder();
     private final Map<String, String> calls = new LinkedHashMap<>();
@@ -642,6 +731,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     private int turn;
     private boolean turnOpen;
     private boolean prompted;
+    private boolean admitted;
     private boolean guarded;
     private boolean flushing;
     private boolean ending;
@@ -671,20 +761,64 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     /**
      * Writes {@code text} to the process as its next prompt, the lane's guard armed first. Answers
      * {@code false} when the process is ending or gone, so the prompt is for whoever comes next.
+     *
+     * <p>The write is made outside this member's lock, under {@code pipe} alone: a process that has
+     * stopped reading blocks it, and its lines must still be read and its end still be reached
+     * while it does. The prompt is owed from before the write, so one that blocks for the idle
+     * window is a stall, and is owed no longer when the write failed. The reader finishes the run
+     * under {@code pipe} too, so a process's end is judged with every prompt taken or refused,
+     * never with one half written.
      */
-    private synchronized boolean prompt(String text) {
-      if (ending || over) {
+    private boolean prompt(String text) {
+      synchronized (pipe) {
+        boolean owed;
+        synchronized (this) {
+          if (ending || over) {
+            return false;
+          }
+          arm();
+          owed = prompted;
+          prompted = true;
+          lastLine = timing.clock().get();
+        }
+        if (written(text)) {
+          return true;
+        }
+        synchronized (this) {
+          prompted = owed && prompted;
+        }
         return false;
       }
-      arm();
+    }
+
+    private boolean written(String text) {
       try {
         handle.stdin().write(LiveStream.userMessage(text));
+        return true;
       } catch (IOException gone) {
         return false;
       }
-      prompted = true;
-      lastLine = timing.clock().get();
-      return true;
+    }
+
+    /** The run records the process: from here the member is one that started, and is prompted. */
+    private synchronized void admit() {
+      admitted = true;
+    }
+
+    /**
+     * The pid the process's wrapper wrote, asked for until it is there, the process is over, or
+     * {@link #PID_PATIENCE} has passed since it started.
+     */
+    private OptionalInt awaitPid() {
+      var deadline = startedAt.plus(PID_PATIENCE);
+      var pid = handle.pid();
+      while (pid.isEmpty()
+          && !over(Duration.ZERO)
+          && timing.clock().get().isBefore(deadline)
+          && waited(PID_ASK_GAP)) {
+        pid = handle.pid();
+      }
+      return pid;
     }
 
     /**
@@ -709,7 +843,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       } catch (IOException broken) {
         System.err.println("  [live] run " + runId + " stopped answering: " + broken.getMessage());
       }
-      attempt(this::finished);
+      synchronized (pipe) {
+        attempt(this::finished);
+      }
     }
 
     /** Runs {@code work} as sail; a failure is this line's, never the reader's. */
@@ -812,10 +948,7 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     }
 
     private void flushLater() {
-      try {
-        timing.delay().pause(DELTA_WINDOW);
-      } catch (InterruptedException stopping) {
-        Thread.currentThread().interrupt();
+      if (!waited(DELTA_WINDOW)) {
         return;
       }
       synchronized (this) {
@@ -863,11 +996,24 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
       notifyAll();
     }
 
-    /** The guard's look at what the turn left: it consumes the baseline the turn was armed with. */
+    /**
+     * The guard's look at what the turn left: it consumes the baseline the turn was armed with. A
+     * look the container would not answer is this turn's loss alone, told on the server's stderr:
+     * the turn still ends, and a process whose output ended is still finished.
+     */
     private void disarm() {
-      if (guarded) {
+      if (!guarded) {
+        return;
+      }
+      guarded = false;
+      try {
         guard.guardRoomRun(seat.project(), runId);
-        guarded = false;
+      } catch (RuntimeException unanswered) {
+        System.err.println(
+            "  [live] run "
+                + runId
+                + ": the lane's guard could not look: "
+                + unanswered.getMessage());
       }
     }
 
@@ -910,25 +1056,31 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     /**
      * The process's output ended, so the run is over: a turn it left open — a prompt it never began
      * to answer is one — is posted as far as it got and told as cut short, the lane's guard takes
-     * its last look, and the run is finished: {@code failed} when it died owing an answer with
-     * nobody having asked it to end, {@code stopped} otherwise.
+     * its last look, and the run is finished: {@code failed} when it died owing an answer, or
+     * before its run recorded it, with nobody having asked it to end, {@code stopped} otherwise.
+     * Whatever that meets, the member is over and gone from its room: a run a store refused to
+     * finish is left to the claim that displaces it or the sweep that finds its process gone, never
+     * behind a member that takes no prompt.
      */
     private synchronized void finished() {
-      flush();
-      if (prompted && !turnOpen) {
-        begin();
+      try {
+        flush();
+        if (prompted && !turnOpen) {
+          begin();
+        }
+        var exit = exitCode();
+        var died = (turnOpen || !admitted) && !ending;
+        var why = ending ? endReason : died ? diagnosis(exit) : null;
+        if (turnOpen) {
+          closeTurn(said.toString(), true, why);
+        }
+        disarm();
+        finish(run, died ? "failed" : "stopped", exit.isPresent() ? exit.getAsInt() : null, why);
+      } finally {
+        members.remove(seat.roomId(), this);
+        over = true;
+        notifyAll();
       }
-      var exit = exitCode();
-      var died = turnOpen && !ending;
-      var why = ending ? endReason : died ? diagnosis(exit) : null;
-      if (turnOpen) {
-        closeTurn(said.toString(), true, why);
-      }
-      disarm();
-      finish(run, died ? "failed" : "stopped", exit.isPresent() ? exit.getAsInt() : null, why);
-      members.remove(seat.roomId(), this);
-      over = true;
-      notifyAll();
     }
 
     private OptionalInt exitCode() {
@@ -985,7 +1137,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
     /**
      * Ends the process: its stdin is closed, so it finishes what it is doing and exits; it is given
      * {@code first} to do that, or to answer the turn it has open, and is then interrupted and, if
-     * that does not end it either, terminated. Returns whether it is over.
+     * that does not end it either, terminated. Returns whether it is over. The close is made on a
+     * thread of its own: it waits behind a write the process is not reading, and the signals that
+     * end such a process must not wait with it.
      */
     private boolean end(String why, Duration first) {
       boolean answering;
@@ -996,9 +1150,9 @@ public final class LiveMembers implements RoomWakeReactor.Live, AutoCloseable {
         if (!ending) {
           ending = true;
           endReason = why;
+          Thread.ofVirtual().name("sail-live-end-" + runId).start(handle.stdin()::close);
         }
         answering = turnOpen;
-        handle.stdin().close();
       }
       if (!settled(first, answering)) {
         handle.signal(AgentProcess.Signal.INT);

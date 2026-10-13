@@ -17,6 +17,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
 /**
@@ -81,6 +82,7 @@ final class FakeAgentProcess implements AgentProcess {
   final List<Fake> processes = new CopyOnWriteArrayList<>();
   private final FakeContainer container;
   private volatile IOException refusal;
+  private volatile boolean slowToName;
   private volatile Consumer<Fake> onStart = fake -> {};
 
   FakeAgentProcess(FakeContainer container) {
@@ -90,6 +92,14 @@ final class FakeAgentProcess implements AgentProcess {
   /** Every start from now on fails with {@code refusal}, as a host with no incus would. */
   void refusing(IOException refusal) {
     this.refusal = refusal;
+  }
+
+  /**
+   * Whether a process started from now on has written no pid file yet, as one whose wrapper has not
+   * run: it is in the container only once {@link Fake#writesPid} says so.
+   */
+  void slowToName(boolean slow) {
+    this.slowToName = slow;
   }
 
   /** Scripts every process started from now on, before anything reads or writes it. */
@@ -116,7 +126,9 @@ final class FakeAgentProcess implements AgentProcess {
     }
     starts.add(new Started(containerName, workDir, Map.copyOf(env), command, pidFile, logFile));
     var fake = new Fake(env.get("SAIL_RUN_ID"));
-    container.started(fake.runId);
+    if (!slowToName) {
+      container.started(fake.runId);
+    }
     processes.add(fake);
     onStart.accept(fake);
     return fake;
@@ -138,9 +150,12 @@ final class FakeAgentProcess implements AgentProcess {
     private boolean endSeen;
     private IOException broken;
     private Integer exitCode;
+    private boolean writeBlocked;
     private volatile boolean stdinClosed;
     private volatile boolean stdinBroken;
+    private volatile boolean deaf;
     private volatile boolean waitInterrupted;
+    private volatile Runnable onPidAsked = () -> {};
     private volatile Runnable onClose = () -> {};
     private volatile Consumer<Signal> onSignal = signal -> {};
     private volatile Consumer<String> onWrite = line -> {};
@@ -221,6 +236,53 @@ final class FakeAgentProcess implements AgentProcess {
       stdinBroken = true;
     }
 
+    /**
+     * The process stops reading its stdin: a write from now on blocks, as on a full pipe, until the
+     * process ends, and then fails; closing its stdin waits behind such a write.
+     */
+    void stopsReading() {
+      deaf = true;
+    }
+
+    /** Blocks until a write to the process's stdin is blocked on it. */
+    void awaitBlockedWrite() {
+      await(() -> writeBlocked, "nothing was written to the fake process of run " + runId);
+    }
+
+    /** Blocks until the process's stdin has been closed. */
+    void awaitStdinClosed() {
+      await(() -> stdinClosed, "nothing closed the stdin of the fake process of run " + runId);
+    }
+
+    private void await(BooleanSupplier reached, String otherwise) {
+      lock.lock();
+      try {
+        var remaining = TimeUnit.SECONDS.toNanos(PATIENCE_SECONDS);
+        while (!reached.getAsBoolean()) {
+          if (remaining <= 0) {
+            throw new AssertionError(otherwise);
+          }
+          remaining = moved.awaitNanos(remaining);
+        }
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new AssertionError("interrupted: " + otherwise, e);
+      } finally {
+        lock.unlock();
+      }
+    }
+
+    /** The process's wrapper writes its pid file: the container finds the process from now on. */
+    void writesPid() {
+      container.started(runId);
+    }
+
+    /** What happens as the process is asked for its pid, before it answers. */
+    Fake onPidAsked(Runnable reaction) {
+      this.onPidAsked = reaction;
+      return this;
+    }
+
     /** Asking for the exit code from now on is interrupted. */
     void interruptsWait() {
       waitInterrupted = true;
@@ -250,21 +312,9 @@ final class FakeAgentProcess implements AgentProcess {
 
     /** Blocks until the reader has taken everything said so far, or seen the process end. */
     void settle() {
-      lock.lock();
-      try {
-        var remaining = TimeUnit.SECONDS.toNanos(PATIENCE_SECONDS);
-        while (!(lines.isEmpty() && (waiting || endSeen))) {
-          if (remaining <= 0) {
-            throw new AssertionError("nothing read the fake process of run " + runId);
-          }
-          remaining = moved.awaitNanos(remaining);
-        }
-      } catch (InterruptedException e) {
-        Thread.currentThread().interrupt();
-        throw new AssertionError("interrupted while the fake process settled", e);
-      } finally {
-        lock.unlock();
-      }
+      await(
+          () -> lines.isEmpty() && (waiting || endSeen),
+          "nothing read the fake process of run " + runId);
     }
 
     @Override
@@ -283,16 +333,44 @@ final class FakeAgentProcess implements AgentProcess {
         exits(1);
         throw new IOException("Broken pipe");
       }
+      if (deaf) {
+        blockUntilEnded();
+        throw new IOException("Broken pipe");
+      }
       written.add(line);
       onWrite.accept(line);
     }
 
+    private void blockUntilEnded() {
+      lock.lock();
+      try {
+        writeBlocked = true;
+        moved.signalAll();
+        while (!ended) {
+          moved.awaitUninterruptibly();
+        }
+        writeBlocked = false;
+        moved.signalAll();
+      } finally {
+        lock.unlock();
+      }
+    }
+
     @Override
     public void close() {
-      if (stdinClosed) {
-        return;
+      lock.lock();
+      try {
+        while (writeBlocked) {
+          moved.awaitUninterruptibly();
+        }
+        if (stdinClosed) {
+          return;
+        }
+        stdinClosed = true;
+        moved.signalAll();
+      } finally {
+        lock.unlock();
       }
-      stdinClosed = true;
       onClose.run();
     }
 
@@ -324,11 +402,17 @@ final class FakeAgentProcess implements AgentProcess {
 
     @Override
     public OptionalInt pid() {
-      return OptionalInt.of(Integer.parseInt(container.pidOf(runId)));
+      onPidAsked.run();
+      return container.launched().contains(runId)
+          ? OptionalInt.of(Integer.parseInt(container.pidOf(runId)))
+          : OptionalInt.empty();
     }
 
     @Override
     public void signal(Signal signal) {
+      if (!container.launched().contains(runId)) {
+        return;
+      }
       signals.add(signal);
       onSignal.accept(signal);
     }

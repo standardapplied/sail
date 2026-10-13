@@ -107,6 +107,7 @@ class JournalDecidesEveryWriteTest {
     final MessageStore messages;
     final String run = DateTimeUtils.newId().toString();
     final String stopping = DateTimeUtils.newId().toString();
+    final String unstarted = DateTimeUtils.newId().toString();
     String review;
     String stage;
     Finding finding;
@@ -146,6 +147,9 @@ class JournalDecidesEveryWriteTest {
       runs.create(
           stopping, "acme", "theirs", "bob", "room", "claude-code", "b", "t", 1, 2, "/l", "u");
       runs.claimStop(stopping, "stopping", () -> {});
+      runs.create(
+          unstarted, "acme", "theirs", "bob", "room", "claude-code", "b", "t", 1, 2, "/l", "u");
+      runs.updateProcess(unstarted, null, null, null);
       review = reviews.createReview("theirs", 1);
       stage = reviews.createStage(review, "codex", "agent");
       reviews.startStage(stage, "codex");
@@ -296,6 +300,9 @@ class JournalDecidesEveryWriteTest {
         owned("RunStore.claimStop", f -> f.runs.claimStop(f.run, "stopping", () -> {})),
         owned("RunStore.releaseStop", f -> f.runs.releaseStop(f.stopping, () -> {})),
         owned("RunStore.transition", f -> f.runs.transition(f.run, "running", "stopped", 0)),
+        owned(
+            "RunStore.transitionUnstarted",
+            f -> f.runs.transitionUnstarted(f.unstarted, "stopped")),
         owned("RunStore.recordExitCode", f -> f.runs.recordExitCode(f.run, 7)),
         owned("ReviewStore.createReview", f -> f.reviews.createReview("theirs", 2)),
         owned("ReviewStore.supersedeForSpec", f -> f.reviews.supersedeForSpec("theirs")),

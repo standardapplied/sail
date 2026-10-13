@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -26,6 +27,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -351,6 +354,131 @@ class LiveMemberEdgesTest {
     assertEquals("membership changed", room.stopOf(process.runId).data().get("reason"));
     assertEquals(List.of(), room.data(Event.WellKnownTypes.AGENT_TURN_ENDED));
     assertEquals(Set.of(), room.runs.deliveredMessageIds(process.runId));
+  }
+
+  @Test
+  void aMemberIsPromptedOnlyOnceItsRunRecordsThePidItsWrapperWrote() {
+    room.engage(SPEC, "claude-code", "full");
+    var asks = new AtomicInteger();
+    var writtenUnnamed = new AtomicReference<List<String>>();
+    var recordedUnnamed = new AtomicReference<Integer>(-1);
+    room.processes.slowToName(true);
+    room.processes.onStart(
+        starting ->
+            starting.onPidAsked(
+                () -> {
+                  if (asks.incrementAndGet() == 1) {
+                    writtenUnnamed.set(List.copyOf(starting.written));
+                    recordedUnnamed.set(room.run(starting.runId).pid());
+                    room.windowElapses();
+                  } else {
+                    starting.writesPid();
+                  }
+                }));
+
+    var first = room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    assertEquals(2, asks.get(), "asked again once the first ask found no pid file");
+    assertEquals(List.of(), writtenUnnamed.get(), "nothing is written to a process with no pid");
+    assertNull(recordedUnnamed.get(), "and its run records none: it reads as never prompted");
+    assertEquals(1, process.written.size());
+    assertEquals(Integer.valueOf(room.container.pidOf(process.runId)), room.memberRun().pid());
+    assertEquals(Set.of(first), room.runs.deliveredMessageIds(process.runId));
+  }
+
+  @Test
+  void aProcessThatNeverWritesItsPidIsEndedUnpromptedAndItsRunIsFreedAtOnce() {
+    room.engage(SPEC, "claude-code", "full");
+    room.impatient();
+    room.processes.slowToName(true);
+    room.processes.onStart(
+        starting -> starting.onPidAsked(() -> room.later(LiveMembers.PID_PATIENCE)));
+
+    var first = room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    process.awaitStdinClosed();
+    assertEquals(List.of(), process.written);
+    assertEquals(List.of(), process.signals, "a process with no pid cannot be signalled");
+    assertEquals(
+        List.of("stopped"),
+        statuses(),
+        "it was never prompted, so what it reserved is not held for a process that may never run");
+    assertNull(room.run(process.runId).pid());
+    assertEquals(
+        "not started: The room's live member did not start: its process wrote no pid.",
+        room.stopOf(process.runId).data().get("reason"));
+    assertEquals(List.of(), room.data(Event.WellKnownTypes.AGENT_TURN_ENDED));
+
+    process.exits(0);
+    room.grace(LiveRoom.PATIENT);
+    room.processes.slowToName(false);
+    room.processes.onStart(starting -> {});
+    var second = room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size());
+    assertEquals(
+        Set.of(first, second),
+        room.runs.deliveredMessageIds(room.processes.latest().runId),
+        "the message it was never handed is in the next process's first prompt");
+  }
+
+  @Test
+  void aProcessThatEndsBeforeItWritesItsPidFailsItsRunAndSaysWhy() {
+    room.engage(SPEC, "claude-code", "full");
+    room.processes.slowToName(true);
+    room.processes.onStart(
+        starting ->
+            starting.onPidAsked(
+                () -> {
+                  starting.exits(255, "Error: Instance is not running\n");
+                  room.heard(Event.WellKnownTypes.AGENT_SESSION_STOPPED, 1);
+                }));
+
+    room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    var failed = room.run(process.runId);
+    assertEquals(List.of(), process.written);
+    assertEquals("failed", failed.status(), "nobody asked it to end, and it never started");
+    assertEquals(255, failed.exitCode());
+    assertNull(failed.pid());
+    assertEquals("Error: Instance is not running", room.stopOf(process.runId).data().get("reason"));
+    assertEquals(
+        List.of(),
+        room.data(Event.WellKnownTypes.AGENT_TURN_ENDED),
+        "it was handed nothing, so it left no turn open");
+  }
+
+  @Test
+  void aMemberWhoseStartFailsIsEndedAndNeverPrompted() {
+    room.engage(SPEC, "claude-code", "full");
+    room.processes.onStart(
+        starting ->
+            starting
+                .onClose(() -> starting.exits(0))
+                .onPidAsked(
+                    () -> {
+                      throw new IllegalStateException("the container could not be asked");
+                    }));
+
+    var first = room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    assertEquals(List.of(), process.written);
+    assertTrue(process.stdinClosed(), "a member that could not be admitted is not left up");
+    assertEquals(List.of("stopped"), statuses());
+    assertEquals(
+        "not started: the container could not be asked",
+        room.stopOf(process.runId).data().get("reason"));
+
+    room.processes.onStart(starting -> {});
+    var second = room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size(), "nothing of it is left to hand the message to");
+    assertEquals(
+        Set.of(first, second), room.runs.deliveredMessageIds(room.processes.latest().runId));
   }
 
   @Test

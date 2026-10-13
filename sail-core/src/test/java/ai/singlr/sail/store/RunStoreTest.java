@@ -284,6 +284,34 @@ class RunStoreTest {
   }
 
   @Test
+  void aRunThatRecordedNoProcessIsEndedAsUnstartedAndItsStampThenLosesTheCompare() {
+    var id = newRun("backend", "auth");
+    assertTrue(store.updateProcess(id, null, null, null));
+
+    assertTrue(store.transitionUnstarted(id, "stopped"));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("stopped", run.status());
+    assertNotNull(run.completedAt());
+    assertFalse(store.updateProcess(id, 4321, null, null), "the launch that lost stamps nothing");
+    assertNull(store.findById(id).orElseThrow().pid());
+  }
+
+  @Test
+  void aRunThatRecordedItsProcessIsNotEndedAsUnstarted() {
+    var id = newRun("backend", "auth");
+    var rev = store.latestRev(id);
+
+    assertFalse(store.transitionUnstarted(id, "stopped"));
+
+    var run = store.findById(id).orElseThrow();
+    assertEquals("running", run.status(), "a run that may have been given work is asked about");
+    assertEquals(1234, run.pid());
+    assertNull(run.completedAt());
+    assertEquals(rev, store.latestRev(id), "a lost compare writes nothing");
+  }
+
+  @Test
   void updateProcessPersistsThePidFingerprintAndItStaysOnTheExecutingBox() {
     var id = newRun("backend", "auth");
     var rev = store.latestRev(id);

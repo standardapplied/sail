@@ -285,7 +285,7 @@ class LiveMemberTest {
     room.dismiss(SPEC);
     room.awaitStopped(process);
 
-    assertTrue(process.stdinClosed());
+    process.awaitStdinClosed();
     assertEquals(List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM), process.signals);
     assertEquals("stopped", room.runs.findById(process.runId).orElseThrow().status());
     var partial = room.messages.list(SPEC, null, 20).getLast();

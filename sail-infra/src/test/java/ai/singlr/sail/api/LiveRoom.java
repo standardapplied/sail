@@ -96,6 +96,7 @@ final class LiveRoom implements AutoCloseable {
   RoomWakeReactor reactor;
 
   private final ProjectReader reader;
+  private final List<LiveMembers> abandoned = new CopyOnWriteArrayList<>();
   private final Settling settling = new Settling();
   private final Semaphore flushes = new Semaphore(0);
   private final ReentrantLock lock = new ReentrantLock();
@@ -196,7 +197,12 @@ final class LiveRoom implements AutoCloseable {
 
   /** Ends are forced at once from now on: for a process scripted to ignore what it is told. */
   void impatient() {
-    grace = IMPATIENT;
+    grace(IMPATIENT);
+  }
+
+  /** Ends wait with {@code grace} from now on. */
+  void grace(LiveMembers.Grace grace) {
+    this.grace = grace;
     live.useTiming(timing());
   }
 
@@ -262,6 +268,7 @@ final class LiveRoom implements AutoCloseable {
   void restart() {
     settle();
     bus.close();
+    abandoned.add(live);
     start();
   }
 
@@ -338,15 +345,21 @@ final class LiveRoom implements AutoCloseable {
 
   /** The box's FDE posts {@code body} in the room; returns once the room has reacted to it. */
   String says(String conversation, String body) {
-    var posted =
-        Actor.call(
-                owner(),
-                () ->
-                    sail.postRoomMessage(
-                        conversation, new SpecMessageRequest(body, null, false), HANDLE))
-            .orThrow();
+    var posted = posts(conversation, body);
     settle();
-    return posted.message().id();
+    return posted;
+  }
+
+  /** As {@link #says}, without waiting for the room: for a message whose delivery is held up. */
+  String posts(String conversation, String body) {
+    return Actor.call(
+            owner(),
+            () ->
+                sail.postRoomMessage(
+                    conversation, new SpecMessageRequest(body, null, false), HANDLE))
+        .orThrow()
+        .message()
+        .id();
   }
 
   /** Seats claude in {@code conversation} and posts {@code body}; the process that started. */
@@ -448,6 +461,12 @@ final class LiveRoom implements AutoCloseable {
 
   /** Blocks until {@code count} events of {@code type} have been published, then settles. */
   void await(String type, int count) {
+    heard(type, count);
+    settle();
+  }
+
+  /** Blocks until {@code count} events of {@code type} have been published. */
+  void heard(String type, int count) {
     lock.lock();
     try {
       var remaining = TimeUnit.SECONDS.toNanos(PATIENCE_SECONDS);
@@ -464,7 +483,6 @@ final class LiveRoom implements AutoCloseable {
     } finally {
       lock.unlock();
     }
-    settle();
   }
 
   /** Blocks until the member's run of {@code process} has been finished and its stop told. */
@@ -580,10 +598,14 @@ final class LiveRoom implements AutoCloseable {
     }
   }
 
-  /** Every fake process still up exits, as sail's own exit would close their stdin. */
+  /**
+   * Every fake process still up exits, as sail's own exit would close their stdin, and the readers
+   * a restart abandoned are waited out before the database they write to is closed.
+   */
   @Override
   public void close() {
     processes.processes.forEach(FakeAgentProcess.Fake::exitsIfRunning);
+    abandoned.forEach(LiveMembers::close);
     live.close();
     bus.close();
     db.close();

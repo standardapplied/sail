@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.LiveRoom.Lines;
@@ -27,6 +28,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -167,7 +169,7 @@ class LiveMemberDisplacementTest {
     room.awaitStopped(process);
 
     var why = "displaced by run " + session.runId() + " claiming its repos";
-    assertTrue(process.stdinClosed());
+    process.awaitStdinClosed();
     assertEquals(List.of(AgentProcess.Signal.INT), process.signals);
     var partial = room.messages.list(SPEC, null, 20).getLast();
     assertEquals("Half", partial.body());
@@ -443,7 +445,7 @@ class LiveMemberDisplacementTest {
         (container, workDir, env, command, pidFile, logFile) -> {
           assertTrue(
               cli.endLiveMember(env.get("SAIL_RUN_ID"), "displaced by a build"),
-              "nothing runs yet, so another process finds the run's agent gone and frees it");
+              "a run that records no process was never prompted, so another process may end it");
           return room.processes.start(container, workDir, env, command, pidFile, logFile);
         });
 
@@ -471,6 +473,138 @@ class LiveMemberDisplacementTest {
         Integer.valueOf(room.processes.latest().pid().getAsInt()),
         room.memberRun().pid(),
         "a run that is still its member's records the process it is");
+  }
+
+  @Test
+  void aMemberDisplacedBeforeItsPidIsWrittenIsNeverPrompted() {
+    room.engage(SPEC, "claude-code", "full");
+    var cli = room.elsewhere().dispatching();
+    var freed = new AtomicReference<Boolean>();
+    room.processes.slowToName(true);
+    room.processes.onStart(
+        starting ->
+            starting
+                .onClose(() -> starting.exits(0))
+                .onPidAsked(
+                    () -> {
+                      freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+                      starting.writesPid();
+                    }));
+
+    var first = room.says(SPEC, "first");
+
+    var lost = room.processes.latest();
+    assertEquals(
+        Boolean.TRUE, freed.get(), "a run that records no process is ended as never started");
+    assertEquals(List.of(), lost.written, "so the process that then names itself gets no work");
+    assertTrue(lost.stdinClosed());
+    assertFalse(room.container.alive(lost.runId), "and nothing works what the run gave back");
+    assertEquals("stopped", room.run(lost.runId).status());
+    assertNull(room.run(lost.runId).pid(), "the stamp lost the compare the end won");
+    assertEquals("displaced by a build", room.stopOf(lost.runId).data().get("reason"));
+    assertEquals(1, stops(lost.runId));
+    assertEquals(Set.of(), room.runs.deliveredMessageIds(lost.runId));
+
+    room.processes.slowToName(false);
+    room.processes.onStart(starting -> {});
+    var second = room.says(SPEC, "second");
+
+    assertEquals(2, room.processes.starts.size());
+    assertEquals(
+        Set.of(first, second), room.runs.deliveredMessageIds(room.processes.latest().runId));
+  }
+
+  @Test
+  void aMemberDisplacedAsItIsFirstPromptedIsSignalledBeforeItsRunIsFreed() {
+    room.engage(SPEC, "claude-code", "full");
+    var cli = room.elsewhere().dispatching();
+    var asks = new AtomicInteger();
+    var freed = new AtomicReference<Boolean>();
+    var aliveOnceFreed = new AtomicReference<Boolean>();
+    room.processes.slowToName(true);
+    room.processes.onStart(
+        starting ->
+            starting
+                .onPidAsked(
+                    () -> {
+                      if (asks.incrementAndGet() == 1) {
+                        room.windowElapses();
+                      } else {
+                        named(starting);
+                      }
+                    })
+                .onWrite(
+                    line -> {
+                      freed.set(cli.endLiveMember(starting.runId, "displaced by a build"));
+                      named(starting);
+                      aliveOnceFreed.set(room.container.alive(starting.runId));
+                      starting.exits(143);
+                    }));
+
+    var first = room.says(SPEC, "first");
+
+    var process = room.processes.latest();
+    assertEquals(Boolean.TRUE, freed.get());
+    assertEquals(
+        Boolean.FALSE,
+        aliveOnceFreed.get(),
+        "a prompted run records its process, so it is ended through its pid file before it is"
+            + " freed: a wrapper slow to write its pid is waited for, never read as gone");
+    assertEquals(1, process.written.size(), "it was prompted while its run still held its repos");
+    assertEquals(Set.of(first), room.runs.deliveredMessageIds(process.runId));
+    assertEquals("stopped", room.run(process.runId).status());
+    assertEquals(
+        Integer.valueOf(room.container.pidOf(process.runId)), room.run(process.runId).pid());
+    assertEquals("displaced by a build", room.stopOf(process.runId).data().get("reason"));
+    assertEquals(1, stops(process.runId));
+  }
+
+  /** The wrapper of {@code process} writes its pid file, unless it already has. */
+  private void named(FakeAgentProcess.Fake process) {
+    if (!room.container.launched().contains(process.runId)) {
+      process.writesPid();
+    }
+  }
+
+  @Test
+  void aMemberThatStoppedReadingItsStdinIsStillReadAndIsStillEnded() {
+    var process = idleMember();
+    process.stopsReading();
+    diesOn(process, AgentProcess.Signal.TERM);
+
+    var second = room.posts(SPEC, "second");
+    process.awaitBlockedWrite();
+    room.later(Duration.ofSeconds(1));
+    process.says(Lines.delta("Two"));
+    process.settle();
+    room.heard(Event.WellKnownTypes.AGENT_TEXT_DELTA, 2);
+
+    room.grace(
+        new LiveMembers.Grace(
+            Duration.ofMillis(20),
+            Duration.ofMillis(20),
+            Duration.ofMillis(20),
+            Duration.ofSeconds(60)));
+    var ended =
+        assertTimeoutPreemptively(
+            Duration.ofSeconds(30),
+            () -> room.sail.dispatching().endLiveMember(process.runId, "displaced by a build"));
+    room.settle();
+
+    assertTrue(ended, "a write the process never reads holds up neither its lines nor its end");
+    assertEquals(
+        List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM),
+        process.signals,
+        "its stdin could not be closed behind that write, and the signals did not wait for it");
+    assertEquals(
+        List.of("One", "Two"),
+        room.data(Event.WellKnownTypes.AGENT_TEXT_DELTA).stream()
+            .map(data -> data.get("text"))
+            .toList());
+    assertEquals("stopped", room.run(process.runId).status());
+    assertEquals("displaced by a build", room.stopOf(process.runId).data().get("reason"));
+    assertEquals(2, room.processes.starts.size(), "the message nobody took starts the next one");
+    assertEquals(List.of(room.promptOf(SPEC, second)), room.processes.latest().written);
   }
 
   private long stops(String runId) {
@@ -554,7 +688,7 @@ class LiveMemberDisplacementTest {
     room.live.sweep();
     room.awaitStopped(process);
 
-    assertTrue(process.stdinClosed());
+    process.awaitStdinClosed();
     assertEquals(List.of(AgentProcess.Signal.INT, AgentProcess.Signal.TERM), process.signals);
     var partial = room.messages.list(SPEC, null, 20).getLast();
     assertEquals("Half way", partial.body());

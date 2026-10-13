@@ -334,13 +334,22 @@ public final class ServerStartCommand implements Runnable {
       ptyEventBridge.start(PtyEventBridge.INTERVAL);
       reconciler.start();
       var reclaimed = operations.liveMembers().reclaim(NodeIdentity.handle());
-      if (reclaimed > 0) {
+      if (reclaimed.ended() > 0) {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Ended "
-                    + reclaimed
+                    + reclaimed.ended()
                     + " live member(s) left from before the restart; each resumes on its room's"
                     + " next message"));
+      }
+      for (var runId : reclaimed.held()) {
+        System.err.println(
+            Ansi.AUTO.string(
+                "  @|red ✗|@ Could not confirm that the live member of run "
+                    + runId
+                    + " left from before the restart has stopped, so what it reserved stays held."
+                    + " Check that its container is running and reachable; the run is finished"
+                    + " once the container answers that its process is gone."));
       }
       operations.liveMembers().startSweep(LIVE_MEMBER_SWEEP);
       var replayed = missedStops.sweep();

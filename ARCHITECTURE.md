@@ -1069,15 +1069,31 @@ class is `LiveMemberTest`'s):
   only idle, 30 s to answer an open turn otherwise, then `kill -INT`, 10 s, `kill -TERM`. A
   turn cut short is posted as far as it got and told with `is_error` and the reason. Every end
   is `running` to `stopped` (or `failed`, for a process that died unasked while it owed an
-  answer, with the end of its log as the reason) as one compare-and-set that revokes the credential, then the
-  `agent_session_stopped` its watcher would have published, `source` `live`. The next message
-  starts a process that resumes the newest session a live run of the same member and lane
-  recorded. On start, `LiveMembers.reclaim` finishes the live runs a previous sail left. A
-  process is prompted only for a run that still holds what it reserved and a seat that is
-  still its member's: once it is registered, its process is stamped on the run with the
-  compare a launched run is verified by (`RunStore.updateProcess`, which lands only on a
-  `running` row) and the room's seat is read again, and a run that was ended or a seat that
-  changed while it started ends the process with nothing written to it.
+  answer or before its run recorded its pid, with the end of its log as the reason) as one
+  compare-and-set that revokes the credential, then the `agent_session_stopped` its watcher
+  would have published, `source` `live`. The next message starts a process that resumes the
+  newest session a live run of the same member and lane recorded. A process is prompted only
+  for a run that still holds what it reserved and a seat that is still its member's: once it
+  is registered, sail waits up to 30 s for the pid its wrapper writes, stamps it on the run
+  with the compare a launched run is verified by (`RunStore.updateProcess`, which lands only
+  on a `running` row) and reads the room's seat again; a process that wrote no pid, a run that
+  was ended or a seat that changed while it started ends the process with nothing written to
+  it, and one that wrote no pid has its run ended at once, as a launch that failed. So a live
+  run that records no pid was never prompted, and one that records a pid has a
+  pid file to be asked through. What a run reserved is freed on those two facts alone, by
+  whoever does not hold its process: a run with no pid is ended by a compare the stamp loses
+  to (`RunStore.transitionUnstarted`), and a run with one only when its container answers that
+  the process is gone. On start, `LiveMembers.reclaim` ends by that rule the live runs reserved
+  before this sail started (run ids are time-ordered, so a run this sail reserved as a message
+  landed during start is its own, registered or not); a run whose process it cannot prove gone
+  stays `running` with its reservation, is named on the server's stderr, and is finished by the
+  missed-stop reconciler once its container says the process is gone. A prompt is written
+  outside the member's lock, so a process that stopped reading its stdin is still read and still
+  ended, its stdin closed on a thread of its own while the signals go on; the reader finishes
+  the run only when no prompt is mid-write. A member whose output ended is over and gone from
+  its room whatever its last look or its finish met: a guard that cannot look loses that look
+  alone, and a run a store refused to finish is left to the claim that displaces it or the
+  sweep that finds its process gone, never behind a member that takes no prompt.
   *`anIdleMemberEndsAndTheNextMessageResumesItsConversation`,
   `theGraceEachEndWaitsWithIsPinned`,
   `aProcessThatDiesMidTurnFailsItsRunAndTheNextMessageResumes`,
@@ -1086,11 +1102,22 @@ class is `LiveMemberTest`'s):
   `LiveMemberDisplacementTest.aMemberPastItsLifetimeIsCutShortAndResumes`,
   `LiveMemberDisplacementTest.aTurnSilentForTheIdleWindowIsAStall`,
   `LiveMemberLanesTest.aRestartOfSailFinishesTheMembersItLeftAndTheyResume`,
+  `LiveMemberLanesTest.aRestartKeepsTheRunOfAMemberItCannotProveGone`,
+  `LiveMemberLanesTest.aRunLeftWithNoProcessRecordedIsReclaimedWithoutAskingItsContainer`,
+  `LiveMemberLanesTest.aRunThisSailReservedIsNotOneItReclaims`,
+  `LiveMemberLanesTest.aReadOnlyMemberWhoseGuardCannotLookAsItExitsIsStillFinishedAndGone`,
   `LiveMemberLanesTest.theMissedStopReconcilerLeavesALiveTurnAlone`,
   `LiveMemberLanesTest.aMemberInAnotherLaneOrFromAWakeIsNotResumed`,
   `LiveMemberEdgesTest.aMemberThatWillNotEndTakesNoPromptAndNothingStartsBesideIt`,
   `LiveMemberEdgesTest.aMemberDismissedWhileItStartedIsEndedBeforeItIsPrompted`,
   `LiveMemberDisplacementTest.aMemberWhoseRunAClaimEndedWhileItStartedIsNeverPrompted`,
+  `LiveMemberEdgesTest.aMemberIsPromptedOnlyOnceItsRunRecordsThePidItsWrapperWrote`,
+  `LiveMemberEdgesTest.aProcessThatNeverWritesItsPidIsEndedUnpromptedAndItsRunIsFreedAtOnce`,
+  `LiveMemberEdgesTest.aProcessThatEndsBeforeItWritesItsPidFailsItsRunAndSaysWhy`,
+  `LiveMemberEdgesTest.aMemberWhoseStartFailsIsEndedAndNeverPrompted`,
+  `LiveMemberDisplacementTest.aMemberThatStoppedReadingItsStdinIsStillReadAndIsStillEnded`,
+  `RunStoreTest.aRunThatRecordedNoProcessIsEndedAsUnstartedAndItsStampThenLosesTheCompare`,
+  `RunStoreTest.aRunThatRecordedItsProcessIsNotEndedAsUnstarted`,
   `ContainerAgentProcessTest`,
   `ReviewAgentLoopIT.aLiveMembersProcessStartsUnderItsInvocationAndIsPromptedOverItsStdin`.*
 - **L5. A claim or an attach displaces a live member; nothing else does.** A build, ad-hoc,
@@ -1105,10 +1132,15 @@ class is `LiveMemberTest`'s):
   again. The member resumes on the room's next message once its repos, or its session, are
   free. A process is owned by the sail that started it: another process on the box (a CLI
   dispatch, the attach) cannot close its stdin and ends it by signal through its pid file, and
-  whichever sees it gone finishes its run.
+  whichever sees it gone finishes its run. It frees the run by L4's two facts: a member that
+  has written no pid yet is ended as never started, and its owner, whose stamp then fails,
+  ends the process unprompted; a member that recorded its pid is signalled and its run kept
+  until the container answers that it is gone.
   *`LiveMemberDisplacementTest` (an idle member, a turn that answers, one that never does, a
   member that will not end, a build's hold, another room's member, a fix claim, a terminal,
-  the race with one, a session host that cannot be asked, another process), `RunReservationTest.aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs`,
+  the race with one, a session host that cannot be asked, another process, one that displaces
+  a member before its pid is written, and one as it is first prompted),
+  `RunReservationTest.aClaimEndsThreeMembersInTurnAndIsThenRefusedAsAnyHeldClaimIs`,
   `RunReservationTest.aChatLanesClaimAndAClaimAnotherRunHoldsDisplaceNoOne`,
   `AgentAttachCommandTest.aLiveMembersRunIsTakenOverNotRefused`,
   `PtyHostYieldTest.aSessionIsLiveWhoeverOpenedItAndNoHostMeansNoSession`.*

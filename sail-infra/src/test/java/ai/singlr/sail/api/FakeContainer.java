@@ -83,12 +83,17 @@ final class FakeContainer implements ShellExec {
     files.put(AgentUnit.forRun(runId).pidPath(), String.valueOf(agent.pid));
   }
 
-  /** The agent of {@code runId} exited on its own, having written {@code log}. */
+  /**
+   * The agent of {@code runId} exited on its own, having written {@code log}; one that never wrote
+   * its pid file was never an agent here.
+   */
   void exited(String runId, String log, int exitCode) {
     files.put(AgentUnit.forRun(runId).logPath(), log);
     var agent = agents.get(runId);
-    agent.exitCode = exitCode;
-    agent.alive = false;
+    if (agent != null) {
+      agent.exitCode = exitCode;
+      agent.alive = false;
+    }
   }
 
   /** The agent of {@code runId} wrote {@code log} and is still running. */
