@@ -1,0 +1,697 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.api;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.ShellExec;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.pty.PtyIdentity;
+import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncConflicts;
+import ai.singlr.sail.store.TokenStore;
+import com.sun.net.httpserver.HttpServer;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
+import java.lang.reflect.Proxy;
+import java.net.InetSocketAddress;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.Arrays;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * A scoped FDE reads exactly its granted projects through main's API. The box first holds project
+ * {@code alpha} alone, and every read route is asked as {@code sam}, whom main scoped to it. Then
+ * everything of project {@code bravo} arrives — its catalog row and container, a spec, rooms,
+ * messages, a run, a review, a shared file, events, a parked conflict, an FDE granted it — beside
+ * an event of no project, and every route is asked again: {@code sam} is answered byte for byte as
+ * before, so nothing of {@code bravo} shows, counts and next-up included, and a route addressed to
+ * something of {@code bravo} still answers what it answered when that did not exist.
+ *
+ * <p>The routes are a table, held complete from the operations side: every method of {@link
+ * Operations} is either reached by a route of the table or declared one no {@code GET} reaches, so
+ * a read added to the API without a row here fails the sweep.
+ */
+class ScopedReadsTest {
+
+  private static final String A_RUN = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  private static final String B_RUN = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  private static final String A_FILE = "docs/alpha.md";
+  private static final String B_FILE = "docs/bravo.md";
+
+  /** The id bravo's review is asked under where the sweep must not name the real one. */
+  private static final String NO_SUCH_REVIEW = "dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+
+  /** The routes that address nothing: lists, and what the box says of itself. */
+  private static final List<String> UNADDRESSED =
+      List.of(
+          "/v1/health",
+          "/v1/whoami",
+          "/v1/fdes",
+          "/v1/agents",
+          "/v1/sync",
+          "/v1/conflicts",
+          "/v1/events/recent",
+          "/v1/events/stats",
+          "/v1/specs",
+          "/v1/specs/board",
+          "/v1/rooms",
+          "/v1/runs",
+          "/v1/projects");
+
+  /** The unaddressed routes on which an unrestricted caller is shown something of bravo. */
+  private static final Set<String> SHOW_EVERY_PROJECT =
+      Set.of(
+          "/v1/fdes",
+          "/v1/conflicts",
+          "/v1/events/recent",
+          "/v1/specs",
+          "/v1/specs/board",
+          "/v1/rooms",
+          "/v1/runs",
+          "/v1/projects");
+
+  /** The routes that address a project or something of one, asked of alpha and of bravo. */
+  private static final List<String> ADDRESSED =
+      List.of(
+          "/v1/conflicts/{spec}?type=spec",
+          "/v1/conflicts/{spec}?type=spec&template=true",
+          "/v1/events?spec={spec}",
+          "/v1/specs?project={project}",
+          "/v1/specs/board?project={project}",
+          "/v1/specs/{spec}",
+          "/v1/specs/{spec}/content",
+          "/v1/specs/{spec}/reviews",
+          "/v1/specs/{spec}/history",
+          "/v1/rooms?project={project}",
+          "/v1/rooms/{room}",
+          "/v1/rooms/{room}/members",
+          "/v1/rooms/{room}/messages",
+          "/v1/rooms/{spec}/messages",
+          "/v1/reviews/{review}",
+          "/v1/runs?project={project}",
+          "/v1/runs?spec={spec}",
+          "/v1/runs/{run}",
+          "/v1/runs/{run}/log",
+          "/v1/runs/{run}/stream",
+          "/v1/projects/{project}",
+          "/v1/projects/{project}/specs",
+          "/v1/projects/{project}/specs/{spec}",
+          "/v1/projects/{project}/agent",
+          "POST /v1/projects/{project}/agent/report",
+          "/v1/projects/{project}/connect",
+          "/v1/projects/{project}/snapshots",
+          "/v1/projects/{project}/files",
+          "/v1/projects/{project}/files/{file}");
+
+  /**
+   * Asked of bravo alone: alpha's run is this box's, so its stream would start a real {@code incus}
+   * tail, while bravo's ran elsewhere and is refused before any process starts.
+   */
+  private static final Set<String> NEVER_ASKED_OF_ALPHA = Set.of("/v1/runs/{run}/stream");
+
+  /** The operations no {@code GET} reaches: the writes, and what only the local socket asks. */
+  private static final Set<String> NOT_READ_OVER_HTTP =
+      Set.of(
+          "sync",
+          "resolveConflict",
+          "approveReview",
+          "dismissFinding",
+          "dispatch",
+          "restoreSnapshot",
+          "deleteSnapshot",
+          "stopRun",
+          "createFollowupSpec",
+          "restoreGlobalSpec",
+          "pruneSpecs",
+          "postRoomMessage",
+          "addRoomMember",
+          "removeRoomMember",
+          "createRoom",
+          "deleteRoom",
+          "createGlobalSpec",
+          "updateGlobalSpec",
+          "deleteGlobalSpec",
+          "setGlobalSpecContent",
+          "publishEvent",
+          "runForCredential",
+          "runActor",
+          "boxActorForCredential",
+          "runInbox",
+          "ackRunMessages",
+          "recordRunSession",
+          "recordRoomConversation");
+
+  @TempDir Path tempDir;
+
+  private final List<String> containers = new CopyOnWriteArrayList<>();
+  private final Set<String> reached = new ConcurrentSkipListSet<>();
+  private final HttpClient client = HttpClient.newHttpClient();
+  private Sqlite db;
+  private AuditPersister recent;
+  private HttpServer server;
+  private String sam;
+  private String ada;
+  private String alphaReview;
+
+  @BeforeEach
+  void aBoxHoldingAlphaAlone() throws Exception {
+    db = Sqlite.open(tempDir.resolve("main.db"));
+    new SchemaManager(db).migrate();
+    recent = new AuditPersister(tempDir.resolve("events.jsonl"), 64);
+    Acting.system(
+        () -> {
+          var fdes = new FdeStore(db);
+          var tokens = new TokenStore(db);
+          ada =
+              tokens
+                  .create(
+                      "ada-laptop", "admin", fdes.add("ada", "Ada", "ada@x", "admin").id(), null)
+                  .token();
+          sam =
+              tokens
+                  .create(
+                      "sam-laptop", "member", fdes.add("sam", "Sam", "sam@x", "member").id(), null)
+                  .token();
+          fdes.restrict("sam");
+          fdes.grant("sam", "alpha");
+          alphaReview = arrive("alpha", A_RUN, A_FILE, "main", "sam", 1);
+        });
+    var specs = new SpecStore(db);
+    var runs = new RunStore(db);
+    var operations =
+        TestControlPlane.standalone(
+            new SailOperations(
+                    new BoxShell(),
+                    ProjectReader.ofCatalog(new ProjectStore(db)),
+                    (command, logPath) -> 4242L,
+                    null,
+                    recent,
+                    specs,
+                    new ReviewStore(db),
+                    runs,
+                    new ProjectStore(db),
+                    () -> new ConnectEnvironment("203.0.113.7", "ops", true),
+                    SyncScheduler.disabled(),
+                    new FdeStore(db),
+                    SessionYield.NONE)
+                .useMessages(new MessageStore(db))
+                .useRooms(new RoomStore(db))
+                .useEvents(new EventStore(db)),
+            db,
+            tempDir.resolve("projects"));
+    var auth = TestAuth.tokens(db);
+    var streamer =
+        new AgentLogStreamer(
+            auth,
+            runs::findById,
+            spec -> specs.findById(spec).map(SpecStore.SpecRow::owner),
+            () -> "main");
+    server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    server.createContext(
+        "/",
+        new ApiRouter(recording(operations), auth, new RateLimitGate(), streamer, () -> "main"));
+    server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
+    server.start();
+  }
+
+  @AfterEach
+  void close() {
+    server.stop(0);
+    db.close();
+  }
+
+  @Test
+  void aScopedReaderIsAnsweredTheSameWhetherOrNotAnotherProjectExists() throws Exception {
+    var withoutBravo = sweep(sam, NO_SUCH_REVIEW);
+
+    var bravoReview = Acting.system(this::bravoArrives);
+    var withBravo = sweep(sam, bravoReview);
+    var unrestricted = sweep(ada, bravoReview);
+
+    for (var route : withBravo.keySet()) {
+      assertEquals(withoutBravo.get(route), withBravo.get(route), route);
+    }
+    for (var route : withBravo.keySet()) {
+      if (!route.startsWith("bravo ")) {
+        assertEquals("200", withBravo.get(route).substring(0, 3), route + " served sam");
+        assertEquals("200", unrestricted.get(route).substring(0, 3), route + " served ada");
+      }
+      if (route.startsWith("bravo ") || SHOW_EVERY_PROJECT.contains(route)) {
+        assertNotEquals(withBravo.get(route), unrestricted.get(route), route + " shows ada bravo");
+      }
+    }
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "spec_not_found", "message": "Spec 'bravo-spec' was not found.", "field_errors": []}}""",
+        withBravo.get("bravo /v1/specs/{spec}"));
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "room_not_found", "message": "Room 'bravo-room' was not found.", "field_errors": []}}""",
+        withBravo.get("bravo /v1/rooms/{room}"));
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "run_not_found", "message": "No run '%s'.", "field_errors": []}}"""
+            .formatted(B_RUN),
+        withBravo.get("bravo /v1/runs/{run}"));
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Review '{review}' not found.", "field_errors": []}}""",
+        withBravo.get("bravo /v1/reviews/{review}"));
+    assertEquals(
+        """
+        404 {"code": "run_not_found", "message": "No run '%s'."}"""
+            .formatted(B_RUN),
+        withBravo.get("bravo /v1/runs/{run}/stream"));
+    assertEquals(readsOverHttp(), new TreeSet<>(reached));
+  }
+
+  @Test
+  void nothingOfBravoIsNamedToAScopedReaderAndAllOfItToAnUnrestrictedOne() throws Exception {
+    var bravoReview = Acting.system(this::bravoArrives);
+    var hidden = List.of("bravo", B_RUN, bravoReview, "unplaced");
+
+    var scoped = sweep(sam, NO_SUCH_REVIEW);
+    var unrestricted = sweep(ada, NO_SUCH_REVIEW);
+
+    for (var route : scoped.keySet()) {
+      if (!route.startsWith("bravo ")) {
+        var answer = scoped.get(route).toLowerCase(Locale.ROOT);
+        assertEquals(List.of(), hidden.stream().filter(answer::contains).toList(), route);
+      }
+    }
+    var shown = String.join("\n", unrestricted.values()).toLowerCase(Locale.ROOT);
+    assertEquals(hidden, hidden.stream().filter(shown::contains).toList());
+  }
+
+  @Test
+  void aScopedCallersWriteOutsideItsScopeIsAnsweredAsOneOnWhatDoesNotExist() throws Exception {
+    Acting.system(this::bravoArrives);
+    var before = entries();
+
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sail fde grant <handle> <project>.", "field_errors": []}}""",
+        send(
+            sam,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"sneak\", \"project\": \"bravo\", \"title\": \"t\"}"));
+    assertEquals(
+        """
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Spec 'bravo-spec' already exists.", "action": "Pick another spec id, or edit it with: sail spec update bravo-spec", "field_errors": []}}""",
+        send(
+            sam,
+            "POST",
+            "/v1/specs",
+            "{\"id\": \"bravo-spec\", \"project\": \"alpha\", \"title\": \"t\"}"));
+    for (var write :
+        List.of(
+            List.of("PUT", "/v1/specs/{spec}", "{\"title\": \"taken over\"}"),
+            List.of("DELETE", "/v1/specs/{spec}", ""),
+            List.of("PUT", "/v1/specs/{spec}/content", "{\"body\": \"b\"}"),
+            List.of("POST", "/v1/rooms/{room}/messages", "{\"body\": \"hello\"}"),
+            List.of("DELETE", "/v1/rooms/{room}", ""),
+            List.of("POST", "/v1/projects/{project}/dispatch", "{}"))) {
+      var onBravo =
+          send(
+              sam, write.get(0), addressed(write.get(1), "bravo", B_RUN, "", B_FILE), write.get(2));
+      var onNothing =
+          send(
+              sam, write.get(0), addressed(write.get(1), "ghost", B_RUN, "", B_FILE), write.get(2));
+      assertEquals("404", onBravo.substring(0, 3), write + ": " + onBravo);
+      assertEquals(onNothing.replace("ghost", "bravo"), onBravo, write.toString());
+    }
+    assertEquals(
+        "404", send(sam, "PUT", "/v1/projects/bravo/files/notes.md", "sneaked in").substring(0, 3));
+    assertEquals(before, entries(), "nothing of any refused write was recorded");
+
+    assertEquals(
+        "201",
+        send(
+                sam,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"mine\", \"project\": \"alpha\", \"title\": \"t\"}")
+            .substring(0, 3));
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"title\": \"an admin edits it\"}")
+            .substring(0, 3));
+  }
+
+  @Test
+  void aRunOnMainSeesNoMoreThanTheScopedFdeItActsFor() throws Exception {
+    var runs = new RunStore(db);
+    var operations =
+        new SailOperations(
+            new BoxShell(),
+            ProjectReader.ofCatalog(new ProjectStore(db)),
+            null,
+            null,
+            new SpecStore(db),
+            new ReviewStore(db),
+            runs,
+            new ProjectStore(db),
+            null,
+            new FdeStore(db),
+            SessionYield.NONE);
+
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    Acting.system(
+        () ->
+            runs.create(
+                run,
+                "alpha",
+                "alpha-spec",
+                "sam",
+                "build",
+                "claude-code",
+                "b",
+                "t",
+                null,
+                null,
+                "/log",
+                "u"));
+
+    var sams = operations.runActor(runs.findById(run).orElseThrow()).orElseThrow();
+
+    assertEquals("sam", sams.owner());
+    assertEquals(ProjectScope.of(List.of("alpha")), sams.scope());
+  }
+
+  private long entries() {
+    return db.queryOne("SELECT count(*) FROM change_log", row -> row.integer(0)).orElseThrow();
+  }
+
+  private String send(String token, String method, String route, String body) throws Exception {
+    var response =
+        client.send(
+            HttpRequest.newBuilder(
+                    URI.create("http://127.0.0.1:" + server.getAddress().getPort() + route))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(30))
+                .method(method, HttpRequest.BodyPublishers.ofString(body))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    return response.statusCode() + " " + response.body();
+  }
+
+  @Test
+  void theTerminalDoorRefusesARoomOutsideTheFdesScopeAsOneThatDoesNotExist() throws Exception {
+    Acting.system(this::bravoArrives);
+    var door = new HostAccess(db, TestAuth.roles(db));
+
+    var outside =
+        assertThrows(
+            IOException.class,
+            () -> door.admit("bravo-room", "bravo", new PtyIdentity("sam", false)));
+    var misaddressed =
+        assertThrows(
+            IOException.class,
+            () -> door.admit("bravo-room", "alpha", new PtyIdentity("sam", false)));
+    var missing =
+        assertThrows(
+            IOException.class,
+            () -> door.admit("ghost-room", "bravo", new PtyIdentity("sam", false)));
+
+    assertEquals("Room 'bravo-room' was not found.", outside.getMessage());
+    assertEquals("Room 'bravo-room' was not found.", misaddressed.getMessage());
+    assertEquals("Room 'ghost-room' was not found.", missing.getMessage());
+    door.admit("alpha-room", "alpha", new PtyIdentity("sam", false));
+    door.admit("bravo-room", "bravo", new PtyIdentity("ada", true));
+  }
+
+  /**
+   * Everything of {@code project} reaches the box: its definition and container, a pending spec
+   * assigned to {@code owner} with a body, a room with a message and an agent's open question, talk
+   * in the spec's own room before that room's row exists, a finished run on {@code node}, a review,
+   * a shared file, a stored event and a recent one, and a parked conflict on the spec. Returns the
+   * review's id.
+   */
+  private String arrive(
+      String project, String run, String file, String node, String owner, int priority) {
+    var spec = project + "-spec";
+    var room = project + "-room";
+    new ProjectStore(db)
+        .upsert(project, "name: " + project + "\nssh:\n  user: dev\nagent:\n  type: claude-code\n");
+    containers.add(project);
+    var specs = new SpecStore(db);
+    specs.create(
+        new SpecStore.SpecRow(
+            spec,
+            project,
+            "The " + project + " work",
+            SpecStatus.PENDING,
+            owner,
+            null,
+            null,
+            null,
+            null,
+            priority,
+            null,
+            "",
+            "",
+            null,
+            List.of(),
+            List.of()),
+        "The body of " + project,
+        "");
+    new RoomStore(db)
+        .create(
+            new RoomStore.RoomRow(
+                room,
+                project,
+                "The " + project + " room",
+                owner,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null));
+    var messages = new MessageStore(db);
+    messages.append(room, owner, "A word about " + project, null);
+    messages.append(room, "claude-code/" + run, "A question about " + project + "?", null, true);
+    messages.append(spec, owner, "Talk in the " + project + " spec", null);
+    var runs = new RunStore(db);
+    runs.create(
+        run,
+        project,
+        spec,
+        node,
+        "build",
+        "claude-code",
+        "feat/" + project,
+        "do " + project,
+        123,
+        null,
+        "/home/dev/.sail/runs/" + run + "/agent.log",
+        "sail-agent-" + run);
+    runs.complete(run, "completed", 0);
+    var review = new ReviewStore(db).createReview(spec, 1);
+    new FileStore(db)
+        .put(
+            project,
+            file,
+            new ByteArrayInputStream(("shared by " + project).getBytes(StandardCharsets.UTF_8)),
+            0644);
+    new EventStore(db)
+        .insert(
+            new EventStore.EventRow(
+                0, "2026-10-13T00:00:00Z", "spec_dispatched", project, spec, "sail", "main", "{}"));
+    recent.onEvent(Event.of(project, spec, "spec_dispatched", "sail", "main"));
+    var held = specs.comparableSnapshot(spec);
+    var theirs = new LinkedHashMap<>(held);
+    theirs.put("title", "The " + project + " work, as main has it");
+    new SyncConflicts(db)
+        .record(
+            "spec",
+            spec,
+            YamlUtil.dumpJson(held),
+            YamlUtil.dumpJson(held),
+            YamlUtil.dumpJson(theirs),
+            "9-main",
+            "main",
+            List.of("title"));
+    return review;
+  }
+
+  /**
+   * Bravo arrives, ready before alpha's spec, with an FDE granted it alone, an event of the box
+   * itself and a stored event on alpha's spec that names no project. Returns its review's id.
+   */
+  private String bravoArrives() {
+    var fdes = new FdeStore(db);
+    fdes.add("bea", "Bea", "bea@x", "member");
+    fdes.restrict("bea");
+    fdes.grant("bea", "bravo");
+    recent.onEvent(SyncTransitionEvents.health("main@unplaced", false, "unreachable", "x", "main"));
+    new EventStore(db)
+        .insert(
+            new EventStore.EventRow(
+                0, "2026-10-13T00:00:01Z", "unplaced", null, "alpha-spec", "sail", "main", "{}"));
+    return arrive("bravo", B_RUN, B_FILE, "elsewhere", "ada", 9);
+  }
+
+  /**
+   * Every route of the table as {@code token} is answered it, {@code "<status> <body>"} by route:
+   * the addressed ones once for alpha and once for bravo, under the project and the route's
+   * template. Bravo's review is {@code bravoReview}, which reads as {@code {review}} in an answer,
+   * so a sweep made before that review existed compares with one made after.
+   */
+  private Map<String, String> sweep(String token, String bravoReview) throws Exception {
+    var answers = new LinkedHashMap<String, String>();
+    for (var route : UNADDRESSED) {
+      answers.put(route, ask(token, route));
+    }
+    for (var template : ADDRESSED) {
+      if (!NEVER_ASKED_OF_ALPHA.contains(template)) {
+        answers.put(
+            "alpha " + template,
+            ask(token, addressed(template, "alpha", A_RUN, alphaReview, A_FILE)));
+      }
+      answers.put(
+          "bravo " + template,
+          ask(token, addressed(template, "bravo", B_RUN, bravoReview, B_FILE))
+              .replace(bravoReview, "{review}"));
+    }
+    return answers;
+  }
+
+  private static String addressed(
+      String template, String project, String run, String review, String file) {
+    return template
+        .replace("{project}", project)
+        .replace("{spec}", project + "-spec")
+        .replace("{room}", project + "-room")
+        .replace("{run}", run)
+        .replace("{review}", review)
+        .replace("{file}", file);
+  }
+
+  private String ask(String token, String route) throws Exception {
+    var post = route.startsWith("POST ");
+    var request =
+        HttpRequest.newBuilder(
+                URI.create(
+                    "http://127.0.0.1:"
+                        + server.getAddress().getPort()
+                        + (post ? route.substring("POST ".length()) : route)))
+            .header("Authorization", "Bearer " + token)
+            .timeout(Duration.ofSeconds(30));
+    var response =
+        client.send(
+            post
+                ? request.POST(HttpRequest.BodyPublishers.noBody()).build()
+                : request.GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+    return response.statusCode() + " " + response.body();
+  }
+
+  /** {@code operations}, noting each operation a route reaches. */
+  private Operations recording(Operations operations) {
+    return (Operations)
+        Proxy.newProxyInstance(
+            Operations.class.getClassLoader(),
+            new Class<?>[] {Operations.class},
+            (proxy, method, arguments) -> {
+              reached.add(method.getName());
+              try {
+                return method.invoke(operations, arguments);
+              } catch (InvocationTargetException thrown) {
+                throw thrown.getCause();
+              }
+            });
+  }
+
+  private static Set<String> readsOverHttp() {
+    return Arrays.stream(Operations.class.getMethods())
+        .map(Method::getName)
+        .filter(operation -> !NOT_READ_OVER_HTTP.contains(operation))
+        .collect(Collectors.toCollection(TreeSet::new));
+  }
+
+  /** The box's containers, a log every run wrote two lines to, and no snapshot. */
+  private final class BoxShell implements ShellExec {
+
+    @Override
+    public Result exec(List<String> command) {
+      var asked = String.join(" ", command);
+      if (asked.equals("incus list --format json")) {
+        return new Result(0, containers.stream().map(BoxShell::running).toList().toString(), "");
+      }
+      for (var container : containers) {
+        if (asked.equals("incus list ^" + container + "$ --format json")) {
+          return new Result(0, "[" + running(container) + "]", "");
+        }
+      }
+      if (asked.startsWith("incus snapshot list")) {
+        return new Result(0, "[]", "");
+      }
+      if (asked.contains(" tail -n ")) {
+        return new Result(0, "one\ntwo\n", "");
+      }
+      return new Result(1, "", "no script for " + asked);
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) {
+      return exec(command);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+
+    private static String running(String container) {
+      return """
+          {"name": "%s", "status": "Running", "state": {"network": {"eth0": {"addresses": [
+            {"family": "inet", "address": "10.0.0.42", "scope": "global"}]}}}}"""
+          .formatted(container);
+    }
+  }
+}

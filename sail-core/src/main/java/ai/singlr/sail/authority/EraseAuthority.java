@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
@@ -18,19 +19,22 @@ import java.util.Optional;
  * ask, each on its own copy. A read-only role erases nothing. A whole project, or a policy's sweep,
  * is an admin's alone. A spec is erased by its owner ({@link SpecStore.LastKnown#owner}) or an
  * admin, once it is archived, cancelled or deleted. Nothing is erased while a run in it has not
- * finished, bar a project purged whole ({@link #idle}).
+ * finished, bar a project purged whole ({@link #idle}). An actor scoped to its granted projects
+ * erases only inside them: what lies outside is, to it, not there.
  */
 public final class EraseAuthority {
 
   private final RunStore runs;
   private final SpecStore specs;
   private final Erasure erasure;
+  private final ChangeLog changeLog;
 
   /** The erase rule, deciding on {@code db}'s copy. */
   public EraseAuthority(Sqlite db) {
     this.runs = new RunStore(db);
     this.specs = new SpecStore(db);
     this.erasure = new Erasure(db);
+    this.changeLog = new ChangeLog(db);
   }
 
   /**
@@ -72,35 +76,56 @@ public final class EraseAuthority {
           "Prune the spec or project it belongs to.");
     }
     var target = new Erasure.Target(type, id);
+    if (!sees(actor, type, id)) {
+      return unheld(type, id);
+    }
     if (erasure.isErased(target)) {
       return Optional.empty();
     }
     if (project) {
-      return erasure.holds(target)
-          ? Optional.empty()
-          : Refusal.of(
-              Refusal.Kind.NOT_PRUNABLE,
-              "main holds no project '" + id + "'",
-              "Sync the project before pruning it.");
+      return erasure.holds(target) ? Optional.empty() : unheld(type, id);
     }
-    return specs
-        .lastKnown(id)
-        .map(spec -> spec(actor, spec))
-        .orElseGet(
-            () ->
-                Refusal.of(
-                    Refusal.Kind.NOT_PRUNABLE,
-                    "main holds no spec '"
-                        + id
-                        + "', so it cannot tell whose it is; sync it before pruning",
-                    "Sync the spec before pruning it."));
+    return specs.lastKnown(id).map(spec -> spec(actor, spec)).orElseGet(() -> unheld(type, id));
   }
 
-  /** Why {@code actor} may not erase {@code spec}, as this box last knew it. */
+  /**
+   * Whether {@code actor}'s scope admits what this box holds of {@code type} {@code id}, by the
+   * project its head carries, which outlives the row and its erasure.
+   */
+  private boolean sees(Actor actor, String type, String id) {
+    var scope = actor.scope();
+    return scope.unrestricted() || scope.admits(changeLog.headProject(type, id).orElse(null));
+  }
+
+  /**
+   * The refusal of a request to erase what main holds nothing of, and, in the same words, what it
+   * holds outside the requester's scope.
+   */
+  private static Optional<Refusal> unheld(String type, String id) {
+    return Erasure.PROJECT.equals(type)
+        ? Refusal.of(
+            Refusal.Kind.NOT_PRUNABLE,
+            "main holds no project '" + id + "'",
+            "Sync the project before pruning it.")
+        : Refusal.of(
+            Refusal.Kind.NOT_PRUNABLE,
+            "main holds no spec '"
+                + id
+                + "', so it cannot tell whose it is; sync it before pruning",
+            "Sync the spec before pruning it.");
+  }
+
+  /**
+   * Why {@code actor} may not erase {@code spec}, as this box last knew it. A spec outside the
+   * actor's scope is one it cannot find.
+   */
   public Optional<Refusal> spec(Actor actor, SpecStore.LastKnown spec) {
     var denied = request(actor, false);
     if (denied.isPresent()) {
       return denied;
+    }
+    if (!sees(actor, Erasure.SPEC, spec.id())) {
+      return Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec '" + spec.id() + "' was not found.", null);
     }
     if (!actor.isAdmin() && !actor.actsFor(spec.owner())) {
       return SpecAuthority.notOwner(spec.id(), spec.assignee(), spec.createdBy());

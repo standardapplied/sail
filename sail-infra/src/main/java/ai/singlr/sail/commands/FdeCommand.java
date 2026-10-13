@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
@@ -68,6 +69,8 @@ import picocli.CommandLine.Spec;
       FdeCommand.Add.class,
       FdeCommand.ListFdes.class,
       FdeCommand.Update.class,
+      FdeCommand.Grant.class,
+      FdeCommand.Revoke.class,
       FdeCommand.Remove.class,
       FdeCommand.Pair.class,
       FdeCommand.Unpair.class,
@@ -309,6 +312,15 @@ public final class FdeCommand implements Runnable {
                 + " \"ssh-ed25519 AAAA... me@host\".")
     private String publicKey;
 
+    @Option(
+        names = "--scoped",
+        description =
+            "Scope the FDE to the projects it is granted (sail fde grant); it sees nothing until"
+                + " one is.")
+    private boolean scoped;
+
+    @ParentCommand private FdeCommand command;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -316,9 +328,10 @@ public final class FdeCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            requireMainForRosterEdit("Adding an FDE");
+            var box = command.box.get();
+            requireMainForRosterEdit(box.node(), "Adding an FDE");
             var key = publicKey == null ? null : SshPublicKey.parse(publicKey);
-            try (var db = Sqlite.open(dbPath())) {
+            try (var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               if (fdeStore.byHandle(handle).isPresent()) {
                 throw new IllegalArgumentException(
@@ -328,13 +341,15 @@ public final class FdeCommand implements Runnable {
                         + handle
                         + "'.");
               }
-              var fde =
-                  key == null
-                      ? fdeStore.add(handle, displayName, email, role)
-                      : addWithKey(fdeStore, key);
+              var fde = db.transaction(() -> add(fdeStore, key));
               System.out.println(
                   Ansi.AUTO.string(
-                      "  @|green ✓|@ FDE added: " + fde.handle() + " (" + fde.role() + ")"));
+                      "  @|green ✓|@ FDE added: "
+                          + fde.handle()
+                          + " ("
+                          + fde.role()
+                          + (scoped ? ", scoped: grant projects with 'sail fde grant'" : "")
+                          + ")"));
               if (key != null) {
                 System.out.println(
                     Ansi.AUTO.string(
@@ -346,6 +361,16 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
+    }
+
+    /** Adds the FDE scoped from its first moment when asked, never unscoped and then narrowed. */
+    private FdeStore.Fde add(FdeStore fdeStore, SshPublicKey key) {
+      var fde =
+          key == null ? fdeStore.add(handle, displayName, email, role) : addWithKey(fdeStore, key);
+      if (scoped) {
+        fdeStore.restrict(fde.handle());
+      }
+      return fde;
     }
 
     private FdeStore.Fde addWithKey(FdeStore fdeStore, SshPublicKey key) {
@@ -400,6 +425,136 @@ public final class FdeCommand implements Runnable {
             }
           });
     }
+  }
+
+  @Command(
+      name = "grant",
+      description = "Grant a scoped FDE a project: it sees it after its box's next sync.",
+      mixinStandardHelpOptions = true)
+  static final class Grant implements Runnable {
+
+    @Parameters(index = "0", description = "FDE handle.")
+    private String handle;
+
+    @Parameters(index = "1", description = "Project name.")
+    private String project;
+
+    @Option(names = "--dry-run", description = "Say what would change without changing it.")
+    private boolean dryRun;
+
+    @Option(names = "--json", description = "Output in JSON format.")
+    private boolean json;
+
+    @ParentCommand private FdeCommand command;
+
+    @Spec private CommandSpec spec;
+
+    @Override
+    public void run() {
+      CliCommand.run(
+          spec,
+          () -> {
+            var box = command.box.get();
+            requireMainForRosterEdit(box.node(), "Granting a project");
+            try (var db = Sqlite.open(box.database())) {
+              System.out.println(scopeEdit(db, handle, project, true, dryRun, json));
+            }
+          });
+    }
+  }
+
+  @Command(
+      name = "revoke",
+      description =
+          "Take a project back from a scoped FDE: its box drops the project on its next sync.",
+      mixinStandardHelpOptions = true)
+  static final class Revoke implements Runnable {
+
+    @Parameters(index = "0", description = "FDE handle.")
+    private String handle;
+
+    @Parameters(index = "1", description = "Project name.")
+    private String project;
+
+    @Option(names = "--dry-run", description = "Say what would change without changing it.")
+    private boolean dryRun;
+
+    @Option(names = "--json", description = "Output in JSON format.")
+    private boolean json;
+
+    @ParentCommand private FdeCommand command;
+
+    @Spec private CommandSpec spec;
+
+    @Override
+    public void run() {
+      CliCommand.run(
+          spec,
+          () -> {
+            var box = command.box.get();
+            requireMainForRosterEdit(box.node(), "Revoking a project");
+            try (var db = Sqlite.open(box.database())) {
+              System.out.println(scopeEdit(db, handle, project, false, dryRun, json));
+            }
+          });
+    }
+  }
+
+  /**
+   * Grants ({@code grant}) or revokes {@code project} for the scoped FDE {@code handle} and says
+   * what that did. A grant names a project in the catalog; a revoke takes back whatever was
+   * granted, a project since pruned included. Either one repeated changes nothing. A grant first
+   * fills the project of any head written without one — by the server of the release before, in the
+   * moments the upgrade migrated under it — since main pages a scoped node by its heads alone and
+   * such a head would never reach it.
+   */
+  static String scopeEdit(
+      Sqlite db, String handle, String project, boolean grant, boolean dryRun, boolean json) {
+    NameValidator.requireValidFdeHandle(handle);
+    NameValidator.requireValidProjectName(project);
+    var fdes = new FdeStore(db);
+    if (grant && new ProjectStore(db).findByName(project).isEmpty()) {
+      throw new IllegalArgumentException(
+          "Unknown project '" + project + "'. List the catalog with 'sail project list'.");
+    }
+    var changed = fdes.grantsOf(handle).admits(project) != grant;
+    if (changed && !dryRun) {
+      if (grant) {
+        new ChangeLog(db).backfillProjects();
+        fdes.grant(handle, project);
+      } else {
+        fdes.revoke(handle, project);
+      }
+    }
+    var projects = List.copyOf(fdes.scopeOf(handle).projects());
+    if (json) {
+      var map = new LinkedHashMap<String, Object>();
+      map.put("handle", handle);
+      map.put("project", project);
+      map.put(grant ? "granted" : "revoked", changed);
+      map.put("dry_run", dryRun);
+      map.put("projects", projects);
+      return YamlUtil.dumpJson(map);
+    }
+    if (!changed) {
+      return Ansi.AUTO.string(
+          "  @|faint "
+              + handle
+              + (grant ? " already holds " : " does not hold ")
+              + project
+              + "; nothing to do.|@");
+    }
+    var did =
+        grant ? (dryRun ? "Would grant " : "Granted ") : (dryRun ? "Would revoke " : "Revoked ");
+    return Ansi.AUTO.string(
+        "  @|green ✓|@ "
+            + did
+            + project
+            + (grant ? " to " : " from ")
+            + handle
+            + (grant
+                ? ". Its box holds the project after its next sync."
+                : ". Its box drops the project, unpushed work included, on its next sync."));
   }
 
   @Command(
@@ -831,6 +986,8 @@ public final class FdeCommand implements Runnable {
   @Command(name = "list", description = "List FDEs.", mixinStandardHelpOptions = true)
   static final class ListFdes implements Runnable {
 
+    @ParentCommand private FdeCommand command;
+
     @Spec private CommandSpec spec;
 
     @Override
@@ -838,13 +995,14 @@ public final class FdeCommand implements Runnable {
       CliCommand.run(
           spec,
           () -> {
-            try (var db = Sqlite.open(dbPath())) {
-              var fdes = new FdeStore(db).list();
+            try (var db = Sqlite.open(command.box.get().database())) {
+              var fdeStore = new FdeStore(db);
+              var fdes = fdeStore.list();
               if (fdes.isEmpty()) {
                 System.out.println("  No FDEs. Add one with 'sail fde add <handle>'.");
                 return;
               }
-              Banner.printFdeTable(fdes, System.out, Ansi.AUTO);
+              Banner.printFdeTable(fdes, fdeStore::scopeOf, System.out, Ansi.AUTO);
             }
           });
     }

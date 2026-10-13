@@ -12,6 +12,7 @@ import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
@@ -72,11 +73,43 @@ public final class ProjectCatalog {
     }
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
+      requireInScope(db, name);
       Actor.call(operator, () -> new ProjectStore(db).decide(name, Map.of()))
           .ifPresent(
               refused -> {
                 throw new WriteRefused(refused);
               });
+    }
+  }
+
+  /**
+   * Refuses, before a command writes anything, a project outside the scope main last named for this
+   * node ({@link SyncScope}): main would deny its every row, so it could only ever exist here. A
+   * box no welcome has scoped, and one with no catalog yet, refuses nothing.
+   */
+  public static void requireInScope(String name) {
+    requireInScope(SailPaths.controlPlaneDb(), name);
+  }
+
+  static void requireInScope(Path catalog, String name) {
+    if (!Files.isRegularFile(catalog)) {
+      return;
+    }
+    try (var db = Sqlite.open(catalog)) {
+      new SchemaManager(db).migrate();
+      requireInScope(db, name);
+    }
+  }
+
+  private static void requireInScope(Sqlite db, String name) {
+    if (!new SyncScope(db).held().admits(name)) {
+      throw new IllegalStateException(
+          "Project '"
+              + name
+              + "' is outside the projects main grants this box, so main would take nothing of it."
+              + " Ask an admin to grant it on main: sail fde grant <handle> "
+              + name
+              + ".");
     }
   }
 

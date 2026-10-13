@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
@@ -90,6 +91,8 @@ public final class PagedSyncSession implements SyncSession {
   private String broken;
   private String handle;
   private long mainFileMax;
+  private ProjectScope scope = ProjectScope.all();
+  private boolean contentLeft;
 
   PagedSyncSession content(Sqlite db) {
     blobs = new BlobStore(db);
@@ -121,6 +124,8 @@ public final class PagedSyncSession implements SyncSession {
     copy.notice = notice;
     copy.handle = handle;
     copy.mainFileMax = mainFileMax;
+    copy.scope = scope;
+    copy.contentLeft = contentLeft;
     return copy;
   }
 
@@ -159,6 +164,7 @@ public final class PagedSyncSession implements SyncSession {
     session.notice = notice;
     session.handle = welcome.handle();
     session.mainFileMax = welcome.fileMax();
+    session.scope = welcome.scope();
     return session;
   }
 
@@ -176,13 +182,21 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   /**
-   * Compacts what the type's round touched and, after a deletion or an erasure, collects the
-   * content left unreferenced. Housekeeping on data already synced: a failure here is reported and
-   * left to the next round or {@code sail sync gc}, never charged to the type.
+   * Compacts what the type's round touched and, after a deletion, an erasure or a project dropped
+   * from this box's scope ({@link #contentLeft}), collects the content left unreferenced.
+   * Housekeeping on data already synced: a failure here is reported and left to the next round or
+   * {@code sail sync gc}, never charged to the type.
    */
   private long collect(String type) {
     try {
-      return blobs.gc(BlobStore.Compaction.of(type, touched), sawTombstone || adopted > 0).freed();
+      var freed =
+          blobs
+              .gc(
+                  BlobStore.Compaction.of(type, touched),
+                  sawTombstone || adopted > 0 || contentLeft)
+              .freed();
+      contentLeft = false;
+      return freed;
     } catch (RuntimeException e) {
       System.err.println(
           "  [sync] "
@@ -433,7 +447,8 @@ public final class PagedSyncSession implements SyncSession {
   /**
    * Reconciles {@code ids} against main's answer for them, {@code entries}: an erasure among them
    * is applied first, and an id main omitted is one it has never seen, which the engine pushes as
-   * new.
+   * new. A main that scopes this node also omits what it holds outside the scope, and the node
+   * offers that as new too, whatever it heard of it before: main's denial withdraws it here.
    */
   private SyncEngine.Report reconcileAnswered(
       String type,
@@ -444,9 +459,15 @@ public final class PagedSyncSession implements SyncSession {
     var remaining = adoptErasures(type, entries);
     var erasedNow = ids(entries);
     erasedNow.removeAll(ids(remaining));
-    var scope = new LinkedHashSet<>(ids);
-    scope.removeAll(erasedNow);
-    return reconcile(local, scope, new PageView(type, remaining, checkpoint));
+    var asked = new LinkedHashSet<>(ids);
+    asked.removeAll(erasedNow);
+    var unseen = new LinkedHashSet<String>();
+    if (!scope.unrestricted()) {
+      unseen.addAll(ids);
+      unseen.removeAll(ids(entries));
+    }
+    return engine.reconcile(
+        new ScopedLocalReplica(local, asked, unseen), new PageView(type, remaining, checkpoint));
   }
 
   /**
@@ -751,6 +772,21 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   @Override
+  public ProjectScope scope() {
+    return scope;
+  }
+
+  @Override
+  public String mainId() {
+    return mainId;
+  }
+
+  @Override
+  public void contentLeft() {
+    contentLeft = true;
+  }
+
+  @Override
   public Held held(String type, List<String> ids, Map<String, String> heard) {
     return onLiveChannel(
         () -> {
@@ -971,7 +1007,8 @@ public final class PagedSyncSession implements SyncSession {
 
     /**
      * Makes main's version in a denial this view's entry — the content it names fetched first, so
-     * the node can adopt it — or drops the entry when main holds none.
+     * the node can adopt it — or drops the entry when main holds none, or none it lets this box
+     * see: the node then withdraws its row.
      */
     private void holdMainsVersion(SyncWire.Denied denied) {
       if (denied.rev() == null) {

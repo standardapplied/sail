@@ -142,6 +142,11 @@ public final class NativeFleet implements AutoCloseable {
   }
 
   public Box node(String handle, Path binary) throws Exception {
+    return node(handle, binary, new String[0]);
+  }
+
+  /** A node whose FDE main adds with {@code fdeFlags} besides its role, email and key. */
+  public Box node(String handle, Path binary, String... fdeFlags) throws Exception {
     if (main == null) {
       throw new IllegalStateException("A node joins a main: create main first");
     }
@@ -162,16 +167,20 @@ public final class NativeFleet implements AutoCloseable {
                 "--email",
                 handle + "@example.dev",
                 "--json"));
-    main.sailOk(
-        "fde",
-        "add",
-        handle,
-        "--role",
-        "member",
-        "--email",
-        handle + "@example.dev",
-        "--key",
-        (String) joined.get("public_key"));
+    var add =
+        new ArrayList<>(
+            List.of(
+                "fde",
+                "add",
+                handle,
+                "--role",
+                "member",
+                "--email",
+                handle + "@example.dev",
+                "--key",
+                (String) joined.get("public_key")));
+    add.addAll(List.of(fdeFlags));
+    main.sailOk(add.toArray(String[]::new));
     return box;
   }
 
@@ -193,22 +202,62 @@ public final class NativeFleet implements AutoCloseable {
   }
 
   /**
+   * Asserts that {@code node}, scoped to {@code projects}, holds exactly main's rows and change-log
+   * heads of those projects, and no row, head or history of any other.
+   */
+  public void assertScopedTo(Box node, String... projects) throws Exception {
+    var in = "('" + String.join("', '", projects) + "')";
+    for (var table : SCOPED.entrySet()) {
+      assertEquals(
+          main.query(table.getValue().formatted("WHERE " + scopedBy(table.getKey()) + " IN " + in)),
+          node.query(table.getValue().formatted("")),
+          () -> node.name + "'s " + table.getKey() + " are not main's within " + in);
+    }
+    assertEquals(
+        main.query(HEADS.formatted("WHERE h.project IN " + in)),
+        node.query(HEADS.formatted("")),
+        () -> node.name + "'s change-log heads are not main's within " + in);
+    assertEquals(
+        "0",
+        node.query(
+                "SELECT count(*) FROM change_log l WHERE NOT EXISTS (SELECT 1 FROM change_heads h"
+                    + " WHERE h.entity_type = l.entity_type AND h.entity_id = l.entity_id)")
+            .strip(),
+        () -> node.name + " keeps history of an entity it holds no head of");
+  }
+
+  private static String scopedBy(String table) {
+    return "projects".equals(table) ? "name" : "project";
+  }
+
+  private static final Map<String, String> SCOPED =
+      replicated(
+          "specs", "SELECT id, project, title, status, assignee FROM specs %s ORDER BY id",
+          "projects", "SELECT name FROM projects %s ORDER BY name",
+          "rooms", "SELECT id FROM rooms %s ORDER BY id",
+          "runs", "SELECT id, status FROM runs %s ORDER BY id",
+          "project_files",
+              "SELECT project, path, content_hash, mode FROM project_files %s ORDER BY id");
+
+  /**
    * Asserts that every node's change-log heads — each entity's id, rev, kind and author, for every
    * synced type — equal main's: after a fleet's final round, no box holds a revision main never
    * minted or records another author for one.
    */
   public void assertHeadsAgree(Box... nodes) throws Exception {
-    var expected = main.query(HEADS);
+    var expected = main.query(HEADS.formatted(""));
     for (var node : nodes) {
       assertEquals(
-          expected, node.query(HEADS), () -> node.name + "'s change-log heads differ from main's");
+          expected,
+          node.query(HEADS.formatted("")),
+          () -> node.name + "'s change-log heads differ from main's");
     }
   }
 
   private static final String HEADS =
       """
       SELECT l.entity_type, l.entity_id, l.rev, l.kind, l.actor
-      FROM change_heads h JOIN change_log l ON l.seq = h.seq
+      FROM change_heads h JOIN change_log l ON l.seq = h.seq %s
       ORDER BY l.entity_type, l.entity_id""";
 
   public static boolean belowFloor(String version) {
@@ -389,15 +438,38 @@ public final class NativeFleet implements AutoCloseable {
      * bodyBytes} of filler. Only callable inside {@link #serving}.
      */
     public void createSpecs(String prefix, int count, int bodyBytes) throws Exception {
+      createSpecs(prefix, count, bodyBytes, "demo");
+    }
+
+    /** As {@link #createSpecs(String, int, int)}, in {@code project}. */
+    public void createSpecs(String prefix, int count, int bodyBytes, String project)
+        throws Exception {
       shOk(
           """
           seq 1 %d | xargs -P 8 -I{} sh -c '
             { echo "# %s {} ✓ 日本語"; yes "filler for %s {}" | head -c %d; } > /tmp/%s-{}.md
-            sail spec create --server %s --id %s-{} --title "%s {} ✓" -p demo \\
+            sail spec create --server %s --id %s-{} --title "%s {} ✓" -p %s \\
               --body-file /tmp/%s-{}.md >/dev/null'
           """
               .formatted(
-                  count, prefix, prefix, bodyBytes, prefix, server(), prefix, prefix, prefix));
+                  count, prefix, prefix, bodyBytes, prefix, server(), prefix, prefix, project,
+                  prefix));
+    }
+
+    /**
+     * Catalogs {@code projects} on this box from descriptors it holds, as {@code sail migrate}
+     * imports a project that was never provisioned.
+     */
+    public void catalog(String... projects) throws Exception {
+      for (var project : projects) {
+        shOk(
+            """
+            install -d "$HOME/.sail/projects/%1$s"
+            printf 'name: %1$s\\nimage: ubuntu/24.04\\n' > "$HOME/.sail/projects/%1$s/sail.yaml"
+            """
+                .formatted(project));
+      }
+      sailOk("migrate");
     }
 
     /** Runs {@code sail} against this box's control-plane server; only inside {@link #serving}. */

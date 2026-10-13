@@ -29,6 +29,7 @@ public final class Refusals {
       case FIXED -> ErrorCode.INVALID_REQUEST;
       case NOT_PRUNABLE -> ErrorCode.SPEC_NOT_PRUNABLE;
       case NOT_PUBLISHABLE -> ErrorCode.FORBIDDEN;
+      case OUT_OF_SCOPE -> ErrorCode.NOT_FOUND;
     };
   }
 

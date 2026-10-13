@@ -59,6 +59,7 @@ public final class TokenAuth implements ApiAuth {
     exchange.setAttribute("token.role", roleOf(info, fde).attribute());
     if (fde != null) {
       exchange.setAttribute("token.fde", fde);
+      exchange.setAttribute(ApiAuth.SCOPE, roles.scopeOf(fde));
     }
   }
 

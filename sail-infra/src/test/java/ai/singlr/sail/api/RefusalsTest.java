@@ -29,7 +29,8 @@ class RefusalsTest {
             Refusal.Kind.NOT_AUTHOR, ErrorCode.FORBIDDEN_NOT_AUTHOR,
             Refusal.Kind.FIXED, ErrorCode.INVALID_REQUEST,
             Refusal.Kind.NOT_PRUNABLE, ErrorCode.SPEC_NOT_PRUNABLE,
-            Refusal.Kind.NOT_PUBLISHABLE, ErrorCode.FORBIDDEN),
+            Refusal.Kind.NOT_PUBLISHABLE, ErrorCode.FORBIDDEN,
+            Refusal.Kind.OUT_OF_SCOPE, ErrorCode.NOT_FOUND),
         Arrays.stream(Refusal.Kind.values())
             .collect(Collectors.toMap(kind -> kind, Refusals::code)));
     assertEquals(403, ErrorCode.FORBIDDEN_NOT_AUTHOR.httpCode());

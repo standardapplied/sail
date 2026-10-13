@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import java.io.IOException;
@@ -118,7 +119,7 @@ public final class SseHandler implements HttpHandler {
   }
 
   private void runStream(HttpExchange exchange) throws IOException {
-    var filter = parseFilter(exchange.getRequestURI());
+    var filter = parseFilter(exchange.getRequestURI(), ApiRouter.actorOf(exchange));
     var streamSubscriber = new StreamSubscriber(filter);
     var subscription = bus.subscribe(streamSubscriber, DEFAULT_PER_CONNECTION_CAPACITY);
     if (subscription == null) {
@@ -191,13 +192,18 @@ public final class SseHandler implements HttpHandler {
     exchange.sendResponseHeaders(503, -1);
   }
 
-  static Predicate<Event> parseFilter(URI uri) {
+  /**
+   * The events a subscriber is sent: those of the projects {@code actor}'s scope admits, narrowed
+   * by the query. An event of the box itself, a sync that degraded, is of no project in the catalog
+   * ({@link Event#SAIL_AGENT} stands in for one), so it reaches an unrestricted subscriber alone.
+   */
+  static Predicate<Event> parseFilter(URI uri, Actor actor) {
+    Predicate<Event> result = event -> actor.scope().admits(event.project());
     var query = uri.getRawQuery();
     if (Strings.isBlank(query)) {
-      return EventSubscriber.all();
+      return result;
     }
     var values = parseQuery(query);
-    Predicate<Event> result = EventSubscriber.all();
     var projectFilter = values.get("project");
     if (Strings.isNotBlank(projectFilter)) {
       result = result.and(EventSubscriber.byProject(projectFilter));

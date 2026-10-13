@@ -15,17 +15,22 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MainVersion;
+import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
@@ -595,6 +600,89 @@ class ConflictOperationsTest {
         assertThrows(ApiException.class, () -> operations.resolve("spec", "ghost", mine()));
     assertEquals(404, refused.status());
     assertEquals("No open conflict for 'ghost'.", refused.getMessage());
+  }
+
+  @Test
+  void aScopedReaderIsShownOnlyTheConflictsOfItsProjects() {
+    var ofProj = Actor.cliOperator("sam").withScope(ProjectScope.of(List.of("proj")));
+    var rooms = new RoomStore(node.db);
+    var messages = new MessageStore(node.db);
+    var reviews = new ReviewStore(node.db);
+    Acting.system(
+        () -> {
+          node.specs.create(SyncBox.spec("auth", "held here", "pending"));
+          node.specs.create(SyncBox.spec("retired", "deleted here", "pending"));
+          node.specs.create(elsewhere("billing"));
+          rooms.ensureFor("billing", "other", "Billing", "uday", "mention");
+          var said = messages.append("billing", "uday", "about billing", null).id();
+          var review = reviews.createReview("billing", 1);
+          park("spec", "auth", node.specs.comparableSnapshot("auth"));
+          park("spec", "retired", node.specs.comparableSnapshot("retired"));
+          park("spec", "billing", node.specs.comparableSnapshot("billing"));
+          park("room", "billing", rooms.comparableSnapshot("billing"));
+          park("message", said, messages.comparableSnapshot(said));
+          park("review", review, reviews.comparableSnapshot(review));
+          park("project", "other", Map.of("definition", "name: other\n"));
+          park("message", "unplaced", Map.of("room_id", "a-room-this-box-never-held"));
+          node.specs.delete("retired");
+        });
+
+    var shownToAll = operations.list().stream().map(SyncConflicts.Conflict::entityType).toList();
+    var shownToScoped =
+        Acting.by(ofProj, () -> operations.list()).stream()
+            .map(SyncConflicts.Conflict::entityId)
+            .toList();
+    var hiddenTemplate =
+        assertThrows(
+            ApiException.class,
+            () -> Acting.by(ofProj, () -> operations.mergeTemplate("spec", "billing")));
+    var ambiguous = assertThrows(ApiException.class, () -> operations.find(null, "billing"));
+
+    assertEquals(
+        List.of("spec", "spec", "spec", "room", "message", "review", "project", "message"),
+        shownToAll);
+    assertEquals(List.of("auth", "retired"), shownToScoped);
+    assertNull(Acting.by(ofProj, () -> operations.find("spec", "billing")));
+    assertNull(Acting.by(ofProj, () -> operations.find(null, "billing")));
+    assertEquals("auth", Acting.by(ofProj, () -> operations.find(null, "auth")).entityId());
+    assertEquals(404, hiddenTemplate.status());
+    assertEquals("No open conflict for 'billing'.", hiddenTemplate.getMessage());
+    assertEquals(
+        "'billing' has open conflicts as spec and room: pass --type", ambiguous.getMessage());
+  }
+
+  private void park(String type, String id, Map<String, Object> held) {
+    var theirs = new LinkedHashMap<>(held);
+    theirs.put("title", "as main has it");
+    node.conflicts.record(
+        type,
+        id,
+        YamlUtil.dumpJson(held),
+        YamlUtil.dumpJson(held),
+        YamlUtil.dumpJson(theirs),
+        "9-main",
+        "main",
+        List.of("title"));
+  }
+
+  private static SpecStore.SpecRow elsewhere(String id) {
+    return new SpecStore.SpecRow(
+        id,
+        "other",
+        "in another project",
+        SpecStatus.PENDING,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        "uday",
+        "",
+        "",
+        "uday",
+        List.of(),
+        List.of());
   }
 
   private static String b64(String text) {

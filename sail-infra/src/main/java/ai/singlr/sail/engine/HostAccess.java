@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.authority.PostingRule;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
@@ -44,10 +45,15 @@ public record HostAccess(Sqlite db, RoleRule roles) {
     return new PtyIdentity(fde.handle(), roleOf(fde.handle()) == Role.ADMIN);
   }
 
+  /**
+   * Admits {@code who} into {@code roomId}. A room of a project outside the FDE's scope is refused
+   * as one that does not exist, before anything names its project.
+   */
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
+    var actor =
+        new Actor(who.fde(), roleOf(who.fde()), Actor.Lane.API).withScope(roles.scopeOf(who.fde()));
     var room =
-        new RoomStore(db)
-            .findById(roomId)
+        Scoped.row(actor, new RoomStore(db).findById(roomId), RoomStore.RoomRow::project)
             .orElseThrow(() -> new IOException("Room '" + roomId + "' was not found."));
     if (!Objects.equals(room.project(), project)) {
       throw new IOException(
@@ -59,7 +65,6 @@ public record HostAccess(Sqlite db, RoleRule roles) {
               + room.project()
               + ".");
     }
-    var actor = new Actor(who.fde(), roleOf(who.fde()), Actor.Lane.API);
     var refused = PostingRule.decide(actor, room.id(), new RoomStore(db).owners(room.id()));
     if (refused.isPresent()) {
       throw new IOException(refused.get().message() + " " + refused.get().fix());

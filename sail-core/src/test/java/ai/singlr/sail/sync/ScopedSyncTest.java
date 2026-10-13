@@ -1,0 +1,808 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.sync;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ContentFixtures;
+import ai.singlr.sail.store.EraseRequests;
+import ai.singlr.sail.store.Erasure;
+import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.MessageStore;
+import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.ReviewStore;
+import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.RunStore;
+import ai.singlr.sail.store.SpecStore;
+import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
+import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
+import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+/**
+ * A scoped FDE's node over a real session: main sends it exactly the rows of the projects it is
+ * granted, refuses whatever it offers outside them without saying what main holds, and the node
+ * drops a project the moment main stops naming it. An unscoped node beside it is untouched.
+ */
+@ActingAs
+class ScopedSyncTest {
+
+  private static final String A = "alpha";
+  private static final String B = "beta";
+  private static final ProjectScope ONLY_A = ProjectScope.of(List.of(A));
+  private static final SyncWire.Hello HELLO = SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "nia");
+
+  @TempDir Path dir;
+  private SyncBox main;
+  private SyncBox nia;
+  private SyncBox uma;
+
+  @BeforeEach
+  void setUp() {
+    main = new SyncBox(dir, "main");
+    nia = new SyncBox(dir, "nia").syncsAs(scoped(ONLY_A));
+    uma = new SyncBox(dir, "uma");
+  }
+
+  @AfterEach
+  void tearDown() {
+    uma.close();
+    nia.close();
+    main.close();
+  }
+
+  @Test
+  void aScopedNodeHoldsEveryRowOfItsProjectsAndNoRowOfAnother() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+
+    SyncBox.quiesce(main, nia, uma);
+
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+    SyncBox.assertEqualToMain(main, uma);
+    for (var entity : SyncedEntities.all()) {
+      assertEquals(
+          new ChangeLog(main.db).maxSeq(entity.type()),
+          nia.syncState.checkpoint("main", entity.type()),
+          entity.type() + ": a scoped node's checkpoint reaches main's tip");
+      assertTrue(count(nia.db, held(entity.type())) > 0, entity.type() + " of alpha arrived");
+    }
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM specs WHERE project = 'beta'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM rooms WHERE project = 'beta'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM runs WHERE project = 'beta'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM project_files WHERE project = 'beta'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM projects WHERE name = 'beta'"));
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM reviews WHERE spec_id = 'beta-work'"));
+    assertEquals(
+        0, count(nia.db, "SELECT count(*) FROM room_messages WHERE room_id = 'beta-work'"));
+    assertEquals(ONLY_A, new SyncScope(nia.db).held());
+    assertEquals(ProjectScope.all(), new SyncScope(uma.db).held());
+  }
+
+  @Test
+  void aPageOfNothingButForeignHeadsStillMovesTheCheckpointPastThem() throws Exception {
+    for (var i = 0; i < 1000; i++) {
+      main.specs.create(spec("b" + i, B, "uma"));
+    }
+    main.specs.create(spec("a-last", A, "nia"));
+    var tip = new ChangeLog(main.db).maxSeq("spec");
+    var rowsLoaded = new ArrayList<String>();
+
+    var since = 0L;
+    var pages = new ArrayList<SyncWire.Page>();
+    SyncWire.Page page;
+    do {
+      page =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              serve(countingRowLoads(rowsLoaded), HELLO, new SyncWire.Pull("spec", since, 100))
+                  .getLast());
+      assertTrue(page.next() > since, "every page moves past the heads it skipped");
+      since = page.next();
+      pages.add(page);
+    } while (!page.done());
+
+    assertEquals(11, pages.size());
+    assertEquals(
+        List.of("a-last"),
+        pages.stream().flatMap(p -> p.entries().stream()).map(SyncWire.Entry::id).toList());
+    assertEquals(tip, since);
+    assertEquals(
+        List.of("a-last"),
+        rowsLoaded,
+        "a thousand foreign heads cost one head scan and no row load");
+
+    SyncBox.quiesce(main, nia);
+    assertEquals(
+        List.of("a-last"), nia.db.query("SELECT id FROM specs ORDER BY id", row -> row.text(0)));
+    assertEquals(tip, nia.syncState.checkpoint("main", "spec"));
+  }
+
+  @Test
+  void aScopedSessionFetchesOnlyContentMainServedIt() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    var ours = bodyHash(main, "alpha-work");
+    var theirs = bodyHash(main, "beta-work");
+
+    var refused =
+        serve(
+                main.server(scoped(ONLY_A)),
+                HELLO,
+                new SyncWire.Pull("spec", 0, 100),
+                new SyncWire.Fetch(List.of(theirs)))
+            .getLast();
+
+    assertEquals(
+        new SyncWire.Failed(
+            "fetch: blob " + theirs + " is not content main served this session", "refused"),
+        refused);
+    var served =
+        serve(
+            main.server(scoped(ONLY_A)),
+            HELLO,
+            new SyncWire.Pull("spec", 0, 100),
+            new SyncWire.Fetch(List.of(ours)));
+    var manifest = assertInstanceOf(SyncWire.Manifest.class, served.get(2)).manifest();
+    assertEquals(ours, manifest.hash());
+    var unlisted = new BlobStore(main.db).manifest(theirs).chunkHashes();
+    assertEquals(
+        new SyncWire.Failed(
+            "fetch_chunks: chunk "
+                + unlisted.getFirst()
+                + " is not content main served this session",
+            "refused"),
+        serve(
+                main.server(scoped(ONLY_A)),
+                HELLO,
+                new SyncWire.Pull("spec", 0, 100),
+                new SyncWire.Fetch(List.of(ours)),
+                new SyncWire.FetchChunks(unlisted))
+            .getLast());
+    assertInstanceOf(
+        SyncWire.Manifest.class,
+        serve(
+                main.server(Actor.sync("uma", Role.MEMBER)),
+                HELLO,
+                new SyncWire.Fetch(List.of(theirs)))
+            .get(1),
+        "an unscoped session fetches by hash as it always has");
+  }
+
+  @Test
+  void aScopedNodesOwnWorkInItsProjectIsCommittedAsToday() {
+    seed(main, A, "nia");
+    SyncBox.quiesce(main, nia);
+
+    nia.create(spec("mine", A, "nia"));
+    Acting.as("nia", () -> nia.specs.setContent("mine", "a body nia wrote", "her plan"));
+    SyncBox.quiesce(main, nia);
+
+    assertEquals("nia", main.specs.findById("mine").orElseThrow().createdBy());
+    assertEquals("a body nia wrote", main.specs.getContent("mine").orElseThrow().body());
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+  }
+
+  @Test
+  void aRowPushedIntoAnotherProjectIsDeniedNamingItsIdAndNothingIsWritten() throws Exception {
+    seed(main, B, "uma");
+    var before = count(main.db, "SELECT count(*) FROM change_log");
+    var forged = snapshot(nia, () -> nia.create(spec("forged", B, "nia")), "spec", "forged");
+
+    var denied =
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push(
+                        "spec", List.of(new MainReplica.Offer("forged", forged, null))))
+                .getLast());
+
+    assertEquals(
+        new SyncWire.Denied(
+            "forged", "Spec 'forged' is in no project this FDE is granted.", null, null, true),
+        denied);
+    assertEquals(before, count(main.db, "SELECT count(*) FROM change_log"));
+    assertTrue(main.specs.findById("forged").isEmpty());
+  }
+
+  @Test
+  void aProjectRowOutsideTheScopeIsDeniedAndOneInsideIsTaken() throws Exception {
+    var definition = Map.<String, Object>of("definition", "name: any\n");
+
+    var results =
+        assertInstanceOf(
+                SyncWire.Results.class,
+                serve(
+                        main.server(scoped(ONLY_A)),
+                        HELLO,
+                        new SyncWire.Push(
+                            "project",
+                            List.of(
+                                new MainReplica.Offer(B, definition, null),
+                                new MainReplica.Offer(A, definition, null))))
+                    .getLast())
+            .results();
+
+    assertEquals(
+        new SyncWire.Denied(
+            B, "Project 'beta' is in no project this FDE is granted.", null, null, true),
+        results.get(0));
+    assertInstanceOf(SyncWire.Accepted.class, results.get(1));
+    assertTrue(new ProjectStore(main.db).findByName(B).isEmpty());
+    assertTrue(new ProjectStore(main.db).findByName(A).isPresent());
+  }
+
+  @Test
+  void aGrantShowsAfterTheNextRoundAndWhatWasHeldReAdoptsUnwritten() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia);
+    var entriesOfA = count(nia.db, "SELECT count(*) FROM change_log");
+    var both = ProjectScope.of(List.of(A, B));
+
+    var granted = SyncBox.roundSettling(main, nia.syncsAs(scoped(both)));
+
+    assertTrue(granted.settled().isEmpty(), "a grant drops nothing");
+    assertTrue(
+        granted.types().stream().allMatch(report -> report.failure() == null), granted.toString());
+    SyncBox.assertScopedToMain(main, nia, both);
+    assertEquals("the beta spec", nia.specs.findById("beta-work").orElseThrow().title());
+    assertEquals(
+        entriesOfA,
+        count(
+            nia.db,
+            "SELECT count(*) FROM change_log l JOIN change_heads h ON h.entity_type ="
+                + " l.entity_type AND h.entity_id = l.entity_id WHERE h.project = 'alpha'"),
+        "alpha's rows were walked again and not one was rewritten");
+    assertEquals(both, new SyncScope(nia.db).held());
+    SyncBox.quiesce(main, nia);
+  }
+
+  @Test
+  void aRevocationDropsTheProjectAtTheStartOfTheRoundUnpushedWorkIncluded() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    var both = ProjectScope.of(List.of(A, B));
+    SyncBox.quiesce(main, nia.syncsAs(scoped(both)));
+    Acting.as("nia", () -> nia.specs.setContent("alpha-work", "an edit main never saw", "plan"));
+    new EraseRequests(nia.db).request("spec", "alpha-work", "nia");
+    var body = bodyHash(nia, "alpha-work");
+    var mainsBody = main.specs.getContent("alpha-work").orElseThrow().body();
+    var held = count(nia.db, "SELECT count(*) FROM change_heads WHERE project = 'alpha'");
+
+    var revoked = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of(B)))));
+
+    assertEquals(
+        List.of(
+            new Settlement.Settled(
+                "project",
+                A,
+                new Settlement.How.Dropped((int) held),
+                "main no longer grants this box the project")),
+        revoked.settled());
+    assertEquals(
+        "project alpha: dropped from this box with the "
+            + held
+            + " rows it held here, unpushed work included — main no longer grants this box the"
+            + " project",
+        revoked.settled().getFirst().describe());
+    for (var table :
+        List.of(
+            "specs WHERE project = 'alpha'",
+            "spec_content WHERE spec_id = 'alpha-work'",
+            "rooms WHERE project = 'alpha'",
+            "room_messages WHERE room_id = 'alpha-work'",
+            "runs WHERE project = 'alpha'",
+            "reviews WHERE spec_id = 'alpha-work'",
+            "project_files WHERE project = 'alpha'",
+            "projects WHERE name = 'alpha'",
+            "change_heads WHERE project = 'alpha'",
+            "change_log WHERE entity_id LIKE 'alpha%'",
+            "sync_offers",
+            "erase_requests",
+            "sync_conflicts")) {
+      assertEquals(0, count(nia.db, "SELECT count(*) FROM " + table), table);
+    }
+    assertFalse(new BlobStore(nia.db).has(body), "the round's collection freed alpha's content");
+    assertEquals(mainsBody, main.specs.getContent("alpha-work").orElseThrow().body());
+    SyncBox.assertScopedToMain(main, nia, ProjectScope.of(List.of(B)));
+    SyncBox.quiesce(main, nia);
+  }
+
+  @Test
+  void aProjectWithARunUnderWayHereIsKeptUntilTheRunEnds() {
+    seed(main, A, "nia");
+    SyncBox.quiesce(main, nia);
+    var run = DateTimeUtils.newId().toString();
+    Acting.as(
+        "nia",
+        () ->
+            new RunStore(nia.db)
+                .create(
+                    run,
+                    A,
+                    "alpha-work",
+                    "nia",
+                    "build",
+                    "claude",
+                    "b",
+                    "t",
+                    null,
+                    null,
+                    "/l",
+                    "u"));
+
+    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.none())));
+
+    assertEquals(
+        List.of(
+            new Settlement.Settled(
+                "project",
+                A,
+                new Settlement.How.Kept(run),
+                "main no longer grants this box the project")),
+        kept.settled().stream().filter(left -> "project".equals(left.type())).toList());
+    assertEquals(
+        "project alpha: kept this round, run '"
+            + run
+            + "' being still under way here; dropped on the first round after it ends — main no"
+            + " longer grants this box the project",
+        kept.settled().getFirst().describe());
+    assertTrue(nia.specs.findById("alpha-work").isPresent());
+    assertTrue(new RunStore(nia.db).findById(run).isPresent());
+
+    Acting.system(() -> new RunStore(nia.db).complete(run, "completed", 0));
+    var dropped = SyncBox.roundSettling(main, nia);
+
+    assertInstanceOf(Settlement.How.Dropped.class, dropped.settled().getFirst().how());
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log"));
+    assertTrue(new RunStore(main.db).findById(run).isEmpty(), "nothing of it was offered");
+  }
+
+  @Test
+  void anErasureReachesTheNodesThatHeldTheRowAndNoOther() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    archive(main, "alpha-work");
+    archive(main, "beta-work");
+    SyncBox.quiesce(main, nia, uma);
+
+    var ours = prune(main, "alpha-work");
+    var theirs = prune(main, "beta-work");
+    SyncBox.quiesce(main, nia, uma);
+
+    for (var target : ours.entities()) {
+      assertEquals(
+          A,
+          new ChangeLog(main.db).headProject(target.type(), target.id()).orElse(null),
+          target + ": an erasure keeps the project its head carried");
+      assertTrue(new ChangeLog(nia.db).isErased(target.type(), target.id()), target.toString());
+    }
+    for (var target : theirs.entities()) {
+      assertEquals(
+          0,
+          count(
+              nia.db,
+              "SELECT count(*) FROM change_log WHERE entity_type = ? AND entity_id = ?",
+              target.type(),
+              target.id()),
+          target + " never crossed to a node outside its project");
+      assertTrue(new ChangeLog(uma.db).isErased(target.type(), target.id()), target.toString());
+    }
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+    SyncBox.assertEqualToMain(main, uma);
+  }
+
+  @Test
+  void aNodesOwnPruneIsErasedInsideItsScopeAndRefusedOutsideIt() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    archive(main, "alpha-work");
+    archive(main, "beta-work");
+    SyncBox.quiesce(main, nia);
+
+    new EraseRequests(nia.db).request("spec", "alpha-work", "nia");
+    SyncBox.quiesce(main, nia);
+
+    assertTrue(new ChangeLog(main.db).isErased("spec", "alpha-work"));
+    assertTrue(new ChangeLog(nia.db).isErased("spec", "alpha-work"));
+    assertEquals(
+        new SyncWire.Refused(
+            "beta-work",
+            "main holds no spec 'beta-work', so it cannot tell whose it is; sync it before"
+                + " pruning"),
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push("spec", List.of(MainReplica.Offer.erasure("beta-work"))))
+                .getLast()));
+    assertFalse(new ChangeLog(main.db).isErased("spec", "beta-work"));
+    prune(main, "beta-work");
+    assertEquals(
+        new SyncWire.Refused(
+            "beta-work",
+            "main holds no spec 'beta-work', so it cannot tell whose it is; sync it before"
+                + " pruning"),
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push("spec", List.of(MainReplica.Offer.erasure("beta-work"))))
+                .getLast()),
+        "an erasure outside the scope is not answered either");
+  }
+
+  @Test
+  void aRowStillHeldAfterARevokeIsWithdrawnWithoutMainsVersionCrossing() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+    Acting.as("uma", () -> nia.specs.setContent("beta-work", "a late edit", "plan"));
+    var body = bodyHash(nia, "beta-work");
+    var mains = new ChangeLog(main.db).head("spec", "beta-work").orElseThrow();
+    nia.syncsAs(scoped(ONLY_A));
+
+    List<SyncSession.TypeReport> reports;
+    String wire;
+    try (var link = SyncBox.connect(main.server(nia.session()), nia)) {
+      reports = new ArrayList<>();
+      for (var entity : SyncedEntities.all()) {
+        reports.add(link.reconcile(entity.type(), nia.replicas().get(entity.type())));
+      }
+      wire = link.log().toString();
+    }
+
+    assertEquals(
+        List.of(
+            new SyncSession.Denial(
+                "spec", "beta-work", "Spec 'beta-work' is in no project this FDE is granted.")),
+        reports.stream().flatMap(report -> report.denials().stream()).toList());
+    assertTrue(wire.contains("\"op\": \"need\""), "the node asked after the row it changed");
+    assertTrue(nia.specs.findById("beta-work").isEmpty(), "the node withdrew its row");
+    var withdrawal = new ChangeLog(nia.db).head("spec", "beta-work").orElseThrow();
+    assertEquals(ChangeLog.Kind.TOMBSTONE, withdrawal.kind());
+    assertEquals(ChangeLog.Entry.DENIED, withdrawal.origin());
+    assertEquals(mains, new ChangeLog(main.db).head("spec", "beta-work").orElseThrow());
+
+    var again = SyncBox.roundSettling(main, nia);
+
+    assertTrue(
+        again.types().stream().allMatch(report -> report.denials().isEmpty()),
+        "a withdrawal is never offered again");
+    assertFalse(new BlobStore(nia.db).has(body), "what the withdrawal kept left with its project");
+    SyncBox.assertScopedToMain(main, nia, ONLY_A);
+  }
+
+  @Test
+  void anErasedIdAndAMessageOutsideTheScopeAreDeniedBeforeAnythingIsReadOfThem() throws Exception {
+    seed(main, B, "uma");
+    archive(main, "beta-work");
+    var message =
+        Map.<String, Object>of(
+            "room_id", "beta-work", "author", "nia", "body", "hello", "created_at", "t");
+    var messageId = DateTimeUtils.newId().toString();
+    var copy = snapshot(nia, () -> nia.create(spec("beta-work", B, "nia")), "spec", "beta-work");
+    prune(main, "beta-work");
+    var conflicts = count(main.db, "SELECT count(*) FROM sync_conflicts");
+
+    var spec =
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push(
+                        "spec", List.of(new MainReplica.Offer("beta-work", copy, "9-stale"))))
+                .getLast());
+    var post =
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push(
+                        "message", List.of(new MainReplica.Offer(messageId, message, "9-stale"))))
+                .getLast());
+
+    assertEquals(
+        new SyncWire.Denied(
+            "beta-work",
+            "Spec 'beta-work' is in no project this FDE is granted.",
+            null,
+            null,
+            true),
+        spec);
+    assertEquals(
+        new SyncWire.Denied(
+            messageId,
+            "Message '" + messageId + "' is in no project this FDE is granted.",
+            null,
+            null,
+            true),
+        post);
+    assertEquals(conflicts, count(main.db, "SELECT count(*) FROM sync_conflicts"));
+  }
+
+  @Test
+  void anIdTakenInAnotherProjectIsDeniedAsExistingAndTheNodeWithdrawsItsOwn() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia);
+    nia.create(spec("beta-work", A, "nia"));
+    var mains = new ChangeLog(main.db).head("spec", "beta-work").orElseThrow();
+
+    var round = SyncBox.roundSettling(main, nia);
+
+    var denial =
+        round.types().stream().flatMap(report -> report.denials().stream()).toList().getFirst();
+    assertEquals(
+        new SyncSession.Denial("spec", "beta-work", "Spec 'beta-work' already exists."), denial);
+    assertEquals(
+        "spec beta-work: main denied this change — Spec 'beta-work' already exists. Yours is in"
+            + " its history: sail spec history beta-work.",
+        denial.describe());
+    assertTrue(nia.specs.findById("beta-work").isEmpty());
+    assertEquals(mains, new ChangeLog(main.db).head("spec", "beta-work").orElseThrow());
+    assertEquals("the beta spec", main.specs.findById("beta-work").orElseThrow().title());
+    SyncBox.quiesce(main, nia);
+  }
+
+  @Test
+  void aDenialByAnotherRuleCarriesMainsVersionOnlyInsideTheScope() throws Exception {
+    seed(main, A, "uma");
+    seed(main, B, "uma");
+    var rev = main.specs.findById("alpha-work").orElseThrow();
+    var mine = snapshot(main, () -> {}, "spec", "alpha-work");
+    var edited = new LinkedHashMap<>(mine);
+    edited.put("title", "taken over");
+    var head = new ChangeLog(main.db).head("spec", "alpha-work").orElseThrow();
+
+    var inside =
+        assertInstanceOf(
+            SyncWire.Denied.class,
+            only(
+                serve(
+                        main.server(scoped(ONLY_A)),
+                        HELLO,
+                        new SyncWire.Push(
+                            "spec",
+                            List.of(new MainReplica.Offer("alpha-work", edited, head.rev()))))
+                    .getLast()));
+
+    assertEquals("Spec 'alpha-work' is assigned to 'uma', not you.", inside.reason());
+    assertEquals(head.rev(), inside.rev());
+    assertEquals(rev.title(), inside.snapshot().get("title"));
+    var outside =
+        only(
+            serve(
+                    main.server(scoped(ONLY_A)),
+                    HELLO,
+                    new SyncWire.Push(
+                        "spec", List.of(new MainReplica.Offer("beta-work", edited, head.rev()))))
+                .getLast());
+    assertEquals(
+        new SyncWire.Denied("beta-work", "Spec 'beta-work' already exists.", null, null, true),
+        outside);
+  }
+
+  @Test
+  void aScopedFdeWithNoGrantAndASessionWithNoFdeReceiveNothing() throws Exception {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.none())));
+
+    assertEquals(0, count(nia.db, "SELECT count(*) FROM change_log"));
+    assertEquals(ProjectScope.none(), new SyncScope(nia.db).held());
+    for (var entity : SyncedEntities.all()) {
+      var page =
+          assertInstanceOf(
+              SyncWire.Page.class,
+              serve(
+                      main.server(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none())),
+                      SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "anon"),
+                      new SyncWire.Pull(entity.type(), 0, 100))
+                  .getLast());
+      assertEquals(List.of(), page.entries(), entity.type());
+      assertTrue(page.done());
+    }
+  }
+
+  @Test
+  void aWelcomeNamingNoScopeMeansEveryProjectAndTheNextRoundPagesEverything() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.none())));
+    assertEquals(ProjectScope.none(), new SyncScope(nia.db).held());
+
+    SyncBox.quiesce(main, nia.syncsAs(Actor.sync("nia", Role.MEMBER)));
+
+    assertEquals(ProjectScope.all(), new SyncScope(nia.db).held());
+    SyncBox.assertEqualToMain(main, nia);
+    assertTrue(nia.specs.findById("beta-work").isPresent());
+  }
+
+  @Test
+  void aScopedSessionIsServedOnlyFromMainsDatabase() {
+    var server =
+        new SyncRpcServer(Map.of(), scoped(ONLY_A), FdeRoster.EMPTY, SyncTransitionSink.NONE);
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> server.serve(new ByteStreams.Input(""), new ByteStreams.Output()));
+
+    assertEquals(
+        "A scoped session is decided from main's change heads: serve it over main's database"
+            + " (SyncRpcServer.over).",
+        refused.getMessage());
+  }
+
+  private static Actor scoped(ProjectScope scope) {
+    return Actor.sync("nia", Role.MEMBER).withScope(scope);
+  }
+
+  /**
+   * Everything one project holds on {@code box}, owned by {@code owner}: its catalog row, a spec
+   * with content only it holds, the spec's room with a thread, a finished run, a review and a
+   * shared file.
+   */
+  private static void seed(SyncBox box, String project, String owner) {
+    var id = project + "-work";
+    new ProjectStore(box.db).upsert(project, "name: " + project + "\n");
+    box.specs.create(spec(id, project, owner));
+    box.specs.setContent(id, "a body only " + project + " holds", "the plan of " + project);
+    new RoomStore(box.db)
+        .create(
+            new RoomStore.RoomRow(
+                id,
+                project,
+                "the " + project + " room",
+                owner,
+                null,
+                null,
+                owner,
+                null,
+                null,
+                owner));
+    var messages = new MessageStore(box.db);
+    var first = messages.append(id, owner, "a word in " + project, null);
+    messages.append(id, owner, "a reply in " + project, first.id());
+    var runs = new RunStore(box.db);
+    var run = DateTimeUtils.newId().toString();
+    runs.create(run, project, id, owner, "build", "claude", "b", "t", null, null, "/log", "u");
+    runs.complete(run, "completed", 0);
+    var reviews = new ReviewStore(box.db);
+    reviews.createStage(reviews.createReview(id, 1), "security", "agent");
+    ContentFixtures.put(new FileStore(box.db), project, "notes.md", "shared in " + project);
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project, String owner) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "the " + project + " spec",
+        SpecStatus.PENDING,
+        owner,
+        null,
+        null,
+        null,
+        null,
+        0,
+        owner,
+        "",
+        "",
+        owner,
+        List.of(),
+        List.of());
+  }
+
+  private static void archive(SyncBox box, String id) {
+    Acting.system(() -> box.specs.updateStatus(id, SpecStatus.ARCHIVED));
+  }
+
+  private static Erasure.Result prune(SyncBox box, String id) {
+    var erasure = new Erasure(box.db);
+    return Acting.as(
+        "uday",
+        () ->
+            erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, id))), "local"));
+  }
+
+  /** The snapshot {@code box} would offer of {@code id} once {@code written} has run. */
+  private static Map<String, Object> snapshot(
+      SyncBox box, Runnable written, String type, String id) {
+    written.run();
+    return box.replicas().get(type).current(id);
+  }
+
+  private static String bodyHash(SyncBox box, String spec) {
+    return box.db
+        .queryOne("SELECT body_hash FROM specs WHERE id = ?", row -> row.text(0), spec)
+        .orElseThrow();
+  }
+
+  private static String held(String type) {
+    return "SELECT count(*) FROM change_heads WHERE entity_type = '" + type + "'";
+  }
+
+  /** Main's server for a session scoped to alpha, recording every spec row it loads. */
+  private SyncRpcServer countingRowLoads(List<String> loaded) {
+    var replicas =
+        new LinkedHashMap<String, MainReplica>(SyncedEntities.replicas(main.db, "main", null));
+    var real = replicas.get("spec");
+    replicas.put(
+        "spec",
+        (MainReplica)
+            Proxy.newProxyInstance(
+                MainReplica.class.getClassLoader(),
+                new Class<?>[] {MainReplica.class},
+                (proxy, method, args) -> {
+                  if (args != null && args.length > 0 && args[0] instanceof String id) {
+                    loaded.add(id);
+                  }
+                  try {
+                    return method.invoke(real, args);
+                  } catch (InvocationTargetException e) {
+                    throw e.getCause();
+                  }
+                }));
+    return new SyncRpcServer(
+            replicas,
+            scoped(ONLY_A),
+            FdeRoster.EMPTY,
+            SyncTransitionSink.NONE,
+            new ChangeLog(main.db)::headsAfter,
+            SyncWire.UPGRADE_FLOOR)
+        .content(main.db, FileLimits.defaults());
+  }
+
+  private static List<SyncWire.Response> serve(SyncRpcServer server, SyncWire.Request... requests)
+      throws IOException {
+    var lines = new ArrayList<String>();
+    for (var request : requests) {
+      lines.add(SyncWire.encode(request));
+    }
+    var out = new ByteStreams.Output();
+    server.serve(new ByteStreams.Input(String.join("\n", lines) + "\n"), out);
+    return out.toString().lines().map(SyncWire::decodeResponse).toList();
+  }
+
+  private static SyncWire.Result only(SyncWire.Response response) {
+    var results = assertInstanceOf(SyncWire.Results.class, response).results();
+    assertEquals(1, results.size());
+    return results.getFirst();
+  }
+
+  private static long count(Sqlite db, String sql, Object... args) {
+    return db.queryOne(sql, row -> row.integer(0), args).orElseThrow();
+  }
+}

@@ -14,6 +14,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
@@ -242,6 +243,34 @@ public final class SyncBox implements AutoCloseable {
     var mismatches = mismatches(main, node);
     if (!mismatches.isEmpty()) {
       fail(node.id + " differs from main:\n" + String.join("\n", mismatches.values()));
+    }
+  }
+
+  /**
+   * Asserts that {@code node}, scoped to {@code scope}, holds exactly main's version of every
+   * entity whose head on main carries a project the scope admits, as {@link #assertEqualToMain}
+   * compares it, and nothing at all — no row, no history, no erasure — of any other entity main
+   * holds.
+   */
+  public static void assertScopedToMain(SyncBox main, SyncBox node, ProjectScope scope) {
+    var changes = new ChangeLog(main.db);
+    var mismatches = mismatches(main, node);
+    var foreign = new ArrayList<String>();
+    for (var entity : SyncedEntities.all()) {
+      for (var id : loggedIds(main, entity.type())) {
+        var key = entity.type() + " " + id;
+        if (scope.admits(changes.headProject(entity.type(), id).orElse(null))) {
+          continue;
+        }
+        mismatches.remove(key);
+        if (loggedIds(node, entity.type()).contains(id)) {
+          foreign.add(key + ": outside " + scope + ", yet " + node.id + " holds it");
+        }
+      }
+    }
+    foreign.addAll(mismatches.values());
+    if (!foreign.isEmpty()) {
+      fail(node.id + " is not main within its scope:\n" + String.join("\n", foreign));
     }
   }
 

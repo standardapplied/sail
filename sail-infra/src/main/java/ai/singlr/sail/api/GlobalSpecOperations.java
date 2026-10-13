@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Actor;
@@ -17,11 +18,13 @@ import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -87,11 +90,16 @@ final class GlobalSpecOperations {
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
     requireStore();
     try {
-      var specs = specStore.list(filter).stream().map(this::viewOf).toList();
+      var specs = readable(filter).stream().map(this::viewOf).toList();
       return new GlobalSpecsListResponse(specs, specs.size());
     } catch (IllegalArgumentException e) {
       throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
     }
+  }
+
+  /** The specs matching {@code filter} that the reader may see. */
+  List<SpecStore.SpecRow> readable(SpecStore.SpecFilter filter) {
+    return Scoped.rows(Actor.reader(), specStore.list(filter), SpecStore.SpecRow::project);
   }
 
   GlobalSpecDetailResponse get(String specId) {
@@ -410,9 +418,38 @@ final class GlobalSpecOperations {
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
+  /**
+   * The board of {@code project}, or of every project. A reader scoped to its granted projects is
+   * shown a board counted from the specs it may see, so it never counts, or names as next, a spec
+   * of another project; every other reader is shown the store's.
+   */
   GlobalBoardResponse board(String project) {
     requireStore();
-    return new GlobalBoardResponse(specStore.board(project), doneOpenFindings(project));
+    return new GlobalBoardResponse(
+        Actor.reader().scope().unrestricted() ? specStore.board(project) : boardOfReadable(project),
+        doneOpenFindings(project));
+  }
+
+  private SpecStore.BoardSummary boardOfReadable(String project) {
+    var counts =
+        readable(new SpecStore.SpecFilter(project, null, null, null, null)).stream()
+            .collect(Collectors.groupingBy(SpecStore.SpecRow::status, Collectors.counting()));
+    var ready =
+        Scoped.rows(Actor.reader(), specStore.readySpecs(project), SpecStore.SpecRow::project);
+    return new SpecStore.BoardSummary(
+        count(counts, SpecStatus.DRAFT),
+        count(counts, SpecStatus.PENDING),
+        count(counts, SpecStatus.IN_PROGRESS),
+        count(counts, SpecStatus.REVIEW),
+        count(counts, SpecStatus.AWAITING_MERGE),
+        count(counts, SpecStatus.DONE),
+        count(counts, SpecStatus.CANCELLED),
+        count(counts, SpecStatus.ARCHIVED),
+        ready.isEmpty() ? null : ready.getFirst().id());
+  }
+
+  private static int count(Map<SpecStatus, Long> counts, SpecStatus status) {
+    return counts.getOrDefault(status, 0L).intValue();
   }
 
   /**
@@ -424,8 +461,7 @@ final class GlobalSpecOperations {
     if (reviewStore == null) {
       return 0;
     }
-    return specStore
-        .list(new SpecStore.SpecFilter(project, SpecStatus.DONE.wire(), null, null, null))
+    return readable(new SpecStore.SpecFilter(project, SpecStatus.DONE.wire(), null, null, null))
         .stream()
         .mapToInt(spec -> openFindingCount(spec.id()))
         .sum();
@@ -435,9 +471,21 @@ final class GlobalSpecOperations {
     return reviewStore == null ? 0 : reviewStore.openFindingsAfterPass(specId).size();
   }
 
+  /**
+   * The revisions of {@code specId} the reader may see. Each is of the project its snapshot names,
+   * so a spec that moved between projects shows a reader the revisions made in theirs, and one that
+   * kept no snapshot, as a tombstone this box only heard of does, is of no known project.
+   */
   GlobalSpecHistoryResponse history(String specId) {
     requireStore();
-    return GlobalSpecHistoryResponse.from(specId, specStore.history(specId));
+    return GlobalSpecHistoryResponse.from(
+        specId,
+        Scoped.rows(Actor.reader(), specStore.history(specId), GlobalSpecOperations::projectOf));
+  }
+
+  private static String projectOf(ChangeLog.Entry revision) {
+    var json = revision.snapshot();
+    return Strings.isBlank(json) ? null : Snapshots.text(YamlUtil.parseMap(json), "project");
   }
 
   /**
@@ -525,12 +573,17 @@ final class GlobalSpecOperations {
     return Strings.isNotBlank(actor) ? actor : Event.SAIL_AGENT;
   }
 
+  /**
+   * The spec an operation addresses, to read or to change: one outside the caller's scope is
+   * answered as one that is not there.
+   */
   private SpecStore.SpecRow findOrThrow(String specId) {
-    return specStore
-        .findById(specId)
-        .orElseThrow(
-            () ->
-                new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found."));
+    return Scoped.row(Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
+        .orElseThrow(() -> notFound(specId));
+  }
+
+  private static ApiException notFound(String specId) {
+    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
   }
 
   /**

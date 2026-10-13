@@ -14,12 +14,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -51,6 +53,38 @@ class ProjectCatalogTest {
     assertTrue(refused.getMessage().contains("'gone' was pruned"), refused.getMessage());
     assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "kept"));
     assertDoesNotThrow(() -> ProjectCatalog.requireUnpruned(catalog, "fresh"));
+  }
+
+  @Test
+  void aNodeRefusesAProjectOutsideTheScopeMainNamedBeforeAnythingIsWritten() {
+    var catalog = dir.resolve("sail.db");
+    var nia = new Actor("nia", Role.ADMIN, Actor.Lane.CLI);
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "any"));
+    assertFalse(Files.exists(catalog), "a check must not create the catalog");
+    try (var db = Sqlite.open(catalog)) {
+      new SchemaManager(db).migrate();
+    }
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "beta"));
+    try (var db = Sqlite.open(catalog)) {
+      new SyncScope(db).record(ProjectScope.of(List.of("alpha")));
+    }
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class, () -> ProjectCatalog.requireInScope(catalog, "beta"));
+
+    assertEquals(
+        "Project 'beta' is outside the projects main grants this box, so main would take nothing"
+            + " of it. Ask an admin to grant it on main: sail fde grant <handle> beta.",
+        refused.getMessage());
+    assertEquals(
+        refused.getMessage(),
+        assertThrows(
+                IllegalStateException.class,
+                () -> ProjectCatalog.requireRecordable(catalog, "beta", nia))
+            .getMessage());
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "alpha"));
+    assertDoesNotThrow(() -> ProjectCatalog.requireRecordable(catalog, "alpha", nia));
   }
 
   @Test

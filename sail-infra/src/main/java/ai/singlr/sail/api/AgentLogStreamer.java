@@ -31,9 +31,10 @@ import java.util.function.Supplier;
 
 /**
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
- * it resolves the run, applies the same provenance guard as the buffered log/stop endpoints — a run
- * whose {@code node} is not this box is refused with a structured {@code run_on_other_node} error
- * rather than tailing a foreign box's local file — then applies the same run-owner rule ({@link
+ * it resolves the run, which a caller whose scope does not admit its project is told does not
+ * exist, applies the same provenance guard as the buffered log/stop endpoints — a run whose {@code
+ * node} is not this box is refused with a structured {@code run_on_other_node} error rather than
+ * tailing a foreign box's local file — then applies the same run-owner rule ({@link
  * RunAuthority#access}) the buffered log endpoint does (the run's spec assignee or an admin, else
  * {@code forbidden_not_assignee}), and finally tails the run's own {@code
  * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
@@ -111,7 +112,8 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 400, "invalid_request", "Missing run id", null);
         return;
       }
-      var run = runLookup.apply(runId).orElse(null);
+      var actor = ApiRouter.actorOf(exchange);
+      var run = Scoped.row(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
       if (run == null) {
         sendError(exchange, 404, "run_not_found", "No run '" + runId + "'.", null);
         return;
@@ -122,10 +124,7 @@ public final class AgentLogStreamer implements HttpHandler {
       }
       var refusal =
           RunAuthority.access(
-              ApiRouter.actorOf(exchange),
-              run.id(),
-              StopOperations.specIdOf(run),
-              RunAuthority.owners(run, specOwner));
+              actor, run.id(), StopOperations.specIdOf(run), RunAuthority.owners(run, specOwner));
       if (refusal.isPresent()) {
         var refused = refusal.get();
         var code = Refusals.code(refused.kind());

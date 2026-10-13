@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
@@ -22,12 +23,14 @@ import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -77,6 +80,8 @@ public final class SyncRpcServer {
   private boolean erasedInSession;
   private boolean deniedInSession;
   private MainBox mainBox;
+  private final Set<String> servedBlobs = new HashSet<>();
+  private final Set<String> servedChunks = new HashSet<>();
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(
@@ -174,11 +179,18 @@ public final class SyncRpcServer {
 
   void serve(InputStream in, OutputStream out, int frame) throws IOException {
     if (blobs == null) {
+      if (!principal.scope().unrestricted()) {
+        throw new IllegalStateException(
+            "A scoped session is decided from main's change heads: serve it over main's database"
+                + " (SyncRpcServer.over).");
+      }
       serveSession(in, out, frame);
       return;
     }
     erasedInSession = false;
     deniedInSession = false;
+    servedBlobs.clear();
+    servedChunks.clear();
     try (var scope = blobs.retain()) {
       serveSession(in, out, frame);
     } finally {
@@ -243,10 +255,16 @@ public final class SyncRpcServer {
       throws IOException {
     switch (content) {
       case SyncWire.Fetch fetch -> {
-        for (var hash : fetch.hashes()) reply(out, new SyncWire.Manifest(blobs.manifest(hash)));
+        requireServed("blob", fetch.hashes(), servedBlobs);
+        for (var hash : fetch.hashes()) {
+          var manifest = blobs.manifest(hash);
+          servedChunks.addAll(manifest.chunkHashes());
+          reply(out, new SyncWire.Manifest(manifest));
+        }
         reply(out, new SyncWire.Done());
       }
       case SyncWire.FetchChunks fetch -> {
+        requireServed("chunk", fetch.hashes(), servedChunks);
         for (var hash : fetch.hashes()) SyncWire.writeChunk(out, hash, blobs.chunk(hash));
         reply(out, new SyncWire.Done());
       }
@@ -261,6 +279,52 @@ public final class SyncRpcServer {
           throw new IllegalArgumentException(
               "Unexpected content operation " + SyncWire.context(content));
     }
+  }
+
+  /**
+   * Refuses a scoped session content main never named to it: a blob is this session's to fetch only
+   * once an entry main admitted referenced it ({@link #serving}), and a chunk only once a manifest
+   * it was served listed it. An unscoped session fetches by hash as it always has.
+   */
+  private void requireServed(String what, List<String> hashes, Set<String> served) {
+    if (principal.scope().unrestricted()) {
+      return;
+    }
+    for (var hash : hashes) {
+      if (!served.contains(hash)) {
+        throw new SyncTransportException(
+            "refused", what + " " + hash + " is not content main served this session", null);
+      }
+    }
+  }
+
+  /**
+   * Records the content {@code snapshots} of {@code type} reference as this session's to fetch;
+   * every entry, accepted version and carried denial main sends a scoped session passes through
+   * here.
+   */
+  private void serving(String type, List<Map<String, Object>> snapshots) {
+    if (principal.scope().unrestricted()) {
+      return;
+    }
+    servedBlobs.addAll(
+        BlobStore.referenced(snapshots, SyncedEntities.require(type).store(db).contentFields()));
+  }
+
+  private void serving(String type, SyncWire.Page page) {
+    var snapshots = new ArrayList<Map<String, Object>>();
+    page.entries().forEach(entry -> snapshots.add(entry.snapshot()));
+    page.accepted().forEach(entry -> snapshots.add(entry.snapshot()));
+    serving(type, snapshots);
+  }
+
+  /**
+   * Whether the session may see what main holds of {@code id}: its head's project is in the
+   * session's scope. An unscoped session sees every id, as it always has.
+   */
+  private boolean admits(String type, String id) {
+    var scope = principal.scope();
+    return scope.unrestricted() || scope.admits(changeLog.headProject(type, id).orElse(null));
   }
 
   private void receiveContent(
@@ -423,7 +487,8 @@ public final class SyncRpcServer {
         version,
         mainId(),
         Objects.toString(principal.handle(), ""),
-        limits.fileMax());
+        limits.fileMax(),
+        principal.scope());
   }
 
   /**
@@ -479,8 +544,11 @@ public final class SyncRpcServer {
   /**
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
-   * next} is the last seq included, so the node checkpoints exactly what it has seen. The whole
-   * page is read as one snapshot of main, so it is internally consistent and no writer waits on it.
+   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head whose
+   * project the session's scope does not admit is passed over by its head alone, no row read, and
+   * {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip having
+   * seen only its own projects, and a page may be empty yet not the last. The whole page is read as
+   * one snapshot of main, so it is internally consistent and no writer waits on it.
    */
   private SyncWire.Response page(SyncWire.Pull pull, int frame) {
     var main = replicas.get(pull.type());
@@ -499,6 +567,10 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
+      if (!principal.scope().admits(head.project())) {
+        next = head.seq();
+        continue;
+      }
       var entry = entryOf(main, head.entityId(), head.seq());
       var length = SyncWire.encodedLength(entry);
       if (!budget.canEverAdmit(length)) {
@@ -511,13 +583,16 @@ public final class SyncRpcServer {
       entries.add(entry);
       next = head.seq();
     }
-    return new SyncWire.Page(entries, next, next >= maxSeq, maxSeq);
+    var page = new SyncWire.Page(entries, next, next >= maxSeq, maxSeq);
+    serving(pull.type(), page);
+    return page;
   }
 
   /**
    * Main's current rows for the ids the node changed locally, in request order, as many as fit the
    * frame; {@code next} counts the ids consumed so the node continues from there. An id main has
-   * never seen is consumed and omitted.
+   * never seen is consumed and omitted, and so is one main holds outside the session's scope: the
+   * node offers it as new, and main's denial of that offer withdraws it there.
    */
   private SyncWire.Response current(SyncWire.Need need, int frame) {
     var main = replicas.get(need.type());
@@ -533,7 +608,7 @@ public final class SyncRpcServer {
     var accepted = new ArrayList<SyncWire.Entry>();
     var consumed = 0;
     for (var id : need.ids()) {
-      if (main.currentRev(id) == null) {
+      if (main.currentRev(id) == null || !admits(need.type(), id)) {
         consumed++;
         continue;
       }
@@ -560,8 +635,11 @@ public final class SyncRpcServer {
       took.ifPresent(accepted::add);
       consumed++;
     }
-    return new SyncWire.Page(
-        entries, consumed, consumed == need.ids().size(), main.maxSeq(), accepted);
+    var page =
+        new SyncWire.Page(
+            entries, consumed, consumed == need.ids().size(), main.maxSeq(), accepted);
+    serving(need.type(), page);
+    return page;
   }
 
   private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
@@ -644,7 +722,22 @@ public final class SyncRpcServer {
                 }));
   }
 
+  /**
+   * Main's verdict on one offer. A scoped pusher's offer outside its scope is denied first, before
+   * the erasure and staleness checks that would otherwise answer about a row it may not see, and
+   * the denial carries nothing of main's: the node withdraws its row and learns only that the id is
+   * not its to write. Every denial after it is therefore of an id main holds inside the pusher's
+   * scope, or not at all, so the version it carries is one the pusher may see.
+   */
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
+    var outside =
+        principal.scope().unrestricted()
+            ? Optional.<Refusal>empty()
+            : new ScopeRule(changeLog, type).pushed(principal, offer.id(), offer.snapshot());
+    if (outside.isPresent()) {
+      deniedInSession |= offer.snapshot() != null && carriesContent(type);
+      return new SyncWire.Denied(offer.id(), outside.get().message(), null, null, true);
+    }
     if (RUN_ENTITY.equals(type)
         && principal.canWrite()
         && (principal.handle() == null || principal.handle().isBlank())) {
@@ -673,6 +766,7 @@ public final class SyncRpcServer {
       case CommitOutcome.Refused refused -> new SyncWire.Refused(offer.id(), refused.reason());
       case CommitOutcome.Denied denied -> {
         deniedInSession |= offer.snapshot() != null && carriesContent(type);
+        serving(type, Collections.singletonList(denied.snapshot()));
         yield new SyncWire.Denied(
             offer.id(),
             denied.reason(),

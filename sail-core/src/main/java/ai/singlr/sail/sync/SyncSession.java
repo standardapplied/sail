@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Sqlite;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -184,6 +185,22 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * the ceiling the node enforces together with its own before a file ever reaches a sync.
    */
   long mainFileMax();
+
+  /**
+   * The projects main's welcome scoped this node to: every project unless main scoped its FDE, and
+   * from a main that predates scoping, which names none. Main alone decides it; the node holds what
+   * main sends and drops what main stops sending.
+   */
+  ProjectScope scope();
+
+  /** The box id main welcomed this session as: the peer this node's checkpoints are kept for. */
+  String mainId();
+
+  /**
+   * Tells the session the round removed rows outside any type's reconcile, so its next collection
+   * frees the content they left unreferenced.
+   */
+  void contentLeft();
 
   /**
    * What main holds of each of {@code ids} of {@code type}: its current version — a revision, a

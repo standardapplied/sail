@@ -6,7 +6,9 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectFiles;
+import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.io.InputStream;
@@ -15,6 +17,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * One project's shared files over the catalog. A read hands its reader the files of a project the
+ * reader's scope admits, so a project outside it reads as one that shares nothing.
+ */
 public record SharedProjectFiles(
     FileStore files, Path projectsDir, String project, FileLimits limits) implements ProjectFiles {
   public SharedProjectFiles {
@@ -24,12 +30,12 @@ public record SharedProjectFiles(
 
   @Override
   public List<FileStore.FileRow> list() {
-    return files.list(project);
+    return Scoped.rows(Actor.reader(), files.list(project), FileStore.FileRow::project);
   }
 
   @Override
   public Optional<FileStore.FileRow> find(String path) {
-    return files.find(project, path);
+    return Scoped.row(Actor.reader(), files.find(project, path), FileStore.FileRow::project);
   }
 
   @Override

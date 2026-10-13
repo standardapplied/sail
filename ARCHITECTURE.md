@@ -203,8 +203,16 @@ and the spec that closes it.
 | C1 | After one round per box with no new writes, every replica equals main: fields, author, creator, revision, tombstone, erasure. | `ConvergenceSyncTest` (every deletable type restored after an adopted deletion, resolves, rooms re-created), every sync test through `SyncBox.quiesce` and `SyncBox.assertEqualToMain`, `NativeFleetIT` (change-log heads); reviews with their findings: `ReviewFindingsSyncTest` (two iterations, a dispute and a resolution reach main and every box alike; a denied review adopted as main's exactly), `ReviewSyncTest`, `PushAuthoritySyncTest` |
 | C2 | State that never replicates is removed only with its entity's erasure or by the box's own action, never by adopting main's version. | reviews hold no such state: a review's findings and its follow-up links are its synced content, so adopting main's version loses nothing (`ReviewFindingsSyncTest`: a follow-up's links survive its spec's delete and restore on every box; `ReviewStoreTest`: the projection is written only from the adopted content) |
 | C3 | Whether a disk copy is this box's output or a person's edit is decided without retained history. | each box records what it wrote or published, box-locally (`MaterializedFiles`, through `FileStore.copyOf`): `FilesAuditTest` (a copy main wrote is refreshed, and a deletion removes copy and record, after more pushes than history keeps and a compaction; a hand edit and a hand revert are kept; a mode-only change survives the same; the upgrade of a main that compacted publishes neither its stale copy nor a deleted file's; every scenario ends converged), `FileStoreTest` (every version in flight until one lands, then that one alone; an undecided copy; a publish recorded; the record goes with an erasure and moves with a rename), `FileMaterializerTest` (a write that died before moving the file; an undecided copy kept until a version this box writes lands in its place), `FileImporterTest` (a publish superseded by main before any materialize; an undecided copy never published), `MaterializedFilesMigrationTest` (the upgrade seeds the record once, resumably, from history — its one use — superseded and deleted versions included; a copy matching no retained version is left undecided, a legacy copy's deliberate execute bit a person's), `MaterializedFilesSyncTest` (the record never reaches a node or the change log), `SyncSchemaConvergenceTest` (the sync lane leaves the seed to `sail migrate`); compaction through the sweep and `sail sync gc`: `RetentionSweeperTest`, `SyncCommandTest`; the upgrade through `sail migrate`, `sail project files add` and `pull`: `FilesUpgradeCliTest`, `ProjectFilesCommandTest` |
-| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, or by its owner's act. | a gone dependency's offer, re-homed or withdrawn and announced (`Settlement.Settled`): `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content; a member's and an admin's child of a pruned room re-homed and landed); a review main never took, withdrawn with its findings kept in the change log and announced, and a node's legacy findings denied after a reassign: `ReviewFindingsSyncTest`; files: no box republishes a stale copy or resurrects a deleted file by mistaking its own output for a person's edit, nor overwrites a person's edit by the reverse, and a person's copy is published once: `FilesAuditTest`, `FileImporterTest`, `FilesUpgradeCliTest`; an erased file's copy stays with its project and its record goes with main's erase, a node's adoption and a node's prune: `FilesAuditTest` |
+| C4 | Work only this box held leaves only by main's denial or erasure, kept in the change log and announced, by its owner's act, or with a project an admin revoked from the box (S4), announced and not kept. | a gone dependency's offer, re-homed or withdrawn and announced (`Settlement.Settled`): `LivenessAuditTest`, `ConvergenceSyncTest` (a denied run's agent's spec edit), `ErasureAuditTest` (a denied offer's content; a member's and an admin's child of a pruned room re-homed and landed); a review main never took, withdrawn with its findings kept in the change log and announced, and a node's legacy findings denied after a reassign: `ReviewFindingsSyncTest`; files: no box republishes a stale copy or resurrects a deleted file by mistaking its own output for a person's edit, nor overwrites a person's edit by the reverse, and a person's copy is published once: `FilesAuditTest`, `FileImporterTest`, `FilesUpgradeCliTest`; an erased file's copy stays with its project and its record goes with main's erase, a node's adoption and a node's prune: `FilesAuditTest` |
 | E1 | An erased id is never written again on any box; what belongs to it goes with it; a node removes only what main never acknowledged. | `ErasureTest`, `ErasureSyncTest`; a prune racing a born-in spec, on an admin and a member node: `ErasureAuditTest` |
+| S1 | A scoped node holds exactly the rows of its granted projects: no row, erasure, blob or roster email of another project reaches it over any wire. | `ScopedSyncTest` (every type from an empty node; a blob fetched by hash and a chunk no served manifest lists are refused; an erasure reaches the nodes that held the row and no other), `ScopedSyncServerTest` (the roster of those who share a project, no email but the node's own, no assignee disabled), `NativeFleetIT` (real processes: rows, heads, blobs and roster) |
+| S2 | A scoped actor reads and writes inside its scope on every box; a write outside it is refused in the journal, on every lane, before the type's own rule. | `ScopeRuleTest` (a create into a hidden project is a project not found; a write over a hidden row says only that the id is taken; specs, posts, files and catalog rows on this box's lanes; a prune), `ScopedSyncTest` (a forged push, a project row, an erase request), `ScopedReadsTest` (every read route under `/v1` answers a scoped caller byte for byte the same whether or not another project exists, held complete against `Operations`; a write into a hidden project is a project not found and one addressed to a hidden row meets what a missing row answers; the terminal door; a run sees its owner's scope), `ScopedTest`, `SseHandlerTest` and `AgentLogStreamerTest` (the event and run-log streams), `ConflictOperationsTest`, `ScopedRosterApiTest` (a session and a token of a scoped FDE both resolve to a scoped caller), `NativeFleetIT` (the gateway's `spec list` with a scoped node's key) |
+| S3 | Main decides scope alone, from its grants and the project each change head carries, and remembers nothing of what it sent. | `ScopedHeadsTest` (every type's head carries its project from its first write, through a deletion, a withdrawal, an erasure and a purge; the backfill), `ScopedSyncTest` (a thousand foreign heads are paged past by their heads alone, no row loaded, and the checkpoint reaches main's tip), `ProjectScopeTest` |
+| S4 | A grant shows after the next round; a revocation removes the project in the same round, unpushed work included, announced. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends), `SyncScopeTest`, `NativeFleetIT` |
+| S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
+| S6 | Versions degrade to an unscoped fleet, never to an error: an older node ignores the scope main names, and a node reads an older main's silence as every project. | `SyncWireTest` (a welcome naming no scope; a key this build does not know), `ScopedSyncTest` (a welcome naming none after one naming an empty scope pages everything), `NativeFleetIT` (a node of the last release is sent only its scope, and drops nothing on a revoke) |
+| S7 | Scope fails closed: an FDE added scoped sees nothing until granted, a session naming no FDE receives nothing, and a head of unknown project reaches unscoped nodes only. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped) |
+| S8 | A refusal for scope carries nothing of main's: it names the id, no snapshot and no rev, and is decided before the erasure and staleness checks. | `ScopedSyncTest` (a row still held after a revoke, an id main erased, a message, an id taken in another project: denied with no version, the node withdraws its own, and a denial by another rule carries main's version only inside the scope) |
 
 Every test in the `sync` package that drives a round between boxes ends each scenario by
 quiescing every box and asserting each replica equals main — fields, author, revision, head kind
@@ -214,6 +222,83 @@ settles a fleet of boxes round by round first, counting a refusal or a settlemen
 No scenario is excepted from equality: every entity converges. The fleet lane (`NativeFleetIT`)
 asserts after every scenario's final round that every box's change-log heads (id, rev, kind,
 author) equal main's for every type.
+
+### Scope: which projects a box holds
+
+An FDE sees every project unless main's roster scopes it (`fdes.scope = 'granted'`, set by
+`sail fde add --scoped`), and then exactly the projects main granted it (`project_grants`,
+box-local on main like `fde_ssh_keys`; `sail fde grant` and `sail fde revoke`). That set is a
+`ProjectScope`, the fifth component of every `Actor`, and `ProjectScope.admits(project)` is the
+one predicate: every door asks it and none keeps a list of projects of its own. A row of no
+known project is admitted by an unrestricted scope only. The scope is resolved where an
+actor's FDE is resolved against main's roster, by the rule that resolves its role
+(`RoleRule.scopeOf`): the API's session and token authentication, and with them the SSH
+gateway's commands, and main's `_sync` server, where a session that names no FDE sees nothing.
+The CLI operator, a run's principals, main's own and a box's machinery see every project, and
+so does every actor on a node: a node mirrors no scope and decides no visibility. It holds
+what main sent and drops what main stops sending.
+
+**Heads carry their project.** `change_heads.project` is written with every append from
+`ChangeLog.projectOf`, the one derivation: the `project` a spec, room or run names, the one a
+file's id begins with (a file's synced state is its content alone), a project's own id, and
+for a review or a message the project of its parent's head, its spec's or its conversation's.
+A state that names none (a withdrawal, a deletion of a row the box never held) keeps the
+project the head already has, and `erase` and `purge` carry it across the erasure row, which
+has no snapshot to read. A column and not a join, because a pruned row has no row to join, yet
+its erasure must reach the nodes that held it and never one that did not. `scoped-heads-v1`
+fills the heads written before; one whose entity was already pruned stays unknown. Every
+grant runs the fill again first, for a head the previous release's server wrote without a
+project in the moments the upgrade migrated under it.
+
+**Main's sync server** decides everything from the session's actor and the heads:
+
+- a page passes over a head the scope does not admit without reading its row, and `next`
+  moves to its seq all the same, so a page may be empty yet not the last;
+- a `Need` omits an id main holds outside the scope exactly as one it does not hold. The node
+  then offers it as new, whatever it once heard of it (`ScopedLocalReplica.unseen`), and
+  main's denial withdraws it there;
+- a blob is the session's to fetch only once an entry main sent it referenced it, and a
+  chunk only once a manifest it was served listed it;
+- the roster is `FdeStore.visibleTo`: everyone whose own scope admits one of the principal's
+  projects, without their emails, and the principal's own row whole;
+- a push is decided for scope first (`ScopeRule.pushed`), before the erasure and staleness
+  checks that would otherwise answer about a row the pusher may not see, and its denial
+  carries no version; an erase request for an id outside the scope is answered as one main
+  does not hold.
+
+**The journal** asks `ScopeRule` ahead of each type's own rule, on every lane: what a write
+is made over is answered only as a taken id, a project the write itself names as one that
+does not exist (`OUT_OF_SCOPE`, a 404 to an API client), and one it reaches through a parent
+is not named.
+
+**The node** brings itself in line at the start of every round (`NodeRound.rescope`), before
+anything is offered or adopted. Every project it holds a head of that the welcome's scope
+does not admit is dropped whole (`Erasure.dropLocal`: main's full walk and whatever else its
+history files under the project, each row with its conflicts, box-local rows, entries, head
+and offer, erasures included; nothing is journalled), and the round's collection frees the
+content. It is decided from what the box holds, never from what it was last told, so a drop
+put off by a failed round or by a run still under way here happens on the next round that
+finds it. A scope that admits a project the recorded one (`sync_scope`) did not resets the
+node's checkpoints (`SyncState.reset`), since the project's history sits below them. A
+welcome naming no scope records every project: an older main scopes no one.
+
+**Main's API** has no single read seam, so one helper (`Scoped`) is applied in each read:
+a row outside the caller's scope is the same not-found a missing row is, a list leaves it
+out, and the event stream filters by the scope the connection opened with. The lookup an
+operation addresses a row by is the same for a read and a write, so a write addressed to a
+hidden row meets a missing one before the journal is ever asked. A read reads as the actor
+its door bound (`Actor.reader`); one no door bound an actor to is the box's own, its root CLI
+describing what the box holds, and sees every project. The HTTP and local-socket routers bind
+their caller before they route, and a run's principal carries its owning FDE's scope.
+
+Known edges. A project rename is a new project to a grant, and the rooms, runs, reviews and
+messages recorded under the old name keep it. A row an unscoped actor moves out of a scoped
+node's project stays on that node, as it was, until the node edits it or loses the project.
+A revocation leaves the project's container and the files already on disk to the operator.
+There is no command that scopes an FDE who was added unscoped. A box's own events
+(a sync that degraded) carry the stand-in project `sail`, so they reach unscoped readers
+only. A scoped reader's page of recent events is filtered after the store's limit and may
+be shorter than asked.
 
 ### What syncs, and how
 

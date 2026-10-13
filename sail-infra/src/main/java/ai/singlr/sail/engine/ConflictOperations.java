@@ -8,9 +8,12 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import ai.singlr.sail.api.Resolution;
+import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ConflictDetector;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncConflicts;
@@ -21,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -38,7 +42,7 @@ public final class ConflictOperations {
   }
 
   public List<SyncConflicts.Conflict> list() {
-    return conflicts.pending().stream().map(this::display).toList();
+    return readable().stream().map(this::display).toList();
   }
 
   /**
@@ -47,15 +51,42 @@ public final class ConflictOperations {
    * only while the id names a single conflict; several are refused by name, never guessed.
    */
   public SyncConflicts.Conflict find(String entityType, String entityId) {
-    var raw = findRaw(entityType, entityId);
+    var raw = among(readable(), entityType, entityId);
     return raw == null ? null : display(raw);
   }
 
-  private SyncConflicts.Conflict findRaw(String entityType, String entityId) {
-    if (Strings.isNotBlank(entityType)) {
-      return conflicts.pendingFor(entityType, entityId).orElse(null);
-    }
-    var matches = conflicts.pending().stream().filter(c -> c.entityId().equals(entityId)).toList();
+  /**
+   * The open conflicts the reader may see. A read looks its conflict up among these alone, so one
+   * out of the reader's scope is neither found nor counted when an id is parked under several
+   * types.
+   */
+  private List<SyncConflicts.Conflict> readable() {
+    return Scoped.rows(Actor.reader(), conflicts.pending(), this::projectOf);
+  }
+
+  /**
+   * The project of the entity a conflict is about, by the one derivation the journal keeps ({@link
+   * ChangeLog#projectOf}): the one its head on this box carries, else the one the side the conflict
+   * recorded names, and null when neither places it.
+   */
+  private String projectOf(SyncConflicts.Conflict conflict) {
+    var changes = new ChangeLog(db);
+    var type = conflict.entityType();
+    var id = conflict.entityId();
+    return changes
+        .headProject(type, id)
+        .or(() -> Optional.ofNullable(changes.projectOf(type, id, conflict.localSnapshot())))
+        .or(() -> Optional.ofNullable(changes.projectOf(type, id, conflict.remoteSnapshot())))
+        .orElse(null);
+  }
+
+  private static SyncConflicts.Conflict among(
+      List<SyncConflicts.Conflict> pending, String entityType, String entityId) {
+    var matches =
+        pending.stream()
+            .filter(c -> c.entityId().equals(entityId))
+            .filter(c -> Strings.isBlank(entityType) || c.entityType().equals(entityType))
+            .toList();
     if (matches.size() > 1) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
@@ -75,7 +106,7 @@ public final class ConflictOperations {
    * refused here, before anyone spends effort merging it.
    */
   public String mergeTemplate(String entityType, String entityId) {
-    var conflict = requireOpen(entityType, entityId);
+    var conflict = requireOpen(readable(), entityType, entityId);
     requireMergeable(conflict);
     requireCurrent(conflict, "merge");
     var shown = display(conflict);
@@ -97,7 +128,7 @@ public final class ConflictOperations {
   public SyncConflicts.Conflict resolve(String entityType, String entityId, Resolution resolution) {
     return db.transaction(
         () -> {
-          var conflict = requireOpen(entityType, entityId);
+          var conflict = requireOpen(readable(), entityType, entityId);
           requireMainsRevision(conflict);
           requireCurrent(
               conflict,
@@ -151,8 +182,9 @@ public final class ConflictOperations {
     }
   }
 
-  private SyncConflicts.Conflict requireOpen(String entityType, String entityId) {
-    var conflict = findRaw(entityType, entityId);
+  private static SyncConflicts.Conflict requireOpen(
+      List<SyncConflicts.Conflict> pending, String entityType, String entityId) {
+    var conflict = among(pending, entityType, entityId);
     if (conflict == null) {
       throw new ApiException(ErrorCode.NOT_FOUND, "No open conflict for '" + entityId + "'.");
     }

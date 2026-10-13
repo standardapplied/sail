@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -115,6 +116,15 @@ class ActorTest {
 
     assertEquals("uday", Actor.call(Actor.cliOperator("uday"), () -> Actor.current().handle()));
     assertThrows(IllegalStateException.class, Actor::current);
+  }
+
+  @Test
+  void aReadNoDoorBoundAnActorToIsTheBoxsOwnAndABoundOneIsItsCallers() {
+    var scoped = Actor.cliOperator("uday").withScope(ProjectScope.of(List.of("acme")));
+
+    assertEquals(Actor.system(), Actor.reader());
+    assertEquals(ProjectScope.all(), Actor.reader().scope());
+    assertEquals(scoped, Actor.call(scoped, () -> Actor.reader()));
   }
 
   @Test

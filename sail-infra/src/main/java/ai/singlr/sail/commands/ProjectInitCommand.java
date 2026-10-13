@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.gen.SailYamlGenerator;
@@ -61,6 +62,7 @@ public final class ProjectInitCommand implements Runnable {
     }
 
     var config = collectInputs(out, ansi);
+    ProjectCatalog.requireInScope(config.name());
 
     if (json) {
       out.println(buildJsonOutput(config));

@@ -16,8 +16,10 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeStore;
@@ -726,6 +728,139 @@ class FdeCommandTest {
 
     assertEquals(1, fde("rm", "ada", "--force"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Removing an FDE"), refusal);
+  }
+
+  @Test
+  void anFdeAddedScopedSeesNothingUntilGrantedAndGrantsAreIdempotent() {
+    inDb(
+        db -> {
+          Acting.system(
+              () -> {
+                new ProjectStore(db).upsert("alpha", "name: alpha\n");
+                new ProjectStore(db).upsert("beta", "name: beta\n");
+              });
+          return null;
+        });
+
+    assertEquals(0, fde("add", "nia", "--scoped"));
+    assertEquals(
+        List.of("  ✓ FDE added: nia (member, scoped: grant projects with 'sail fde grant')"),
+        printed());
+    assertEquals(0, fde("add", "uma"));
+    assertEquals(List.of("  ✓ FDE added: uma (member)"), printed());
+    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(ProjectScope.all(), inDb(db -> new FdeStore(db).scopeOf("uma")));
+
+    inDb(
+        db -> {
+          db.execute("UPDATE change_heads SET project = NULL");
+          return null;
+        });
+    assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"));
+    assertEquals(
+        List.of("  ✓ Would grant alpha to nia. Its box holds the project after its next sync."),
+        printed());
+    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+    assertEquals(List.of(), inDb(db -> new ChangeLog(db).heldProjects()));
+
+    assertEquals(0, fde("grant", "nia", "alpha"));
+    assertEquals(
+        List.of("  ✓ Granted alpha to nia. Its box holds the project after its next sync."),
+        printed());
+    assertEquals(
+        List.of("alpha", "beta"),
+        inDb(db -> new ChangeLog(db).heldProjects()),
+        "a grant fills the heads a release before this one wrote without their project");
+    assertEquals(0, fde("grant", "nia", "alpha"));
+    assertEquals(List.of("  nia already holds alpha; nothing to do."), printed());
+    assertEquals(0, fde("grant", "nia", "beta", "--json"));
+    assertEquals(
+        List.of(
+            "{\"handle\": \"nia\", \"project\": \"beta\", \"granted\": true, \"dry_run\":"
+                + " false, \"projects\": [\"alpha\", \"beta\"]}"),
+        printed());
+
+    assertEquals(0, fde("list"));
+    var table = String.join("\n", printed());
+    assertTrue(table.contains("SCOPE"), table);
+    assertTrue(table.contains("2: alpha, beta"), table);
+    assertTrue(table.lines().anyMatch(line -> line.contains("uma") && line.contains("all")), table);
+
+    assertEquals(0, fde("revoke", "nia", "alpha", "--dry-run", "--json"));
+    assertEquals(
+        List.of(
+            "{\"handle\": \"nia\", \"project\": \"alpha\", \"revoked\": true, \"dry_run\":"
+                + " true, \"projects\": [\"alpha\", \"beta\"]}"),
+        printed());
+    assertEquals(0, fde("revoke", "nia", "alpha"));
+    assertEquals(
+        List.of(
+            "  ✓ Revoked alpha from nia. Its box drops the project, unpushed work included, on its"
+                + " next sync."),
+        printed());
+    assertEquals(0, fde("revoke", "nia", "alpha"));
+    assertEquals(List.of("  nia does not hold alpha; nothing to do."), printed());
+    assertEquals(0, fde("revoke", "nia", "beta", "--dry-run"));
+    assertEquals(
+        List.of(
+            "  ✓ Would revoke beta from nia. Its box drops the project, unpushed work included,"
+                + " on its next sync."),
+        printed());
+    assertEquals(ProjectScope.of(List.of("beta")), inDb(db -> new FdeStore(db).scopeOf("nia")));
+  }
+
+  @Test
+  void aGrantNamesAScopedFdeAndAProjectInTheCatalog() {
+    inDb(
+        db -> {
+          Acting.system(() -> new ProjectStore(db).upsert("alpha", "name: alpha\n"));
+          return null;
+        });
+    assertEquals(0, fde("add", "nia", "--scoped"));
+    assertEquals(0, fde("add", "uma"));
+
+    assertEquals(1, fde("grant", "nia", "ghost"));
+    assertEquals("Unknown project 'ghost'. List the catalog with 'sail project list'.", refusal);
+    assertEquals(1, fde("grant", "nobody", "alpha"));
+    assertEquals("Unknown FDE 'nobody'.", refusal);
+    assertEquals(1, fde("grant", "uma", "alpha"));
+    assertEquals(
+        "FDE 'uma' sees every project, so there is nothing to grant or revoke. Only an FDE added"
+            + " with 'sail fde add <handle> --scoped' is granted projects.",
+        refusal);
+    assertEquals(1, fde("add", "root", "--role", "admin", "--scoped"));
+    assertEquals(
+        "FDE 'root' cannot be both scoped and an admin: an admin edits the roster, and so could"
+            + " grant itself any project. Scope a member or a viewer.",
+        refusal);
+    assertTrue(
+        inDb(db -> new FdeStore(db).byHandle("root")).isEmpty(), "the refused add left no FDE");
+    assertEquals(1, fde("grant", "nia", "Not/A/Name"));
+    assertEquals(
+        "Invalid project name: 'Not/A/Name'. Must match [a-z0-9][a-z0-9-]*, max 63 characters.",
+        refusal);
+    assertEquals(1, fde("revoke", "Bad Handle", "alpha"));
+    assertEquals(0, fde("revoke", "nia", "ghost"), "a project since pruned is still revocable");
+    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("nia")));
+  }
+
+  @Test
+  void aNodeRefusesToAddGrantOrRevokeWithTheRosterSentence() {
+    node = true;
+
+    assertEquals(1, fde("add", "nia", "--scoped"));
+    assertEquals(FdeCommand.rosterEditOnNodeMessage("Adding an FDE"), refusal);
+    assertEquals(1, fde("grant", "nia", "alpha"));
+    assertEquals(FdeCommand.rosterEditOnNodeMessage("Granting a project"), refusal);
+    assertEquals(1, fde("revoke", "nia", "alpha"));
+    assertEquals(FdeCommand.rosterEditOnNodeMessage("Revoking a project"), refusal);
+    assertTrue(inDb(db -> new FdeStore(db).list()).isEmpty());
+  }
+
+  @Test
+  void aBoxWithNoFdeListsNone() {
+    assertEquals(0, fde("list"));
+    assertEquals(List.of("  No FDEs. Add one with 'sail fde add <handle>'."), printed());
   }
 
   @Test

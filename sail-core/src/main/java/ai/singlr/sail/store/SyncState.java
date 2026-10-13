@@ -36,6 +36,15 @@ public final class SyncState {
         .orElse(0L);
   }
 
+  /**
+   * Forgets how far this node has read {@code peer}'s change log, for every type, so its next round
+   * walks every head again: how a project newly in this node's scope, whose history sits below the
+   * checkpoints, is paged at all. What the node already holds re-adopts at the same rev, unwritten.
+   */
+  public void reset(String peer) {
+    db.execute("UPDATE sync_state SET checkpoint = 0 WHERE peer = ?", peer);
+  }
+
   /** Advances one type's checkpoint for {@code peer}. Monotonic: never moves it backward. */
   public void advance(String peer, String entityType, long checkpoint) {
     db.execute(

@@ -17,12 +17,21 @@ import java.util.function.Supplier;
 /**
  * A {@link LocalReplica} view over a fixed id set; see {@link LocalReplica#scopedTo}. The ids keep
  * the order they arrived in: a page lists a reply after its parent, and the engine must visit them
- * that way or the reply is refused for a parent it has not adopted yet.
+ * that way or the reply is refused for a parent it has not adopted yet. {@code unseen} are the ids
+ * a scoped main answered nothing of: whatever this box once heard of them, main shows it none now,
+ * so they have no base here and the engine offers them as new, for main to deny and this box to
+ * withdraw — never a deletion on main to weigh against the local edit.
  */
-record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalReplica {
+record ScopedLocalReplica(LocalReplica inner, Set<String> ids, Set<String> unseen)
+    implements LocalReplica {
 
   ScopedLocalReplica {
     ids = Collections.unmodifiableSet(new LinkedHashSet<>(ids));
+    unseen = Set.copyOf(unseen);
+  }
+
+  ScopedLocalReplica(LocalReplica inner, Set<String> ids) {
+    this(inner, ids, Set.of());
   }
 
   @Override
@@ -92,7 +101,7 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids) implements LocalR
 
   @Override
   public Map<String, Object> base(String id) {
-    return inner.base(id);
+    return unseen.contains(id) ? null : inner.base(id);
   }
 
   @Override

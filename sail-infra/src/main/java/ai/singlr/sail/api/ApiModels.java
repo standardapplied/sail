@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Capability;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -63,8 +64,18 @@ record WhoamiResponse(
   }
 }
 
-record FdeSummaryView(String handle, String displayName, String email, String role)
+/**
+ * One FDE of the roster. {@code scope} is the projects main lets it see, named only to an admin
+ * reader and null for everyone else: {@code all}, or {@code granted} with its {@code projects}.
+ */
+record FdeSummaryView(
+    String handle, String displayName, String email, String role, ProjectScope scope)
     implements Mappable {
+
+  FdeSummaryView(String handle, String displayName, String email, String role) {
+    this(handle, displayName, email, role, null);
+  }
+
   @Override
   public Map<String, Object> toMap() {
     var m = new LinkedHashMap<String, Object>();
@@ -72,6 +83,12 @@ record FdeSummaryView(String handle, String displayName, String email, String ro
     m.put("display_name", displayName);
     m.put("email", email);
     m.put("role", role);
+    if (scope != null) {
+      m.put("scope", scope.unrestricted() ? "all" : "granted");
+      if (!scope.unrestricted()) {
+        m.put("projects", List.copyOf(scope.projects()));
+      }
+    }
     return m;
   }
 }

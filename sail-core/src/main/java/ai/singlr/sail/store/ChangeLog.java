@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import java.util.ArrayList;
@@ -129,8 +130,11 @@ public final class ChangeLog {
     }
   }
 
-  /** One entity's latest change: the seq of its head entry and its id. */
-  public record Head(long seq, String entityId) {}
+  /**
+   * One entity's latest change: the seq of its head entry, its id, and the project it belongs to,
+   * null when unknown.
+   */
+  public record Head(long seq, String entityId, String project) {}
 
   /**
    * Runs {@code work} in one transaction on the journal's database, excluding every concurrent
@@ -247,7 +251,8 @@ public final class ChangeLog {
               origin,
               deleted,
               snapshot,
-              deleted ? Kind.TOMBSTONE : Kind.REVISION);
+              deleted ? Kind.TOMBSTONE : Kind.REVISION,
+              null);
         });
   }
 
@@ -261,6 +266,7 @@ public final class ChangeLog {
     var actor = Actor.current();
     db.transaction(
         () -> {
+          var project = headProject(entityType, entityId).orElse(null);
           purge(entityType, entityId);
           insert(
               entityType,
@@ -271,7 +277,8 @@ public final class ChangeLog {
               origin,
               true,
               EMPTY_SNAPSHOT,
-              Kind.ERASURE);
+              Kind.ERASURE,
+              project);
         });
   }
 
@@ -279,11 +286,13 @@ public final class ChangeLog {
    * Deletes every entry of an entity except its erasure rows, and any offer of it in flight, and
    * points its head at the newest erasure left — or drops the head when none is. How an entity that
    * belonged to an erased one leaves this box's history when its own erasure has not been recorded
-   * here. Names no actor: it rewrites history under erasure rather than recording a write.
+   * here. The head keeps the project it carried: an erasure row names none. Names no actor: it
+   * rewrites history under erasure rather than recording a write.
    */
   public void purge(String entityType, String entityId) {
     db.transaction(
         () -> {
+          var project = headProject(entityType, entityId).orElse(null);
           db.execute(
               "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ? AND kind <> 'erasure'",
               entityType,
@@ -295,14 +304,124 @@ public final class ChangeLog {
               entityId);
           db.execute(
               """
-              INSERT INTO change_heads (entity_type, entity_id, seq)
-              SELECT entity_type, entity_id, MAX(seq) FROM change_log
+              INSERT INTO change_heads (entity_type, entity_id, seq, project)
+              SELECT entity_type, entity_id, MAX(seq), ? FROM change_log
               WHERE entity_type = ? AND entity_id = ? AND kind = 'erasure'
               GROUP BY entity_type, entity_id""",
+              project,
               entityType,
               entityId);
         });
   }
+
+  /**
+   * Forgets an entity entirely — every entry of it, erasures included, its head and any offer of it
+   * in flight — as if this box had never held it. How a project that left a node's scope leaves the
+   * node: main stops sending it, so nothing of it may stay to be offered, paged or matched. Names
+   * no actor: nothing is recorded.
+   */
+  public void forget(String entityType, String entityId) {
+    db.transaction(
+        () -> {
+          db.execute(
+              "DELETE FROM change_log WHERE entity_type = ? AND entity_id = ?",
+              entityType,
+              entityId);
+          db.execute(
+              "DELETE FROM change_heads WHERE entity_type = ? AND entity_id = ?",
+              entityType,
+              entityId);
+          settleOffer(entityType, entityId);
+        });
+  }
+
+  /** Every project a head of this box carries: the projects it holds anything of. */
+  public List<String> heldProjects() {
+    return db.query(
+        "SELECT DISTINCT project FROM change_heads WHERE project IS NOT NULL ORDER BY project",
+        row -> row.text(0));
+  }
+
+  /**
+   * The project the head of an entity carries; empty when the entity has no head or its project is
+   * unknown.
+   */
+  public Optional<String> headProject(String entityType, String entityId) {
+    return db.queryOne(
+            "SELECT COALESCE(project, '') FROM change_heads"
+                + " WHERE entity_type = ? AND entity_id = ?",
+            row -> row.text(0),
+            entityType,
+            entityId)
+        .filter(Strings::isNotBlank);
+  }
+
+  /**
+   * The project a state of an entity belongs to, null when it names none: the {@code project} a
+   * spec, room or run names, the one a file's id begins with — a file's synced state is its content
+   * alone — a project's own id, the project of a review's spec and of a message's conversation — a
+   * room, or the spec living in it — each read from the parent's head, so a parent since deleted or
+   * pruned still answers. The one derivation every scope decision reads, the head's column
+   * included.
+   */
+  public String projectOf(String entityType, String entityId, String snapshot) {
+    return db.queryOne(PROJECT_OF, row -> row.text(0), entityType, entityId, snapshot)
+        .filter(Strings::isNotBlank)
+        .orElse(null);
+  }
+
+  /** {@link #projectOf(String, String, String)} of a state held as a map; null maps name none. */
+  public String projectOf(String entityType, String entityId, Map<String, Object> snapshot) {
+    return projectOf(entityType, entityId, snapshot == null ? null : YamlUtil.dumpJson(snapshot));
+  }
+
+  /**
+   * Fills the project of every head that carries none, from the state its entry keeps, parents
+   * before the reviews and messages that read theirs. A head whose entity is gone — an erasure, or
+   * a deletion of a row this box never held — names no project and stays unknown. Returns how many
+   * heads carry a project afterwards.
+   */
+  public long backfillProjects() {
+    return db.transaction(
+        () -> {
+          for (var children : List.of(0, 1)) {
+            db.execute(BACKFILL_PROJECTS, children);
+          }
+          return db.queryOne(
+                  "SELECT COUNT(*) FROM change_heads WHERE project IS NOT NULL",
+                  row -> row.integer(0))
+              .orElse(0L);
+        });
+  }
+
+  /** The SQL of {@link #projectOf} over the type, id and snapshot expressions it is given. */
+  private static String projectExpression(String type, String id, String snapshot) {
+    return """
+        NULLIF(CASE %1$s
+            WHEN 'project' THEN %2$s
+            WHEN 'file' THEN substr(%2$s, 1, instr(%2$s, '/') - 1)
+            WHEN 'review' THEN (SELECT p.project FROM change_heads p
+                WHERE p.entity_type = 'spec' AND p.entity_id = json_extract(%3$s, '$.spec_id'))
+            WHEN 'message' THEN (SELECT COALESCE(
+                    (SELECT p.project FROM change_heads p
+                        WHERE p.entity_type = 'room' AND p.entity_id = c.id),
+                    (SELECT s.project FROM specs s WHERE s.room_id = c.id OR s.id = c.id LIMIT 1),
+                    (SELECT p.project FROM change_heads p
+                        WHERE p.entity_type = 'spec' AND p.entity_id = c.id))
+                FROM (SELECT COALESCE(json_extract(%3$s, '$.room_id'),
+                    json_extract(%3$s, '$.spec_id')) AS id) c)
+            ELSE json_extract(%3$s, '$.project') END, '')"""
+        .formatted(type, id, snapshot);
+  }
+
+  private static final String PROJECT_OF =
+      "SELECT COALESCE(" + projectExpression("?1", "?2", "?3") + ", '')";
+
+  private static final String BACKFILL_PROJECTS =
+      "UPDATE change_heads SET project = "
+          + projectExpression("change_heads.entity_type", "change_heads.entity_id", "l.snapshot")
+          + " FROM change_log l WHERE l.seq = change_heads.seq AND change_heads.project IS NULL"
+          + " AND (change_heads.entity_type IN ('review', 'message')) = ?";
 
   /** The erasure that is an entity's latest entry here, if it was erased. */
   public Optional<Entry> erasure(String entityType, String entityId) {
@@ -450,7 +569,8 @@ public final class ChangeLog {
       String origin,
       boolean deleted,
       String snapshot,
-      Kind kind) {
+      Kind kind,
+      String carriedProject) {
     db.transaction(
         () -> {
           db.execute(
@@ -468,11 +588,14 @@ public final class ChangeLog {
               kind.wire());
           db.execute(
               """
-              INSERT INTO change_heads (entity_type, entity_id, seq)
-              VALUES (?, ?, last_insert_rowid())
-              ON CONFLICT(entity_type, entity_id) DO UPDATE SET seq = excluded.seq""",
+              INSERT INTO change_heads (entity_type, entity_id, seq, project)
+              VALUES (?, ?, last_insert_rowid(), COALESCE(?, ?))
+              ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+                  seq = excluded.seq, project = COALESCE(excluded.project, project)""",
               entityType,
-              entityId);
+              entityId,
+              projectOf(entityType, entityId, snapshot),
+              carriedProject);
         });
   }
 
@@ -520,10 +643,10 @@ public final class ChangeLog {
   public List<Head> headsAfter(String entityType, long since, int limit) {
     return db.query(
         """
-        SELECT seq, entity_id FROM change_heads
+        SELECT seq, entity_id, project FROM change_heads
         WHERE entity_type = ? AND seq > ?
         ORDER BY seq LIMIT ?""",
-        row -> new Head(row.integer(0), row.text(1)),
+        row -> new Head(row.integer(0), row.text(1), row.isNull(2) ? null : row.text(2)),
         entityType,
         since,
         limit);

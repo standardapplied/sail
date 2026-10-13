@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
@@ -97,6 +98,7 @@ public final class SyncWire {
   private static final String MAIN_ID = "mainId";
   private static final String HANDLE = "handle";
   private static final String FILE_MAX = "file_max";
+  private static final String SCOPE = "scope";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -356,10 +358,20 @@ public final class SyncWire {
   /**
    * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
    * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
-   * null from an older main, which never says.
+   * null from an older main, which never says — and the {@code scope} of projects that FDE may see:
+   * every project unless main scoped it, which is also what an older main, naming none, means.
    */
-  public record Welcome(int protocol, String version, String mainId, String handle, long fileMax)
+  public record Welcome(
+      int protocol, String version, String mainId, String handle, long fileMax, ProjectScope scope)
       implements Response {
+    public Welcome {
+      Objects.requireNonNull(scope, "scope");
+    }
+
+    public Welcome(int protocol, String version, String mainId, String handle, long fileMax) {
+      this(protocol, version, mainId, handle, fileMax, ProjectScope.all());
+    }
+
     /** A welcome that names no handle, as a main that predates saying so sends it. */
     public Welcome(int protocol, String version, String mainId) {
       this(protocol, version, mainId, null, 0);
@@ -665,6 +677,9 @@ public final class SyncWire {
         if (welcome.fileMax() > 0) {
           map.put(FILE_MAX, welcome.fileMax());
         }
+        if (!welcome.scope().unrestricted()) {
+          map.put(SCOPE, List.copyOf(welcome.scope().projects()));
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -753,7 +768,8 @@ public final class SyncWire {
               string(map, VERSION),
               string(map, MAIN_ID),
               string(map, HANDLE),
-              longValue(map, FILE_MAX));
+              longValue(map, FILE_MAX),
+              map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all());
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->

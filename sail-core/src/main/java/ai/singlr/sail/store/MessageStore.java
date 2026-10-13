@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.MessageAuthority;
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Ids;
@@ -90,7 +91,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
                   question);
           requireReplyTarget(row);
           var snapshot = snapshot(row);
-          WriteAuthority.admit(db, decide(snapshot));
+          WriteAuthority.admit(db, decide(id, snapshot));
           var rev = Revisions.next(null, YamlUtil.dumpJson(snapshot));
           write(row, rev, null);
           journal(row, rev, ChangeLog.Entry.LOCAL, snapshot);
@@ -99,12 +100,18 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Why the bound {@link Actor} may not post {@code post}, a message's snapshot, as this box's own;
-   * empty if it may: the one decision of every post that is not a push, which {@link #append} asks
-   * as it journals the message. A pushed post was decided at {@link #commitRevision}.
+   * Why the bound {@link Actor} may not post {@code post}, the snapshot of message {@code id}, as
+   * this box's own; empty if it may: the one decision of every post that is not a push, which
+   * {@link #append} asks as it journals the message. A pushed post was decided at {@link
+   * #commitRevision}.
    */
-  private Optional<Refusal> decide(Map<String, Object> post) {
-    return WriteAuthority.local(authority(), null, null, post);
+  private Optional<Refusal> decide(String id, Map<String, Object> post) {
+    return WriteAuthority.local(scoped(authority()), id, null, post);
+  }
+
+  /** {@code rule} behind the scope rule every synced type's write passes first. */
+  private WriteAuthority scoped(WriteAuthority rule) {
+    return new ScopeRule(changeLog, ENTITY).before(rule);
   }
 
   /** Who may post on this box, and as whom: the rule the journal and main's commit decide by. */
@@ -444,7 +451,7 @@ public final class MessageStore implements ConflictResolver, SyncedStore {
           if (!holdsReplyTarget(row)) {
             return new PushOutcome.Denied("it replies to a message in another room", null, null);
           }
-          var refusal = authority.decide(Actor.current(), id, null, snapshot);
+          var refusal = scoped(authority).decide(Actor.current(), id, null, snapshot);
           if (refusal.isPresent()) {
             return new PushOutcome.Denied(refusal.get().message(), null, null);
           }

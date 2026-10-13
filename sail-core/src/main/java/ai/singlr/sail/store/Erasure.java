@@ -36,7 +36,8 @@ import java.util.Set;
  * rows: it records main's row and removes the entity with what belongs to it that main never
  * acknowledged — everything main held gets an erasure row of its own, decided on main's copy, and
  * arrives in its own page. Both are atomic, and adopting an erasure this box already holds changes
- * nothing.
+ * nothing. {@link #dropLocal} is a node letting go of a project main no longer grants it: main's
+ * full walk, and no erasure row, since nothing was erased.
  */
 public final class Erasure {
 
@@ -210,6 +211,33 @@ public final class Erasure {
             changeLog.purge(target.type(), target.id());
           }
           return new Result(discarded, dropped);
+        });
+  }
+
+  /**
+   * Removes {@code project} and all that belongs to it from this box as if it had never held them:
+   * main's full walk, then whatever else its history files under the project — each live row, its
+   * conflicts and box-local rows, and every entry, head and offer of it, erasures included. How a
+   * project that left a node's scope leaves the node, whatever main had acknowledged of it: main
+   * sends nothing of it again, so nothing may stay to be offered or matched against a page.
+   * Journals nothing and names no actor. Returns what went.
+   */
+  public Result dropLocal(String project) {
+    return db.transaction(
+        () -> {
+          deferReplyConstraint();
+          var entities = new LinkedHashSet<>(closure(List.of(new Target(PROJECT, project))));
+          entities.addAll(
+              db.query(
+                  "SELECT entity_type, entity_id FROM change_heads WHERE project = ? ORDER BY seq",
+                  row -> new Target(row.text(0), row.text(1)),
+                  project));
+          var dropped = 0;
+          for (var target : entities) {
+            dropped += remove(target);
+            changeLog.forget(target.type(), target.id());
+          }
+          return new Result(List.copyOf(entities), dropped);
         });
   }
 

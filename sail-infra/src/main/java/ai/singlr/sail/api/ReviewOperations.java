@@ -34,7 +34,7 @@ final class ReviewOperations {
   ReviewListResponse listForSpec(String specId) {
     requireStore();
     var views =
-        reviewStore.reviewsForSpec(specId).stream()
+        Scoped.rows(Actor.reader(), reviewStore.reviewsForSpec(specId), this::projectOf).stream()
             .map(
                 r -> {
                   var stageViews =
@@ -190,11 +190,22 @@ final class ReviewOperations {
     return Strings.isNotBlank(actor.handle()) ? actor.handle() : Event.SAIL_AGENT;
   }
 
+  /**
+   * The review an operation addresses, to read or to decide: one of a spec outside the caller's
+   * scope is answered as one that is not there.
+   */
   private ReviewStore.ReviewRow findReviewOrThrow(String reviewId) {
-    return reviewStore
-        .findReview(reviewId)
-        .orElseThrow(
-            () -> new ApiException(ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found."));
+    return Scoped.row(Actor.reader(), reviewStore.findReview(reviewId), this::projectOf)
+        .orElseThrow(() -> notFound(reviewId));
+  }
+
+  private static ApiException notFound(String reviewId) {
+    return new ApiException(ErrorCode.NOT_FOUND, "Review '" + reviewId + "' not found.");
+  }
+
+  /** A review is of its spec's project, and of no known project once its spec is gone. */
+  private String projectOf(ReviewStore.ReviewRow review) {
+    return specStore.findById(review.specId()).map(SpecStore.SpecRow::project).orElse(null);
   }
 
   private void requireStore() {

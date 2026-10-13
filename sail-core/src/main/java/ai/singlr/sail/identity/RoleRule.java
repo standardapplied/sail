@@ -57,6 +57,15 @@ public final class RoleRule {
     return fde.map(found -> Role.fromAttribute(found.role()).cappedBy(bound));
   }
 
+  /**
+   * The projects a credential naming FDE {@code handle} may see, resolved at the same doors as its
+   * role: the grants of an FDE main's roster scopes, every project otherwise. A box that keeps no
+   * roster scopes no one.
+   */
+  public ProjectScope scopeOf(String handle) {
+    return roster == null ? ProjectScope.all() : roster.scopeOf(handle);
+  }
+
   /** Whether {@code handle} names an FDE other than this node's own. */
   private boolean foreignOnNode(String handle) {
     var config = box.get();

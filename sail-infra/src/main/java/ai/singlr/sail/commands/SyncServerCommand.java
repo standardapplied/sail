@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -102,11 +103,12 @@ public final class SyncServerCommand implements Callable<Integer> {
 
   /**
    * Serves one session as the FDE {@code token} names, with the role {@link RoleRule} gives it on
-   * this main ({@code box}), whose own FDE syncs from no box but main. A session with no token is a
-   * read-only one that owns nothing; a token whose FDE is disabled is refused before anything is
-   * served. Main first fixes the findings of every shipped follow-up it holds ({@link
-   * ShippedFollowUps#catchUp}), so a resolution a busy database cost an earlier session lands
-   * before this one can move a follow-up on; failing that fails the session for the node to retry.
+   * this main ({@code box}), whose own FDE syncs from no box but main, seeing the projects main's
+   * roster scopes it to. A session with no token is a read-only one that owns nothing and sees
+   * nothing; a token whose FDE is disabled is refused before anything is served. Main first fixes
+   * the findings of every shipped follow-up it holds ({@link ShippedFollowUps#catchUp}), so a
+   * resolution a busy database cost an earlier session lands before this one can move a follow-up
+   * on; failing that fails the session for the node to retry.
    */
   static int serve(
       SyncDatabase converged,
@@ -138,7 +140,7 @@ public final class SyncServerCommand implements Callable<Integer> {
             mainId,
             box.get().handle(),
             principal.get(),
-            () -> roster(db),
+            () -> roster(db, principal.get()),
             transitionSink,
             SailVersion.version())
         .serve(in, out);
@@ -194,8 +196,17 @@ public final class SyncServerCommand implements Callable<Integer> {
     }
   }
 
+  /** Main's whole roster, as an unscoped FDE's node mirrors it. */
   static List<Map<String, Object>> roster(Sqlite db) {
-    return new FdeStore(db).list().stream().map(SyncServerCommand::fdeToMap).toList();
+    return roster(db, Actor.sync(null, Role.VIEWER));
+  }
+
+  /** Main's roster as {@code principal}'s node mirrors it ({@link FdeStore#visibleTo}). */
+  static List<Map<String, Object>> roster(Sqlite db, Actor principal) {
+    return new FdeStore(db)
+        .visibleTo(principal.handle(), principal.scope()).stream()
+            .map(SyncServerCommand::fdeToMap)
+            .toList();
   }
 
   private static Map<String, Object> fdeToMap(FdeStore.Fde fde) {
@@ -217,9 +228,11 @@ public final class SyncServerCommand implements Callable<Integer> {
                 .validate(token)
                 .flatMap(session -> new FdeStore(db).byId(session.fdeId()));
     if (fde.isEmpty()) {
-      return Optional.of(Actor.sync(null, Role.VIEWER));
+      return Optional.of(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none()));
     }
     var handle = fde.get().handle();
-    return roles.roleOf(handle, Role.ADMIN).map(role -> Actor.sync(handle, role));
+    return roles
+        .roleOf(handle, Role.ADMIN)
+        .map(role -> Actor.sync(handle, role).withScope(roles.scopeOf(handle)));
   }
 }

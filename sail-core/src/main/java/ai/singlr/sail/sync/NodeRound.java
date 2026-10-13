@@ -7,12 +7,17 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Decidability;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
+import ai.singlr.sail.store.SyncScope;
+import ai.singlr.sail.store.SyncState;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -37,18 +42,87 @@ public final class NodeRound {
    * #acknowledgeHeld}), every one main does not hold is stamped as this box's ({@link
    * #stampUnheld}), and so is every run of this box's that acts for no one, which an older release
    * reserved and main would never take. Main's file ceiling is recorded, and every offer whose
-   * dependency can never arrive is settled ({@link Settlement}). Returns what was settled, for the
-   * round's notices.
+   * dependency can never arrive is settled ({@link Settlement}). Before any of that the box is
+   * brought in line with the scope main named ({@link #rescope}). Returns what was settled and what
+   * was dropped, for the round's notices.
    */
   public static List<Settlement.Settled> begin(SyncSession session, Sqlite db, String handle) {
     requireAgreed(session.handle(), handle);
+    var settled = new ArrayList<>(rescope(session, db, handle));
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
     runs.stamp(handle, runs.ownerless(handle));
     var limits = new SyncLimits(db);
     limits.recordMainFileMax(session.mainFileMax());
     acknowledgeOversized(session, db, limits.mainFileMax());
-    return settle(db, handle);
+    settled.addAll(settle(db, handle));
+    return List.copyOf(settled);
+  }
+
+  /**
+   * Brings this box in line with the scope main's welcome named, before anything is asked of main.
+   * Every project the box holds anything of that the scope does not admit is dropped whole ({@link
+   * Erasure#dropLocal}), unpushed work included: main sends nothing of it again and would deny
+   * every offer of it, so the admin's revocation is how that work leaves this box. It is decided
+   * from what the box holds, never from what it was last told, so a drop a failed round or a run
+   * still under way here put off happens on the next round that finds it. A project newly in scope
+   * has its history below this box's checkpoints, so they are reset and main's heads walked again
+   * ({@link SyncState#reset}). The scope is then recorded as the one this box works within.
+   */
+  private static List<Settlement.Settled> rescope(SyncSession session, Sqlite db, String handle) {
+    var scope = session.scope();
+    var known = new SyncScope(db);
+    var settled = new ArrayList<Settlement.Settled>();
+    if (!scope.unrestricted()) {
+      var changeLog = new ChangeLog(db);
+      for (var project : changeLog.heldProjects()) {
+        if (!scope.admits(project)) {
+          settled.add(drop(db, handle, project));
+        }
+      }
+    }
+    if (settled.stream().anyMatch(left -> left.how() instanceof Settlement.How.Dropped)) {
+      session.contentLeft();
+    }
+    var widened = widenedFrom(known.held(), scope);
+    db.transaction(
+        () -> {
+          if (widened) {
+            new SyncState(db).reset(session.mainId());
+          }
+          known.record(scope);
+          return null;
+        });
+    return settled;
+  }
+
+  /** Whether {@code now} admits a project {@code before} did not. */
+  private static boolean widenedFrom(ProjectScope before, ProjectScope now) {
+    return !before.unrestricted()
+        && (now.unrestricted() || !before.projects().containsAll(now.projects()));
+  }
+
+  /**
+   * Drops {@code project} and all that belongs to it from this box, unless a run in it is still
+   * under way here: its agent and watcher act through the rows, so the project stays, named with
+   * the run, until the first round after the run ends.
+   */
+  private static Settlement.Settled drop(Sqlite db, String handle, String project) {
+    var how =
+        db.<Settlement.How>transaction(
+            () -> {
+              var live =
+                  new RunStore(db)
+                      .listForProject(project).stream()
+                          .filter(run -> run.liveOn(handle))
+                          .findFirst();
+              return live.isPresent()
+                  ? new Settlement.How.Kept(live.get().id())
+                  : new Settlement.How.Dropped(
+                      new Erasure(db).dropLocal(project).entities().size());
+            });
+    return new Settlement.Settled(
+        Erasure.PROJECT, project, how, "main no longer grants this box the project");
   }
 
   /**

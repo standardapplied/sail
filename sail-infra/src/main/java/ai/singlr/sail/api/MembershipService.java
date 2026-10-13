@@ -12,12 +12,14 @@ import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SnapshotManager;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SpecStore;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -85,10 +87,14 @@ public final class MembershipService {
     return room == null ? RoomState.EMPTY : RoomState.of(room);
   }
 
-  /** The members of {@code roomId}'s roster — the room row is the only home a roster has. */
+  /**
+   * The members of {@code roomId}'s roster — the room row is the only home a roster has. A room
+   * outside the reader's scope reads as one that is not there.
+   */
   public java.util.List<Engagement> members(String roomId) {
     var store = rooms.get();
-    var room = store == null ? null : store.findById(roomId).orElse(null);
+    var held = store == null ? Optional.<RoomStore.RoomRow>empty() : store.findById(roomId);
+    var room = Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project).orElse(null);
     if (room == null) {
       throw new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
     }

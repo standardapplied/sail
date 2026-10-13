@@ -20,6 +20,7 @@ import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MaterializedFilesMigration;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.ScopedHeadsMigration;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.sync.SyncEngine;
@@ -168,6 +169,11 @@ class SyncCliTest {
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
       throws Exception {
+    db.execute("DROP TABLE sync_scope");
+    db.execute("ALTER TABLE change_heads DROP COLUMN project");
+    db.execute("DROP TABLE project_grants");
+    db.execute("ALTER TABLE fdes DROP COLUMN scope");
+    db.execute("DELETE FROM data_migrations WHERE name = ?", ScopedHeadsMigration.NAME);
     db.execute("DROP TABLE fde_pairings");
     db.execute("ALTER TABLE reviews DROP COLUMN waiting_on");
     db.execute("ALTER TABLE events DROP COLUMN publisher");

@@ -24,14 +24,16 @@ public interface ProjectReader {
 
   /** The project's definition, or a not-found error saying how to get one. */
   default SailYaml require(String project) {
-    return read(project)
-        .orElseThrow(
-            () ->
-                new ApiException(
-                    ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
-                    "Project '" + project + "' is not in the catalog.",
-                    "If its descriptor is on this box, import it with 'sudo sail migrate'. To"
-                        + " create the project, run 'sail project apply -f <file>'."));
+    return read(project).orElseThrow(() -> absent(project));
+  }
+
+  /** The not-found error for a project this box holds no definition of. */
+  static ApiException absent(String project) {
+    return new ApiException(
+        ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
+        "Project '" + project + "' is not in the catalog.",
+        "If its descriptor is on this box, import it with 'sudo sail migrate'. To"
+            + " create the project, run 'sail project apply -f <file>'.");
   }
 
   /**
