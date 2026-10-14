@@ -29,6 +29,7 @@ public final class Refusals {
       case FIXED -> ErrorCode.INVALID_REQUEST;
       case NOT_PRUNABLE -> ErrorCode.SPEC_NOT_PRUNABLE;
       case NOT_PUBLISHABLE -> ErrorCode.FORBIDDEN;
+      case OUT_OF_SCOPE -> ErrorCode.NOT_FOUND;
     };
   }
 
@@ -43,6 +44,16 @@ public final class Refusals {
    */
   public static Exception translated(Exception failure) {
     return failure instanceof WriteRefused refused ? exception(refused.refusal()) : failure;
+  }
+
+  /** The answer for a room the caller may not see: the same as for one that is not there. */
+  static ApiException roomNotFound(String roomId) {
+    return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
+  }
+
+  /** The answer for a spec the caller may not see: the same as for one that is not there. */
+  static ApiException specNotFound(String specId) {
+    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
   }
 
   /**

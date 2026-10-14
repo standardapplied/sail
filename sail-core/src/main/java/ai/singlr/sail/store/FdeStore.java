@@ -9,6 +9,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Secrets;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.util.Collection;
 import java.util.List;
@@ -29,6 +30,7 @@ public final class FdeStore {
   }
 
   public static final String DEFAULT_ROLE = "member";
+  private static final String ADMIN = "admin";
   private static final Set<String> ROLES = Set.of("admin", "member", "viewer");
   private static final Set<String> STATUSES = Set.of("active", "disabled");
 
@@ -40,6 +42,11 @@ public final class FdeStore {
       String role,
       String status,
       String createdAt) {
+
+    /** This FDE as the roster shows it to one who may not read its email. */
+    public Fde withoutEmail() {
+      return new Fde(id, handle, displayName, "", role, status, createdAt);
+    }
 
     /** Whether this FDE may act at all: a {@code disabled} one is refused through every door. */
     public boolean active() {
@@ -147,6 +154,9 @@ public final class FdeStore {
       throw new IllegalArgumentException(
           "Invalid role: " + role + ". Must be one of " + ROLES + ".");
     }
+    if (ADMIN.equals(role) && !scopeOf(handle).unrestricted()) {
+      throw scopedAdmin(handle);
+    }
     var updated =
         new Fde(
             existing.id(),
@@ -165,8 +175,144 @@ public final class FdeStore {
     return Optional.of(updated);
   }
 
+  /**
+   * Scopes {@code handle} to the projects it is granted, none until one is: an FDE main scoped sees
+   * nothing it was not granted. Returns whether the roster holds the handle.
+   *
+   * @throws IllegalArgumentException for an admin, who could undo its own scope
+   */
+  public boolean restrict(String handle) {
+    if (byHandle(handle).filter(fde -> ADMIN.equals(fde.role())).isPresent()) {
+      throw scopedAdmin(handle);
+    }
+    db.execute("UPDATE fdes SET scope = 'granted' WHERE handle = ?", handle);
+    return db.changes() > 0;
+  }
+
+  /**
+   * An admin edits the roster, so one scoped to its grants could grant itself any project: a scope
+   * that held no one would be worse than none.
+   */
+  private static IllegalArgumentException scopedAdmin(String handle) {
+    return new IllegalArgumentException(
+        "FDE '"
+            + handle
+            + "' cannot be both scoped and an admin: an admin edits the roster, and so could"
+            + " grant itself any project. Scope a member or a viewer.");
+  }
+
+  /**
+   * The scope this roster gives the FDE {@code handle}: its grants when the roster scopes it, every
+   * project otherwise. A credential naming no FDE, or one the roster does not hold, is not an FDE
+   * main scoped; whether it may act at all is the role rule's to refuse.
+   */
+  public ProjectScope scopeOf(String handle) {
+    if (Strings.isBlank(handle)) {
+      return ProjectScope.all();
+    }
+    return db.queryOne(
+            "SELECT id FROM fdes WHERE handle = ? AND scope = 'granted'",
+            row -> row.text(0),
+            handle)
+        .map(
+            id ->
+                ProjectScope.of(
+                    db.query(
+                        "SELECT project FROM project_grants WHERE fde_id = ?",
+                        row -> row.text(0),
+                        id)))
+        .orElse(ProjectScope.all());
+  }
+
+  /**
+   * Takes {@code project} back from every FDE granted it: the project was erased, and one created
+   * under its name later is another project, granted anew.
+   */
+  public void revokeFromEveryone(String project) {
+    db.execute("DELETE FROM project_grants WHERE project = ?", project);
+  }
+
+  /**
+   * The projects the scoped FDE {@code handle} is granted.
+   *
+   * @throws IllegalArgumentException when the roster holds no such FDE, or it is not scoped: an FDE
+   *     that sees every project has nothing to be granted
+   */
+  public ProjectScope grantsOf(String handle) {
+    if (byHandle(handle).isEmpty()) {
+      throw new IllegalArgumentException("Unknown FDE '" + handle + "'.");
+    }
+    var scope = scopeOf(handle);
+    if (scope.unrestricted()) {
+      throw new IllegalArgumentException(
+          "FDE '"
+              + handle
+              + "' sees every project, so there is nothing to grant or revoke. Only an FDE"
+              + " added with 'sail fde add <handle> --scoped' is granted projects.");
+    }
+    return scope;
+  }
+
+  /**
+   * Grants the scoped FDE {@code handle} the project {@code project}; granting what it already
+   * holds changes nothing. Refused as {@link #grantsOf} refuses.
+   */
+  public void grant(String handle, String project) {
+    NameValidator.requireValidProjectName(project);
+    db.transaction(
+        () -> {
+          grantsOf(handle);
+          db.execute(
+              """
+              INSERT INTO project_grants (fde_id, project, granted_at)
+              SELECT id, ?, ? FROM fdes WHERE handle = ?
+              ON CONFLICT(fde_id, project) DO NOTHING""",
+              project,
+              DateTimeUtils.now().toString(),
+              handle);
+          return null;
+        });
+  }
+
+  /**
+   * Takes the project {@code project} back from the scoped FDE {@code handle}; revoking what it
+   * does not hold changes nothing. Refused as {@link #grantsOf} refuses.
+   */
+  public void revoke(String handle, String project) {
+    db.transaction(
+        () -> {
+          grantsOf(handle);
+          db.execute(
+              """
+              DELETE FROM project_grants WHERE project = ?
+              AND fde_id = (SELECT id FROM fdes WHERE handle = ?)""",
+              project,
+              handle);
+          return null;
+        });
+  }
+
   public List<Fde> list() {
     return db.query(SELECT + " ORDER BY handle", FdeStore::map);
+  }
+
+  /**
+   * The roster as the FDE {@code reader}, seeing {@code scope}, may read it. An unrestricted reader
+   * reads all of it. A scoped one reads the FDEs who can touch a project it holds — everyone whose
+   * own scope admits one of its projects — without their emails, and its own row whole: enough to
+   * name every assignee and author it will meet, and no one else.
+   */
+  public List<Fde> visibleTo(String reader, ProjectScope scope) {
+    if (scope.unrestricted()) {
+      return list();
+    }
+    return list().stream()
+        .filter(
+            fde ->
+                fde.handle().equals(reader)
+                    || scope.projects().stream().anyMatch(scopeOf(fde.handle())::admits))
+        .map(fde -> fde.handle().equals(reader) ? fde : fde.withoutEmail())
+        .toList();
   }
 
   /**

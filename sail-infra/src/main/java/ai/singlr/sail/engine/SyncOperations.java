@@ -168,6 +168,7 @@ public final class SyncOperations {
       ProjectStore projects)
       throws Exception {
     var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
+    session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
     var knownMessages = messages.syncEntityIds();

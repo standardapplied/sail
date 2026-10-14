@@ -6,6 +6,7 @@
 package ai.singlr.sail.identity;
 
 import ai.singlr.sail.common.Strings;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 
 /**
@@ -16,7 +17,9 @@ import java.util.concurrent.Callable;
  * is null for a machine credential that owns no FDE. {@code role} carries the capabilities. {@code
  * lane} names the way the write is made. {@code owner} is set only on the {@link Lane#AGENT} and
  * {@link Lane#ROOM} lanes: the FDE the run's principal acts for, used for attribution and policy
- * tiering, never as a separate authorization system.
+ * tiering, never as a separate authorization system. {@code scope} is the projects the actor may
+ * see ({@link ProjectScope}): every project unless main scoped the FDE behind it, which only the
+ * doors that resolve an FDE against main's roster ever say.
  *
  * <p>Every entry point binds the actor it acts as with {@link #run} or {@link #call}, at its edge,
  * and the {@code ChangeLog} reads it back through {@link #current()} for every revision it records.
@@ -26,7 +29,7 @@ import java.util.concurrent.Callable;
  * unknown role resolves (via {@link Role#fromAttribute}) to the least-privileged {@link
  * Role#VIEWER}.
  */
-public record Actor(String handle, Role role, Lane lane, String owner) {
+public record Actor(String handle, Role role, Lane lane, String owner, ProjectScope scope) {
 
   /** The author this box's own machinery writes as. */
   public static final String SYSTEM_HANDLE = "sail";
@@ -54,8 +57,21 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
     SYSTEM
   }
 
+  public Actor {
+    Objects.requireNonNull(scope, "scope");
+  }
+
   public Actor(String handle, Role role, Lane lane) {
     this(handle, role, lane, null);
+  }
+
+  public Actor(String handle, Role role, Lane lane, String owner) {
+    this(handle, role, lane, owner, ProjectScope.all());
+  }
+
+  /** This actor seeing only {@code scope}. */
+  public Actor withScope(ProjectScope scope) {
+    return new Actor(handle, role, lane, owner, scope);
   }
 
   /**
@@ -123,6 +139,17 @@ public record Actor(String handle, Role role, Lane lane, String owner) {
               + " Actor.call at the entry point that started this work.");
     }
     return CURRENT.get();
+  }
+
+  /**
+   * Who is reading. A read leaves nothing behind that must name its author, so this box's own work
+   * that no door bound an actor to — its root CLI describing what the box holds, its machinery
+   * looking a row up — reads as the box itself ({@link #system}), which sees every project. A door
+   * that serves anyone else binds its caller before it routes, and a read then sees no more than
+   * that caller's {@link #scope}. A write never falls back like this: see {@link #current()}.
+   */
+  public static Actor reader() {
+    return CURRENT.isBound() ? CURRENT.get() : system();
   }
 
   /** Runs {@code work} as {@code actor}. */

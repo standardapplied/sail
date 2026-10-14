@@ -11,7 +11,9 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.Sqlite;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -27,7 +29,8 @@ import java.util.function.Supplier;
  * clients see it. The announcement names the message and nothing more; it is decided on the
  * conversation that message is in, never on a run or a room its sender names beside it, and the
  * event is rebuilt whole from the stored row, exactly as the messages route emits it for a local
- * post.
+ * post: under the project the message is filed in ({@link MessageStore#projectOf}), its room's,
+ * which is not its spec's once that spec has moved, and only for a sender whose scope admits it.
  */
 final class EventDoor {
 
@@ -52,10 +55,11 @@ final class EventDoor {
 
   private Event report(Event offered) {
     var subject =
-        authority.subject(
-            offered.project(),
-            offered.spec(),
-            Objects.toString(offered.data().get(Event.WellKnownData.RUN_ID), null));
+        seen(authority.subject(
+                offered.project(),
+                offered.spec(),
+                Objects.toString(offered.data().get(Event.WellKnownData.RUN_ID), null)))
+            .orElseGet(() -> unheld(offered.project(), offered.spec()));
     var publisher = publisher(offered, subject);
     return offered.admitted(
         subject.project(),
@@ -65,23 +69,47 @@ final class EventDoor {
   }
 
   private Event announcement(Event offered) {
-    var message = messages.findById(announced(offered));
-    var subject =
-        authority.subject(
-            offered.project(),
-            message.map(MessageStore.MessageRow::roomId).orElse(offered.spec()),
-            null);
+    var message =
+        Scoped.row(Actor.current(), messages.findById(announced(offered)), messages::projectOf);
+    var about =
+        seen(
+            authority.subject(
+                offered.project(),
+                message.map(MessageStore.MessageRow::roomId).orElse(offered.spec()),
+                null));
+    var subject = about.orElseGet(() -> unheld(offered.project(), offered.spec()));
     var publisher = publisher(offered, subject);
-    var held = message.orElseThrow(() -> unheld(offered));
+    var held = message.filter(found -> about.isPresent()).orElseThrow(() -> unheld(offered));
+    var project = Objects.requireNonNullElse(messages.projectOf(held), subject.project());
     return SyncTransitionEvents.messagePosted(
-            subject.project(),
+            project,
             held.roomId(),
             held.id(),
             held.author(),
             held.body(),
             held.question(),
             offered.host())
-        .admitted(subject.project(), held.roomId(), publisher, DateTimeUtils.now());
+        .admitted(project, held.roomId(), publisher, DateTimeUtils.now());
+  }
+
+  /**
+   * {@code subject} when the sender's scope admits its project, and empty when it does not: what
+   * this box holds outside that scope is decided as work it does not hold, which has no owner to
+   * act for, so no refusal says whose it is.
+   */
+  private static Optional<EventAuthority.Subject> seen(EventAuthority.Subject subject) {
+    return Scoped.row(Actor.current(), Optional.of(subject), EventAuthority.Subject::project);
+  }
+
+  /** The subject of an event about work this box does not hold, as its sender addressed it. */
+  private static EventAuthority.Subject unheld(String project, String conversation) {
+    return new EventAuthority.Subject(
+        project,
+        Strings.isBlank(conversation) ? null : conversation,
+        null,
+        List.of(),
+        List.of(),
+        false);
   }
 
   private Event.Publisher publisher(Event offered, EventAuthority.Subject subject) {

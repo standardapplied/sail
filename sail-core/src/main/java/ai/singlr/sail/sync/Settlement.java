@@ -48,6 +48,16 @@ public final class Settlement {
     /** Withdrawn, the work kept in the change log. */
     record Withdrawn() implements How {}
 
+    /** A project out of this box's scope, gone from it with the {@code rows} it held here. */
+    record Dropped(int rows) implements How {}
+
+    /** A project out of this box's scope, kept while {@code run} is still under way here. */
+    record Kept(String run) implements How {
+      public Kept {
+        Objects.requireNonNull(run, "run");
+      }
+    }
+
     /** Could not be settled; {@code reason} says why, and the next round tries again. */
     record Failed(String reason) implements How {
       public Failed {
@@ -61,6 +71,15 @@ public final class Settlement {
         case ReHomed ignored -> "re-homed into its own room, its room being gone; offered next";
         case Reverted ignored -> "reverted to the version main holds";
         case Withdrawn ignored -> "withdrawn; yours stays in this box's change log";
+        case Dropped dropped ->
+            "dropped from this box with the "
+                + dropped.rows()
+                + (dropped.rows() == 1 ? " row" : " rows")
+                + " it held here, unpushed work included";
+        case Kept kept ->
+            "kept this round, run '"
+                + kept.run()
+                + "' being still under way here; dropped on the first round after it ends";
         case Failed failed -> "could not be settled: " + failed.reason();
       };
     }

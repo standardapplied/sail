@@ -11,8 +11,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
@@ -68,6 +73,124 @@ class MessageStoreTest {
     assertEquals(List.of(first.id()), ids(messages.list("room", second.id(), 2)));
     assertEquals(List.of(first.id(), second.id(), third.id()), ids(messages.list("room", null, 3)));
     assertTrue(messages.list("missing", null, 10).isEmpty());
+  }
+
+  @Test
+  void aConversationIsReadMessageByMessageByTheProjectEachWasFiledUnder() {
+    var specs = new SpecStore(db);
+    specs.create(spec("mover", "beta"));
+    var asked = messages.append("mover", "claude/a1b2c3", "Which, in beta?", null, true);
+    var beta = messages.append("mover", "bea", "said in beta", null);
+    specs.update(spec("mover", "alpha"));
+    var first = messages.append("mover", "ann", "said in alpha", null);
+    var second = messages.append("mover", "claude/a1b2c3", "Which, in alpha?", null, true);
+    specs.update(spec("mover", "beta"));
+    var back = messages.append("mover", "bea", "said in beta again", null);
+    var ann = reader("alpha");
+    var bea = reader("beta");
+    var nobody = new Actor("nan", Role.MEMBER, Actor.Lane.API).withScope(ProjectScope.none());
+    var everything = List.of(asked.id(), beta.id(), first.id(), second.id(), back.id());
+
+    assertEquals(everything, ids(messages.list("mover", null, 10)));
+    assertEquals(
+        List.of(first.id(), second.id()),
+        ids(Acting.by(ann, () -> messages.list("mover", null, 2))),
+        "the page is as long as its limit of what its reader sees");
+    assertEquals(List.of(second.id()), ids(Acting.by(ann, () -> messages.list("mover", null, 1))));
+    assertEquals(
+        List.of(first.id()), ids(Acting.by(ann, () -> messages.list("mover", second.id(), 2))));
+    assertEquals(List.of(), ids(Acting.by(ann, () -> messages.list("mover", first.id(), 2))));
+    assertEquals(
+        List.of(first.id(), second.id()),
+        ids(Acting.by(ann, () -> messages.listAfter("mover", null, 10))));
+    assertEquals(
+        List.of(first.id(), second.id()),
+        ids(Acting.by(ann, () -> messages.listAfter("mover", asked.id(), 10))));
+    assertEquals(
+        List.of(beta.id(), back.id()),
+        ids(Acting.by(bea, () -> messages.listAfter("mover", asked.id(), 2))));
+    assertEquals(
+        List.of(first.id()),
+        ids(Acting.by(ann, () -> messages.listUndelivered("mover", "run", "claude/a1b2c3", 1))));
+    assertEquals(
+        List.of(beta.id(), back.id()),
+        ids(Acting.by(bea, () -> messages.listUndelivered("mover", "run", "claude/a1b2c3", 5))));
+    assertEquals(List.of(), ids(Acting.by(nobody, () -> messages.list("mover", null, 10))));
+
+    assertEquals(Map.of(), messages.openQuestions(), "every question was answered by a person");
+    assertEquals(
+        Map.of("mover", second.id()),
+        Acting.by(ann, messages::openQuestions),
+        "the answer filed under beta is one alpha's reader does not hold");
+    assertEquals(Map.of(), Acting.by(bea, messages::openQuestions));
+    assertEquals(Map.of(), Acting.by(nobody, messages::openQuestions));
+    assertEquals(Map.of("mover", back.createdAt()), messages.latestByRoom());
+    assertEquals(Map.of("mover", second.createdAt()), Acting.by(ann, messages::latestByRoom));
+    assertEquals(Map.of("mover", back.createdAt()), Acting.by(bea, messages::latestByRoom));
+    assertEquals(Map.of(), Acting.by(nobody, messages::latestByRoom));
+    assertEquals(
+        everything,
+        Acting.by(ann, () -> messages.retiredBefore(DateTimeUtils.now().plusSeconds(60), 10)),
+        "retention decides by every message, whoever is bound: no question still waits");
+  }
+
+  @Test
+  void aReplyAnswersOnlyAMessageItsWriterMayReadAndIsFiledWithIt() {
+    var specs = new SpecStore(db);
+    specs.create(spec("mover", "beta"));
+    var asked = messages.append("mover", "bea", "asked in beta", null);
+    specs.update(spec("mover", "alpha"));
+    var ann = reader("alpha");
+    var nobodys = DateTimeUtils.newId().toString();
+
+    var hidden =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Acting.by(ann, () -> messages.append("mover", "ann", "an answer", asked.id())));
+    var missing =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> Acting.by(ann, () -> messages.append("mover", "ann", "an answer", nobodys)));
+
+    assertEquals("reply_to must reference a message in room 'mover'", missing.getMessage());
+    assertEquals(missing.getMessage(), hidden.getMessage());
+    var answered = messages.append("mover", "bea", "answered after the move", asked.id());
+    var further = messages.append("mover", "bea", "and again", answered.id());
+    assertEquals("beta", messages.projectOf(answered), "a reply is filed with what it answers");
+    assertEquals("beta", messages.projectOf(further));
+    assertEquals(List.of(), ids(Acting.by(ann, () -> messages.list("mover", null, 10))));
+    var ada = new Actor("ada", Role.MEMBER, Actor.Lane.API).withScope(ann.scope());
+    var said = Acting.by(ada, () -> messages.append("mover", "ada", "said in alpha", null));
+    var reply = Acting.by(ada, () -> messages.append("mover", "ada", "answered", said.id()));
+    assertEquals("alpha", messages.projectOf(reply));
+    assertEquals(
+        List.of(said.id(), reply.id()),
+        ids(Acting.by(ann, () -> messages.list("mover", null, 10))));
+  }
+
+  private static Actor reader(String project) {
+    return new Actor("ann", Role.MEMBER, Actor.Lane.API)
+        .withScope(ProjectScope.of(List.of(project)));
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "a spec",
+        SpecStatus.PENDING,
+        "ada",
+        null,
+        null,
+        null,
+        null,
+        0,
+        "ada",
+        "",
+        "",
+        "ada",
+        List.of(),
+        List.of());
   }
 
   @Test

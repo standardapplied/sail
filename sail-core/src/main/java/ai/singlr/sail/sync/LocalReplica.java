@@ -34,6 +34,9 @@ public interface LocalReplica {
    */
   Set<String> dirtyIds();
 
+  /** The project this box files {@code id} under, by its head; null when the head names none. */
+  String project(String id);
+
   /**
    * Whether this node may push its own change to {@code id} up to main, or may only pull main's
    * version. Multi-writer entities (specs, files, projects) always may. A single-writer entity like
@@ -108,13 +111,13 @@ public interface LocalReplica {
    * overwritten. Returns {@code false} when the row moved; the caller re-reconciles instead.
    */
   default boolean adoptIfCurrent(
-      String id, String expectedRev, Map<String, Object> snapshot, String rev) {
+      String id, String expectedRev, Map<String, Object> snapshot, String rev, String project) {
     return atomically(
         () -> {
           if (!Objects.equals(currentRev(id), expectedRev)) {
             return false;
           }
-          adopt(id, snapshot, rev);
+          adopt(id, snapshot, rev, project);
           return true;
         });
   }
@@ -130,8 +133,12 @@ public interface LocalReplica {
   /** Latest local revision (including a tombstone); {@code null} if unknown. */
   String currentRev(String id);
 
-  /** Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete). */
-  void adopt(String id, Map<String, Object> snapshot, String rev);
+  /**
+   * Adopts an authoritative state at main's exact rev ({@code null} snapshot = delete), filed under
+   * {@code project}, the one main's head names for it, so this box and main agree on which project
+   * the row leaves with; null when main names none, and the state then files itself.
+   */
+  void adopt(String id, Map<String, Object> snapshot, String rev, String project);
 
   /**
    * Parks a conflict for human resolution against {@code remote}, main's side at its rev and

@@ -36,7 +36,8 @@ import java.util.Set;
  * rows: it records main's row and removes the entity with what belongs to it that main never
  * acknowledged — everything main held gets an erasure row of its own, decided on main's copy, and
  * arrives in its own page. Both are atomic, and adopting an erasure this box already holds changes
- * nothing.
+ * nothing. {@link #dropLocal} is a node letting go of a project main no longer grants it: main's
+ * full walk, and no erasure row, since nothing was erased.
  */
 public final class Erasure {
 
@@ -105,6 +106,7 @@ public final class Erasure {
   private final EraseRequests requests;
   private final SpecStore specs;
   private final RunStore runs;
+  private final FdeStore fdes;
   private final SlackThreadStore slackThreads;
   private final Map<String, SyncedStore> stores = new LinkedHashMap<>();
 
@@ -116,6 +118,7 @@ public final class Erasure {
     this.requests = new EraseRequests(db);
     this.specs = new SpecStore(db);
     this.runs = new RunStore(db);
+    this.fdes = new FdeStore(db);
     this.slackThreads = new SlackThreadStore(db);
     for (var entity : SyncedEntities.all()) {
       stores.put(entity.type(), entity.store(db));
@@ -169,9 +172,10 @@ public final class Erasure {
    * removes the entity with what belongs to it that main never acknowledged. What main held leaves
    * with its own erasure row, in its own page. Returns whether anything changed; an erasure this
    * box already holds changes nothing, and one of an entity this box never held records only the
-   * row.
+   * row, filed under the {@code project} main names for it — null when it names none — so it leaves
+   * with that project ({@link #dropLocal}).
    */
-  public boolean adopt(String type, String id, String rev) {
+  public boolean adopt(String type, String id, String rev, String project) {
     requireKnownType(type);
     Strings.requireNonBlank(rev, "An adopted erasure carries main's rev");
     return db.transaction(
@@ -185,6 +189,7 @@ public final class Erasure {
             remove(target);
             if (target.equals(root)) {
               changeLog.erase(type, id, rev, ChangeLog.Entry.SYNC);
+              changeLog.fileUnder(type, id, project);
             } else {
               changeLog.purge(target.type(), target.id());
             }
@@ -210,6 +215,42 @@ public final class Erasure {
             changeLog.purge(target.type(), target.id());
           }
           return new Result(discarded, dropped);
+        });
+  }
+
+  /**
+   * Removes {@code project} and all that belongs to it from this box as if it had never held them:
+   * main's full walk, then whatever else its history files under the project — each live row, its
+   * conflicts and box-local rows, and every entry, head and offer of it, erasures included. How a
+   * project that left a node's scope leaves the node, whatever main had acknowledged of it: main
+   * sends nothing of it again, so nothing may stay to be offered or matched against a page. What
+   * the walk reaches that history files under another project stays: the room and the runs a spec
+   * left behind when it moved here are that project's, which main still sends this box and would
+   * never send again. A thread is never split so: a reply is filed with the message it answers
+   * ({@link ChangeLog#projectOf}). Journals nothing and names no actor. Returns what went.
+   */
+  public Result dropLocal(String project) {
+    return db.transaction(
+        () -> {
+          deferReplyConstraint();
+          var entities = new LinkedHashSet<>(closure(List.of(new Target(PROJECT, project))));
+          entities.removeIf(
+              target ->
+                  changeLog
+                      .headProject(target.type(), target.id())
+                      .filter(filed -> !project.equals(filed))
+                      .isPresent());
+          entities.addAll(
+              db.query(
+                  "SELECT entity_type, entity_id FROM change_heads WHERE project = ? ORDER BY seq",
+                  row -> new Target(row.text(0), row.text(1)),
+                  project));
+          var dropped = 0;
+          for (var target : entities) {
+            dropped += remove(target);
+            changeLog.forget(target.type(), target.id());
+          }
+          return new Result(List.copyOf(entities), dropped);
         });
   }
 
@@ -351,6 +392,7 @@ public final class Erasure {
       case ROOM -> events.eraseBySpec(target.id());
       case PROJECT -> {
         runs.eraseLeases(target.id());
+        fdes.revokeFromEveryone(target.id());
         yield events.eraseByProject(target.id());
       }
       default -> 0;

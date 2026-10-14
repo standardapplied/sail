@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -35,6 +36,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -52,6 +54,7 @@ class BuildDispatchCoverageTest {
 
   private static final String HANDLE = "me";
   private static final Actor ADMIN = Actor.cliOperator(HANDLE);
+  private static final Actor ONLY_ACME = ADMIN.withScope(ProjectScope.of(List.of("acme")));
   private static final String REPO = "git -C /home/dev/workspace/app";
 
   private static final String RUNNING_JSON =
@@ -243,36 +246,145 @@ class BuildDispatchCoverageTest {
         "the message rendered into the dispatch prompt is recorded as delivered on the run");
   }
 
+  @Test
+  void aScopedCallerDispatchesNoSpecWhoseEarlierReviewIsFiledOutsideItsScope() throws IOException {
+    var db = seedDb();
+    var specs = new SpecStore(db);
+    var reviews = new ReviewStore(db);
+    var left = beforeItMoved(db, () -> reviews.createReview("auth", 1));
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/auth origin/main", "");
+    var ops = ops(shell, YAML, db);
+
+    var thrown = assertThrows(ApiException.class, () -> dispatch(ops, ONLY_ACME));
+
+    assertEquals(ErrorCode.CONFLICT, thrown.failure().errorCode());
+    assertEquals(
+        "Dispatching spec 'auth' would close a review outside your project scope.",
+        thrown.getMessage());
+    assertEquals("Ask an admin to dispatch it.", thrown.failure().action());
+    assertFalse(reviews.findReview(left).orElseThrow().superseded());
+    assertEquals(SpecStatus.PENDING, specs.findById("auth").orElseThrow().status(), "no claim");
+    assertEquals(List.of(), new RunStore(db).listForProject("acme"), "no reservation");
+    assertFalse(ranContaining(shell, "checkout"), "and nothing started for it");
+
+    assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops, ADMIN));
+    assertTrue(
+        reviews.findReview(left).orElseThrow().superseded(), "an admin's dispatch closes it");
+  }
+
+  @Test
+  void aDispatchNamingNoSpecPassesOverOneWhoseEarlierReviewIsFiledOutsideTheCallersScope()
+      throws IOException {
+    var db = seedDb();
+    var specs = new SpecStore(db);
+    var reviews = new ReviewStore(db);
+    Acting.system(
+        () -> {
+          Acting.as("me", () -> specs.create(spec("login", "acme")));
+          specs.setContent("login", "Do login", "");
+          return null;
+        });
+    var left = beforeItMoved(db, () -> reviews.createReview("auth", 1));
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/login origin/main", "");
+    var ops = ops(shell, YAML, db);
+
+    var outcome =
+        Actor.call(
+            ONLY_ACME,
+            () ->
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request(null, "background", false, null, false),
+                    HANDLE));
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
+    assertEquals("login", dispatched.taskSpec().id(), "the next ready spec the caller may close");
+    assertFalse(reviews.findReview(left).orElseThrow().superseded());
+    assertEquals(SpecStatus.PENDING, specs.findById("auth").orElseThrow().status());
+  }
+
+  @Test
+  void aScopedCallersPromptCarriesNoTalkFiledOutsideItsScope() throws IOException {
+    var db = seedDb();
+    var messages = new MessageStore(db);
+    var reviews = new ReviewStore(db);
+    var left =
+        beforeItMoved(
+            db,
+            () -> {
+              reviews.createReview("auth", 1);
+              reviews.supersedeForSpec("auth");
+              return messages.append("auth", "bea", "Said where the spec was before.", null);
+            });
+    var here = messages.append("auth", HANDLE, "Please start with the login form.", null);
+    var runStore = new RunStore(db);
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/auth origin/main", "");
+    var ops = ops(shell, YAML, db, runStore).useMessages(messages);
+
+    var dispatched =
+        assertInstanceOf(DispatchOperations.Dispatched.class, dispatch(ops, ONLY_ACME));
+
+    assertTrue(dispatched.task().contains(here.body()), dispatched.task());
+    assertFalse(dispatched.task().contains(left.body()), dispatched.task());
+    assertEquals(List.of(here.id()), List.copyOf(runStore.deliveredMessageIds(dispatched.runId())));
+  }
+
   private Sqlite seedDb() {
     return Acting.system(
         () -> {
           var db = Sqlite.open(tempDir.resolve("sail.db"));
           new SchemaManager(db).migrate();
           var specStore = new SpecStore(db);
-          Acting.as(
-              "me",
-              () ->
-                  specStore.create(
-                      new SpecStore.SpecRow(
-                          "auth",
-                          "acme",
-                          "Add auth",
-                          SpecStatus.PENDING,
-                          HANDLE,
-                          null,
-                          null,
-                          null,
-                          null,
-                          0,
-                          "me",
-                          null,
-                          null,
-                          "me",
-                          List.of(),
-                          List.of())));
+          Acting.as("me", () -> specStore.create(auth("acme")));
           specStore.setContent("auth", "Do auth", "");
           new FdeStore(db).add(HANDLE, null, null, "admin");
           return db;
+        });
+  }
+
+  private static SpecStore.SpecRow auth(String project) {
+    return spec("auth", project);
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "Add " + id,
+        SpecStatus.PENDING,
+        HANDLE,
+        null,
+        null,
+        null,
+        null,
+        0,
+        "me",
+        null,
+        null,
+        "me",
+        List.of(),
+        List.of());
+  }
+
+  /** Runs {@code written} while the spec is in another project, as a spec that moved here was. */
+  private static <T> T beforeItMoved(Sqlite db, Supplier<T> written) {
+    return Acting.system(
+        () -> {
+          var specs = new SpecStore(db);
+          specs.update(auth("elsewhere"));
+          var left = written.get();
+          specs.update(auth("acme"));
+          specs.setContent("auth", "Do auth", "");
+          return left;
         });
   }
 
@@ -301,8 +413,12 @@ class BuildDispatchCoverageTest {
   }
 
   private static DispatchOperations.Outcome dispatch(DispatchOperations ops) {
+    return dispatch(ops, ADMIN);
+  }
+
+  private static DispatchOperations.Outcome dispatch(DispatchOperations ops, Actor caller) {
     return Actor.call(
-        ADMIN,
+        caller,
         () ->
             ops.dispatch(
                 "acme",

@@ -89,9 +89,10 @@ public final class SchemaManager {
    * guard's launch baseline, kept host-side so the guarded agent can never reach it), {@code
    * container_leases} (a box's own exclusive-container-operation claims), {@code fde_boxes} (main's
    * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
-   * shared file this box wrote to disk or published) and {@code fde_pairings} (the key and token
-   * this box made for each FDE's Mast) are local-only as well — none of the seven ever joins a sync
-   * snapshot.
+   * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
+   * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
+   * FDE) and {@code sync_scope} (the scope main last named for this node) are local-only as well —
+   * none of the nine ever joins a sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
@@ -195,6 +196,44 @@ public final class SchemaManager {
       BEGIN
           UPDATE change_log SET kind = 'tombstone' WHERE seq = NEW.seq;
       END""";
+
+  /**
+   * Whether main scoped an FDE to the projects it is granted ({@code granted}) or it sees every
+   * project ({@code all}, every FDE before this). Main's alone: the roster a node mirrors never
+   * says, so a node scopes no one.
+   */
+  static final String FDE_SCOPE =
+      """
+      ALTER TABLE fdes ADD COLUMN scope TEXT NOT NULL DEFAULT 'all'
+          CHECK (scope IN ('all', 'granted'))""";
+
+  /** The projects main granted each scoped FDE: box-local on main, like {@code fde_ssh_keys}. */
+  static final String PROJECT_GRANTS =
+      """
+      CREATE TABLE project_grants (
+          fde_id TEXT NOT NULL REFERENCES fdes(id) ON DELETE CASCADE,
+          project TEXT NOT NULL,
+          granted_at TEXT NOT NULL,
+          PRIMARY KEY (fde_id, project)
+      )""";
+
+  /**
+   * The project each change head belongs to, null when unknown, so a page is scoped from the head
+   * alone: a pruned row has no row left to join, yet its erasure must still reach the nodes that
+   * held it and no other. Filled for existing heads by the {@code scoped-heads-v1} data migration.
+   */
+  static final String HEAD_PROJECT = "ALTER TABLE change_heads ADD COLUMN project TEXT";
+
+  /**
+   * The scope main's last welcome named for this node: one {@code all} row, or one {@code granted}
+   * row per project (a lone one naming none for a scope of no project). Empty until a welcome says.
+   */
+  static final String NODE_SCOPE =
+      """
+      CREATE TABLE sync_scope (
+          kind TEXT NOT NULL CHECK (kind IN ('all', 'granted')),
+          project TEXT
+      )""";
 
   static final List<String> MIGRATIONS =
       List.of(
@@ -716,7 +755,11 @@ public final class SchemaManager {
               public_key TEXT NOT NULL,
               token_name TEXT NOT NULL,
               created_at TEXT NOT NULL
-          )""");
+          )""",
+          FDE_SCOPE,
+          PROJECT_GRANTS,
+          HEAD_PROJECT,
+          NODE_SCOPE);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

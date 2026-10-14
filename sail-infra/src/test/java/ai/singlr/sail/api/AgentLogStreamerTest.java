@@ -13,9 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import com.sun.net.httpserver.Headers;
 import com.sun.net.httpserver.HttpContext;
@@ -32,6 +35,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
@@ -78,7 +82,31 @@ class AgentLogStreamerTest {
       java.util.function.Function<String, Optional<RunStore.RunRow>> lookup,
       java.util.function.Function<String, Optional<String>> assignee,
       String localHandle) {
-    return new AgentLogStreamer(exchange -> {}, lookup, assignee, () -> localHandle);
+    return new AgentLogStreamer(
+        exchange -> {},
+        lookup,
+        id -> assignee.apply(id).map(owner -> specOf(id, owner)),
+        () -> localHandle);
+  }
+
+  private static SpecStore.SpecRow specOf(String id, String assignee) {
+    return new SpecStore.SpecRow(
+        id,
+        "acme",
+        "t",
+        SpecStatus.IN_PROGRESS,
+        assignee,
+        null,
+        null,
+        null,
+        null,
+        0,
+        null,
+        "",
+        "",
+        null,
+        List.of(),
+        List.of());
   }
 
   @Test
@@ -139,6 +167,31 @@ class AgentLogStreamerTest {
 
     assertEquals(409, out.status);
     assertTrue(out.body().contains("run_on_other_node"), out.body());
+  }
+
+  @Test
+  void aRunOutsideTheCallersScopeIsAnsweredAsAnUnknownRun() throws Exception {
+    var outside = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
+    outside.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("nautilus")));
+    var unknown = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
+
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(outside);
+    streamer(id -> Optional.empty(), "node-a").handle(unknown);
+
+    assertEquals(404, outside.status);
+    assertEquals("{\"code\": \"run_not_found\", \"message\": \"No run 'r1'.\"}", outside.body());
+    assertEquals(unknown.body(), outside.body());
+  }
+
+  @Test
+  void aRunInsideTheCallersScopeIsDecidedAsForAnyCaller() throws Exception {
+    var inside = new CapturingExchange("/v1/runs/r1/stream").as("sam", "admin");
+    inside.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("acme")));
+
+    streamer(id -> Optional.of(runOn("node-b")), "node-a").handle(inside);
+
+    assertEquals(409, inside.status);
+    assertTrue(inside.body().contains("run_on_other_node"), inside.body());
   }
 
   @Test
@@ -361,6 +414,7 @@ class AgentLogStreamerTest {
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
+      attributes.put(ApiAuth.SCOPE, ProjectScope.all());
     }
 
     private CapturingExchange as(String fde, String role) {

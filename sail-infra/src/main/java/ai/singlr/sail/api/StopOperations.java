@@ -184,11 +184,11 @@ public final class StopOperations {
 
   /**
    * Executes one clean stop. Refusals throw {@link ApiException} with a structured code before any
-   * mutation: an unknown run is a 404, a run that executed elsewhere a {@code run_on_other_node},
-   * and a caller who is neither the run's spec assignee nor an admin a {@code
-   * forbidden_not_assignee} (the same run-owner rule, {@link RunAuthority#access}, the log routes
-   * enforce). A dry run resolves and probes but writes and signals nothing, returning the outcome
-   * it would produce.
+   * mutation: an unknown run, or one of a project outside the caller's scope, is a 404, a run that
+   * executed elsewhere a {@code run_on_other_node}, and a caller who is neither the run's spec
+   * assignee nor an admin a {@code forbidden_not_assignee} (the same run-owner rule, {@link
+   * RunAuthority#access}, the log routes enforce). A dry run resolves and probes but writes and
+   * signals nothing, returning the outcome it would produce.
    */
   public Outcome stop(Target target, String localHandle, boolean dryRun) {
     return switch (target) {
@@ -199,8 +199,7 @@ public final class StopOperations {
 
   private Outcome stopRun(String runId, String localHandle, boolean dryRun) {
     var run =
-        runStore
-            .findById(runId)
+        Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
             .orElseThrow(
                 () -> new ApiException(ErrorCode.RUN_NOT_FOUND, "No run '" + runId + "'."));
     if (!run.ownedBy(localHandle)) {
@@ -586,9 +585,17 @@ public final class StopOperations {
           "Ask an admin for a member or admin credential.");
     }
     var owners =
-        RunAuthority.owners(
-            run, specId -> specStore.findById(specId).map(SpecStore.SpecRow::owner));
+        RunAuthority.owners(run, specId -> ownerSeen(Actor.reader(), specStore.findById(specId)));
     Refusals.enforce(RunAuthority.access(actor, run.id(), specIdOf(run), owners));
+  }
+
+  /**
+   * The owner of {@code spec} as the run-owner rule names it to {@code reader}: empty for a spec
+   * outside the reader's scope, so a run that stayed in a project its spec has left never says who
+   * owns that spec now.
+   */
+  static Optional<String> ownerSeen(Actor reader, Optional<SpecStore.SpecRow> spec) {
+    return Scoped.row(reader, spec, SpecStore.SpecRow::project).map(SpecStore.SpecRow::owner);
   }
 
   /**

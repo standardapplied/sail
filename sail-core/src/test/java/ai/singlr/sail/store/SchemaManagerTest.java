@@ -16,10 +16,12 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.ProjectScope;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -381,6 +383,49 @@ class SchemaManagerTest {
     pairings.put(ada.id(), "ssh-ed25519 AAAA sail-mast:ada", "mast-ada");
     assertEquals("mast-ada", pairings.find(ada.id()).orElseThrow().tokenName());
     assertEquals("ada", new TokenStore(db).validate(token).orElseThrow().fdeHandle());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
+  void scopingMigratesFromThe0_47_0ReleaseLeavingEveryFdeUnscopedAndEveryHeadToTheBackfill() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE fdes ADD COLUMN scope");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO fdes (id, handle, role, status, created_at)"
+            + " VALUES ('fde_1', 'ada', 'member', 'active', 't')");
+    db.execute(
+        "INSERT INTO change_log (entity_type, entity_id, rev, recorded_at, origin, deleted,"
+            + " snapshot, kind) VALUES ('spec', 's1', '1-a', 't', 'local', 0,"
+            + " '{\"project\": \"alpha\"}', 'revision')");
+    db.execute(
+        "INSERT INTO change_heads (entity_type, entity_id, seq)"
+            + " VALUES ('spec', 's1', last_insert_rowid())");
+    db.execute(
+        "INSERT INTO sync_state (peer, entity_type, checkpoint, updated_at)"
+            + " VALUES ('main', 'spec', 12, 't')");
+
+    new SchemaManager(db).migrate();
+
+    var fdes = new FdeStore(db);
+    assertEquals(ProjectScope.all(), fdes.scopeOf("ada"), "an FDE from before scoping sees all");
+    fdes.restrict("ada");
+    fdes.grant("ada", "alpha");
+    assertEquals(ProjectScope.of(List.of("alpha")), fdes.scopeOf("ada"));
+    assertThrows(
+        SqliteException.class,
+        () -> db.execute("UPDATE fdes SET scope = 'some' WHERE id = 'fde_1'"));
+    var log = new ChangeLog(db);
+    assertEquals(Optional.empty(), log.headProject("spec", "s1"), "the data migration fills it");
+    assertEquals(1, log.backfillProjects());
+    assertEquals(Optional.of("alpha"), log.headProject("spec", "s1"));
+    assertEquals(ProjectScope.all(), new SyncScope(db).held());
+    assertEquals(12, new SyncState(db).checkpoint("main", "spec"));
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 

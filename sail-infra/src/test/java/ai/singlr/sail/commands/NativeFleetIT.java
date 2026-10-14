@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -250,6 +251,125 @@ class NativeFleetIT {
           "the node holds main's erasure rows");
       fleet.assertConverged(mady);
       fleet.assertHeadsAgree(mady);
+    }
+  }
+
+  @Test
+  void aScopedNodeHoldsExactlyItsGrantedProjectsThroughGrantWriteRevokeAndPrune() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.catalog("alpha", "beta");
+      var nia = fleet.node("nia", fleet.candidate(), "--scoped");
+      var uma = fleet.node("uma", fleet.candidate());
+      var released = fleet.node("ole", fleet.released(), "--scoped");
+      main.sailOk("fde", "grant", "nia", "alpha");
+      main.sailOk("fde", "grant", "ole", "alpha");
+      main.serving(
+          () -> {
+            main.createSpecs("a", 2, BODY_BYTES, "alpha");
+            main.createSpecs("b", 2, BODY_BYTES, "beta");
+            main.shOk("dd if=/dev/urandom of=/tmp/a.bin bs=1M count=1 status=none");
+            main.shOk("dd if=/dev/urandom of=/tmp/b.bin bs=1M count=1 status=none");
+            main.sailOk("project", "files", "add", "-p", "alpha", "/tmp/a.bin", "--as", "a.bin");
+            main.sailOk("project", "files", "add", "-p", "beta", "/tmp/b.bin", "--as", "b.bin");
+          });
+      var betaFile =
+          main.query("SELECT content_hash FROM project_files WHERE project = 'beta'").strip();
+
+      nia.sailOk("sync");
+      uma.sailOk("sync");
+      released.sailOk("sync");
+
+      assertEquals(
+          "a-1\na-2",
+          released.query("SELECT id FROM specs ORDER BY id").strip(),
+          "main scopes a node of the last release all the same");
+      assertEquals(
+          "0",
+          released.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
+      fleet.assertScopedTo(nia, "alpha");
+      assertEquals("2", nia.query("SELECT count(*) FROM specs").strip());
+      assertEquals(
+          "0", nia.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
+      assertEquals(
+          "nia|nia@example.dev\nole|\nuday|\numa|",
+          nia.query("SELECT handle, email FROM fdes ORDER BY handle").strip(),
+          "a scoped node mirrors who shares its projects, and no email but its own");
+      fleet.assertConverged(uma);
+      fleet.assertHeadsAgree(uma);
+      main.serving(
+          () -> {
+            var listed =
+                nia.shOk(
+                    "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.sail/sync_ed25519"
+                        + " sail@localhost spec list --all-projects --json --server http://127.0.0.1:7171");
+            assertTrue(listed.contains("\"a-1\"") && listed.contains("\"a-2\""), listed);
+            assertFalse(listed.contains("b-1") || listed.contains("beta"), listed);
+          });
+
+      main.sailOk("fde", "grant", "nia", "beta");
+      nia.sailOk("sync");
+
+      fleet.assertScopedTo(nia, "alpha", "beta");
+      assertEquals("4", nia.query("SELECT count(*) FROM specs").strip());
+      assertEquals(
+          "1", nia.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
+
+      fleet.offline(
+          nia,
+          () -> {
+            nia.createSpecs("nia-a", 1, BODY_BYTES, "alpha");
+            nia.apiOk("spec", "update", "b-1", "--assignee", "nia");
+          });
+      main.sailOk("fde", "revoke", "nia", "beta");
+      var revoked = nia.sail("sync");
+
+      assertEquals(0, revoked.exit(), revoked::output);
+      assertTrue(
+          revoked.output().contains("project beta: dropped from this box with the"),
+          revoked::output);
+      fleet.assertScopedTo(nia, "alpha");
+      assertEquals(
+          "0", nia.query("SELECT count(*) FROM blobs WHERE hash = '" + betaFile + "'").strip());
+      assertEquals("1", main.query("SELECT count(*) FROM specs WHERE id = 'nia-a-1'").strip());
+      assertEquals(
+          "",
+          main.query("SELECT COALESCE(assignee, '') FROM specs WHERE id = 'b-1'").strip(),
+          "main holds the spec without the node's unpushed claim");
+
+      main.serving(
+          () -> {
+            for (var doomed : List.of("a-1", "b-2")) {
+              main.apiOk("spec", "update", doomed, "--status", "archived");
+              main.apiOk("spec", "prune", doomed, "--apply");
+            }
+          });
+      nia.sailOk("sync");
+      uma.sailOk("sync");
+
+      assertEquals(
+          "1",
+          nia.query(
+                  "SELECT count(*) FROM change_log WHERE entity_type = 'spec' AND entity_id ="
+                      + " 'a-1' AND kind = 'erasure'")
+              .strip(),
+          "the erasure of a spec the node held reached it");
+      assertEquals(
+          "0",
+          nia.query("SELECT count(*) FROM change_log WHERE entity_id IN ('b-1', 'b-2')").strip(),
+          "nothing of another project's erasure crossed");
+      fleet.assertScopedTo(nia, "alpha");
+      fleet.assertConverged(uma);
+      fleet.assertHeadsAgree(uma);
+      assertEquals(0, NativeFleet.json(nia.sailOk("sync", "--json")).get("pulled"));
+
+      main.sailOk("fde", "revoke", "ole", "alpha");
+      released.sailOk("sync");
+
+      assertEquals(
+          "a-1\na-2",
+          released.query("SELECT id FROM specs ORDER BY id").strip(),
+          "a node that predates scoping is sent nothing more, and drops nothing");
     }
   }
 

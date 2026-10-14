@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
@@ -97,12 +98,14 @@ public final class SyncWire {
   private static final String MAIN_ID = "mainId";
   private static final String HANDLE = "handle";
   private static final String FILE_MAX = "file_max";
+  private static final String SCOPE = "scope";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
   private static final String KIND = "kind";
   private static final String ERASE = "erase";
   private static final String AUTHOR = "author";
+  private static final String PROJECT = "project";
   private static final String CREATOR = "creator";
   private static final String GONE = "gone";
 
@@ -356,10 +359,20 @@ public final class SyncWire {
   /**
    * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
    * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
-   * null from an older main, which never says.
+   * null from an older main, which never says — and the {@code scope} of projects that FDE may see:
+   * every project unless main scoped it, which is also what an older main, naming none, means.
    */
-  public record Welcome(int protocol, String version, String mainId, String handle, long fileMax)
+  public record Welcome(
+      int protocol, String version, String mainId, String handle, long fileMax, ProjectScope scope)
       implements Response {
+    public Welcome {
+      Objects.requireNonNull(scope, "scope");
+    }
+
+    public Welcome(int protocol, String version, String mainId, String handle, long fileMax) {
+      this(protocol, version, mainId, handle, fileMax, ProjectScope.all());
+    }
+
     /** A welcome that names no handle, as a main that predates saying so sends it. */
     public Welcome(int protocol, String version, String mainId) {
       this(protocol, version, mainId, null, 0);
@@ -381,7 +394,11 @@ public final class SyncWire {
    * snapshot; {@code kind} says which, so no reader infers one from the other. Having no snapshot
    * to name its author in, a tombstone or an erasure carries the {@code author} main recorded, so
    * the node records the same one; an older main sends none. A revision's author rides in its
-   * snapshot.
+   * snapshot. Every entry carries the {@code project} main's head files it in, and the node files
+   * its own head there: a tombstone or an erasure has no snapshot to name one, and a review or a
+   * message names none either, so a node left to work it out from the parent it holds could file
+   * the row elsewhere than main does and drop, or keep, what main does not. An older main sends
+   * none, and a version outside any page names none.
    */
   public record Entry(
       long seq,
@@ -390,7 +407,8 @@ public final class SyncWire {
       boolean deleted,
       Map<String, Object> snapshot,
       ChangeLog.Kind kind,
-      String author) {
+      String author,
+      String project) {
     public Entry {
       if (kind == null) {
         throw new IllegalArgumentException("Entry " + id + " names no kind");
@@ -415,6 +433,18 @@ public final class SyncWire {
           snapshot,
           snapshot == null ? ChangeLog.Kind.TOMBSTONE : ChangeLog.Kind.REVISION,
           author);
+    }
+
+    /** An entry naming no project: a version outside any page, or what an older main sent. */
+    public Entry(
+        long seq,
+        String id,
+        String rev,
+        boolean deleted,
+        Map<String, Object> snapshot,
+        ChangeLog.Kind kind,
+        String author) {
+      this(seq, id, rev, deleted, snapshot, kind, author, null);
     }
 
     public boolean erased() {
@@ -665,6 +695,9 @@ public final class SyncWire {
         if (welcome.fileMax() > 0) {
           map.put(FILE_MAX, welcome.fileMax());
         }
+        if (!welcome.scope().unrestricted()) {
+          map.put(SCOPE, List.copyOf(welcome.scope().projects()));
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -753,7 +786,8 @@ public final class SyncWire {
               string(map, VERSION),
               string(map, MAIN_ID),
               string(map, HANDLE),
-              longValue(map, FILE_MAX));
+              longValue(map, FILE_MAX),
+              map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all());
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->
@@ -781,6 +815,9 @@ public final class SyncWire {
     map.put(REV, entry.rev());
     map.put(DELETED, entry.deleted());
     map.put(KIND, entry.kind().wire());
+    if (entry.project() != null) {
+      map.put(PROJECT, entry.project());
+    }
     if (!entry.deleted()) {
       map.put(SNAPSHOT, entry.snapshot());
     } else if (entry.author() != null) {
@@ -797,7 +834,8 @@ public final class SyncWire {
         bool(map, DELETED),
         snapshot(map, SNAPSHOT),
         ChangeLog.Kind.of(string(map, KIND)),
-        string(map, AUTHOR));
+        string(map, AUTHOR),
+        string(map, PROJECT));
   }
 
   private static Map<String, Object> offerMap(MainReplica.Offer offer) {

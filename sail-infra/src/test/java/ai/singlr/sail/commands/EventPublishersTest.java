@@ -219,7 +219,7 @@ class EventPublishersTest {
                           "main",
                           null,
                           Actor.sync(ME, Role.MEMBER),
-                          () -> SyncServerCommand.roster(main.db),
+                          () -> SyncServerCommand.roster(main.db, Actor.main()),
                           SyncTransitionSink.NONE,
                           SyncWire.UPGRADE_FLOOR)));
 

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.identity.ProjectScope;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -91,6 +92,16 @@ public final class EventStore {
    * idx_events_spec} (spec_id plus the implicit rowid), so a large events table is never scanned.
    */
   public List<EventRow> forSpec(String specId, Long afterId, int limit, Set<String> excludedTypes) {
+    return forSpec(specId, afterId, limit, excludedTypes, ProjectScope.all());
+  }
+
+  /**
+   * {@link #forSpec(String, Long, int, Set)} of the rows {@code scope} admits alone, so the window
+   * is as long as its limit of what its reader sees: a row of a project outside the scope, or of
+   * none, never occupies it.
+   */
+  public List<EventRow> forSpec(
+      String specId, Long afterId, int limit, Set<String> excludedTypes, ProjectScope scope) {
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive, got " + limit);
     }
@@ -106,12 +117,17 @@ public final class EventStore {
       parameters.add(afterId);
     }
     parameters.addAll(excludedTypes);
+    var admitted = ChangeLog.scopeArgument(scope);
+    if (admitted != null) {
+      parameters.add(admitted);
+    }
     parameters.add(limit);
     var sql =
         "SELECT id, timestamp, type, project, spec_id, agent, host, data, publisher FROM events"
             + " WHERE spec_id = ?"
             + (afterId != null ? " AND id > ?" : "")
             + exclusion
+            + (admitted != null ? " AND project IN (SELECT value FROM json_each(?))" : "")
             + " ORDER BY id "
             + (afterId != null ? "ASC" : "DESC")
             + " LIMIT ?";

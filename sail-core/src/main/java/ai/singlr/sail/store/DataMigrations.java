@@ -24,7 +24,8 @@ public final class DataMigrations {
           new OrphanErasure(),
           new PersonalRoomErasure(),
           new MaterializedFilesMigration(SailPaths.projectsDir()),
-          new StagePromptsMigration());
+          new StagePromptsMigration(),
+          new ScopedHeadsMigration());
 
   private DataMigrations() {}
 

@@ -13,6 +13,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
@@ -54,7 +55,12 @@ class BannerTest {
                 "id1", "uday", "Alex Morgan", "alex@example.com", "admin", "active", "t"),
             new FdeStore.Fde("id2", "mady", null, null, "member", "active", "t"));
 
-    Banner.printFdeTable(fdes, new PrintStream(out, true, StandardCharsets.UTF_8), Ansi.OFF);
+    Banner.printFdeTable(
+        fdes,
+        handle ->
+            "mady".equals(handle) ? ProjectScope.of(List.of("beta", "alpha")) : ProjectScope.all(),
+        new PrintStream(out, true, StandardCharsets.UTF_8),
+        Ansi.OFF);
     var text = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(text.contains("FDEs"));
@@ -66,6 +72,10 @@ class BannerTest {
     assertTrue(text.contains("admin"));
     assertTrue(text.contains("mady"));
     assertTrue(text.contains("-"), "missing name/email render as a dash");
+    assertTrue(text.contains("SCOPE"));
+    assertTrue(text.contains("2: alpha, beta"));
+    assertEquals("all", Banner.scopeLabel(ProjectScope.all()));
+    assertEquals("none", Banner.scopeLabel(ProjectScope.none()));
   }
 
   @Test

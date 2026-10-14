@@ -466,7 +466,7 @@ class SyncServerCommandTest {
   void rosterExposesMainsFdesAsMaps() {
     new FdeStore(mainDb).add("ada", "Ada", "ada@x.dev", "admin");
 
-    var roster = SyncServerCommand.roster(mainDb);
+    var roster = SyncServerCommand.roster(mainDb, Actor.main());
 
     var ada = roster.stream().filter(m -> "ada".equals(m.get("handle"))).findFirst().orElseThrow();
     assertEquals("admin", ada.get("role"));

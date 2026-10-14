@@ -15,6 +15,10 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
+/**
+ * One project's shared files over the catalog. A read hands its reader the files of a project the
+ * reader's scope admits, so a project outside it reads as one that shares nothing.
+ */
 public record SharedProjectFiles(
     FileStore files, Path projectsDir, String project, FileLimits limits) implements ProjectFiles {
   public SharedProjectFiles {

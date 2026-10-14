@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /**
@@ -90,6 +91,15 @@ public final class SpecCatalog {
    * null} when {@code assignee} is null (no FDE bound) or nothing matches.
    */
   public static Spec nextReadyAssignedTo(List<Spec> specs, String assignee) {
+    return nextReadyAssignedTo(specs, assignee, spec -> true);
+  }
+
+  /**
+   * {@link #nextReadyAssignedTo(List, String)} among the specs {@code dispatchable} admits, the
+   * others passed over as if not ready; dependencies are still met from every spec.
+   */
+  public static Spec nextReadyAssignedTo(
+      List<Spec> specs, String assignee, Predicate<Spec> dispatchable) {
     if (assignee == null) {
       return null;
     }
@@ -101,7 +111,7 @@ public final class SpecCatalog {
       if (!dependenciesMet(spec, doneIds)) {
         continue;
       }
-      if (!assignee.equals(spec.assignee())) {
+      if (!assignee.equals(spec.assignee()) || !dispatchable.test(spec)) {
         continue;
       }
       return spec;

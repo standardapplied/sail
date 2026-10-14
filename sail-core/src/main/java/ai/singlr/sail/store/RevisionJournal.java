@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.Strings;
@@ -44,6 +45,7 @@ public final class RevisionJournal implements ConflictResolver {
   private final ChangeLog changeLog;
   private final EntitySchema schema;
   private final Supplier<? extends WriteAuthority> authority;
+  private final ScopeRule scope;
 
   /**
    * The journal of {@code schema}'s entity, whose writes {@code authority} decides. The rule is
@@ -58,6 +60,7 @@ public final class RevisionJournal implements ConflictResolver {
     this.changeLog = Objects.requireNonNull(changeLog, "changeLog");
     this.schema = Objects.requireNonNull(schema, "schema");
     this.authority = Objects.requireNonNull(authority, "authority");
+    this.scope = new ScopeRule(changeLog, schema.entityType());
   }
 
   /** The schema's {@link EntitySchema#latestWinsFields}, the one place a store's are declared. */
@@ -228,10 +231,11 @@ public final class RevisionJournal implements ConflictResolver {
    * ({@link #held}), which the row being written has not reached yet, so a revision never admits
    * itself. A revision main decided is not decided again: one pushed ({@link Actor.Lane#SYNC}) was
    * decided at {@link #commitRevision}, and the rule passes main's own and this box's machinery
-   * ({@link WriteAuthority#decided}).
+   * ({@link WriteAuthority#decided}). Whether the write stays inside the projects the actor may see
+   * is asked first, of every type alike ({@link ScopeRule}).
    */
   public Optional<Refusal> decide(String id, Map<String, Object> next) {
-    return WriteAuthority.local(authority.get(), id, held(id), next);
+    return WriteAuthority.local(scope.before(authority.get()), id, held(id), next);
   }
 
   /**
@@ -484,7 +488,7 @@ public final class RevisionJournal implements ConflictResolver {
           if (deletion && marks.isEmpty() && !schema.exists(id)) {
             return new PushOutcome.Accepted(latestRev(id));
           }
-          var refusal = authority.decide(Actor.current(), id, held(id), snapshot);
+          var refusal = scope.before(authority).decide(Actor.current(), id, held(id), snapshot);
           if (refusal.isPresent()) {
             return new PushOutcome.Denied(
                 refusal.get().message(), latestRev(id), currentForSync(id));

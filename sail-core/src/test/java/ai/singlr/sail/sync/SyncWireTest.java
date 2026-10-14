@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FastCdc;
@@ -110,6 +111,41 @@ class SyncWireTest {
                     "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.46.2\","
                         + " \"mainId\": \"m\"}"))
             .handle());
+  }
+
+  @Test
+  void aWelcomeNamesAScopeOnlyForAScopedFdeAndAMissingKeyIsNeverAnEmptyGrant() {
+    var unscoped = new SyncWire.Welcome(4, "0.48.0", "main-box", "ada", 0);
+    var scoped =
+        new SyncWire.Welcome(
+            4, "0.48.0", "main-box", "nia", 0, ProjectScope.of(List.of("beta", "alpha")));
+    var ungranted = new SyncWire.Welcome(4, "0.48.0", "main-box", "bob", 0, ProjectScope.none());
+
+    assertFalse(SyncWire.encode(unscoped).contains("scope"));
+    assertEquals(
+        "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.48.0\", \"mainId\":"
+            + " \"main-box\", \"handle\": \"nia\", \"scope\": [\"alpha\", \"beta\"]}",
+        SyncWire.encode(scoped));
+    assertEquals(unscoped, SyncWire.decodeResponse(SyncWire.encode(unscoped)));
+    assertEquals(scoped, SyncWire.decodeResponse(SyncWire.encode(scoped)));
+    assertEquals(ungranted, SyncWire.decodeResponse(SyncWire.encode(ungranted)));
+    assertTrue(SyncWire.encode(ungranted).contains("\"scope\": []"));
+    assertEquals(
+        ProjectScope.none(),
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.48.0\","
+                        + " \"mainId\": \"m\", \"scope\": null}"))
+            .scope(),
+        "a scope key that names nothing readable grants nothing");
+    assertEquals(
+        ProjectScope.all(),
+        ((SyncWire.Welcome)
+                SyncWire.decodeResponse(
+                    "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.47.0\","
+                        + " \"mainId\": \"m\", \"a_key_from_the_future\": [1]}"))
+            .scope(),
+        "an older main names no scope, and a key this build does not know is ignored");
   }
 
   @Test
@@ -323,6 +359,30 @@ class SyncWireTest {
 
     assertFalse(revision.contains("\"author\""), revision);
     assertFalse(deniedRevision.contains("\"author\""), deniedRevision);
+  }
+
+  @Test
+  void anEntryCarriesTheProjectMainFilesItUnderWhateverItsKind() {
+    var entries =
+        List.of(
+            new SyncWire.Entry(
+                1, "live", "1-a", false, snapshot(), ChangeLog.Kind.REVISION, null, "alpha"),
+            new SyncWire.Entry(
+                2, "gone", "2-b", true, null, ChangeLog.Kind.TOMBSTONE, "ada", "alpha"),
+            new SyncWire.Entry(
+                3, "erased", "3-c", true, null, ChangeLog.Kind.ERASURE, "ada", "alpha"),
+            new SyncWire.Entry(
+                4, "unfiled", "4-d", true, null, ChangeLog.Kind.ERASURE, "ada", null));
+
+    var decoded =
+        ((SyncWire.Page)
+                SyncWire.decodeResponse(SyncWire.encode(new SyncWire.Page(entries, 4, true, 4))))
+            .entries();
+
+    assertEquals(entries, decoded);
+    assertFalse(
+        SyncWire.encode(new SyncWire.Page(entries.subList(3, 4), 4, true, 4)).contains("project"),
+        "an entry main names no project for reads as one an earlier main sent");
   }
 
   @Test

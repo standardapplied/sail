@@ -31,9 +31,10 @@ import java.util.function.Supplier;
 
 /**
  * SSE handler that streams a single run's log output. The address is {@code /v1/runs/{id}/stream}:
- * it resolves the run, applies the same provenance guard as the buffered log/stop endpoints — a run
- * whose {@code node} is not this box is refused with a structured {@code run_on_other_node} error
- * rather than tailing a foreign box's local file — then applies the same run-owner rule ({@link
+ * it resolves the run, which a caller whose scope does not admit its project is told does not
+ * exist, applies the same provenance guard as the buffered log/stop endpoints — a run whose {@code
+ * node} is not this box is refused with a structured {@code run_on_other_node} error rather than
+ * tailing a foreign box's local file — then applies the same run-owner rule ({@link
  * RunAuthority#access}) the buffered log endpoint does (the run's spec assignee or an admin, else
  * {@code forbidden_not_assignee}), and finally tails the run's own {@code
  * ~/.sail/runs/<id>/agent.log} via {@code incus exec}, sending each line as an SSE {@code data:}
@@ -57,22 +58,22 @@ public final class AgentLogStreamer implements HttpHandler {
 
   private final ApiAuth auth;
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
-  private final Function<String, Optional<String>> specOwner;
+  private final Function<String, Optional<SpecStore.SpecRow>> specLookup;
   private final Supplier<String> localHandle;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
-    this(auth, AgentLogStreamer::lookupFromDb, AgentLogStreamer::ownerFromDb, NodeIdentity::handle);
+    this(auth, AgentLogStreamer::lookupFromDb, AgentLogStreamer::specFromDb, NodeIdentity::handle);
   }
 
   AgentLogStreamer(
       ApiAuth auth,
       Function<String, Optional<RunStore.RunRow>> runLookup,
-      Function<String, Optional<String>> specOwner,
+      Function<String, Optional<SpecStore.SpecRow>> specLookup,
       Supplier<String> localHandle) {
     this.auth = auth;
     this.runLookup = runLookup;
-    this.specOwner = specOwner;
+    this.specLookup = specLookup;
     this.localHandle = localHandle;
   }
 
@@ -84,9 +85,9 @@ public final class AgentLogStreamer implements HttpHandler {
     }
   }
 
-  private static Optional<String> ownerFromDb(String specId) {
+  private static Optional<SpecStore.SpecRow> specFromDb(String specId) {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb())) {
-      return new SpecStore(db).findById(specId).map(SpecStore.SpecRow::owner);
+      return new SpecStore(db).findById(specId);
     } catch (RuntimeException e) {
       return Optional.empty();
     }
@@ -111,7 +112,8 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 400, "invalid_request", "Missing run id", null);
         return;
       }
-      var run = runLookup.apply(runId).orElse(null);
+      var actor = ApiRouter.actorOf(exchange);
+      var run = Scoped.row(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
       if (run == null) {
         sendError(exchange, 404, "run_not_found", "No run '" + runId + "'.", null);
         return;
@@ -122,10 +124,11 @@ public final class AgentLogStreamer implements HttpHandler {
       }
       var refusal =
           RunAuthority.access(
-              ApiRouter.actorOf(exchange),
+              actor,
               run.id(),
               StopOperations.specIdOf(run),
-              RunAuthority.owners(run, specOwner));
+              RunAuthority.owners(
+                  run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
       if (refusal.isPresent()) {
         var refused = refusal.get();
         var code = Refusals.code(refused.kind());

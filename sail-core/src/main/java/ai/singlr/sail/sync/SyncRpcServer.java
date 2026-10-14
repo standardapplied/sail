@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
@@ -21,13 +22,16 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 
 /**
  * Main's side of one sync session: a request loop over the SSH channel's stdio. Nothing is served
@@ -77,6 +81,8 @@ public final class SyncRpcServer {
   private boolean erasedInSession;
   private boolean deniedInSession;
   private MainBox mainBox;
+  private final Set<String> sharedBlobs = new HashSet<>();
+  private final Set<String> sharedChunks = new HashSet<>();
 
   public SyncRpcServer(MainReplica main, boolean writable) {
     this(
@@ -174,11 +180,18 @@ public final class SyncRpcServer {
 
   void serve(InputStream in, OutputStream out, int frame) throws IOException {
     if (blobs == null) {
+      if (!principal.scope().unrestricted()) {
+        throw new IllegalStateException(
+            "A scoped session is decided from main's change heads: serve it over main's database"
+                + " (SyncRpcServer.over).");
+      }
       serveSession(in, out, frame);
       return;
     }
     erasedInSession = false;
     deniedInSession = false;
+    sharedBlobs.clear();
+    sharedChunks.clear();
     try (var scope = blobs.retain()) {
       serveSession(in, out, frame);
     } finally {
@@ -243,10 +256,16 @@ public final class SyncRpcServer {
       throws IOException {
     switch (content) {
       case SyncWire.Fetch fetch -> {
-        for (var hash : fetch.hashes()) reply(out, new SyncWire.Manifest(blobs.manifest(hash)));
+        requireServed("blob", fetch.hashes(), sharedBlobs);
+        for (var hash : fetch.hashes()) {
+          var manifest = blobs.manifest(hash);
+          sharedChunks.addAll(manifest.chunkHashes());
+          reply(out, new SyncWire.Manifest(manifest));
+        }
         reply(out, new SyncWire.Done());
       }
       case SyncWire.FetchChunks fetch -> {
+        requireServed("chunk", fetch.hashes(), sharedChunks);
         for (var hash : fetch.hashes()) SyncWire.writeChunk(out, hash, blobs.chunk(hash));
         reply(out, new SyncWire.Done());
       }
@@ -263,9 +282,82 @@ public final class SyncRpcServer {
     }
   }
 
+  /**
+   * Refuses a scoped session content it has not shared with main: a blob is this session's to fetch
+   * only once an entry main admitted referenced it ({@link #serving}) or the session sent it whole
+   * ({@link #receiveContent}), and a chunk only once a manifest it was served listed it. An
+   * unscoped session fetches by hash as it always has.
+   */
+  private void requireServed(String what, List<String> hashes, Set<String> served) {
+    if (principal.scope().unrestricted()) {
+      return;
+    }
+    for (var hash : hashes) {
+      if (!served.contains(hash)) {
+        throw new SyncTransportException(
+            "refused", what + " " + hash + " is not content main served this session", null);
+      }
+    }
+  }
+
+  /**
+   * Records the content {@code snapshots} of {@code type} reference as this session's to fetch;
+   * every entry, accepted version and carried denial main sends a scoped session passes through
+   * here.
+   */
+  private void serving(String type, List<Map<String, Object>> snapshots) {
+    if (principal.scope().unrestricted()) {
+      return;
+    }
+    sharedBlobs.addAll(
+        BlobStore.referenced(snapshots, SyncedEntities.require(type).store(db).contentFields()));
+  }
+
+  private void serving(String type, SyncWire.Page page) {
+    var snapshots = new ArrayList<Map<String, Object>>();
+    page.entries().forEach(entry -> snapshots.add(entry.snapshot()));
+    page.accepted().forEach(entry -> snapshots.add(entry.snapshot()));
+    serving(type, snapshots);
+  }
+
+  /**
+   * Whether the session may see what main holds of {@code id}: its head's project is in the
+   * session's scope. An unscoped session sees every id, as it always has.
+   */
+  private boolean admits(String type, String id) {
+    var scope = principal.scope();
+    return scope.unrestricted() || scope.admits(headProject(type, id));
+  }
+
+  /**
+   * Whether the session may see {@code version}, an earlier state main holds of {@code id}: the
+   * project that state names is in the session's scope, wherever the id's head has moved since. A
+   * version that kept no state names no project and says nothing of one.
+   */
+  private boolean admits(String type, String id, MainReplica.State version) {
+    var scope = principal.scope();
+    return scope.unrestricted()
+        || version.snapshot() == null
+        || scope.admits(changeLog.projectOf(type, id, version.snapshot()));
+  }
+
+  /** The project main's head of {@code id} carries, null when unknown or main keeps no journal. */
+  private String headProject(String type, String id) {
+    return changeLog == null ? null : changeLog.headProject(type, id).orElse(null);
+  }
+
+  /**
+   * Takes the content a session announces. Main asks an unscoped session only for what it lacks. A
+   * scoped session is asked for every blob and chunk it has not shared with main this session, held
+   * here or not: holding a hash is no proof of holding its bytes, and main saying which hashes it
+   * holds would tell the session of content outside its scope. What it then sends is its own to
+   * reference in an offer ({@link #unshared}).
+   */
   private void receiveContent(
       SyncWire.Announce announce, InputStream in, OutputStream out, int frame) throws IOException {
-    var missing = blobs.missing(announce.hashes());
+    var scoped = !principal.scope().unrestricted();
+    var missing =
+        scoped ? without(announce.hashes(), sharedBlobs) : blobs.missing(announce.hashes());
     reply(out, new SyncWire.Lack(List.copyOf(missing)));
     if (missing.isEmpty()) return;
     var receiver = new ContentReceiver(in, () -> readContent(in, frame), blobs, "blobs " + missing);
@@ -294,12 +386,38 @@ public final class SyncRpcServer {
     }
     var chunks = new LinkedHashSet<String>();
     manifests.values().forEach(manifest -> chunks.addAll(manifest.chunkHashes()));
-    var requested = blobs.missingChunks(chunks);
+    var requested = scoped ? without(chunks, sharedChunks) : blobs.missingChunks(chunks);
     reply(out, new SyncWire.Lack(List.copyOf(requested)));
     receiver.chunks(
         requested, manifests.values().stream().mapToLong(BlobStore.Manifest::size).sum());
     manifests.values().forEach(blobs::assemble);
+    if (scoped) {
+      sharedBlobs.addAll(manifests.keySet());
+    }
     reply(out, new SyncWire.Done());
+  }
+
+  private static Set<String> without(Collection<String> hashes, Set<String> shared) {
+    var rest = new LinkedHashSet<>(hashes);
+    rest.removeAll(shared);
+    return rest;
+  }
+
+  /**
+   * The content {@code offer} references that a scoped, writing session has neither been served nor
+   * sent: a hash it could only have learned elsewhere, which main must not turn into content it
+   * then serves. Empty for a session that sees every project, and for one that may not write, whose
+   * offer main's own rule denies.
+   */
+  private Set<String> unshared(String type, MainReplica.Offer offer) {
+    if (principal.scope().unrestricted() || !principal.canWrite()) {
+      return Set.of();
+    }
+    return without(
+        BlobStore.referenced(
+            Collections.singletonList(offer.snapshot()),
+            SyncedEntities.require(type).store(db).contentFields()),
+        sharedBlobs);
   }
 
   private static SyncWire.Content readContent(InputStream input, int frame) {
@@ -423,7 +541,8 @@ public final class SyncRpcServer {
         version,
         mainId(),
         Objects.toString(principal.handle(), ""),
-        limits.fileMax());
+        limits.fileMax(),
+        principal.scope());
   }
 
   /**
@@ -479,8 +598,11 @@ public final class SyncRpcServer {
   /**
    * One page of {@code pull.type()}'s change log after {@code pull.since()}: the heads in seq
    * order, each read as its current row, until {@code limit} entries or the frame is full. {@code
-   * next} is the last seq included, so the node checkpoints exactly what it has seen. The whole
-   * page is read as one snapshot of main, so it is internally consistent and no writer waits on it.
+   * next} is the last seq included, so the node checkpoints exactly what it has seen. A head whose
+   * project the session's scope does not admit is passed over by its head alone, no row read, and
+   * {@code next} moves past it all the same: a scoped node's checkpoint reaches main's tip having
+   * seen only its own projects, and a page may be empty yet not the last. The whole page is read as
+   * one snapshot of main, so it is internally consistent and no writer waits on it.
    */
   private SyncWire.Response page(SyncWire.Pull pull, int frame) {
     var main = replicas.get(pull.type());
@@ -499,7 +621,11 @@ public final class SyncRpcServer {
     var entries = new ArrayList<SyncWire.Entry>();
     var next = pull.since();
     for (var head : heads.after(pull.type(), pull.since(), pull.limit())) {
-      var entry = entryOf(main, head.entityId(), head.seq());
+      if (!principal.scope().admits(head.project())) {
+        next = head.seq();
+        continue;
+      }
+      var entry = entryOf(head.entityId(), main.state(head.entityId()), head.seq(), head.project());
       var length = SyncWire.encodedLength(entry);
       if (!budget.canEverAdmit(length)) {
         return oversize(entry.id(), length, frame);
@@ -511,13 +637,18 @@ public final class SyncRpcServer {
       entries.add(entry);
       next = head.seq();
     }
-    return new SyncWire.Page(entries, next, next >= maxSeq, maxSeq);
+    var page = new SyncWire.Page(entries, next, next >= maxSeq, maxSeq);
+    serving(pull.type(), page);
+    return page;
   }
 
   /**
    * Main's current rows for the ids the node changed locally, in request order, as many as fit the
    * frame; {@code next} counts the ids consumed so the node continues from there. An id main has
-   * never seen is consumed and omitted.
+   * never seen is consumed and omitted, and so is one main holds outside the session's scope: the
+   * node offers it as new, and main's denial of that offer withdraws it there. What main took from
+   * the node earlier is handed back only when that version is itself of a project in the scope: a
+   * row that moved into the scope since is answered with its current state alone.
    */
   private SyncWire.Response current(SyncWire.Need need, int frame) {
     var main = replicas.get(need.type());
@@ -533,17 +664,18 @@ public final class SyncRpcServer {
     var accepted = new ArrayList<SyncWire.Entry>();
     var consumed = 0;
     for (var id : need.ids()) {
-      if (main.currentRev(id) == null) {
+      if (main.currentRev(id) == null || !admits(need.type(), id)) {
         consumed++;
         continue;
       }
       var state = main.state(id);
-      var entry = need.acceptedOnly() ? null : entryOf(id, state, 0);
+      var entry = need.acceptedOnly() ? null : entryOf(id, state, 0, headProject(need.type(), id));
       var took =
           state.kind() == ChangeLog.Kind.ERASURE
               ? Optional.<SyncWire.Entry>empty()
               : main.acceptedFrom(id, principal.peer(), need.bases().get(id))
-                  .map(version -> entryOf(id, version, 0));
+                  .filter(version -> admits(need.type(), id, version))
+                  .map(version -> entryOf(id, version, 0, null));
       var length =
           (entry == null ? 0 : SyncWire.encodedLength(entry))
               + took.map(SyncWire::encodedLength).orElse(0);
@@ -560,15 +692,18 @@ public final class SyncRpcServer {
       took.ifPresent(accepted::add);
       consumed++;
     }
-    return new SyncWire.Page(
-        entries, consumed, consumed == need.ids().size(), main.maxSeq(), accepted);
+    var page =
+        new SyncWire.Page(
+            entries, consumed, consumed == need.ids().size(), main.maxSeq(), accepted);
+    serving(need.type(), page);
+    return page;
   }
 
-  private static SyncWire.Entry entryOf(MainReplica main, String id, long seq) {
-    return entryOf(id, main.state(id), seq);
-  }
-
-  private static SyncWire.Entry entryOf(String id, MainReplica.State state, long seq) {
+  /**
+   * {@code state} of {@code id} as an entry, naming the {@code project} main's head files it in.
+   */
+  private static SyncWire.Entry entryOf(
+      String id, MainReplica.State state, long seq, String project) {
     return new SyncWire.Entry(
         seq,
         id,
@@ -576,7 +711,8 @@ public final class SyncRpcServer {
         state.snapshot() == null,
         state.snapshot(),
         state.kind(),
-        state.author());
+        state.author(),
+        project);
   }
 
   private static SyncWire.Failed oversize(String id, int length, int frame) {
@@ -644,7 +780,22 @@ public final class SyncRpcServer {
                 }));
   }
 
+  /**
+   * Main's verdict on one offer. A scoped pusher's offer outside its scope is denied first, before
+   * the erasure and staleness checks that would otherwise answer about a row it may not see, and
+   * the denial carries nothing of main's: the node withdraws its row and learns only that the id is
+   * not its to write. Every denial after it is therefore of an id main holds inside the pusher's
+   * scope, or not at all, so the version it carries is one the pusher may see.
+   */
   private SyncWire.Result result(String type, MainReplica main, MainReplica.Offer offer) {
+    var outside =
+        principal.scope().unrestricted()
+            ? Optional.<Refusal>empty()
+            : new ScopeRule(changeLog, type).pushed(principal, offer.id(), offer.snapshot());
+    if (outside.isPresent()) {
+      deniedInSession |= offer.snapshot() != null && carriesContent(type);
+      return new SyncWire.Denied(offer.id(), outside.get().message(), null, null, true);
+    }
     if (RUN_ENTITY.equals(type)
         && principal.canWrite()
         && (principal.handle() == null || principal.handle().isBlank())) {
@@ -652,6 +803,11 @@ public final class SyncRpcServer {
           offer.id(),
           "This sync session has no node handle, so a run cannot be attributed to it; "
               + "set the node's sync handle before pushing runs.");
+    }
+    if (!unshared(type, offer).isEmpty()) {
+      return new SyncWire.Refused(
+          offer.id(),
+          "This offer names content the session neither sent nor was served; announce it first.");
     }
     var before = main.current(offer.id());
     CommitOutcome outcome;
@@ -673,6 +829,7 @@ public final class SyncRpcServer {
       case CommitOutcome.Refused refused -> new SyncWire.Refused(offer.id(), refused.reason());
       case CommitOutcome.Denied denied -> {
         deniedInSession |= offer.snapshot() != null && carriesContent(type);
+        serving(type, Collections.singletonList(denied.snapshot()));
         yield new SyncWire.Denied(
             offer.id(),
             denied.reason(),

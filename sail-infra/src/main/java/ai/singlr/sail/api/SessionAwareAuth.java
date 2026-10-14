@@ -63,6 +63,7 @@ public final class SessionAwareAuth implements ApiAuth {
     exchange.setAttribute("token.name", fde.handle());
     exchange.setAttribute("token.fde", fde.handle());
     exchange.setAttribute("token.role", role.attribute());
+    exchange.setAttribute(ApiAuth.SCOPE, roles.scopeOf(fde.handle()));
     if (fde.displayName() != null) {
       exchange.setAttribute("token.displayName", fde.displayName());
     }

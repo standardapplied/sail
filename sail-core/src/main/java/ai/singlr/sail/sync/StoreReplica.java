@@ -96,6 +96,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public String project(String id) {
+    return changeLog.headProject(store.entityType(), id).orElse(null);
+  }
+
+  @Override
   public boolean mayPush(String entityId) {
     return store.mayPush(entityId, handle);
   }
@@ -234,8 +239,9 @@ public final class StoreReplica implements LocalReplica, MainReplica {
    * answer was never heard: main's version is the answer.
    */
   @Override
-  public void adopt(String entityId, Map<String, Object> snapshot, String rev) {
+  public void adopt(String entityId, Map<String, Object> snapshot, String rev, String project) {
     store.adoptForSync(entityId, snapshot, rev);
+    changeLog.fileUnder(store.entityType(), entityId, project);
     conflicts.settle(store.entityType(), entityId, rev);
     changeLog.settleOffer(store.entityType(), entityId);
   }

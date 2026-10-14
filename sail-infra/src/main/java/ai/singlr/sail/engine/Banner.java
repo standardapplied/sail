@@ -13,6 +13,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
@@ -26,6 +27,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Help.Ansi;
 
@@ -624,13 +626,29 @@ public final class Banner {
   }
 
   /** Prints a bordered FDE list table. */
-  public static void printFdeTable(List<FdeStore.Fde> fdes, PrintStream out, Ansi ansi) {
-    var table = new TableFormatter(" FDEs ", List.of("HANDLE", "NAME", "EMAIL", "ROLE", "STATUS"));
+  public static void printFdeTable(
+      List<FdeStore.Fde> fdes, Function<String, ProjectScope> scopeOf, PrintStream out, Ansi ansi) {
+    var table =
+        new TableFormatter(" FDEs ", List.of("HANDLE", "NAME", "EMAIL", "ROLE", "STATUS", "SCOPE"));
     for (var fde : fdes) {
       table.addRow(
-          fde.handle(), orDash(fde.displayName()), orDash(fde.email()), fde.role(), fde.status());
+          fde.handle(),
+          orDash(fde.displayName()),
+          orDash(fde.email()),
+          fde.role(),
+          fde.status(),
+          scopeLabel(scopeOf.apply(fde.handle())));
     }
     table.render(out, ansi);
+  }
+
+  /** {@code all}, or how many projects a scoped FDE is granted and their names. */
+  static String scopeLabel(ProjectScope scope) {
+    if (scope.unrestricted()) {
+      return "all";
+    }
+    var projects = scope.projects();
+    return projects.isEmpty() ? "none" : projects.size() + ": " + String.join(", ", projects);
   }
 
   private static String orDash(String value) {
