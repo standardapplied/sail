@@ -237,6 +237,12 @@ public final class PagedSyncSession implements SyncSession {
     }
   }
 
+  /** Whether {@code id} is filed under a project this round keeps whole ({@link #keep}). */
+  private boolean kept(LocalReplica local, String id) {
+    var project = local.project(id);
+    return project != null && kept.contains(project);
+  }
+
   private TypeReport reconcileType(String type, LocalReplica local) {
     var fetchedBefore = fetchedBytes;
     var sentBefore = sentBytes;
@@ -281,7 +287,7 @@ public final class PagedSyncSession implements SyncSession {
     }
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
-    dirty.removeIf(id -> kept.contains(local.project(id)));
+    dirty.removeIf(id -> kept(local, id));
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }

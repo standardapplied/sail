@@ -96,6 +96,7 @@ public final class FdeCommand implements Runnable {
   record Box(
       Path database,
       String operator,
+      String handle,
       Path home,
       Path hostKey,
       Path workstationKey,
@@ -106,6 +107,7 @@ public final class FdeCommand implements Runnable {
       return new Box(
           dbPath(),
           System.getProperty("user.name"),
+          HostSync.handle(),
           Path.of(System.getProperty("user.home")),
           Path.of("/etc/ssh/ssh_host_ed25519_key.pub"),
           SailPaths.workstationPublicKeyPath(),
@@ -241,6 +243,20 @@ public final class FdeCommand implements Runnable {
         });
   }
 
+  /**
+   * This box's own FDE acts as an admin here whatever its roster row says ({@code
+   * RoleRule.scopeOf}), so a scope on it would hold no one: refused, as an admin's is.
+   */
+  private static void requireNotThisBoxsOwn(Box box, String handle) {
+    if (handle.equals(box.handle())) {
+      throw new IllegalArgumentException(
+          "FDE '"
+              + handle
+              + "' is this box's own and acts as an admin here, so it cannot be scoped. Scope a"
+              + " member or a viewer.");
+    }
+  }
+
   private static void requireMainForRosterEdit(String action) {
     requireMainForRosterEdit(HostSync.isNode(HostSync.config()), action);
   }
@@ -330,6 +346,9 @@ public final class FdeCommand implements Runnable {
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Adding an FDE");
+            if (scoped) {
+              requireNotThisBoxsOwn(box, handle);
+            }
             var key = publicKey == null ? null : SshPublicKey.parse(publicKey);
             try (var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
@@ -456,6 +475,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Granting a project");
+            requireNotThisBoxsOwn(box, handle);
             try (var db = Sqlite.open(box.database())) {
               System.out.println(scopeEdit(db, handle, project, true, dryRun, json));
             }

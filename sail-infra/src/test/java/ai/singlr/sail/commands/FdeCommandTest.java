@@ -82,6 +82,7 @@ class FdeCommandTest {
   private String operator = "root";
   private boolean node;
   private String refusal;
+  private String handle;
 
   @BeforeEach
   void aBoxWithAHostKeyAndAMigratedControlPlane() throws IOException {
@@ -137,6 +138,7 @@ class FdeCommandTest {
                     new FdeCommand.Box(
                         tempDir.resolve("sail.db"),
                         operator,
+                        handle,
                         home(),
                         hostKey(),
                         workstationKey(),
@@ -833,6 +835,16 @@ class FdeCommandTest {
         "FDE 'root' cannot be both scoped and an admin: an admin edits the roster, and so could"
             + " grant itself any project. Scope a member or a viewer.",
         refusal);
+    handle = "uma";
+    var own =
+        "FDE 'uma' is this box's own and acts as an admin here, so it cannot be scoped. Scope a"
+            + " member or a viewer.";
+    assertEquals(1, fde("grant", "uma", "alpha"));
+    assertEquals(own, refusal);
+    assertEquals(1, fde("add", "uma", "--scoped"), "an FDE already added is told the same");
+    assertEquals(own, refusal);
+    assertEquals(0, fde("grant", "nia", "alpha", "--dry-run"), "another FDE is granted as before");
+    handle = null;
     assertTrue(
         inDb(db -> new FdeStore(db).byHandle("root")).isEmpty(), "the refused add left no FDE");
     assertEquals(1, fde("grant", "nia", "Not/A/Name"));

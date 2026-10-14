@@ -211,7 +211,7 @@ and the spec that closes it.
 | S4 | A grant shows after the next round; a revocation removes the project in the same round, unpushed work included, announced. | `ScopedSyncTest` (a grant resets the checkpoints and what was held re-adopts unwritten; a revocation drops rows, history, heads, offers, requests and content at the round's start; a project with a run under way here is kept until the run ends; what was erased or deleted before the node first synced leaves with its project; with a spec moved each way between two projects, a revocation takes what main files under the project and leaves what it files under the other, and the node equals main within its scope; a thread begun before its room moved arrives and leaves whole), `SyncScopeTest`, `NativeFleetIT` |
 | S5 | An unscoped FDE is untouched: a fleet with no scoped FDE behaves as it did. | every sync test, unchanged; `ScopedSyncTest` and `NativeFleetIT` (an unscoped node beside a scoped one equals main), `ScopedSyncServerTest` (the whole roster, with emails) |
 | S6 | Versions degrade to an unscoped fleet, never to an error: an older node ignores the scope main names, and a node reads an older main's silence as every project. | `SyncWireTest` (a welcome naming no scope; a key this build does not know), `ScopedSyncTest` (a welcome naming none after one naming an empty scope pages everything), `NativeFleetIT` (a node of the last release is sent only its scope, and drops nothing on a revoke) |
-| S7 | Scope fails closed: an FDE added scoped sees nothing until granted, a session naming no FDE receives nothing, and a head of unknown project reaches unscoped nodes only. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped) |
+| S7 | Scope fails closed: an FDE added scoped sees nothing until granted, a session naming no FDE receives nothing, a head of unknown project reaches unscoped nodes only, and a request whose auth stamped no scope reads none. | `ScopedSyncServerTest` (no grant; no token, a blank one and one never issued), `ScopedSyncTest`, `ScopedHeadsTest` (a head pruned before heads carried a project stays unknown), `SyncWireTest` (a scope key that names nothing readable grants nothing), `ProjectScopeTest` (an admin is never scoped) |
 | S8 | A refusal for scope carries nothing of main's: it names the id, no snapshot and no rev, and is decided before the erasure and staleness checks. | `ScopedSyncTest` (a row still held after a revoke, an id main erased, a message, an id taken in another project: denied with no version, the node withdraws its own, and a denial by another rule carries main's version only inside the scope) |
 
 Every test in the `sync` package that drives a round between boxes ends each scenario by
@@ -388,8 +388,7 @@ node's project stays on that node, as it was, until the node edits it or loses t
 A revocation leaves the project's container and the files already on disk to the operator.
 There is no command that scopes an FDE who was added unscoped. A box's own events
 (a sync that degraded) carry the stand-in project `sail`, so they reach unscoped readers
-only. A scoped reader's page of recent events is filtered after the store's limit and may
-be shorter than asked.
+only.
 
 ### What syncs, and how
 

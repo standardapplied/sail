@@ -24,7 +24,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
  * Global (control-plane) spec CRUD against the {@link SpecStore}. Pure database operations, split
@@ -457,38 +456,11 @@ final class GlobalSpecOperations {
     return new GlobalSpecContentResponse(specId, content.body(), content.plan());
   }
 
-  /**
-   * The board of {@code project}, or of every project. A reader scoped to its granted projects is
-   * shown a board counted from the specs it may see, so it never counts, or names as next, a spec
-   * of another project; every other reader is shown the store's.
-   */
+  /** The board of {@code project}, or of every project, counted from the specs the reader sees. */
   GlobalBoardResponse board(String project) {
     requireStore();
     return new GlobalBoardResponse(
-        Actor.reader().scope().unrestricted() ? specStore.board(project) : boardOfReadable(project),
-        doneOpenFindings(project));
-  }
-
-  private SpecStore.BoardSummary boardOfReadable(String project) {
-    var counts =
-        readable(new SpecStore.SpecFilter(project, null, null, null, null)).stream()
-            .collect(Collectors.groupingBy(SpecStore.SpecRow::status, Collectors.counting()));
-    var ready =
-        Scoped.rows(Actor.reader(), specStore.readySpecs(project), SpecStore.SpecRow::project);
-    return new SpecStore.BoardSummary(
-        count(counts, SpecStatus.DRAFT),
-        count(counts, SpecStatus.PENDING),
-        count(counts, SpecStatus.IN_PROGRESS),
-        count(counts, SpecStatus.REVIEW),
-        count(counts, SpecStatus.AWAITING_MERGE),
-        count(counts, SpecStatus.DONE),
-        count(counts, SpecStatus.CANCELLED),
-        count(counts, SpecStatus.ARCHIVED),
-        ready.isEmpty() ? null : ready.getFirst().id());
-  }
-
-  private static int count(Map<SpecStatus, Long> counts, SpecStatus status) {
-    return counts.getOrDefault(status, 0L).intValue();
+        specStore.board(project, Actor.reader().scope()), doneOpenFindings(project));
   }
 
   /**

@@ -276,6 +276,40 @@ class BuildDispatchCoverageTest {
   }
 
   @Test
+  void aDispatchNamingNoSpecPassesOverOneWhoseEarlierReviewIsFiledOutsideTheCallersScope()
+      throws IOException {
+    var db = seedDb();
+    var specs = new SpecStore(db);
+    var reviews = new ReviewStore(db);
+    Acting.system(
+        () -> {
+          Acting.as("me", () -> specs.create(spec("login", "acme")));
+          specs.setContent("login", "Do login", "");
+          return null;
+        });
+    var left = beforeItMoved(db, () -> reviews.createReview("auth", 1));
+    var shell =
+        happyPath()
+            .on(REPO + " rev-parse --verify --quiet refs/remotes/origin/main", "")
+            .on(REPO + " checkout -b sail/login origin/main", "");
+    var ops = ops(shell, YAML, db);
+
+    var outcome =
+        Actor.call(
+            ONLY_ACME,
+            () ->
+                ops.dispatch(
+                    "acme",
+                    new DispatchOperations.Request(null, "background", false, null, false),
+                    HANDLE));
+
+    var dispatched = assertInstanceOf(DispatchOperations.Dispatched.class, outcome);
+    assertEquals("login", dispatched.taskSpec().id(), "the next ready spec the caller may close");
+    assertFalse(reviews.findReview(left).orElseThrow().superseded());
+    assertEquals(SpecStatus.PENDING, specs.findById("auth").orElseThrow().status());
+  }
+
+  @Test
   void aScopedCallersPromptCarriesNoTalkFiledOutsideItsScope() throws IOException {
     var db = seedDb();
     var messages = new MessageStore(db);
@@ -318,10 +352,14 @@ class BuildDispatchCoverageTest {
   }
 
   private static SpecStore.SpecRow auth(String project) {
+    return spec("auth", project);
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
     return new SpecStore.SpecRow(
-        "auth",
+        id,
         project,
-        "Add auth",
+        "Add " + id,
         SpecStatus.PENDING,
         HANDLE,
         null,

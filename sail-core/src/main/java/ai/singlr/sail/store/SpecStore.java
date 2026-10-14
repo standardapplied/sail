@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
+import ai.singlr.sail.identity.ProjectScope;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -1192,15 +1193,32 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   public BoardSummary board(String projectFilter) {
+    return board(projectFilter, ProjectScope.all());
+  }
+
+  /**
+   * The board of {@code projectFilter}, or of every project, counted from the specs {@code scope}
+   * admits alone, so a scoped reader never counts, or is named as next, a spec of another project.
+   */
+  public BoardSummary board(String projectFilter, ProjectScope scope) {
+    var conditions = new ArrayList<String>();
+    var parameters = new ArrayList<Object>();
+    if (projectFilter != null) {
+      conditions.add("project = ?");
+      parameters.add(projectFilter);
+    }
+    var admitted = ChangeLog.scopeArgument(scope);
+    if (admitted != null) {
+      conditions.add("project IN (SELECT value FROM json_each(?))");
+      parameters.add(admitted);
+    }
     var counts =
-        projectFilter == null
-            ? db.query(
-                "SELECT status, COUNT(*) FROM specs GROUP BY status",
-                row -> new Object[] {row.text(0), row.integer(1)})
-            : db.query(
-                "SELECT status, COUNT(*) FROM specs WHERE project = ? GROUP BY status",
-                row -> new Object[] {row.text(0), row.integer(1)},
-                projectFilter);
+        db.query(
+            "SELECT status, COUNT(*) FROM specs"
+                + (conditions.isEmpty() ? "" : " WHERE " + String.join(" AND ", conditions))
+                + " GROUP BY status",
+            row -> new Object[] {row.text(0), row.integer(1)},
+            parameters.toArray());
     var byStatus = new EnumMap<SpecStatus, Integer>(SpecStatus.class);
     for (var status : SpecStatus.values()) {
       byStatus.put(status, 0);
@@ -1208,7 +1226,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     for (var row : counts) {
       byStatus.put(SpecStatus.fromWire((String) row[0]), (int) (long) row[1]);
     }
-    var ready = readySpecs(projectFilter);
+    var ready =
+        readySpecs(projectFilter).stream().filter(spec -> scope.admits(spec.project())).toList();
     var nextReadyId = ready.isEmpty() ? null : ready.getFirst().id();
     return new BoardSummary(
         byStatus.get(SpecStatus.DRAFT),
