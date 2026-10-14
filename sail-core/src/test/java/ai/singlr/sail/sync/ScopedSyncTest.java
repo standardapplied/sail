@@ -943,12 +943,29 @@ class ScopedSyncTest {
                         "u"),
             "run",
             runId);
+    var asked = new MessageStore(main.db).append("alpha-work", "nia", "asked in alpha", null);
+    moveRoom(main, "alpha-work", B);
+    var reply =
+        Map.<String, Object>of(
+            "room_id", "alpha-work",
+            "author", "nia",
+            "body", "answered from alpha",
+            "reply_to", asked.id(),
+            "created_at", "t");
     var heads = count(main.db, "SELECT count(*) FROM change_heads");
 
     assertEquals(
         "Room 'beta-work' was not found.",
         born("spec", "mine", with(spec, "room_id", "beta-work")),
         "a room of beta, owned by uma");
+    assertEquals(
+        "Spec 'beta-work' was not found.",
+        born("run", "beta-work", with(run, "spec_id", "beta-work")),
+        "a run on its spec's id names that spec all the same");
+    assertEquals(
+        "Room 'alpha-work' was not found.",
+        born("message", DateTimeUtils.newId().toString(), reply),
+        "a reply to what was asked in alpha, in a room since moved to beta");
     assertEquals(
         "Room 'beta-roomless' was not found.",
         born("spec", "mine", with(spec, "room_id", "beta-roomless")),

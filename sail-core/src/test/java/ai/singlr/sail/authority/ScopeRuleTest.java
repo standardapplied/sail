@@ -27,6 +27,7 @@ import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -119,6 +120,14 @@ class ScopeRuleTest {
         Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", hint),
         run.decide(NIA, "r", null, born("spec_id", "beta-work")));
     assertEquals(room, run.decide(NIA, "r", null, born("room_id", "beta-work")));
+    assertEquals(
+        Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Spec 'beta-work' was not found.", hint),
+        run.decide(NIA, "beta-work", null, born("spec_id", "beta-work")),
+        "a run born on its spec's id names that spec all the same");
+    assertEquals(
+        room,
+        run.decide(NIA, "beta-work", null, born("room_id", "beta-work")),
+        "a run born on its room's id names that room all the same");
     assertEquals(Optional.empty(), run.decide(NIA, "r", null, born("spec_id", "alpha-work")));
     assertEquals(Optional.empty(), run.decide(NIA, "r", null, born("spec_id", "nobodys")));
     assertEquals(
@@ -129,6 +138,65 @@ class ScopeRuleTest {
         Optional.empty(),
         rule.decide(Actors.OWNER_API, "new", null, born("room_id", "beta-work")),
         "an actor that sees every project is left to the type's rule");
+  }
+
+  @Test
+  void aReplyIsBornNamingAConversationInsideTheScopeThoughItsThreadIsFiledInside() {
+    var messages = new MessageStore(db);
+    var rooms = new RoomStore(db);
+    rooms.create(
+        new RoomStore.RoomRow(
+            "alpha-talk", "alpha", "talk", "uma", null, null, "uma", null, null, "uma"));
+    var asked = messages.append("alpha-work", "uma", "asked while the room was alpha's", null);
+    var home = messages.append("alpha-talk", "uma", "asked where the room stays", null);
+    moveRoom("alpha-work", "beta");
+    var rule = new ScopeRule(new ChangeLog(db), "message");
+    var hint = "Name one in a project this FDE is granted.";
+    var room = Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Room 'alpha-work' was not found.", hint);
+
+    assertEquals(
+        room,
+        rule.decide(NIA, "m", null, reply("room_id", "alpha-work", asked.id())),
+        "the thread is alpha's, the room it is in is not");
+    assertEquals(
+        room,
+        rule.decide(NIA, "m", null, reply("spec_id", "alpha-work", asked.id())),
+        "named by the key pre-rename entries carry");
+    assertEquals(
+        Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE, "Message 'm' is in no project this FDE is granted.", GRANT),
+        rule.decide(NIA, "m", null, reply("room_id", "alpha-work", null)),
+        "a fresh word in the moved room is beta's");
+    assertEquals(
+        Optional.empty(), rule.decide(NIA, "m", null, reply("room_id", "alpha-talk", home.id())));
+    assertEquals(
+        Optional.empty(),
+        rule.decide(Actors.OWNER_API, "m", null, reply("room_id", "alpha-work", asked.id())));
+  }
+
+  private void moveRoom(String id, String project) {
+    var rooms = new RoomStore(db);
+    var moved = new LinkedHashMap<>(rooms.comparableSnapshot(id));
+    moved.put("project", project);
+    Acting.system(
+        () ->
+            rooms.commitRevision(
+                id,
+                moved,
+                new ChangeLog(db).head("room", id).orElseThrow().rev(),
+                rooms.authority()));
+  }
+
+  private static Map<String, Object> reply(String conversationKey, String room, String to) {
+    var state = new LinkedHashMap<String, Object>();
+    state.put(conversationKey, room);
+    state.put("author", "nia");
+    state.put("body", "an answer");
+    state.put("created_at", "2026-10-14T00:00:00Z");
+    if (to != null) {
+      state.put("reply_to", to);
+    }
+    return state;
   }
 
   private static Map<String, Object> born(String field, String value) {

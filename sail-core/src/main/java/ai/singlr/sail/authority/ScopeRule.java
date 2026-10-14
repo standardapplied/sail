@@ -34,11 +34,18 @@ public final class ScopeRule {
 
   /**
    * The rows a state is born naming beside its project, by the field naming each and the type it
-   * names. A review's spec and a message's conversation are not here: each gives its child its
-   * project, which is asked already.
+   * names. A review's spec is not here: it gives the review its project, which is asked already. A
+   * message's conversation is, under either key a message names it by, since a reply takes the
+   * project of the message it answers, wherever its room has moved since.
    */
   private static final Map<String, Map<String, String>> NAMED =
-      Map.of(SPEC, Map.of("room_id", ROOM), "run", Map.of("spec_id", SPEC, "room_id", ROOM));
+      Map.of(
+          SPEC,
+          Map.of("room_id", ROOM),
+          "run",
+          Map.of("spec_id", SPEC, "room_id", ROOM),
+          "message",
+          Map.of("room_id", ROOM, "spec_id", ROOM));
 
   private final ChangeLog changeLog;
   private final String type;
@@ -91,7 +98,7 @@ public final class ScopeRule {
     for (var naming : NAMED.getOrDefault(type, Map.of()).entrySet()) {
       var named = Snapshots.text(next, naming.getKey());
       if (Strings.isNotBlank(named)
-          && !named.equals(id)
+          && !ownConversation(id, named)
           && beyond(scope, naming.getValue(), named)) {
         return Refusal.of(
             Refusal.Kind.OUT_OF_SCOPE,
@@ -102,6 +109,15 @@ public final class ScopeRule {
     return (SPEC.equals(type) || ROOM.equals(type)) && beyond(scope, ROOM, id)
         ? taken(id)
         : Optional.empty();
+  }
+
+  /**
+   * Whether a spec born as {@code id} names {@code named} as the room it lives in: its own
+   * conversation, asked below as the id of both. A run's id names nothing of the spec or room on
+   * the same id, which it reads as any other.
+   */
+  private boolean ownConversation(String id, String named) {
+    return SPEC.equals(type) && named.equals(id);
   }
 
   /**
