@@ -245,7 +245,12 @@ class EventTest {
   @Test
   void aLiveMembersStreamIsEphemeralAndNothingElseIs() {
     assertEquals(
-        Set.of("agent_presence", "agent_text_delta", "agent_tool_call", "agent_turn_ended"),
+        Set.of(
+            "agent_presence",
+            "agent_turn_began",
+            "agent_text_delta",
+            "agent_tool_call",
+            "agent_turn_ended"),
         Event.WellKnownTypes.EPHEMERAL_TYPES);
     for (var type : Event.WellKnownTypes.EPHEMERAL_TYPES) {
       assertEquals(Event.RetentionClass.EPHEMERAL, Event.WellKnownTypes.retentionClass(type), type);

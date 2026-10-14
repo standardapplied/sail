@@ -163,6 +163,9 @@ public record Event(
 
     public static final String AGENT_PRESENCE = "agent_presence";
 
+    /** A live member began a turn: it is working on an answer nothing of which is told yet. */
+    public static final String AGENT_TURN_BEGAN = "agent_turn_began";
+
     /** A live member wrote a fragment of its reply; {@code data.text} is the fragment. */
     public static final String AGENT_TEXT_DELTA = "agent_text_delta";
 
@@ -211,12 +214,13 @@ public record Event(
 
     /**
      * The {@link RetentionClass#EPHEMERAL} types: on the bus and the stream only, never persisted.
-     * Presence, and what a live member's stream is made of — its text as it is written, its tool
-     * calls and its turn ends — which exist to be watched as they happen; what a reader sees
-     * afterwards is the message the turn became.
+     * Presence, and what a live member's stream is made of — a turn's beginning, its text as it is
+     * written, its tool calls and its end — which exist to be watched as they happen; what a reader
+     * sees afterwards is the message the turn became.
      */
     public static final Set<String> EPHEMERAL_TYPES =
-        Set.of(AGENT_PRESENCE, AGENT_TEXT_DELTA, AGENT_TOOL_CALL, AGENT_TURN_ENDED);
+        Set.of(
+            AGENT_PRESENCE, AGENT_TURN_BEGAN, AGENT_TEXT_DELTA, AGENT_TOOL_CALL, AGENT_TURN_ENDED);
 
     public static RetentionClass retentionClass(String type) {
       if (TELEMETRY_TYPES.contains(type)) {

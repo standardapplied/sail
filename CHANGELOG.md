@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.48.0
+## 0.49.0
 
 - **A scoped FDE sees exactly its granted projects, on every box.** Sync was a full replica: main paged every row of every synced type to every node that authenticated, handed out any blob by hash, and sent the whole roster with emails; roles gated writes and no read was narrowed by who asked. An FDE can now be scoped to the projects main grants it, and one predicate, "is this row's project in this actor's scope" (`ProjectScope.admits`), is asked at every door that reads or writes a row: main's sync server, main's API and the journal that decides writes. An unscoped FDE, which is every FDE until one is added scoped, sees and does exactly what it did. **Upgrade main before granting anyone**: a node of an earlier release under the new main is sent only its scope all the same, but ignores the scope main names and so never drops a project on a revoke.
   - **`sail fde add <handle> --scoped`** adds an FDE that sees nothing until granted; **`sail fde grant <handle> <project>`** and **`sail fde revoke <handle> <project>`** (admin, on main or a standalone box, refused on a node with the roster sentence; `--dry-run`, `--json`; idempotent) edit its grants. A grant names a project in the catalog; a revoke takes back whatever was granted. `sail fde list` gains a `SCOPE` column (`all`, or the count and names), and `GET /v1/fdes` names each FDE's `scope` (`all`, or `granted` with its `projects`) to an admin reader and to no one else. An admin is never scoped and a scoped FDE never made admin: an admin edits the roster, and so could grant itself any project. There is no command yet that scopes an FDE who was added unscoped.
@@ -11,6 +11,10 @@
   - **Main's API and its event stream filter by the caller's scope.** Every read route, and every write route that addresses a row, answers a row outside the caller's scope exactly as one that does not exist, lists leave such rows out, and `GET /v1/events/stream` delivers no event of another project. A conversation is read message by message: what was said in a spec's room before the spec moved projects stays with the project it left, in the room's pages, its open question, a run's inbox and an agent's prompt alike. A run whose FDE lost its project is answered `run_not_found` on the local socket from the next request on. The SSH gateway's `spec`, `agent` and `events` commands reach the same routes as the same caller, so `ssh sail@main spec list` with a scoped node's key lists that node's projects.
   - `sail project init` and `sail project apply` on a scoped node refuse a project outside its scope before writing anything, naming `sail fde grant`.
   - Not in this release: a role per grant, a Mast surface for grants, and following a project rename (a rename is a new project to a grant; grant the new name).
+
+## 0.48.0
+
+- **A live member's turn says when it begins.** Nothing was published between a prompt reaching a live member and the first text or tool step of its answer, so a room showed nothing while the member thought. `agent_turn_began` is published at the first line of every turn, a thinking one included, carrying the `run_id`, `room_id`, `principal` and `turn` every live event does; like them it is never persisted and no client may publish it. A client names it in the room stream's `type=` list.
 
 ## 0.47.0
 

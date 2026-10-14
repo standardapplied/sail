@@ -1201,6 +1201,8 @@ class is `LiveMemberTest`'s):
   `LiveStreamTest.aPromptIsOneUserMessageLine`.*
 - **L2. Sail reads the process; the agent's reply is its text.** `system/init` records the
   session on the run (`session_source` `stream-json`) and publishes `agent_session_started`;
+  the first line of a turn, a thinking one included, publishes `agent_turn_began`, so a room
+  can say the member is working before any of its answer is written;
   a `text_delta` becomes `agent_text_delta`, fragments within 50 ms of one another told as
   one; a `tool_use` block becomes `agent_tool_call` `started` with the tool and its first
   string argument clipped to 120 code points, its `tool_result` the `finished`; `result` ends
@@ -1212,7 +1214,8 @@ class is `LiveMemberTest`'s):
   these say nothing. The member's settings file (`~/.sail/claude-live.json`) carries the
   read-deny rules and `includeCoAuthoredBy: false` and names no hook; it is installed and
   fingerprinted beside the hooks file.
-  *`sailReadsTheProcessAndPostsTheTurnsTextAsTheMember`, `LiveStreamTest`,
+  *`sailReadsTheProcessAndPostsTheTurnsTextAsTheMember`,
+  `aTurnsBeginningIsToldBeforeAnythingOfItIsAndOnceForEachTurn`, `LiveStreamTest`,
   `LiveMemberEdgesTest.textBlocksAreParagraphsAndLinesThatSayNothingAreIgnored`,
   `LiveMemberEdgesTest.aTurnThatStreamedNothingPostsItsResultAndAnEmptyOnePostsNothing`,
   `LiveMemberEdgesTest.whatTheAgentWritesIsBoundedWhereItEnters`,
@@ -1221,10 +1224,10 @@ class is `LiveMemberTest`'s):
   `LiveMemberPromptGoldenTest`, `HarnessGoldenTest.claudeCodeLiveFullMember`,
   `HarnessHooksGoldenTest.claudeCodeLiveSettingsNameNoHook`,
   `ContainerSailSetupTest.fingerprintCoversEveryInstalledFile`.*
-- **L3. The room is the record.** `agent_text_delta`, `agent_tool_call` and `agent_turn_ended`
-  are `EPHEMERAL`: on the bus and the stream, never persisted, and no client may publish one
-  (they are absent from `EventAuthority`'s list, so an admin's and a run's publish are both
-  refused). `GET /v1/events/stream?room=<id>` scopes a stream to one room beside `project` and
+- **L3. The room is the record.** `agent_turn_began`, `agent_text_delta`, `agent_tool_call` and
+  `agent_turn_ended` are `EPHEMERAL`: on the bus and the stream, never persisted, and no client
+  may publish one (they are absent from `EventAuthority`'s list, so an admin's and a run's
+  publish are both refused). `GET /v1/events/stream?room=<id>` scopes a stream to one room beside `project` and
   `type`.
   *`EventTest.aLiveMembersStreamIsEphemeralAndNothingElseIs`,
   `SpecStoreAuditPersisterTest.aLiveMembersStreamIsNeverPersisted`,
