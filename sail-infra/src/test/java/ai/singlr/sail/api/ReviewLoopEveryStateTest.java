@@ -19,6 +19,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.store.ReviewStore;
 import java.nio.file.Path;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -468,7 +469,11 @@ class ReviewLoopEveryStateTest {
         });
   }
 
-  /** A run row of {@link #STATE} in lane {@code role}: ended, or with its agent at work. */
+  /**
+   * A run row of {@link #STATE} in lane {@code role}: ended, or with its agent at work. It starts
+   * on a whole second, so runs written together tie and the store orders them by id, as minted: an
+   * instant's text drops trailing zeros, and sorts after a longer one of the same millisecond.
+   */
   private String runRow(String role, String review, boolean ended) {
     var id = DateTimeUtils.newId().toString();
     var unit = AgentUnit.forRun(id);
@@ -483,7 +488,7 @@ class ReviewLoopEveryStateTest {
         ReviewLoop.HANDLE,
         ReviewLoop.HANDLE,
         role,
-        DateTimeUtils.now().toString(),
+        DateTimeUtils.now().truncatedTo(ChronoUnit.SECONDS).toString(),
         unit.logPath(),
         unit.unitName(),
         review);
