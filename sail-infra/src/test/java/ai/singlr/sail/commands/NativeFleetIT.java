@@ -364,12 +364,16 @@ class NativeFleetIT {
       assertEquals(0, NativeFleet.json(nia.sailOk("sync", "--json")).get("pulled"));
 
       main.sailOk("fde", "revoke", "ole", "alpha");
-      released.sailOk("sync");
+      var releasedRevoked = released.sail("sync");
 
+      assertEquals(0, releasedRevoked.exit(), releasedRevoked::output);
+      assertTrue(
+          releasedRevoked.output().contains("project alpha: dropped from this box with the"),
+          releasedRevoked::output);
       assertEquals(
-          "a-1\na-2",
+          "",
           released.query("SELECT id FROM specs ORDER BY id").strip(),
-          "a node that predates scoping is sent nothing more, and drops nothing");
+          "a node of the last release drops the project main revoked, as one of this build does");
     }
   }
 
