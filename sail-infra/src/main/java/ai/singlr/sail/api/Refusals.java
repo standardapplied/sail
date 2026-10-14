@@ -46,10 +46,6 @@ public final class Refusals {
     return failure instanceof WriteRefused refused ? exception(refused.refusal()) : failure;
   }
 
-  /**
-   * Refuses a read-only credential a side effect on this box that no synced row's rule decides — to
-   * {@code act} ("restore snapshots") — with the refusal every rule gives a read-only role.
-   */
   /** The answer for a room the caller may not see: the same as for one that is not there. */
   static ApiException roomNotFound(String roomId) {
     return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
@@ -60,6 +56,10 @@ public final class Refusals {
     return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
   }
 
+  /**
+   * Refuses a read-only credential a side effect on this box that no synced row's rule decides — to
+   * {@code act} ("restore snapshots") — with the refusal every rule gives a read-only role.
+   */
   static void requireWriter(String act) {
     if (!Actor.current().canWrite()) {
       throw exception(Refusal.readOnly(act).orElseThrow());
