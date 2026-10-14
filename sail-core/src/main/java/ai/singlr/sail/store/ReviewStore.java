@@ -789,8 +789,8 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
    * Applies {@code changes}, fields to set per finding id, to the content of every review holding
    * one of the findings: one revision per review whose content changes, none for a review whose
    * findings already read so. A finding this box does not hold changes nothing, and neither does
-   * one of a review filed outside the bound actor's scope: a write that reaches findings through
-   * their spec or their follow-up passes over a review its actor could not read.
+   * one of a review filed outside the reader's scope: a write that reaches findings through their
+   * spec or their follow-up passes over a review its actor could not read.
    */
   private void amend(Map<String, Map<String, Object>> changes) {
     var scope = Actor.reader().scope();

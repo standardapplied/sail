@@ -14,6 +14,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -464,5 +465,22 @@ class ErasureTest {
 
   private long count(String sql) {
     return db.queryOne(sql, row -> row.integer(0)).orElseThrow();
+  }
+
+  @Test
+  void aProjectsErasureTakesItsGrantsWithIt() {
+    var fdes = new FdeStore(db);
+    fdes.add("bob", null, null, "member");
+    fdes.restrict("bob");
+    new ProjectStore(db).upsert("alpha", "name: alpha\n");
+    fdes.grant("bob", "alpha");
+    fdes.grant("bob", "beta");
+
+    erasure.erase(erasure.closure(List.of(new Erasure.Target(Erasure.PROJECT, "alpha"))), "local");
+
+    assertEquals(
+        ProjectScope.of(List.of("beta")),
+        fdes.scopeOf("bob"),
+        "a project created under the erased name later is another, granted anew");
   }
 }

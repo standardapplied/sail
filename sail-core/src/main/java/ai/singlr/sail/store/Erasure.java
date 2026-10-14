@@ -106,6 +106,7 @@ public final class Erasure {
   private final EraseRequests requests;
   private final SpecStore specs;
   private final RunStore runs;
+  private final FdeStore fdes;
   private final SlackThreadStore slackThreads;
   private final Map<String, SyncedStore> stores = new LinkedHashMap<>();
 
@@ -117,6 +118,7 @@ public final class Erasure {
     this.requests = new EraseRequests(db);
     this.specs = new SpecStore(db);
     this.runs = new RunStore(db);
+    this.fdes = new FdeStore(db);
     this.slackThreads = new SlackThreadStore(db);
     for (var entity : SyncedEntities.all()) {
       stores.put(entity.type(), entity.store(db));
@@ -390,6 +392,7 @@ public final class Erasure {
       case ROOM -> events.eraseBySpec(target.id());
       case PROJECT -> {
         runs.eraseLeases(target.id());
+        fdes.revokeFromEveryone(target.id());
         yield events.eraseByProject(target.id());
       }
       default -> 0;

@@ -83,7 +83,8 @@ public final class ScopeRule {
     if (inside(scope, project, next)) {
       return held == null && next != null ? bornBeyond(scope, id, next) : Optional.empty();
     }
-    return project != null && (project.equals(id) || project.equals(next.get("project")))
+    return project != null
+            && (project.equals(id) || next != null && project.equals(next.get("project")))
         ? Refusal.of(Refusal.Kind.OUT_OF_SCOPE, "Project '" + project + "' was not found.", GRANT)
         : unplaced(id);
   }

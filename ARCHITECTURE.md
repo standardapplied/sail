@@ -234,9 +234,10 @@ known project is admitted by an unrestricted scope only. The scope is resolved w
 actor's FDE is resolved against main's roster, by the rule that resolves its role
 (`RoleRule.scopeOf`): the API's session and token authentication, and with them the SSH
 gateway's commands, and main's `_sync` server, where a session that names no FDE sees nothing.
-The CLI operator, a run's principals, main's own and a box's machinery see every project, and
-so does every actor on a node: a node mirrors no scope and decides no visibility. It holds
-what main sent and drops what main stops sending.
+The CLI operator, main's own FDE (an admin, and so never scoped, whatever the roster says of
+it) and a box's machinery see every project, and so does every actor on a node: a node mirrors
+no scope and decides no visibility. It holds what main sent and drops what main stops sending.
+A run's principal and the box credential see what the FDE they act for sees.
 
 **Heads carry their project.** `change_heads.project` is written with every append from
 `ChangeLog.projectOf`, the one derivation: the `project` a spec, room or run names, the one a
@@ -325,7 +326,9 @@ into the dropped project left its room, its thread and its runs in the one it ca
 which main still sends the node and, their heads being behind its checkpoints, would never
 send again. A thread is never split so, a reply being filed with what it answers. It is decided from what the box holds, never from what it was last told, so a drop
 put off by a failed round or by a run still under way here happens on the next round that
-finds it. A scope that admits a project the recorded one (`sync_scope`) did not resets the
+finds it. So does the content of a row main denied after a revoke: its `denied` tombstone
+keeps the row's last state, so its blobs stay referenced until the next round's start finds
+the head still filed under the revoked project and drops it, content included. A scope that admits a project the recorded one (`sync_scope`) did not resets the
 node's checkpoints (`SyncState.reset`), since the project's history sits below them. A
 welcome naming no scope records every project: an older main scopes no one.
 

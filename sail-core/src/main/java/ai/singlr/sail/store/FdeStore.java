@@ -43,6 +43,11 @@ public final class FdeStore {
       String status,
       String createdAt) {
 
+    /** This FDE as the roster shows it to one who may not read its email. */
+    public Fde withoutEmail() {
+      return new Fde(id, handle, displayName, "", role, status, createdAt);
+    }
+
     /** Whether this FDE may act at all: a {@code disabled} one is refused through every door. */
     public boolean active() {
       return "active".equals(status);
@@ -196,9 +201,35 @@ public final class FdeStore {
             + " grant itself any project. Scope a member or a viewer.");
   }
 
-  /** The projects {@code handle} may see ({@link ProjectScope#of(Sqlite, String)}). */
+  /**
+   * The scope this roster gives the FDE {@code handle}: its grants when the roster scopes it, every
+   * project otherwise. A credential naming no FDE, or one the roster does not hold, is not an FDE
+   * main scoped; whether it may act at all is the role rule's to refuse.
+   */
   public ProjectScope scopeOf(String handle) {
-    return ProjectScope.of(db, handle);
+    if (Strings.isBlank(handle)) {
+      return ProjectScope.all();
+    }
+    return db.queryOne(
+            "SELECT id FROM fdes WHERE handle = ? AND scope = 'granted'",
+            row -> row.text(0),
+            handle)
+        .map(
+            id ->
+                ProjectScope.of(
+                    db.query(
+                        "SELECT project FROM project_grants WHERE fde_id = ?",
+                        row -> row.text(0),
+                        id)))
+        .orElse(ProjectScope.all());
+  }
+
+  /**
+   * Takes {@code project} back from every FDE granted it: the project was erased, and one created
+   * under its name later is another project, granted anew.
+   */
+  public void revokeFromEveryone(String project) {
+    db.execute("DELETE FROM project_grants WHERE project = ?", project);
   }
 
   /**
@@ -280,18 +311,7 @@ public final class FdeStore {
             fde ->
                 fde.handle().equals(reader)
                     || scope.projects().stream().anyMatch(scopeOf(fde.handle())::admits))
-        .map(
-            fde ->
-                fde.handle().equals(reader)
-                    ? fde
-                    : new Fde(
-                        fde.id(),
-                        fde.handle(),
-                        fde.displayName(),
-                        "",
-                        fde.role(),
-                        fde.status(),
-                        fde.createdAt()))
+        .map(fde -> fde.handle().equals(reader) ? fde : fde.withoutEmail())
         .toList();
   }
 

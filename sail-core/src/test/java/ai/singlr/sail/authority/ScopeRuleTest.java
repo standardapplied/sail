@@ -93,6 +93,13 @@ class ScopeRuleTest {
         rule.decide(NIA, "new", null, Map.of("title", "names no project")));
     assertEquals(
         Optional.empty(), rule.decide(NIA, "new", null, Map.of("project", "alpha", "title", "t")));
+    assertEquals(
+        Refusal.of(
+            Refusal.Kind.OUT_OF_SCOPE,
+            "File 'beta/notes.md' is in no project this FDE is granted.",
+            GRANT),
+        new ScopeRule(new ChangeLog(db), "file").decide(NIA, "beta/notes.md", null, null),
+        "a deletion of a file this box never held is placed by its id");
   }
 
   @Test

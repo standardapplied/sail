@@ -503,14 +503,7 @@ public final class SailOperations implements HostOperations {
     }
     return boxCredentialStore
         .resolve(credential)
-        .flatMap(
-            handle ->
-                roles()
-                    .roleOf(handle, Role.ADMIN)
-                    .map(
-                        role ->
-                            new Actor(handle, role, Actor.Lane.CLI)
-                                .withScope(roles().scopeOf(handle))));
+        .flatMap(handle -> roles().actorOf(handle, Role.ADMIN, Actor.Lane.CLI));
   }
 
   SailOperations(

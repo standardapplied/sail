@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -157,5 +158,25 @@ class RoleRuleTest {
     assertEquals(Role.VIEWER, Role.VIEWER.cappedBy(Role.ADMIN));
     assertEquals(Role.MEMBER, Role.MEMBER.cappedBy(Role.MEMBER));
     assertEquals("viewer", Role.VIEWER.attribute());
+  }
+
+  @Test
+  void theOperatorIsNeverScopedWhateverTheRosterSaysAndAnActorCarriesItsRoleAndScopeTogether() {
+    roster.restrict("uday");
+    roster.restrict("mady");
+    roster.grant("mady", "alpha");
+    var rule = new RoleRule(() -> MAIN, roster);
+
+    assertEquals(ProjectScope.all(), rule.scopeOf("uday"), "main's own FDE acts as an admin");
+    assertEquals(
+        Optional.of(new Actor("uday", Role.ADMIN, Actor.Lane.API)),
+        rule.actorOf("uday", Role.ADMIN, Actor.Lane.API));
+    assertEquals(
+        Optional.of(
+            new Actor("mady", Role.MEMBER, Actor.Lane.SYNC)
+                .withScope(ProjectScope.of(List.of("alpha")))),
+        rule.actorOf("mady", Role.ADMIN, Actor.Lane.SYNC));
+    assertEquals(Optional.empty(), rule.actorOf("nobody", Role.ADMIN, Actor.Lane.API));
+    assertEquals(ProjectScope.all(), new RoleRule(() -> MAIN, null).scopeOf("mady"));
   }
 }

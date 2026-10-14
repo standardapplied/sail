@@ -79,10 +79,10 @@ class ProjectScopeTest {
     fdes.add("ada", "Ada", "ada@x.dev", "admin");
     fdes.add("bob", "Bob", "bob@x.dev", "member");
 
-    assertEquals(ProjectScope.all(), ProjectScope.of(db, "bob"));
-    assertEquals(ProjectScope.all(), ProjectScope.of(db, "unknown"));
-    assertEquals(ProjectScope.all(), ProjectScope.of(db, null));
-    assertEquals(ProjectScope.all(), ProjectScope.of(db, " "));
+    assertEquals(ProjectScope.all(), fdes.scopeOf("bob"));
+    assertEquals(ProjectScope.all(), fdes.scopeOf("unknown"));
+    assertEquals(ProjectScope.all(), fdes.scopeOf(null));
+    assertEquals(ProjectScope.all(), fdes.scopeOf(" "));
 
     assertTrue(fdes.restrict("bob"));
     assertFalse(fdes.restrict("unknown"));

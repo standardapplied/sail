@@ -60,10 +60,19 @@ public final class RoleRule {
   /**
    * The projects a credential naming FDE {@code handle} may see, resolved at the same doors as its
    * role: the grants of an FDE main's roster scopes, every project otherwise. A box that keeps no
-   * roster scopes no one.
+   * roster scopes no one, and the operator, an admin whatever the roster says, is never scoped.
    */
   public ProjectScope scopeOf(String handle) {
-    return roster == null ? ProjectScope.all() : roster.scopeOf(handle);
+    return roster == null || isOperator(handle) ? ProjectScope.all() : roster.scopeOf(handle);
+  }
+
+  /**
+   * The actor a credential naming FDE {@code handle} and minted with {@code cap} acts as on {@code
+   * lane}: its role and its scope, resolved together; empty when the credential is refused.
+   */
+  public Optional<Actor> actorOf(String handle, Role cap, Actor.Lane lane) {
+    return roleOf(handle, cap)
+        .map(role -> new Actor(handle, role, lane).withScope(scopeOf(handle)));
   }
 
   /** Whether {@code handle} names an FDE other than this node's own. */

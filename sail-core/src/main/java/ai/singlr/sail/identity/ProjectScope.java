@@ -5,8 +5,6 @@
 
 package ai.singlr.sail.identity;
 
-import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.store.Sqlite;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Set;
@@ -41,31 +39,6 @@ public record ProjectScope(boolean unrestricted, Set<String> projects) {
   /** Exactly {@code projects}. */
   public static ProjectScope of(Collection<String> projects) {
     return projects.isEmpty() ? NONE : new ProjectScope(false, Set.copyOf(projects));
-  }
-
-  /**
-   * The scope main's roster in {@code db} gives the FDE {@code handle}: its grants when the roster
-   * scopes it, every project otherwise. A credential naming no FDE, or one the roster does not
-   * hold, is not an FDE main scoped; whether it may act at all is {@link RoleRule}'s to refuse.
-   */
-  public static ProjectScope of(Sqlite db, String handle) {
-    if (Strings.isBlank(handle)) {
-      return ALL;
-    }
-    var scoped =
-        db.queryOne(
-            "SELECT id FROM fdes WHERE handle = ? AND scope = 'granted'",
-            row -> row.text(0),
-            handle);
-    return scoped
-        .map(
-            id ->
-                of(
-                    db.query(
-                        "SELECT project FROM project_grants WHERE fde_id = ?",
-                        row -> row.text(0),
-                        id)))
-        .orElse(ALL);
   }
 
   /**

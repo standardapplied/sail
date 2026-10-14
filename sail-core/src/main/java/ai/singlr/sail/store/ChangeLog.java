@@ -460,7 +460,8 @@ public final class ChangeLog {
                         AND p.entity_id = json_extract(%3$s, '$.reply_to')),
                     (SELECT p.project FROM change_heads p
                         WHERE p.entity_type = 'room' AND p.entity_id = c.id),
-                    (SELECT s.project FROM specs s WHERE s.room_id = c.id OR s.id = c.id LIMIT 1),
+                    (SELECT s.project FROM specs s WHERE s.id = c.id),
+                    (SELECT s.project FROM specs s WHERE s.room_id = c.id ORDER BY s.id LIMIT 1),
                     (SELECT p.project FROM change_heads p
                         WHERE p.entity_type = 'spec' AND p.entity_id = c.id))
                 FROM (SELECT COALESCE(json_extract(%3$s, '$.room_id'),

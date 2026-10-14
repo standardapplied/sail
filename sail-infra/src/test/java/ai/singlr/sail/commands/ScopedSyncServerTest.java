@@ -134,7 +134,7 @@ class ScopedSyncServerTest {
     assertEquals(ProjectScope.all(), round.scope());
     assertEquals(
         List.of("a1", "b1"), nodeDb.query("SELECT id FROM specs ORDER BY id", row -> row.text(0)));
-    assertEquals(SyncServerCommand.roster(mainDb), round.roster());
+    assertEquals(SyncServerCommand.roster(mainDb, Actor.main()), round.roster());
     assertEquals(
         List.of("ada@x.dev", "bob@x.dev", "nia@x.dev", "sam@x.dev", "uma@x.dev", "zed@x.dev"),
         round.roster().stream().map(fde -> fde.get("email")).toList());

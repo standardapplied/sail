@@ -50,8 +50,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
    * as one that does not exist, before anything names its project.
    */
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
-    var actor =
-        new Actor(who.fde(), roleOf(who.fde()), Actor.Lane.API).withScope(roles.scopeOf(who.fde()));
+    var actor = actorOf(who.fde());
     var room =
         Scoped.row(actor, new RoomStore(db).findById(roomId), RoomStore.RoomRow::project)
             .orElseThrow(() -> new IOException("Room '" + roomId + "' was not found."));
@@ -72,14 +71,18 @@ public record HostAccess(Sqlite db, RoleRule roles) {
   }
 
   private Role roleOf(String handle) throws IOException {
-    var role = roles.roleOf(handle, Role.ADMIN);
-    if (role.isEmpty()) {
+    return actorOf(handle).role();
+  }
+
+  private Actor actorOf(String handle) throws IOException {
+    var actor = roles.actorOf(handle, Role.ADMIN, Actor.Lane.API);
+    if (actor.isEmpty()) {
       throw new IOException(
           "FDE '"
               + handle
               + "' is disabled or not in this box's roster. Ask an admin to re-enable it, or run"
               + " 'sail sync' on a node that has not synced its roster.");
     }
-    return role.get();
+    return actor.get();
   }
 }

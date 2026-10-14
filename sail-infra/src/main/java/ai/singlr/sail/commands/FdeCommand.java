@@ -503,10 +503,10 @@ public final class FdeCommand implements Runnable {
   /**
    * Grants ({@code grant}) or revokes {@code project} for the scoped FDE {@code handle} and says
    * what that did. A grant names a project in the catalog; a revoke takes back whatever was
-   * granted, a project since pruned included. Either one repeated changes nothing. A grant first
-   * fills the project of any head written without one — by the server of the release before, in the
-   * moments the upgrade migrated under it — since main pages a scoped node by its heads alone and
-   * such a head would never reach it.
+   * granted. Either one repeated changes nothing. A grant first fills the project of any head
+   * written without one — by the server of the release before, in the moments the upgrade migrated
+   * under it — since main pages a scoped node by its heads alone and such a head would never reach
+   * it.
    */
   static String scopeEdit(
       Sqlite db, String handle, String project, boolean grant, boolean dryRun, boolean json) {

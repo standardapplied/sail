@@ -196,11 +196,6 @@ public final class SyncServerCommand implements Callable<Integer> {
     }
   }
 
-  /** Main's whole roster, as an unscoped FDE's node mirrors it. */
-  static List<Map<String, Object>> roster(Sqlite db) {
-    return roster(db, Actor.sync(null, Role.VIEWER));
-  }
-
   /** Main's roster as {@code principal}'s node mirrors it ({@link FdeStore#visibleTo}). */
   static List<Map<String, Object>> roster(Sqlite db, Actor principal) {
     return new FdeStore(db)
@@ -230,9 +225,6 @@ public final class SyncServerCommand implements Callable<Integer> {
     if (fde.isEmpty()) {
       return Optional.of(Actor.sync(null, Role.VIEWER).withScope(ProjectScope.none()));
     }
-    var handle = fde.get().handle();
-    return roles
-        .roleOf(handle, Role.ADMIN)
-        .map(role -> Actor.sync(handle, role).withScope(roles.scopeOf(handle)));
+    return roles.actorOf(fde.get().handle(), Role.ADMIN, Actor.Lane.SYNC);
   }
 }
