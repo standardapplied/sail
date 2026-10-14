@@ -61,7 +61,9 @@ public final class ConflictOperations {
    * types.
    */
   private List<SyncConflicts.Conflict> readable() {
-    return Scoped.rows(Actor.reader(), conflicts.pending(), this::projectOf);
+    var changes = new ChangeLog(db);
+    return Scoped.rows(
+        Actor.reader(), conflicts.pending(), conflict -> projectOf(changes, conflict));
   }
 
   /**
@@ -69,8 +71,7 @@ public final class ConflictOperations {
    * ChangeLog#projectOf}): the one its head on this box carries, else the one the side the conflict
    * recorded names, and null when neither places it.
    */
-  private String projectOf(SyncConflicts.Conflict conflict) {
-    var changes = new ChangeLog(db);
+  private static String projectOf(ChangeLog changes, SyncConflicts.Conflict conflict) {
     var type = conflict.entityType();
     var id = conflict.entityId();
     return changes

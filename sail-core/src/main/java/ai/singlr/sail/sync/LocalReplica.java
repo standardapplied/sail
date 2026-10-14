@@ -34,6 +34,9 @@ public interface LocalReplica {
    */
   Set<String> dirtyIds();
 
+  /** The project this box files {@code id} under, by its head; null when the head names none. */
+  String project(String id);
+
   /**
    * Whether this node may push its own change to {@code id} up to main, or may only pull main's
    * version. Multi-writer entities (specs, files, projects) always may. A single-writer entity like

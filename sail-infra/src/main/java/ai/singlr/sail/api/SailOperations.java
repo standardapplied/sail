@@ -70,6 +70,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 public final class SailOperations implements HostOperations {
 
@@ -308,7 +309,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public ProjectFiles projectFiles(String project) {
     return new SharedProjectFiles(
-        new FileStore(controlPlane), projectsDir, project, FileLimits.load());
+        new FileStore(controlPlane), projectsDir, readable(project), FileLimits.load());
   }
 
   private final ShellExec shell;
@@ -901,7 +902,12 @@ public final class SailOperations implements HostOperations {
         });
   }
 
-  /** Appends into a room and publishes {@code spec_message_posted}, scoped by the room id. */
+  /**
+   * Appends into a room and publishes {@code spec_message_posted} under the project the message is
+   * filed in — a reply's is its thread's, wherever the room has moved since — so a stream that
+   * cannot read the message is never told of it; {@code project}, the room's, places a message the
+   * journal filed nowhere.
+   */
   private SpecMessageResponse appendMessage(
       String project, String roomId, SpecMessageRequest request, String author) {
     var store = requireMessageStore();
@@ -919,7 +925,7 @@ public final class SailOperations implements HostOperations {
     }
     publishOnBus(
         Event.of(
-            project,
+            Objects.requireNonNullElse(store.projectOf(row), project),
             roomId,
             Event.WellKnownTypes.SPEC_MESSAGE_POSTED,
             author,
@@ -935,7 +941,7 @@ public final class SailOperations implements HostOperations {
    */
   private RoomStore.RoomRow requireRoomOrSpec(String roomId) {
     return Scoped.row(Actor.reader(), roomOrSpec(roomId), RoomStore.RoomRow::project)
-        .orElseThrow(() -> roomNotFound(roomId));
+        .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
   /**
@@ -965,10 +971,6 @@ public final class SailOperations implements HostOperations {
               spec.updatedBy()));
     }
     return roomStore == null ? Optional.empty() : roomStore.findById(roomId);
-  }
-
-  private static ApiException roomNotFound(String roomId) {
-    return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
   @Override
@@ -1078,7 +1080,7 @@ public final class SailOperations implements HostOperations {
           var store = requireRoomStore();
           return detailOf(
               Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
-                  .orElseThrow(() -> roomNotFound(roomId)));
+                  .orElseThrow(() -> Refusals.roomNotFound(roomId)));
         });
   }
 
@@ -1092,13 +1094,16 @@ public final class SailOperations implements HostOperations {
               return store.atomically(
                   () -> {
                     Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
-                        .orElseThrow(() -> roomNotFound(roomId));
+                        .orElseThrow(() -> Refusals.roomNotFound(roomId));
                     var attached = specsIn(roomId);
+                    var seen = Scoped.rows(Actor.reader(), attached, SpecStore.SpecRow::project);
                     if (!attached.isEmpty()) {
                       throw new ApiException(
                           ErrorCode.CONFLICT,
-                          "Room '" + roomId + "' holds " + attached.size() + " spec(s).",
-                          rehoming(attached));
+                          seen.isEmpty()
+                              ? "Room '" + roomId + "' holds work outside your project scope."
+                              : "Room '" + roomId + "' holds " + seen.size() + " spec(s).",
+                          rehoming(seen));
                     }
                     store.delete(roomId);
                     return new RoomDeletedResponse(roomId);
@@ -1128,14 +1133,12 @@ public final class SailOperations implements HostOperations {
   }
 
   /** What to do about {@code attached}, naming only the specs the reader may see. */
-  private static String rehoming(List<SpecStore.SpecRow> attached) {
-    var seen =
-        Scoped.rows(Actor.reader(), attached, SpecStore.SpecRow::project).stream()
-            .map(SpecStore.SpecRow::id)
-            .toList();
+  /** How to empty a room that holds {@code seen}, the specs in it the caller may see. */
+  private static String rehoming(List<SpecStore.SpecRow> seen) {
     return seen.isEmpty()
         ? "Ask an admin to re-home its specs: none is in a project this FDE is granted."
-        : "Delete or re-home its specs first: " + String.join(", ", seen);
+        : "Delete or re-home its specs first: "
+            + seen.stream().map(SpecStore.SpecRow::id).collect(Collectors.joining(", "));
   }
 
   private List<SpecStore.SpecRow> specsIn(String roomId) {
@@ -1238,8 +1241,10 @@ public final class SailOperations implements HostOperations {
    * is answered as one the catalog does not hold.
    */
   private static String readable(String project) {
-    return Scoped.row(Actor.reader(), Optional.of(project), Function.identity())
-        .orElseThrow(() -> ProjectReader.absent(project));
+    if (!Actor.reader().scope().admits(project)) {
+      throw ProjectReader.absent(project);
+    }
+    return project;
   }
 
   /**
@@ -1695,7 +1700,8 @@ public final class SailOperations implements HostOperations {
     }
     return safe(
         () -> {
-          var events = Scoped.rows(Actor.reader(), auditPersister.recent(limit), Event::project);
+          var scope = Actor.reader().scope();
+          var events = auditPersister.recent(limit, event -> scope.admits(event.project()));
           var maps = events.stream().map(Event::toMap).toList();
           return new RecentEventsResponse(limit, maps.size(), maps);
         });
@@ -1719,10 +1725,12 @@ public final class SailOperations implements HostOperations {
     return safe(
         () -> {
           var rows =
-              Scoped.rows(
-                  Actor.reader(),
-                  eventStore.forSpec(specId, since, limit, Event.WellKnownTypes.TELEMETRY_TYPES),
-                  EventStore.EventRow::project);
+              eventStore.forSpec(
+                  specId,
+                  since,
+                  limit,
+                  Event.WellKnownTypes.TELEMETRY_TYPES,
+                  Actor.reader().scope());
           var maps = rows.stream().map(SailOperations::eventRowMap).toList();
           return new SpecEventsResponse(specId, since, limit, maps.size(), maps);
         });

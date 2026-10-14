@@ -139,7 +139,9 @@ public final class EventAuthority {
 
   /**
    * The {@link Subject} of an event its sender addressed to {@code project}, {@code conversation}
-   * (a spec or room id, null for none) and {@code runId} (null for none).
+   * (a spec or room id, null for none) and {@code runId} (null for none). An event about a run is
+   * of the project the run is filed under, where its owner reads it, though its spec has moved
+   * since; the spec still decides whose it is.
    */
   public Subject subject(String project, String conversation, String runId) {
     var run = Strings.isBlank(runId) ? Optional.<RunStore.RunRow>empty() : runs.findById(runId);
@@ -149,7 +151,7 @@ public final class EventAuthority {
     var held = run.get();
     var worked = about(held.project(), held.conversationId());
     return new Subject(
-        worked.project(),
+        held.project(),
         worked.conversation(),
         held.id(),
         worked.conversation() == null

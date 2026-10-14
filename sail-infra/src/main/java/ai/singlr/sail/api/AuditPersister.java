@@ -11,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayDeque;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -64,19 +63,25 @@ public final class AuditPersister implements EventSubscriber {
 
   /** Returns up to {@code limit} most-recently-observed events, oldest first. */
   public List<Event> recent(int limit) {
+    return recent(limit, event -> true);
+  }
+
+  /**
+   * Up to {@code limit} of the most recently observed events {@code admitted} accepts, oldest
+   * first: a page is as long as its limit of what its reader sees, however busy what it does not.
+   */
+  public List<Event> recent(int limit, Predicate<Event> admitted) {
     if (limit <= 0) {
       throw new IllegalArgumentException("limit must be positive, got " + limit);
     }
     synchronized (recentLock) {
-      var size = recent.size();
-      var n = Math.min(limit, size);
-      var out = new ArrayList<Event>(n);
-      var iter = recent.iterator();
-      for (var skip = size - n; skip > 0; skip--) {
-        iter.next();
-      }
-      for (var i = 0; i < n; i++) {
-        out.add(iter.next());
+      var out = new ArrayDeque<Event>();
+      var newest = recent.descendingIterator();
+      while (newest.hasNext() && out.size() < limit) {
+        var event = newest.next();
+        if (admitted.test(event)) {
+          out.addFirst(event);
+        }
       }
       return List.copyOf(out);
     }

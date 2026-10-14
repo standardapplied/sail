@@ -281,6 +281,11 @@ class SyncTransportTest {
     }
 
     @Override
+    public String project(String id) {
+      return inner.project(id);
+    }
+
+    @Override
     public Set<String> dirtyIds() {
       return inner.dirtyIds();
     }

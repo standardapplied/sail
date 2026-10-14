@@ -920,6 +920,49 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aDirtySpecAndItsThreadStayWhileTheProjectIsKeptForALiveRun() {
+    seed(main, A, "nia");
+    SyncBox.quiesce(main, nia);
+    var run = DateTimeUtils.newId().toString();
+    Acting.as(
+        "nia",
+        () ->
+            new RunStore(nia.db)
+                .create(
+                    run,
+                    A,
+                    "alpha-work",
+                    "nia",
+                    "build",
+                    "claude",
+                    "b",
+                    "t",
+                    null,
+                    null,
+                    "/l",
+                    "u"));
+    Acting.as("nia", () -> nia.specs.updateStatus("alpha-work", SpecStatus.IN_PROGRESS));
+    var posted =
+        Acting.as(
+            "nia", () -> new MessageStore(nia.db).append("alpha-work", "nia", "working", null));
+
+    var kept = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.none())));
+
+    assertInstanceOf(Settlement.How.Kept.class, kept.settled().getFirst().how());
+    assertEquals(
+        List.of(),
+        kept.types().stream().flatMap(report -> report.denials().stream()).toList(),
+        "nothing of a kept project is offered, so nothing of it is denied and withdrawn");
+    assertTrue(new RunStore(nia.db).findById(run).isPresent(), "the live run stays");
+    assertEquals(
+        Optional.of(SpecStatus.IN_PROGRESS),
+        nia.specs.findById("alpha-work").map(SpecStore.SpecRow::status),
+        "the spec the run works stays as the run left it");
+    assertTrue(new MessageStore(nia.db).findById(posted.id()).isPresent(), "and its thread");
+    assertEquals(Optional.of(A), new ChangeLog(nia.db).headProject("spec", "alpha-work"));
+  }
+
+  @Test
   void aRowIsBornNamingOnlyWhatItsPusherMaySee() throws Exception {
     seed(main, A, "nia");
     seed(main, B, "uma");

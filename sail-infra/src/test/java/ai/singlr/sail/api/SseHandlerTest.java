@@ -153,6 +153,7 @@ class SseHandlerTest {
     ApiAuth auth =
         exchange -> {
           exchange.setAttribute("token.role", "member");
+          exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
           if ("Bearer scoped".equals(exchange.getRequestHeaders().getFirst("Authorization"))) {
             exchange.setAttribute("token.fde", "sam");
             exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.of(List.of("light")));

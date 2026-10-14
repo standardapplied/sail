@@ -220,9 +220,7 @@ final class GlobalSpecOperations {
           "Start the server with 'sail server start' or omit the room.");
     }
     return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
-        .orElseThrow(
-            () ->
-                new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found."));
+        .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
   /**
@@ -375,13 +373,19 @@ final class GlobalSpecOperations {
   /**
    * Writes an explicit wake edit onto the spec's home room — the one home the wake mode has, and
    * the same room messages, roster, and the spec view read. For a spec living in another room it is
-   * a revision of that room, which the room rule decides as it is journaled.
+   * a revision of that room, which the room rule decides as it is journaled. A room the caller may
+   * not see — one a spec moved into the caller's scope left behind — is the room that was not
+   * found, before the journal can say its id is taken.
    */
   private void writeWake(SpecStore.SpecRow updated, String wake) {
     var store = rooms.get();
     var roomId = updated.roomIdOrIdentity();
+    var held = store.findById(roomId);
     var room =
-        store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
+        held.isPresent()
+            ? Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
+                .orElseThrow(() -> Refusals.roomNotFound(roomId))
+            : store.ensureFor(roomId, updated.project(), updated.title(), updated.assignee(), null);
     if (!Objects.equals(room.wake(), wake)) {
       store.updateWake(roomId, wake);
     }
@@ -407,6 +411,10 @@ final class GlobalSpecOperations {
     }
   }
 
+  /**
+   * Deletes a spec, and the identity room it minted when the caller may see it: one a spec moved
+   * into the caller's scope left in another project stays there, for an admin or retention.
+   */
   GlobalSpecDeletedResponse delete(String specId) {
     requireStore();
     var existing = findOrThrow(specId);
@@ -418,7 +426,10 @@ final class GlobalSpecOperations {
             catchUpOnShippedFollowUps();
           }
           specStore.delete(specId);
-          if (store != null && mintedItsRoom) {
+          if (store != null
+              && mintedItsRoom
+              && Scoped.row(Actor.reader(), store.findById(specId), RoomStore.RoomRow::project)
+                  .isPresent()) {
             store.delete(specId);
           }
           return null;
@@ -567,7 +578,7 @@ final class GlobalSpecOperations {
                 Actor.reader(),
                 specStore.head(specId),
                 found -> specStore.headProject(specId).orElse(null))
-            .orElseThrow(() -> notFound(specId));
+            .orElseThrow(() -> Refusals.specNotFound(specId));
     if (head.kind() == ChangeLog.Kind.ERASURE) {
       throw new ApiException(ErrorCode.SPEC_PRUNED, specStore.pruned(specId));
     }
@@ -620,11 +631,7 @@ final class GlobalSpecOperations {
    */
   private SpecStore.SpecRow findOrThrow(String specId) {
     return Scoped.row(Actor.reader(), specStore.findById(specId), SpecStore.SpecRow::project)
-        .orElseThrow(() -> notFound(specId));
-  }
-
-  private static ApiException notFound(String specId) {
-    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + specId + "' was not found.");
+        .orElseThrow(() -> Refusals.specNotFound(specId));
   }
 
   /**

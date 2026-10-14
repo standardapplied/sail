@@ -414,6 +414,7 @@ class AgentLogStreamerTest {
 
     private CapturingExchange(String path) {
       this.uri = URI.create(path);
+      attributes.put(ApiAuth.SCOPE, ProjectScope.all());
     }
 
     private CapturingExchange as(String fde, String role) {

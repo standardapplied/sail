@@ -6,8 +6,10 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
@@ -16,7 +18,9 @@ import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.EventStore;
@@ -58,7 +62,9 @@ import java.util.Set;
 import java.util.TreeSet;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -219,6 +225,8 @@ class ScopedReadsTest {
           List.of("POST", "/v1/events", event("{project}", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "\"spec\": \"{spec}\", ", "")),
           List.of("POST", "/v1/events", event("alpha", "", ", \"run_id\": \"{run}\"")),
+          List.of("PUT", "/v1/projects/{project}/files/{file}", "sneaked in"),
+          List.of("DELETE", "/v1/projects/{project}/files/{file}", ""),
           List.of("POST", "/v1/projects/{project}/dispatch", "{}"),
           List.of("POST", "/v1/projects/{project}/snapshots/a-label/restore", ""),
           List.of("DELETE", "/v1/projects/{project}/snapshots/a-label", ""));
@@ -263,6 +271,7 @@ class ScopedReadsTest {
   private final HttpClient client = HttpClient.newHttpClient();
   private Sqlite db;
   private AuditPersister recent;
+  private EventBus bus;
   private HttpServer server;
   private SailOperations operations;
   private String sam;
@@ -274,6 +283,7 @@ class ScopedReadsTest {
     db = Sqlite.open(tempDir.resolve("main.db"));
     new SchemaManager(db).migrate();
     recent = new AuditPersister(tempDir.resolve("events.jsonl"), 64);
+    bus = new EventBus();
     Acting.system(
         () -> {
           var fdes = new FdeStore(db);
@@ -300,7 +310,7 @@ class ScopedReadsTest {
                     new BoxShell(),
                     ProjectReader.ofCatalog(new ProjectStore(db)),
                     (command, logPath) -> 4242L,
-                    new EventBus(),
+                    bus,
                     recent,
                     specs,
                     new ReviewStore(db),
@@ -328,6 +338,7 @@ class ScopedReadsTest {
   @AfterEach
   void close() {
     server.stop(0);
+    bus.close();
     db.close();
   }
 
@@ -1045,8 +1056,9 @@ class ScopedReadsTest {
 
     assertEquals(
         """
-        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Delete or re-home its specs first: seen", "field_errors": []}}""",
-        send(sam, "DELETE", "/v1/rooms/alpha-room", ""));
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 1 spec(s).", "action": "Delete or re-home its specs first: seen", "field_errors": []}}""",
+        send(sam, "DELETE", "/v1/rooms/alpha-room", ""),
+        "the specs counted are the ones the caller sees");
     assertEquals(
         """
         409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Delete or re-home its specs first: seen, unseen", "field_errors": []}}""",
@@ -1055,8 +1067,9 @@ class ScopedReadsTest {
         "200", send(ada, "PUT", "/v1/specs/seen", "{\"project\": \"bravo\"}").substring(0, 3));
     assertEquals(
         """
-        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds 2 spec(s).", "action": "Ask an admin to re-home its specs: none is in a project this FDE is granted.", "field_errors": []}}""",
-        send(sam, "DELETE", "/v1/rooms/alpha-room", ""));
+        409 {"schema_version": 1, "error": {"code": "conflict", "message": "Room 'alpha-room' holds work outside your project scope.", "action": "Ask an admin to re-home its specs: none is in a project this FDE is granted.", "field_errors": []}}""",
+        send(sam, "DELETE", "/v1/rooms/alpha-room", ""),
+        "a room emptied of what the caller sees still holds what it does not, uncounted");
   }
 
   @Test
@@ -1097,6 +1110,150 @@ class ScopedReadsTest {
 
     assertEquals("sam", sams.owner());
     assertEquals(ProjectScope.of(List.of("alpha")), sams.scope());
+  }
+
+  @Test
+  void aPageOfEventsIsAsLongAsItsLimitOfWhatTheReaderSees() throws Exception {
+    var recentBefore = ask(sam, "/v1/events/recent?limit=1");
+    var specBefore = ask(sam, "/v1/events?spec=alpha-spec&limit=1");
+
+    Acting.system(this::bravoArrives);
+
+    assertEquals(
+        List.of(recentBefore, specBefore),
+        List.of(
+            ask(sam, "/v1/events/recent?limit=1"), ask(sam, "/v1/events?spec=alpha-spec&limit=1")),
+        "a busy project outside the scope, and an event of no project, take no room in the page");
+  }
+
+  @Test
+  void aReplyFiledInAnotherProjectIsAnnouncedUnderThatProjectNotTheRoomsCurrentOne()
+      throws Exception {
+    Acting.system(this::bravoArrives);
+    var left = new MessageStore(db).list("bravo-spec", null, 1).getFirst();
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/bravo-spec", "{\"project\": \"alpha\"}").substring(0, 3));
+    var announced = new CopyOnWriteArrayList<Event>();
+    var delivered = new CountDownLatch(1);
+    try (var subscription =
+        bus.subscribe(
+            new EventSubscriber() {
+              @Override
+              public String name() {
+                return "audit";
+              }
+
+              @Override
+              public Predicate<Event> filter() {
+                return event -> Event.WellKnownTypes.SPEC_MESSAGE_POSTED.equals(event.type());
+              }
+
+              @Override
+              public void onEvent(Event event) {
+                announced.add(event);
+                delivered.countDown();
+              }
+            })) {
+      var answered =
+          send(
+              ada,
+              "POST",
+              "/v1/rooms/bravo-spec/messages",
+              "{\"body\": \"Bravo's secret answer\", \"reply_to\": \"" + left.id() + "\"}");
+      assertEquals("201", answered.substring(0, 3), answered);
+      BusTesting.awaitDelivery(delivered);
+    }
+    var event = announced.getFirst();
+    var samsStream =
+        SseHandler.parseFilter(
+            URI.create("http://x/v1/events/stream"),
+            new Actor("sam", Role.MEMBER, Actor.Lane.API)
+                .withScope(ProjectScope.of(List.of("alpha"))));
+
+    assertEquals(
+        "bravo", event.project(), "the answer is filed with its question: " + event.toJsonLine());
+    assertFalse(samsStream.test(event), "sam's stream never carries it");
+    assertFalse(
+        ask(sam, "/v1/rooms/bravo-spec/messages").contains("Bravo's secret answer"),
+        "and sam's page of the room does not hold it");
+  }
+
+  @Test
+  void aSpecMovedIntoTheScopeIsItsOwnersToDeleteAndToWake() throws Exception {
+    Acting.system(this::bravoArrives);
+    assertEquals(
+        "201",
+        send(
+                ada,
+                "POST",
+                "/v1/specs",
+                "{\"id\": \"wander\", \"project\": \"bravo\", \"title\": \"t\","
+                    + " \"assignee\": \"sam\"}")
+            .substring(0, 3));
+    assertEquals(
+        "200", send(ada, "PUT", "/v1/specs/wander", "{\"project\": \"alpha\"}").substring(0, 3));
+
+    var woken = send(sam, "PUT", "/v1/specs/wander", "{\"wake\": \"on\"}");
+    var deleted = send(sam, "DELETE", "/v1/specs/wander", "");
+
+    assertEquals(
+        """
+        404 {"schema_version": 1, "error": {"code": "room_not_found", "message": "Room 'wander' was not found.", "field_errors": []}}""",
+        woken,
+        "the wake lives on the room the spec left behind, which is not there for its owner");
+    assertEquals("200", deleted.substring(0, 3), deleted);
+    assertTrue(
+        new RoomStore(db).findById("wander").isPresent(),
+        "the identity room it left in bravo stays, for an admin or retention");
+  }
+
+  @Test
+  void aRunNarratesItsOwnLifecycleAfterAnAdminMovedItsSpecOutOfTheScope() throws Exception {
+    Acting.system(this::bravoArrives);
+    var runs = new RunStore(db);
+    var local = new LocalApiRouter(operations);
+    var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    var reserved =
+        Acting.system(
+            () ->
+                runs.reserveDispatch(
+                    run,
+                    "alpha",
+                    "alpha-spec",
+                    "sam",
+                    "build",
+                    List.of(),
+                    "claude-code",
+                    "b",
+                    "t",
+                    "/log",
+                    "u"));
+    var bearer =
+        Map.of(
+            "authorization", "Bearer " + ((RunStore.Reservation.Reserved) reserved).credential());
+    var narrated =
+        new LocalApiRequest(
+            "POST",
+            "/v1/events",
+            Map.of(),
+            bearer,
+            ("{\"v\": 1, \"id\": 0, \"ts\": \"2026-10-13T00:00:00Z\", \"project\": \"alpha\","
+                    + " \"spec\": \"alpha-spec\", \"type\": \"agent_tool_started\","
+                    + " \"agent\": \"claude-code/"
+                    + run
+                    + "\", \"host\": \"main\", \"data\": {}}")
+                .getBytes(StandardCharsets.UTF_8));
+
+    var before = local.handle(narrated);
+    assertEquals(202, before.status(), "" + before.body());
+
+    assertEquals(
+        "200",
+        send(ada, "PUT", "/v1/specs/alpha-spec", "{\"project\": \"bravo\"}").substring(0, 3));
+    var after = local.handle(narrated);
+
+    assertEquals(202, after.status(), "the run is filed under alpha still: " + after.body());
   }
 
   private long entries() {

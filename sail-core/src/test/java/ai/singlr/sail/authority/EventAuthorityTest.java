@@ -521,10 +521,14 @@ class EventAuthorityTest {
   }
 
   @Test
-  void aRunsSpecDecidesItsEventsProjectNotTheRowItsPusherWrote() {
+  void aRunsEventIsOfTheProjectTheRunIsFiledUnderThoughItsSpecHasMoved() {
     board.db.execute("UPDATE runs SET project = 'elsewhere' WHERE id IN (?, ?)", OTHER_RUN, ADHOC);
 
-    assertEquals("acme", rule.subject("elsewhere", null, OTHER_RUN).project());
+    assertEquals("elsewhere", rule.subject("acme", null, OTHER_RUN).project());
+    assertEquals(
+        List.of(CAROL),
+        rule.subject("acme", null, OTHER_RUN).owners(),
+        "its spec still decides whose it is");
     assertEquals("elsewhere", rule.subject("acme", null, ADHOC).project());
   }
 

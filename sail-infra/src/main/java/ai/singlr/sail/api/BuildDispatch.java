@@ -28,6 +28,7 @@ import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -124,12 +125,25 @@ public final class BuildDispatch {
     }
 
     var specs = specStore.projectSpecs(project);
-    var resolution = resolveSpec(specs, request.specId(), request.restart(), localHandle);
+    var resolution =
+        resolveSpec(
+            specs,
+            request.specId(),
+            request.restart(),
+            localHandle,
+            spec -> earlierReviewsInScope(spec.id()));
     if (resolution.spec() == null) {
       return new DispatchOperations.NoSpecs();
     }
     var nextSpec = resolution.spec();
-    requireEarlierReviewsInScope(nextSpec.id());
+    if (!earlierReviewsInScope(nextSpec.id())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Dispatching spec '"
+              + nextSpec.id()
+              + "' would close a review outside your project scope.",
+          "Ask an admin to dispatch it.");
+    }
 
     var targetRepos = DispatchRepos.resolve(loaded.config(), nextSpec, request.repos());
     var taskSpec = DispatchRepos.withTargetRepos(nextSpec, targetRepos);
@@ -252,13 +266,26 @@ public final class BuildDispatch {
    */
   static SpecResolution resolveSpec(
       List<Spec> specs, String specId, boolean restart, String localHandle) {
+    return resolveSpec(specs, specId, restart, localHandle, spec -> true);
+  }
+
+  /**
+   * {@link #resolveSpec(List, String, boolean, String)}, picking the next ready spec among those
+   * {@code dispatchable} admits when none is named; a named spec is resolved whatever it says.
+   */
+  static SpecResolution resolveSpec(
+      List<Spec> specs,
+      String specId,
+      boolean restart,
+      String localHandle,
+      Predicate<Spec> dispatchable) {
     var spec = Strings.isBlank(specId) ? null : SpecCatalog.findById(specs, specId);
     if (spec == null) {
       if (RestartResolution.decide(specId, null, restart)
           instanceof RestartResolution.Refused refused) {
         throw refusal(refused);
       }
-      var next = SpecCatalog.nextReadyAssignedTo(specs, localHandle);
+      var next = SpecCatalog.nextReadyAssignedTo(specs, localHandle, dispatchable);
       if (next == null) {
         return SpecResolution.none();
       }
@@ -283,23 +310,18 @@ public final class BuildDispatch {
   }
 
   /**
-   * A dispatch closes every review of the spec's earlier attempts ({@link
-   * ReviewStore#supersedeForSpec}), or the loop would read the last of them as this attempt's. So
-   * it is refused whole while one of them is filed outside the caller's scope, left in the project
-   * the spec moved from, and the refusal names none of it.
+   * Whether every open review of the spec's earlier attempts is filed inside the caller's scope. A
+   * dispatch closes them all ({@link ReviewStore#supersedeForSpec}), or the loop would read the
+   * last of them as this attempt's; so a named spec with one left in the project it moved from is
+   * refused whole, naming none of it, and an unnamed pick passes such a spec over.
    */
-  private void requireEarlierReviewsInScope(String specId) {
+  private boolean earlierReviewsInScope(String specId) {
     if (reviewStore == null) {
-      return;
+      return true;
     }
     var earlier =
         reviewStore.reviewsForSpec(specId).stream().filter(review -> !review.superseded()).toList();
-    if (Scoped.rows(Actor.reader(), earlier, reviewStore::projectOf).size() < earlier.size()) {
-      throw new ApiException(
-          ErrorCode.CONFLICT,
-          "Dispatching spec '" + specId + "' would close a review outside your project scope.",
-          "Ask an admin to dispatch it.");
-    }
+    return Scoped.rows(Actor.reader(), earlier, reviewStore::projectOf).size() == earlier.size();
   }
 
   /**

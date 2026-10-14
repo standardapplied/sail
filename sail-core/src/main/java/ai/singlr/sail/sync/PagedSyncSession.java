@@ -92,6 +92,7 @@ public final class PagedSyncSession implements SyncSession {
   private String handle;
   private long mainFileMax;
   private ProjectScope scope = ProjectScope.all();
+  private Set<String> kept = Set.of();
   private boolean contentLeft;
 
   PagedSyncSession content(Sqlite db) {
@@ -125,6 +126,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.handle = handle;
     copy.mainFileMax = mainFileMax;
     copy.scope = scope;
+    copy.kept = kept;
     copy.contentLeft = contentLeft;
     return copy;
   }
@@ -279,6 +281,7 @@ public final class PagedSyncSession implements SyncSession {
     }
     var dirty = new LinkedHashSet<>(local.dirtyIds());
     dirty.removeAll(seen);
+    dirty.removeIf(id -> kept.contains(local.project(id)));
     if (!dirty.isEmpty()) {
       report = report.plus(reconcileDirty(type, local, List.copyOf(dirty), since));
     }
@@ -778,6 +781,11 @@ public final class PagedSyncSession implements SyncSession {
   @Override
   public ProjectScope scope() {
     return scope;
+  }
+
+  @Override
+  public void keep(Set<String> projects) {
+    kept = Set.copyOf(projects);
   }
 
   @Override

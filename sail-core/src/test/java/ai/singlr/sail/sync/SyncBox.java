@@ -151,6 +151,7 @@ public final class SyncBox implements AutoCloseable {
           new ArrayList<>(
               Actor.call(
                   Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle())));
+      link.session().keep(NodeRound.kept(settled));
       var replicas = node.replicas();
       var types =
           SyncedEntities.all().stream()

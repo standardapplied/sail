@@ -45,6 +45,11 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids, Set<String> unsee
   }
 
   @Override
+  public String project(String id) {
+    return inner.project(id);
+  }
+
+  @Override
   public boolean mayPush(String id) {
     return inner.mayPush(id);
   }

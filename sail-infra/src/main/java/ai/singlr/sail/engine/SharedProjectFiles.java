@@ -6,9 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectFiles;
-import ai.singlr.sail.api.Scoped;
 import ai.singlr.sail.config.FileLimits;
-import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FileStore;
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,12 +28,12 @@ public record SharedProjectFiles(
 
   @Override
   public List<FileStore.FileRow> list() {
-    return Scoped.rows(Actor.reader(), files.list(project), FileStore.FileRow::project);
+    return files.list(project);
   }
 
   @Override
   public Optional<FileStore.FileRow> find(String path) {
-    return Scoped.row(Actor.reader(), files.find(project, path), FileStore.FileRow::project);
+    return files.find(project, path);
   }
 
   @Override

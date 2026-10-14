@@ -259,12 +259,12 @@ final class SpecPruner {
     for (var id : request.ids()) {
       var target = new Erasure.Target(Erasure.SPEC, id);
       if (!Actor.current().scope().admits(specs.headProject(id).orElse(null))) {
-        throw notFound(id);
+        throw Refusals.specNotFound(id);
       }
       if (erasure.isErased(target)) {
         continue;
       }
-      var spec = specs.lastKnown(id).orElseThrow(() -> notFound(id));
+      var spec = specs.lastKnown(id).orElseThrow(() -> Refusals.specNotFound(id));
       Refusals.enforce(authority.spec(Actor.current(), spec));
       roots.add(target);
     }
@@ -282,10 +282,6 @@ final class SpecPruner {
       }
     }
     return roots;
-  }
-
-  private static ApiException notFound(String id) {
-    return new ApiException(ErrorCode.SPEC_NOT_FOUND, "Spec '" + id + "' was not found.");
   }
 
   private static List<Erasure.Target> targets(String type, List<String> ids) {

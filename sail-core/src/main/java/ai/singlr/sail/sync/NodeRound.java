@@ -24,6 +24,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * What a node does first in every round, once main has welcomed it, before it offers or adopts
@@ -94,6 +95,19 @@ public final class NodeRound {
           return null;
         });
     return settled;
+  }
+
+  /**
+   * The projects {@code settled} kept whole for a run still under way ({@link
+   * Settlement.How.Kept}), for the session to offer nothing of ({@link SyncSession#keep}).
+   */
+  public static Set<String> kept(List<Settlement.Settled> settled) {
+    return settled.stream()
+        .filter(
+            each ->
+                Erasure.PROJECT.equals(each.type()) && each.how() instanceof Settlement.How.Kept)
+        .map(Settlement.Settled::id)
+        .collect(Collectors.toUnmodifiableSet());
   }
 
   /** Whether {@code now} admits a project {@code before} did not. */

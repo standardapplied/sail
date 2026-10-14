@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -192,6 +193,13 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * main sends and drops what main stops sending.
    */
   ProjectScope scope();
+
+  /**
+   * Holds {@code projects} whole for this round: nothing filed under one is offered, since main no
+   * longer grants them and would deny every offer, and the denial withdraw the rows a run still
+   * under way here acts through ({@link NodeRound#kept}).
+   */
+  void keep(Set<String> projects);
 
   /** The box id main welcomed this session as: the peer this node's checkpoints are kept for. */
   String mainId();

@@ -102,7 +102,7 @@ public final class MembershipService {
   private static RoomStore.RoomRow readable(RoomStore store, String roomId) {
     var held = store == null ? Optional.<RoomStore.RoomRow>empty() : store.findById(roomId);
     return Scoped.row(Actor.reader(), held, RoomStore.RoomRow::project)
-        .orElseThrow(() -> roomNotFound(roomId));
+        .orElseThrow(() -> Refusals.roomNotFound(roomId));
   }
 
   /**
@@ -118,13 +118,9 @@ public final class MembershipService {
             : store.findById(spec.roomIdOrIdentity());
     if (Scoped.row(reader, Optional.of(spec), SpecStore.SpecRow::project).isEmpty()
         || (room.isPresent() && Scoped.row(reader, room, RoomStore.RoomRow::project).isEmpty())) {
-      throw roomNotFound(spec.id());
+      throw Refusals.roomNotFound(spec.id());
     }
     return spec;
-  }
-
-  private static ApiException roomNotFound(String roomId) {
-    return new ApiException(ErrorCode.ROOM_NOT_FOUND, "Room '" + roomId + "' was not found.");
   }
 
   /** A prepared membership: the snapshot label a full mode will pay, and the deferred half. */

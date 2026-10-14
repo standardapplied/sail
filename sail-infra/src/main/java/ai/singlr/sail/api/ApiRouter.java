@@ -451,11 +451,11 @@ public final class ApiRouter implements HttpHandler {
    * Builds the {@link Actor} for a request from the exchange attributes {@link ApiAuth} stamped:
    * {@code token.fde} is the caller's FDE handle (null for a machine credential owning no FDE) and
    * {@code token.role} resolves to the caller's {@link Role}; {@code token.scope} is the projects
-   * main's roster lets that FDE see, every project for a credential that names none. The route tier
-   * has only admitted the credential to read; whether it may write is decided from this actor where
-   * the write is made — by the type's rule as the journal records it, or by the operation's
-   * admission before a side effect. Package-private so the SSE {@link AgentLogStreamer} builds the
-   * same actor from the same stamped attributes.
+   * main's roster lets that FDE see, as the auth stamped it, and none when it stamped nothing:
+   * scope fails closed. The route tier has only admitted the credential to read; whether it may
+   * write is decided from this actor where the write is made — by the type's rule as the journal
+   * records it, or by the operation's admission before a side effect. Package-private so the SSE
+   * {@link AgentLogStreamer} builds the same actor from the same stamped attributes.
    */
   static Actor actorOf(HttpExchange exchange) {
     return new Actor(
@@ -465,7 +465,7 @@ public final class ApiRouter implements HttpHandler {
         .withScope(
             exchange.getAttribute(ApiAuth.SCOPE) instanceof ProjectScope scope
                 ? scope
-                : ProjectScope.all());
+                : ProjectScope.none());
   }
 
   /**

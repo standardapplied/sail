@@ -96,6 +96,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   }
 
   @Override
+  public String project(String id) {
+    return changeLog.headProject(store.entityType(), id).orElse(null);
+  }
+
+  @Override
   public boolean mayPush(String entityId) {
     return store.mayPush(entityId, handle);
   }

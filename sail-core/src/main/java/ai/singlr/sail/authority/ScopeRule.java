@@ -31,6 +31,8 @@ public final class ScopeRule {
       "Ask an admin on main for the project: sail fde grant <handle> <project>.";
   private static final String SPEC = "spec";
   private static final String ROOM = "room";
+  private static final String RUN = "run";
+  private static final String MESSAGE = "message";
 
   /**
    * The rows a state is born naming beside its project, by the field naming each and the type it
@@ -42,9 +44,9 @@ public final class ScopeRule {
       Map.of(
           SPEC,
           Map.of("room_id", ROOM),
-          "run",
+          RUN,
           Map.of("spec_id", SPEC, "room_id", ROOM),
-          "message",
+          MESSAGE,
           Map.of("room_id", ROOM, "spec_id", ROOM));
 
   private final ChangeLog changeLog;

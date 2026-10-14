@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.identity.ProjectScope;
 import com.sun.net.httpserver.HttpExchange;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -42,5 +43,6 @@ final class FixedTokenTestAuth implements ApiAuth {
     }
     exchange.setAttribute("token.name", "admin");
     exchange.setAttribute("token.role", "admin");
+    exchange.setAttribute(ApiAuth.SCOPE, ProjectScope.all());
   }
 }

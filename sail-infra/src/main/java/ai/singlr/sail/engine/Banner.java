@@ -648,7 +648,7 @@ public final class Banner {
       return "all";
     }
     var projects = scope.projects();
-    return projects.isEmpty() ? "0" : projects.size() + ": " + String.join(", ", projects);
+    return projects.isEmpty() ? "none" : projects.size() + ": " + String.join(", ", projects);
   }
 
   private static String orDash(String value) {

@@ -63,7 +63,9 @@ public final class RoleRule {
    * roster scopes no one, and the operator, an admin whatever the roster says, is never scoped.
    */
   public ProjectScope scopeOf(String handle) {
-    return roster == null || isOperator(handle) ? ProjectScope.all() : roster.scopeOf(handle);
+    return roster == null || Strings.isBlank(handle) || isOperator(handle)
+        ? ProjectScope.all()
+        : roster.scopeOf(handle);
   }
 
   /**
