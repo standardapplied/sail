@@ -237,7 +237,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<ProjectResponse> project(String project) {
-    return Result.success(new ProjectResponse(project, "running", null));
+    return Result.success(new ProjectResponse(project, "running", null, null));
   }
 
   @Override

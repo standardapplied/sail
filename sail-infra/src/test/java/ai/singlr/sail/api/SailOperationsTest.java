@@ -134,6 +134,7 @@ class SailOperationsTest {
     assertEquals("acme", get(result, "name"));
     assertEquals("running", get(result, "container_status"));
     assertTrue(get(result, "agent").toString().contains("claude-code"));
+    assertEquals(Map.of("agent", "claude-code", "mode", "full"), get(result, "member"));
   }
 
   @Test
@@ -163,6 +164,7 @@ class SailOperationsTest {
     var result = operations.project("acme");
 
     assertFalse(containsKey(result, "agent"));
+    assertFalse(containsKey(result, "member"));
   }
 
   @Test

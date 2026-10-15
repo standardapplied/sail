@@ -1423,8 +1423,14 @@ public final class SailOperations implements HostOperations {
 
   private ProjectResponse projectValue(String project) {
     var loaded = projects.load(project);
-    var agent = loaded.config().agent() != null ? AgentConfigView.from(loaded.config()) : null;
-    return new ProjectResponse(project, statusName(loaded.state()), agent);
+    var declared = loaded.config().agent();
+    return declared == null
+        ? new ProjectResponse(project, statusName(loaded.state()), null, null)
+        : new ProjectResponse(
+            project,
+            statusName(loaded.state()),
+            AgentConfigView.from(loaded.config()),
+            declared.projectMember());
   }
 
   /**

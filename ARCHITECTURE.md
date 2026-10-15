@@ -1347,6 +1347,42 @@ class is `LiveMemberTest`'s):
   `RoomWakeReactorTest.aLiveMembersRoomOwesNoTurnOnAStopOrASweep`,
   `HarnessGoldenTest.codexHasNoLiveMode`.*
 
+**Home rooms.** Every FDE has one standing conversation per project with the project's agent:
+the room `<project>--<handle>`, titled with the project's name, assigned to the FDE, its
+roster the *project's member* (`agent.member` in the definition: `agent` defaulting to
+`agent.type`, `model` to the agent's default, `mode` to `full`). `sail project apply` makes it
+(`HomeRoom.ensure`, the last step of `ProjectApplyCommand.converge`) through the doors the API
+takes, `createRoom` then `addRoomMember`, as the box's FDE. Each clause with the tests that prove
+it (`HomeRoomTest` unless another class is named):
+
+- **H1. A project's home room exists on the box that applies it.** Once the container runs with
+  the member's harness installed, the apply leaves the room created and engaged; a second apply
+  changes nothing. A box that names no FDE, a definition with no agent, and a handle that cannot
+  form a room id have none, and the apply says why once. A refused engage keeps the room, and the
+  next apply engages a room nobody has revised since and that seats no one.
+  *`theFirstApplyCreatesTheFdesRoomEngagedWithTheProjectsMember`, `aSecondApplyChangesNothing`,
+  `aRefusedEngageKeepsTheRoomAndTheNextApplyEngagesIt`, `aBoxThatNamesNoFdeHasNoHomeRoom`,
+  `HomeRoomIT.anApplyEngagesOnceAndThenTheRoomIsTheFdes`.*
+- **H2. The home room is the FDE's.** Its assignee is the FDE, so their box serves its member,
+  and only they or an admin on main change its roster.
+  *`eachFdeGetsTheirOwnRoomAndNeitherMayChangeTheOthers`.*
+- **H3. A home room is a room.** Nothing in the loop, the harness, the journal, sync or scope
+  reads its id; it syncs, is scoped and wakes as any room. An id a spec already holds refuses
+  the apply with the API's sentence.
+  *`anIdTakenByASpecRefusesTheApply`.*
+- **H4. The definition decides, once.** `agent.member` is read when the room is created; a later
+  definition does not rewrite an engaged roster, and an FDE's disengage wins. A member the
+  project does not install, an unknown mode or a model that is not one shell-safe token is
+  refused when the definition is read, before anything is provisioned.
+  *`aLaterDefinitionDoesNotRewriteAnEngagedRoster`, `aRoomTheFdeDisengagedStaysDisengaged`,
+  `SailYamlTest.aMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
+  `SailYamlTest.aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused`.*
+- **H5. Mast shows one conversation per project.** `GET /v1/projects/{p}` names the project's
+  `member`; Mast places the viewer's home room first under the project's name and presets its
+  agent selects to the member. *`SailOperationsTest.projectReturnsContainerAndAgentStatus`.*
+- **H6. A box applied before this release gets its home room on its next apply, and nothing
+  else moves.**
+
 The loop closes: every wait is recorded, every review ends, and every stop says only what
 happened. Each clause with the tests that prove it (`ReviewLoopRecoveryTest` unless another
 class is named):

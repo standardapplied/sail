@@ -143,7 +143,8 @@ record ConnectResponse(
   }
 }
 
-record ProjectResponse(String name, String containerStatus, AgentConfigView agent)
+record ProjectResponse(
+    String name, String containerStatus, AgentConfigView agent, SailYaml.Member member)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -151,6 +152,7 @@ record ProjectResponse(String name, String containerStatus, AgentConfigView agen
     m.put("name", name);
     m.put("container_status", containerStatus);
     m.put("agent", agent);
+    if (member != null) m.put("member", member.toMap());
     return m;
   }
 }

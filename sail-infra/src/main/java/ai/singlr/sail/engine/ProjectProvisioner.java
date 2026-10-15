@@ -996,12 +996,7 @@ public final class ProjectProvisioner {
       return;
     }
 
-    var installNames = agentConfig.install();
-    if (installNames == null || installNames.isEmpty()) {
-      installNames = List.of(agentConfig.type());
-    }
-
-    var tools = installNames.stream().map(Harnesses::of).toList();
+    var tools = agentConfig.installs().stream().map(Harnesses::of).toList();
 
     step(17, "Installing " + tools.size() + " agent CLI(s)...");
 
@@ -1078,11 +1073,7 @@ public final class ProjectProvisioner {
     if (config.agent() == null) {
       return List.of();
     }
-    var install = config.agent().install();
-    if (install != null && !install.isEmpty()) {
-      return install.stream().distinct().map(Harnesses::of).toList();
-    }
-    return config.agent().type() != null ? List.of(Harnesses.of(config.agent().type())) : List.of();
+    return config.agent().installs().stream().map(Harnesses::of).toList();
   }
 
   private void recordSpecsPhase() throws Exception {
