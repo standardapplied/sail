@@ -9,14 +9,17 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -61,6 +64,73 @@ class ProjectProvisionerTest {
         null);
   }
 
+  private static SailYaml minimalConfigWith(SailYaml.Ssh ssh) {
+    var config = minimalConfig();
+    return new SailYaml(
+        config.name(),
+        config.description(),
+        config.resources(),
+        config.image(),
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        ssh);
+  }
+
+  private static SailYaml minimalConfigWith(SailYaml.Runtimes runtimes) {
+    var config = minimalConfig();
+    return new SailYaml(
+        config.name(),
+        config.description(),
+        config.resources(),
+        config.image(),
+        null,
+        runtimes,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static Map<String, Object> errorOf(Map<String, Object> state) {
+    return (Map<String, Object>) state.get("error");
+  }
+
+  /** Records what each {@code incus file push} wrote, by destination, and answers as its script. */
+  private static final class PushRecordingShell implements ShellExec {
+    final ScriptedShellExecutor script;
+    final Map<String, String> pushed = new LinkedHashMap<>();
+
+    PushRecordingShell(ScriptedShellExecutor script) {
+      this.script = script;
+    }
+
+    @Override
+    public Result exec(List<String> command) throws IOException {
+      return exec(command, null, Duration.ZERO);
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+      if (command.size() > 3 && command.subList(0, 3).equals(List.of("incus", "file", "push"))) {
+        pushed.put(command.getLast(), Files.readString(Path.of(command.get(command.size() - 2))));
+      }
+      return script.exec(command, workDir, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
   private static HostYaml hostYaml() {
     return new HostYaml(
         "zfs",
@@ -86,6 +156,7 @@ class ProjectProvisionerTest {
         .onOk("incus launch")
         .onOk("ip -4 addr show")
         .onFail("id dev", "no such user")
+        .onOk("id -u dev", "1000")
         .onOk("useradd")
         .onFail("which podman", "")
         .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -97,12 +168,15 @@ class ProjectProvisionerTest {
         .onOk("mktemp", "/tmp/sail-crontab.test123\n");
   }
 
-  /** Shell for minimalConfig — no runtimes, no services, no SSH, no git/repos. */
+  /** Shell for minimalConfig — no runtimes, no services, no ssh block, no git/repos. */
   private ScriptedShellExecutor minimalSuccessShell() {
     return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
         .onFail("incus info simple", "not found")
         .onOk("incus launch")
         .onOk("ip -4 addr show")
+        .onFail("id dev", "no such user")
+        .onOk("id -u dev", "1000")
+        .onOk("useradd")
         .onFail("which podman", "")
         .onFail("test -f /etc/profile.d/testcontainers.sh", "")
         .onFail("crontab -l", "no crontab for dev")
@@ -141,7 +215,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void stateFileCleanedUpOnSuccess() throws Exception {
+  void aFinishedRunRecordsCompleteWithTheInputsItProvisionedFrom() throws Exception {
     var shell = allSuccessShell();
     var stateFile = tempDir.resolve("provision-state.yaml");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
@@ -149,16 +223,17 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
-    assertFalse(
-        java.nio.file.Files.exists(stateFile),
-        "State file should be deleted on successful completion");
+    var persisted = YamlUtil.parseFile(stateFile);
+    assertEquals("COMPLETE", persisted.get("completed_phase"));
+    assertEquals(ProjectProvisioner.inputs(fullConfig()), persisted.get("inputs"));
+    assertNull(persisted.get("error"));
   }
 
   @Test
   void resumeFromNetworkReadySkipsFirstThreeSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load();
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
     setupTracker.advance(ProjectPhase.RESOURCE_LIMITS_SET);
 
     var shell = allSuccessShell();
@@ -179,12 +254,13 @@ class ProjectProvisionerTest {
   void resumeFromPackagesSkipsFirstFiveSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load();
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
     setupTracker.advance(ProjectPhase.PACKAGES_INSTALLED);
 
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -209,7 +285,7 @@ class ProjectProvisionerTest {
   void resumeFromSshConfiguredRunsNewSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load();
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
 
     var shell =
@@ -237,7 +313,7 @@ class ProjectProvisionerTest {
   void resumeFromCompleteSkipsAllSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load();
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
     setupTracker.advance(ProjectPhase.COMPLETE);
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
@@ -249,6 +325,126 @@ class ProjectProvisionerTest {
 
     assertEquals(20, steps.size());
     assertTrue(steps.stream().allMatch(s -> s.startsWith("skipped:")));
+  }
+
+  @Test
+  void anInterruptedRunForAnotherDescriptorRestartsFromStepOne() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
+    var edited = minimalConfigWith(new SailYaml.Ssh("dev", null));
+
+    var shell = minimalSuccessShell();
+    var steps = new ArrayList<String>();
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    new ProjectProvisioner(shell, tracker, new RecordingListener(steps))
+        .provision(edited, hostYaml(), null, null);
+
+    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertTrue(shell.invocations().contains("incus exec simple -- id dev"));
+    assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
+    var persisted = YamlUtil.parseFile(stateFile);
+    assertEquals("COMPLETE", persisted.get("completed_phase"));
+    assertEquals(ProjectProvisioner.inputs(edited), persisted.get("inputs"));
+  }
+
+  @Test
+  void aStateFileFromBeforeInputsWereRecordedRestartsFromStepOne() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    Files.writeString(
+        stateFile,
+        """
+        completed_phase: SSH_CONFIGURED
+        started_at: '2026-10-15T09:00:00Z'
+        updated_at: '2026-10-15T09:05:00Z'
+        error: null
+        """);
+
+    var shell = minimalSuccessShell();
+    var steps = new ArrayList<String>();
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    new ProjectProvisioner(shell, tracker, new RecordingListener(steps))
+        .provision(minimalConfig(), hostYaml(), null, null);
+
+    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
+    assertEquals(
+        ProjectProvisioner.inputs(minimalConfig()), YamlUtil.parseFile(stateFile).get("inputs"));
+  }
+
+  @Test
+  void aRuntimeAddedToAnInterruptedRunsDescriptorIsInstalledAndTheRestIsAlreadyThere()
+      throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.advance(ProjectPhase.MAVEN_INSTALLED);
+    var withJdk = minimalConfigWith(new SailYaml.Runtimes(25, null, null));
+
+    var shell = provisionedSimpleShell().onFail("dpkg -s temurin-25-jdk", "not installed");
+    var steps = new ArrayList<String>();
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    new ProjectProvisioner(shell, tracker, new RecordingListener(steps))
+        .provision(withJdk, hostYaml(), null, null);
+
+    var cmds = shell.invocations();
+    assertTrue(cmds.contains("incus exec simple -- dpkg -s temurin-25-jdk"));
+    assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq temurin-25-jdk")));
+    assertAlreadyProvisioned(steps, cmds);
+    assertTrue(steps.contains("done:9/20:JDK 25 (Temurin)"), steps.toString());
+  }
+
+  @Test
+  void aRuntimeAddedToAFinishedContainersDescriptorIsInstalledAndTheRestIsAlreadyThere()
+      throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.advance(ProjectPhase.COMPLETE);
+    var withNode = minimalConfigWith(new SailYaml.Runtimes(0, "22", null));
+
+    var shell = provisionedSimpleShell().onFail("node --version", "not found");
+    var steps = new ArrayList<String>();
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    new ProjectProvisioner(shell, tracker, new RecordingListener(steps))
+        .provision(withNode, hostYaml(), null, null);
+
+    var cmds = shell.invocations();
+    assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq nodejs")));
+    assertAlreadyProvisioned(steps, cmds);
+    assertTrue(steps.contains("done:10/20:Node.js 22"), steps.toString());
+    var persisted = YamlUtil.parseFile(stateFile);
+    assertEquals("COMPLETE", persisted.get("completed_phase"));
+    assertEquals(ProjectProvisioner.inputs(withNode), persisted.get("inputs"));
+  }
+
+  /** A running {@code simple} whose user, limits, Podman and cron already exist. */
+  private ScriptedShellExecutor provisionedSimpleShell() {
+    return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+        .onOk("incus info simple", "Name: simple\nStatus: RUNNING")
+        .onOk("incus config get simple limits.cpu", "2\n")
+        .onOk("incus config get simple limits.memory", "4GB\n")
+        .onOk("incus config get simple security.nesting", "true\n")
+        .onOk("incus config get simple raw.lxc", "lxc.apparmor.profile=unconfined\n")
+        .onOk("id dev", "uid=1000(dev)")
+        .onOk("id -u dev", "1000")
+        .onOk("which podman", "/usr/bin/podman")
+        .onOk("test -f /etc/profile.d/testcontainers.sh")
+        .onOk("echo $VERSION_CODENAME", "noble")
+        .onOk("crontab -l", "0 3 * * * /home/dev/.sail/bin/sail-prune.sh");
+  }
+
+  private static void assertAlreadyProvisioned(List<String> steps, List<String> cmds) {
+    assertTrue(steps.contains("done:1/20:Container simple (already exists)"), steps.toString());
+    assertTrue(
+        steps.contains("done:3/20:Resources 2 CPU, 4GB RAM (already set)"), steps.toString());
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus launch")));
+    assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus restart")));
+    assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus config set")));
+    assertFalse(cmds.stream().anyMatch(c -> c.contains("useradd")));
+    assertFalse(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq podman")));
   }
 
   @Test
@@ -304,6 +500,7 @@ class ProjectProvisionerTest {
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus info acme-health", "Name: acme-health\nStatus: RUNNING")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -524,6 +721,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onFail("useradd", "useradd: permission denied");
     var tracker = tracker();
 
@@ -537,16 +735,102 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void sshNullConfigSkipsStep() throws Exception {
-    var shell = minimalSuccessShell();
+  void aDescriptorWithoutAnSshBlockProvisionsDev() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
-    assertTrue(steps.stream().anyMatch(s -> s.contains("done:6/") && s.contains("skipped")));
-    var cmds = shell.invocations();
-    assertFalse(cmds.stream().anyMatch(c -> c.contains("useradd")));
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    var cmds = shell.script.invocations();
+    assertTrue(cmds.contains("incus exec simple -- useradd -m -s /bin/bash dev"), cmds.toString());
+    assertTrue(cmds.contains("incus exec simple -- usermod -aG sudo dev"));
+    assertTrue(cmds.contains("incus exec simple -- systemctl enable --now ssh"));
+    assertTrue(cmds.contains("incus exec simple -- loginctl enable-linger dev"));
+    assertTrue(cmds.stream().anyMatch(c -> c.contains("crontab -u dev /tmp/sail-crontab")));
+    assertEquals("dev ALL=(ALL) NOPASSWD:ALL\n", shell.pushed.get("simple/etc/sudoers.d/dev"));
+    assertFalse(shell.pushed.containsKey("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void anSshBlockWithKeysAndNoUserProvisionsDevWithThoseKeys() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+    var steps = new ArrayList<String>();
+    var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
+
+    provisioner.provision(
+        minimalConfigWith(new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA alice@laptop"))),
+        hostYaml(),
+        null,
+        null);
+
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertTrue(
+        shell.script.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
+    assertEquals(
+        "ssh-ed25519 AAAA alice@laptop\n",
+        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void aDevAtAnotherUidFailsStepSixAndKeepsTheWatermarkBeforeIt() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("incus info simple", "not found")
+            .onOk("id dev", "uid=1001(dev)")
+            .onOk("id -u dev", "1001\n");
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    var provisioner = new ProjectProvisioner(shell, tracker, null);
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> provisioner.provision(minimalConfig(), hostYaml(), null, null));
+
+    var expected =
+        "User 'dev' in simple has uid 1001, but sail runs every agent, shell and hook as uid 1000."
+            + " The image 'ubuntu/24.04' has another user at uid 1000; use an image without one"
+            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sail project"
+            + " destroy simple' and 'sudo sail project apply simple'.";
+    assertEquals(expected, failure.getMessage());
+    var persisted = YamlUtil.parseFile(stateFile);
+    assertEquals("PACKAGES_INSTALLED", persisted.get("completed_phase"));
+    assertEquals("SSH_CONFIGURED", errorOf(persisted).get("failed_phase"));
+    assertEquals(expected, errorOf(persisted).get("message"));
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("usermod")));
+  }
+
+  @Test
+  void aDevThatCannotBeLookedUpFailsStepSix() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("incus info simple", "not found")
+            .onFail("id dev", "no such user")
+            .onFail("id -u dev", "id: 'dev': no such user");
+    var provisioner = new ProjectProvisioner(shell, tracker(), null);
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () -> provisioner.provision(minimalConfig(), hostYaml(), null, null));
+
+    assertEquals(
+        "Failed to look up user 'dev' in simple: id: 'dev': no such user", failure.getMessage());
+  }
+
+  @Test
+  void anExistingDevGetsExactlyTheDescriptorsKeysWhichMayBeNone() throws Exception {
+    var shell =
+        new PushRecordingShell(
+            minimalSuccessShell().onOk("id dev", "uid=1000(dev)").onOk("id -u dev", "1000"));
+    var provisioner = new ProjectProvisioner(shell, tracker(), null);
+
+    provisioner.provision(minimalConfigWith(new SailYaml.Ssh("dev", null)), hostYaml(), null, null);
+
+    assertEquals("", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertFalse(shell.script.invocations().stream().anyMatch(c -> c.contains("useradd")));
   }
 
   @Test
@@ -557,6 +841,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onOk("id dev", "uid=1000(dev)")
+            .onOk("id -u dev", "1000")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
             .onFail("dpkg -s temurin-25-jdk", "not installed")
@@ -564,12 +849,14 @@ class ProjectProvisionerTest {
             .onFail("node --version", "not found")
             .onFail("podman container inspect", "no such container")
             .onFail("crontab -l", "no crontab");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null);
+    var steps = new ArrayList<String>();
+    var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
     var cmds = shell.invocations();
     assertFalse(cmds.stream().anyMatch(c -> c.contains("useradd")));
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
   }
 
   @Test
@@ -594,6 +881,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -631,6 +919,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -683,6 +972,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -715,6 +1005,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onOk("which podman", "/usr/bin/podman")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -745,6 +1036,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("apt-get install -y -qq podman", "E: Unable to locate package podman");
@@ -785,6 +1077,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onOk("test -f /etc/profile.d/testcontainers.sh", "")
@@ -845,6 +1138,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -869,6 +1163,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -921,6 +1216,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -946,6 +1242,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -987,6 +1284,7 @@ class ProjectProvisionerTest {
         .onOk("incus launch")
         .onOk("ip -4 addr show")
         .onFail("id dev", "no such user")
+        .onOk("id -u dev", "1000")
         .onOk("useradd")
         .onFail("which podman", "")
         .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1052,7 +1350,12 @@ class ProjectProvisionerTest {
     assertEquals(
         "Failed to log gh in for github.com in acme-health: The token in GH_TOKEN is invalid.",
         failed.getMessage());
-    assertEquals(ProjectPhase.GIT_CONFIGURED, tracker().load().resumePoint().orElseThrow());
+    assertEquals(
+        ProjectPhase.GIT_CONFIGURED,
+        tracker()
+            .load(ProjectProvisioner.inputs(configWithGit("token")))
+            .resumePoint()
+            .orElseThrow());
   }
 
   @Test
@@ -1614,6 +1917,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1642,6 +1946,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1689,6 +1994,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1730,6 +2036,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1798,6 +2105,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1846,6 +2154,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -1897,6 +2206,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
@@ -2029,6 +2339,7 @@ class ProjectProvisionerTest {
             .onOk("incus launch")
             .onOk("ip -4 addr show")
             .onFail("id dev", "no such user")
+            .onOk("id -u dev", "1000")
             .onOk("useradd")
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")

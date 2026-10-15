@@ -12,9 +12,16 @@ import java.util.Map;
  * Persistent state of a multi-step provisioning operation. Written to YAML after each phase
  * completes. Uses {@code String} for phase names (not generics) so serialization works without type
  * erasure issues — the {@link ProvisionTracker} handles {@code String <-> Enum} conversion.
+ *
+ * @param inputs a digest of what the run provisions from; progress recorded for other inputs, or
+ *     with none, is no progress for these
  */
 public record ProvisionState(
-    String completedPhase, String startedAt, String updatedAt, ProvisionError error) {
+    String completedPhase,
+    String startedAt,
+    String updatedAt,
+    ProvisionError error,
+    String inputs) {
   /** Error details captured when a provisioning phase fails. */
   public record ProvisionError(String failedPhase, String message, String failedAt) {
     @SuppressWarnings("unchecked")
@@ -34,9 +41,9 @@ public record ProvisionState(
     }
   }
 
-  /** Returns a fresh, empty state with no completed phases. */
-  public static ProvisionState empty() {
-    return new ProvisionState(null, null, null, null);
+  /** Returns a fresh state for {@code inputs} with no completed phases. */
+  public static ProvisionState empty(String inputs) {
+    return new ProvisionState(null, null, null, null, inputs);
   }
 
   @SuppressWarnings("unchecked")
@@ -46,7 +53,8 @@ public record ProvisionState(
         (String) map.get("completed_phase"),
         (String) map.get("started_at"),
         (String) map.get("updated_at"),
-        errorRaw != null ? ProvisionError.fromMap(errorRaw) : null);
+        errorRaw != null ? ProvisionError.fromMap(errorRaw) : null,
+        (String) map.get("inputs"));
   }
 
   public Map<String, Object> toMap() {
@@ -55,6 +63,7 @@ public record ProvisionState(
     map.put("started_at", startedAt);
     map.put("updated_at", updatedAt);
     map.put("error", error != null ? error.toMap() : null);
+    map.put("inputs", inputs);
     return map;
   }
 }

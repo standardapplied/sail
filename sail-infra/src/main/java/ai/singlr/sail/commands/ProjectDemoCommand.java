@@ -142,7 +142,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var stateFile = SailPaths.provisionState(config.name());
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    tracker.load();
+    tracker.reset();
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     var provisioner = new ProjectProvisioner(shell, tracker, listener);
@@ -158,8 +158,7 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     out.println();
-    Banner.printProjectCreated(
-        config.name(), config.ssh() != null ? config.ssh().user() : null, out, ansi);
+    Banner.printProjectCreated(config.name(), config.sshUser(), out, ansi);
 
     var mgr = new ContainerManager(shell);
     var currentState = mgr.queryState(config.name());
@@ -173,8 +172,7 @@ public final class ProjectDemoCommand implements Runnable {
 
       var ports = ContainerExec.queryServicePorts(shell, config.name());
       if (!ports.isEmpty()) {
-        Banner.printSshTunnels(
-            config.name(), config.ssh() != null ? config.ssh().user() : null, ports, out, ansi);
+        Banner.printSshTunnels(config.name(), config.sshUser(), ports, out, ansi);
       }
     }
   }

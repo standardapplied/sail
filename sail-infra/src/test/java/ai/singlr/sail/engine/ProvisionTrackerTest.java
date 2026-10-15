@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,9 @@ class ProvisionTrackerTest {
     COMPLETE,
   }
 
+  private static final String X = "inputs-x";
+  private static final String Y = "inputs-y";
+
   private Path stateFile() {
     return tempDir.resolve("provision-state.yaml");
   }
@@ -37,7 +41,7 @@ class ProvisionTrackerTest {
   @Test
   void freshTrackerHasNoCompletedPhases() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
 
     assertFalse(tracker.isCompleted(TestPhase.STEP_ONE));
     assertFalse(tracker.isCompleted(TestPhase.COMPLETE));
@@ -46,7 +50,7 @@ class ProvisionTrackerTest {
   @Test
   void freshTrackerResumePointIsFirstPhase() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
 
     var resume = tracker.resumePoint();
     assertTrue(resume.isPresent());
@@ -57,7 +61,7 @@ class ProvisionTrackerTest {
   void advancePersistsStateToDisk() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
 
     tracker.advance(TestPhase.STEP_ONE);
 
@@ -75,7 +79,7 @@ class ProvisionTrackerTest {
             + "updated_at: 2026-10-09T00:00:00Z\n");
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
 
-    tracker.load();
+    tracker.load(X);
 
     assertFalse(tracker.isCompleted(TestPhase.STEP_ONE));
     assertEquals(TestPhase.STEP_ONE, tracker.resumePoint().orElseThrow());
@@ -85,11 +89,11 @@ class ProvisionTrackerTest {
   void loadReadsPersistedState() throws Exception {
     var file = stateFile();
     var tracker1 = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker1.load();
+    tracker1.load(X);
     tracker1.advance(TestPhase.STEP_TWO);
 
     var tracker2 = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker2.load();
+    tracker2.load(X);
 
     assertTrue(tracker2.isCompleted(TestPhase.STEP_ONE));
     assertTrue(tracker2.isCompleted(TestPhase.STEP_TWO));
@@ -99,7 +103,7 @@ class ProvisionTrackerTest {
   @Test
   void isCompletedReturnsTrueForPriorPhases() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_THREE);
 
     assertTrue(tracker.isCompleted(TestPhase.STEP_ONE));
@@ -111,7 +115,7 @@ class ProvisionTrackerTest {
   @Test
   void resumePointReturnsFirstIncompletePhase() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_TWO);
 
     var resume = tracker.resumePoint();
@@ -122,7 +126,7 @@ class ProvisionTrackerTest {
   @Test
   void resumePointReturnsEmptyWhenAllComplete() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.COMPLETE);
 
     var resume = tracker.resumePoint();
@@ -133,7 +137,7 @@ class ProvisionTrackerTest {
   void recordFailurePersistsErrorDetails() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
     tracker.recordFailure(TestPhase.STEP_TWO, "apt-get failed: network unreachable");
 
@@ -152,7 +156,7 @@ class ProvisionTrackerTest {
   @Test
   void advanceClearsPriorError() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
     tracker.recordFailure(TestPhase.STEP_TWO, "some error");
 
@@ -164,32 +168,10 @@ class ProvisionTrackerTest {
   }
 
   @Test
-  void cleanupDeletesStateFile() throws Exception {
-    var file = stateFile();
-    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
-    tracker.advance(TestPhase.COMPLETE);
-
-    assertTrue(Files.exists(file));
-
-    tracker.cleanup();
-
-    assertFalse(Files.exists(file));
-  }
-
-  @Test
-  void cleanupNoOpWhenNoFile() throws Exception {
-    var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
-
-    assertDoesNotThrow(() -> tracker.cleanup());
-  }
-
-  @Test
   void dryRunDoesNotWriteStateToDisk() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, true);
-    tracker.load();
+    tracker.load(X);
 
     tracker.advance(TestPhase.STEP_ONE);
     tracker.advance(TestPhase.STEP_TWO);
@@ -200,7 +182,7 @@ class ProvisionTrackerTest {
   @Test
   void dryRunStillTracksInMemory() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), true);
-    tracker.load();
+    tracker.load(X);
 
     tracker.advance(TestPhase.STEP_TWO);
 
@@ -213,11 +195,11 @@ class ProvisionTrackerTest {
   void hasIncompleteRunDetectsPartialState() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_TWO);
 
     var tracker2 = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker2.load();
+    tracker2.load(X);
 
     assertTrue(tracker2.hasIncompleteRun());
   }
@@ -226,11 +208,11 @@ class ProvisionTrackerTest {
   void hasIncompleteRunReturnsFalseWhenComplete() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.COMPLETE);
 
     var tracker2 = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker2.load();
+    tracker2.load(X);
 
     assertFalse(tracker2.hasIncompleteRun());
   }
@@ -238,7 +220,7 @@ class ProvisionTrackerTest {
   @Test
   void hasIncompleteRunReturnsFalseForFreshState() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
 
     assertFalse(tracker.hasIncompleteRun());
   }
@@ -247,7 +229,7 @@ class ProvisionTrackerTest {
   void atomicWriteDoesNotLeavePartialFile() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
 
     var tmpFile = file.resolveSibling(file.getFileName() + ".tmp");
@@ -259,7 +241,7 @@ class ProvisionTrackerTest {
   void stateFileContainsTimestamps() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
 
     var state = tracker.currentState();
@@ -270,7 +252,7 @@ class ProvisionTrackerTest {
   @Test
   void startedAtPreservedAcrossAdvances() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
 
     var startedAt = tracker.currentState().startedAt();
@@ -283,7 +265,7 @@ class ProvisionTrackerTest {
   @Test
   void advanceRejectsRegressionToEarlierPhase() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_TWO);
 
     var ex = assertThrows(IllegalStateException.class, () -> tracker.advance(TestPhase.STEP_ONE));
@@ -293,7 +275,7 @@ class ProvisionTrackerTest {
   @Test
   void advanceRejectsReplayOfSamePhase() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
 
     var ex = assertThrows(IllegalStateException.class, () -> tracker.advance(TestPhase.STEP_ONE));
@@ -301,22 +283,9 @@ class ProvisionTrackerTest {
   }
 
   @Test
-  void dryRunCleanupIsNoOp() throws Exception {
-    var file = stateFile();
-    var realTracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    realTracker.load();
-    realTracker.advance(TestPhase.STEP_ONE);
-    assertTrue(Files.exists(file));
-
-    var dryTracker = new ProvisionTracker<>(TestPhase.class, file, true);
-    dryTracker.cleanup();
-    assertTrue(Files.exists(file));
-  }
-
-  @Test
   void resetClearsInMemoryStateToEmpty() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_TWO);
 
     assertTrue(tracker.isCompleted(TestPhase.STEP_ONE));
@@ -333,7 +302,7 @@ class ProvisionTrackerTest {
   void resetDeletesStateFileOnDisk() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_ONE);
     assertTrue(Files.exists(file));
 
@@ -346,7 +315,7 @@ class ProvisionTrackerTest {
   void resetMakesHasIncompleteRunReturnFalse() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_TWO);
     assertTrue(tracker.hasIncompleteRun());
 
@@ -358,7 +327,7 @@ class ProvisionTrackerTest {
   @Test
   void resetAllowsAdvancingFromFirstPhaseAgain() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_THREE);
 
     tracker.reset();
@@ -371,7 +340,7 @@ class ProvisionTrackerTest {
   @Test
   void resetResumePointReturnsFirstPhase() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
     tracker.advance(TestPhase.STEP_THREE);
 
     tracker.reset();
@@ -385,12 +354,12 @@ class ProvisionTrackerTest {
   void dryRunResetClearsMemoryButKeepsFile() throws Exception {
     var file = stateFile();
     var realTracker = new ProvisionTracker<>(TestPhase.class, file, false);
-    realTracker.load();
+    realTracker.load(X);
     realTracker.advance(TestPhase.STEP_TWO);
     assertTrue(Files.exists(file));
 
     var dryTracker = new ProvisionTracker<>(TestPhase.class, file, true);
-    dryTracker.load();
+    dryTracker.load(X);
     assertTrue(dryTracker.isCompleted(TestPhase.STEP_TWO));
 
     dryTracker.reset();
@@ -402,10 +371,129 @@ class ProvisionTrackerTest {
   @Test
   void resetIsIdempotentOnFreshTracker() throws Exception {
     var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
-    tracker.load();
+    tracker.load(X);
 
     assertDoesNotThrow(() -> tracker.reset());
     assertFalse(tracker.hasIncompleteRun());
     assertNull(tracker.currentState().completedPhase());
+  }
+
+  @Test
+  void progressRecordedForOtherInputsRestartsFromTheFirstPhaseAndIsPersisted() throws Exception {
+    var file = stateFile();
+    var first = new ProvisionTracker<>(TestPhase.class, file, false);
+    first.load(X);
+    first.advance(TestPhase.STEP_TWO);
+    first.recordFailure(TestPhase.STEP_THREE, "boom");
+    var startedAt = first.currentState().startedAt();
+
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    tracker.load(Y);
+
+    assertTrue(tracker.hasIncompleteRun());
+    assertFalse(tracker.isCompleted(TestPhase.STEP_ONE));
+    assertEquals(TestPhase.STEP_ONE, tracker.resumePoint().orElseThrow());
+    assertEquals("STEP_TWO", tracker.superseded().orElseThrow().completedPhase());
+    var persisted = YamlUtil.parseFile(file);
+    assertNull(persisted.get("completed_phase"));
+    assertEquals(startedAt, persisted.get("started_at"));
+    assertNull(persisted.get("error"));
+    assertEquals(Y, persisted.get("inputs"));
+    assertEquals(
+        new ProvisionState(null, startedAt, (String) persisted.get("updated_at"), null, Y),
+        tracker.currentState());
+  }
+
+  @Test
+  void aStateWrittenBeforeInputsWereRecordedRestartsFromTheFirstPhase() throws Exception {
+    var file = stateFile();
+    Files.writeString(
+        file,
+        "completed_phase: STEP_TWO\nstarted_at: 2026-10-09T00:00:00Z\n"
+            + "updated_at: 2026-10-09T00:00:00Z\nerror: null\n");
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+
+    tracker.load(X);
+
+    assertTrue(tracker.hasIncompleteRun());
+    assertEquals(TestPhase.STEP_ONE, tracker.resumePoint().orElseThrow());
+    var persisted = YamlUtil.parseFile(file);
+    assertNull(persisted.get("completed_phase"));
+    assertEquals("2026-10-09T00:00:00Z", persisted.get("started_at"));
+    assertEquals(X, persisted.get("inputs"));
+  }
+
+  @Test
+  void progressRecordedForTheSameInputsIsKept() throws Exception {
+    var file = stateFile();
+    var first = new ProvisionTracker<>(TestPhase.class, file, false);
+    first.load(X);
+    first.advance(TestPhase.STEP_TWO);
+
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    tracker.load(X);
+
+    assertEquals(TestPhase.STEP_THREE, tracker.resumePoint().orElseThrow());
+    assertTrue(tracker.superseded().isEmpty());
+  }
+
+  @Test
+  void advanceAndRecordFailureKeepTheLoadedInputs() throws Exception {
+    var file = stateFile();
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    tracker.load(X);
+
+    tracker.advance(TestPhase.STEP_ONE);
+    assertEquals(X, YamlUtil.parseFile(file).get("inputs"));
+
+    tracker.recordFailure(TestPhase.STEP_TWO, "boom");
+    assertEquals(X, YamlUtil.parseFile(file).get("inputs"));
+    assertEquals(X, tracker.currentState().inputs());
+  }
+
+  @Test
+  void aDryRunRestartsInMemoryAndWritesNothing() throws Exception {
+    var file = stateFile();
+    var real = new ProvisionTracker<>(TestPhase.class, file, false);
+    real.load(X);
+    real.advance(TestPhase.STEP_TWO);
+    var before = Files.readString(file);
+
+    var dry = new ProvisionTracker<>(TestPhase.class, file, true);
+    dry.load(Y);
+
+    assertFalse(dry.isCompleted(TestPhase.STEP_ONE));
+    assertEquals(Y, dry.currentState().inputs());
+    assertEquals(before, Files.readString(file));
+  }
+
+  @Test
+  void aFinishedRunIsCompleteOnlyForItsOwnInputs() throws Exception {
+    var file = stateFile();
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    tracker.load(X);
+    assertFalse(tracker.isComplete());
+    tracker.advance(TestPhase.COMPLETE);
+
+    var same = new ProvisionTracker<>(TestPhase.class, file, false).load(X);
+    assertTrue(same.isComplete());
+    assertFalse(same.hasIncompleteRun());
+
+    var changed = new ProvisionTracker<>(TestPhase.class, file, false).load(Y);
+    assertFalse(changed.isComplete());
+    assertTrue(changed.hasIncompleteRun());
+    assertEquals("COMPLETE", changed.superseded().orElseThrow().completedPhase());
+  }
+
+  @Test
+  void resetKeepsTheInputsAFreshRunRecords() throws Exception {
+    var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
+    tracker.load(X);
+    tracker.advance(TestPhase.STEP_ONE);
+
+    tracker.reset();
+    tracker.advance(TestPhase.STEP_ONE);
+
+    assertEquals(X, YamlUtil.parseFile(stateFile()).get("inputs"));
   }
 }

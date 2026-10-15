@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -18,7 +19,8 @@ import java.util.Optional;
  * its own phase enum and creates a tracker parameterized by that enum. The tracker handles
  * persistence, resume detection, and lifecycle.
  *
- * <p>State is persisted to YAML after each phase via atomic write-then-rename for crash safety. In
+ * <p>State is persisted to YAML after each phase via atomic write-then-rename for crash safety, and
+ * kept once the final phase is recorded: it says which inputs the finished run provisioned from. In
  * dry-run mode, state is tracked in memory only — no disk writes.
  *
  * <p>Not thread-safe. Provisioning is single-threaded by design.
@@ -32,29 +34,52 @@ public final class ProvisionTracker<P extends Enum<P>> {
   private final boolean dryRun;
   private final P[] phases;
   private ProvisionState state;
+  private ProvisionState superseded;
 
   public ProvisionTracker(Class<P> phaseType, Path stateFile, boolean dryRun) {
     this.phaseType = phaseType;
     this.stateFile = stateFile;
     this.dryRun = dryRun;
     this.phases = phaseType.getEnumConstants();
-    this.state = ProvisionState.empty();
+    this.state = ProvisionState.empty(null);
   }
 
   /**
-   * Loads existing state from disk, or starts with empty state if no file exists. Call once before
-   * the provisioning loop. A completed phase this version no longer has — a run that stopped at a
-   * phase a later release removed — is read as no progress, so the run resumes from the first
-   * phase, each of which skips what is already done.
+   * Loads the progress recorded for {@code inputs}, or starts with empty state if no file exists.
+   * Call once before the provisioning loop. Progress recorded for other inputs, or by a release
+   * that recorded none, was made for another descriptor: the run restarts from the first phase,
+   * each of which re-checks its own effect, and the restart is persisted so an interrupted restart
+   * is still a run to resume. A completed phase this version no longer has — a run that stopped at
+   * a phase a later release removed — is likewise read as no progress.
    *
+   * @param inputs a digest of what this run provisions from
    * @return this tracker for fluent chaining
    */
-  public ProvisionTracker<P> load() throws IOException {
-    if (Files.exists(stateFile)) {
-      var loaded = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
-      this.state = isKnownPhase(loaded.completedPhase()) ? loaded : ProvisionState.empty();
+  public ProvisionTracker<P> load(String inputs) throws IOException {
+    superseded = null;
+    if (!Files.exists(stateFile)) {
+      this.state = ProvisionState.empty(inputs);
+      return this;
+    }
+    var loaded = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
+    if (!Objects.equals(loaded.inputs(), inputs)) {
+      superseded = loaded;
+      this.state =
+          new ProvisionState(
+              null, loaded.startedAt(), DateTimeUtils.now().toString(), null, inputs);
+      persist();
+    } else {
+      this.state = isKnownPhase(loaded.completedPhase()) ? loaded : ProvisionState.empty(inputs);
     }
     return this;
+  }
+
+  /**
+   * The state {@link #load} set aside because it was recorded for other inputs, or empty when the
+   * loaded progress was this run's own.
+   */
+  public Optional<ProvisionState> superseded() {
+    return Optional.ofNullable(superseded);
   }
 
   private boolean isKnownPhase(String name) {
@@ -113,7 +138,11 @@ public final class ProvisionTracker<P extends Enum<P>> {
     var now = DateTimeUtils.now().toString();
     this.state =
         new ProvisionState(
-            completedPhase.name(), state.startedAt() != null ? state.startedAt() : now, now, null);
+            completedPhase.name(),
+            state.startedAt() != null ? state.startedAt() : now,
+            now,
+            null,
+            state.inputs());
     persist();
   }
 
@@ -128,19 +157,9 @@ public final class ProvisionTracker<P extends Enum<P>> {
             state.completedPhase(),
             state.startedAt() != null ? state.startedAt() : now,
             now,
-            new ProvisionState.ProvisionError(failedPhase.name(), message, now));
+            new ProvisionState.ProvisionError(failedPhase.name(), message, now),
+            state.inputs());
     persist();
-  }
-
-  /**
-   * Deletes the state file. Called when provisioning completes successfully. Absence of the state
-   * file means "fully provisioned."
-   */
-  public void cleanup() throws IOException {
-    if (dryRun) {
-      return;
-    }
-    Files.deleteIfExists(stateFile);
   }
 
   /**
@@ -148,7 +167,7 @@ public final class ProvisionTracker<P extends Enum<P>> {
    * (e.g. container was deleted externally but state file remains).
    */
   public void reset() throws IOException {
-    this.state = ProvisionState.empty();
+    this.state = ProvisionState.empty(state.inputs());
     if (!dryRun) {
       Files.deleteIfExists(stateFile);
     }
@@ -164,6 +183,11 @@ public final class ProvisionTracker<P extends Enum<P>> {
     }
     var completed = Enum.valueOf(phaseType, state.completedPhase());
     return completed.ordinal() < phases[phases.length - 1].ordinal();
+  }
+
+  /** Returns {@code true} once the final phase is recorded for this run's inputs. */
+  public boolean isComplete() {
+    return isCompleted(phases[phases.length - 1]);
   }
 
   /** Returns the current in-memory state snapshot. */

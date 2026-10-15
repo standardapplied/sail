@@ -498,7 +498,8 @@ class BannerTest {
             "2026-02-18T10:30:00Z",
             "2026-02-18T10:34:22Z",
             new ProvisionState.ProvisionError(
-                "SSH_CONFIGURED", "Failed to create user", "2026-02-18T10:34:22Z"));
+                "SSH_CONFIGURED", "Failed to create user", "2026-02-18T10:34:22Z"),
+            "inputs-x");
     var out = new ByteArrayOutputStream();
     Banner.printResumeInfo(state, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -511,7 +512,7 @@ class BannerTest {
 
   @Test
   void resumeInfoWithoutErrorShowsOnlyPhase() {
-    var state = new ProvisionState("NETWORK_READY", "2026-02-18T10:30:00Z", null, null);
+    var state = new ProvisionState("NETWORK_READY", "2026-02-18T10:30:00Z", null, null, "inputs-x");
     var out = new ByteArrayOutputStream();
     Banner.printResumeInfo(state, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -942,6 +943,33 @@ class BannerTest {
         assertEquals(2, pipeCount, "Misaligned borders in: " + line);
       }
     }
+  }
+
+  @Test
+  void anSshBlockWithKeysAndNoUserSummarizesAsDev() {
+    var config =
+        new SailYaml(
+            "acme",
+            null,
+            new SailYaml.Resources(2, "4GB", "50GB"),
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA...")));
+    var summary = new ByteArrayOutputStream();
+    var projectConfig = new ByteArrayOutputStream();
+
+    Banner.printProjectSummary(config, new PrintStream(summary), Ansi.OFF);
+    Banner.printProjectConfig(
+        config, new ContainerState.NotCreated(), new PrintStream(projectConfig), Ansi.OFF);
+
+    assertTrue(summary.toString(StandardCharsets.UTF_8).contains("SSH user:    dev"));
+    assertTrue(projectConfig.toString(StandardCharsets.UTF_8).contains("SSH user:    dev"));
   }
 
   @Test

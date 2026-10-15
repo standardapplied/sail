@@ -9,13 +9,18 @@ import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.webauthn.Hashes;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -77,14 +82,14 @@ public final class ProjectProvisioner {
   public void provision(
       SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
       throws Exception {
-    tracker.load();
+    tracker.load(inputs(config));
     try {
       launchContainer(config, host);
       setDiskQuota(config, host);
       setResourceLimits(config);
       waitForNetwork(config);
       installPackages(config);
-      configureSsh(config);
+      configureSsh(config, host);
       installSailMachinery(config);
       installPodman(config);
       configureTestcontainers(config);
@@ -100,13 +105,21 @@ public final class ProjectProvisioner {
       installSkills(config);
       recordSpecsPhase();
       writeProjectState(config);
-      tracker.cleanup();
     } catch (Exception e) {
       if (currentPhase != null) {
         tracker.recordFailure(currentPhase, e.getMessage());
       }
       throw e;
     }
+  }
+
+  /**
+   * The digest of the resolved descriptor a run provisions from: the {@link ProvisionTracker} keeps
+   * progress only for the inputs it was recorded for, so an edited descriptor is provisioned again.
+   */
+  public static String inputs(SailYaml config) {
+    var descriptor = YamlUtil.dumpToString(config.toMap());
+    return HexFormat.of().formatHex(Hashes.sha256(descriptor.getBytes(StandardCharsets.UTF_8)));
   }
 
   private void launchContainer(SailYaml config, HostYaml host) throws Exception {
@@ -124,8 +137,7 @@ public final class ProjectProvisioner {
       return;
     }
 
-    var rawImage = Objects.requireNonNullElse(config.image(), host.image());
-    var image = rawImage.replace('/', '-');
+    var image = image(config, host).replace('/', '-');
     var result =
         shell.exec(
             List.of("incus", "launch", image, config.name(), "--profile", host.baseProfile()),
@@ -202,28 +214,47 @@ public final class ProjectProvisioner {
     }
     step(3, "Setting resource limits...");
 
+    var name = config.name();
     var cpu = config.resources().cpu();
     var memory = config.resources().memory();
-    var result =
-        shell.exec(
-            List.of(
-                "incus",
-                "config",
-                "set",
-                config.name(),
-                "limits.cpu=" + cpu,
-                "limits.memory=" + memory,
-                "security.nesting=true",
-                "raw.lxc=lxc.apparmor.profile=unconfined"));
+    var limits = new LinkedHashMap<String, String>();
+    limits.put("limits.cpu", String.valueOf(cpu));
+    limits.put("limits.memory", memory);
+    limits.put("security.nesting", "true");
+    limits.put("raw.lxc", "lxc.apparmor.profile=unconfined");
+    var detail = "Resources " + cpu + " CPU, " + memory + " RAM";
+    if (isConfigured(name, limits)) {
+      tracker.advance(currentPhase);
+      stepDone(3, detail + " (already set)");
+      return;
+    }
+    var set = new ArrayList<>(List.of("incus", "config", "set", name));
+    limits.forEach((key, value) -> set.add(key + "=" + value));
+    var result = shell.exec(set);
     if (!result.ok()) {
       throw new IOException("Failed to set resource limits: " + result.stderr());
     }
-    var restart = shell.exec(List.of("incus", "restart", config.name()));
+    var restart = shell.exec(List.of("incus", "restart", name));
     if (!restart.ok()) {
       throw new IOException("Failed to restart container after config: " + restart.stderr());
     }
     tracker.advance(currentPhase);
-    stepDone(3, "Resources " + cpu + " CPU, " + memory + " RAM");
+    stepDone(3, detail);
+  }
+
+  /**
+   * Whether the container already holds every one of {@code settings}, so that a container
+   * provisioned again for an edited descriptor is not restarted under the agents running in it.
+   */
+  private boolean isConfigured(String name, Map<String, String> settings)
+      throws IOException, InterruptedException, TimeoutException {
+    for (var setting : settings.entrySet()) {
+      var current = shell.exec(List.of("incus", "config", "get", name, setting.getKey()));
+      if (!current.ok() || !current.stdout().strip().equals(setting.getValue())) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private void waitForNetwork(SailYaml config) throws Exception {
@@ -282,7 +313,7 @@ public final class ProjectProvisioner {
     stepDone(5, "Installed " + packages.size() + " packages");
   }
 
-  private void configureSsh(SailYaml config) throws Exception {
+  private void configureSsh(SailYaml config, HostYaml host) throws Exception {
     currentPhase = ProjectPhase.SSH_CONFIGURED;
     if (tracker.isCompleted(currentPhase)) {
       stepSkipped(6, "SSH already configured");
@@ -290,14 +321,8 @@ public final class ProjectProvisioner {
     }
     step(6, "Configuring SSH access...");
 
-    if (config.ssh() == null) {
-      tracker.advance(currentPhase);
-      stepDone(6, "skipped (no ssh config)");
-      return;
-    }
-
     var name = config.name();
-    var user = config.ssh().user();
+    var user = config.sshUser();
 
     var userCheck = execInContainer(name, List.of("id", user));
     if (!userCheck.ok()) {
@@ -310,6 +335,7 @@ public final class ProjectProvisioner {
         throw new IOException("Failed to create user '" + user + "': " + result.stderr());
       }
     }
+    requireDevUid(name, user, image(config, host));
 
     var sudoResult = execInContainer(name, List.of("usermod", "-aG", "sudo", user));
     if (!sudoResult.ok()) {
@@ -318,16 +344,9 @@ public final class ProjectProvisioner {
     }
     pushFileToContainer(name, "/etc/sudoers.d/" + user, user + " ALL=(ALL) NOPASSWD:ALL\n", "0440");
 
-    if (config.ssh().authorizedKeys() != null && !config.ssh().authorizedKeys().isEmpty()) {
-      var sshDir = "/home/" + user + "/.ssh";
-      execInContainer(name, List.of("mkdir", "-p", sshDir));
-      pushFileToContainer(
-          name,
-          sshDir + "/authorized_keys",
-          String.join("\n", config.ssh().authorizedKeys()) + "\n",
-          "0600");
-      execInContainer(name, List.of("chmod", "700", sshDir));
-      execInContainer(name, List.of("chown", "-R", user + ":" + user, sshDir));
+    var keys = authorizedKeys(config);
+    if (userCheck.ok() || !keys.isEmpty()) {
+      writeAuthorizedKeys(name, user, keys);
     }
 
     var sshResult = execInContainer(name, List.of("systemctl", "enable", "--now", "ssh"));
@@ -340,6 +359,65 @@ public final class ProjectProvisioner {
 
     tracker.advance(currentPhase);
     stepDone(6, "Created user " + user + " (uid 1000)");
+  }
+
+  private static List<String> authorizedKeys(SailYaml config) {
+    return config.ssh() != null && config.ssh().authorizedKeys() != null
+        ? config.ssh().authorizedKeys()
+        : List.of();
+  }
+
+  /**
+   * Writes exactly the descriptor's keys, so a key removed from the descriptor loses its access on
+   * the next provisioning run; a user created by this run has no file to empty.
+   */
+  private void writeAuthorizedKeys(String name, String user, List<String> keys)
+      throws IOException, InterruptedException, TimeoutException {
+    var sshDir = "/home/" + user + "/.ssh";
+    execInContainer(name, List.of("mkdir", "-p", sshDir));
+    pushFileToContainer(
+        name,
+        sshDir + "/authorized_keys",
+        keys.isEmpty() ? "" : String.join("\n", keys) + "\n",
+        "0600");
+    execInContainer(name, List.of("chmod", "700", sshDir));
+    execInContainer(name, List.of("chown", "-R", user + ":" + user, sshDir));
+  }
+
+  /**
+   * Every agent, shell and hook runs as uid 1000 with {@code HOME=/home/dev} ({@link
+   * ContainerExec}), so a {@code dev} at any other uid is a container nothing of sail's can work
+   * in.
+   */
+  private void requireDevUid(String name, String user, String image)
+      throws IOException, InterruptedException, TimeoutException {
+    var uid = execInContainer(name, List.of("id", "-u", user));
+    if (!uid.ok()) {
+      throw new IOException(
+          "Failed to look up user '" + user + "' in " + name + ": " + uid.stderr());
+    }
+    var actual = uid.stdout().strip();
+    if (!"1000".equals(actual)) {
+      throw new IOException(
+          "User '"
+              + user
+              + "' in "
+              + name
+              + " has uid "
+              + actual
+              + ", but sail runs every agent, shell and hook as uid 1000. The image '"
+              + image
+              + "' has another user at uid 1000; use an image without one (ubuntu/24.04 has only"
+              + " 'ubuntu', which sail removes), then run 'sail project destroy "
+              + name
+              + "' and 'sudo sail project apply "
+              + name
+              + "'.");
+    }
+  }
+
+  private static String image(SailYaml config, HostYaml host) {
+    return Objects.requireNonNullElse(config.image(), host.image());
   }
 
   private void installPodman(SailYaml config) throws Exception {
@@ -367,7 +445,7 @@ public final class ProjectProvisioner {
         "/etc/containers/registries.conf.d/01-unqualified.conf",
         "unqualified-search-registries = [\"docker.io\"]\n");
 
-    var sshUser = sshUser(config);
+    var sshUser = config.sshUser();
     var lingerResult = execInContainer(name, List.of("loginctl", "enable-linger", sshUser));
     if (!lingerResult.ok()) {
       throw new IOException(
@@ -625,7 +703,7 @@ public final class ProjectProvisioner {
     step(11, "Configuring git identity...");
 
     var name = config.name();
-    var user = sshUser(config);
+    var user = config.sshUser();
 
     var nameResult =
         execAsDevUser(name, List.of("git", "config", "--global", "user.name", config.git().name()));
@@ -796,7 +874,7 @@ public final class ProjectProvisioner {
     step(13, "Cloning " + config.repos().size() + " repositories...");
 
     var name = config.name();
-    var user = sshUser(config);
+    var user = config.sshUser();
     var cloned = 0;
 
     refreshCredentialStore(config, gitTokens, name, user);
@@ -881,7 +959,7 @@ public final class ProjectProvisioner {
 
     step(14, "Pushing " + entries.size() + " workspace file(s)...");
 
-    var user = sshUser(config);
+    var user = config.sshUser();
     var workspace = "/home/" + user + "/workspace/";
     for (var entry : entries) {
       var cmd =
@@ -951,7 +1029,7 @@ public final class ProjectProvisioner {
     step(16, "Configuring stale container cleanup...");
 
     var name = config.name();
-    var user = sshUser(config);
+    var user = config.sshUser();
 
     var check = execAsDevUser(name, List.of("crontab", "-l"));
     if (check.ok() && check.stdout().contains(CleanupScripts.CONTAINER_CLEANUP_PATH)) {
@@ -1043,7 +1121,7 @@ public final class ProjectProvisioner {
       return;
     }
 
-    var user = sshUser(config);
+    var user = config.sshUser();
     var workspace = "/home/" + user + "/workspace";
     execInContainer(config.name(), List.of("mkdir", "-p", workspace));
     execInContainer(config.name(), List.of("chown", user + ":" + user, workspace));
@@ -1189,11 +1267,6 @@ public final class ProjectProvisioner {
                 + "'");
       }
     }
-  }
-
-  /** Returns the SSH user from config, defaulting to {@code "dev"}. */
-  private static String sshUser(SailYaml config) {
-    return config.ssh() != null ? config.ssh().user() : "dev";
   }
 
   /**
