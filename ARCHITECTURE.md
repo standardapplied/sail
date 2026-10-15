@@ -1347,6 +1347,58 @@ class is `LiveMemberTest`'s):
   `RoomWakeReactorTest.aLiveMembersRoomOwesNoTurnOnAStopOrASweep`,
   `HarnessGoldenTest.codexHasNoLiveMode`.*
 
+**Home rooms.** Every FDE has one standing conversation per project with the project's agent:
+the room `<project>--<handle>` (`HomeRoom.idOf`: when a room id cannot carry the pair verbatim,
+with upper case, '.', '_', a `--` in the handle (so `acme--ada`/`bob` and `acme`/`ada--bob`
+never share an id) or too many characters, it is `home--` and the pair's SHA-256, 64 hex
+characters no handle can spell), titled with the project's name, assigned to the FDE, its
+roster the *project's member* (`agent.member` in the definition: `agent` defaulting to
+`agent.type`, `model` to the agent's default, `mode` to `full`). `sail project apply` makes it
+(`HomeRoom.ensure`, the last step of `ProjectApplyCommand.converge`) through the door the API
+takes, `POST /v1/rooms` with a `member`, as the box's FDE: the member is admitted as
+`addRoomMember` admits one, and the room is written with it seated, in one revision. Each clause with the tests that prove
+it (`HomeRoomTest` unless another class is named):
+
+- **H1. A project's home room exists on the box that applies it.** Once the container runs with
+  the member's harness installed, the apply leaves the room created and engaged; a second apply
+  changes nothing. A box that names no FDE and a definition with no agent have none, and the
+  apply says why once; every valid handle has one. A refused member creates no room, so nothing
+  syncs and the next apply creates it seated: a room that seats no one is always its owner's
+  choice, never a refusal's.
+  *`theFirstApplyCreatesTheFdesRoomEngagedWithTheProjectsMember`, `aSecondApplyChangesNothing`,
+  `aRefusedMemberCreatesNoRoomAndTheNextApplyCreatesItSeated`,
+  `aBoxThatNamesNoFdeHasNoHomeRoom`, `aHandleARoomIdCannotCarryVerbatimStillGetsAHomeRoom`,
+  `theLongestProjectAndHandleStillNameARoomOfTheirOwn`,
+  `HomeRoomIT.anApplyEngagesOnceAndThenTheRoomIsTheFdes`.*
+- **H2. The home room is the FDE's.** Its assignee is the FDE, so their box serves its member,
+  and only they or an admin on main change its roster.
+  *`eachFdeGetsTheirOwnRoomAndNeitherMayChangeTheOthers`.*
+- **H3. A home room is a room.** Nothing in the loop, the harness, the journal, sync or scope
+  reads its id; it syncs, is scoped and wakes as any room. Only a room of that project, owned by
+  the FDE, under an id no spec holds is a home room: an id a spec holds (its own room included)
+  refuses the apply with the API's sentence, a room of another project under the id refuses it
+  naming that project, and a room someone else owns refuses it naming the owner.
+  *`anIdTakenByASpecRefusesTheApply`, `aSpecCreatedThroughTheApiUnderTheIdRefusesTheApply`,
+  `theFdesOwnRoomInAnotherProjectRefusesTheApply`,
+  `aRoomSomeoneElseTookUnderTheHomeRoomIdRefusesTheApply`.*
+- **H4. The definition decides, once.** `agent.member` is read when the room is created; a later
+  definition does not rewrite an engaged roster, and an FDE's disengage wins. A member the
+  project does not install, declared or the `agent.type` default, an unknown mode or a model
+  that is not one shell-safe token is refused when the definition is read, before anything is
+  provisioned.
+  *`aLaterDefinitionDoesNotRewriteAnEngagedRoster`, `aRoomTheFdeDisengagedStaysDisengaged`,
+  `SailYamlTest.aMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
+  `SailYamlTest.anImplicitMemberTheProjectDoesNotInstallIsRefusedNamingTheField`,
+  `SailYamlTest.aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused`.*
+- **H5. Mast shows one conversation per project.** `GET /v1/projects/{p}` names the project's
+  `member` and the reader's `home_room` id, so the id is derived in one place; Mast places that
+  room first under the project's name and presets its agent selects to the member. A reader
+  with no FDE, a machine token, reads the project with no `home_room`.
+  *`SailOperationsTest.projectReturnsContainerAndAgentStatus`,
+  `SailOperationsTest.aMachineTokenReadsTheProjectWithoutAHomeRoom`.*
+- **H6. A box applied before this release gets its home room on its next apply, and nothing
+  else moves.**
+
 The loop closes: every wait is recorded, every review ends, and every stop says only what
 happened. Each clause with the tests that prove it (`ReviewLoopRecoveryTest` unless another
 class is named):

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -341,7 +342,8 @@ public record SailYaml(
       Map<String, String> config,
       Guardrails guardrails,
       Notifications notifications,
-      ReviewPipelineConfig reviewPipeline) {
+      ReviewPipelineConfig reviewPipeline,
+      Member member) {
 
     public Agent(
         String type,
@@ -361,6 +363,7 @@ public record SailYaml(
           config,
           guardrails,
           notifications,
+          null,
           null);
     }
 
@@ -383,19 +386,108 @@ public record SailYaml(
       refuseDeleted(map, "agent.build_skill", descriptor);
       var notificationsRaw = (Map<String, Object>) map.get("notifications");
       var reviewPipelineRaw = (Map<String, Object>) map.get("review_pipeline");
-      return new Agent(
-          (String) map.get("type"),
-          Boolean.TRUE.equals(map.get("auto_branch")),
-          (String) map.get("branch_prefix"),
-          Boolean.TRUE.equals(map.get("auto_snapshot")),
-          (List<String>) map.get("install"),
-          (Map<String, String>) map.get("config"),
-          Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK, descriptor)
-              .orElse(null),
-          notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
-          reviewPipelineRaw != null
-              ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
-              : null);
+      var memberRaw = (Map<String, Object>) map.get("member");
+      var agent =
+          new Agent(
+              (String) map.get("type"),
+              Boolean.TRUE.equals(map.get("auto_branch")),
+              (String) map.get("branch_prefix"),
+              Boolean.TRUE.equals(map.get("auto_snapshot")),
+              (List<String>) map.get("install"),
+              (Map<String, String>) map.get("config"),
+              Guardrails.fromBlock(map.get("guardrails"), Guardrails.BUILD_BLOCK, descriptor)
+                  .orElse(null),
+              notificationsRaw != null ? Notifications.fromMap(notificationsRaw, descriptor) : null,
+              reviewPipelineRaw != null
+                  ? ReviewPipelineConfig.fromMap(reviewPipelineRaw, descriptor)
+                  : null,
+              memberRaw != null ? Member.fromMap(memberRaw) : null);
+      agent.requireSeatableMember(descriptor);
+      return agent;
+    }
+
+    /** The harnesses the project installs: {@code install}, else {@code type}. */
+    public List<String> installs() {
+      if (install != null && !install.isEmpty()) {
+        return install.stream().distinct().toList();
+      }
+      return type != null ? List.of(type) : List.of();
+    }
+
+    /**
+     * The member a home room opens with: {@code member} with its blanks filled, the agent from
+     * {@code type}, the agent's own default model, {@code full} access. Null when neither names an
+     * agent.
+     */
+    public Member projectMember() {
+      var declared = declaredMember();
+      var agent = memberAgent();
+      if (Strings.isBlank(agent)) {
+        return null;
+      }
+      return new Member(
+          agent,
+          Strings.isBlank(declared.model()) ? null : declared.model(),
+          Strings.isBlank(declared.mode())
+              ? EngagementMode.FULL.wire()
+              : EngagementMode.of(declared.mode()).wire());
+    }
+
+    private Member declaredMember() {
+      return member != null ? member : new Member(null, null, null);
+    }
+
+    private String memberAgent() {
+      var declared = declaredMember().agent();
+      return Strings.isBlank(declared) ? type : declared;
+    }
+
+    /**
+     * Refuses a member that could never be seated, declared or the default {@code type} makes: a
+     * harness the project does not install, a mode no engagement knows, or a model that is not one
+     * shell-safe token. A definition naming no agent at all has no member to refuse.
+     */
+    private void requireSeatableMember(String descriptor) {
+      var declared = declaredMember();
+      var agent = memberAgent();
+      if (Strings.isBlank(agent)) {
+        if (member == null) {
+          return;
+        }
+        throw new IllegalArgumentException(
+            "agent.member.agent in "
+                + descriptor
+                + " is unset and agent.type names no agent. Set one of them.");
+      }
+      if (!installs().contains(agent)) {
+        throw new IllegalArgumentException(
+            "agent.member.agent '"
+                + agent
+                + "' is not a harness "
+                + descriptor
+                + " installs ("
+                + String.join(", ", installs())
+                + "). Add it to agent.install, or name one of those.");
+      }
+      try {
+        if (Strings.isNotBlank(declared.mode())) {
+          EngagementMode.of(declared.mode());
+        }
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException(
+            "agent.member.mode in " + descriptor + ": " + e.getMessage(), e);
+      }
+      try {
+        Spec.validatedModel(declared.model());
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException(
+            "agent.member.model '"
+                + declared.model()
+                + "' in "
+                + descriptor
+                + " is not a model id. Use one without spaces or shell syntax.",
+            e);
+      }
     }
 
     public Map<String, Object> toMap() {
@@ -409,6 +501,7 @@ public record SailYaml(
       if (guardrails != null) map.put("guardrails", guardrails.toMap());
       if (notifications != null) map.put("notifications", notifications.toMap());
       if (reviewPipeline != null) map.put("review_pipeline", reviewPipeline.toMap());
+      if (member != null) map.put("member", member.toMap());
       return map;
     }
 
@@ -435,6 +528,25 @@ public record SailYaml(
     public Duration lifetimeFor(Lane lane) {
       var bounded = guardrails != null || lane == Lane.REVIEW;
       return bounded ? Guardrails.parseDuration(guardrailsFor(lane).maxDuration()) : null;
+    }
+  }
+
+  /**
+   * The engagement {@code agent.member} names for a project's home room: each field blank for its
+   * default, which {@link Agent#projectMember} fills.
+   */
+  public record Member(String agent, String model, String mode) {
+    static Member fromMap(Map<String, Object> map) {
+      return new Member(
+          (String) map.get("agent"), (String) map.get("model"), (String) map.get("mode"));
+    }
+
+    public Map<String, Object> toMap() {
+      var map = new LinkedHashMap<String, Object>();
+      if (agent != null) map.put("agent", agent);
+      if (model != null) map.put("model", model);
+      if (mode != null) map.put("mode", mode);
+      return map;
     }
   }
 
@@ -489,7 +601,8 @@ public record SailYaml(
             agent.config(),
             agent.guardrails(),
             agent.notifications(),
-            agent.reviewPipeline());
+            agent.reviewPipeline(),
+            agent.member());
     return new SailYaml(
         name,
         description,

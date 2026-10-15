@@ -974,7 +974,7 @@ public final class SailOperations implements HostOperations {
   }
 
   @Override
-  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, String localHandle) {
     var actor = Actor.current();
     freshenForRead();
     var result =
@@ -992,23 +992,37 @@ public final class SailOperations implements HostOperations {
               }
               NameValidator.requireValidSpecId(request.id());
               requireValidWake(request.wake());
-              return store.atomically(
-                  () -> {
-                    requireUnclaimedRoomId(store, request.id());
-                    store.create(
-                        new RoomStore.RoomRow(
-                            request.id(),
-                            request.project(),
-                            request.title(),
-                            actor.handle(),
-                            request.wake(),
-                            null,
-                            null,
-                            null,
-                            null,
-                            null));
-                    return detailOf(store.findById(request.id()).orElseThrow());
-                  });
+              Function<String, RoomDetailResponse> create =
+                  roster ->
+                      store.atomically(
+                          () -> {
+                            requireUnclaimedRoomId(store, request.id());
+                            store.create(
+                                new RoomStore.RoomRow(
+                                    request.id(),
+                                    request.project(),
+                                    request.title(),
+                                    actor.handle(),
+                                    request.wake(),
+                                    roster,
+                                    null,
+                                    null,
+                                    null,
+                                    null));
+                            return detailOf(store.findById(request.id()).orElseThrow());
+                          });
+              if (request.member() == null) {
+                return create.apply(null);
+              }
+              NameValidator.requireValidProjectName(request.project());
+              requireUnclaimedRoomId(store, request.id());
+              return dispatchOps.createSeated(
+                  request.id(),
+                  request.project(),
+                  actor.handle(),
+                  request.member(),
+                  localHandle,
+                  create);
             });
     if (result instanceof Result.Success<RoomDetailResponse>) {
       triggerSyncAfterWrite();
@@ -1423,8 +1437,13 @@ public final class SailOperations implements HostOperations {
 
   private ProjectResponse projectValue(String project) {
     var loaded = projects.load(project);
-    var agent = loaded.config().agent() != null ? AgentConfigView.from(loaded.config()) : null;
-    return new ProjectResponse(project, statusName(loaded.state()), agent);
+    var declared = loaded.config().agent();
+    var agent = declared == null ? null : AgentConfigView.from(loaded.config());
+    var member = declared == null ? null : declared.projectMember();
+    var handle = Actor.reader().actingFde();
+    var homeRoom =
+        member == null || Strings.isBlank(handle) ? null : HomeRoom.idOf(project, handle);
+    return new ProjectResponse(project, statusName(loaded.state()), agent, member, homeRoom);
   }
 
   /**

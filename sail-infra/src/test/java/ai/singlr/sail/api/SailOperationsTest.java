@@ -134,6 +134,22 @@ class SailOperationsTest {
     assertEquals("acme", get(result, "name"));
     assertEquals("running", get(result, "container_status"));
     assertTrue(get(result, "agent").toString().contains("claude-code"));
+    assertEquals(Map.of("agent", "claude-code", "mode", "full"), get(result, "member"));
+    var asAda =
+        Actor.call(new Actor("ada", Role.MEMBER, Actor.Lane.CLI), () -> operations.project("acme"));
+    assertEquals("acme--ada", get(asAda, "home_room"), "the reader's own home room");
+  }
+
+  @Test
+  void aMachineTokenReadsTheProjectWithoutAHomeRoom() throws Exception {
+    var operations = operations(shell().on("incus list ^acme$", RUNNING_JSON));
+
+    var result =
+        Actor.call(new Actor(null, Role.MEMBER, Actor.Lane.API), () -> operations.project("acme"));
+
+    assertTrue(result.isSuccess(), result.toString());
+    assertEquals(Map.of("agent", "claude-code", "mode", "full"), get(result, "member"));
+    assertFalse(containsKey(result, "home_room"));
   }
 
   @Test
@@ -163,6 +179,8 @@ class SailOperationsTest {
     var result = operations.project("acme");
 
     assertFalse(containsKey(result, "agent"));
+    assertFalse(containsKey(result, "member"));
+    assertFalse(containsKey(result, "home_room"));
   }
 
   @Test

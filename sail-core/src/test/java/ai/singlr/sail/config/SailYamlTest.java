@@ -972,4 +972,107 @@ class SailYamlTest {
         "repos[].forge must be text when set.",
         refusal(yaml.replace("forge: github", "forge: [a]")));
   }
+
+  @Test
+  void theProjectsMemberDefaultsToItsAgentWithFullAccess() {
+    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
+
+    assertNull(config.agent().member());
+    assertEquals(new SailYaml.Member("claude-code", null, "full"), config.agent().projectMember());
+    assertFalse(config.agent().toMap().containsKey("member"), "init writes no member key");
+  }
+
+  @Test
+  void aDeclaredMemberIsReadAndRoundTrips() {
+    var yaml =
+        "name: acme\nagent:\n  type: claude-code\n  install: [claude-code, codex]\n"
+            + "  member:\n    agent: codex\n    model: gpt-5-codex\n    mode: read_only\n";
+
+    var config = SailYaml.fromMap(YamlUtil.parseMap(yaml));
+
+    assertEquals(
+        new SailYaml.Member("codex", "gpt-5-codex", "read_only"), config.agent().projectMember());
+    assertEquals(List.of("claude-code", "codex"), config.agent().installs());
+    assertEquals(config, SailYaml.fromMap(config.toMap()), "member round-trips");
+  }
+
+  @Test
+  void aMemberTheProjectDoesNotInstallIsRefusedNamingTheField() {
+    var yaml = "name: acme\nagent:\n  type: claude-code\n  member:\n    agent: codex\n";
+
+    assertEquals(
+        "agent.member.agent 'codex' is not a harness acme/sail.yaml installs (claude-code). Add"
+            + " it to agent.install, or name one of those.",
+        refusal(yaml));
+  }
+
+  @Test
+  void anImplicitMemberTheProjectDoesNotInstallIsRefusedNamingTheField() {
+    var yaml = "name: acme\nagent:\n  type: claude-code\n  install: [codex]\n";
+
+    assertEquals(
+        "agent.member.agent 'claude-code' is not a harness acme/sail.yaml installs (codex). Add"
+            + " it to agent.install, or name one of those.",
+        refusal(yaml));
+  }
+
+  @Test
+  void aDefinitionNamingNoAgentHasNoMember() {
+    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
+
+    assertNull(config.agent().projectMember());
+  }
+
+  @Test
+  void aMemberBlockWithNoAgentToFallBackOnIsRefused() {
+    var yaml = "name: acme\nagent:\n  member:\n    model: gpt-5-codex\n";
+
+    assertEquals(
+        "agent.member.agent in acme/sail.yaml is unset and agent.type names no agent. Set one of"
+            + " them.",
+        refusal(yaml));
+  }
+
+  @Test
+  void aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused() {
+    var base = "name: acme\nagent:\n  type: claude-code\n  member:\n";
+
+    assertEquals(
+        "agent.member.mode in acme/sail.yaml: Engagement mode must be 'full' or 'read_only', got"
+            + " 'admin'.",
+        refusal(base + "    mode: admin\n"));
+    assertEquals(
+        "agent.member.model 'opus; rm -rf /' in acme/sail.yaml is not a model id. Use one without"
+            + " spaces or shell syntax.",
+        refusal(base + "    model: 'opus; rm -rf /'\n"));
+  }
+
+  @Test
+  void aMembersLegacyReadOnlySpellingReadsAsTheWireForm() {
+    var config =
+        SailYaml.fromMap(
+            YamlUtil.parseMap(
+                "name: acme\nagent:\n  type: claude-code\n  member:\n    mode: read-only\n"));
+
+    assertEquals("read_only", config.agent().projectMember().mode());
+  }
+
+  @Test
+  void aBlankMemberFallsBackToEveryDefault() {
+    var config =
+        SailYaml.fromMap(
+            YamlUtil.parseMap(
+                "name: acme\nagent:\n  type: codex\n  member:\n    agent: ''\n    model: ''\n"));
+
+    assertEquals(new SailYaml.Member("codex", null, "full"), config.agent().projectMember());
+  }
+
+  @Test
+  void installsFallBackToTheAgentType() {
+    var none = new SailYaml.Agent(null, false, null, false, null, null, null, null);
+    var empty = new SailYaml.Agent("codex", false, null, false, List.of(), null, null, null);
+
+    assertEquals(List.of(), none.installs());
+    assertEquals(List.of("codex"), empty.installs());
+  }
 }

@@ -195,15 +195,16 @@ public final class AgentLogStreamer implements HttpHandler {
    * Relays the tail's output as SSE until the client disconnects or the tail process exits. Ending
    * on process death is the load-bearing part: {@code tail -f} in a container that never existed
    * (bad project) or whose agent has stopped exits, and without this the loop would heartbeat onto
-   * a dead pipe forever, holding the connection open and never closing the stream. Buffered lines
-   * are drained through the ready() branch before the exit is observed, so no output is lost.
+   * a dead pipe forever, holding the connection open and never closing the stream. A process seen
+   * gone is read to the end of its pipe first, so what it wrote between a {@code ready()} that saw
+   * nothing and its exit is still relayed.
    */
   static void pump(Process tailProcess, BufferedReader reader, OutputStream out, int since)
       throws IOException, InterruptedException {
     var lineNumber = since > 0 ? since : 1;
     var lastHeartbeat = System.nanoTime();
     while (true) {
-      if (reader.ready()) {
+      if (reader.ready() || !tailProcess.isAlive()) {
         var line = reader.readLine();
         if (line == null) {
           break;
@@ -211,8 +212,6 @@ public final class AgentLogStreamer implements HttpHandler {
         writeSseData(out, lineNumber, line);
         lineNumber++;
         lastHeartbeat = System.nanoTime();
-      } else if (!tailProcess.isAlive()) {
-        break;
       } else {
         if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
           out.write(HEARTBEAT);

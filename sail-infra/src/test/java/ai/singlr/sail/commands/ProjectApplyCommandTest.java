@@ -9,19 +9,29 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
+import ai.singlr.sail.api.ApiException;
+import ai.singlr.sail.api.HomeRoom;
+import ai.singlr.sail.api.SailOperations;
+import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
@@ -30,7 +40,7 @@ class ProjectApplyCommandTest {
 
   private static ProjectApplyCommand.Outcome outcome(
       ContainerSailSetup.Result machinery, boolean hostnameRealigned) {
-    return new ProjectApplyCommand.Outcome(3, 1, 4, machinery, hostnameRealigned, List.of());
+    return new ProjectApplyCommand.Outcome(3, 1, 4, machinery, hostnameRealigned, List.of(), null);
   }
 
   @Test
@@ -99,7 +109,8 @@ class ProjectApplyCommandTest {
                 0,
                 ContainerSailSetup.Result.UPDATED,
                 true,
-                List.of("no descriptor in the catalog — converged machinery only")));
+                List.of("no descriptor in the catalog — converged machinery only"),
+                null));
 
     assertEquals("web", row.get("name"));
     assertEquals("started", row.get("action"));
@@ -108,6 +119,81 @@ class ProjectApplyCommandTest {
     assertEquals(true, row.get("hostname_realigned"));
     assertEquals(
         List.of("no descriptor in the catalog — converged machinery only"), row.get("warnings"));
+  }
+
+  @Test
+  void jsonSummaryReportsTheHomeRoom() {
+    var row =
+        ProjectApplyCommand.jsonSummary(
+            "acme",
+            ProjectApplyCommand.Action.CONVERGED,
+            new ProjectApplyCommand.Outcome(
+                0,
+                0,
+                0,
+                ContainerSailSetup.Result.ALREADY_PRESENT,
+                false,
+                List.of(),
+                new HomeRoom.Outcome("acme--ada", false, true, null)));
+
+    assertEquals(
+        Map.of("id", "acme--ada", "created", false, "engaged", true), row.get("home_room"));
+  }
+
+  @Test
+  void theApplyOutputNamesTheHomeRoomOrWhyThereIsNone() {
+    assertNull(ProjectApplyCommand.homeRoomLine(null));
+    assertEquals(
+        "Home room acme--ada: created, engaged.",
+        ProjectApplyCommand.homeRoomLine(new HomeRoom.Outcome("acme--ada", true, true, null)));
+    assertEquals(
+        "Home room acme--ada: present, no agent engaged.",
+        ProjectApplyCommand.homeRoomLine(new HomeRoom.Outcome("acme--ada", false, false, null)));
+    assertEquals(
+        "No home room: this box names no FDE, so it has no home room.",
+        ProjectApplyCommand.homeRoomLine(
+            new HomeRoom.Outcome(
+                null, false, false, "this box names no FDE, so it has no home room")));
+  }
+
+  @Test
+  void aBoxThatNamesNoFdeMakesNoHomeRoomAndResolvesNoOperator() {
+    var outcome =
+        ProjectApplyCommand.ensureHomeRoom(
+            null,
+            claudeProject(),
+            "",
+            () -> {
+              throw new AssertionError("a box with no FDE acts as no one");
+            });
+
+    assertEquals("this box names no FDE, so it has no home room", outcome.skipped());
+  }
+
+  @Test
+  void theHomeRoomIsMadeAsTheBoxsOperator() {
+    var resolved = new AtomicBoolean();
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                ProjectApplyCommand.ensureHomeRoom(
+                    new SailOperations(),
+                    claudeProject(),
+                    "ada",
+                    () -> {
+                      resolved.set(true);
+                      return new Actor("ada", Role.MEMBER, Actor.Lane.CLI);
+                    }));
+
+    assertTrue(resolved.get());
+    assertEquals(
+        "This box keeps no room aggregate, so rooms cannot be served.", refused.getMessage());
+  }
+
+  private static SailYaml claudeProject() {
+    return SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  type: claude-code\n"));
   }
 
   @Test
@@ -120,6 +206,7 @@ class ProjectApplyCommandTest {
 
     assertEquals("current", row.get("machinery"));
     assertFalse(row.containsKey("warnings"));
+    assertFalse(row.containsKey("home_room"));
   }
 
   @Test

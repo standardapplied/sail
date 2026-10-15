@@ -25,6 +25,7 @@ import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * The single dispatch executor behind every lane. Owns the whole procedure — resolve, policy,
@@ -413,6 +414,17 @@ public final class DispatchOperations {
       boolean takeSnapshot,
       String localHandle) {
     return membership.engage(specId, agentYamlName, mode, model, takeSnapshot, localHandle);
+  }
+
+  /** Delegates to {@link MembershipService#createSeated}: a room born with its first member. */
+  public <T> T createSeated(
+      String roomId,
+      String project,
+      String owner,
+      EngageRequest request,
+      String localHandle,
+      Function<String, T> create) {
+    return membership.createSeated(roomId, project, owner, request, localHandle, create);
   }
 
   /** Delegates to {@link EngagementService}: dismisses the room's engaged agent. */

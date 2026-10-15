@@ -484,7 +484,8 @@ public final class ApiRouter implements HttpHandler {
         }
         case POST ->
             ApiResponse.fromCreated(
-                operations.createRoom(RoomCreateRequest.fromMap(JsonBody.readMap(exchange))));
+                operations.createRoom(
+                    RoomCreateRequest.fromMap(JsonBody.readMap(exchange)), nodeHandle.get()));
         default -> throw methodNotAllowed();
       };
     }

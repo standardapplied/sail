@@ -20,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /**
@@ -153,29 +154,8 @@ public final class MembershipService {
     }
     LaunchAdmission.requireAllowed(spec.toSpec(), localHandle);
     authorizeRoster(spec.roomIdOrIdentity());
-    admission.requireTrustedRoster(localHandle);
-    var harness = LaunchAdmission.resolveAgent(agentYamlName);
-    Engagement member;
-    try {
-      member =
-          Engagement.of(
-              harness.yamlName(),
-              mode,
-              LaunchAdmission.validateModel(model),
-              DateTimeUtils.now().toString());
-    } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
-    }
-    var refusal = harness.readOnlyRefusal();
-    if (!member.full() && refusal.isPresent()) {
-      throw new ApiException(
-          ErrorCode.BAD_REQUEST,
-          refusal.get(),
-          "Add " + harness.yamlName() + " with full access instead.");
-    }
     var project = spec.project();
-    projects.loadRunning(project);
-    admission.requireInstalled(harness, project);
+    var member = admit(project, agentYamlName, mode, model, localHandle);
     if (!member.full() || !takeSnapshot) {
       persistMembership(specId, member);
       publishEngaged(project, specId, member, "");
@@ -198,6 +178,39 @@ public final class MembershipService {
     var room = readable(store, roomId);
     LaunchAdmission.requireAllowedForRoom(roomId, store.ownerOf(roomId), localHandle);
     authorizeRoster(roomId);
+    var member = admit(room.project(), agentYamlName, mode, model, localHandle);
+    store.updateRoster(roomId, Roster.solo(member).toJson());
+    publishEngaged(room.project(), roomId, member, "");
+    return new EngageLaunch(member.agent(), member.mode(), "", null);
+  }
+
+  /**
+   * Creates room {@code roomId}, which {@code owner} is about to own, with {@code request} already
+   * seated: the member is admitted exactly as {@link #engage} admits one to a spec-less room, then
+   * {@code create} writes the room with that roster in its first revision. A refused member creates
+   * no room, so a room is never left seating no one by a refusal its owner did not choose.
+   */
+  public <T> T createSeated(
+      String roomId,
+      String project,
+      String owner,
+      EngageRequest request,
+      String localHandle,
+      Function<String, T> create) {
+    LaunchAdmission.requireAllowedForRoom(roomId, owner, localHandle);
+    var member = admit(project, request.agent(), request.mode(), request.model(), localHandle);
+    var created = create.apply(Roster.solo(member).toJson());
+    publishEngaged(project, roomId, member, "");
+    return created;
+  }
+
+  /**
+   * The member an engagement seats, once every check that does not read the room has passed: a
+   * trusted roster, a known harness, a valid mode and model, read-only only where the harness
+   * enforces it, and the harness installed in the project's running container.
+   */
+  private Engagement admit(
+      String project, String agentYamlName, String mode, String model, String localHandle) {
     admission.requireTrustedRoster(localHandle);
     var harness = LaunchAdmission.resolveAgent(agentYamlName);
     Engagement member;
@@ -218,11 +231,9 @@ public final class MembershipService {
           refusal.get(),
           "Add " + harness.yamlName() + " with full access instead.");
     }
-    projects.loadRunning(room.project());
-    admission.requireInstalled(harness, room.project());
-    store.updateRoster(roomId, Roster.solo(member).toJson());
-    publishEngaged(room.project(), roomId, member, "");
-    return new EngageLaunch(member.agent(), member.mode(), "", null);
+    projects.loadRunning(project);
+    admission.requireInstalled(harness, project);
+    return member;
   }
 
   private void completeEngage(String project, String specId, Engagement member, String label) {

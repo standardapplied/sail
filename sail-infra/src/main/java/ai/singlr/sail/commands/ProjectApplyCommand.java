@@ -5,6 +5,8 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.api.HomeRoom;
+import ai.singlr.sail.api.Operations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.Strings;
@@ -31,6 +33,7 @@ import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.identity.Actor;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -44,9 +47,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -217,6 +220,10 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + warning));
     }
     System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ " + summaryLine(action, outcome)));
+    var homeRoom = homeRoomLine(outcome.homeRoom());
+    if (homeRoom != null) {
+      System.out.println("    " + homeRoom);
+    }
     if (action == Action.CREATED) {
       printConnectHints(config, observer, observed);
     }
@@ -298,6 +305,10 @@ public final class ProjectApplyCommand implements Runnable {
           }
           System.out.println(
               Ansi.AUTO.string("  @|green ✓|@ " + project + " — " + summaryLine(action, outcome)));
+          var homeRoom = homeRoomLine(outcome.homeRoom());
+          if (homeRoom != null) {
+            System.out.println("    " + homeRoom);
+          }
         }
       } catch (Exception e) {
         failed++;
@@ -429,7 +440,8 @@ public final class ProjectApplyCommand implements Runnable {
       int skipped,
       ContainerSailSetup.Result machinery,
       boolean hostnameRealigned,
-      List<String> warnings) {}
+      List<String> warnings,
+      HomeRoom.Outcome homeRoom) {}
 
   /**
    * The full convergence pass: descriptor state, sail machinery, skills, hostname. The {@code
@@ -459,23 +471,37 @@ public final class ProjectApplyCommand implements Runnable {
         applier.applyRepos(
             project, config.repos(), sshUser, GitCredentials.singleTokenMap(token), config.git()));
     results.add(applier.applyWorkspaceFiles(project, sailYamlPath, sshUser));
-    var agentInstall =
-        config.agent() != null
-            ? Objects.requireNonNullElse(config.agent().install(), List.of(config.agent().type()))
-            : null;
+    var agentInstall = config.agent() != null ? config.agent().installs() : null;
     results.add(applier.applyAgentTools(project, agentInstall));
     results.add(applier.applyGitConfig(project, config.git(), sshUser));
+    HomeRoom.Outcome homeRoom;
     try (var operations = OperationsFactory.open()) {
       results.add(
           applier.applySkills(project, config, new ProjectSkills(operations::projectFiles)));
+      results.add(applier.applyCleanupCron(project, sshUser));
+      homeRoom =
+          dryRun
+              ? null
+              : ensureHomeRoom(operations, config, HostSync.handle(), CliOperator::current);
     }
-    results.add(applier.applyCleanupCron(project, sshUser));
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();
     var removed = results.stream().mapToInt(ProjectApplier.ApplyResult::removed).sum();
     var skipped = results.stream().mapToInt(ProjectApplier.ApplyResult::skipped).sum();
     results.forEach(result -> warnings.addAll(result.warnings()));
-    return new Outcome(added, removed, skipped, machinery, hostnameRealigned, warnings);
+    return new Outcome(added, removed, skipped, machinery, hostnameRealigned, warnings, homeRoom);
+  }
+
+  /**
+   * The home room of this box's FDE, created and engaged as that FDE once the container runs with
+   * its harnesses installed. A box that names no FDE acts as no one: it has no home room to make.
+   */
+  static HomeRoom.Outcome ensureHomeRoom(
+      Operations operations, SailYaml config, String handle, Supplier<Actor> operator) {
+    if (Strings.isBlank(handle)) {
+      return HomeRoom.ensure(operations, config, handle);
+    }
+    return Actor.call(operator.get(), () -> HomeRoom.ensure(operations, config, handle));
   }
 
   private Outcome convergeMachineryOnly(ShellExecutor observer, ShellExecutor shell, String project)
@@ -490,7 +516,8 @@ public final class ProjectApplyCommand implements Runnable {
         0,
         machinery,
         hostnameRealigned,
-        List.of("no descriptor in the catalog — converged machinery only"));
+        List.of("no descriptor in the catalog — converged machinery only"),
+        null);
   }
 
   static String summaryLine(Action action, Outcome outcome) {
@@ -522,7 +549,24 @@ public final class ProjectApplyCommand implements Runnable {
     if (!outcome.warnings().isEmpty()) {
       map.put("warnings", outcome.warnings());
     }
+    if (outcome.homeRoom() != null) {
+      map.put("home_room", outcome.homeRoom().toMap());
+    }
     return map;
+  }
+
+  /** The apply output's one line about the home room, or null when this apply made no decision. */
+  static String homeRoomLine(HomeRoom.Outcome homeRoom) {
+    if (homeRoom == null) {
+      return null;
+    }
+    if (homeRoom.skipped() != null) {
+      return "No home room: " + homeRoom.skipped() + ".";
+    }
+    return "Home room "
+        + homeRoom.id()
+        + (homeRoom.created() ? ": created" : ": present")
+        + (homeRoom.engaged() ? ", engaged." : ", no agent engaged.");
   }
 
   /** Only provisioning needs root; converging a live container does not. */

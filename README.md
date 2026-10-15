@@ -83,6 +83,10 @@ its login and its token end together. The pairing's key also becomes the worksta
 box's containers trust; a box that already has one refuses unless `--as-workstation-key` says
 to replace it.
 
+Each project the box applies opens with a conversation already waiting: `sail project apply`
+leaves the box's FDE a home room, `<project>--<handle>`, with the project's agent in it
+(`agent.member` in the definition picks another installed agent, model or mode).
+
 On a Mac or other thin client, `sail client <host>` points the local CLI at a box. Commands are
 forwarded over SSH; no control plane runs locally.
 

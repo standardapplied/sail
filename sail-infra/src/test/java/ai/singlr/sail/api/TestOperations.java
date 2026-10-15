@@ -166,7 +166,7 @@ class TestOperations implements Operations {
   }
 
   @Override
-  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+  public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, String localHandle) {
     return Result.failure(ErrorCode.COMMAND_FAILED, "not supported in this fake");
   }
 
@@ -237,7 +237,7 @@ class TestOperations implements Operations {
 
   @Override
   public Result<ProjectResponse> project(String project) {
-    return Result.success(new ProjectResponse(project, "running", null));
+    return Result.success(new ProjectResponse(project, "running", null, null, null));
   }
 
   @Override

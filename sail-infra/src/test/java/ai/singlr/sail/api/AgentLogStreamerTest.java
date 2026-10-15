@@ -30,6 +30,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.io.StringReader;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -386,6 +387,25 @@ class AgentLogStreamerTest {
           assertTrue(body.contains("second"), body);
           assertFalse(process.isAlive());
         });
+  }
+
+  @Test
+  void pumpRelaysWhatTheTailWroteBetweenAnEmptyReadyAndItsExit() throws Exception {
+    var process = new ProcessBuilder("sh", "-c", "true").start();
+    process.waitFor();
+    var arrivedLate =
+        new BufferedReader(new StringReader("first\nsecond\n")) {
+          @Override
+          public boolean ready() {
+            return false;
+          }
+        };
+    var out = new ByteArrayOutputStream();
+
+    AgentLogStreamer.pump(process, arrivedLate, out, 0);
+
+    assertEquals(
+        "id: 1\ndata: first\n\nid: 2\ndata: second\n\n", out.toString(StandardCharsets.UTF_8));
   }
 
   @Test

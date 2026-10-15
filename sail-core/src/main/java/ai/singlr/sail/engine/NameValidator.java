@@ -80,11 +80,16 @@ public final class NameValidator {
     }
   }
 
+  /** Returns whether the given id is a valid spec id, the namespace room ids share. */
+  public static boolean isValidSpecId(String specId) {
+    return specId != null
+        && specId.length() <= MAX_SPEC_ID_LENGTH
+        && SPEC_ID.matcher(specId).matches();
+  }
+
   /** Validates a spec id. Throws if invalid. */
   public static void requireValidSpecId(String specId) {
-    if (specId == null
-        || specId.length() > MAX_SPEC_ID_LENGTH
-        || !SPEC_ID.matcher(specId).matches()) {
+    if (!isValidSpecId(specId)) {
       throw new IllegalArgumentException(
           "Invalid spec id: '"
               + specId
