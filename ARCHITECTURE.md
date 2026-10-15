@@ -2165,20 +2165,22 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   set up with `sudo sail init --main <main>` (`requireOwnFde`; a box with no sync handle names
   `sudo sail host config set sync-handle`). Main and a node both pair their own FDE.
 - **C3. A pairing is revocable in one command, and leaves no trust behind.** One seam
-  (`FdeCommand.unpair`) revokes every pairing, for `sail fde unpair <handle>`, `sail fde rm`,
+  (`PairingRevocation.revoke`) revokes every pairing, for `sail fde unpair <handle>`, `sail fde rm`,
   a re-pair and the upgrade: it removes every key line the pairing made from the operator's
   login, then the pairing's key from the `authorized_keys` of every account whose home is under
   `/home` in every container of the box, running or stopped (`ContainerAuthorizedKeys`, `incus
-  file pull` and `push`). The accounts come from each container's `/etc/passwd`, never from the
+  file pull` and `push`; virtual machines are left out: sail provisions none, and a stopped one
+  serves no file). The accounts come from each container's `/etc/passwd`, never from the
   catalog, whose `ssh.user` may have changed since the container was provisioned; a line goes
   only when its key type and blob are the pairing's, so other keys stay, whatever their comments
   or options mention. Then the workstation key file goes when it holds that key (a file that
   cannot be read fails the revocation; only a missing one holds nothing), and last the token
   its record names is revoked and the record deleted; it is idempotent and says what it
-  removed. `sail fde rm <handle>` removes the FDE
-  first, where the last-admin refusal happens and the token and record go with the row, then
-  revokes, so a refused removal leaves the pairing whole. Both happen in one transaction that
-  commits only once the revocation is done. There is one live code per FDE per box: pairing
+  removed. `sail fde rm <handle>` asks the last-admin refusal first (`FdeStore.requireRemovable`,
+  which the removal asks again), so a refused removal leaves the pairing whole; then it revokes,
+  and only then removes the FDE, so a revocation that stops leaves the FDE to run `rm` on again.
+  The revocation holds no write transaction while it reaches into containers: sail-api writes
+  on through it. There is one live code per FDE per box: pairing
   again unpairs first. Revoking the token alone (`sail server token revoke mast-<handle>`)
   leaves the login; `unpair` is the revocation. The release that brought C0 revokes, through
   the same seam, every pairing whose FDE is not the box's own (`pairings-own-box-v1`, run by

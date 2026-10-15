@@ -567,8 +567,8 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Runs {@link FdeCommand.OwnBoxPairings} once, saying each pairing it revoked as it is revoked. A
-   * revocation that fails is said and left unrecorded, so the next {@code migrate} finishes it.
+   * Runs {@link OwnBoxPairings} once, saying each pairing it revoked as it is revoked. A revocation
+   * that fails is said and left unrecorded, so the next {@code migrate} finishes it.
    */
   static void revokeOtherFdesPairings(Sqlite db, Supplier<FdeCommand.Box> box, boolean jsonOutput) {
     Consumer<String> said =
@@ -576,7 +576,7 @@ public final class MigrateCommand implements Runnable {
             ? note -> {}
             : note -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + note));
     try {
-      new DataMigrator(db, List.of(new FdeCommand.OwnBoxPairings(box, said)))
+      new DataMigrator(db, List.of(new OwnBoxPairings(box, said)))
           .run(ProjectRegistry.loadFromDisk(), DataMigration.Prompter.NON_INTERACTIVE);
     } catch (RuntimeException failure) {
       System.err.println(

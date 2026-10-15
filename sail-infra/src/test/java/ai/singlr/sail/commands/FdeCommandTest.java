@@ -265,7 +265,7 @@ class FdeCommandTest {
     private Result failure;
 
     @Override
-    public Result exec(List<String> command) throws IOException {
+    public Result exec(List<String> command) throws IOException, InterruptedException {
       commands.add(List.copyOf(command));
       if (command.getFirst().equals("incus")) {
         return incus.exec(command);
@@ -298,7 +298,8 @@ class FdeCommandTest {
     }
 
     @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+    public Result exec(List<String> command, Path workDir, Duration timeout)
+        throws IOException, InterruptedException {
       return exec(command);
     }
 
@@ -353,19 +354,34 @@ class FdeCommandTest {
   private static final class Incus {
 
     private final Map<String, String> states = new LinkedHashMap<>();
+    private final Map<String, String> types = new LinkedHashMap<>();
     private final Map<String, String> files = new LinkedHashMap<>();
     private final Map<String, ShellExec.Result> failures = new LinkedHashMap<>();
+    private Runnable beforePull = () -> {};
+    private boolean interrupted;
 
     void container(String name, String state, String file, String content) {
       states.put(name, state);
+      types.put(name, "container");
       files.put(name + file, content);
+    }
+
+    /** A virtual machine, which serves no file while stopped. */
+    void virtualMachine(String name, String state) {
+      states.put(name, state);
+      types.put(name, "virtual-machine");
+      failures.put(
+          name + PASSWD, new ShellExec.Result(1, "", "Error: VM agent isn't currently running\n"));
     }
 
     String file(String container, String file) {
       return files.get(container + file);
     }
 
-    ShellExec.Result exec(List<String> command) throws IOException {
+    ShellExec.Result exec(List<String> command) throws IOException, InterruptedException {
+      if (interrupted) {
+        throw new InterruptedException();
+      }
       var failure = failures.get(String.join(" ", command.subList(1, 3)));
       if (failure == null && command.get(2).equals("pull")) {
         failure = failures.get(command.get(3));
@@ -380,13 +396,21 @@ class FdeCommandTest {
                 states.entrySet().stream()
                     .map(
                         c ->
-                            "{\"name\":\"" + c.getKey() + "\",\"status\":\"" + c.getValue() + "\"}")
+                            "{\"name\":\""
+                                + c.getKey()
+                                + "\",\"status\":\""
+                                + c.getValue()
+                                + "\",\"type\":\""
+                                + types.get(c.getKey())
+                                + "\"}")
                     .collect(Collectors.joining(",", "[", "]")),
                 "");
-        case "file pull" ->
-            files.containsKey(command.get(3))
-                ? new ShellExec.Result(0, files.get(command.get(3)), "")
-                : new ShellExec.Result(1, "", "Error: Not Found\n");
+        case "file pull" -> {
+          beforePull.run();
+          yield files.containsKey(command.get(3))
+              ? new ShellExec.Result(0, files.get(command.get(3)), "")
+              : new ShellExec.Result(1, "", "Error: Not Found\n");
+        }
         case "file push" -> {
           files.put(command.getLast(), Files.readString(Path.of(command.get(command.size() - 2))));
           yield new ShellExec.Result(0, "", "");
@@ -759,6 +783,7 @@ class FdeCommandTest {
     keygen.incus.files.put("docs/home/dev" + AUTHORIZED, key.line() + "\n");
     keygen.incus.container("stray", "Stopped", PASSWD, accounts("dev:x:1000:1000"));
     keygen.incus.files.put("stray/home/dev" + AUTHORIZED, key.line() + "\n");
+    keygen.incus.virtualMachine("win", "Stopped");
   }
 
   private static final String PASSWD = "/etc/passwd";
@@ -882,6 +907,31 @@ class FdeCommandTest {
   }
 
   @Test
+  void removingAnFdeLeavesTheControlPlaneWritableWhileItReachesIntoContainers() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    containersTrusting(keygen.made.getFirst());
+    var writable = new ArrayList<Boolean>();
+    keygen.incus.beforePull = () -> writable.add(writeLockIsFree());
+
+    assertEquals(0, fde("rm", "ada", "--force"), refusal);
+
+    assertEquals(12, writable.size());
+    assertEquals(List.of(true), writable.stream().distinct().toList());
+  }
+
+  /** Whether another connection takes the control plane's write lock without waiting. */
+  private boolean writeLockIsFree() {
+    try (var db = Sqlite.open(tempDir.resolve("sail.db"))) {
+      db.execute("PRAGMA busy_timeout = 0");
+      db.execute("BEGIN IMMEDIATE");
+      db.execute("ROLLBACK");
+      return true;
+    } catch (RuntimeException busy) {
+      return false;
+    }
+  }
+
+  @Test
   void removingAnFdeTakesItsKeyFromEveryContainer() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     var key = keygen.made.getFirst();
@@ -891,7 +941,8 @@ class FdeCommandTest {
     assertEquals(0, fde("rm", "ada", "--force"), refusal);
 
     assertEquals(
-        "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys. The"
+        "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys and"
+            + " token 'mast-ada' revoked. The"
             + " workstation key was its key and is removed. Containers of acme, web, docs, stray no"
             + " longer trust it.",
         printed().getLast());
@@ -1034,6 +1085,39 @@ class FdeCommandTest {
   }
 
   @Test
+  void aWorkstationKeyFileAlreadyGoneLeavesTheRestOfTheRevocationToRun() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.delete(workstationKey());
+    out.reset();
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
+                + " 'mast-ada' revoked."),
+        printed());
+    assertEquals(List.of(), pairedKeys());
+  }
+
+  @Test
+  void anInterruptedRevocationKeepsTheRecordAndTheInterrupt() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    keygen.incus.interrupted = true;
+
+    try {
+      assertEquals(1, fde("unpair", "ada"));
+      assertTrue(Thread.currentThread().isInterrupted());
+    } finally {
+      Thread.interrupted();
+    }
+
+    assertEquals("Interrupted while removing ada's key from this box's containers.", refusal);
+    assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
+    assertEquals(List.of("mast-ada"), tokens().stream().map(TokenStore.TokenInfo::name).toList());
+  }
+
+  @Test
   void aWorkstationKeyThatCannotBeReadKeepsTheRecordSoTheNextRunFinishesIt() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("---------"));
@@ -1124,6 +1208,31 @@ class FdeCommandTest {
   }
 
   @Test
+  void anUpgradeOfABoxThatNamesNoFdeRevokesEveryPairingAndSaysHowItsOperatorPairsAgain()
+      throws Exception {
+    handle = "uday";
+    assertEquals(0, fde("pair", "uday", "--host", "m", "--email", "uday@x.com"));
+    var token = (String) decoded(printedCode()).get("token");
+    handle = null;
+    out.reset();
+
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+
+    assertEquals(
+        List.of(
+            "  ✓ Revoked uday's connect code: a code logs in as root and is minted only for this"
+                + " box's own FDE. This box names none: if it is uday, name it with 'sudo sail"
+                + " host config set sync-handle uday' and pair again."),
+        printed());
+    assertEquals(List.of(), loginsOf("uday"));
+    assertNull(handleOf(token));
+  }
+
+  @Test
   void aRehearsalOnACopyRevokesNoPairingAndTheBoxsOwnMigrateDoes() throws Exception {
     var tokens = pairedClientThenUday();
     var convergence =
@@ -1132,7 +1241,7 @@ class FdeCommandTest {
             (db, json) -> MigrateCommand.revokeOtherFdesPairings(db, this::box, json));
     assertFalse(
         MigrateCommand.REGISTRY.stream()
-            .anyMatch(migration -> migration.name().equals(FdeCommand.OwnBoxPairings.NAME)),
+            .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
         "every lane runs the registry; only the box's own convergence revokes");
 
     MigrateCommand.runMigrations(
@@ -1181,6 +1290,29 @@ class FdeCommandTest {
         });
 
     assertNull(handleOf(tokens[0]));
+  }
+
+  @Test
+  void anUpgradeThatCannotTakeThePairingLockRevokesNothingAndSaysSo() throws Exception {
+    var tokens = pairedClientThenUday();
+    var lock = tempDir.resolve("sail.db.pairings.lock");
+    Files.delete(lock);
+    Files.createDirectory(lock);
+    err.reset();
+
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+
+    assertEquals(
+        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not take"
+            + " the pairing lock ("
+            + lock
+            + ": Is a directory). Run 'sudo sail migrate' again.\n",
+        err.toString(StandardCharsets.UTF_8));
+    assertEquals("client", handleOf(tokens[0]));
   }
 
   @Test
@@ -1336,7 +1468,8 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE removed: ada",
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
-            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."
+            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys"
+                + " and token 'mast-ada' revoked."
                 + " The workstation key was its key and is removed."),
         printed());
     assertEquals("", Files.readString(authorizedKeys()));
@@ -1401,7 +1534,8 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE removed: ada",
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
-            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."
+            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys"
+                + " and token 'mast-ada' revoked."
                 + " The workstation key was its key and is removed."),
         printed());
     assertEquals("", Files.readString(authorizedKeys()));

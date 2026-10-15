@@ -374,17 +374,26 @@ public final class FdeStore {
           var fde =
               byId(fdeId)
                   .orElseThrow(() -> new IllegalArgumentException("No FDE with id " + fdeId + "."));
-          if ("admin".equals(fde.role()) && fde.active() && activeAdminCount() <= 1) {
-            throw new IllegalStateException(
-                "'"
-                    + fde.handle()
-                    + "' is the last active admin FDE. Add another admin first:"
-                    + " sail fde add <handle> --role admin");
-          }
+          requireRemovable(fde);
           db.execute("DELETE FROM api_tokens WHERE fde_id = ?", fdeId);
           new FdeBoxes(db).release(fde.handle());
           db.execute("DELETE FROM fdes WHERE id = ?", fdeId);
         });
+  }
+
+  /**
+   * Refuses when removing {@code fde} would leave the host with no active admin. {@link #remove}
+   * asks it again inside its delete, so a caller that asks first only learns of the refusal before
+   * it does anything else.
+   */
+  public void requireRemovable(Fde fde) {
+    if ("admin".equals(fde.role()) && fde.active() && activeAdminCount() <= 1) {
+      throw new IllegalStateException(
+          "'"
+              + fde.handle()
+              + "' is the last active admin FDE. Add another admin first:"
+              + " sail fde add <handle> --role admin");
+    }
   }
 
   private static final String SELECT =

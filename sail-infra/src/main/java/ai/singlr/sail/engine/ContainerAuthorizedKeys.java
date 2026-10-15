@@ -13,6 +13,7 @@ import java.util.Locale;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * The {@code authorized_keys} of the accounts in each of this box's containers, which provisioning
@@ -52,7 +53,7 @@ public final class ContainerAuthorizedKeys {
                 + Pattern.quote(key.blob())
                 + "(?:\\s.*)?$");
     var changed = new ArrayList<String>();
-    for (var container : new ContainerManager(shell).listAll()) {
+    for (var container : new ContainerManager(shell).listContainers()) {
       var removed = false;
       for (var account : homeAccounts(container.name())) {
         removed |= removeFrom(container.name(), account, entry);
@@ -98,7 +99,7 @@ public final class ContainerAuthorizedKeys {
     if (kept.size() == lines.size()) {
       return false;
     }
-    var content = kept.stream().map(line -> line + "\n").reduce("", String::concat);
+    var content = kept.stream().map(line -> line + "\n").collect(Collectors.joining());
     ContainerFilePush.push(
         shell,
         container,
