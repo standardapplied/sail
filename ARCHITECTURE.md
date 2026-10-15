@@ -810,7 +810,9 @@ tracker resumes only for the descriptor it was written for: its state carries th
 resolved descriptor, and progress recorded for another (or by a release that recorded none)
 restarts the run from the first step, each step re-checking its own effect. The finished state is
 kept, so an apply whose descriptor changed since provisioning runs every step again and installs
-only the difference. The container's user is always `dev` at uid 1000; step 6 is recorded only
+only the difference. The state lives beside the control-plane database, not in the executing
+user's home: provisioning runs as root while a plain apply runs as the operator, and both read the
+one record. Only a run that may provision writes it. The container's user is always `dev` at uid 1000; step 6 is recorded only
 once that user exists at that uid, and `resolveForProvisioning` refuses an `ssh.user` naming any
 other.
 It launches the Incus container from the configured image, bind-mounts the host `sail-api`

@@ -392,6 +392,9 @@ public final class ProjectProvisioner {
   private void requireDevUid(String name, String user, String image)
       throws IOException, InterruptedException, TimeoutException {
     var uid = execInContainer(name, List.of("id", "-u", user));
+    if (shell.isDryRun()) {
+      return;
+    }
     if (!uid.ok()) {
       throw new IOException(
           "Failed to look up user '" + user + "' in " + name + ": " + uid.stderr());

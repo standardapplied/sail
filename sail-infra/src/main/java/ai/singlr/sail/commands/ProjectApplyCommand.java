@@ -208,8 +208,7 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
-    var tracker =
-        new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun);
+    var tracker = tracker(SailPaths.provisionState(config.name()), dryRun, ConsoleHelper.isRoot());
     tracker.load(ProjectProvisioner.inputs(config));
     if (action == Action.CREATED && (tracker.hasIncompleteRun() || tracker.isComplete())) {
       if (!json) {
@@ -307,8 +306,7 @@ public final class ProjectApplyCommand implements Runnable {
         Outcome outcome;
         if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
-          var tracker =
-              new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(project), dryRun);
+          var tracker = tracker(SailPaths.provisionState(project), dryRun, ConsoleHelper.isRoot());
           tracker.load(ProjectProvisioner.inputs(targetPlan.config()));
           if (!tracker.isComplete()) {
             provision(targetPlan.config(), sailYamlPath, shell, tracker, false);
@@ -605,6 +603,16 @@ public final class ProjectApplyCommand implements Runnable {
             ? "the last provisioning run"
             : "the interrupted run";
     return "The descriptor changed since " + since + ": every step is checked again.";
+  }
+
+  /**
+   * Only a run that may provision records progress. A plain apply reads the record root wrote, to
+   * tell whether the container needs provisioning at all, but never rewrites it: a restart it
+   * persisted would land in a directory it cannot write before {@link #requireRootToProvision}
+   * could say what to run instead.
+   */
+  static ProvisionTracker<ProjectPhase> tracker(Path stateFile, boolean dryRun, boolean isRoot) {
+    return new ProvisionTracker<>(ProjectPhase.class, stateFile, dryRun || !isRoot);
   }
 
   /** Only provisioning needs root; converging a live container does not. */

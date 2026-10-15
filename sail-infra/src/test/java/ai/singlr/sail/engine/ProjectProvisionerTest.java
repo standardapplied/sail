@@ -207,6 +207,20 @@ class ProjectProvisionerTest {
   }
 
   @Test
+  void aDryRunPreviewsEveryStepAndWritesNoState() throws Exception {
+    var tracker = dryRunTracker();
+    var steps = new ArrayList<String>();
+    var provisioner =
+        new ProjectProvisioner(new ShellExecutor(true), tracker, new RecordingListener(steps));
+
+    provisioner.provision(minimalConfig(), hostYaml(), null, null);
+
+    assertTrue(tracker.isComplete());
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"));
+    assertFalse(Files.exists(tempDir.resolve("provision-state.yaml")));
+  }
+
+  @Test
   void nullListenerDoesNotThrow() throws Exception {
     var shell = allSuccessShell();
     var provisioner = new ProjectProvisioner(shell, tracker(), null);

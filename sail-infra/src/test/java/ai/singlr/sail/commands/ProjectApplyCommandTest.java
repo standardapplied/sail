@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -344,6 +345,33 @@ class ProjectApplyCommandTest {
 
     assertEquals("dev", dev.config().sshUser());
     assertEquals("dev", keysOnly.config().sshUser());
+  }
+
+  @Test
+  void aPlainApplyReadsTheRecordRootWroteAndConvergesOnly(@TempDir Path dataDir) throws Exception {
+    var stateFile = dataDir.resolve("projects/web/provision-state.yaml");
+    ProjectApplyCommand.tracker(stateFile, false, true)
+        .load("inputs-x")
+        .advance(ProjectPhase.COMPLETE);
+
+    var plain = ProjectApplyCommand.tracker(stateFile, false, false).load("inputs-x");
+
+    assertTrue(plain.isComplete());
+    assertFalse(plain.hasIncompleteRun());
+  }
+
+  @Test
+  void aPlainApplyNeverRewritesTheRecord(@TempDir Path dataDir) throws Exception {
+    var stateFile = dataDir.resolve("projects/web/provision-state.yaml");
+    ProjectApplyCommand.tracker(stateFile, false, true)
+        .load("inputs-x")
+        .advance(ProjectPhase.COMPLETE);
+    var written = Files.readString(stateFile);
+
+    var plain = ProjectApplyCommand.tracker(stateFile, false, false).load("inputs-y");
+
+    assertFalse(plain.isComplete());
+    assertEquals(written, Files.readString(stateFile));
   }
 
   @Test
