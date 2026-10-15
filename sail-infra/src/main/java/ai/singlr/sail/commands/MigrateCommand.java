@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -209,6 +211,7 @@ public final class MigrateCommand implements Runnable {
     relocateHostConfig(jsonOutput);
     assignBoxId(jsonOutput);
     syncAuthorizedKeys(db, jsonOutput);
+    revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput);
     ensureSshdKeepalive(jsonOutput);
     convergeContainers(jsonOutput);
     ensurePtyHostService(jsonOutput);
@@ -560,6 +563,28 @@ public final class MigrateCommand implements Runnable {
           "  authorized_keys sync failed: "
               + e.getMessage()
               + ". Converge manually with 'sudo sail host keys sync'.");
+    }
+  }
+
+  /**
+   * Runs {@link OwnBoxPairings} once, saying each pairing it revoked as it is revoked. A revocation
+   * that fails is said and left unrecorded, so the next {@code migrate} finishes it.
+   */
+  static void revokeOtherFdesPairings(Sqlite db, Supplier<FdeCommand.Box> box, boolean jsonOutput) {
+    Consumer<String> said =
+        jsonOutput
+            ? note -> {}
+            : note -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + note));
+    try {
+      new DataMigrator(db, List.of(new OwnBoxPairings(box, said)))
+          .run(ProjectRegistry.loadFromDisk(), DataMigration.Prompter.NON_INTERACTIVE);
+    } catch (RuntimeException failure) {
+      System.err.println(
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ Connect codes of FDEs other than this box's own are not all"
+                  + " revoked: "
+                  + failure.getMessage()
+                  + " Run 'sudo sail migrate' again."));
     }
   }
 

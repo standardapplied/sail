@@ -12,9 +12,9 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
-import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -35,7 +35,6 @@ import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -90,8 +89,8 @@ public final class FdeCommand implements Runnable {
   /**
    * What a pairing touches on this box: the control plane, the operator (the account {@code
    * sail-api} runs as, whose home holds the pty socket Mast forwards to), the SSH host key a code
-   * pins and the workstation key containers trust. A test puts all of it under a temporary
-   * directory.
+   * pins, the workstation key containers trust and the main a node syncs with ({@code null} on main
+   * or a lone box). A test puts all of it under a temporary directory.
    */
   record Box(
       Path database,
@@ -101,18 +100,24 @@ public final class FdeCommand implements Runnable {
       Path hostKey,
       Path workstationKey,
       ShellExec shell,
-      boolean node) {
+      String main) {
 
     static Box here() {
+      var sync = HostSync.config();
       return new Box(
           dbPath(),
           System.getProperty("user.name"),
-          HostSync.handle(),
+          sync.handle(),
           Path.of(System.getProperty("user.home")),
           Path.of("/etc/ssh/ssh_host_ed25519_key.pub"),
           SailPaths.workstationPublicKeyPath(),
           new ShellExecutor(false),
-          HostSync.isNode(HostSync.config()));
+          HostSync.isNode(sync) ? sync.main() : null);
+    }
+
+    /** Whether this box is a node, whose roster is a copy of main's. */
+    boolean node() {
+      return main != null;
     }
 
     /**
@@ -163,86 +168,6 @@ public final class FdeCommand implements Runnable {
     return "sail-mast:" + handle;
   }
 
-  private static String keyLinesRemoved(Box box, int count) {
-    return (count == 1 ? "1 key line" : count + " key lines")
-        + " removed from "
-        + box.operator()
-        + "'s authorized_keys";
-  }
-
-  /**
-   * Holds off every other command that makes or revokes a pairing on this box until closed. A
-   * pairing is a key line in the operator's login and a record in the control plane, and no
-   * transaction spans the two: a command that read one while another stood between them would
-   * forget the record of a login just written, or write a login for an FDE just removed. Each such
-   * command holds this from its first read to its last write. It is a lock file beside the
-   * database, as the sync rounds' is, so the gateway's account takes it too.
-   */
-  private static FileMutex holdPairings(Box box) throws IOException {
-    var database = box.database();
-    return FileMutex.acquire(database.resolveSibling(database.getFileName() + ".pairings.lock"));
-  }
-
-  /**
-   * Removes {@code handle}'s key lines from the operator's login, and returns how many. A login
-   * that cannot be removed fails the command here, before it forgets the FDE, the token or the
-   * record: a login must never outlive what revokes it.
-   */
-  private static int revokeLogin(Box box, String handle) {
-    try {
-      return new OperatorAuthorizedKeys(box.home()).removeCommented(pairingComment(handle));
-    } catch (IOException failure) {
-      throw new UncheckedIOException(
-          "Could not remove "
-              + handle
-              + "'s key line from "
-              + box.operator()
-              + "'s authorized_keys ("
-              + failure.getClass().getSimpleName()
-              + "), so nothing of "
-              + handle
-              + " was removed and its pairing still works. Check that "
-              + box.home().resolve(".ssh")
-              + " is writable by "
-              + box.operator()
-              + ", then run the command again.",
-          failure);
-    }
-  }
-
-  /**
-   * Revokes {@code handle}'s pairing: every key line made for it in the operator's login, the token
-   * the pairing names and its record. Returns what it removed, or empty when there was no pairing.
-   * The lines go by their comment, so a pairing whose FDE is already gone is still revoked.
-   */
-  private static Optional<String> unpair(Box box, Sqlite db, String handle) {
-    var keyLines = revokeLogin(box, handle);
-    var pairing =
-        new FdeStore(db).byHandle(handle).flatMap(fde -> new FdePairingStore(db).find(fde.id()));
-    if (keyLines == 0 && pairing.isEmpty()) {
-      return Optional.empty();
-    }
-    var revoked =
-        pairing.isPresent() && forget(db, pairing.get())
-            ? " and token '" + pairing.get().tokenName() + "' revoked"
-            : "";
-    return Optional.of(keyLinesRemoved(box, keyLines) + revoked + ".");
-  }
-
-  /**
-   * Refuses an FDE roster edit on a node. The roster is main-authoritative and replicates one-way,
-   * so an add/update/remove on a node is silently overwritten by the next sync — failing loud with
-   * the right place to run it is far better than losing the edit.
-   */
-  /** Deletes a pairing's record and revokes its token, answering whether the token was there. */
-  private static boolean forget(Sqlite db, FdePairingStore.Pairing pairing) {
-    return db.transaction(
-        () -> {
-          new FdePairingStore(db).remove(pairing.fdeId());
-          return new TokenStore(db).revoke(pairing.tokenName());
-        });
-  }
-
   /**
    * This box's own FDE acts as an admin here whatever its roster row says ({@code
    * RoleRule.scopeOf}), so a scope on it would hold no one: refused, as an admin's is.
@@ -257,6 +182,40 @@ public final class FdeCommand implements Runnable {
     }
   }
 
+  /**
+   * Refuses a connect code for anyone but this box's own FDE. A code logs in as the operator, who
+   * sees every project, container and secret here; another FDE holds a code for its own box.
+   */
+  private static void requireOwnFde(Box box, String handle, String host) {
+    var login = "A connect code logs in as " + box.operator() + "@" + host;
+    if (box.handle() == null) {
+      throw new IllegalStateException(
+          login
+              + ", which sees every project here, so it is minted only for this box's own FDE,"
+              + " and this box names none. If it is "
+              + handle
+              + ", name it with 'sudo sail host config set sync-handle "
+              + handle
+              + "' and pair again.");
+    }
+    if (!handle.equals(box.handle())) {
+      throw new IllegalStateException(
+          login
+              + ", which sees every project here. Pair "
+              + handle
+              + " on its own box instead: set it up with 'sudo sail init --main "
+              + Objects.requireNonNullElse(box.main(), host)
+              + "', then run 'sail fde pair "
+              + handle
+              + " --host <its address>' there.");
+    }
+  }
+
+  /**
+   * Refuses an FDE roster edit on a node. The roster is main-authoritative and replicates one-way,
+   * so an add/update/remove on a node is silently overwritten by the next sync — failing loud with
+   * the right place to run it is far better than losing the edit.
+   */
   private static void requireMainForRosterEdit(String action) {
     requireMainForRosterEdit(HostSync.isNode(HostSync.config()), action);
   }
@@ -665,7 +624,7 @@ public final class FdeCommand implements Runnable {
               System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
               return;
             }
-            try (var held = holdPairings(box);
+            try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               var fde =
@@ -673,29 +632,27 @@ public final class FdeCommand implements Runnable {
                       .byHandle(handle)
                       .orElseThrow(
                           () -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
-              var paired = new FdePairingStore(db).find(fde.id()).isPresent();
-              if (paired) {
+              var pairing = new FdePairingStore(db).find(fde.id());
+              if (pairing.isPresent()) {
                 requireOperator(box, "rm " + handle);
               }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
-              var keyLines =
-                  db.transaction(
-                      () -> {
-                        fdeStore.remove(fde.id());
-                        return box.gateway() ? 0 : revokeLogin(box, fde.handle());
-                      });
+              fdeStore.requireRemovable(fde);
+              var revoked =
+                  box.gateway()
+                      ? Optional.<String>empty()
+                      : PairingRevocation.revoke(box, db, fde.handle(), pairing);
+              fdeStore.remove(fde.id());
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
                   Ansi.AUTO.string(
                       "  @|faint Owned tokens, SSH keys, sessions, passkeys, and enrollment"
                           + " tickets are revoked.|@"));
-              if (paired || keyLines > 0) {
-                System.out.println(
-                    Ansi.AUTO.string(
-                        "  @|green ✓|@ Its Mast pairing is revoked: "
-                            + keyLinesRemoved(box, keyLines)
-                            + "."));
-              }
+              revoked.ifPresent(
+                  removed ->
+                      System.out.println(
+                          Ansi.AUTO.string(
+                              "  @|green ✓|@ Its Mast pairing is revoked: " + removed)));
               if (hadSshKeys) {
                 applyKeys(db);
               }
@@ -716,12 +673,16 @@ public final class FdeCommand implements Runnable {
   @Command(
       name = "pair",
       description =
-          "Mint the one connect code an FDE's Mast needs to reach this box. Run it as the account"
-              + " sail-api runs as.",
+          "Mint the connect code this box's own FDE pastes into Mast. The code logs in as the"
+              + " account sail-api runs as, which sees every project here, so it is minted for no"
+              + " other FDE: onboard another on its own box ('sudo sail init --main <main>') and"
+              + " pair it there. Run it as the account sail-api runs as.",
       mixinStandardHelpOptions = true)
   static final class Pair implements Runnable {
 
-    @Parameters(index = "0", description = "FDE handle; added when this box has no such FDE.")
+    @Parameters(
+        index = "0",
+        description = "This box's own FDE handle (its sync-handle); added on main when absent.")
     private String handle;
 
     @Option(
@@ -767,34 +728,38 @@ public final class FdeCommand implements Runnable {
 
     private void execute() throws Exception {
       var box = command.box.get();
-      requireMainForRosterEdit(box.node(), "Pairing an FDE");
       validate();
+      requireOwnFde(box, handle, host);
+      if (box.node() && (displayName != null || email != null || role != null)) {
+        throw new IllegalStateException(
+            rosterEditOnNodeMessage("Changing an FDE's name, email or role"));
+      }
       requireOperator(box, "pair " + handle);
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
-      try (var held = holdPairings(box);
+      try (var held = PairingTrust.hold(box.database());
           var db = Sqlite.open(box.database())) {
         var fdes = new FdeStore(db);
         var existing = fdes.byHandle(handle);
-        var address = address(existing);
+        if (box.node() && existing.isEmpty()) {
+          throw new IllegalStateException(
+              "This node holds no roster row for '"
+                  + handle
+                  + "' yet, and main's roster names the FDEs here. Run 'sudo sail sync', then pair"
+                  + " again.");
+        }
+        var address = address(box, existing);
         var hostKey = hostKey(box.hostKey());
         var replaced =
             replacedWorkstationKey(
                 box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())));
         var key = mintKey(box.shell());
-        var fde =
-            existing.isPresent()
-                ? fdes.update(handle, displayName, email, role).orElseThrow()
-                : fdes.add(
-                    handle,
-                    displayName,
-                    email,
-                    Objects.requireNonNullElse(role, FdeStore.DEFAULT_ROLE));
+        var fde = box.node() ? existing.orElseThrow() : rosterRow(fdes, existing);
         if (existing.isEmpty()) {
           System.out.println(
               Ansi.AUTO.string(
                   "  @|green ✓|@ FDE added: " + fde.handle() + " (" + fde.role() + ")"));
         }
-        unpair(box, db, handle)
+        PairingRevocation.revoke(box, db, handle)
             .ifPresent(
                 removed ->
                     System.out.println(
@@ -855,8 +820,19 @@ public final class FdeCommand implements Runnable {
       }
     }
 
+    /**
+     * The FDE main's roster holds for the code once this pairing has added it or applied the name,
+     * email and role passed.
+     */
+    private FdeStore.Fde rosterRow(FdeStore fdes, Optional<FdeStore.Fde> existing) {
+      return existing.isPresent()
+          ? fdes.update(handle, displayName, email, role).orElseThrow()
+          : fdes.add(
+              handle, displayName, email, Objects.requireNonNullElse(role, FdeStore.DEFAULT_ROLE));
+    }
+
     /** The email the code names: the one passed, else the one this box holds for the FDE. */
-    private String address(Optional<FdeStore.Fde> existing) {
+    private String address(Box box, Optional<FdeStore.Fde> existing) {
       if (existing.isPresent() && !existing.get().active()) {
         throw new IllegalStateException(
             "FDE '"
@@ -871,7 +847,12 @@ public final class FdeCommand implements Runnable {
         throw new IllegalArgumentException(
             "This box holds no email for '"
                 + handle
-                + "', and a connect code names one. Pass --email <email>.");
+                + "', and a connect code names one. "
+                + (box.node()
+                    ? "Set it on main with 'sail fde update "
+                        + handle
+                        + " --email <email>', run 'sudo sail sync' here, then pair again."
+                    : "Pass --email <email>."));
       }
       return address;
     }
@@ -988,11 +969,11 @@ public final class FdeCommand implements Runnable {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
             requireOperator(box, "unpair " + handle);
-            try (var held = holdPairings(box);
+            try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               System.out.println(
                   Ansi.AUTO.string(
-                      unpair(box, db, handle)
+                      PairingRevocation.revoke(box, db, handle)
                           .map(removed -> "  @|green ✓|@ Unpaired " + handle + ": " + removed)
                           .orElse(
                               "  @|faint "

@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 
 /**
  * Manages Incus container lifecycle: query state, start, stop, delete. All state is queried live
@@ -51,12 +52,27 @@ public final class ContainerManager {
 
   /** Lists all containers with their current state. */
   public List<ContainerInfo> listAll() throws IOException, InterruptedException, TimeoutException {
+    return list(entry -> true);
+  }
+
+  /**
+   * Lists this box's system containers, leaving out its virtual machines: a stopped one serves no
+   * file, and sail provisions none.
+   */
+  public List<ContainerInfo> listContainers()
+      throws IOException, InterruptedException, TimeoutException {
+    return list(entry -> "container".equals(entry.get("type")));
+  }
+
+  private List<ContainerInfo> list(Predicate<Map<String, Object>> kept)
+      throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(List.of("incus", "list", "--format", "json"));
     if (!result.ok()) {
       throw new IOException("incus list failed: " + result.stderr());
     }
     var entries = YamlUtil.parseList(result.stdout());
     return entries.stream()
+        .filter(kept)
         .map(
             entry -> {
               var name = Objects.toString(entry.get("name"), "unknown");

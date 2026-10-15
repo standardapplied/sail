@@ -19,22 +19,31 @@ import ai.singlr.sail.api.HomeRoom;
 import ai.singlr.sail.api.SailOperations;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class ProjectApplyCommandTest {
 
@@ -224,6 +233,59 @@ class ProjectApplyCommandTest {
   void dryRunAndRootSkipTheRootGate() {
     ProjectApplyCommand.requireRootToProvision("web", true, false);
     ProjectApplyCommand.requireRootToProvision("web", false, true);
+  }
+
+  @Test
+  @Timeout(60)
+  void anApplyReadsNothingWhileAPairingIsMadeOrRevoked(@TempDir Path dir) throws Exception {
+    var database = dir.resolve("sail.db");
+    var descriptor = dir.resolve("acme.yaml");
+    var errors = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
+    try {
+      var apply = applying(database, "-f", descriptor.toString(), "--yes");
+
+      try (var pairing = PairingTrust.hold(database)) {
+        FileMutexTest.awaitParked(Thread.ofPlatform().start(apply));
+        assertFalse(apply.isDone(), "the apply waits before it reads the workstation key");
+      }
+
+      assertEquals(1, apply.get());
+      assertEquals(
+          Banner.errorLine(
+                  "Project descriptor not found: "
+                      + descriptor
+                      + "\n  Run 'sail project init' to author one, sync it from main with 'sail"
+                      + " sync', or specify one with --file.",
+                  Ansi.AUTO)
+              + System.lineSeparator(),
+          errors.toString(StandardCharsets.UTF_8));
+    } finally {
+      System.setErr(originalErr);
+    }
+  }
+
+  @Test
+  @Timeout(60)
+  void aDryRunWritesNoKeySoItDoesNotWaitForAPairing(@TempDir Path dir) throws Exception {
+    var database = dir.resolve("sail.db");
+    var originalErr = System.err;
+    System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+    try (var pairing = PairingTrust.hold(database)) {
+      var apply = applying(database, "-f", dir.resolve("acme.yaml").toString(), "--dry-run");
+      Thread.ofPlatform().start(apply);
+
+      assertEquals(1, apply.get());
+    } finally {
+      System.setErr(originalErr);
+    }
+  }
+
+  private static FutureTask<Integer> applying(Path database, String... args) {
+    var command = new CommandLine(new ProjectApplyCommand(() -> database));
+    command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
+    return new FutureTask<>(() -> command.execute(args));
   }
 
   @Test

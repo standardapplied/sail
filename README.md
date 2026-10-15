@@ -69,7 +69,7 @@ sail sync status --json           # stored health, last success, and any failure
 ```
 
 Hand a person their box in Mast with one string. On the box, as the account `sail-api` runs as
-(with `sudo` where that is root):
+(with `sudo` where that is root), for the box's own FDE (its sync handle):
 
 ```bash
 sail fde pair ada --host 34.1.2.3 --email ada@example.com   # prints a connect code, once
@@ -77,11 +77,18 @@ sail fde unpair ada                                         # revokes it
 ```
 
 The code is everything Mast needs: where the box is and its host key, a login key made for this
-pairing, and an API token for `ada`. It is a secret that opens a shell on the box, so send it as
-you would a password. It lasts a year unless `--ttl-days` or `--no-expiry` says otherwise, and
-its login and its token end together. The pairing's key also becomes the workstation key the
-box's containers trust; a box that already has one refuses unless `--as-workstation-key` says
-to replace it.
+pairing, and an API token for `ada`. It logs in as the account `sail-api` runs as, which sees
+every project, container and secret on the box, so a box mints it for its own FDE and no other.
+It is a secret that opens a shell on the box, so send it as you would a password. It lasts a year
+unless `--ttl-days` or `--no-expiry` says otherwise, and its login and its token end together.
+The pairing's key also becomes the workstation key the box's containers trust; a box that
+already has one refuses unless `--as-workstation-key` says to replace it. Unpairing takes the key
+back out of the login, the workstation key and every container.
+
+A client, or any other engineer, gets a box of their own: set it up with
+`sudo sail init --main <main>`, grant it its projects on main (`sail fde grant <handle>
+<project>`), and pair on that box. A node pairs its own FDE as main's roster has it, so the
+roster options (`--name`, `--email`, `--role`) are main's.
 
 Each project the box applies opens with a conversation already waiting: `sail project apply`
 leaves the box's FDE a home room, `<project>--<handle>`, with the project's agent in it

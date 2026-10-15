@@ -23,7 +23,13 @@ import org.junit.jupiter.api.Test;
 class CommandsUseTheSeamTest {
   private static final Set<String> ALLOWED =
       Set.of(
-          "MigrateCommand", "JoinCommand", "ServerStartCommand", "SyncServerCommand", "FdeCommand");
+          "MigrateCommand",
+          "JoinCommand",
+          "ServerStartCommand",
+          "SyncServerCommand",
+          "FdeCommand",
+          "PairingRevocation",
+          "OwnBoxPairings");
 
   @Test
   void commandsUseOperationsInsteadOfOpeningStores() throws Exception {

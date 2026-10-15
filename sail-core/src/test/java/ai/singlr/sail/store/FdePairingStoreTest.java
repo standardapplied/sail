@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,18 @@ class FdePairingStoreTest {
     assertTrue(pairings.remove(ada));
     assertTrue(pairings.find(ada).isEmpty());
     assertFalse(pairings.remove(ada));
+  }
+
+  @Test
+  void theHandlesOfThePairedFdesAreListedInOrder() {
+    assertEquals(List.of(), pairings.handles());
+    var bob = new FdeStore(db).add("bob", null, null, "member").id();
+    new FdeStore(db).add("cy", null, null, "member");
+
+    pairings.put(bob, "ssh-ed25519 BBBB sail-mast:bob", "mast-bob");
+    pairings.put(ada, "ssh-ed25519 AAAA sail-mast:ada", "mast-ada");
+
+    assertEquals(List.of("ada", "bob"), pairings.handles());
   }
 
   @Test

@@ -23,6 +23,7 @@ import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
@@ -106,6 +107,16 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Spec private CommandSpec spec;
 
+  private final Supplier<Path> database;
+
+  public ProjectApplyCommand() {
+    this(SailPaths::controlPlaneDb);
+  }
+
+  ProjectApplyCommand(Supplier<Path> database) {
+    this.database = database;
+  }
+
   enum Action {
     CREATED,
     STARTED,
@@ -141,6 +152,16 @@ public final class ProjectApplyCommand implements Runnable {
     if (all && file != null) {
       throw new IllegalArgumentException("--file applies to a single project, not --all.");
     }
+    if (dryRun) {
+      converge();
+      return;
+    }
+    try (var held = PairingTrust.hold(database.get())) {
+      converge();
+    }
+  }
+
+  private void converge() throws Exception {
     if (all) {
       applyAll();
     } else {

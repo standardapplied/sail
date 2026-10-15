@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class ContainerManagerTest {
@@ -260,6 +261,25 @@ class ContainerManagerTest {
     assertInstanceOf(ContainerState.Stopped.class, containers.get(1).state());
     assertEquals("ml-pipeline", containers.get(2).name());
     assertInstanceOf(ContainerState.Running.class, containers.get(2).state());
+  }
+
+  @Test
+  void listContainersLeavesOutVirtualMachines() throws Exception {
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk(
+                "incus list --format json",
+                """
+                [{"name": "acme", "status": "Running", "type": "container", "state": {}},
+                 {"name": "win", "status": "Stopped", "type": "virtual-machine", "state": {}},
+                 {"name": "docs", "status": "Stopped", "type": "container", "state": {}}]
+                """);
+
+    var containers = new ContainerManager(shell).listContainers();
+
+    assertEquals(
+        List.of("acme", "docs"),
+        containers.stream().map(ContainerManager.ContainerInfo::name).toList());
   }
 
   @Test

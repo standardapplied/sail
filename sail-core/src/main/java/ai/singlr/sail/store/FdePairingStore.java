@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -40,6 +41,13 @@ public final class FdePairingStore {
         "SELECT fde_id, public_key, token_name, created_at FROM fde_pairings WHERE fde_id = ?",
         row -> new Pairing(row.text(0), row.text(1), row.text(2), row.text(3)),
         fdeId);
+  }
+
+  /** The handles of the FDEs paired on this box, in order. */
+  public List<String> handles() {
+    return db.query(
+        "SELECT f.handle FROM fde_pairings p JOIN fdes f ON f.id = p.fde_id ORDER BY f.handle",
+        row -> row.text(0));
   }
 
   public boolean remove(String fdeId) {
