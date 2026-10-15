@@ -10,12 +10,11 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Ownership;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.zip.CRC32;
 
 /**
  * An FDE's standing conversation with a project's agent: one room per FDE per project, created by
@@ -26,7 +25,6 @@ import java.util.Map;
  */
 public final class HomeRoom {
 
-  private static final int HASH_CHARS = 8;
   private static final int MAX_ID = NameValidator.MAX_SPEC_ID_LENGTH;
 
   private HomeRoom() {}
@@ -54,8 +52,8 @@ public final class HomeRoom {
   /**
    * {@code handle}'s home room id in {@code project}: {@code <project>--<handle>} when that is a
    * room id. A handle a room id cannot carry verbatim (upper case, '.', '_', or too long) is folded
-   * to the room id alphabet, cut to fit, and suffixed with a digest of the handle, so every FDE
-   * still gets an id of their own.
+   * to the room id alphabet, cut to fit, and suffixed with the handle's CRC-32, so every FDE still
+   * gets an id of their own.
    */
   public static String idOf(String project, String handle) {
     var verbatim = project + "--" + handle;
@@ -69,13 +67,9 @@ public final class HomeRoom {
   }
 
   private static String digest(String handle) {
-    try {
-      var bytes =
-          MessageDigest.getInstance("SHA-256").digest(handle.getBytes(StandardCharsets.UTF_8));
-      return HexFormat.of().formatHex(bytes).substring(0, HASH_CHARS);
-    } catch (NoSuchAlgorithmException e) {
-      throw new IllegalStateException("SHA-256 unavailable", e);
-    }
+    var crc = new CRC32();
+    crc.update(handle.getBytes(StandardCharsets.UTF_8));
+    return HexFormat.of().toHexDigits((int) crc.getValue());
   }
 
   /**

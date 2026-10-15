@@ -1350,7 +1350,7 @@ class is `LiveMemberTest`'s):
 **Home rooms.** Every FDE has one standing conversation per project with the project's agent:
 the room `<project>--<handle>` (`HomeRoom.idOf`: a handle a room id cannot carry verbatim, with
 upper case, '.', '_' or too many characters, is folded to the room id alphabet, cut to fit and
-suffixed with a digest of the handle), titled with the project's name, assigned to the FDE, its
+suffixed with the handle's CRC-32), titled with the project's name, assigned to the FDE, its
 roster the *project's member* (`agent.member` in the definition: `agent` defaulting to
 `agent.type`, `model` to the agent's default, `mode` to `full`). `sail project apply` makes it
 (`HomeRoom.ensure`, the last step of `ProjectApplyCommand.converge`) through the door the API

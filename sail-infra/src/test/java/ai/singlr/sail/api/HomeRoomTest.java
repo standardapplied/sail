@@ -285,7 +285,7 @@ class HomeRoomTest {
   @Test
   void aHandleIsFoldedOnlyWhenTheRoomIdCannotCarryIt() {
     assertEquals("acme--ada", HomeRoom.idOf("acme", "ada"));
-    assertEquals("acme--ada-l-b724b05d", HomeRoom.idOf("acme", "Ada.L"));
+    assertEquals("acme--ada-l-2a8d4330", HomeRoom.idOf("acme", "Ada.L"));
     assertNotEquals(HomeRoom.idOf("acme", "ada_l"), HomeRoom.idOf("acme", "Ada.L"));
     assertNotEquals("acme--ada-l", HomeRoom.idOf("acme", "ada.l"));
   }
