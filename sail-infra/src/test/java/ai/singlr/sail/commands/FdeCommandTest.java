@@ -52,6 +52,8 @@ import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import java.util.function.Function;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,9 +82,9 @@ class FdeCommandTest {
   private final ByteArrayOutputStream err = new ByteArrayOutputStream();
   private final Keygen keygen = new Keygen();
   private String operator = "root";
-  private boolean node;
+  private String main;
   private String refusal;
-  private String handle;
+  private String handle = "ada";
 
   @BeforeEach
   void aBoxWithAHostKeyAndAMigratedControlPlane() throws IOException {
@@ -130,20 +132,20 @@ class FdeCommandTest {
     return fdeCommand().execute(args);
   }
 
+  private FdeCommand.Box box() {
+    return new FdeCommand.Box(
+        tempDir.resolve("sail.db"),
+        operator,
+        handle,
+        home(),
+        hostKey(),
+        workstationKey(),
+        keygen,
+        main);
+  }
+
   private CommandLine fdeCommand() {
-    var command =
-        new CommandLine(
-            new FdeCommand(
-                () ->
-                    new FdeCommand.Box(
-                        tempDir.resolve("sail.db"),
-                        operator,
-                        handle,
-                        home(),
-                        hostKey(),
-                        workstationKey(),
-                        keygen,
-                        node)));
+    var command = new CommandLine(new FdeCommand(this::box));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
@@ -251,17 +253,21 @@ class FdeCommandTest {
 
   /**
    * What {@code ssh-keygen} does for a pairing: a fresh, unencrypted ed25519 pair in OpenSSH's own
-   * formats at the path {@code -f} names.
+   * formats at the path {@code -f} names. An {@code incus} command goes to {@link #incus}.
    */
   private static final class Keygen implements ShellExec {
 
     private final List<List<String>> commands = new ArrayList<>();
     private final List<SshPublicKey> made = new ArrayList<>();
+    private final Incus incus = new Incus();
     private Result failure;
 
     @Override
     public Result exec(List<String> command) throws IOException {
       commands.add(List.copyOf(command));
+      if (command.getFirst().equals("incus")) {
+        return incus.exec(command);
+      }
       if (failure != null) {
         return failure;
       }
@@ -336,6 +342,68 @@ class FdeCommandTest {
       to.writeBytes(ByteBuffer.allocate(4).putInt(bytes.length).array());
       to.writeBytes(bytes);
     }
+  }
+
+  /**
+   * Incus as it answers for this box's containers, running or stopped alike: their names and
+   * states, and the files {@code incus file pull} and {@code push} read and write in them.
+   */
+  private static final class Incus {
+
+    private final Map<String, String> states = new LinkedHashMap<>();
+    private final Map<String, String> files = new LinkedHashMap<>();
+    private final Map<String, ShellExec.Result> failures = new LinkedHashMap<>();
+
+    void container(String name, String state, String file, String content) {
+      states.put(name, state);
+      files.put(name + file, content);
+    }
+
+    String file(String container, String file) {
+      return files.get(container + file);
+    }
+
+    ShellExec.Result exec(List<String> command) throws IOException {
+      var failure = failures.get(String.join(" ", command.subList(1, 3)));
+      if (failure != null) {
+        return failure;
+      }
+      return switch (command.get(1) + " " + command.get(2)) {
+        case "list --format" ->
+            new ShellExec.Result(
+                0,
+                states.entrySet().stream()
+                    .map(
+                        c ->
+                            "{\"name\":\"" + c.getKey() + "\",\"status\":\"" + c.getValue() + "\"}")
+                    .collect(Collectors.joining(",", "[", "]")),
+                "");
+        case "file pull" ->
+            files.containsKey(command.get(3))
+                ? new ShellExec.Result(0, files.get(command.get(3)), "")
+                : new ShellExec.Result(1, "", "Error: Not Found\n");
+        case "file push" -> {
+          files.put(command.getLast(), Files.readString(Path.of(command.get(command.size() - 2))));
+          yield new ShellExec.Result(0, "", "");
+        }
+        default -> throw new IllegalArgumentException("Unexpected " + command);
+      };
+    }
+  }
+
+  /** The incus commands run, each staged file named {@code <staged>}. */
+  private List<List<String>> incusCommands() {
+    return keygen.commands.stream()
+        .filter(command -> command.getFirst().equals("incus"))
+        .map(
+            command ->
+                command.get(2).equals("push")
+                    ? Stream.concat(
+                            command.subList(0, command.size() - 2).stream(),
+                            Stream.of("<staged>", command.getLast()))
+                        .toList()
+                    : command)
+        .toList();
   }
 
   /**
@@ -487,7 +555,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ Unpaired ada first: 1 key line removed from root's authorized_keys and token"
-                + " 'mast-ada' revoked.",
+                + " 'mast-ada' revoked. The workstation key was its key and is removed.",
             "  ✓ Paired ada: Mast logs in as root@box.acme.dev. The code expires "
                 + tokens().getFirst().expiresAt()
                 + ".",
@@ -502,6 +570,486 @@ class FdeCommandTest {
         printed());
   }
 
+  /** The sentence that refuses a code for {@code other}, an FDE this box is not. */
+  private static String notThisBoxsOwn(String other, String host, String main) {
+    return "A connect code logs in as root@"
+        + host
+        + ", which sees every project here. Pair "
+        + other
+        + " on its own box instead: set it up with 'sudo sail init --main "
+        + main
+        + "', then run 'sail fde pair "
+        + other
+        + " --host <its address>' there.";
+  }
+
+  @Test
+  void aConnectCodeIsMintedForNoFdeButThisBoxsOwn() throws Exception {
+    handle = "uday";
+    inDb(
+        db -> {
+          Acting.system(() -> new ProjectStore(db).upsert("acme", "name: acme\n"));
+          var fdes = new FdeStore(db);
+          fdes.add("client", null, "client@x.com", "member");
+          fdes.restrict("client");
+          fdes.grant("client", "acme");
+          return fdes.add("eng", null, "eng@x.com", "member");
+        });
+    var roster = inDb(db -> new FdeStore(db).list());
+
+    for (var refused :
+        List.of(
+            List.of("pair", "client", "--host", "m.acme.dev"),
+            List.of("pair", "eng", "--host", "m.acme.dev", "--as-workstation-key"),
+            List.of(
+                "pair", "newbie", "--host", "m.acme.dev", "--role", "viewer", "--email", "n@x"))) {
+      assertEquals(1, fde(refused.toArray(String[]::new)));
+
+      assertEquals(notThisBoxsOwn(refused.get(1), "m.acme.dev", "m.acme.dev"), refusal);
+    }
+    assertEquals(roster, inDb(db -> new FdeStore(db).list()), "no FDE is added or changed");
+    assertFalse(Files.exists(home().resolve(".ssh")));
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals(List.of(), tokens());
+    assertEquals(List.of(), pairedKeys());
+    assertEquals(List.of(), keygen.commands);
+
+    assertEquals(0, fde("pair", "uday", "--host", "m.acme.dev", "--email", "uday@x.com"), refusal);
+    assertEquals("root", decoded(printedCode()).get("user"));
+    assertEquals("uday", decoded(printedCode()).get("handle"));
+  }
+
+  @Test
+  void aBoxThatNamesNoFdeOfItsOwnMintsNoCodeAndSaysHowToNameIt() {
+    handle = null;
+
+    assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+
+    assertEquals(
+        "A connect code logs in as root@34.1.2.3, which sees every project here, so it is minted"
+            + " only for this box's own FDE, and this box names none. If it is ada, name it with"
+            + " 'sudo sail host config set sync-handle ada' and pair again.",
+        refusal);
+    assertNothingWritten("ada");
+  }
+
+  private FdeStore.Fde replicated(String handle, String email) {
+    return inDb(
+        db -> {
+          new FdeStore(db)
+              .replicate(handle, "Client", email, "member", "active", "2026-10-01T00:00:00Z");
+          return new FdeStore(db).byHandle(handle).orElseThrow();
+        });
+  }
+
+  private long changes() {
+    return inDb(db -> db.queryOne("SELECT count(*) FROM change_log", row -> row.integer(0)))
+        .orElseThrow();
+  }
+
+  @Test
+  void aNodePairsItsOwnFdeAsMainsRosterHasItAndWritesNoRosterRow() throws Exception {
+    main = "sail@main";
+    handle = "client";
+    var client = replicated("client", "client@x.com");
+    var changes = changes();
+
+    assertEquals(0, fde("pair", "client", "--host", "c.acme.dev"), refusal);
+
+    assertEquals(client, inDb(db -> new FdeStore(db).byHandle("client")).orElseThrow());
+    assertEquals(changes, changes(), "the roster is main's");
+    var key = keygen.made.getFirst();
+    var token = tokens().getFirst();
+    assertEquals(keyLine(key, "client", token.expiresAt()), Files.readString(authorizedKeys()));
+    assertEquals(key.line() + "\n", Files.readString(workstationKey()));
+    assertEquals(List.of(key.blob()), pairedKeys());
+    assertEquals("mast-client", token.name());
+    var fields = decoded(printedCode());
+    assertEquals("client", handleOf((String) fields.get("token")), "the node's API answers it");
+    assertEquals(
+        List.of("client", "client@x.com", "c.acme.dev", "root"),
+        List.of(fields.get("handle"), fields.get("email"), fields.get("host"), fields.get("user")));
+    assertEquals(
+        "  ✓ Paired client: Mast logs in as root@c.acme.dev. The code expires "
+            + token.expiresAt()
+            + ".",
+        printed().getFirst());
+  }
+
+  @Test
+  void aNodeRefusesToEditTheRosterOrPairAnyoneButItsOwnFde() {
+    main = "sail@main";
+    handle = "client";
+
+    assertEquals(1, fde("pair", "client", "--host", "c.acme.dev"));
+    assertEquals(
+        "This node holds no roster row for 'client' yet, and main's roster names the FDEs here."
+            + " Run 'sudo sail sync', then pair again.",
+        refusal);
+    assertNothingWritten("client");
+
+    var client = replicated("client", null);
+    assertEquals(1, fde("pair", "client", "--host", "c.acme.dev"));
+    assertEquals(
+        "This box holds no email for 'client', and a connect code names one. Set it on main with"
+            + " 'sail fde update client --email <email>', run 'sudo sail sync' here, then pair"
+            + " again.",
+        refusal);
+
+    for (var option : List.of("--email=c@x.com", "--name=C", "--role=admin")) {
+      assertEquals(1, fde("pair", "client", "--host", "c.acme.dev", option));
+      assertEquals(
+          FdeCommand.rosterEditOnNodeMessage("Changing an FDE's name, email or role"), refusal);
+    }
+
+    assertEquals(1, fde("pair", "uday", "--host", "c.acme.dev"));
+    assertEquals(notThisBoxsOwn("uday", "c.acme.dev", "sail@main"), refusal);
+
+    assertEquals(client, inDb(db -> new FdeStore(db).byHandle("client")).orElseThrow());
+    assertFalse(Files.exists(home().resolve(".ssh")));
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals(List.of(), tokens());
+    assertEquals(List.of(), keygen.commands);
+  }
+
+  private static final String AUTHORIZED = "/.ssh/authorized_keys";
+
+  /**
+   * A catalog of three projects: acme and web take SSH logins as dev and eng, docs takes none; and
+   * their containers, plus one no project names. Each container trusts {@code key} beside the
+   * laptop's.
+   */
+  private void containersTrusting(SshPublicKey key) {
+    inDb(
+        db -> {
+          Acting.system(
+              () -> {
+                var projects = new ProjectStore(db);
+                for (var project : List.of("acme:dev", "web:eng")) {
+                  var nameAndUser = project.split(":");
+                  projects.upsert(
+                      nameAndUser[0],
+                      "name: "
+                          + nameAndUser[0]
+                          + "\nssh:\n  user: "
+                          + nameAndUser[1]
+                          + "\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n");
+                }
+                projects.upsert("docs", "name: docs\n");
+              });
+          return null;
+        });
+    keygen.incus.container(
+        "acme", "Running", "/home/dev" + AUTHORIZED, key.line() + "\n" + LAPTOP.line() + "\n");
+    keygen.incus.container(
+        "web", "Stopped", "/home/eng" + AUTHORIZED, LAPTOP.line() + "\n" + key.line() + "\n");
+    keygen.incus.container("docs", "Running", "/home/dev" + AUTHORIZED, key.line() + "\n");
+    keygen.incus.container("stray", "Stopped", "/home/dev" + AUTHORIZED, key.line() + "\n");
+  }
+
+  /** What a revocation of {@code key} leaves in each container. */
+  private void assertContainersNoLongerTrust(SshPublicKey key) {
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
+    assertEquals(
+        key.line() + "\n",
+        keygen.incus.file("docs", "/home/dev" + AUTHORIZED),
+        "a project that takes no SSH login is not looked at");
+    assertEquals(
+        key.line() + "\n",
+        keygen.incus.file("stray", "/home/dev" + AUTHORIZED),
+        "a container no project names is not sail's to edit");
+    var push = List.of("incus", "file", "push", "--uid", "1000", "--gid", "1000", "--mode", "0600");
+    assertEquals(
+        List.of(
+            List.of("incus", "list", "--format", "json"),
+            List.of("incus", "file", "pull", "acme/home/dev" + AUTHORIZED, "-"),
+            Stream.concat(push.stream(), Stream.of("<staged>", "acme/home/dev" + AUTHORIZED))
+                .toList(),
+            List.of("incus", "file", "pull", "web/home/eng" + AUTHORIZED, "-"),
+            Stream.concat(push.stream(), Stream.of("<staged>", "web/home/eng" + AUTHORIZED))
+                .toList()),
+        incusCommands());
+  }
+
+  @Test
+  void unpairTakesItsKeyFromEveryContainerRunningOrStoppedAndLeavesTheirOtherKeys()
+      throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var key = keygen.made.getFirst();
+    containersTrusting(key);
+    keygen.commands.clear();
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
+                + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers"
+                + " of acme, web no longer trust it."),
+        printed());
+    assertContainersNoLongerTrust(key);
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals("", Files.readString(authorizedKeys()));
+    assertEquals(List.of(), tokens());
+    assertEquals(List.of(), pairedKeys());
+    keygen.commands.clear();
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(List.of("  ada has no pairing on this box; nothing to do."), printed());
+    assertEquals(List.of(), keygen.commands);
+  }
+
+  @Test
+  void removingAnFdeTakesItsKeyFromEveryContainer() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var key = keygen.made.getFirst();
+    containersTrusting(key);
+    keygen.commands.clear();
+
+    assertEquals(0, fde("rm", "ada", "--force"), refusal);
+
+    assertEquals(
+        "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys. The"
+            + " workstation key was its key and is removed. Containers of acme, web no longer trust"
+            + " it.",
+        printed().getLast());
+    assertContainersNoLongerTrust(key);
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals("", Files.readString(authorizedKeys()));
+  }
+
+  @Test
+  void pairingAgainTakesTheOldKeyFromEveryContainerAndTheNewOneIsTrustedAfterTheirNextApply()
+      throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var old = keygen.made.getFirst();
+    containersTrusting(old);
+    keygen.commands.clear();
+
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3"), refusal);
+
+    var renewed = keygen.made.getLast();
+    assertEquals(
+        "  ✓ Unpaired ada first: 1 key line removed from root's authorized_keys and token"
+            + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers of"
+            + " acme, web no longer trust it.",
+        printed().getFirst());
+    assertEquals(
+        "  Containers of acme, docs, web trust this key only after their next 'sail project"
+            + " apply'.",
+        printed().getLast());
+    assertEquals(renewed.line() + "\n", Files.readString(workstationKey()));
+    assertEquals(List.of(renewed.blob()), loginsOf("ada"));
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
+  }
+
+  @Test
+  void aWorkstationKeySetByHandOutlivesAPairingThatIsNotIt() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    HostConfigSetCommand.writeWorkstationKey(workstationKey(), LAPTOP.line());
+    containersTrusting(LAPTOP);
+    var acme = keygen.incus.file("acme", "/home/dev" + AUTHORIZED);
+    var web = keygen.incus.file("web", "/home/eng" + AUTHORIZED);
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
+                + " 'mast-ada' revoked."),
+        printed());
+    assertEquals(LAPTOP.line() + "\n", Files.readString(workstationKey()));
+    assertEquals(acme, keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(web, keygen.incus.file("web", "/home/eng" + AUTHORIZED));
+    assertTrue(
+        incusCommands().stream().noneMatch(command -> command.get(2).equals("push")),
+        "a file that does not hold the key is not written");
+  }
+
+  @Test
+  void aContainerThatCannotBeEditedKeepsTheRecordSoTheNextRunFinishesTheRevocation()
+      throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var key = keygen.made.getFirst();
+    containersTrusting(key);
+    keygen.incus.failures.put("list --format", new ShellExec.Result(1, "", "Error: unreachable\n"));
+
+    assertEquals(1, fde("unpair", "ada"));
+
+    assertEquals(
+        "Could not remove ada's key from this box's containers (incus list failed: Error:"
+            + " unreachable\n). Its login is revoked, and its token and record are kept until the"
+            + " key is gone: check that 'incus list' answers, then run the command again.",
+        refusal);
+    assertEquals("", Files.readString(authorizedKeys()), "the login goes first");
+    assertEquals(List.of(key.blob()), pairedKeys());
+    assertEquals(List.of("mast-ada"), tokens().stream().map(TokenStore.TokenInfo::name).toList());
+    assertEquals(key.line() + "\n", Files.readString(workstationKey()));
+
+    keygen.incus.failures.clear();
+    keygen.incus.failures.put("file pull", new ShellExec.Result(1, "", "Error: I/O error\n"));
+    assertEquals(1, fde("unpair", "ada"));
+    assertEquals(
+        "Could not remove ada's key from this box's containers (could not read"
+            + " /home/dev/.ssh/authorized_keys in acme: Error: I/O error). Its login is revoked,"
+            + " and its token and record are kept until the key is gone: check that 'incus list'"
+            + " answers, then run the command again.",
+        refusal);
+
+    keygen.incus.failures.clear();
+    keygen.incus.files.remove("web/home/eng" + AUTHORIZED);
+    keygen.commands.clear();
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 0 key lines removed from root's authorized_keys and token"
+                + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers"
+                + " of acme no longer trust it."),
+        printed(),
+        "a container whose user has no authorized_keys trusts nothing to remove");
+    assertEquals(List.of(), pairedKeys());
+    assertFalse(Files.exists(workstationKey()));
+  }
+
+  @Test
+  void aWorkstationKeyThatCannotBeRemovedKeepsTheRecordSoTheNextRunFinishesIt() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var sail = workstationKey().getParent();
+    Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("r-x------"));
+    try {
+      assertEquals(1, fde("unpair", "ada"));
+    } finally {
+      Files.setPosixFilePermissions(sail, PosixFilePermissions.fromString("rwx------"));
+    }
+
+    assertEquals(
+        "Could not remove "
+            + workstationKey()
+            + ", which holds ada's key (AccessDeniedException). Its login is revoked, and its"
+            + " token and record are kept until the key is gone: check that "
+            + sail
+            + " is writable by root, then run the command again.",
+        refusal);
+    assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals(List.of(), pairedKeys());
+  }
+
+  /** A box that paired {@code client} before codes were its own FDE's, and now pairs uday. */
+  private String[] pairedClientThenUday() throws Exception {
+    handle = "client";
+    assertEquals(0, fde("pair", "client", "--host", "m", "--email", "client@x.com"));
+    var client = (String) decoded(printedCode()).get("token");
+    handle = "uday";
+    assertEquals(
+        0, fde("pair", "uday", "--host", "m", "--email", "uday@x.com", "--as-workstation-key"));
+    return new String[] {client, (String) decoded(printedCode()).get("token")};
+  }
+
+  @Test
+  void anUpgradeRevokesEveryPairingButTheBoxsOwnOnceAndSaysWhichThroughTheSameSeam()
+      throws Exception {
+    var tokens = pairedClientThenUday();
+    var uday = loginsOf("uday");
+    var workstation = Files.readString(workstationKey());
+    out.reset();
+
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+
+    assertEquals(
+        List.of(
+            "  ✓ Revoked client's connect code: a code logs in as root and is minted only for this"
+                + " box's own FDE."),
+        printed());
+    assertEquals(List.of(), loginsOf("client"));
+    assertNull(handleOf(tokens[0]));
+    assertEquals(List.of("uday"), inDb(db -> new FdePairingStore(db).handles()));
+    assertEquals(uday, loginsOf("uday"));
+    assertEquals("uday", handleOf(tokens[1]));
+    assertEquals(workstation, Files.readString(workstationKey()), "it is uday's key");
+
+    out.reset();
+    handle = "nobody";
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+
+    assertEquals(List.of(), printed(), "it runs once");
+    assertEquals("uday", handleOf(tokens[1]));
+  }
+
+  @Test
+  void aRehearsalOnACopyRevokesNoPairingAndTheBoxsOwnMigrateDoes() throws Exception {
+    var tokens = pairedClientThenUday();
+    var convergence =
+        new MigrateCommand.Convergence(
+            (db, json) -> {},
+            (db, json) -> MigrateCommand.revokeOtherFdesPairings(db, this::box, json));
+    assertFalse(
+        MigrateCommand.REGISTRY.stream()
+            .anyMatch(migration -> migration.name().equals(FdeCommand.OwnBoxPairings.NAME)),
+        "every lane runs the registry; only the box's own convergence revokes");
+
+    MigrateCommand.runMigrations(
+        tempDir.resolve("sail.db"),
+        true,
+        true,
+        new MigrateCommand.Scope.DatabaseOnly("only the copy"),
+        convergence);
+
+    assertEquals("client", handleOf(tokens[0]));
+    assertEquals(1, loginsOf("client").size());
+
+    MigrateCommand.runMigrations(
+        tempDir.resolve("sail.db"), true, true, new MigrateCommand.Scope.Box(), convergence);
+
+    assertNull(handleOf(tokens[0]));
+    assertEquals(List.of(), loginsOf("client"));
+  }
+
+  @Test
+  void anUpgradeThatCannotRevokeSaysSoAndTheNextMigrateFinishesIt() throws Exception {
+    var tokens = pairedClientThenUday();
+    var ssh = home().resolve(".ssh");
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("r-x------"));
+    err.reset();
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+    Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
+
+    assertEquals(
+        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not remove"
+            + " client's key line from root's authorized_keys (AccessDeniedException), so nothing"
+            + " of client was removed and its pairing still works. Check that "
+            + ssh
+            + " is writable by root, then run the command again. Run 'sudo sail migrate' again.\n",
+        err.toString(StandardCharsets.UTF_8));
+    assertEquals("client", handleOf(tokens[0]));
+
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, true);
+          return null;
+        });
+
+    assertNull(handleOf(tokens[0]));
+  }
+
   @ParameterizedTest
   @CsvSource({"me@mac, ' (me@mac)'", ",''"})
   void pairingWhereTheWorkstationKeyIsAnothersIsRefusedNamingItAndWritesNothing(
@@ -510,18 +1058,18 @@ class FdeCommandTest {
     Files.createDirectories(workstationKey().getParent());
     Files.writeString(workstationKey(), registered.line() + "\n");
 
-    var exit = fde("pair", "bob", "--host", "34.1.2.3", "--email", "bob@x.com");
+    var exit = fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com");
 
     assertEquals(1, exit);
     assertEquals(
         "This box's containers trust the workstation key "
             + registered.fingerprint()
             + named
-            + ", and they trust one key. Pass --as-workstation-key to replace it with bob's.",
+            + ", and they trust one key. Pass --as-workstation-key to replace it with ada's.",
         refusal);
     assertEquals(registered.line() + "\n", Files.readString(workstationKey()));
     Files.delete(workstationKey());
-    assertNothingWritten("bob");
+    assertNothingWritten("ada");
   }
 
   @Test
@@ -530,7 +1078,7 @@ class FdeCommandTest {
     Files.writeString(workstationKey(), LAPTOP.line() + "\n");
 
     var exit =
-        fde("pair", "bob", "--host", "34.1.2.3", "--email", "bob@x.com", "--as-workstation-key");
+        fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com", "--as-workstation-key");
 
     assertEquals(0, exit, refusal);
     assertEquals(keygen.made.getFirst().line() + "\n", Files.readString(workstationKey()));
@@ -545,21 +1093,20 @@ class FdeCommandTest {
     Files.writeString(authorizedKeys(), LAPTOP.line() + "\n");
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     var token = (String) decoded(printedCode()).get("token");
-    var workstation = Files.readString(workstationKey());
 
     assertEquals(0, fde("unpair", "ada"), refusal);
 
     assertEquals(
         List.of(
             "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
-                + " 'mast-ada' revoked."),
+                + " 'mast-ada' revoked. The workstation key was its key and is removed."),
         printed());
     assertEquals(LAPTOP.line() + "\n", Files.readString(authorizedKeys()));
     assertNull(handleOf(token));
     assertEquals(List.of(), tokens());
     var ada = inDb(db -> new FdeStore(db).byHandle("ada")).orElseThrow();
     assertTrue(inDb(db -> new FdePairingStore(db).find(ada.id())).isEmpty());
-    assertEquals(workstation, Files.readString(workstationKey()), "replacing it is a separate act");
+    assertFalse(Files.exists(workstationKey()), "containers stop trusting the pairing's key");
 
     assertEquals(0, fde("unpair", "ada"), refusal);
 
@@ -570,24 +1117,29 @@ class FdeCommandTest {
   @Test
   void unpairSaysOnlyWhatItRemoved() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
-    assertEquals(
-        0, fde("pair", "bob", "--host", "34.1.2.3", "--email", "b@x.com", "--as-workstation-key"));
     inDb(db -> new TokenStore(db).revoke("mast-ada"));
-    var bob = inDb(db -> new FdeStore(db).byHandle("bob")).orElseThrow();
-    inDb(db -> new FdePairingStore(db).remove(bob.id()));
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys. The workstation key"
+                + " was its key and is removed."),
+        printed());
+
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3"));
+    var ada = inDb(db -> new FdeStore(db).byHandle("ada")).orElseThrow();
+    inDb(db -> new FdePairingStore(db).remove(ada.id()));
 
     assertEquals(0, fde("unpair", "ada"), refusal);
     assertEquals(
         List.of("  ✓ Unpaired ada: 1 key line removed from root's authorized_keys."), printed());
-
-    assertEquals(0, fde("unpair", "bob"), refusal);
-    assertEquals(
-        List.of("  ✓ Unpaired bob: 1 key line removed from root's authorized_keys."), printed());
     assertEquals("", Files.readString(authorizedKeys()));
     assertEquals(
-        List.of("mast-bob"),
+        List.of("mast-ada"),
         tokens().stream().map(TokenStore.TokenInfo::name).toList(),
         "a token no pairing names is not this command's to revoke");
+    assertTrue(
+        Files.exists(workstationKey()), "without the record, nothing names the key it must match");
 
     assertEquals(1, fde("unpair", "not a handle"));
     assertEquals(
@@ -607,9 +1159,11 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE removed: ada",
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
-            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."),
+            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."
+                + " The workstation key was its key and is removed."),
         printed());
     assertEquals("", Files.readString(authorizedKeys()));
+    assertFalse(Files.exists(workstationKey()));
     assertNull(handleOf(token));
     assertTrue(inDb(db -> new FdeStore(db).byHandle("ada")).isEmpty());
     assertEquals(
@@ -657,6 +1211,7 @@ class FdeCommandTest {
       assertEquals(refused, refusal);
       assertEquals(List.of(), printed());
       assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
+      assertEquals(keygen.made.getFirst().line() + "\n", Files.readString(workstationKey()));
     }
 
     Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
@@ -669,7 +1224,8 @@ class FdeCommandTest {
         List.of(
             "  ✓ FDE removed: ada",
             "  Owned tokens, SSH keys, sessions, passkeys, and enrollment tickets are revoked.",
-            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."),
+            "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys."
+                + " The workstation key was its key and is removed."),
         printed());
     assertEquals("", Files.readString(authorizedKeys()));
     assertNull(handleOf(token));
@@ -721,12 +1277,8 @@ class FdeCommandTest {
   }
 
   @Test
-  void aNodeRefusesToPairOrRemoveWithTheRosterSentence() {
-    node = true;
-
-    assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
-    assertEquals(FdeCommand.rosterEditOnNodeMessage("Pairing an FDE"), refusal);
-    assertNothingWritten("ada");
+  void aNodeRefusesToRemoveWithTheRosterSentence() {
+    main = "sail@main";
 
     assertEquals(1, fde("rm", "ada", "--force"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Removing an FDE"), refusal);
@@ -858,7 +1410,7 @@ class FdeCommandTest {
 
   @Test
   void aNodeRefusesToAddGrantOrRevokeWithTheRosterSentence() {
-    node = true;
+    main = "sail@main";
 
     assertEquals(1, fde("add", "nia", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Adding an FDE"), refusal);
@@ -880,14 +1432,13 @@ class FdeCommandTest {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     var token = (String) decoded(printedCode()).get("token");
     var line = Files.readString(authorizedKeys());
-    inDb(db -> new FdeStore(db).add("bob", null, "bob@x.com", "member"));
     operator = "sail";
     keygen.commands.clear();
 
-    assertEquals(1, fde("pair", "bob", "--host", "34.1.2.3", "--as-workstation-key"));
+    assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3"));
     assertEquals(
         "A pairing is a login of this box's operator, and an SSH-key session runs as the gateway's"
-            + " account. Run 'sail fde pair bob' on the host, as the account sail-api runs as.",
+            + " account. Run 'sail fde pair ada' on the host, as the account sail-api runs as.",
         refusal);
     assertEquals(1, fde("unpair", "ada"));
     assertEquals(
