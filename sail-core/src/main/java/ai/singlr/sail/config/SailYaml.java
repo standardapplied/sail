@@ -421,7 +421,7 @@ public record SailYaml(
      */
     public Member projectMember() {
       var declared = declaredMember();
-      var agent = Strings.isBlank(declared.agent()) ? type : declared.agent();
+      var agent = memberAgent();
       if (Strings.isBlank(agent)) {
         return null;
       }
@@ -437,6 +437,11 @@ public record SailYaml(
       return member != null ? member : new Member(null, null, null);
     }
 
+    private String memberAgent() {
+      var declared = declaredMember().agent();
+      return Strings.isBlank(declared) ? type : declared;
+    }
+
     /**
      * Refuses a member that could never be seated, declared or the default {@code type} makes: a
      * harness the project does not install, a mode no engagement knows, or a model that is not one
@@ -444,7 +449,7 @@ public record SailYaml(
      */
     private void requireSeatableMember(String descriptor) {
       var declared = declaredMember();
-      var agent = Strings.isBlank(declared.agent()) ? type : declared.agent();
+      var agent = memberAgent();
       if (Strings.isBlank(agent)) {
         if (member == null) {
           return;
