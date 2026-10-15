@@ -364,6 +364,87 @@ class HomeRoomTest {
   }
 
   @Test
+  void aSpecCreatedThroughTheApiUnderTheIdRefusesTheApply() {
+    var ops = operations();
+    var born =
+        Actor.call(
+            fde("ada"),
+            () ->
+                ops.createGlobalSpec(
+                    new SpecCreateRequest(
+                        "acme--ada",
+                        "acme",
+                        "Taken",
+                        "draft",
+                        "ada",
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        List.of(),
+                        List.of(),
+                        "",
+                        null,
+                        null)));
+    assertTrue(born.isSuccess(), born.toString());
+    assertTrue(roomStore.findById("acme--ada").isPresent(), "the spec's own room");
+
+    var refused = assertThrows(ApiException.class, () -> apply("ada", CLAUDE_ONLY));
+
+    assertEquals("Spec 'acme--ada' already owns that conversation id.", refused.getMessage());
+    assertTrue(roster("acme--ada").isEmpty());
+  }
+
+  @Test
+  void theFdesOwnRoomInAnotherProjectRefusesTheApply() {
+    var ops = operations();
+    var other =
+        Actor.call(
+            fde("ada"),
+            () -> ops.createRoom(new RoomCreateRequest("acme--ada", "other", "Mine", null), "ada"));
+    assertTrue(other.isSuccess(), other.toString());
+
+    var refused = assertThrows(ApiException.class, () -> apply("ada", CLAUDE_ONLY));
+
+    assertEquals(
+        "Room 'acme--ada' belongs to project 'other', not 'acme', whose home room it would be.",
+        refused.getMessage());
+    assertEquals("Free room id 'acme--ada', then apply again.", refused.failure().action());
+    assertEquals("other", roomStore.findById("acme--ada").orElseThrow().project());
+  }
+
+  @Test
+  void aSpecLookupThatFailsRefusesWithItsSentence() {
+    var ops =
+        new TestOperations() {
+          @Override
+          public Result<RoomDetailResponse> room(String roomId) {
+            return Result.success(
+                new RoomDetailResponse(
+                    new RoomView(
+                        roomId, "acme", "acme", "ada", null, null, List.of(), List.of(), "ada",
+                        null, null, null),
+                    null,
+                    null));
+          }
+
+          @Override
+          public Result<GlobalSpecDetailResponse> globalSpec(String specId) {
+            return Result.failure(ErrorCode.COMMAND_FAILED, "The catalog is locked.", "Retry.");
+          }
+        };
+
+    var refused =
+        assertThrows(
+            ApiException.class,
+            () ->
+                Actor.call(fde("ada"), () -> HomeRoom.ensure(ops, definition(CLAUDE_ONLY), "ada")));
+
+    assertEquals("The catalog is locked.", refused.getMessage());
+  }
+
+  @Test
   void aBoxWithoutRoomsRefusesWithTheStoresSentence() {
     var ops =
         new SailOperations(

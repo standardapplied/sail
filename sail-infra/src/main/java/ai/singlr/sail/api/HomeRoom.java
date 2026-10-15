@@ -78,7 +78,7 @@ public final class HomeRoom {
     var id = idOf(project, handle);
     var held = operations.room(id);
     if (held instanceof Result.Success<RoomDetailResponse> found) {
-      return existing(found.value().room(), handle);
+      return existing(operations, found.value().room(), project, handle);
     }
     var unread = (Result.Failure<RoomDetailResponse>) held;
     if (unread.errorCode() != ErrorCode.ROOM_NOT_FOUND) {
@@ -89,7 +89,16 @@ public final class HomeRoom {
     return new Outcome(id, true, true, null);
   }
 
-  private static Outcome existing(RoomView room, String handle) {
+  private static Outcome existing(
+      Operations operations, RoomView room, String project, String handle) {
+    requireNoSpec(operations, room.id());
+    if (!project.equals(room.project())) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Room '%s' belongs to project '%s', not '%s', whose home room it would be."
+              .formatted(room.id(), room.project(), project),
+          "Free room id '%s', then apply again.".formatted(room.id()));
+    }
     if (!Ownership.owns(handle, room.assignee(), room.createdBy())) {
       var owner = Ownership.ownerOf(room.assignee(), room.createdBy());
       throw new ApiException(
@@ -99,6 +108,24 @@ public final class HomeRoom {
           "Have %s or an admin delete room '%s', then apply again.".formatted(owner, room.id()));
     }
     return new Outcome(room.id(), false, !room.members().isEmpty(), null);
+  }
+
+  /**
+   * A spec's own room answers to the spec's id, so finding a room is not finding a home room: the
+   * id must still be free of every spec, as {@code POST /v1/rooms} demands of a new one.
+   */
+  private static void requireNoSpec(Operations operations, String id) {
+    var spec = operations.globalSpec(id);
+    if (spec instanceof Result.Success<GlobalSpecDetailResponse>) {
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Spec '" + id + "' already owns that conversation id.",
+          "Pick a room id that is not a spec id.");
+    }
+    var missing = (Result.Failure<GlobalSpecDetailResponse>) spec;
+    if (missing.errorCode() != ErrorCode.SPEC_NOT_FOUND) {
+      throw refusal(missing);
+    }
   }
 
   private static void refuse(Result<?> result) {

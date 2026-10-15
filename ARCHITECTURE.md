@@ -1374,10 +1374,13 @@ it (`HomeRoomTest` unless another class is named):
   and only they or an admin on main change its roster.
   *`eachFdeGetsTheirOwnRoomAndNeitherMayChangeTheOthers`.*
 - **H3. A home room is a room.** Nothing in the loop, the harness, the journal, sync or scope
-  reads its id; it syncs, is scoped and wakes as any room. An id a spec already holds refuses
-  the apply with the API's sentence; a room someone else owns under the id refuses it naming
-  the owner.
-  *`anIdTakenByASpecRefusesTheApply`, `aRoomSomeoneElseTookUnderTheHomeRoomIdRefusesTheApply`.*
+  reads its id; it syncs, is scoped and wakes as any room. Only a room of that project, owned by
+  the FDE, under an id no spec holds is a home room: an id a spec holds (its own room included)
+  refuses the apply with the API's sentence, a room of another project under the id refuses it
+  naming that project, and a room someone else owns refuses it naming the owner.
+  *`anIdTakenByASpecRefusesTheApply`, `aSpecCreatedThroughTheApiUnderTheIdRefusesTheApply`,
+  `theFdesOwnRoomInAnotherProjectRefusesTheApply`,
+  `aRoomSomeoneElseTookUnderTheHomeRoomIdRefusesTheApply`.*
 - **H4. The definition decides, once.** `agent.member` is read when the room is created; a later
   definition does not rewrite an engaged roster, and an FDE's disengage wins. A member the
   project does not install, declared or the `agent.type` default, an unknown mode or a model
@@ -1389,7 +1392,10 @@ it (`HomeRoomTest` unless another class is named):
   `SailYamlTest.aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused`.*
 - **H5. Mast shows one conversation per project.** `GET /v1/projects/{p}` names the project's
   `member` and the reader's `home_room` id, so the id is derived in one place; Mast places that
-  room first under the project's name and presets its agent selects to the member. *`SailOperationsTest.projectReturnsContainerAndAgentStatus`.*
+  room first under the project's name and presets its agent selects to the member. A reader
+  with no FDE, a machine token, reads the project with no `home_room`.
+  *`SailOperationsTest.projectReturnsContainerAndAgentStatus`,
+  `SailOperationsTest.aMachineTokenReadsTheProjectWithoutAHomeRoom`.*
 - **H6. A box applied before this release gets its home room on its next apply, and nothing
   else moves.**
 

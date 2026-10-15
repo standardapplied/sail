@@ -1440,7 +1440,9 @@ public final class SailOperations implements HostOperations {
     var declared = loaded.config().agent();
     var agent = declared == null ? null : AgentConfigView.from(loaded.config());
     var member = declared == null ? null : declared.projectMember();
-    var homeRoom = member == null ? null : HomeRoom.idOf(project, Actor.reader().actingFde());
+    var handle = Actor.reader().actingFde();
+    var homeRoom =
+        member == null || Strings.isBlank(handle) ? null : HomeRoom.idOf(project, handle);
     return new ProjectResponse(project, statusName(loaded.state()), agent, member, homeRoom);
   }
 
