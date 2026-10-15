@@ -1007,6 +1007,33 @@ class SailYamlTest {
   }
 
   @Test
+  void anImplicitMemberTheProjectDoesNotInstallIsRefusedNamingTheField() {
+    var yaml = "name: acme\nagent:\n  type: claude-code\n  install: [codex]\n";
+
+    assertEquals(
+        "agent.member.agent 'claude-code' is not a harness acme/sail.yaml installs (codex). Add"
+            + " it to agent.install, or name one of those.",
+        refusal(yaml));
+  }
+
+  @Test
+  void aDefinitionNamingNoAgentHasNoMember() {
+    var config = SailYaml.fromMap(YamlUtil.parseMap("name: acme\nagent:\n  auto_branch: true\n"));
+
+    assertNull(config.agent().projectMember());
+  }
+
+  @Test
+  void aMemberBlockWithNoAgentToFallBackOnIsRefused() {
+    var yaml = "name: acme\nagent:\n  member:\n    model: gpt-5-codex\n";
+
+    assertEquals(
+        "agent.member.agent in acme/sail.yaml is unset and agent.type names no agent. Set one of"
+            + " them.",
+        refusal(yaml));
+  }
+
+  @Test
   void aMemberWithAnUnknownModeOrAnUnsafeModelIsRefused() {
     var base = "name: acme\nagent:\n  type: claude-code\n  member:\n";
 

@@ -8,19 +8,26 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.identity.Ownership;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 
 /**
- * An FDE's standing conversation with a project's agent: one room per FDE per project, id {@code
- * <project>--<handle>}, created by the box that applies the project and engaged with the member the
- * definition names. After that it is a room like any other. The definition is read once: a room the
- * FDE has engaged, disengaged or otherwise revised is theirs, and a later apply leaves it alone.
- * Only a room nobody has revised since its creation and that seats no one, which a refused engage
- * leaves behind, is engaged again.
+ * An FDE's standing conversation with a project's agent: one room per FDE per project, created by
+ * the box that applies the project with the member the definition names already seated. After that
+ * it is a room like any other. The definition is read once: a room that exists is its owner's, and
+ * a later apply leaves it alone. The room is born seated, in one write, so a refused member leaves
+ * no room behind and an empty roster is only ever its owner's choice.
  */
 public final class HomeRoom {
+
+  private static final int HASH_CHARS = 8;
+  private static final int MAX_ID = NameValidator.MAX_SPEC_ID_LENGTH;
 
   private HomeRoom() {}
 
@@ -44,55 +51,71 @@ public final class HomeRoom {
     }
   }
 
-  private static String idOf(String project, String handle) {
-    return project + "--" + handle;
+  /**
+   * {@code handle}'s home room id in {@code project}: {@code <project>--<handle>} when that is a
+   * room id. A handle a room id cannot carry verbatim (upper case, '.', '_', or too long) is folded
+   * to the room id alphabet, cut to fit, and suffixed with a digest of the handle, so every FDE
+   * still gets an id of their own.
+   */
+  public static String idOf(String project, String handle) {
+    var verbatim = project + "--" + handle;
+    if (NameValidator.isValidSpecId(verbatim)) {
+      return verbatim;
+    }
+    var suffix = "-" + digest(handle);
+    var folded = project + "--" + handle.toLowerCase(Locale.ROOT).replaceAll("[._]", "-");
+    var room = folded.substring(0, Math.min(folded.length(), MAX_ID - suffix.length()));
+    return room + suffix;
+  }
+
+  private static String digest(String handle) {
+    try {
+      var bytes =
+          MessageDigest.getInstance("SHA-256").digest(handle.getBytes(StandardCharsets.UTF_8));
+      return HexFormat.of().formatHex(bytes).substring(0, HASH_CHARS);
+    } catch (NoSuchAlgorithmException e) {
+      throw new IllegalStateException("SHA-256 unavailable", e);
+    }
   }
 
   /**
-   * Leaves {@code handle}'s home room for {@code definition} in the catalog, engaged with the
-   * project's member, through the same doors the API's room creation and engagement take, so every
-   * admission check runs as it does there. Runs as the bound actor, the box's FDE. A refused engage
-   * keeps the created room, which the next apply engages.
+   * Leaves {@code handle}'s home room for {@code definition} in the catalog, seating the project's
+   * member, through the same door the API's room creation takes, so every admission check runs as
+   * it does there. Runs as the bound actor, the box's FDE.
    */
   public static Outcome ensure(Operations operations, SailYaml definition, String handle) {
     if (Strings.isBlank(handle)) {
       return Outcome.skipped("this box names no FDE, so it has no home room");
     }
-    if (definition.agent() == null) {
+    var member = definition.agent() == null ? null : definition.agent().projectMember();
+    if (member == null) {
       return Outcome.skipped("the definition names no agent, so it has no home room");
     }
     var project = definition.name();
     var id = idOf(project, handle);
-    if (!NameValidator.isValidSpecId(id)) {
-      return Outcome.skipped(
-          "'"
-              + id
-              + "' cannot name a room (lowercase letters, digits and '-', at most "
-              + NameValidator.MAX_SPEC_ID_LENGTH
-              + " characters), so there is no home room");
-    }
     var held = operations.room(id);
-    if (held instanceof Result.Success<RoomDetailResponse> found && !awaitingMember(found)) {
-      return new Outcome(id, false, !found.value().room().members().isEmpty(), null);
+    if (held instanceof Result.Success<RoomDetailResponse> found) {
+      return existing(found.value().room(), handle);
     }
-    if (held instanceof Result.Failure<RoomDetailResponse> unread
-        && unread.errorCode() != ErrorCode.ROOM_NOT_FOUND) {
+    var unread = (Result.Failure<RoomDetailResponse>) held;
+    if (unread.errorCode() != ErrorCode.ROOM_NOT_FOUND) {
       throw refusal(unread);
     }
-    var created = held.isFailure();
-    if (created) {
-      refuse(operations.createRoom(new RoomCreateRequest(id, project, project, null)));
-    }
-    var member = definition.agent().projectMember();
-    refuse(
-        operations.addRoomMember(
-            id, new EngageRequest(member.agent(), member.mode(), member.model(), false), handle));
-    return new Outcome(id, created, true, null);
+    var seat = new EngageRequest(member.agent(), member.mode(), member.model(), false);
+    refuse(operations.createRoom(new RoomCreateRequest(id, project, project, null, seat), handle));
+    return new Outcome(id, true, true, null);
   }
 
-  private static boolean awaitingMember(Result.Success<RoomDetailResponse> found) {
-    var room = found.value().room();
-    return room.members().isEmpty() && Objects.equals(room.updatedAt(), room.createdAt());
+  private static Outcome existing(RoomView room, String handle) {
+    if (!Ownership.owns(handle, room.assignee(), room.createdBy())) {
+      var owner = Ownership.ownerOf(room.assignee(), room.createdBy());
+      throw new ApiException(
+          ErrorCode.CONFLICT,
+          "Room '%s' belongs to '%s', not to %s, whose home room it would be."
+              .formatted(room.id(), owner, handle),
+          "Have %s or an admin delete room '%s', then apply again.".formatted(owner, room.id()));
+    }
+    return new Outcome(room.id(), false, !room.members().isEmpty(), null);
   }
 
   private static void refuse(Result<?> result) {

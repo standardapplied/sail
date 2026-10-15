@@ -143,8 +143,17 @@ record ConnectResponse(
   }
 }
 
+/**
+ * Body of {@code GET /v1/projects/{p}}. {@code homeRoom} is the reader's home room id in the
+ * project, whether or not an apply has created it yet; both it and {@code member} are absent from a
+ * project whose definition names no agent.
+ */
 record ProjectResponse(
-    String name, String containerStatus, AgentConfigView agent, SailYaml.Member member)
+    String name,
+    String containerStatus,
+    AgentConfigView agent,
+    SailYaml.Member member,
+    String homeRoom)
     implements Mappable {
   @Override
   public Map<String, Object> toMap() {
@@ -153,6 +162,7 @@ record ProjectResponse(
     m.put("container_status", containerStatus);
     m.put("agent", agent);
     if (member != null) m.put("member", member.toMap());
+    if (homeRoom != null) m.put("home_room", homeRoom);
     return m;
   }
 }
@@ -763,13 +773,25 @@ record DisengageResponse(String agent) implements Mappable {
   }
 }
 
-record RoomCreateRequest(String id, String project, String title, String wake) {
+/**
+ * Body of {@code POST /v1/rooms}. {@code member}, when present, is seated in the same write that
+ * creates the room, so a refused member leaves no room behind.
+ */
+record RoomCreateRequest(
+    String id, String project, String title, String wake, EngageRequest member) {
+  RoomCreateRequest(String id, String project, String title, String wake) {
+    this(id, project, title, wake, null);
+  }
+
+  @SuppressWarnings("unchecked")
   static RoomCreateRequest fromMap(Map<String, Object> map) {
+    var member = (Map<String, Object>) map.get("member");
     return new RoomCreateRequest(
         (String) map.get("id"),
         (String) map.get("project"),
         (String) map.get("title"),
-        (String) map.get("wake"));
+        (String) map.get("wake"),
+        member == null ? null : EngageRequest.fromMap(member));
   }
 }
 

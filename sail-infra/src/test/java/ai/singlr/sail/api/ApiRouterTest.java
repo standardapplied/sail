@@ -1659,6 +1659,19 @@ class ApiRouterTest {
               "{\"id\": \"fresh-room\", \"project\": \"acme\", \"title\": \"Fresh\"}");
       assertEquals(201, created.statusCode());
       assertEquals("fresh-room", ops.lastRoomCreate.id());
+      assertNull(ops.lastRoomCreate.member());
+
+      var seated =
+          post(
+              server,
+              "/v1/rooms",
+              "token",
+              """
+              {"id": "seated-room", "project": "acme", "title": "Seated",
+               "member": {"agent": "codex", "model": "gpt-5-codex", "mode": "full"}}""");
+      assertEquals(201, seated.statusCode());
+      assertEquals(
+          new EngageRequest("codex", "full", "gpt-5-codex", false), ops.lastRoomCreate.member());
       assertEquals(
           new Actor(null, Role.ADMIN, Actor.Lane.API),
           ops.lastRoomCreator,
@@ -2122,8 +2135,7 @@ class ApiRouterTest {
     String lastRoomDelete;
 
     @Override
-    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
-
+    public Result<RoomDetailResponse> createRoom(RoomCreateRequest request, String localHandle) {
       var actor = Actor.current();
       lastRoomCreate = request;
       lastRoomCreator = Actor.current();
@@ -2222,7 +2234,7 @@ class ApiRouterTest {
 
     @Override
     public Result<ProjectResponse> project(String project) {
-      return Result.success(new ProjectResponse(project, "running", null, null));
+      return Result.success(new ProjectResponse(project, "running", null, null, null));
     }
 
     @Override

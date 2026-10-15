@@ -91,7 +91,8 @@ class RoomsSurfaceTest {
                   () ->
                       ops.createRoom(
                           RoomCreateRequest.fromMap(
-                              Map.of("id", id, "project", "acme", "title", title))));
+                              Map.of("id", id, "project", "acme", "title", title)),
+                          null));
           assertTrue(result instanceof Result.Success<RoomDetailResponse>, result.toString());
           return ((Result.Success<RoomDetailResponse>) result).value();
         });
@@ -165,7 +166,8 @@ class RoomsSurfaceTest {
             () ->
                 ops.createRoom(
                     RoomCreateRequest.fromMap(
-                        Map.of("id", "dup-room", "project", "acme", "title", "Two"))));
+                        Map.of("id", "dup-room", "project", "acme", "title", "Two")),
+                    null));
 
     assertTrue(second instanceof Result.Failure<RoomDetailResponse>);
     assertEquals(ErrorCode.CONFLICT, ((Result.Failure<RoomDetailResponse>) second).errorCode());
@@ -203,7 +205,8 @@ class RoomsSurfaceTest {
             () ->
                 ops.createRoom(
                     RoomCreateRequest.fromMap(
-                        Map.of("id", "auth", "project", "acme", "title", "Namesake"))));
+                        Map.of("id", "auth", "project", "acme", "title", "Namesake")),
+                    null));
 
     assertTrue(shadowed instanceof Result.Failure<RoomDetailResponse>, shadowed.toString());
     var failure = (Result.Failure<RoomDetailResponse>) shadowed;
@@ -253,7 +256,7 @@ class RoomsSurfaceTest {
             admin(),
             () ->
                 ops.createRoom(
-                    RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme"))));
+                    RoomCreateRequest.fromMap(Map.of("id", "x-room", "project", "acme")), null));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) noTitle).errorCode());
 
@@ -264,14 +267,8 @@ class RoomsSurfaceTest {
                 ops.createRoom(
                     RoomCreateRequest.fromMap(
                         Map.of(
-                            "id",
-                            "y-room",
-                            "project",
-                            "acme",
-                            "title",
-                            "Y",
-                            "wake",
-                            "sometimes"))));
+                            "id", "y-room", "project", "acme", "title", "Y", "wake", "sometimes")),
+                    null));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) badWake).errorCode());
 
@@ -305,7 +302,8 @@ class RoomsSurfaceTest {
                             "title",
                             "Wakey",
                             "wake",
-                            "mention"))));
+                            "mention")),
+                    null));
     assertEquals("mention", ((Result.Success<RoomDetailResponse>) created).value().room().wake());
 
     var all = Actor.call(admin(), () -> ops.rooms(null));
@@ -336,7 +334,8 @@ class RoomsSurfaceTest {
                     () ->
                         unwired.createRoom(
                             RoomCreateRequest.fromMap(
-                                Map.of("id", "z-room", "project", "acme", "title", "Z")))))
+                                Map.of("id", "z-room", "project", "acme", "title", "Z")),
+                            null)))
             .errorCode());
     assertEquals(
         ErrorCode.COMMAND_FAILED,
@@ -395,12 +394,14 @@ class RoomsSurfaceTest {
   @Test
   void blankIdentityFieldsOnCreateAreEachRefused() {
     var blankId =
-        Actor.call(admin(), () -> ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null)));
+        Actor.call(
+            admin(), () -> ops.createRoom(new RoomCreateRequest(" ", "acme", "T", null), null));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankId).errorCode());
 
     var blankProject =
-        Actor.call(admin(), () -> ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null)));
+        Actor.call(
+            admin(), () -> ops.createRoom(new RoomCreateRequest("p-room", " ", "T", null), null));
     assertEquals(
         ErrorCode.INVALID_REQUEST, ((Result.Failure<RoomDetailResponse>) blankProject).errorCode());
   }

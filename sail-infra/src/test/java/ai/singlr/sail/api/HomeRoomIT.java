@@ -36,9 +36,9 @@ import org.junit.jupiter.api.Test;
 /**
  * The home room against <strong>one real incus container</strong>: every admission the apply's
  * engage passes (the container is Running, the member's harness is on the dev user's PATH) is asked
- * of the container itself. A member whose harness is missing leaves the room created and unengaged;
- * once it is installed the next apply engages it, a further apply changes nothing, and a room its
- * FDE disengaged stays disengaged. Fake harness binaries stand in for the agents.
+ * of the container itself. A member whose harness is missing leaves no room; once it is installed
+ * the next apply creates the room seated, a further apply changes nothing, and a room its FDE
+ * disengaged stays disengaged. Fake harness binaries stand in for the agents.
  */
 class HomeRoomIT extends AbstractIncusIT {
 
@@ -114,12 +114,12 @@ class HomeRoomIT extends AbstractIncusIT {
               () -> Actor.call(FDE, () -> HomeRoom.ensure(ops, definition, HANDLE)));
       assertEquals(
           "Agent 'codex' is not installed in project '" + CONTAINER + "'.", missing.getMessage());
-      assertTrue(roster(rooms).isEmpty(), "the room stays created and unengaged");
+      assertTrue(rooms.findById(ROOM).isEmpty(), "a refused member leaves no room");
 
       ContainerFilePush.push(
           shell, CONTAINER, "/usr/local/bin/codex", FAKE_AGENT, List.of("--mode", "0755"));
       assertEquals(
-          new HomeRoom.Outcome(ROOM, false, true, null),
+          new HomeRoom.Outcome(ROOM, true, true, null),
           Actor.call(FDE, () -> HomeRoom.ensure(ops, definition, HANDLE)));
       assertEquals("codex", roster(rooms).getFirst().agent());
 

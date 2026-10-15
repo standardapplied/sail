@@ -6,6 +6,7 @@
 package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -23,6 +25,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -88,6 +91,7 @@ class HomeRoomTest {
     var fdes = new FdeStore(db);
     fdes.add("ada", null, null, "member");
     fdes.add("mady", null, null, "member");
+    fdes.add("Ada.L", null, null, "member");
     shell = container(new ScriptedShellExecutor(new ShellExec.Result(1, "", "unscripted")));
   }
 
@@ -200,7 +204,7 @@ class HomeRoomTest {
   }
 
   @Test
-  void aRefusedEngageKeepsTheRoomAndTheNextApplyEngagesIt() {
+  void aRefusedMemberCreatesNoRoomAndTheNextApplyCreatesItSeated() {
     shell =
         container(
             new ScriptedShellExecutor(new ShellExec.Result(1, "", "unscripted"))
@@ -212,11 +216,13 @@ class HomeRoomTest {
     assertEquals(
         "Add claude-code to sail.yaml's agent.install list and run 'sail project apply'.",
         refused.failure().action());
-    assertTrue(roster("acme--ada").isEmpty(), "the room stays created and unengaged");
+    assertTrue(roomStore.findById("acme--ada").isEmpty(), "a refused member leaves no room");
+    assertTrue(
+        new ChangeLog(db).head("room", "acme--ada").isEmpty(), "and no revision for sync to carry");
 
     var outcome = apply("ada", CLAUDE_ONLY);
 
-    assertEquals(new HomeRoom.Outcome("acme--ada", false, true, null), outcome);
+    assertEquals(new HomeRoom.Outcome("acme--ada", true, true, null), outcome);
     assertEquals("claude-code", roster("acme--ada").getFirst().agent());
   }
 
@@ -252,15 +258,56 @@ class HomeRoomTest {
   }
 
   @Test
-  void aHandleThatCannotNameARoomIdHasNoHomeRoom() {
+  void aHandleARoomIdCannotCarryVerbatimStillGetsAHomeRoom() {
     var outcome = apply("Ada.L", CLAUDE_ONLY);
 
+    var id = HomeRoom.idOf("acme", "Ada.L");
+    assertEquals(new HomeRoom.Outcome(id, true, true, null), outcome);
+    var room = roomStore.findById(id).orElseThrow();
+    assertEquals("Ada.L", room.assignee());
+    assertEquals("claude-code", roster(id).getFirst().agent());
+    assertEquals(new HomeRoom.Outcome(id, false, true, null), apply("Ada.L", CLAUDE_ONLY));
+  }
+
+  @Test
+  void theLongestProjectAndHandleStillNameARoomOfTheirOwn() {
+    var project = "p".repeat(63);
+    var handle = "H".repeat(63);
+    var other = "H".repeat(62) + "h";
+
+    var id = HomeRoom.idOf(project, handle);
+
+    assertTrue(NameValidator.isValidSpecId(id), id);
+    assertTrue(NameValidator.isValidSpecId(HomeRoom.idOf(project, other)));
+    assertNotEquals(id, HomeRoom.idOf(project, other));
+  }
+
+  @Test
+  void aHandleIsFoldedOnlyWhenTheRoomIdCannotCarryIt() {
+    assertEquals("acme--ada", HomeRoom.idOf("acme", "ada"));
+    assertEquals("acme--ada-l-b724b05d", HomeRoom.idOf("acme", "Ada.L"));
+    assertNotEquals(HomeRoom.idOf("acme", "ada_l"), HomeRoom.idOf("acme", "Ada.L"));
+    assertNotEquals("acme--ada-l", HomeRoom.idOf("acme", "ada.l"));
+  }
+
+  @Test
+  void aRoomSomeoneElseTookUnderTheHomeRoomIdRefusesTheApply() {
+    var ops = operations();
+    var squat =
+        Actor.call(
+            fde("mady"),
+            () -> ops.createRoom(new RoomCreateRequest("acme--ada", "acme", "Mine", null), "mady"));
+    assertTrue(squat.isSuccess(), squat.toString());
+
+    var refused = assertThrows(ApiException.class, () -> apply("ada", CLAUDE_ONLY));
+
     assertEquals(
-        HomeRoom.Outcome.skipped(
-            "'acme--Ada.L' cannot name a room (lowercase letters, digits and '-', at most 80"
-                + " characters), so there is no home room"),
-        outcome);
-    assertTrue(roomStore.listAll().isEmpty());
+        "Room 'acme--ada' belongs to 'mady', not to ada, whose home room it would be.",
+        refused.getMessage());
+    assertEquals(
+        "Have mady or an admin delete room 'acme--ada', then apply again.",
+        refused.failure().action());
+    assertTrue(roster("acme--ada").isEmpty());
   }
 
   @Test
@@ -326,7 +373,8 @@ class HomeRoomTest {
           }
 
           @Override
-          public Result<RoomDetailResponse> createRoom(RoomCreateRequest request) {
+          public Result<RoomDetailResponse> createRoom(
+              RoomCreateRequest request, String localHandle) {
             throw new AssertionError("a room that could not be read is not created");
           }
         };

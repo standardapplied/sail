@@ -416,27 +416,44 @@ public record SailYaml(
 
     /**
      * The member a home room opens with: {@code member} with its blanks filled, the agent from
-     * {@code type}, the agent's own default model, {@code full} access.
+     * {@code type}, the agent's own default model, {@code full} access. Null when neither names an
+     * agent.
      */
     public Member projectMember() {
-      var declared = member != null ? member : new Member(null, null, null);
+      var declared = declaredMember();
+      var agent = Strings.isBlank(declared.agent()) ? type : declared.agent();
+      if (Strings.isBlank(agent)) {
+        return null;
+      }
       return new Member(
-          Strings.isBlank(declared.agent()) ? type : declared.agent(),
+          agent,
           Strings.isBlank(declared.model()) ? null : declared.model(),
           Strings.isBlank(declared.mode())
               ? EngagementMode.FULL.wire()
               : EngagementMode.of(declared.mode()).wire());
     }
 
+    private Member declaredMember() {
+      return member != null ? member : new Member(null, null, null);
+    }
+
     /**
-     * Refuses a declared {@code member} that could never be seated: a harness the project does not
-     * install, a mode no engagement knows, or a model that is not one shell-safe token.
+     * Refuses a member that could never be seated, declared or the default {@code type} makes: a
+     * harness the project does not install, a mode no engagement knows, or a model that is not one
+     * shell-safe token. A definition naming no agent at all has no member to refuse.
      */
     private void requireSeatableMember(String descriptor) {
-      if (member == null) {
-        return;
+      var declared = declaredMember();
+      var agent = Strings.isBlank(declared.agent()) ? type : declared.agent();
+      if (Strings.isBlank(agent)) {
+        if (member == null) {
+          return;
+        }
+        throw new IllegalArgumentException(
+            "agent.member.agent in "
+                + descriptor
+                + " is unset and agent.type names no agent. Set one of them.");
       }
-      var agent = Strings.isBlank(member.agent()) ? type : member.agent();
       if (!installs().contains(agent)) {
         throw new IllegalArgumentException(
             "agent.member.agent '"
@@ -448,19 +465,19 @@ public record SailYaml(
                 + "). Add it to agent.install, or name one of those.");
       }
       try {
-        if (Strings.isNotBlank(member.mode())) {
-          EngagementMode.of(member.mode());
+        if (Strings.isNotBlank(declared.mode())) {
+          EngagementMode.of(declared.mode());
         }
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException(
             "agent.member.mode in " + descriptor + ": " + e.getMessage(), e);
       }
       try {
-        Spec.validatedModel(member.model());
+        Spec.validatedModel(declared.model());
       } catch (IllegalArgumentException e) {
         throw new IllegalArgumentException(
             "agent.member.model '"
-                + member.model()
+                + declared.model()
                 + "' in "
                 + descriptor
                 + " is not a model id. Use one without spaces or shell syntax.",

@@ -135,6 +135,9 @@ class SailOperationsTest {
     assertEquals("running", get(result, "container_status"));
     assertTrue(get(result, "agent").toString().contains("claude-code"));
     assertEquals(Map.of("agent", "claude-code", "mode", "full"), get(result, "member"));
+    var asAda =
+        Actor.call(new Actor("ada", Role.MEMBER, Actor.Lane.CLI), () -> operations.project("acme"));
+    assertEquals("acme--ada", get(asAda, "home_room"), "the reader's own home room");
   }
 
   @Test
@@ -165,6 +168,7 @@ class SailOperationsTest {
 
     assertFalse(containsKey(result, "agent"));
     assertFalse(containsKey(result, "member"));
+    assertFalse(containsKey(result, "home_room"));
   }
 
   @Test
