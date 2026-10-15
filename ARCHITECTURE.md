@@ -2201,7 +2201,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
     the gateway's account takes it too) from their first read to their last write. Without it a
     command reading between another's two steps forgets the record of a login just written, or
     writes a login for an FDE just removed. `rm` asks its confirmation before it takes the lock,
-    so an unanswered prompt holds nobody.
+    so an unanswered prompt holds nobody. A `project apply` that writes (not `--dry-run`) holds
+    the same lock (`PairingTrust`) from reading the workstation key to installing it, so a
+    revocation either scans the containers after the key is in them or the apply reads the key
+    after it is gone; a revocation waits for an apply in flight (`ProjectApplyCommandTest`,
+    `FdeCommandTest`).
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers; the command names the projects the catalog holds, whose containers trust it only

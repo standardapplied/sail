@@ -13,6 +13,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
@@ -855,6 +857,28 @@ class FdeCommandTest {
 
     assertEquals(List.of("  ada has no pairing on this box; nothing to do."), printed());
     assertEquals(List.of(), keygen.commands);
+  }
+
+  @Test
+  @Timeout(60)
+  void aRevocationThatStartsWhileAnApplyInstallsTheKeyWaitsAndThenTakesItFromTheContainer()
+      throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    var key = keygen.made.getFirst();
+    keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
+    var unpair = new FutureTask<>(() -> fdeCommand().execute("unpair", "ada"));
+
+    try (var applying = PairingTrust.hold(tempDir.resolve("sail.db"))) {
+      var revoking = Thread.ofPlatform().start(unpair);
+      FileMutexTest.awaitParked(revoking);
+      assertFalse(unpair.isDone(), "the revocation waits for the apply that read the key");
+      keygen.incus.files.put(
+          "acme/home/dev" + AUTHORIZED, LAPTOP.line() + "\n" + key.line() + "\n");
+    }
+
+    assertEquals(0, unpair.get(), refusal);
+    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertFalse(Files.exists(workstationKey()));
   }
 
   @Test

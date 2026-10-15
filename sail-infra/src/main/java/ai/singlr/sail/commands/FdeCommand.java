@@ -14,9 +14,9 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerAuthorizedKeys;
-import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -180,19 +180,6 @@ public final class FdeCommand implements Runnable {
         + " removed from "
         + box.operator()
         + "'s authorized_keys";
-  }
-
-  /**
-   * Holds off every other command that makes or revokes a pairing on this box until closed. A
-   * pairing is a key line in the operator's login and a record in the control plane, and no
-   * transaction spans the two: a command that read one while another stood between them would
-   * forget the record of a login just written, or write a login for an FDE just removed. Each such
-   * command holds this from its first read to its last write. It is a lock file beside the
-   * database, as the sync rounds' is, so the gateway's account takes it too.
-   */
-  private static FileMutex holdPairings(Box box) throws IOException {
-    var database = box.database();
-    return FileMutex.acquire(database.resolveSibling(database.getFileName() + ".pairings.lock"));
   }
 
   /**
@@ -788,7 +775,7 @@ public final class FdeCommand implements Runnable {
               System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
               return;
             }
-            try (var held = holdPairings(box);
+            try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               var fde =
@@ -902,7 +889,7 @@ public final class FdeCommand implements Runnable {
       }
       requireOperator(box, "pair " + handle);
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
-      try (var held = holdPairings(box);
+      try (var held = PairingTrust.hold(box.database());
           var db = Sqlite.open(box.database())) {
         var fdes = new FdeStore(db);
         var existing = fdes.byHandle(handle);
@@ -1150,7 +1137,7 @@ public final class FdeCommand implements Runnable {
     public Report apply(Sqlite db, ProjectRegistry projects, Prompter prompter) {
       var here = box.get();
       var notes = new ArrayList<String>();
-      try (var held = holdPairings(here)) {
+      try (var held = PairingTrust.hold(here.database())) {
         for (var handle : new FdePairingStore(db).handles()) {
           if (!handle.equals(here.handle())) {
             unpair(here, db, handle);
@@ -1190,7 +1177,7 @@ public final class FdeCommand implements Runnable {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
             requireOperator(box, "unpair " + handle);
-            try (var held = holdPairings(box);
+            try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               System.out.println(
                   Ansi.AUTO.string(
