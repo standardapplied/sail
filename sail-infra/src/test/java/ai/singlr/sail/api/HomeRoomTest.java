@@ -285,9 +285,22 @@ class HomeRoomTest {
   @Test
   void aHandleIsFoldedOnlyWhenTheRoomIdCannotCarryIt() {
     assertEquals("acme--ada", HomeRoom.idOf("acme", "ada"));
-    assertEquals("acme--ada-l-2a8d4330", HomeRoom.idOf("acme", "Ada.L"));
+    assertTrue(HomeRoom.idOf("acme", "Ada.L").matches("home--[0-9a-f]{64}"));
     assertNotEquals(HomeRoom.idOf("acme", "ada_l"), HomeRoom.idOf("acme", "Ada.L"));
-    assertNotEquals("acme--ada-l", HomeRoom.idOf("acme", "ada.l"));
+    assertNotEquals(HomeRoom.idOf("acme", "Ada.L"), HomeRoom.idOf("acme2", "Ada.L"));
+  }
+
+  @Test
+  void aFoldedIdIsNeverAnotherHandlesVerbatimId() {
+    var folded = HomeRoom.idOf("acme", "Ada.L");
+    var literal = folded.substring("home--".length());
+    var lookalike = literal.substring(0, 63);
+
+    assertThrows(
+        IllegalArgumentException.class, () -> NameValidator.requireValidFdeHandle(literal));
+    NameValidator.requireValidFdeHandle(lookalike);
+    assertNotEquals(folded, HomeRoom.idOf("home", lookalike));
+    assertNotEquals(folded, HomeRoom.idOf("acme", "ada-l-2a8d4330"));
   }
 
   @Test

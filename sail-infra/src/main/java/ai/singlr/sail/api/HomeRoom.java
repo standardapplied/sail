@@ -9,12 +9,11 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.identity.Ownership;
+import ai.singlr.sail.webauthn.Hashes;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
-import java.util.Locale;
 import java.util.Map;
-import java.util.zip.CRC32;
 
 /**
  * An FDE's standing conversation with a project's agent: one room per FDE per project, created by
@@ -24,8 +23,6 @@ import java.util.zip.CRC32;
  * no room behind and an empty roster is only ever its owner's choice.
  */
 public final class HomeRoom {
-
-  private static final int MAX_ID = NameValidator.MAX_SPEC_ID_LENGTH;
 
   private HomeRoom() {}
 
@@ -51,25 +48,16 @@ public final class HomeRoom {
 
   /**
    * {@code handle}'s home room id in {@code project}: {@code <project>--<handle>} when that is a
-   * room id. A handle a room id cannot carry verbatim (upper case, '.', '_', or too long) is folded
-   * to the room id alphabet, cut to fit, and suffixed with the handle's CRC-32, so every FDE still
-   * gets an id of their own.
+   * room id. Otherwise the SHA-256 of the pair after {@code home--}: its 64 hex characters are
+   * longer than any handle, so it can never be another FDE's verbatim id.
    */
   public static String idOf(String project, String handle) {
     var verbatim = project + "--" + handle;
     if (NameValidator.isValidSpecId(verbatim)) {
       return verbatim;
     }
-    var suffix = "-" + digest(handle);
-    var folded = project + "--" + handle.toLowerCase(Locale.ROOT).replaceAll("[._]", "-");
-    var room = folded.substring(0, Math.min(folded.length(), MAX_ID - suffix.length()));
-    return room + suffix;
-  }
-
-  private static String digest(String handle) {
-    var crc = new CRC32();
-    crc.update(handle.getBytes(StandardCharsets.UTF_8));
-    return HexFormat.of().toHexDigits((int) crc.getValue());
+    var pair = (project + "\0" + handle).getBytes(StandardCharsets.UTF_8);
+    return "home--" + HexFormat.of().formatHex(Hashes.sha256(pair));
   }
 
   /**
