@@ -1183,6 +1183,50 @@ class FdeCommandTest {
     assertNull(handleOf(tokens[0]));
   }
 
+  @Test
+  void anUpgradeThatRevokesOnePairingAndFailsOnTheNextSaysTheOneItRevoked() throws Exception {
+    var tokens = pairedClientThenUday();
+    handle = "ada";
+    assertEquals(
+        0, fde("pair", "ada", "--host", "m", "--email", "ada@x.com", "--as-workstation-key"));
+    var ada = (String) decoded(printedCode()).get("token");
+    handle = "uday";
+    var client =
+        inDb(
+            db ->
+                new FdePairingStore(db)
+                    .find(new FdeStore(db).byHandle("client").orElseThrow().id())
+                    .orElseThrow()
+                    .publicKey());
+    keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
+    keygen.incus.files.put("acme/home/dev" + AUTHORIZED, client + "\n");
+    keygen.incus.failures.put("file push", new ShellExec.Result(1, "", "Error: I/O error\n"));
+    out.reset();
+    err.reset();
+
+    inDb(
+        db -> {
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          return null;
+        });
+
+    assertEquals(
+        List.of(
+            "  ✓ Revoked ada's connect code: a code logs in as root and is minted only for this"
+                + " box's own FDE."),
+        printed());
+    assertEquals(
+        "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not remove"
+            + " client's key from this box's containers (Failed to push file to"
+            + " /home/dev/.ssh/authorized_keys: Error: I/O error\n). Its login is revoked, and its"
+            + " token and record are kept until the key is gone: check that 'incus list' answers,"
+            + " then run the command again. Run 'sudo sail migrate' again.\n",
+        err.toString(StandardCharsets.UTF_8));
+    assertNull(handleOf(ada));
+    assertEquals("client", handleOf(tokens[0]));
+    assertEquals(List.of("client", "uday"), inDb(db -> new FdePairingStore(db).handles()));
+  }
+
   @ParameterizedTest
   @CsvSource({"me@mac, ' (me@mac)'", ",''"})
   void pairingWhereTheWorkstationKeyIsAnothersIsRefusedNamingItAndWritesNothing(

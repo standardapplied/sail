@@ -53,6 +53,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
@@ -1106,16 +1107,19 @@ public final class FdeCommand implements Runnable {
    * Revokes, through {@link #unpair}, every pairing on this box but its own FDE's: a connect code
    * logs in as the operator, who sees every project here, and is minted only for the box's own FDE
    * since this release. It edits the operator's login and the containers, so {@code migrate} runs
-   * it only when it converges the box itself, never in a rehearsal on a copy.
+   * it only when it converges the box itself, never in a rehearsal on a copy. Each revocation is
+   * said as it commits: a later one that fails cannot take back the notice of one already done.
    */
   static final class OwnBoxPairings implements DataMigration {
 
     static final String NAME = "pairings-own-box-v1";
 
     private final Supplier<Box> box;
+    private final Consumer<String> said;
 
-    OwnBoxPairings(Supplier<Box> box) {
+    OwnBoxPairings(Supplier<Box> box, Consumer<String> said) {
       this.box = box;
+      this.said = said;
     }
 
     @Override
@@ -1141,12 +1145,14 @@ public final class FdeCommand implements Runnable {
         for (var handle : new FdePairingStore(db).handles()) {
           if (!handle.equals(here.handle())) {
             unpair(here, db, handle);
-            notes.add(
+            var note =
                 "Revoked "
                     + handle
                     + "'s connect code: a code logs in as "
                     + here.operator()
-                    + " and is minted only for this box's own FDE.");
+                    + " and is minted only for this box's own FDE.";
+            said.accept(note);
+            notes.add(note);
           }
         }
       } catch (IOException failure) {

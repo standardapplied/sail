@@ -47,6 +47,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -566,20 +567,17 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Runs {@link FdeCommand.OwnBoxPairings} once, saying each pairing it revoked. A revocation that
-   * fails is said and left unrecorded, so the next {@code migrate} finishes it.
+   * Runs {@link FdeCommand.OwnBoxPairings} once, saying each pairing it revoked as it is revoked. A
+   * revocation that fails is said and left unrecorded, so the next {@code migrate} finishes it.
    */
   static void revokeOtherFdesPairings(Sqlite db, Supplier<FdeCommand.Box> box, boolean jsonOutput) {
+    Consumer<String> said =
+        jsonOutput
+            ? note -> {}
+            : note -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + note));
     try {
-      var runs =
-          new DataMigrator(db, List.of(new FdeCommand.OwnBoxPairings(box)))
-              .run(ProjectRegistry.loadFromDisk(), DataMigration.Prompter.NON_INTERACTIVE);
-      if (!jsonOutput) {
-        runs.getFirst()
-            .report()
-            .notes()
-            .forEach(note -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + note)));
-      }
+      new DataMigrator(db, List.of(new FdeCommand.OwnBoxPairings(box, said)))
+          .run(ProjectRegistry.loadFromDisk(), DataMigration.Prompter.NON_INTERACTIVE);
     } catch (RuntimeException failure) {
       System.err.println(
           Ansi.AUTO.string(
