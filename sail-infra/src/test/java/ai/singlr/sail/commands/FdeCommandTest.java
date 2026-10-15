@@ -365,6 +365,9 @@ class FdeCommandTest {
 
     ShellExec.Result exec(List<String> command) throws IOException {
       var failure = failures.get(String.join(" ", command.subList(1, 3)));
+      if (failure == null && command.get(2).equals("pull")) {
+        failure = failures.get(command.get(3));
+      }
       if (failure != null) {
         return failure;
       }
@@ -715,9 +718,9 @@ class FdeCommandTest {
   private static final String AUTHORIZED = "/.ssh/authorized_keys";
 
   /**
-   * A catalog of three projects: acme and web take SSH logins as dev and eng, docs takes none; and
-   * their containers, plus one no project names. Each container trusts {@code key} beside the
-   * laptop's.
+   * A catalog of three projects whose containers no longer match it: acme takes SSH logins as dev,
+   * web was provisioned as eng and now names newuser, docs dropped its ssh section; plus a
+   * container no project names. Each container trusts {@code key} beside the laptop's.
    */
   private void containersTrusting(SshPublicKey key) {
     inDb(
@@ -725,7 +728,7 @@ class FdeCommandTest {
           Acting.system(
               () -> {
                 var projects = new ProjectStore(db);
-                for (var project : List.of("acme:dev", "web:eng")) {
+                for (var project : List.of("acme:dev", "web:newuser")) {
                   var nameAndUser = project.split(":");
                   projects.upsert(
                       nameAndUser[0],
@@ -739,37 +742,90 @@ class FdeCommandTest {
               });
           return null;
         });
-    keygen.incus.container(
-        "acme", "Running", "/home/dev" + AUTHORIZED, key.line() + "\n" + LAPTOP.line() + "\n");
-    keygen.incus.container(
-        "web", "Stopped", "/home/eng" + AUTHORIZED, LAPTOP.line() + "\n" + key.line() + "\n");
-    keygen.incus.container("docs", "Running", "/home/dev" + AUTHORIZED, key.line() + "\n");
-    keygen.incus.container("stray", "Stopped", "/home/dev" + AUTHORIZED, key.line() + "\n");
+    keygen.incus.container("acme", "Running", PASSWD, accounts("dev:x:1000:1000"));
+    keygen.incus.files.put(
+        "acme/home/dev" + AUTHORIZED,
+        key.line()
+            + "\n"
+            + othersMentioning(key)
+            + "no-pty,from=\"10.0.0.1\" "
+            + key.line()
+            + "\n");
+    keygen.incus.container("web", "Stopped", PASSWD, accounts("eng:x:1001:1001"));
+    keygen.incus.files.put("web/home/eng" + AUTHORIZED, LAPTOP.line() + "\n" + key.line() + "\n");
+    keygen.incus.container("docs", "Running", PASSWD, accounts("dev:x:1000:1000"));
+    keygen.incus.files.put("docs/home/dev" + AUTHORIZED, key.line() + "\n");
+    keygen.incus.container("stray", "Stopped", PASSWD, accounts("dev:x:1000:1000"));
+    keygen.incus.files.put("stray/home/dev" + AUTHORIZED, key.line() + "\n");
   }
 
-  /** What a revocation of {@code key} leaves in each container. */
+  private static final String PASSWD = "/etc/passwd";
+
+  /**
+   * A container's accounts: the system ones, an ubuntu account never given a key, one whose home
+   * climbs out of /home, and {@code user} at /home.
+   */
+  private static String accounts(String user) {
+    var name = user.substring(0, user.indexOf(':'));
+    return "root:x:0:0:root:/root:/bin/bash\n"
+        + "daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin\n"
+        + "ubuntu:x:1002:1002::/home/ubuntu:/bin/bash\n"
+        + "climber:x:1003:1003::/home/..:/bin/bash\n"
+        + user
+        + "::/home/"
+        + name
+        + ":/bin/bash\n";
+  }
+
+  /** Key lines that are not {@code key} though the blob of {@code key} appears in them. */
+  private static String othersMentioning(SshPublicKey key) {
+    return LAPTOP.line()
+        + " retired "
+        + key.blob()
+        + "\n"
+        + "command=\"echo "
+        + key.type()
+        + " "
+        + key.blob()
+        + "\" "
+        + LAPTOP.line()
+        + "\n"
+        + "# "
+        + key.line()
+        + "\n";
+  }
+
+  /** What a revocation of {@code key} leaves in each container, and the incus it took. */
   private void assertContainersNoLongerTrust(SshPublicKey key) {
-    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(othersMentioning(key), keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
-    assertEquals(
-        key.line() + "\n",
-        keygen.incus.file("docs", "/home/dev" + AUTHORIZED),
-        "a project that takes no SSH login is not looked at");
-    assertEquals(
-        key.line() + "\n",
-        keygen.incus.file("stray", "/home/dev" + AUTHORIZED),
-        "a container no project names is not sail's to edit");
-    var push = List.of("incus", "file", "push", "--uid", "1000", "--gid", "1000", "--mode", "0600");
-    assertEquals(
-        List.of(
-            List.of("incus", "list", "--format", "json"),
-            List.of("incus", "file", "pull", "acme/home/dev" + AUTHORIZED, "-"),
-            Stream.concat(push.stream(), Stream.of("<staged>", "acme/home/dev" + AUTHORIZED))
-                .toList(),
-            List.of("incus", "file", "pull", "web/home/eng" + AUTHORIZED, "-"),
-            Stream.concat(push.stream(), Stream.of("<staged>", "web/home/eng" + AUTHORIZED))
-                .toList()),
-        incusCommands());
+    assertEquals("", keygen.incus.file("docs", "/home/dev" + AUTHORIZED));
+    assertEquals("", keygen.incus.file("stray", "/home/dev" + AUTHORIZED));
+    var commands = new ArrayList<List<String>>();
+    commands.add(List.of("incus", "list", "--format", "json"));
+    for (var container :
+        List.of("acme:dev:1000", "web:eng:1001", "docs:dev:1000", "stray:dev:1000")) {
+      var nameUserId = container.split(":");
+      var file = nameUserId[0] + "/home/" + nameUserId[1] + AUTHORIZED;
+      commands.add(List.of("incus", "file", "pull", nameUserId[0] + PASSWD, "-"));
+      commands.add(
+          List.of("incus", "file", "pull", nameUserId[0] + "/home/ubuntu" + AUTHORIZED, "-"));
+      commands.add(List.of("incus", "file", "pull", file, "-"));
+      commands.add(
+          List.of(
+              "incus",
+              "file",
+              "push",
+              "--uid",
+              nameUserId[2],
+              "--gid",
+              nameUserId[2],
+              "--mode",
+              "0600",
+              "<staged>",
+              file));
+    }
+    assertEquals(commands, incusCommands());
   }
 
   @Test
@@ -786,7 +842,7 @@ class FdeCommandTest {
         List.of(
             "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
                 + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers"
-                + " of acme, web no longer trust it."),
+                + " of acme, web, docs, stray no longer trust it."),
         printed());
     assertContainersNoLongerTrust(key);
     assertFalse(Files.exists(workstationKey()));
@@ -812,8 +868,8 @@ class FdeCommandTest {
 
     assertEquals(
         "  ✓ Its Mast pairing is revoked: 1 key line removed from root's authorized_keys. The"
-            + " workstation key was its key and is removed. Containers of acme, web no longer trust"
-            + " it.",
+            + " workstation key was its key and is removed. Containers of acme, web, docs, stray no"
+            + " longer trust it.",
         printed().getLast());
     assertContainersNoLongerTrust(key);
     assertFalse(Files.exists(workstationKey()));
@@ -834,7 +890,7 @@ class FdeCommandTest {
     assertEquals(
         "  ✓ Unpaired ada first: 1 key line removed from root's authorized_keys and token"
             + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers of"
-            + " acme, web no longer trust it.",
+            + " acme, web, docs, stray no longer trust it.",
         printed().getFirst());
     assertEquals(
         "  Containers of acme, docs, web trust this key only after their next 'sail project"
@@ -842,7 +898,7 @@ class FdeCommandTest {
         printed().getLast());
     assertEquals(renewed.line() + "\n", Files.readString(workstationKey()));
     assertEquals(List.of(renewed.blob()), loginsOf("ada"));
-    assertEquals(LAPTOP.line() + "\n", keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
+    assertEquals(othersMentioning(old), keygen.incus.file("acme", "/home/dev" + AUTHORIZED));
     assertEquals(LAPTOP.line() + "\n", keygen.incus.file("web", "/home/eng" + AUTHORIZED));
   }
 
@@ -894,10 +950,22 @@ class FdeCommandTest {
     assertEquals(1, fde("unpair", "ada"));
     assertEquals(
         "Could not remove ada's key from this box's containers (could not read"
+            + " /etc/passwd in acme: Error: I/O error). Its login is revoked,"
+            + " and its token and record are kept until the key is gone: check that 'incus list'"
+            + " answers, then run the command again.",
+        refusal);
+
+    keygen.incus.failures.clear();
+    keygen.incus.failures.put(
+        "acme/home/dev" + AUTHORIZED, new ShellExec.Result(1, "", "Error: I/O error\n"));
+    assertEquals(1, fde("unpair", "ada"));
+    assertEquals(
+        "Could not remove ada's key from this box's containers (could not read"
             + " /home/dev/.ssh/authorized_keys in acme: Error: I/O error). Its login is revoked,"
             + " and its token and record are kept until the key is gone: check that 'incus list'"
             + " answers, then run the command again.",
         refusal);
+    assertEquals(List.of(key.blob()), pairedKeys());
 
     keygen.incus.failures.clear();
     keygen.incus.files.remove("web/home/eng" + AUTHORIZED);
@@ -908,7 +976,7 @@ class FdeCommandTest {
         List.of(
             "  ✓ Unpaired ada: 0 key lines removed from root's authorized_keys and token"
                 + " 'mast-ada' revoked. The workstation key was its key and is removed. Containers"
-                + " of acme no longer trust it."),
+                + " of acme, docs, stray no longer trust it."),
         printed(),
         "a container whose user has no authorized_keys trusts nothing to remove");
     assertEquals(List.of(), pairedKeys());
@@ -929,16 +997,57 @@ class FdeCommandTest {
     assertEquals(
         "Could not remove "
             + workstationKey()
-            + ", which holds ada's key (AccessDeniedException). Its login is revoked, and its"
+            + ", which may hold ada's key (AccessDeniedException). Its login is revoked, and its"
             + " token and record are kept until the key is gone: check that "
-            + sail
-            + " is writable by root, then run the command again.",
+            + workstationKey()
+            + " and its directory are readable and writable by root, then run the command again.",
         refusal);
     assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
 
     assertEquals(0, fde("unpair", "ada"), refusal);
     assertFalse(Files.exists(workstationKey()));
     assertEquals(List.of(), pairedKeys());
+  }
+
+  @Test
+  void aWorkstationKeyThatCannotBeReadKeepsTheRecordSoTheNextRunFinishesIt() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("---------"));
+    try {
+      assertEquals(1, fde("unpair", "ada"));
+    } finally {
+      Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("rw-------"));
+    }
+
+    assertEquals(
+        "Could not remove "
+            + workstationKey()
+            + ", which may hold ada's key (AccessDeniedException). Its login is revoked, and its"
+            + " token and record are kept until the key is gone: check that "
+            + workstationKey()
+            + " and its directory are readable and writable by root, then run the command again.",
+        refusal);
+    assertEquals(List.of(keygen.made.getFirst().blob()), pairedKeys());
+    assertEquals(List.of("mast-ada"), tokens().stream().map(TokenStore.TokenInfo::name).toList());
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+    assertFalse(Files.exists(workstationKey()));
+    assertEquals(List.of(), pairedKeys());
+  }
+
+  @Test
+  void aWorkstationKeyFileThatHoldsNoKeyIsLeftAlone() throws Exception {
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.writeString(workstationKey(), "not a key\n");
+
+    assertEquals(0, fde("unpair", "ada"), refusal);
+
+    assertEquals(
+        List.of(
+            "  ✓ Unpaired ada: 1 key line removed from root's authorized_keys and token"
+                + " 'mast-ada' revoked."),
+        printed());
+    assertEquals("not a key\n", Files.readString(workstationKey()));
   }
 
   /** A box that paired {@code client} before codes were its own FDE's, and now pairs uday. */

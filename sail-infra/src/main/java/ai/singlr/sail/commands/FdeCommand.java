@@ -10,7 +10,6 @@ import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectRegistry;
-import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
@@ -42,6 +41,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
@@ -233,17 +233,17 @@ public final class FdeCommand implements Runnable {
   /**
    * Revokes {@code handle}'s pairing and every trust it left on this box, the one seam each
    * revocation goes through. Its key lines leave the operator's login; then its key leaves the
-   * containers of this box's projects and, when it is the workstation key, that file; last its
-   * token and record are forgotten. A step that fails stops it before the record that names the key
-   * is forgotten, so running it again finishes it. Returns what it removed, or empty when there was
-   * no pairing. The login lines go by their comment, so a pairing whose record is already gone
-   * still loses its login.
+   * containers of this box and, when it is the workstation key, that file; last its token and
+   * record are forgotten. A step that fails stops it before the record that names the key is
+   * forgotten, so running it again finishes it. Returns what it removed, or empty when there was no
+   * pairing. The login lines go by their comment, so a pairing whose record is already gone still
+   * loses its login.
    */
   private static Optional<String> unpair(
       Box box, Sqlite db, String handle, Optional<FdePairingStore.Pairing> pairing) {
     var keyLines = revokeLogin(box, handle);
     var key = pairing.map(held -> SshPublicKey.parse(held.publicKey()));
-    var containers = key.map(held -> untrustContainers(box, db, handle, held)).orElse(List.of());
+    var containers = key.map(held -> untrustContainers(box, handle, held)).orElse(List.of());
     var workstation = key.filter(held -> removeWorkstationKey(box, handle, held)).isPresent();
     if (keyLines == 0 && pairing.isEmpty()) {
       return Optional.empty();
@@ -262,21 +262,10 @@ public final class FdeCommand implements Runnable {
                 : " Containers of " + String.join(", ", containers) + " no longer trust it."));
   }
 
-  /**
-   * Removes {@code key} from the containers of this box's projects that take SSH logins, and
-   * returns those it was in.
-   */
-  private static List<String> untrustContainers(
-      Box box, Sqlite db, String handle, SshPublicKey key) {
-    var sshUsers = new LinkedHashMap<String, String>();
-    for (var project : new ProjectStore(db).list()) {
-      var config = SailYaml.fromMap(YamlUtil.parseMap(project.definition()));
-      if (config.ssh() != null) {
-        sshUsers.put(project.name(), config.sshUser());
-      }
-    }
+  /** Removes {@code key} from every container of this box, and returns those it was in. */
+  private static List<String> untrustContainers(Box box, String handle, SshPublicKey key) {
     try {
-      return new ContainerAuthorizedKeys(box.shell()).remove(key, sshUsers);
+      return new ContainerAuthorizedKeys(box.shell()).remove(key);
     } catch (IOException | TimeoutException failure) {
       throw new IllegalStateException(
           "Could not remove "
@@ -294,30 +283,43 @@ public final class FdeCommand implements Runnable {
     }
   }
 
-  /** Deletes the workstation key file when it holds {@code key}, answering whether it did. */
+  /**
+   * Deletes the workstation key file when it holds {@code key}, answering whether it did. Only a
+   * missing file holds nothing: one that cannot be read may hold the key, so it fails the
+   * revocation before the record that names the key is forgotten.
+   */
   private static boolean removeWorkstationKey(Box box, String handle, SshPublicKey key) {
-    var registered = WorkstationIdentity.registeredAt(box.workstationKey());
-    if (registered.isEmpty() || !registered.get().fingerprint().equals(key.fingerprint())) {
-      return false;
-    }
     try {
+      if (!heldBy(Files.readString(box.workstationKey()), key)) {
+        return false;
+      }
       Files.delete(box.workstationKey());
       return true;
+    } catch (NoSuchFileException missing) {
+      return false;
     } catch (IOException failure) {
       throw new UncheckedIOException(
           "Could not remove "
               + box.workstationKey()
-              + ", which holds "
+              + ", which may hold "
               + handle
               + "'s key ("
               + failure.getClass().getSimpleName()
               + "). Its login is revoked, and its token and record are kept until the key is gone:"
               + " check that "
-              + box.workstationKey().getParent()
-              + " is writable by "
+              + box.workstationKey()
+              + " and its directory are readable and writable by "
               + box.operator()
               + ", then run the command again.",
           failure);
+    }
+  }
+
+  private static boolean heldBy(String workstationKey, SshPublicKey key) {
+    try {
+      return SshPublicKey.parse(workstationKey).fingerprint().equals(key.fingerprint());
+    } catch (IllegalArgumentException notAKey) {
+      return false;
     }
   }
 

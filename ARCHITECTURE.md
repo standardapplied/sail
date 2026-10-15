@@ -2167,11 +2167,15 @@ operator's login and home are the JVM's `user.name` and `user.home`.
 - **C3. A pairing is revocable in one command, and leaves no trust behind.** One seam
   (`FdeCommand.unpair`) revokes every pairing, for `sail fde unpair <handle>`, `sail fde rm`,
   a re-pair and the upgrade: it removes every key line the pairing made from the operator's
-  login, then the pairing's key from the `authorized_keys` of the SSH user in every container
-  of the catalog's projects that take SSH logins, running or stopped (`ContainerAuthorizedKeys`,
-  `incus file pull` and `push`, by the exact key blob, so other keys stay), then the workstation
-  key file when it holds that key, and last revokes the token its record names and deletes the
-  record; it is idempotent and says what it removed. `sail fde rm <handle>` removes the FDE
+  login, then the pairing's key from the `authorized_keys` of every account whose home is under
+  `/home` in every container of the box, running or stopped (`ContainerAuthorizedKeys`, `incus
+  file pull` and `push`). The accounts come from each container's `/etc/passwd`, never from the
+  catalog, whose `ssh.user` may have changed since the container was provisioned; a line goes
+  only when its key type and blob are the pairing's, so other keys stay, whatever their comments
+  or options mention. Then the workstation key file goes when it holds that key (a file that
+  cannot be read fails the revocation; only a missing one holds nothing), and last the token
+  its record names is revoked and the record deleted; it is idempotent and says what it
+  removed. `sail fde rm <handle>` removes the FDE
   first, where the last-admin refusal happens and the token and record go with the row, then
   revokes, so a refused removal leaves the pairing whole. Both happen in one transaction that
   commits only once the revocation is done. There is one live code per FDE per box: pairing
