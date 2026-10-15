@@ -2159,21 +2159,35 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   exists only in the code. What stays is what verifies: the public key line in the operator's
   `authorized_keys`, the token's hash, and the pairing's record (`fde_pairings`: the public key
   and the token's name, box-local, removed with its FDE).
-- **C3. A pairing is revocable in one command.** `sail fde unpair <handle>` removes every key
-  line the pairing made, revokes the token its record names and deletes the record; it is
-  idempotent and says what it removed. `sail fde rm <handle>` removes the FDE first, where the
-  last-admin refusal happens and the token and record go with the row, then the key lines, so a
-  refused removal leaves the pairing whole. Both happen in one transaction that commits only
-  once the key lines are gone. There is one live code per FDE per box: pairing again unpairs
-  first. Revoking the token alone (`sail server token revoke mast-<handle>`) leaves the login;
-  `unpair` is the revocation.
+- **C0. A code is minted only for the box's own FDE.** Its login is the operator, who reads
+  the whole database, every container and every secret here, so `pair` refuses any handle but
+  the box's sync handle before it writes anything, naming the box that FDE pairs on: its own,
+  set up with `sudo sail init --main <main>` (`requireOwnFde`; a box with no sync handle names
+  `sudo sail host config set sync-handle`). Main and a node both pair their own FDE.
+- **C3. A pairing is revocable in one command, and leaves no trust behind.** One seam
+  (`FdeCommand.unpair`) revokes every pairing, for `sail fde unpair <handle>`, `sail fde rm`,
+  a re-pair and the upgrade: it removes every key line the pairing made from the operator's
+  login, then the pairing's key from the `authorized_keys` of the SSH user in every container
+  of the catalog's projects that take SSH logins, running or stopped (`ContainerAuthorizedKeys`,
+  `incus file pull` and `push`, by the exact key blob, so other keys stay), then the workstation
+  key file when it holds that key, and last revokes the token its record names and deletes the
+  record; it is idempotent and says what it removed. `sail fde rm <handle>` removes the FDE
+  first, where the last-admin refusal happens and the token and record go with the row, then
+  revokes, so a refused removal leaves the pairing whole. Both happen in one transaction that
+  commits only once the revocation is done. There is one live code per FDE per box: pairing
+  again unpairs first. Revoking the token alone (`sail server token revoke mast-<handle>`)
+  leaves the login; `unpair` is the revocation. The release that brought C0 revokes, through
+  the same seam, every pairing whose FDE is not the box's own (`pairings-own-box-v1`, run by
+  `migrate` only when it converges the box itself, never in a rehearsal on a copy).
 
   A pairing is a key line in a file and a record in the database, and no transaction spans the
   two, so two rules keep **a login from ever outliving the record that revokes it**:
   - *The record is written before its line and forgotten after it.* `pair` mints the token and
     the record, then appends the line; `unpair` and `rm` remove the lines, then the record. A
     command that stops between the two leaves a record without a login, which the next run
-    clears. A line that cannot be removed fails the command before anything is forgotten
+    clears; one that cannot reach a container or the workstation key stops there, with the
+    login gone and the record kept, so the next run finishes it. A line that cannot be removed
+    fails the command before anything is forgotten
     ("Could not remove ada's key line from root's authorized_keys (AccessDeniedException), so
     nothing of ada was removed and its pairing still works. Check that /root/.ssh is writable
     by root, then run the command again."), and a file that cannot be looked at is that failure,
@@ -2189,8 +2203,9 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   containers; the command names the projects the catalog holds, whose containers trust it only
   after their next `project apply`. A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
-  fingerprint and comment, unless `--as-workstation-key` is passed. Unpairing leaves the
-  workstation key as it is.
+  fingerprint and comment, unless `--as-workstation-key` is passed. Revoking the pairing takes
+  its key back out of the workstation key and the containers (C3); a key set by `sail host
+  config set ssh-public-key` is never touched.
 - **C5. The code is a secret, handled as one.** It is printed to the terminal and nowhere else:
   no file, no log line, no exception message. Its private key has no passphrase, so Mast can
   use it unattended. Its lifetime is its token's: 365 days unless `--ttl-days` or `--no-expiry`
@@ -2209,8 +2224,10 @@ operator's login and home are the JVM's `user.name` and `user.home`.
   never write back a line the other removed. A paired person can therefore open a shell on the
   box as its operator; the box is theirs.
 
-Pairing edits the roster (it adds the FDE when the box holds none), so a node refuses it as it
-refuses `fde add`; it is for a main or a standalone box. A handle, host, email and name are
+On main, pairing adds the box's own FDE when the roster holds none and applies `--name`,
+`--email` and `--role`. On a node it is no roster edit: the FDE must be in the replicated roster
+and active, the roster options are refused with the roster sentence, and only box-local state is
+written: the login line, the token, the record and the workstation key. A handle, host, email and name are
 validated where they enter (`NameValidator`), and nothing reaches a shell but as an argument.
 
 An admin's `fde` commands also arrive through the gateway, where they run as the `sail` user,
