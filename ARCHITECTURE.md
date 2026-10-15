@@ -1349,7 +1349,8 @@ class is `LiveMemberTest`'s):
 
 **Home rooms.** Every FDE has one standing conversation per project with the project's agent:
 the room `<project>--<handle>` (`HomeRoom.idOf`: when a room id cannot carry the pair verbatim,
-with upper case, '.', '_' or too many characters, it is `home--` and the pair's SHA-256, 64 hex
+with upper case, '.', '_', a `--` in the handle (so `acme--ada`/`bob` and `acme`/`ada--bob`
+never share an id) or too many characters, it is `home--` and the pair's SHA-256, 64 hex
 characters no handle can spell), titled with the project's name, assigned to the FDE, its
 roster the *project's member* (`agent.member` in the definition: `agent` defaulting to
 `agent.type`, `model` to the agent's default, `mode` to `full`). `sail project apply` makes it

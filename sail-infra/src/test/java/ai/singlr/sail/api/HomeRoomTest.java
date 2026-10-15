@@ -291,6 +291,16 @@ class HomeRoomTest {
   }
 
   @Test
+  void aHandleThatSpellsTheSeamNeverSharesAnotherPairsId() {
+    NameValidator.requireValidProjectName("acme--ada");
+    NameValidator.requireValidFdeHandle("ada--bob");
+
+    assertEquals("acme--ada--bob", HomeRoom.idOf("acme--ada", "bob"));
+    assertTrue(HomeRoom.idOf("acme", "ada--bob").matches("home--[0-9a-f]{64}"));
+    assertEquals("acme---ada", HomeRoom.idOf("acme-", "ada"));
+  }
+
+  @Test
   void aFoldedIdIsNeverAnotherHandlesVerbatimId() {
     var folded = HomeRoom.idOf("acme", "Ada.L");
     var literal = folded.substring("home--".length());

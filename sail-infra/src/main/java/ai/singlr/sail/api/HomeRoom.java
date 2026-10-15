@@ -48,12 +48,13 @@ public final class HomeRoom {
 
   /**
    * {@code handle}'s home room id in {@code project}: {@code <project>--<handle>} when that is a
-   * room id. Otherwise the SHA-256 of the pair after {@code home--}: its 64 hex characters are
-   * longer than any handle, so it can never be another FDE's verbatim id.
+   * room id and its last {@code --} is the pair's seam, so no two pairs spell it. Otherwise the
+   * SHA-256 of the pair after {@code home--}: its 64 hex characters are longer than any handle, so
+   * it can never be another FDE's verbatim id.
    */
   public static String idOf(String project, String handle) {
     var verbatim = project + "--" + handle;
-    if (NameValidator.isValidSpecId(verbatim)) {
+    if (!handle.contains("--") && NameValidator.isValidSpecId(verbatim)) {
       return verbatim;
     }
     var pair = (project + "\0" + handle).getBytes(StandardCharsets.UTF_8);
