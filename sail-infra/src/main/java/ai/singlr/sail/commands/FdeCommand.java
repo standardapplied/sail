@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -82,6 +83,8 @@ public final class FdeCommand implements Runnable {
 
   /** The format a connect code names, so Mast can refuse anything else in one sentence. */
   static final String CODE_PREFIX = "sail1.";
+
+  private static final Pattern FINGERPRINT = Pattern.compile("SHA256:[A-Za-z0-9+/]{43}");
 
   /** How long a connect code, and so its token, lives unless the operator says otherwise. */
   private static final Duration PAIRING_TTL = Duration.ofDays(365);
@@ -262,6 +265,17 @@ public final class FdeCommand implements Runnable {
     }
   }
 
+  /** This box's SSH host key, which a connect code pins and a joining node pinned. */
+  static SshPublicKey hostKey(Path file) throws IOException {
+    if (!Files.isRegularFile(file)) {
+      throw new IllegalStateException(
+          "This box has no SSH host key at "
+              + file
+              + ". Generate one with 'sudo ssh-keygen -A', then run this again.");
+    }
+    return SshPublicKey.parse(Files.readString(file));
+  }
+
   @Command(name = "add", description = "Add an FDE.", mixinStandardHelpOptions = true)
   static final class Add implements Runnable {
 
@@ -294,6 +308,14 @@ public final class FdeCommand implements Runnable {
                 + " one is.")
     private boolean scoped;
 
+    @Option(
+        names = "--main-host-key",
+        paramLabel = "FINGERPRINT",
+        description =
+            "The SHA256 fingerprint of this box's SSH host key that the joining node pinned, as"
+                + " its join printed it; the add is refused when it is not this box's.")
+    private String mainHostKey;
+
     @ParentCommand private FdeCommand command;
 
     @Spec private CommandSpec spec;
@@ -309,6 +331,9 @@ public final class FdeCommand implements Runnable {
               requireNotThisBoxsOwn(box, handle);
             }
             var key = publicKey == null ? null : SshPublicKey.parse(publicKey);
+            if (mainHostKey != null) {
+              requirePinnedHostKey(box, requireFingerprint(mainHostKey));
+            }
             try (var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               if (fdeStore.byHandle(handle).isPresent()) {
@@ -339,6 +364,35 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
+    }
+
+    private static String requireFingerprint(String value) {
+      if (!FINGERPRINT.matcher(value).matches()) {
+        throw new IllegalArgumentException(
+            "--main-host-key takes the SHA256 fingerprint the node's join printed (SHA256: and 43"
+                + " base64 characters), not '"
+                + value
+                + "'.");
+      }
+      return value;
+    }
+
+    /**
+     * Refuses a node that pinned another key for this box: something between it and this box
+     * answered its join, and the key it would authorise syncs through that.
+     */
+    private static void requirePinnedHostKey(Box box, String pinned) throws IOException {
+      var own = hostKey(box.hostKey()).fingerprint();
+      if (!own.equals(pinned)) {
+        throw new IllegalStateException(
+            "The node pinned "
+                + pinned
+                + " for this box, but this box's host key is "
+                + own
+                + ": something between that node and this box answered for it. Do not add this"
+                + " key; ask the engineer to re-run 'sudo sail init --main <this box>' on a network"
+                + " path you trust.");
+      }
     }
 
     /** Adds the FDE scoped from its first moment when asked, never unscoped and then narrowed. */
@@ -749,6 +803,7 @@ public final class FdeCommand implements Runnable {
         }
         var address = address(box, existing);
         var hostKey = hostKey(box.hostKey());
+        var pinned = hostKey.type() + " " + hostKey.blob();
         var replaced =
             replacedWorkstationKey(
                 box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())));
@@ -792,7 +847,7 @@ public final class FdeCommand implements Runnable {
         System.out.println();
         System.out.println("  Paste this code into Mast. It is a secret, and it is shown once:");
         System.out.println();
-        System.out.println(code(box, address, hostKey, key.privateKey(), token.token()));
+        System.out.println(code(box, address, pinned, key.privateKey(), token.token()));
         var projects = new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name);
         var stale = projects.collect(Collectors.joining(", "));
         if (!stale.isEmpty()) {
@@ -855,18 +910,6 @@ public final class FdeCommand implements Runnable {
                     : "Pass --email <email>."));
       }
       return address;
-    }
-
-    private static String hostKey(Path file) throws IOException {
-      if (!Files.isRegularFile(file)) {
-        throw new IllegalStateException(
-            "This box has no SSH host key at "
-                + file
-                + ", and a connect code pins it. Generate one with 'sudo ssh-keygen -A' and pair"
-                + " again.");
-      }
-      var key = SshPublicKey.parse(Files.readString(file));
-      return key.type() + " " + key.blob();
     }
 
     /**

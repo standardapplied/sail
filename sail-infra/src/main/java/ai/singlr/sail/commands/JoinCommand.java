@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
@@ -18,8 +19,6 @@ import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
-import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -100,17 +99,19 @@ public final class JoinCommand implements Runnable {
             resolvedHandle,
             resolvedName,
             resolvedEmail,
-            SshSyncChannel::open);
-    probeReachability(normalized);
+            SshSyncChannel::open,
+            MainHostKey.here());
     print(plan);
   }
 
   /**
-   * Generates the sync key if needed and points the local host config at {@code target} as a node.
-   * A change of handle is refused while a run main holds under the old one would be stranded, and
-   * once written every run main has not taken is stamped with the new one ({@link HandleChange}),
-   * in the box's database {@code db}. Pure of any prompting or stdout so it can be exercised
-   * directly in tests with a {@code @TempDir} config and a stub identity.
+   * Pins main's SSH host key, generates the sync key if needed and points the local host config at
+   * {@code target} as a node. The pin comes first, so a main whose key cannot be read or differs
+   * from the one pinned leaves no half-joined box. A change of handle is refused while a run main
+   * holds under the old one would be stranded, and once written every run main has not taken is
+   * stamped with the new one ({@link HandleChange}), in the box's database {@code db}. Pure of any
+   * prompting or stdout so it can be exercised directly in tests with a {@code @TempDir} config and
+   * a stub identity.
    */
   static Plan plan(
       Path hostConfig,
@@ -120,12 +121,15 @@ public final class JoinCommand implements Runnable {
       String handle,
       String name,
       String email,
-      SyncOperations.Channels channels)
+      SyncOperations.Channels channels,
+      MainHostKey mainHostKey)
       throws Exception {
     if (!Files.exists(hostConfig)) {
       throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
     }
     HostConfigSetCommand.validate("sync-main", target);
+    requireWritable(hostConfig, target);
+    var pinned = mainHostKey.pin(hostForProbe(target));
     var publicKey = identity.ensure("sail-sync:" + handle);
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
     var updated =
@@ -133,9 +137,8 @@ public final class JoinCommand implements Runnable {
             HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
             "sync-handle",
             handle);
-    requireWritable(hostConfig, target);
     HandleChange.write(hostConfig, db, host, updated, channels);
-    return new Plan(target, handle, name, email, publicKey);
+    return new Plan(target, handle, name, email, publicKey, pinned);
   }
 
   private static void requireWritable(Path hostConfig, String target) {
@@ -174,9 +177,7 @@ public final class JoinCommand implements Runnable {
             + " (or just the host).");
   }
 
-  /**
-   * Bare host for a reachability probe: strips any {@code user@} prefix and {@code :port} suffix.
-   */
+  /** Bare host whose SSH host key is pinned: strips any {@code user@} prefix and {@code :port}. */
   static String hostForProbe(String target) {
     var trimmed = target.strip();
     var at = trimmed.indexOf('@');
@@ -307,24 +308,13 @@ public final class JoinCommand implements Runnable {
     return line == null || line.isBlank() ? gitDefault : line.strip();
   }
 
-  private static void probeReachability(String target) {
-    var host = hostForProbe(target);
-    try (var socket = new Socket()) {
-      socket.connect(new InetSocketAddress(host, 22), 5000);
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Heads up: couldn't reach "
-                  + host
-                  + ":22 right now. Check the address and firewall — you can still hand the"
-                  + " operator the line below and run 'sail sync' once it's reachable.",
-              Ansi.AUTO));
-    }
-  }
-
-  /** The {@code sail fde add} line main's operator runs to authorise this node. */
-  static String authorizeLine(String handle, String name, String email, String publicKey) {
-    var line = new StringBuilder("sail fde add " + handle + " --role member");
+  /**
+   * The {@code sail fde add} line main's operator runs to authorise this node, carrying the host
+   * key this node pinned for main so main refuses it when another box answered the join.
+   */
+  static String authorizeLine(
+      String handle, String name, String email, String publicKey, String mainHostKey) {
+    var line = new StringBuilder("sudo sail fde add " + handle + " --role member");
     if (Strings.isNotBlank(name)) {
       line.append(" --name \"").append(name).append('"');
     }
@@ -332,6 +322,7 @@ public final class JoinCommand implements Runnable {
       line.append(" --email \"").append(email).append('"');
     }
     line.append(" --key \"").append(publicKey).append('"');
+    line.append(" --main-host-key ").append(mainHostKey);
     return line.toString();
   }
 
@@ -341,7 +332,9 @@ public final class JoinCommand implements Runnable {
 
   /** Renders the join result — machine JSON or the human next-steps block. Pure for testing. */
   static String render(Plan plan, boolean json) {
-    var authorize = authorizeLine(plan.handle(), plan.name(), plan.email(), plan.publicKey());
+    var authorize =
+        authorizeLine(
+            plan.handle(), plan.name(), plan.email(), plan.publicKey(), plan.mainHostKey());
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("target", plan.target());
@@ -349,6 +342,7 @@ public final class JoinCommand implements Runnable {
       map.put("suggested_name", plan.name());
       map.put("suggested_email", plan.email());
       map.put("public_key", plan.publicKey());
+      map.put("main_host_key", plan.mainHostKey());
       map.put("authorize_command", authorize);
       return YamlUtil.dumpJson(map);
     }
@@ -361,11 +355,20 @@ public final class JoinCommand implements Runnable {
 
               @|cyan %s|@
 
-            Once they have, finish here with @|bold sail sync|@. Only a public key leaves \
+            Once they have, finish here with @|bold sudo sail sync|@. Only a public key leaves \
         this box — never a secret."""
             .formatted(plan.target(), plan.target(), authorize));
   }
 
-  /** Result of a join: the target, the chosen handle, and this node's public sync key. */
-  record Plan(String target, String handle, String name, String email, String publicKey) {}
+  /**
+   * Result of a join: the target, the chosen handle, this node's public sync key and the
+   * fingerprint of main's host key it pinned.
+   */
+  record Plan(
+      String target,
+      String handle,
+      String name,
+      String email,
+      String publicKey,
+      String mainHostKey) {}
 }

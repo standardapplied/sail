@@ -18,14 +18,51 @@ public final class Main {
   private Main() {}
 
   public static void main(String[] args) {
-    if (RuntimeMode.detect() instanceof RuntimeMode.Client client) {
-      System.exit(new RemoteCommandRunner(client.config()).execute(args));
+    switch (RuntimeMode.detect()) {
+      case RuntimeMode.Client client ->
+          System.exit(new RemoteCommandRunner(client.config()).execute(args));
+      case RuntimeMode.Refused refused when !exempt(args) -> {
+        System.err.println(refusal(System.getProperty("user.name"), args));
+        System.exit(1);
+      }
+      default -> {}
     }
     AutoUpgrader.upgradeIfAvailable(args);
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, commandLine, parseResult) -> report(ex, commandLine));
     var exitCode = cmd.execute(args);
     System.exit(exitCode);
+  }
+
+  /**
+   * Whether picocli reads {@code args} as a request for help or the version, which every account
+   * may; a {@code --help} it would pass on as an argument, after {@code --} say, runs the command.
+   */
+  static boolean exempt(String[] args) {
+    try {
+      for (var parsed = new CommandLine(new Sail()).parseArgs(args);
+          parsed != null;
+          parsed = parsed.subcommand()) {
+        if (parsed.isUsageHelpRequested() || parsed.isVersionHelpRequested()) {
+          return true;
+        }
+      }
+      return false;
+    } catch (CommandLine.ParameterException invalid) {
+      return false;
+    }
+  }
+
+  /** What an account that does not own this box is told, with its command to paste back. */
+  static String refusal(String user, String[] args) {
+    var command = new StringBuilder("sudo sail");
+    for (var arg : args) {
+      command.append(' ').append(Strings.shellWord(arg));
+    }
+    return "sail-api on this box runs as root, so "
+        + user
+        + "'s sail would see none of its specs, projects or FDEs. Run it with sudo: "
+        + command;
   }
 
   /**

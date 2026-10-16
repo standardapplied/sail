@@ -53,20 +53,27 @@ declares it the source of truth:
 sudo sail init --as-main
 ```
 
-Authorize each engineer with the public key their `sail init --main` printed:
+Authorize each engineer with the line their `sudo sail init --main` printed. It carries the
+fingerprint of main's host key that their box pinned, and main refuses the line when that is not
+its own key:
 
 ```bash
-sail fde add mady --role member --key "ssh-ed25519 AAAA... sail-sync@madybox"
+sudo sail fde add mady --role member --key "ssh-ed25519 AAAA... sail-sync@madybox" \
+  --main-host-key SHA256:...
 ```
 
 Join a node:
 
 ```bash
-sudo sail init --main <main-ip>   # provision, install sail-api, generate this box's sync key,
-                                  # and print the fde add line to run on main
-sail sync                         # pull specs, projects and shared files from main
-sail sync status --json           # stored health, last success, and any failure reason
+sudo sail init --main <main-ip>   # provision, install sail-api, pin main's SSH host key,
+                                  # generate this box's sync key, and print the fde add line
+sudo sail sync                    # pull specs, projects and shared files from main
+sudo sail sync status --json      # stored health, last success, and any failure reason
 ```
+
+A box set up by `sudo sail init` is root's: `sail-api` runs as root, whoever invoked `sudo`. Run
+sail there with `sudo`; another account's plain `sail` is refused and names the `sudo` command to
+run instead.
 
 Hand a person their box in Mast with one string. On the box, as the account `sail-api` runs as
 (with `sudo` where that is root), for the box's own FDE (its sync handle):

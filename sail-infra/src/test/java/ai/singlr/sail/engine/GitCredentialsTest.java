@@ -21,17 +21,10 @@ import org.junit.jupiter.api.Test;
 class GitCredentialsTest {
 
   @Test
-  void resolveHostPathExpandsTildeWithSudoUser() {
-    var original = System.getenv("SUDO_USER");
-    var path = GitCredentials.resolveHostPath("~/.ssh/id_ed25519");
-    if (original != null) {
-      assertEquals(Path.of("/home", original, ".ssh/id_ed25519"), path);
-    } else {
-      assertEquals(
-          Path.of(System.getProperty("user.home"), ".ssh/id_ed25519"),
-          path,
-          "Should fall back to user.home when SUDO_USER is not set");
-    }
+  void resolveHostPathExpandsTildeToTheInvokingHome() {
+    assertEquals(
+        SailPaths.invokingHome().resolve(".ssh/id_ed25519"),
+        GitCredentials.resolveHostPath("~/.ssh/id_ed25519"));
   }
 
   @Test

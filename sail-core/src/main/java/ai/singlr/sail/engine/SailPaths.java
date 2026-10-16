@@ -11,7 +11,10 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
  * Centralized path constants for CLI state files. All state lives under {@code ~/.sail/}: project
@@ -32,6 +35,12 @@ public final class SailPaths {
   }
 
   private static final Path SYSTEM_DATA_DIR = Path.of("/var/lib/sail");
+
+  /**
+   * The system {@code sail-api} unit, present on a box whose control plane is root's. Its presence
+   * is what tells another account's CLI that the box's state is not its own.
+   */
+  public static final Path SYSTEM_UNIT = Path.of("/etc/systemd/system/sail-api.service");
 
   /** The provisioned system data directory, where a host's control-plane database lives. */
   public static Path systemDataDir() {
@@ -149,7 +158,82 @@ public final class SailPaths {
    * that owner into the box's containers.
    */
   public static Path workstationPublicKeyPath() {
-    return SAIL_DIR.resolve("workstation_key.pub");
+    return workstationPublicKeyPath(SAIL_DIR.getParent());
+  }
+
+  /** The workstation public key of the account whose home is {@code home}. */
+  public static Path workstationPublicKeyPath(Path home) {
+    return home.resolve(".sail").resolve("workstation_key.pub");
+  }
+
+  /**
+   * The home a project's personal placeholders resolve from: the {@code sudo} user's when root acts
+   * for an account that owns a box in its own home, so its plain and sudo applies resolve alike
+   * even beside root's system unit, and this account's otherwise, root's included for an operator
+   * who owns no box of their own.
+   */
+  public static Path identityHome() {
+    return identityHome(
+        isRoot(),
+        System.getenv("SUDO_USER"),
+        SailPaths::accountHome,
+        Path.of(System.getProperty("user.home")));
+  }
+
+  /** Pure of the process, so every account's resolution is exercised directly. */
+  static Path identityHome(
+      boolean root, String sudoUser, Function<String, Path> homeOf, Path ownHome) {
+    if (!root || Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
+      return ownHome;
+    }
+    var sudoHome = homeOf.apply(sudoUser);
+    return Files.exists(sudoHome.resolve(".sail").resolve("host.yaml")) ? sudoHome : ownHome;
+  }
+
+  /**
+   * The home of the person behind this process: the {@code sudo} caller's, as the account database
+   * records it ({@code /root} for a root shell's {@code sudo}), else this account's own.
+   */
+  public static Path invokingHome() {
+    return invokingHome(
+        System.getenv("SUDO_USER"),
+        SailPaths::accountHome,
+        Path.of(System.getProperty("user.home")));
+  }
+
+  /** Pure of the process, so every caller's resolution is exercised directly. */
+  static Path invokingHome(String sudoUser, Function<String, Path> homeOf, Path ownHome) {
+    return Strings.isBlank(sudoUser) ? ownHome : homeOf.apply(sudoUser);
+  }
+
+  /**
+   * An account's home as the system's account database records it, which need not be {@code
+   * /home/<user>}.
+   */
+  public static Path accountHome(String user) {
+    return accountHome(new ShellExecutor(false), user);
+  }
+
+  public static Path accountHome(ShellExec shell, String user) {
+    try {
+      var result = shell.exec(List.of("getent", "passwd", "--", user));
+      var fields = result.stdout().strip().split(":", -1);
+      if (!result.ok() || fields.length != 7 || !fields[0].equals(user) || !isAbsolute(fields[5])) {
+        throw new IllegalStateException(
+            "Couldn't find " + user + "'s home: 'getent passwd " + user + "' has no usable entry.");
+      }
+      return Path.of(fields[5]);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while looking up " + user + "'s home.", e);
+    } catch (IOException | TimeoutException e) {
+      throw new IllegalStateException(
+          "Couldn't find " + user + "'s home: 'getent passwd " + user + "' failed: " + e, e);
+    }
+  }
+
+  private static boolean isAbsolute(String path) {
+    return !path.isEmpty() && Path.of(path).isAbsolute();
   }
 
   /**

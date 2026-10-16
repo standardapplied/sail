@@ -10,6 +10,7 @@ import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.TimeoutException;
@@ -27,15 +28,28 @@ public final class LocalIdentity {
 
   private final ShellExec shell;
   private final Path sshPublicKeyPath;
+  private final Path home;
 
+  /** This process's git identity and the workstation key at {@code sshPublicKeyPath}. */
   public LocalIdentity(ShellExec shell, Path sshPublicKeyPath) {
-    this.shell = shell;
-    this.sshPublicKeyPath = sshPublicKeyPath;
+    this(shell, sshPublicKeyPath, null);
   }
 
-  /** This box's identity: real git config and the box owner's workstation public key. */
+  /** The identity of the account whose home is {@code home}: its git config and its key. */
+  LocalIdentity(ShellExec shell, Path sshPublicKeyPath, Path home) {
+    this.shell = shell;
+    this.sshPublicKeyPath = sshPublicKeyPath;
+    this.home = home;
+  }
+
+  /**
+   * This box's identity: the git config and workstation public key of the account that owns it
+   * ({@link SailPaths#identityHome()}).
+   */
   public static LocalIdentity detect() {
-    return new LocalIdentity(new ShellExecutor(false), SailPaths.workstationPublicKeyPath());
+    var home = SailPaths.identityHome();
+    return new LocalIdentity(
+        new ShellExecutor(false), SailPaths.workstationPublicKeyPath(home), home);
   }
 
   /**
@@ -53,7 +67,7 @@ public final class LocalIdentity {
     if (key == null) {
       return Optional.empty();
     }
-    var value = run(List.of("git", "config", "--global", "--get", key));
+    var value = run(gitConfigCommand(key));
     return Strings.isBlank(value) ? Optional.empty() : Optional.of(value);
   }
 
@@ -68,8 +82,21 @@ public final class LocalIdentity {
     };
   }
 
+  /**
+   * {@code git config --global} of this identity's account, with its home passed as an argument.
+   */
+  List<String> gitConfigCommand(String key) {
+    var command = List.of("git", "config", "--global", "--get", key);
+    if (home == null) {
+      return command;
+    }
+    var withHome = new ArrayList<>(List.of("env", "HOME=" + home));
+    withHome.addAll(command);
+    return List.copyOf(withHome);
+  }
+
   private String gitConfig(String key) {
-    var value = run(List.of("git", "config", "--global", "--get", key));
+    var value = run(gitConfigCommand(key));
     if (Strings.isBlank(value)) {
       throw new IllegalStateException(
           "This box has no git "

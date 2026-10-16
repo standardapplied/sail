@@ -9,11 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -96,6 +99,82 @@ class LocalIdentityTest {
   void gitValueIsEmptyWhenUnsetOrNotAGitPlaceholder() {
     assertTrue(identity(Map.of()).gitValue("GIT_NAME").isEmpty(), "unset identity, no throw");
     assertTrue(identity(Map.of()).gitValue("SSH_PUBLIC_KEY").isEmpty(), "not a git field");
+  }
+
+  @Test
+  void anAccountsIdentityReadsItsGitConfigAndItsWorkstationKey() throws IOException {
+    var home = dir.resolve("dev");
+    Files.createDirectories(home.resolve(".sail"));
+    Files.writeString(home.resolve(".sail/workstation_key.pub"), VALID_KEY + "\n");
+    var commands = new ArrayList<List<String>>();
+    var shell = stubGit(Map.of("user.name", "Mady M"), commands);
+
+    var identity = new LocalIdentity(shell, home.resolve(".sail/workstation_key.pub"), home);
+
+    assertEquals("Mady M", identity.valueFor("GIT_NAME"));
+    assertEquals(VALID_KEY, identity.valueFor("SSH_PUBLIC_KEY"));
+    assertEquals(
+        List.of(List.of("env", "HOME=" + home, "git", "config", "--global", "--get", "user.name")),
+        commands);
+  }
+
+  @Test
+  void aSudoApplyOnAnAccountsOwnBoxRecordsTheDigestItsPlainApplyDoes() throws IOException {
+    var dev = dir.resolve("srv/dev");
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk("getent passwd -- dev", "dev:x:1001:1001::" + dev + ":/bin/bash\n");
+    Function<String, Path> homeOf = user -> SailPaths.accountHome(passwd, user);
+    var root = dir.resolve("root");
+    Files.createDirectories(dev.resolve(".sail"));
+    Files.createDirectories(root.resolve(".sail"));
+    Files.writeString(dev.resolve(".sail/host.yaml"), "storage_backend: dir\n");
+    Files.writeString(dev.resolve(".sail/workstation_key.pub"), VALID_KEY + "\n");
+    Files.writeString(
+        root.resolve(".sail/workstation_key.pub"), TestSshKeys.ed25519("root", "root@box") + "\n");
+    var plain = inputs(SailPaths.identityHome(false, null, homeOf, dev), dev);
+    var sudo = inputs(SailPaths.identityHome(true, "dev", homeOf, root), dev);
+
+    assertEquals(plain, sudo);
+  }
+
+  private static String inputs(Path home, Path dev) {
+    var git =
+        home.equals(dev)
+            ? Map.of("user.name", "Mady M", "user.email", "mady@example.com")
+            : Map.of("user.name", "root", "user.email", "root@box");
+    var config =
+        ProjectDefinitions.resolveForProvisioning(
+            "name: acme\n"
+                + "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\n"
+                + "ssh:\n  user: dev\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n",
+            home(home, git));
+    return ProjectProvisioner.inputs(config);
+  }
+
+  private static LocalIdentity home(Path home, Map<String, String> git) {
+    return new LocalIdentity(
+        stubGit(git, new ArrayList<>()), home.resolve(".sail/workstation_key.pub"), home);
+  }
+
+  private static ShellExec stubGit(Map<String, String> config, List<List<String>> commands) {
+    return new ShellExec() {
+      @Override
+      public Result exec(List<String> command) {
+        commands.add(command);
+        return new Result(0, config.getOrDefault(command.getLast(), ""), "");
+      }
+
+      @Override
+      public Result exec(List<String> command, Path workDir, java.time.Duration timeout) {
+        return exec(command);
+      }
+
+      @Override
+      public boolean isDryRun() {
+        return false;
+      }
+    };
   }
 
   private static ShellExec stubGit(Map<String, String> config) {

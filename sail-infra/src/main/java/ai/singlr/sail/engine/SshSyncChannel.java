@@ -6,12 +6,17 @@
 package ai.singlr.sail.engine;
 
 import java.io.BufferedInputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 /**
  * One sync session's transport: an {@code ssh sail@main sail _sync} subprocess whose stdio is the
@@ -22,21 +27,56 @@ import java.util.List;
  */
 public final class SshSyncChannel implements SyncOperations.Channel {
 
+  private static final Duration EXIT_GRACE = Duration.ofSeconds(5);
+
   private final Process process;
   private final InputStream reader;
   private final OutputStream writer;
+  private final Thread drain;
+  private volatile String lastLine = "";
 
-  private SshSyncChannel(Process process) {
+  /** Wraps a started {@code ssh} whose stderr is piped, forwarding it as it arrives. */
+  SshSyncChannel(Process process) {
     this.process = process;
     this.reader = new BufferedInputStream(process.getInputStream());
     this.writer = process.getOutputStream();
+    this.drain = Thread.ofVirtual().start(() -> drain(process.getErrorStream()));
   }
 
   /** Opens a sync channel to {@code target} (e.g. {@code sail@maindevbox}). */
   public static SshSyncChannel open(String target) throws IOException {
-    var builder = new ProcessBuilder(sshCommand(target, SyncIdentity.resolve().orElse(null)));
-    builder.redirectError(ProcessBuilder.Redirect.INHERIT);
-    return new SshSyncChannel(builder.start());
+    return new SshSyncChannel(
+        new ProcessBuilder(sshCommand(target, SyncIdentity.resolve().orElse(null))).start());
+  }
+
+  /** Forwards each line ssh writes to stderr, as an inherited stderr did, keeping the last one. */
+  private void drain(InputStream stderr) {
+    try (var lines = new BufferedReader(new InputStreamReader(stderr, StandardCharsets.UTF_8))) {
+      for (var line = lines.readLine(); line != null; line = lines.readLine()) {
+        System.err.println(line);
+        if (!line.isBlank()) {
+          lastLine = line.strip();
+        }
+      }
+    } catch (IOException closed) {
+      System.err.println("ssh's stderr closed: " + closed.getMessage());
+    }
+  }
+
+  /**
+   * The last line ssh wrote to stderr, once it has exited and that stream is drained. A channel
+   * that closed before main replied is an ssh on its way out, so the wait is short.
+   */
+  @Override
+  public String diagnostic() {
+    try {
+      if (process.waitFor(EXIT_GRACE.toMillis(), TimeUnit.MILLISECONDS)) {
+        drain.join(EXIT_GRACE);
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+    return lastLine;
   }
 
   /**

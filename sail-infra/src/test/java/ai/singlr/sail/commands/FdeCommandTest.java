@@ -24,6 +24,7 @@ import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
+import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -1788,6 +1789,57 @@ class FdeCommandTest {
   }
 
   @Test
+  void aNodeThatPinnedThisBoxsHostKeyIsAddedAsToday() {
+    assertEquals(0, fde("add", "nia", "--main-host-key", HOST_KEY.fingerprint()));
+
+    assertEquals("member", inDb(db -> new FdeStore(db).byHandle("nia")).orElseThrow().role());
+  }
+
+  @Test
+  void aNodeThatPinnedAnotherKeyIsRefusedBeforeAnythingIsWritten() {
+    var other = SshPublicKey.parse(TestSshKeys.ed25519("other", "root@elsewhere")).fingerprint();
+
+    assertEquals(1, fde("add", "nia", "--key", LAPTOP.line(), "--main-host-key", other));
+
+    assertEquals(
+        "The node pinned "
+            + other
+            + " for this box, but this box's host key is "
+            + HOST_KEY.fingerprint()
+            + ": something between that node and this box answered for it. Do not add this key;"
+            + " ask the engineer to re-run 'sudo sail init --main <this box>' on a network path"
+            + " you trust.",
+        refusal);
+    assertNothingWritten("nia");
+    assertEquals(List.of(), inDb(db -> new FdeSshKeyStore(db).list()));
+  }
+
+  @Test
+  void aMalformedPinIsRefusedAtTheEdge() {
+    assertEquals(1, fde("add", "nia", "--main-host-key", "SHA256:short"));
+
+    assertEquals(
+        "--main-host-key takes the SHA256 fingerprint the node's join printed (SHA256: and 43"
+            + " base64 characters), not 'SHA256:short'.",
+        refusal);
+    assertNothingWritten("nia");
+  }
+
+  @Test
+  void aPinOnABoxWithNoHostKeyIsRefusedNamingTheFile() throws Exception {
+    Files.delete(hostKey());
+
+    assertEquals(1, fde("add", "nia", "--main-host-key", HOST_KEY.fingerprint()));
+
+    assertEquals(
+        "This box has no SSH host key at "
+            + hostKey()
+            + ". Generate one with 'sudo ssh-keygen -A', then run this again.",
+        refusal);
+    assertNothingWritten("nia");
+  }
+
+  @Test
   void aBoxWithNoHostKeyIsRefusedNamingTheFileAndWritesNothing() throws Exception {
     Files.delete(hostKey());
 
@@ -1796,8 +1848,7 @@ class FdeCommandTest {
     assertEquals(
         "This box has no SSH host key at "
             + hostKey()
-            + ", and a connect code pins it. Generate one with 'sudo ssh-keygen -A' and pair"
-            + " again.",
+            + ". Generate one with 'sudo ssh-keygen -A', then run this again.",
         refusal);
     assertNothingWritten("ada");
   }

@@ -62,6 +62,11 @@ public final class SyncOperations {
 
     OutputStream writer();
 
+    /** The transport's own last word on why it closed, or empty when it has none. */
+    default String diagnostic() {
+      return "";
+    }
+
     @Override
     void close() throws IOException;
   }
@@ -70,6 +75,8 @@ public final class SyncOperations {
   public interface Channels {
     Channel open(String target) throws IOException;
   }
+
+  private static final String HOST_KEY_FAILED = "Host key verification failed.";
 
   private final Sqlite db;
   private final String host;
@@ -151,7 +158,7 @@ public final class SyncOperations {
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
     try (var channel = channels.open(target);
-        var session = open(channel, config, db)) {
+        var session = open(channel, config, db, target)) {
       var handle = Objects.toString(config.handle(), "");
       var replicas = SyncedEntities.replicas(db, config.boxId(), handle);
       return reconcile(session, handle, replicas, messages, specs, files, projects);
@@ -216,7 +223,7 @@ public final class SyncOperations {
   public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
       throws Exception {
     try (var channel = channels.open(config.main());
-        var session = open(channel, config, db)) {
+        var session = open(channel, config, db, config.main())) {
       return NodeRound.acknowledgeHeld(session, db);
     }
   }
@@ -224,13 +231,32 @@ public final class SyncOperations {
   /**
    * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
    */
-  private static SyncSession open(Channel channel, SyncConfig config, Sqlite db) {
-    return SyncSession.open(
-        channel.reader(),
-        channel.writer(),
-        SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
-        SyncOperations::notice,
-        db);
+  private static SyncSession open(Channel channel, SyncConfig config, Sqlite db, String target) {
+    try {
+      return SyncSession.open(
+          channel.reader(),
+          channel.writer(),
+          SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
+          SyncOperations::notice,
+          db);
+    } catch (SyncTransportException e) {
+      if (!"unreachable".equals(e.kind())) {
+        throw e;
+      }
+      var said = channel.diagnostic();
+      if (Strings.isBlank(said)) {
+        throw e;
+      }
+      throw new SyncTransportException("unreachable", explained(e.getMessage(), said, target), e);
+    }
+  }
+
+  /** A closed channel's failure with the transport's last word, and its remedy when it has one. */
+  static String explained(String failure, String said, String target) {
+    var message = failure + " ssh said: " + said;
+    return HOST_KEY_FAILED.equals(said)
+        ? message + " — re-run 'sudo sail init --main " + target + "' to pin main's host key."
+        : message;
   }
 
   private static String requireBoxId(SyncConfig config) {

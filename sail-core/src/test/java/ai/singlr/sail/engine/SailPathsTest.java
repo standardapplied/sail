@@ -11,9 +11,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -147,5 +149,102 @@ class SailPathsTest {
 
     assertTrue(SailPaths.dataDirOverridden(link.toString()));
     assertTrue(SailPaths.dataDirOverridden(tempDir.resolve("missing").toString()));
+  }
+
+  @Test
+  void theSystemUnitIsRootsSailApi() {
+    assertEquals(Path.of("/etc/systemd/system/sail-api.service"), SailPaths.SYSTEM_UNIT);
+  }
+
+  private Path ownBox(String user) throws Exception {
+    var home = tempDir.resolve("srv").resolve(user);
+    Files.createDirectories(home.resolve(".sail"));
+    Files.writeString(home.resolve(".sail/host.yaml"), "storage_backend: dir\n");
+    return home;
+  }
+
+  private Path homeOf(String user) {
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk(
+                "getent passwd -- dev",
+                "dev:x:1001:1001::" + tempDir.resolve("srv/dev") + ":/bin/bash\n")
+            .onOk("getent passwd -- mady", "mady:x:1002:1002::/home/mady:/bin/bash\n");
+    return SailPaths.accountHome(passwd, user);
+  }
+
+  @Test
+  void sudoOnABoxAnAccountOwnsInItsHomeResolvesThatAccountsIdentity() throws Exception {
+    var dev = ownBox("dev");
+    var root = tempDir.resolve("root");
+
+    assertEquals(dev, SailPaths.identityHome(true, "dev", this::homeOf, root));
+  }
+
+  @Test
+  void everyOtherAccountResolvesItsOwnIdentity() throws Exception {
+    ownBox("dev");
+    var own = tempDir.resolve("own");
+
+    assertEquals(own, SailPaths.identityHome(false, "dev", this::homeOf, own), "not root");
+    assertEquals(own, SailPaths.identityHome(true, null, this::homeOf, own), "no sudo");
+    assertEquals(own, SailPaths.identityHome(true, "root", this::homeOf, own), "sudo by root");
+    assertEquals(own, SailPaths.identityHome(true, "mady", this::homeOf, own), "mady owns none");
+  }
+
+  @Test
+  void theInvokingHomeIsTheSudoCallersPasswdHomeElseTheProcesssOwn() {
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk("getent passwd -- dev", "dev:x:1001:1001::/srv/dev:/bin/bash\n")
+            .onOk("getent passwd -- root", "root:x:0:0:root:/root:/bin/bash\n");
+    Function<String, Path> homeOf = user -> SailPaths.accountHome(passwd, user);
+    var own = tempDir.resolve("own");
+
+    assertEquals(Path.of("/srv/dev"), SailPaths.invokingHome("dev", homeOf, own));
+    assertEquals(
+        Path.of("/root"),
+        SailPaths.invokingHome("root", homeOf, own),
+        "a root shell's sudo sets SUDO_USER=root, whose home is /root, not /home/root");
+    assertEquals(own, SailPaths.invokingHome(null, homeOf, own), "no sudo");
+    assertEquals(own, SailPaths.invokingHome(" ", homeOf, own), "blank SUDO_USER");
+  }
+
+  @Test
+  void anAccountsHomeIsWhereItsPasswdEntrySaysNotUnderHome() {
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk("getent passwd -- dev", "dev:x:1001:1001::/srv/dev:/bin/sh\n");
+
+    assertEquals(Path.of("/srv/dev"), SailPaths.accountHome(passwd, "dev"));
+    assertEquals(List.of(List.of("getent", "passwd", "--", "dev")), passwd.arguments());
+  }
+
+  @Test
+  void anAccountWithNoUsableEntryIsRefused() {
+    var refusal = "Couldn't find dev's home: 'getent passwd dev' has no usable entry.";
+    for (var shell :
+        List.of(
+            new ScriptedShellExecutor().on("getent", new ShellExec.Result(2, "", "")),
+            new ScriptedShellExecutor().onOk("getent", "dev:x:1001:1001::/srv/dev\n"),
+            new ScriptedShellExecutor().onOk("getent", "devx:x:1001:1001::/srv/dev:/bin/sh\n"),
+            new ScriptedShellExecutor().onOk("getent", "dev:x:1001:1001:::/bin/sh\n"),
+            new ScriptedShellExecutor().onOk("getent", "dev:x:1001:1001::srv/dev:/bin/sh\n"))) {
+      var failure =
+          assertThrows(IllegalStateException.class, () -> SailPaths.accountHome(shell, "dev"));
+      assertEquals(refusal, failure.getMessage());
+    }
+  }
+
+  @Test
+  void aLookupThatCannotRunIsRefused() {
+    var shell = new ScriptedShellExecutor().onThrow("getent", new IOException("no getent"));
+
+    var failure =
+        assertThrows(IllegalStateException.class, () -> SailPaths.accountHome(shell, "dev"));
+
+    assertEquals(
+        "Couldn't find dev's home: 'getent passwd dev' failed: java.io.IOException: no getent",
+        failure.getMessage());
   }
 }
