@@ -87,6 +87,26 @@ class CliCommandTest {
   }
 
   @Test
+  void aRefusalThatNamesNoFixIsPrintedAsItsMessageAlone() {
+    var command = new CommandLine(new TestCommand());
+
+    assertThrows(
+        CommandLine.ExecutionException.class,
+        () ->
+            CliCommand.run(
+                command.getCommandSpec(),
+                () -> {
+                  throw new ApiException(
+                      ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
+                      "Project 'acme' is not in the catalog.");
+                }));
+
+    assertEquals(
+        "  ✗ Project 'acme' is not in the catalog.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   void theTopLevelHandlerPrintsNothingThisRunAlreadyPrinted() {
     var line = new CommandLine(new TestCommand());
     var err = new StringWriter();
