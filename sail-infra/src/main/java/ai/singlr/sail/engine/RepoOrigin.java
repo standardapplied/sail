@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import java.io.IOException;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 
 /**
@@ -19,40 +20,62 @@ import java.util.concurrent.TimeoutException;
 final class RepoOrigin {
 
   private static final int NO_SUCH_REMOTE = 2;
+  private static final List<String> WORK_TREE_ROOT = List.of("true", "");
+  private static final String NOT_A_CHECKOUT = "is not a git checkout";
 
   private RepoOrigin() {}
 
   /**
-   * Refuses the checkout at {@code dir} unless its {@code origin} is {@code repo}'s URL. A dry run
-   * observes no checkout, so it has nothing to refuse.
+   * Refuses {@code dir} unless it is the root of a checkout whose {@code origin} is {@code repo}'s
+   * URL. A dry run observes no checkout, so it has nothing to refuse.
    */
   static void require(ShellExec probes, String container, String dir, SailYaml.Repo repo)
       throws IOException, InterruptedException, TimeoutException {
     if (probes.isDryRun()) {
       return;
     }
+    var found = mismatch(probes, container, dir, repo);
+    if (found.isEmpty()) {
+      return;
+    }
+    throw new IllegalStateException(
+        "Repo '"
+            + repo.path()
+            + "' "
+            + found.get()
+            + ", but the definition says "
+            + repo.url()
+            + ". Move it aside (it may hold work) or fix the URL.");
+  }
+
+  /**
+   * How the checkout at {@code dir} differs from {@code repo}, if it does. {@code git -C} finds a
+   * repository in any parent directory, so a directory inside another checkout is no checkout
+   * unless it is the root of its own work tree.
+   */
+  private static Optional<String> mismatch(
+      ShellExec probes, String container, String dir, SailYaml.Repo repo)
+      throws IOException, InterruptedException, TimeoutException {
+    var checkout =
+        probes.exec(
+            ContainerExec.asDevUser(
+                container,
+                List.of("git", "-C", dir, "rev-parse", "--is-inside-work-tree", "--show-prefix")));
+    if (!checkout.ok() || !WORK_TREE_ROOT.equals(checkout.stdout().lines().toList())) {
+      return Optional.of(NOT_A_CHECKOUT);
+    }
     var origin =
         probes.exec(
             ContainerExec.asDevUser(
                 container, List.of("git", "-C", dir, "remote", "get-url", "origin")));
     var actual = origin.stdout().strip();
-    if (origin.ok() && sameRepository(actual, repo.url())) {
-      return;
+    if (origin.ok()) {
+      return sameRepository(actual, repo.url())
+          ? Optional.empty()
+          : Optional.of("is a clone of " + shown(actual));
     }
-    var found =
-        origin.ok()
-            ? "is a clone of " + shown(actual)
-            : origin.exitCode() == NO_SUCH_REMOTE
-                ? "is a clone with no origin"
-                : "is not a git checkout";
-    throw new IllegalStateException(
-        "Repo '"
-            + repo.path()
-            + "' "
-            + found
-            + ", but the definition says "
-            + repo.url()
-            + ". Move it aside (it may hold work) or fix the URL.");
+    return Optional.of(
+        origin.exitCode() == NO_SUCH_REMOTE ? "is a clone with no origin" : NOT_A_CHECKOUT);
   }
 
   /**

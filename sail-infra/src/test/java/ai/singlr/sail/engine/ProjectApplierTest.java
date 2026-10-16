@@ -257,6 +257,7 @@ class ProjectApplierTest {
     var shell =
         new ScriptedShellExecutor()
             .onOk("test -d /home/dev/workspace/backend")
+            .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
             .onOk(
                 "git -C /home/dev/workspace/backend remote get-url origin",
                 "https://github.com/org/backend.git\n");
@@ -272,6 +273,7 @@ class ProjectApplierTest {
   private static ScriptedShellExecutor checkout(ShellExec.Result origin) {
     return new ScriptedShellExecutor()
         .onOk("test -d /home/dev/workspace/backend")
+        .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
         .on("git -C /home/dev/workspace/backend remote get-url origin", origin);
   }
 

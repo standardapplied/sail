@@ -112,9 +112,9 @@ public final class JoinCommand implements Runnable {
    * from the one pinned leaves no half-joined box. A change of handle is refused while a run main
    * holds under the old one would be stranded, and once written every run main has not taken is
    * stamped with the new one ({@link HandleChange}), in the box's database {@code db}. Main already
-   * holds this box's key when the box re-joins the main it synced with before, as the same handle,
-   * with the sync key it had then. Pure of any prompting or stdout so it can be exercised directly
-   * in tests with a {@code @TempDir} config and a stub identity.
+   * holds this box's key when the box re-joins the main it synced with since it last joined, as the
+   * same handle, with the same sync key. Pure of any prompting or stdout so it can be exercised
+   * directly in tests with a {@code @TempDir} config and a stub identity.
    */
   static Plan plan(
       Path hostConfig,
@@ -133,21 +133,21 @@ public final class JoinCommand implements Runnable {
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);
     var pinned = mainHostKey.pin(target);
-    var keyHeld = identity.exists();
-    var publicKey = identity.ensure("sail-sync:" + handle);
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
     var before = host.sync();
-    var mainHasKey =
-        keyHeld
-            && target.equals(before.main())
-            && handle.equals(before.handle())
-            && syncedWith(db, target);
+    var sameIdentity =
+        identity.exists() && target.equals(before.main()) && handle.equals(before.handle());
+    var mainHasKey = sameIdentity && syncedWith(db, target);
     var updated =
         HostConfigSetCommand.applyChange(
             HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
             "sync-handle",
             handle);
     HandleChange.write(hostConfig, db, host, updated, channels);
+    if (!sameIdentity) {
+      forgetSyncs(db, target);
+    }
+    var publicKey = identity.ensure("sail-sync:" + handle);
     return new Plan(target, handle, name, email, publicKey, pinned, mainHasKey);
   }
 
@@ -160,6 +160,20 @@ public final class JoinCommand implements Runnable {
           .find(target)
           .map(health -> health.lastSuccessAt() != null)
           .orElse(false);
+    }
+  }
+
+  /**
+   * A sync with {@code target} before this join was made with another key or handle, so it is no
+   * evidence that main holds the one this join hands it. Forgotten before the key is made, so a
+   * join re-run before main's operator has added the key still hands them the line.
+   */
+  private static void forgetSyncs(Path db, String target) {
+    if (!Files.exists(db)) {
+      return;
+    }
+    try (var sqlite = Sqlite.open(db)) {
+      new SyncHealth(sqlite).forget(target);
     }
   }
 

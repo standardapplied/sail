@@ -133,8 +133,8 @@ public final class InitCommand implements Runnable {
     var box = this.box.get();
     requireRoot(box.root());
     requireNoUserService(box.sudoUser(), box.homeOf());
-    var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name");
-    var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email");
+    var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
+    var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
 
     var provisioned = Files.exists(box.hostConfig());
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
@@ -154,16 +154,24 @@ public final class InitCommand implements Runnable {
   /**
    * The operator's {@code placeholder} value: {@code flag}, or else asked for when this box's git
    * identity holds none. Asked before the first step, so a long setup waits on no question, and
-   * adopted after the last, once the box is provisioned.
+   * adopted after the last, once the box is provisioned. A box left with no value is refused before
+   * any step: every project applied here by name would be refused for it.
    */
-  private static GitChoice gitChoice(Box box, String placeholder, String flag, String label) {
+  private static GitChoice gitChoice(
+      Box box, String placeholder, String flag, String label, String option) {
     if (box.identity().gitValue(placeholder).isPresent()) {
       return new GitChoice(placeholder, flag, false);
     }
     var chosen = Strings.isNotBlank(flag) ? flag : box.prompt().ask(label);
-    return Strings.isBlank(chosen)
-        ? new GitChoice(placeholder, null, false)
-        : new GitChoice(placeholder, chosen.strip(), true);
+    if (Strings.isBlank(chosen)) {
+      throw new IllegalStateException(
+          "This box has no git "
+              + LocalIdentity.gitKey(placeholder)
+              + " set, so a project here can't take on your identity. Re-run with "
+              + option
+              + " \"...\".");
+    }
+    return new GitChoice(placeholder, chosen.strip(), true);
   }
 
   /**

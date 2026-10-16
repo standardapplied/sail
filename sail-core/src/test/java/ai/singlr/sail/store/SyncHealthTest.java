@@ -59,6 +59,19 @@ class SyncHealthTest {
   }
 
   @Test
+  void aForgottenPeerHasNoHealthAndOthersKeepTheirs() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    health.begin("main", t0);
+    health.succeeded("main", t0, SyncEngine.Report.NONE);
+    health.begin("other", t0);
+
+    health.forget("main");
+
+    assertTrue(health.find("main").isEmpty());
+    assertEquals("syncing", health.find("other").orElseThrow().state());
+  }
+
+  @Test
   void theLastRoundsDenialsAreKeptUntilTheNextRoundReplacesThem() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
     health.begin("main", t0);

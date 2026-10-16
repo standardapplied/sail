@@ -69,6 +69,11 @@ public final class SyncHealth {
         peer);
   }
 
+  /** Drops everything recorded about syncing with {@code peer}, as if this box never had. */
+  public void forget(String peer) {
+    db.execute("DELETE FROM sync_health WHERE peer = ?", peer);
+  }
+
   public void begin(String peer, Instant at) {
     db.execute(
         """

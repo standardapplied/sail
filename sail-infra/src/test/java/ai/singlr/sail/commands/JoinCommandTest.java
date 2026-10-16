@@ -36,6 +36,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.Callable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -564,13 +565,41 @@ class JoinCommandTest {
   }
 
   @Test
-  void aReJoinWithANewSyncKeyHandsItsOperatorTheLine() throws Exception {
+  void aReJoinWithANewSyncKeyHandsItsOperatorTheLineUntilASyncSucceedsWithIt() throws Exception {
     var hostConfig = writeHostConfig();
     join(hostConfig);
     syncedWith("sail@maindevbox");
     Files.delete(dir.resolve("sync_ed25519"));
 
-    assertFalse(join(hostConfig).mainHasKey());
+    assertFalse(join(hostConfig).mainHasKey(), "the key is new");
+    assertFalse(join(hostConfig).mainHasKey(), "no sync has succeeded with the new key");
+    syncedWith("sail@maindevbox");
+    assertTrue(join(hostConfig).mainHasKey());
+  }
+
+  @Test
+  void aReJoinAfterAHandleChangeHandsItsOperatorTheLineUntilASyncSucceedsAsIt() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+    syncedWith("sail@maindevbox");
+    var asAda =
+        (Callable<JoinCommand.Plan>)
+            () ->
+                JoinCommand.plan(
+                    hostConfig,
+                    dir.resolve("sail.db"),
+                    identity(),
+                    "sail@maindevbox",
+                    "ada",
+                    null,
+                    null,
+                    NO_MAIN,
+                    pin());
+
+    assertFalse(asAda.call().mainHasKey(), "main holds the key under the old handle");
+    assertFalse(asAda.call().mainHasKey(), "no sync has succeeded as the new handle");
+    syncedWith("sail@maindevbox");
+    assertTrue(asAda.call().mainHasKey());
   }
 
   private final class StubKeygen implements ShellExec {

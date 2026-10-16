@@ -1543,6 +1543,7 @@ class ProjectProvisionerTest {
         .onFail("which podman", "")
         .onFail("test -f /etc/profile.d/testcontainers.sh", "")
         .onFail("crontab -l", "no crontab")
+        .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
         .onOk(
             "git -C /home/dev/workspace/api remote get-url origin",
             "https://github.com/acme/api.git\n");

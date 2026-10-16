@@ -47,6 +47,8 @@ class InitCommandTest {
   @BeforeEach
   void freshBox() {
     hostConfig = tempDir.resolve("host.yaml");
+    gitConfig.put("user.name", "Root Person");
+    gitConfig.put("user.email", "root@box");
   }
 
   private final Map<String, String> gitConfig = new HashMap<>();
@@ -270,6 +272,7 @@ class InitCommandTest {
 
   @Test
   void aNodesNameAndEmailBecomeRootsGitIdentitySoAByNameApplyResolvesIt() {
+    gitConfig.clear();
     assertEquals(0, init("--main", "m", "--name", "A B", "--email", "a@b"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
@@ -297,6 +300,7 @@ class InitCommandTest {
 
   @Test
   void aMainTakesItsGitIdentityFromInitSoItsSecondApplyByNameConverges() {
+    gitConfig.clear();
     assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
@@ -307,6 +311,7 @@ class InitCommandTest {
 
   @Test
   void aBoxWithNoGitIdentityAsksForIt() {
+    gitConfig.clear();
     answers.put("Your full name", " A B ");
     answers.put("Your email", "a@b");
 
@@ -317,6 +322,7 @@ class InitCommandTest {
 
   @Test
   void theIdentityIsAskedBeforeTheFirstStepAndGivenOnlyOnceSetupFinished() {
+    gitConfig.clear();
     answers.put("Your full name", "A B");
     failing = "HostServiceInstallCommand";
 
@@ -330,11 +336,31 @@ class InitCommandTest {
   }
 
   @Test
-  void aNodeWithNoIdentityAndNoTerminalSetsNoneAndLeavesTheRosterToJoin() {
-    assertEquals(0, init("--main", "m"));
+  void aBoxLeftWithNoGitIdentityIsRefusedBeforeAnyStep() {
+    gitConfig.clear();
 
+    assertEquals(1, init("--main", "m"));
+
+    assertEquals(
+        "This box has no git user.name set, so a project here can't take on your identity."
+            + " Re-run with --name \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
     assertEquals(Map.of(), gitConfig);
-    assertEquals("JoinCommand m", ran.getLast());
+  }
+
+  @Test
+  void aBlankAnswerIsNoIdentity() {
+    gitConfig.remove("user.email");
+    answers.put("Your email", "  ");
+
+    assertEquals(1, init("--as-main"));
+
+    assertEquals(
+        "This box has no git user.email set, so a project here can't take on your identity."
+            + " Re-run with --email \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
   }
 
   @Command(name = "refusing")

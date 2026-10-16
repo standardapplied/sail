@@ -112,7 +112,8 @@ public final class LocalIdentity {
             + gitFix(key));
   }
 
-  private static String gitKey(String placeholder) {
+  /** The git config key a {@code ${GIT_NAME}}/{@code ${GIT_EMAIL}} placeholder reads. */
+  public static String gitKey(String placeholder) {
     return switch (placeholder) {
       case PlaceholderResolver.GIT_NAME -> "user.name";
       case PlaceholderResolver.GIT_EMAIL -> "user.email";
