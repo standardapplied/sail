@@ -11,7 +11,10 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
+import java.util.function.Function;
 
 /**
  * Centralized path constants for CLI state files. All state lives under {@code ~/.sail/}: project
@@ -168,17 +171,48 @@ public final class SailPaths {
     return identityHome(
         isRoot(),
         System.getenv("SUDO_USER"),
-        Path.of("/home"),
+        SailPaths::accountHome,
         Path.of(System.getProperty("user.home")));
   }
 
   /** Pure of the process, so every account's resolution is exercised directly. */
-  static Path identityHome(boolean root, String sudoUser, Path homes, Path ownHome) {
+  static Path identityHome(
+      boolean root, String sudoUser, Function<String, Path> homeOf, Path ownHome) {
     if (!root || Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
       return ownHome;
     }
-    var sudoHome = homes.resolve(sudoUser);
+    var sudoHome = homeOf.apply(sudoUser);
     return Files.exists(sudoHome.resolve(".sail").resolve("host.yaml")) ? sudoHome : ownHome;
+  }
+
+  /**
+   * An account's home as the system's account database records it, which need not be {@code
+   * /home/<user>}.
+   */
+  public static Path accountHome(String user) {
+    return accountHome(new ShellExecutor(false), user);
+  }
+
+  public static Path accountHome(ShellExec shell, String user) {
+    try {
+      var result = shell.exec(List.of("getent", "passwd", "--", user));
+      var fields = result.stdout().strip().split(":", -1);
+      if (!result.ok() || fields.length != 7 || !fields[0].equals(user) || !isAbsolute(fields[5])) {
+        throw new IllegalStateException(
+            "Couldn't find " + user + "'s home: 'getent passwd " + user + "' has no usable entry.");
+      }
+      return Path.of(fields[5]);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new IllegalStateException("Interrupted while looking up " + user + "'s home.", e);
+    } catch (IOException | TimeoutException e) {
+      throw new IllegalStateException(
+          "Couldn't find " + user + "'s home: 'getent passwd " + user + "' failed: " + e, e);
+    }
+  }
+
+  private static boolean isAbsolute(String path) {
+    return !path.isEmpty() && Path.of(path).isAbsolute();
   }
 
   /**

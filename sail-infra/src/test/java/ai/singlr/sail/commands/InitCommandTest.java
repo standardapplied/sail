@@ -8,6 +8,8 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -39,14 +41,22 @@ class InitCommandTest {
         new CommandLine(
             new InitCommand(
                 () ->
-                    new InitCommand.Box(
-                        root, sudoUser, hostConfig, tempDir::resolve, this::runStep)));
+                    new InitCommand.Box(root, sudoUser, hostConfig, this::homeOf, this::runStep)));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
           return 1;
         });
     return command.execute(args);
+  }
+
+  private Path homeOf(String user) {
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk(
+                "getent passwd -- " + user,
+                user + ":x:1001:1001::" + tempDir.resolve("srv").resolve(user) + ":/bin/bash\n");
+    return SailPaths.accountHome(passwd, user);
   }
 
   private void runStep(Object command, String... args) {
@@ -69,8 +79,9 @@ class InitCommandTest {
   }
 
   private void installUserService(String user) throws Exception {
-    var unit = tempDir.resolve(user).resolve(".sail/services/sail-api.service");
-    var link = tempDir.resolve(user).resolve(".config/systemd/user/sail-api.service");
+    var unit = tempDir.resolve("srv").resolve(user).resolve(".sail/services/sail-api.service");
+    var link =
+        tempDir.resolve("srv").resolve(user).resolve(".config/systemd/user/sail-api.service");
     Files.createDirectories(unit.getParent());
     Files.createDirectories(link.getParent());
     Files.writeString(unit, "[Unit]\n");
@@ -143,7 +154,7 @@ class InitCommandTest {
 
     assertEquals(
         "dev already runs sail-api as a user service ("
-            + tempDir.resolve("dev/.sail/services/sail-api.service")
+            + tempDir.resolve("srv/dev/.sail/services/sail-api.service")
             + "), so this box is set up for dev: run sail as dev, without sudo. To set the box up"
             + " as root instead, first run 'sail host service uninstall' as dev.",
         refusal);

@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -119,8 +120,11 @@ class LocalIdentityTest {
 
   @Test
   void aSudoApplyOnAnAccountsOwnBoxRecordsTheDigestItsPlainApplyDoes() throws IOException {
-    var homes = dir.resolve("home");
-    var dev = homes.resolve("dev");
+    var dev = dir.resolve("srv/dev");
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk("getent passwd -- dev", "dev:x:1001:1001::" + dev + ":/bin/bash\n");
+    Function<String, Path> homeOf = user -> SailPaths.accountHome(passwd, user);
     var root = dir.resolve("root");
     Files.createDirectories(dev.resolve(".sail"));
     Files.createDirectories(root.resolve(".sail"));
@@ -128,8 +132,8 @@ class LocalIdentityTest {
     Files.writeString(dev.resolve(".sail/workstation_key.pub"), VALID_KEY + "\n");
     Files.writeString(
         root.resolve(".sail/workstation_key.pub"), TestSshKeys.ed25519("root", "root@box") + "\n");
-    var plain = inputs(SailPaths.identityHome(false, null, homes, dev), dev);
-    var sudo = inputs(SailPaths.identityHome(true, "dev", homes, root), dev);
+    var plain = inputs(SailPaths.identityHome(false, null, homeOf, dev), dev);
+    var sudo = inputs(SailPaths.identityHome(true, "dev", homeOf, root), dev);
 
     assertEquals(plain, sudo);
   }

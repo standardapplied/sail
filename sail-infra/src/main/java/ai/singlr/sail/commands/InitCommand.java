@@ -87,7 +87,7 @@ public final class InitCommand implements Runnable {
           SailPaths.isRoot(),
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
-          user -> Path.of("/home", user),
+          SailPaths::accountHome,
           InitCommand::runCommand);
     }
   }
