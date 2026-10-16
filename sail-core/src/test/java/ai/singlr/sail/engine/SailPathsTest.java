@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.function.Function;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -189,6 +190,24 @@ class SailPathsTest {
     assertEquals(own, SailPaths.identityHome(true, null, this::homeOf, own), "no sudo");
     assertEquals(own, SailPaths.identityHome(true, "root", this::homeOf, own), "sudo by root");
     assertEquals(own, SailPaths.identityHome(true, "mady", this::homeOf, own), "mady owns none");
+  }
+
+  @Test
+  void theInvokingHomeIsTheSudoCallersPasswdHomeElseTheProcesssOwn() {
+    var passwd =
+        new ScriptedShellExecutor()
+            .onOk("getent passwd -- dev", "dev:x:1001:1001::/srv/dev:/bin/bash\n")
+            .onOk("getent passwd -- root", "root:x:0:0:root:/root:/bin/bash\n");
+    Function<String, Path> homeOf = user -> SailPaths.accountHome(passwd, user);
+    var own = tempDir.resolve("own");
+
+    assertEquals(Path.of("/srv/dev"), SailPaths.invokingHome("dev", homeOf, own));
+    assertEquals(
+        Path.of("/root"),
+        SailPaths.invokingHome("root", homeOf, own),
+        "a root shell's sudo sets SUDO_USER=root, whose home is /root, not /home/root");
+    assertEquals(own, SailPaths.invokingHome(null, homeOf, own), "no sudo");
+    assertEquals(own, SailPaths.invokingHome(" ", homeOf, own), "blank SUDO_USER");
   }
 
   @Test

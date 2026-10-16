@@ -49,7 +49,7 @@ public final class LocalIdentity {
   public static LocalIdentity detect() {
     var home = SailPaths.identityHome();
     return new LocalIdentity(
-        new ShellExecutor(false), home.resolve(".sail").resolve("workstation_key.pub"), home);
+        new ShellExecutor(false), SailPaths.workstationPublicKeyPath(home), home);
   }
 
   /**

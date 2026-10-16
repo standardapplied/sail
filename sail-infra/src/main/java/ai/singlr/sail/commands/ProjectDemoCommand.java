@@ -288,13 +288,7 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   static String detectSshPublicKey() {
-    var sudoUser = System.getenv("SUDO_USER");
-    Path sshDir;
-    if (Strings.isNotBlank(sudoUser)) {
-      sshDir = Path.of("/home", sudoUser, ".ssh");
-    } else {
-      sshDir = Path.of(System.getProperty("user.home"), ".ssh");
-    }
+    var sshDir = SailPaths.invokingHome().resolve(".ssh");
 
     for (var name : List.of("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub")) {
       var keyFile = sshDir.resolve(name);

@@ -175,18 +175,12 @@ public final class GitCredentials {
   }
 
   /**
-   * Resolves a host-side file path, expanding {@code ~} to the invoking user's home directory. When
-   * running under {@code sudo}, uses {@code SUDO_USER} to find the real user's home instead of
-   * root's.
+   * Resolves a host-side file path, expanding {@code ~} to the invoking user's home ({@link
+   * SailPaths#invokingHome()}), the {@code sudo} caller's rather than root's.
    */
   public static Path resolveHostPath(String path) {
-    if (path.startsWith("~/")) {
-      var sudoUser = System.getenv("SUDO_USER");
-      if (Strings.isNotBlank(sudoUser)) {
-        return Path.of("/home", sudoUser, path.substring(2));
-      }
-      return Path.of(System.getProperty("user.home"), path.substring(2));
-    }
-    return Path.of(path);
+    return path.startsWith("~/")
+        ? SailPaths.invokingHome().resolve(path.substring(2))
+        : Path.of(path);
   }
 }

@@ -158,7 +158,12 @@ public final class SailPaths {
    * that owner into the box's containers.
    */
   public static Path workstationPublicKeyPath() {
-    return SAIL_DIR.resolve("workstation_key.pub");
+    return workstationPublicKeyPath(SAIL_DIR.getParent());
+  }
+
+  /** The workstation public key of the account whose home is {@code home}. */
+  public static Path workstationPublicKeyPath(Path home) {
+    return home.resolve(".sail").resolve("workstation_key.pub");
   }
 
   /**
@@ -183,6 +188,22 @@ public final class SailPaths {
     }
     var sudoHome = homeOf.apply(sudoUser);
     return Files.exists(sudoHome.resolve(".sail").resolve("host.yaml")) ? sudoHome : ownHome;
+  }
+
+  /**
+   * The home of the person behind this process: the {@code sudo} caller's, as the account database
+   * records it ({@code /root} for a root shell's {@code sudo}), else this account's own.
+   */
+  public static Path invokingHome() {
+    return invokingHome(
+        System.getenv("SUDO_USER"),
+        SailPaths::accountHome,
+        Path.of(System.getProperty("user.home")));
+  }
+
+  /** Pure of the process, so every caller's resolution is exercised directly. */
+  static Path invokingHome(String sudoUser, Function<String, Path> homeOf, Path ownHome) {
+    return Strings.isBlank(sudoUser) ? ownHome : homeOf.apply(sudoUser);
   }
 
   /**
