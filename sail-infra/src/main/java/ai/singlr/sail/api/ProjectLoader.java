@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import java.util.Objects;
 
@@ -52,17 +53,20 @@ final class ProjectLoader {
       case ContainerState.Running ignored -> {
         return loaded;
       }
-      case ContainerState.Stopped ignored ->
-          throw new ApiException(
-              ErrorCode.PROJECT_STOPPED,
-              "Project '" + project + "' is stopped.",
-              "Start it with sail project start " + project + ".");
+      case ContainerState.Stopped ignored -> throw stopped(project, OperatorCommand.here());
       case ContainerState.NotCreated ignored ->
           throw new ApiException(
               ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
       case ContainerState.Error error ->
           throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
     }
+  }
+
+  static ApiException stopped(String project, OperatorCommand operator) {
+    return new ApiException(
+        ErrorCode.PROJECT_STOPPED,
+        "Project '" + project + "' is stopped.",
+        "Start it with " + operator.sail("project start " + project) + ".");
   }
 
   void requireExists(String project) {

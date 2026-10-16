@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import java.io.IOException;
@@ -72,6 +73,21 @@ class ProjectLoaderTest {
 
     assertEquals(ErrorCode.PROJECT_LOAD_FAILED, failed.failure().errorCode());
     assertEquals("Failed to load project.", failed.getMessage());
+  }
+
+  @Test
+  void aStoppedProjectIsRefusedWithTheCommandThatStartsIt() {
+    var loader =
+        new ProjectLoader(
+            listing("[{\"name\":\"gamma\",\"status\":\"Stopped\"}]"), p -> Optional.of(ACME));
+
+    var refused = assertThrows(ApiException.class, () -> loader.loadRunning("gamma"));
+
+    assertEquals(ErrorCode.PROJECT_STOPPED, refused.failure().errorCode());
+    assertEquals("Project 'gamma' is stopped.", refused.getMessage());
+    assertEquals(
+        "Start it with " + OperatorCommand.here().sail("project start gamma") + ".",
+        refused.error().action());
   }
 
   @Test

@@ -33,6 +33,8 @@ class OperatorHintsTest {
   private static List<String> hints(OperatorCommand operator) {
     var zed = new ByteArrayOutputStream();
     Banner.printZedConnect("gamma", operator, new PrintStream(zed), Ansi.OFF);
+    var launched = new ByteArrayOutputStream();
+    Banner.printAgentLaunched("gamma", null, null, operator, new PrintStream(launched), Ansi.OFF);
     return List.of(
         HostSyncCommand.roleLines(new SyncConfig(null, null, null), operator, Ansi.OFF),
         Ansi.OFF.string(HostSshIdentityCommand.enabledLine(operator)),
@@ -42,7 +44,8 @@ class OperatorHintsTest {
         Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),
         ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), operator),
         HostInitCommand.notInitialized(operator).getMessage(),
-        ContainerStateGuard.notCreated("gamma", operator));
+        ContainerStateGuard.notCreated("gamma", operator),
+        launched.toString(StandardCharsets.UTF_8));
   }
 
   @Test
@@ -69,7 +72,10 @@ class OperatorHintsTest {
                 + "  Run 'sudo sail project init' to author one, sync it from main with 'sudo sail"
                 + " sync', or specify one with --file.",
             "Server not initialized. Run 'sudo sail host init' first.",
-            "Project 'gamma' does not exist. Run 'sudo sail project apply <name>' first."),
+            "Project 'gamma' does not exist. Run 'sudo sail project apply <name>' first.",
+            "  ✓ Agent launched in background\n"
+                + "    Log:     sudo sail agent log gamma --follow\n"
+                + "    Stop:    sudo sail agent stop gamma\n"),
         hints(SUDO));
   }
 
@@ -95,7 +101,10 @@ class OperatorHintsTest {
                 + "  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
                 + " specify one with --file.",
             "Server not initialized. Run 'sail host init' first.",
-            "Project 'gamma' does not exist. Run 'sail project apply <name>' first."),
+            "Project 'gamma' does not exist. Run 'sail project apply <name>' first.",
+            "  ✓ Agent launched in background\n"
+                + "    Log:     sail agent log gamma --follow\n"
+                + "    Stop:    sail agent stop gamma\n"),
         hints(PLAIN));
   }
 

@@ -20,6 +20,7 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
@@ -191,7 +192,12 @@ public final class DispatchCommand implements Runnable {
           return;
         }
         Banner.printAgentLaunched(
-            name, dispatched.task(), dispatched.branch(), System.out, Ansi.AUTO);
+            name,
+            dispatched.task(),
+            dispatched.branch(),
+            OperatorCommand.here(),
+            System.out,
+            Ansi.AUTO);
         dispatched
             .watcher()
             .ifPresent(

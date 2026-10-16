@@ -10,6 +10,7 @@ import ai.singlr.sail.auth.PasskeyCeremonies;
 import ai.singlr.sail.auth.PasskeyException;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Capability;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -92,7 +93,9 @@ public final class WebauthnAuthHandler implements HttpHandler {
       throw new ApiException(
           ErrorCode.PASSKEY_NOT_CONFIGURED,
           "Passkey login is not configured on this server.",
-          "Set the webauthn block in host.yaml or pass --origin to 'sail server start'.");
+          "Set the webauthn block in host.yaml or pass --origin to '"
+              + OperatorCommand.here().sail("server start")
+              + "'.");
     }
     var path = exchange.getRequestURI().getPath();
     try {

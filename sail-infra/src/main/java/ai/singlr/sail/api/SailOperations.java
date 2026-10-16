@@ -28,6 +28,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -790,9 +791,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<FdesResponse> fdes() {
     if (fdeStore == null) {
-      return Result.failure(
-          ErrorCode.INTERNAL,
-          "FDE roster not available. Start the server with 'sail server start'.");
+      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("FDE roster"));
     }
     return safe(this::fdesValue);
   }
@@ -1252,13 +1251,21 @@ public final class SailOperations implements HostOperations {
     return safe(() -> agentReportValue(readable(project), localHandle));
   }
 
+  static String storeUnavailable(String store) {
+    return storeUnavailable(store, OperatorCommand.here());
+  }
+
+  static String storeUnavailable(String store, OperatorCommand operator) {
+    return store + " not available. Start the server with '" + operator.sail("server start") + "'.";
+  }
+
   /**
    * {@code project} as a route addresses it, to read or to act on: one outside the caller's scope
    * is answered as one the catalog does not hold.
    */
   private static String readable(String project) {
     if (!Actor.reader().scope().admits(project)) {
-      throw ProjectReader.absent(project);
+      throw ProjectReader.absent(project, OperatorCommand.here());
     }
     return project;
   }
@@ -1324,9 +1331,7 @@ public final class SailOperations implements HostOperations {
   @Override
   public Result<StopRunResponse> stopRun(String runId, String localHandle) {
     if (stopOps == null) {
-      return Result.failure(
-          ErrorCode.INTERNAL,
-          "Run store not available. Start the server with 'sail server start'.");
+      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("Run store"));
     }
     var outcome = safe(() -> stopOps.stop(new StopOperations.RunTarget(runId), localHandle, false));
     if (outcome instanceof Result.Failure<StopOperations.Outcome>) {
@@ -1362,9 +1367,7 @@ public final class SailOperations implements HostOperations {
   private <T> Result<T> onLocalRun(
       String runId, String localHandle, Function<RunStore.RunRow, Result<T>> served) {
     if (runStore == null) {
-      return Result.failure(
-          ErrorCode.INTERNAL,
-          "Run store not available. Start the server with 'sail server start'.");
+      return Result.failure(ErrorCode.INTERNAL, storeUnavailable("Run store"));
     }
     var run =
         Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project).orElse(null);
@@ -1399,9 +1402,7 @@ public final class SailOperations implements HostOperations {
 
   private RunStore requireRunStore() {
     if (runStore == null) {
-      throw new ApiException(
-          ErrorCode.INTERNAL,
-          "Run store not available. Start the server with 'sail server start'.");
+      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Run store"));
     }
     return runStore;
   }
@@ -2046,9 +2047,7 @@ public final class SailOperations implements HostOperations {
    */
   private RunStore.RunRow requireRun(String runId) {
     if (runStore == null) {
-      throw new ApiException(
-          ErrorCode.INTERNAL,
-          "Run store not available. Start the server with 'sail server start'.");
+      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Run store"));
     }
     return Scoped.row(Actor.reader(), runStore.findById(runId), RunStore.RunRow::project)
         .orElseThrow(
@@ -2059,9 +2058,7 @@ public final class SailOperations implements HostOperations {
 
   private MessageStore requireMessageStore() {
     if (messageStore == null) {
-      throw new ApiException(
-          ErrorCode.INTERNAL,
-          "Message store not available. Start the server with 'sail server start'.");
+      throw new ApiException(ErrorCode.INTERNAL, storeUnavailable("Message store"));
     }
     return messageStore;
   }
@@ -2083,7 +2080,7 @@ public final class SailOperations implements HostOperations {
             throw new ApiException(
                 ErrorCode.INTERNAL,
                 "This box keeps no erasure log, so nothing can be pruned here.",
-                "Start the server with 'sail server start'.");
+                "Start the server with '" + OperatorCommand.here().sail("server start") + "'.");
           }
           return pruner.prune(request);
         });

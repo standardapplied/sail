@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.Optional;
 
@@ -24,16 +25,18 @@ public interface ProjectReader {
 
   /** The project's definition, or a not-found error saying how to get one. */
   default SailYaml require(String project) {
-    return read(project).orElseThrow(() -> absent(project));
+    return read(project).orElseThrow(() -> absent(project, OperatorCommand.here()));
   }
 
   /** The not-found error for a project this box holds no definition of. */
-  static ApiException absent(String project) {
+  static ApiException absent(String project, OperatorCommand operator) {
     return new ApiException(
         ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
         "Project '" + project + "' is not in the catalog.",
         "If its descriptor is on this box, import it with 'sudo sail migrate'. To"
-            + " create the project, run 'sail project apply -f <file>'.");
+            + " create the project, run '"
+            + operator.sail("project apply -f <file>")
+            + "'.");
   }
 
   /**

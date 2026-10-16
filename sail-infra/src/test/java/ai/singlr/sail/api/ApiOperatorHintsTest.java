@@ -1,0 +1,85 @@
+/*
+ * Copyright (c) 2026 Standard Applied Intelligence Labs
+ * SPDX-License-Identifier: MIT
+ */
+
+package ai.singlr.sail.api;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
+import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.harness.Harnesses;
+import java.util.List;
+import org.junit.jupiter.api.Test;
+
+/**
+ * Every operations-layer message that names a {@code sail} command for its operator to type. The
+ * CLI runs this layer in-process, so a {@code sudo} caller on a root box reads it as that caller.
+ */
+class ApiOperatorHintsTest {
+
+  private static final OperatorCommand SUDO = new OperatorCommand(true);
+  private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
+
+  private static Spec spec(String assignee) {
+    return new Spec(
+        "auth",
+        "gamma",
+        "Add auth",
+        SpecStatus.PENDING,
+        assignee,
+        List.of(),
+        List.of(),
+        null,
+        null,
+        null,
+        null);
+  }
+
+  private static List<String> hints(OperatorCommand operator) {
+    return List.of(
+        ProjectLoader.stopped("gamma", operator).error().action(),
+        ProjectReader.absent("gamma", operator).error().action(),
+        DispatchPolicy.runsOnOtherNode(spec(null), "ada", operator).fix(),
+        DispatchPolicy.runsOnOtherNode(spec("bob"), "ada", operator).fix(),
+        LaunchAdmission.handleHint(operator),
+        LaunchAdmission.notInstalled(Harnesses.of("claude-code"), "gamma", operator)
+            .error()
+            .action(),
+        SailOperations.storeUnavailable("Run store", operator));
+  }
+
+  @Test
+  void aSudoCallerOnARootBoxIsToldEveryCommandWithSudo() {
+    assertEquals(
+        List.of(
+            "Start it with sudo sail project start gamma.",
+            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
+                + " project, run 'sudo sail project apply -f <file>'.",
+            "Claim it first: sudo sail spec update auth --assignee ada",
+            "Reassign it to dispatch here: sudo sail spec update auth --assignee ada",
+            "Set it with: sudo sail host config set sync-handle <handle>",
+            "Add claude-code to sail.yaml's agent.install list and run 'sudo sail project apply"
+                + " gamma'.",
+            "Run store not available. Start the server with 'sudo sail server start'."),
+        hints(SUDO));
+  }
+
+  @Test
+  void rootOrABoxsOwnAccountIsToldEveryCommandAsToday() {
+    assertEquals(
+        List.of(
+            "Start it with sail project start gamma.",
+            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
+                + " project, run 'sail project apply -f <file>'.",
+            "Claim it first: sail spec update auth --assignee ada",
+            "Reassign it to dispatch here: sail spec update auth --assignee ada",
+            "Set it with: sail host config set sync-handle <handle>",
+            "Add claude-code to sail.yaml's agent.install list and run 'sail project apply"
+                + " gamma'.",
+            "Run store not available. Start the server with 'sail server start'."),
+        hints(PLAIN));
+  }
+}

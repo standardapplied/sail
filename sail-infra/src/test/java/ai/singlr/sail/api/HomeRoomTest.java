@@ -214,7 +214,7 @@ class HomeRoomTest {
 
     assertEquals("Agent 'claude-code' is not installed in project 'acme'.", refused.getMessage());
     assertEquals(
-        "Add claude-code to sail.yaml's agent.install list and run 'sail project apply'.",
+        "Add claude-code to sail.yaml's agent.install list and run 'sail project apply acme'.",
         refused.failure().action());
     assertTrue(roomStore.findById("acme--ada").isEmpty(), "a refused member leaves no room");
     assertTrue(

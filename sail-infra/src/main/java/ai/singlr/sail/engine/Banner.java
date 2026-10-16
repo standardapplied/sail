@@ -1104,7 +1104,12 @@ public final class Banner {
 
   /** Prints confirmation after a background agent launch. */
   public static void printAgentLaunched(
-      String name, String task, String branch, PrintStream out, Ansi ansi) {
+      String name,
+      String task,
+      String branch,
+      OperatorCommand operator,
+      PrintStream out,
+      Ansi ansi) {
     out.println(amber(ansi, "  @|green \u2713|@ Agent launched in background"));
     if (task != null) {
       out.println(amber(ansi, "    @|bold Task:|@    " + prettifyTask(task)));
@@ -1112,8 +1117,9 @@ public final class Banner {
     if (Strings.isNotBlank(branch)) {
       out.println(amber(ansi, "    @|bold Branch:|@  " + branch));
     }
-    out.println(amber(ansi, "    @|bold Log:|@     sail agent log " + name + " --follow"));
-    out.println(amber(ansi, "    @|bold Stop:|@    sail agent stop " + name));
+    out.println(
+        amber(ansi, "    @|bold Log:|@     " + operator.sail("agent log " + name + " --follow")));
+    out.println(amber(ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + name)));
   }
 
   /** Prints a list of other running projects (informational). */
@@ -1229,7 +1235,11 @@ public final class Banner {
 
     out.println(amber(ansi, "  @|bold Next Steps:|@"));
     out.println(
-        amber(ansi, "    sail agent log " + name + " --tail 50    @|faint # see agent output|@"));
+        amber(
+            ansi,
+            "    "
+                + OperatorCommand.here().sail("agent log " + name + " --tail 50")
+                + "    @|faint # see agent output|@"));
     var remaining =
         report.specs().stream()
             .filter(s -> s.status() == SpecStatus.PENDING || s.status() == SpecStatus.IN_PROGRESS)

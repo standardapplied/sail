@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ReviewStore;
@@ -189,7 +190,8 @@ final class GlobalSpecOperations {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Spec '" + request.id() + "' already exists.",
-          "Pick another spec id, or edit it with: sail spec update " + request.id());
+          "Pick another spec id, or edit it with: "
+              + OperatorCommand.here().sail("spec update " + request.id()));
     }
     var attached = row.withRoomId(home != null ? home.id() : request.id());
     specStore.create(
@@ -216,7 +218,9 @@ final class GlobalSpecOperations {
       throw new ApiException(
           ErrorCode.INTERNAL,
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
-          "Start the server with 'sail server start' or omit the room.");
+          "Start the server with '"
+              + OperatorCommand.here().sail("server start")
+              + "' or omit the room.");
     }
     return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
@@ -620,9 +624,7 @@ final class GlobalSpecOperations {
 
   private void requireStore() {
     if (specStore == null) {
-      throw new ApiException(
-          ErrorCode.INTERNAL,
-          "Spec store not available. Start the server with 'sail server start'.");
+      throw new ApiException(ErrorCode.INTERNAL, SailOperations.storeUnavailable("Spec store"));
     }
   }
 

@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import java.util.Objects;
 
@@ -43,7 +44,7 @@ public final class DispatchPolicy {
       return nodeHandleUnset();
     }
     if (!localHandle.equals(spec.assignee())) {
-      return runsOnOtherNode(spec, localHandle);
+      return runsOnOtherNode(spec, localHandle, OperatorCommand.here());
     }
     if (!actor.canWrite()) {
       return new DispatchDecision.Refused(
@@ -85,15 +86,17 @@ public final class DispatchPolicy {
         ErrorCode.NODE_HANDLE_UNSET,
         "This node has no sync-handle, so it cannot be any spec's execution node.",
         "Set it once: sudo sail host config set sync-handle <handle> (a node gets it from"
-            + " 'sail join').");
+            + " 'sudo sail join').");
   }
 
-  private static DispatchDecision.Refused runsOnOtherNode(Spec spec, String localHandle) {
+  static DispatchDecision.Refused runsOnOtherNode(
+      Spec spec, String localHandle, OperatorCommand operator) {
+    var claim = operator.sail("spec update " + spec.id() + " --assignee " + localHandle);
     if (Strings.isBlank(spec.assignee())) {
       return new DispatchDecision.Refused(
           ErrorCode.RUNS_ON_OTHER_NODE,
           "Spec '" + spec.id() + "' is unassigned, so no node may dispatch it.",
-          "Claim it first: sail spec update " + spec.id() + " --assignee " + localHandle);
+          "Claim it first: " + claim);
     }
     return new DispatchDecision.Refused(
         ErrorCode.RUNS_ON_OTHER_NODE,
@@ -104,9 +107,6 @@ public final class DispatchPolicy {
             + "', which runs on that FDE's devbox, not this node ('"
             + localHandle
             + "').",
-        "Reassign it to dispatch here: sail spec update "
-            + spec.id()
-            + " --assignee "
-            + localHandle);
+        "Reassign it to dispatch here: " + claim);
   }
 }
