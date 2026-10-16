@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.sync.SyncEngine;
@@ -40,29 +41,34 @@ class SyncHealthTest {
   @Test
   void aRoundMovesThroughSyncingToInSyncAndFailuresAgeIntoStale() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
-    health.begin("main", t0);
+    var first = health.begin("main", t0);
     assertEquals("syncing", health.find("main").orElseThrow().state());
-    assertFalse(health.succeeded("main", t0.plusSeconds(1), new SyncEngine.Report(1, 0, 0, 0)));
+    assertFalse(
+        health.succeeded("main", first, t0.plusSeconds(1), new SyncEngine.Report(1, 0, 0, 0)));
     var ok = health.find("main").orElseThrow();
     assertEquals("in_sync", ok.state());
     assertEquals(1, ok.lastReport().pulled());
 
-    assertEquals(1, health.failed("main", t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
-    assertEquals(2, health.failed("main", t0.plusSeconds(3), "unreachable", "ssh: exit 255"));
+    assertEquals(1, failedRound(t0.plusSeconds(2)));
+    assertEquals(2, failedRound(t0.plusSeconds(3)));
     var stale = health.find("main").orElseThrow();
     assertEquals("stale", stale.state());
     assertEquals(t0.plusSeconds(2), stale.staleSince(), "stale since the first failure");
     assertEquals(t0.plusSeconds(1), stale.lastSuccessAt());
 
-    assertTrue(health.succeeded("main", t0.plusSeconds(4), new SyncEngine.Report(0, 0, 0, 0)));
+    assertTrue(
+        health.succeeded(
+            "main",
+            health.begin("main", t0.plusSeconds(4)),
+            t0.plusSeconds(4),
+            new SyncEngine.Report(0, 0, 0, 0)));
     assertEquals(0, health.find("main").orElseThrow().consecutiveFailures());
   }
 
   @Test
   void aForgottenPeerHasNoHealthAndOthersKeepTheirs() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
-    health.begin("main", t0);
-    health.succeeded("main", t0, SyncEngine.Report.NONE);
+    health.succeeded("main", health.begin("main", t0), t0, SyncEngine.Report.NONE);
     health.begin("other", t0);
 
     health.forget("main");
@@ -74,30 +80,54 @@ class SyncHealthTest {
   @Test
   void aRoundThatFinishesAfterItsPeerWasForgottenRecordsNothing() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
-    health.begin("sail@main", t0);
+    var succeeding = health.begin("sail@main", t0);
     health.forget("sail@main");
 
-    assertFalse(health.succeeded("sail@main", t0.plusSeconds(1), SyncEngine.Report.NONE));
+    assertFalse(
+        health.succeeded("sail@main", succeeding, t0.plusSeconds(1), SyncEngine.Report.NONE));
     assertTrue(health.find("sail@main").isEmpty());
 
-    health.begin("sail@main", t0);
+    var failing = health.begin("sail@main", t0);
     health.forget("sail@main");
 
-    assertEquals(0, health.failed("sail@main", t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
+    assertEquals(
+        0, health.failed("sail@main", failing, t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
     assertTrue(health.find("sail@main").isEmpty());
+  }
+
+  @Test
+  void aRoundFromBeforeAForgetNeverWritesIntoTheRoundsBegunAfterIt() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    var obsolete = health.begin("sail@main", t0);
+    health.forget("sail@main");
+    var current = health.begin("sail@main", t0.plusSeconds(1));
+
+    assertFalse(health.succeeded("sail@main", obsolete, t0.plusSeconds(2), SyncEngine.Report.NONE));
+    assertEquals(
+        0, health.failed("sail@main", obsolete, t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
+    var untouched = health.find("sail@main").orElseThrow();
+    assertEquals("syncing", untouched.state());
+    assertEquals(t0.plusSeconds(1), untouched.lastAttemptAt());
+
+    assertEquals(
+        1, health.failed("sail@main", current, t0.plusSeconds(3), "refused", "key not authorized"));
+    var stale = health.find("sail@main").orElseThrow();
+    assertNull(stale.lastSuccessAt(), "the new identity has never synced");
+    assertEquals("refused", stale.lastErrorKind());
   }
 
   @Test
   void theLastRoundsDenialsAreKeptUntilTheNextRoundReplacesThem() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
-    health.begin("main", t0);
+    var first = health.begin("main", t0);
     assertEquals(List.of(), health.find("main").orElseThrow().denials());
     var denial = new SyncSession.Denial("spec", "auth", "your role is read-only");
 
-    health.succeeded("main", t0, SyncEngine.Report.NONE, 0, 0, 0, List.of(denial));
+    health.succeeded("main", first, t0, SyncEngine.Report.NONE, 0, 0, 0, List.of(denial));
 
     assertEquals(List.of(denial), health.find("main").orElseThrow().denials());
-    health.succeeded("main", t0.plusSeconds(1), SyncEngine.Report.NONE);
+    health.succeeded(
+        "main", health.begin("main", t0.plusSeconds(1)), t0.plusSeconds(1), SyncEngine.Report.NONE);
     assertEquals(List.of(), health.find("main").orElseThrow().denials());
   }
 
@@ -144,13 +174,17 @@ class SyncHealthTest {
                   refusedWhileLocked.set(true);
                 }
               });
-      contended.begin("main", at);
-      contended.succeeded("main", at, new SyncEngine.Report(0, 0, 0, 0));
+      contended.succeeded(
+          "main", contended.begin("main", at), at, new SyncEngine.Report(0, 0, 0, 0));
       assertTrue(refusedWhileLocked.get(), "the other writer found the lock already taken");
       assertFalse(committedInBetween.get());
       assertEquals("in_sync", health.find("main").orElseThrow().state());
       other.execute("UPDATE sync_health SET last_error = 'other' WHERE peer = 'main'");
       assertEquals("other", health.find("main").orElseThrow().lastError(), "and proceeds after");
     }
+  }
+
+  private int failedRound(Instant at) {
+    return health.failed("main", health.begin("main", at), at, "unreachable", "ssh: exit 255");
   }
 }

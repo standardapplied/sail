@@ -44,7 +44,7 @@ final class RepoOrigin {
             + "' "
             + found.get()
             + ", but the definition says "
-            + repo.url()
+            + shown(repo.url())
             + ". Move it aside (it may hold work) or fix the URL.");
   }
 

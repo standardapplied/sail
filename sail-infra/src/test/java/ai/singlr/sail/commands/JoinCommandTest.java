@@ -491,8 +491,8 @@ class JoinCommandTest {
     try (var db = Sqlite.open(dir.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
       var health = new SyncHealth(db);
-      health.begin(peer, Instant.parse("2026-10-16T10:00:00Z"));
-      health.succeeded(peer, Instant.parse("2026-10-16T10:00:01Z"), SyncEngine.Report.NONE);
+      var round = health.begin(peer, Instant.parse("2026-10-16T10:00:00Z"));
+      health.succeeded(peer, round, Instant.parse("2026-10-16T10:00:01Z"), SyncEngine.Report.NONE);
     }
   }
 

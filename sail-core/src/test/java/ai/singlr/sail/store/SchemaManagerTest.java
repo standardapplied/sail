@@ -243,6 +243,30 @@ class SchemaManagerTest {
   }
 
   @Test
+  void syncHealthFromBeforeRoundIdsKeepsItsLastSuccessAndTheNextRoundRecords() {
+    stageAtBaseline();
+    var prior = migrationIndex("ALTER TABLE sync_health ADD COLUMN round_id");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO sync_health (peer, last_success_at, state) VALUES ('main', ?, 'in_sync')",
+        java.time.Instant.EPOCH.toString());
+
+    new SchemaManager(db).migrate();
+
+    var health = new SyncHealth(db);
+    assertEquals(java.time.Instant.EPOCH, health.find("main").orElseThrow().lastSuccessAt());
+    var at = java.time.Instant.EPOCH.plusSeconds(1);
+    assertEquals(
+        1, health.failed("main", health.begin("main", at), at, "unreachable", "ssh: exit 255"));
+    assertEquals(java.time.Instant.EPOCH, health.find("main").orElseThrow().lastSuccessAt());
+  }
+
+  @Test
   void theBoxEachFdeSyncsFromMigratesFromThe0_46_2ReleaseKeepingItsRuns() {
     stageAtBaseline();
     var prior = migrationIndex("CREATE TABLE fde_boxes");

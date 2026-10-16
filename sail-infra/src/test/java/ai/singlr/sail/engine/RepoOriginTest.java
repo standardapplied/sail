@@ -191,4 +191,22 @@ class RepoOriginTest {
     git(dir, "remote", "add", "origin", "https://token@github.com/org/old.git");
     assertEquals(refused("is a clone of https://github.com/org/old.git"), refusal(dir));
   }
+
+  @Test
+  void aTokenInTheDefinitionsUrlIsNeverEchoed() throws Exception {
+    var dir = checkout("https://github.com/org/old.git");
+    var withToken =
+        new SailYaml.Repo("https://x-access-token:secret@github.com/org/new.git", "web", null);
+
+    var refusal =
+        assertThrows(
+                IllegalStateException.class,
+                () -> RepoOrigin.require(new LocalGit(), "acme", dir.toString(), withToken))
+            .getMessage();
+
+    assertEquals(
+        "Repo 'web' is a clone of https://github.com/org/old.git, but the definition says"
+            + " https://github.com/org/new.git. Move it aside (it may hold work) or fix the URL.",
+        refusal);
+  }
 }

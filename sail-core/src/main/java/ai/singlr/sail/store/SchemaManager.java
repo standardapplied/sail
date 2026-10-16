@@ -759,7 +759,8 @@ public final class SchemaManager {
           FDE_SCOPE,
           PROJECT_GRANTS,
           HEAD_PROJECT,
-          NODE_SCOPE);
+          NODE_SCOPE,
+          "ALTER TABLE sync_health ADD COLUMN round_id TEXT");
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();
