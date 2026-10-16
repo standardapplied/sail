@@ -154,7 +154,9 @@ public final class NativeFleet implements AutoCloseable {
     box.shOk(PROVISION_NODE);
     box.install(binary);
     box.sailOk("server", "init");
-    box.shOk("ssh-keyscan -H localhost > /root/.ssh/known_hosts 2>/dev/null");
+    if (!binary.equals(candidate)) {
+      box.shOk("ssh-keyscan -H localhost > /root/.ssh/known_hosts 2>/dev/null");
+    }
     var joined =
         json(
             box.sailOk(
@@ -179,9 +181,22 @@ public final class NativeFleet implements AutoCloseable {
                 handle + "@example.dev",
                 "--key",
                 (String) joined.get("public_key")));
+    if (candidate.equals(main.binary) && joined.get("main_host_key") instanceof String pinned) {
+      add.addAll(List.of("--main-host-key", pinned));
+    }
     add.addAll(List.of(fdeFlags));
     main.sailOk(add.toArray(String[]::new));
     return box;
+  }
+
+  /** Gives main a new SSH host key and restarts its sshd, as a rebuilt main would come back. */
+  public void rekeyMain() throws Exception {
+    sshd.close();
+    try {
+      main.shOk("rm -f /etc/ssh/ssh_host_* && ssh-keygen -A >/dev/null");
+    } finally {
+      sshd = main.sshd();
+    }
   }
 
   /** Runs {@code work} against {@code node}'s server while main is unreachable. */
@@ -368,6 +383,7 @@ public final class NativeFleet implements AutoCloseable {
     private final int port;
     private final boolean isMain;
     private final String db;
+    private Path binary;
 
     private Box(String name, String container, int port, boolean isMain, String db) {
       this.name = name;
@@ -386,6 +402,7 @@ public final class NativeFleet implements AutoCloseable {
               COMMAND_DEADLINE,
               List.of("podman", "cp", binary.toString(), container + ":/usr/local/bin/sail")));
       shOk("chmod 755 /usr/local/bin/sail");
+      this.binary = binary;
       sailOk("migrate");
     }
 

@@ -142,6 +142,31 @@ class NativeFleetIT {
   }
 
   @Test
+  void aNodePinsMainsHostKeyAtJoinAndARekeyedMainFailsItsSyncNamingTheRemedy() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.serving(() -> main.createSpecs("pinned", 2, 1_000));
+      var mady = fleet.node("mady", fleet.candidate());
+
+      mady.sailOk("sync");
+      fleet.assertConverged(mady);
+
+      fleet.rekeyMain();
+      var refused = mady.sail("sync");
+
+      assertNotEquals(0, refused.exit(), refused::output);
+      assertTrue(
+          refused
+              .output()
+              .contains(
+                  "hello: Sync channel closed before main replied. ssh said: Host key verification"
+                      + " failed. — re-run 'sudo sail init --main sail@localhost' to pin main's"
+                      + " host key."),
+          refused::output);
+    }
+  }
+
+  @Test
   void aNodeUpgradedAheadOfMainRecoversOnceMainFollows() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.released());
