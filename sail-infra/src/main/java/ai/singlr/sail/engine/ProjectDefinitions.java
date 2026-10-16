@@ -120,7 +120,36 @@ public final class ProjectDefinitions {
    */
   public static SailYaml resolveForProvisioning(
       String definitionText, UnaryOperator<String> values) {
-    return SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
+    var config = SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
+    requireDevUser(config);
+    return config;
+  }
+
+  /**
+   * Refuses a descriptor whose container could not work: sail runs every agent, shell and hook as
+   * {@code dev} (uid 1000, {@code /home/dev}). Refused here, where only provisioning reads a
+   * descriptor, and not when one is parsed, so sync, connect and listing still read such a row.
+   */
+  private static void requireDevUser(SailYaml config) {
+    var user = config.sshUser();
+    if (!"dev".equals(user)) {
+      var name = config.name();
+      throw new IllegalArgumentException(
+          "ssh.user is '"
+              + user
+              + "', but sail runs every agent, shell and hook as 'dev' (uid 1000, /home/dev)."
+              + " Remove 'ssh.user' from "
+              + name
+              + "'s descriptor (or set it to dev) with 'sail project edit "
+              + name
+              + "', then apply again. A container already created as '"
+              + user
+              + "' must be recreated: 'sail project destroy "
+              + name
+              + "', then 'sudo sail project apply "
+              + name
+              + "'.");
+    }
   }
 
   /**

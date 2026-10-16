@@ -145,7 +145,7 @@ public final class ProjectConfigCommand implements Runnable {
     map.put("specs", specSummary.toMap());
 
     if (config.ssh() != null) {
-      map.put("ssh_user", config.ssh().user());
+      map.put("ssh_user", config.sshUser());
     }
 
     System.out.println(YamlUtil.dumpJson(map));

@@ -115,6 +115,24 @@ public final class ProjectInitCommand implements Runnable {
         agentType, true, "agent/", true, install, null, null, null, null, null);
   }
 
+  /**
+   * Asks for the keys that may SSH into the container. The user is not asked: sail runs every
+   * agent, shell and hook as {@code dev}, so that is the only user a container can have.
+   */
+  static SailYaml.Ssh promptSsh(PrintStream out, Ansi ansi) {
+    out.println();
+    out.println(ansi.string("  @|bold SSH access|@"));
+    List<String> authorizedKeys = null;
+    if (ConsoleHelper.confirmNo("Add public key for remote login (SSH into container)?")) {
+      authorizedKeys = new ArrayList<>();
+      do {
+        var key = ConsoleHelper.promptRequired(out, ansi, "Public key (e.g. ssh-ed25519 AAAA...)");
+        authorizedKeys.add(key);
+      } while (ConsoleHelper.confirmNo("Add another key?"));
+    }
+    return new SailYaml.Ssh("dev", authorizedKeys);
+  }
+
   static String agentTypePrompt() {
     return "Agent type (" + String.join("/", Harnesses.names()) + "/none)";
   }
@@ -229,18 +247,7 @@ public final class ProjectInitCommand implements Runnable {
       services = null;
     }
 
-    out.println();
-    out.println(ansi.string("  @|bold SSH access|@"));
-    var sshUser = ConsoleHelper.promptWithDefault(out, ansi, "SSH user", "dev");
-    List<String> authorizedKeys = null;
-    if (ConsoleHelper.confirmNo("Add public key for remote login (SSH into container)?")) {
-      authorizedKeys = new ArrayList<>();
-      do {
-        var key = ConsoleHelper.promptRequired(out, ansi, "Public key (e.g. ssh-ed25519 AAAA...)");
-        authorizedKeys.add(key);
-      } while (ConsoleHelper.confirmNo("Add another key?"));
-    }
-    var ssh = new SailYaml.Ssh(sshUser, authorizedKeys);
+    var ssh = promptSsh(out, ansi);
 
     out.println();
     var agent = promptAgent(out, ansi);

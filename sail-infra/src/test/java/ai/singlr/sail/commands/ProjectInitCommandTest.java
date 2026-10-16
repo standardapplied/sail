@@ -6,10 +6,12 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.harness.Harnesses;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -85,5 +87,38 @@ class ProjectInitCommandTest {
         "the project's own harness leads, and naming it again adds nothing");
     assertTrue(
         asked.toString(StandardCharsets.UTF_8).contains("  Agent CLI name (claude-code/codex): "));
+  }
+
+  @Test
+  void sshAccessAsksOnlyForKeysAndWritesDev() {
+    System.setIn(
+        new ByteArrayInputStream(
+            "y\nssh-ed25519 AAAA alice@laptop\nn\n".getBytes(StandardCharsets.UTF_8)));
+    ConsoleHelper.resetStdin();
+
+    var ssh =
+        ProjectInitCommand.promptSsh(
+            new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
+
+    assertEquals(new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA alice@laptop")), ssh);
+    assertFalse(asked.toString(StandardCharsets.UTF_8).contains("SSH user"));
+    var config =
+        new SailYaml(
+            "acme",
+            null,
+            new SailYaml.Resources(2, "4GB", "50GB"),
+            "ubuntu/24.04",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            ssh);
+    assertTrue(
+        SailYamlGenerator.generate(config)
+            .contains("ssh:\n  user: dev\n  authorized_keys:\n    - "),
+        SailYamlGenerator.generate(config));
   }
 }

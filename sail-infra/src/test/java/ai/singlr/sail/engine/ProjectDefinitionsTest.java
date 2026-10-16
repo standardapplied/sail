@@ -159,6 +159,21 @@ class ProjectDefinitionsTest {
   }
 
   @Test
+  void theDemoAndBothExamplesProvisionDev() throws Exception {
+    var examples = Path.of("..", "examples");
+    var definitions =
+        List.of(
+            DemoProject.DEFINITION,
+            Files.readString(examples.resolve("java-fullstack.yaml")),
+            Files.readString(examples.resolve("node-api.yaml")));
+
+    for (var definition : definitions) {
+      var config = ProjectDefinitions.resolveForProvisioning(definition, field -> "value");
+      assertEquals("dev", config.ssh().user(), config.name());
+    }
+  }
+
+  @Test
   void resolveForProvisioningNeedsNoIdentityWhenThereAreNoPlaceholders() {
     var noIdentity = new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"));
     var config =

@@ -135,6 +135,12 @@ ssh:
   authorized_keys: [ ${SSH_PUBLIC_KEY} ]            # per-developer, never synced
 ```
 
+The container's user is always `dev` (uid 1000, `/home/dev`): every agent, shell and hook runs
+as it. `ssh.user` may be omitted and, if set, must be `dev`; apply refuses any other before it
+creates anything. Apply records each provisioning step for the definition it ran with, so an
+edit made after a failed or finished run is provisioned again from the first step, each step
+installing only what is missing.
+
 `sudo sail project demo` spins up a bundled zero-config demo (an Outline wiki) end to end.
 
 ## Specs and agents

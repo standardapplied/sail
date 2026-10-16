@@ -25,6 +25,8 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.engine.ProvisionState;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -280,6 +282,105 @@ class ProjectApplyCommandTest {
     } finally {
       System.setErr(originalErr);
     }
+  }
+
+  @Test
+  @Timeout(60)
+  void aDescriptorNamingAnotherUserIsRefusedBeforeAnythingIsCreated(@TempDir Path dir)
+      throws Exception {
+    var project = "refuse-" + Long.toHexString(System.nanoTime());
+    var descriptor = dir.resolve(project + ".yaml");
+    Files.writeString(
+        descriptor,
+        """
+        name: %s
+        resources:
+          cpu: 2
+          memory: 4GB
+          disk: 50GB
+        ssh:
+          user: bob
+        """
+            .formatted(project));
+    var errors = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(errors, true, StandardCharsets.UTF_8));
+    try {
+      var apply = applying(dir.resolve("sail.db"), "-f", descriptor.toString(), "--yes");
+      apply.run();
+
+      assertEquals(1, apply.get());
+      assertEquals(
+          Banner.errorLine(otherUserRefusal(project, "bob"), Ansi.AUTO) + System.lineSeparator(),
+          errors.toString(StandardCharsets.UTF_8));
+      assertFalse(Files.exists(SailPaths.projectDir(project)), "nothing is recorded for it");
+    } finally {
+      System.setErr(originalErr);
+    }
+  }
+
+  @Test
+  void planTargetRefusesAnotherUserBeforeTheContainerIsStarted() {
+    var thrown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                ProjectApplyCommand.planTarget(
+                    "alpha", new ContainerState.Stopped(), "name: alpha\nssh:\n  user: bob\n"));
+
+    assertEquals(otherUserRefusal("alpha", "bob"), thrown.getMessage());
+  }
+
+  @Test
+  void planTargetAcceptsDevAndAnSshBlockThatNamesNoUser() {
+    var dev =
+        ProjectApplyCommand.planTarget(
+            "alpha", new ContainerState.Stopped(), "name: alpha\nssh:\n  user: dev\n");
+    var keysOnly =
+        ProjectApplyCommand.planTarget(
+            "alpha",
+            new ContainerState.Stopped(),
+            "name: alpha\nssh:\n  authorized_keys:\n    - ssh-ed25519 AAAA alice@laptop\n");
+
+    assertEquals("dev", dev.config().sshUser());
+    assertEquals("dev", keysOnly.config().sshUser());
+  }
+
+  @Test
+  void theRecheckLineSaysWhyAnExistingContainerIsProvisionedAgain() {
+    var interrupted = new ProvisionState("SSH_CONFIGURED", null, null, null, "inputs-x");
+    var finished = new ProvisionState("COMPLETE", null, null, null, "inputs-x");
+    var changedSinceInterrupted =
+        "The descriptor changed since the interrupted run: every step is checked again.";
+    var changedSinceFinished =
+        "The descriptor changed since the last provisioning run: every step is checked again.";
+    var noRecord =
+        "No record of the descriptor this container was provisioned from: every step is checked"
+            + " again.";
+
+    assertEquals(changedSinceInterrupted, ProjectApplyCommand.recheckLine(interrupted, true));
+    assertEquals(changedSinceInterrupted, ProjectApplyCommand.recheckLine(interrupted, false));
+    assertEquals(changedSinceFinished, ProjectApplyCommand.recheckLine(null, true));
+    assertEquals(changedSinceFinished, ProjectApplyCommand.recheckLine(finished, true));
+    assertEquals(noRecord, ProjectApplyCommand.recheckLine(null, false));
+    assertEquals(noRecord, ProjectApplyCommand.recheckLine(finished, false));
+  }
+
+  private static String otherUserRefusal(String project, String user) {
+    return "ssh.user is '"
+        + user
+        + "', but sail runs every agent, shell and hook as 'dev' (uid 1000, /home/dev). Remove"
+        + " 'ssh.user' from "
+        + project
+        + "'s descriptor (or set it to dev) with 'sail project edit "
+        + project
+        + "', then apply again. A container already created as '"
+        + user
+        + "' must be recreated: 'sail project destroy "
+        + project
+        + "', then 'sudo sail project apply "
+        + project
+        + "'.";
   }
 
   private static FutureTask<Integer> applying(Path database, String... args) {

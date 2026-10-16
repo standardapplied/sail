@@ -805,7 +805,18 @@ SHA-256, and strips the Gatekeeper quarantine flag.
 `ShellExecutor`, and every command maps to calls the operator could run by hand.
 
 **Container provisioning** (`ProjectProvisioner`) is an idempotent, resumable pipeline of
-roughly twenty steps, and a `ProvisionTracker` lets a failed run pick up where it stopped.
+roughly twenty steps, and a `ProvisionTracker` lets a failed run pick up where it stopped. The
+tracker resumes only for the descriptor it was written for: its state carries the SHA-256 of the
+resolved descriptor, and progress recorded for another (or by a release that recorded none)
+restarts the run from the first step, each step re-checking its own effect. A finished run records
+that SHA-256 on the container itself (the Incus key `user.sail.inputs`) and deletes its progress
+file: root, which provisions, and the operator, whose plain apply only converges, read the one
+record on any box, and a deleted container takes its record with it. A run clears that record
+before it changes an existing container, so a run that fails part way leaves none. An apply whose descriptor
+differs from the container's record, or finds none, runs every step again and installs only the
+difference. The container's user is always `dev` at uid 1000; step 6 is recorded only once that
+user exists at that uid, and `resolveForProvisioning` refuses an `ssh.user` naming any
+other.
 It launches the Incus container from the configured image, bind-mounts the host `sail-api`
 Unix socket in, installs the in-container `spec` CLI and event hooks, applies the disk quota
 (advisory on `dir`, hard via `refquota` on `zfs`) and the cpu and memory limits (with

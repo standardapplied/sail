@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
+import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -207,21 +208,9 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
-    var tracker =
-        new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun);
-    tracker.load();
-    if (action == Action.CREATED && tracker.hasIncompleteRun()) {
-      if (!json) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|faint Stale state detected — container '"
-                    + config.name()
-                    + "' no longer exists. Starting fresh.|@"));
-      }
-      tracker.reset();
-    }
-    if (action == Action.CREATED || tracker.hasIncompleteRun()) {
-      provision(config, sailYamlPath, shell, tracker);
+    var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
+    if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config)))) {
+      provision(config, sailYamlPath, shell, action == Action.CREATED, recorded.isPresent());
       action = Action.CREATED;
     }
 
@@ -306,11 +295,9 @@ public final class ProjectApplyCommand implements Runnable {
         Outcome outcome;
         if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
-          var tracker =
-              new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(project), dryRun);
-          tracker.load();
-          if (tracker.hasIncompleteRun()) {
-            provision(targetPlan.config(), sailYamlPath, shell, tracker);
+          var recorded = ProjectProvisioner.provisionedInputs(observer, project);
+          if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(targetPlan.config())))) {
+            provision(targetPlan.config(), sailYamlPath, shell, false, recorded.isPresent());
             action = Action.CREATED;
           }
           outcome = converge(observer, shell, targetPlan.config(), sailYamlPath);
@@ -590,6 +577,22 @@ public final class ProjectApplyCommand implements Runnable {
         + (homeRoom.engaged() ? ", engaged." : ", no agent engaged.");
   }
 
+  /**
+   * Why an existing container is provisioned again from its first step: the interrupted run's
+   * progress ({@code superseded}) was recorded for another descriptor, the container was last
+   * provisioned from another descriptor ({@code recorded}), or the container records none at all.
+   */
+  static String recheckLine(ProvisionState superseded, boolean recorded) {
+    if (superseded != null && !ProjectPhase.COMPLETE.name().equals(superseded.completedPhase())) {
+      return "The descriptor changed since the interrupted run: every step is checked again.";
+    }
+    if (recorded) {
+      return "The descriptor changed since the last provisioning run: every step is checked again.";
+    }
+    return "No record of the descriptor this container was provisioned from: every step is checked"
+        + " again.";
+  }
+
   /** Only provisioning needs root; converging a live container does not. */
   static void requireRootToProvision(String name, boolean dryRun, boolean isRoot) {
     if (!dryRun && !isRoot) {
@@ -603,13 +606,14 @@ public final class ProjectApplyCommand implements Runnable {
 
   /**
    * Provisions from the resolved descriptor with resumable progress: a fresh container from
-   * scratch, or the remaining phases of an interrupted earlier run.
+   * scratch, the remaining phases of an interrupted earlier run, or every phase again for a
+   * container whose descriptor changed since it was provisioned.
+   *
+   * @param fresh whether the container is created by this run
+   * @param recorded whether the container records the descriptor it was last provisioned from
    */
   private void provision(
-      SailYaml config,
-      Path sailYamlPath,
-      ShellExecutor shell,
-      ProvisionTracker<ProjectPhase> tracker)
+      SailYaml config, Path sailYamlPath, ShellExecutor shell, boolean fresh, boolean recorded)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
     ProjectCatalog.requireUnpruned(config.name());
@@ -621,7 +625,26 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
-    if (tracker.hasIncompleteRun()) {
+    var tracker =
+        new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun)
+            .load(ProjectProvisioner.inputs(config));
+    if (fresh && (tracker.hasIncompleteRun() || tracker.isComplete()) && !json) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Stale state detected — container '"
+                  + config.name()
+                  + "' no longer exists. Starting fresh.|@"));
+    }
+    if (fresh || tracker.isComplete()) {
+      tracker.reset();
+    }
+    var superseded = tracker.superseded();
+    var resuming = tracker.hasIncompleteRun() && superseded.isEmpty();
+    if (!fresh && !resuming && !json) {
+      System.out.println(
+          Ansi.AUTO.string("  @|faint " + recheckLine(superseded.orElse(null), recorded) + "|@"));
+    }
+    if (resuming) {
       if (!json) {
         Banner.printResumeInfo(tracker.currentState(), System.out, Ansi.AUTO);
       }
@@ -633,7 +656,7 @@ public final class ProjectApplyCommand implements Runnable {
     if (!json) {
       Banner.printProjectSummary(config, System.out, Ansi.AUTO);
     }
-    if (!yes && !dryRun && !json && !tracker.hasIncompleteRun()) {
+    if (!yes && !dryRun && !json && fresh) {
       if (!ConsoleHelper.confirm("Create project " + config.name() + "?")) {
         throw new IllegalStateException("Aborted.");
       }
@@ -650,8 +673,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     if (!json) {
       System.out.println();
-      Banner.printProjectCreated(
-          config.name(), config.ssh() != null ? config.ssh().user() : null, System.out, Ansi.AUTO);
+      Banner.printProjectCreated(config.name(), config.sshUser(), System.out, Ansi.AUTO);
     }
   }
 
@@ -684,12 +706,7 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var ports = ContainerExec.queryServicePorts(shell, config.name());
     if (!ports.isEmpty()) {
-      Banner.printSshTunnels(
-          config.name(),
-          config.ssh() != null ? config.ssh().user() : null,
-          ports,
-          System.out,
-          Ansi.AUTO);
+      Banner.printSshTunnels(config.name(), config.sshUser(), ports, System.out, Ansi.AUTO);
     }
   }
 

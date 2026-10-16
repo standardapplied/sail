@@ -274,7 +274,7 @@ public final class Banner {
     }
     w = Math.max(w, rowWidth("Packages:", pkgCount + " user + 5 baseline"));
     if (config.ssh() != null) {
-      w = Math.max(w, rowWidth("SSH user:", config.ssh().user()));
+      w = Math.max(w, rowWidth("SSH user:", config.sshUser()));
     }
     if (config.git() != null) {
       w = Math.max(w, rowWidth("Git:", config.git().name() + " <" + config.git().email() + ">"));
@@ -304,7 +304,7 @@ public final class Banner {
     }
     labelRow(out, ansi, w, "Packages:", pkgCount + " user + 5 baseline", null, null);
     if (config.ssh() != null) {
-      labelRow(out, ansi, w, "SSH user:", config.ssh().user(), null, null);
+      labelRow(out, ansi, w, "SSH user:", config.sshUser(), null, null);
     }
     if (config.git() != null) {
       labelRow(
@@ -382,7 +382,7 @@ public final class Banner {
       w = Math.max(w, rowWidth("Auto-branch:", String.valueOf(config.agent().autoBranch())));
     }
     if (config.ssh() != null) {
-      w = Math.max(w, rowWidth("SSH user:", config.ssh().user()));
+      w = Math.max(w, rowWidth("SSH user:", config.sshUser()));
     }
 
     out.println();
@@ -478,7 +478,7 @@ public final class Banner {
     }
 
     if (config.ssh() != null) {
-      labelRow(out, ansi, w, "SSH user:", config.ssh().user(), null, null);
+      labelRow(out, ansi, w, "SSH user:", config.sshUser(), null, null);
       emptyRow(out, ansi, w);
     }
 
