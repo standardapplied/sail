@@ -82,8 +82,9 @@ public final class ProjectProvisioner {
    * Runs all provisioning steps with resume support. On failure, the current phase is recorded in
    * the tracker and the exception is re-thrown. A tracker its owner already loaded for this
    * descriptor is used as it stands, so a reset the owner made in a dry run is not read back from
-   * the file it left in place. On success the container records the inputs it was provisioned from
-   * and the progress file is removed.
+   * the file it left in place. Once the container exists its record of the last finished run is
+   * cleared, and on success it records the inputs it was provisioned from and the progress file is
+   * removed.
    */
   public void provision(
       SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
@@ -94,6 +95,9 @@ public final class ProjectProvisioner {
     }
     try {
       launchContainer(config, host);
+      if (!tracker.isComplete()) {
+        clearProvisionedInputs(config.name());
+      }
       setDiskQuota(config, host);
       setResourceLimits(config);
       waitForNetwork(config);
@@ -145,6 +149,18 @@ public final class ProjectProvisioner {
       return Optional.empty();
     }
     return Optional.of(result.stdout().strip());
+  }
+
+  /**
+   * Voids the container's record of a finished run before this run changes it, so a run that fails
+   * part way leaves no record and the next apply provisions again, whatever descriptor it brings.
+   */
+  private void clearProvisionedInputs(String name) throws Exception {
+    var cleared = shell.exec(List.of("incus", "config", "set", name, INPUTS_KEY + "="));
+    if (!cleared.ok()) {
+      throw new IOException(
+          "Failed to clear the record of the last provisioned descriptor: " + cleared.stderr());
+    }
   }
 
   private void launchContainer(SailYaml config, HostYaml host) throws Exception {

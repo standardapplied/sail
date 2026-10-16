@@ -131,6 +131,46 @@ class ProjectProvisionerTest {
     }
   }
 
+  /** Keeps the container's {@code user.sail.inputs} record as Incus would, around its script. */
+  private static final class InputsRecordingShell implements ShellExec {
+    final PushRecordingShell pushes;
+    final Map<String, String> inputs = new LinkedHashMap<>();
+
+    InputsRecordingShell(PushRecordingShell pushes) {
+      this.pushes = pushes;
+    }
+
+    @Override
+    public Result exec(List<String> command) throws IOException {
+      return exec(command, null, Duration.ZERO);
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+      if (command.size() == 5 && command.subList(0, 3).equals(List.of("incus", "config", "get"))) {
+        if (command.get(4).equals("user.sail.inputs")) {
+          return new Result(0, inputs.getOrDefault(command.get(3), "") + "\n", "");
+        }
+      }
+      if (command.size() == 5
+          && command.subList(0, 3).equals(List.of("incus", "config", "set"))
+          && command.get(4).startsWith("user.sail.inputs=")) {
+        var value = command.get(4).substring("user.sail.inputs=".length());
+        if (value.isEmpty()) {
+          inputs.remove(command.get(3));
+        } else {
+          inputs.put(command.get(3), value);
+        }
+      }
+      return pushes.exec(command, workDir, timeout);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
   private static HostYaml hostYaml() {
     return new HostYaml(
         "zfs",
@@ -249,7 +289,12 @@ class ProjectProvisionerTest {
 
   @Test
   void aFailureToRecordTheInputsFailsTheLastStep() throws Exception {
-    var shell = allSuccessShell().onFail("incus config set acme-health user.sail.inputs", "denied");
+    var shell =
+        allSuccessShell()
+            .onFail(
+                "incus config set acme-health user.sail.inputs="
+                    + ProjectProvisioner.inputs(fullConfig()),
+                "denied");
     var stateFile = tempDir.resolve("provision-state.yaml");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     var provisioner = new ProjectProvisioner(shell, tracker, null);
@@ -483,6 +528,80 @@ class ProjectProvisionerTest {
     assertFalse(Files.exists(stateFile));
   }
 
+  @Test
+  void anInterruptedRunVoidsTheFinishedRecordSoTheFinishedDescriptorIsProvisionedAgain()
+      throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var finished = minimalConfig();
+    var edited =
+        new SailYaml(
+            finished.name(),
+            finished.description(),
+            finished.resources(),
+            finished.image(),
+            null,
+            new SailYaml.Runtimes(0, "22", null),
+            null,
+            null,
+            null,
+            null,
+            null,
+            new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
+    var shell =
+        new InputsRecordingShell(
+            new PushRecordingShell(
+                provisionedSimpleShell()
+                    .onFail("node --version", "not found")
+                    .onFail("apt-get install -y -qq nodejs", "E: Unable to locate package")));
+    shell.inputs.put("simple", ProjectProvisioner.inputs(finished));
+
+    assertThrows(
+        IOException.class,
+        () ->
+            new ProjectProvisioner(
+                    shell, new ProvisionTracker<>(ProjectPhase.class, stateFile, false), null)
+                .provision(edited, hostYaml(), null, null));
+
+    assertEquals(
+        "ssh-ed25519 AAAA mallory@laptop\n",
+        shell.pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals(Optional.empty(), ProjectProvisioner.provisionedInputs(shell, "simple"));
+
+    var steps = new ArrayList<String>();
+    new ProjectProvisioner(
+            shell,
+            new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
+            new RecordingListener(steps))
+        .provision(finished, hostYaml(), null, null);
+
+    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertEquals("", shell.pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals(
+        Optional.of(ProjectProvisioner.inputs(finished)),
+        ProjectProvisioner.provisionedInputs(shell, "simple"));
+  }
+
+  @Test
+  void aRecordThatCannotBeClearedFailsBeforeTheContainerIsChanged() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var shell =
+        provisionedSimpleShell().onFail("incus config set simple user.sail.inputs=", "denied");
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                new ProjectProvisioner(shell, tracker, null)
+                    .provision(minimalConfig(), hostYaml(), null, null));
+
+    assertEquals(
+        "Failed to clear the record of the last provisioned descriptor: denied",
+        failure.getMessage());
+    assertEquals("incus config set simple user.sail.inputs=", shell.invocations().getLast());
+    assertEquals("CONTAINER_LAUNCHED", YamlUtil.parseFile(stateFile).get("completed_phase"));
+  }
+
   /** A running {@code simple} whose user, limits, Podman and cron already exist. */
   private ScriptedShellExecutor provisionedSimpleShell() {
     return new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -675,7 +794,7 @@ class ProjectProvisionerTest {
             .onFail("incus info acme-health", "not found")
             .onOk("incus launch")
             .onOk("incus config device override")
-            .onFail("incus config set", "limits not supported");
+            .onFail("limits.cpu=", "limits not supported");
     var tracker = tracker();
 
     var provisioner = new ProjectProvisioner(shell, tracker, null);
@@ -2355,7 +2474,7 @@ class ProjectProvisionerTest {
     var cmds = shell.invocations();
     var launch = indexOfContaining(cmds, "incus launch");
     var diskSet = indexOfContaining(cmds, "incus config device override");
-    var limitsSet = indexOfContaining(cmds, "incus config set");
+    var limitsSet = indexOfContaining(cmds, "limits.cpu=");
     var aptUpdate = indexOfContaining(cmds, "apt-get update");
     var aptInstall = indexOfContaining(cmds, "apt-get install");
     var sshEnable = indexOfContaining(cmds, "systemctl enable --now ssh");
