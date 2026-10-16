@@ -191,11 +191,10 @@ public final class SailOperations implements HostOperations {
     if (target == null) return syncOperations.sync(request);
     var health = new SyncHealth(controlPlane);
     var attemptedAt = syncClock.instant();
-    String roundId = null;
     SyncReport round;
     try {
       syncOperations.prepare();
-      roundId = health.begin(target, attemptedAt);
+      health.begin(target, attemptedAt);
       round = syncOperations.sync(request);
     } catch (Exception e) {
       var kind =
@@ -206,8 +205,8 @@ public final class SailOperations implements HostOperations {
                   : "store";
       var error = Objects.toString(e.getMessage(), e.getClass().getSimpleName());
       try {
-        var failedRound = roundId != null ? roundId : health.begin(target, attemptedAt);
-        if (health.failed(target, failedRound, syncClock.instant(), kind, error) == 1) {
+        if (health.find(target).isEmpty()) health.begin(target, attemptedAt);
+        if (health.failed(target, syncClock.instant(), kind, error) == 1) {
           publishSyncTransition(target, false, kind, error);
         }
       } catch (RuntimeException recordingFailure) {
@@ -217,7 +216,6 @@ public final class SailOperations implements HostOperations {
     }
     if (health.succeeded(
         target,
-        roundId,
         syncClock.instant(),
         round.report(),
         round.fetchedBytes(),

@@ -18,25 +18,26 @@ import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
-import ai.singlr.sail.store.SyncHealth;
-import ai.singlr.sail.sync.SyncEngine;
+import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.Callable;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -46,6 +47,12 @@ class JoinCommandTest {
       target -> {
         throw new IOException("a unit test reaches no main");
       };
+  private static final SyncOperations.Channels NEVER_ASKED =
+      target -> {
+        throw new AssertionError("main has nothing to say about a key this join made");
+      };
+  private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
+  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
 
   private static final String PUB =
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";
@@ -71,6 +78,14 @@ class JoinCommandTest {
   @TempDir Path dir;
 
   private SshPublicKey answering = MAIN;
+  private SyncBox main;
+
+  @AfterEach
+  void tearDown() {
+    if (main != null) {
+      main.close();
+    }
+  }
 
   private Path knownHosts() {
     return dir.resolve("ssh").resolve("known_hosts");
@@ -487,22 +502,31 @@ class JoinCommandTest {
         human(plan));
   }
 
-  private void syncedWith(String peer) {
-    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
-      new SchemaManager(db).migrate();
-      var health = new SyncHealth(db);
-      var round = health.begin(peer, Instant.parse("2026-10-16T10:00:00Z"));
-      health.succeeded(peer, round, Instant.parse("2026-10-16T10:00:01Z"), SyncEngine.Report.NONE);
-    }
+  private JoinCommand.Plan join(Path hostConfig, String handle, SyncOperations.Channels channels)
+      throws Exception {
+    return JoinCommand.plan(
+        hostConfig,
+        dir.resolve("sail.db"),
+        identity(),
+        "sail@maindevbox",
+        handle,
+        null,
+        null,
+        channels,
+        pin());
+  }
+
+  private SyncOperations.Channels mainServing(Actor as) {
+    main = new SyncBox("main");
+    return target -> PipedSyncChannel.to(main.server(as));
   }
 
   @Test
-  void reJoiningTheMainThatAlreadyHoldsThisBoxsKeyAsksItsOperatorForNothing() throws Exception {
+  void reJoiningTheMainThatWelcomesThisBoxsKeyAsksItsOperatorForNothing() throws Exception {
     var hostConfig = writeHostConfig();
     join(hostConfig);
-    syncedWith("sail@maindevbox");
 
-    var plan = join(hostConfig);
+    var plan = join(hostConfig, "mady", mainServing(MADY));
 
     assertTrue(plan.mainHasKey());
     assertEquals(
@@ -522,84 +546,29 @@ class JoinCommandTest {
   }
 
   @Test
-  void aReJoinMainHasNeverAnsweredStillHandsItsOperatorTheLine() throws Exception {
-    var hostConfig = writeHostConfig();
-    join(hostConfig);
-
-    assertFalse(join(hostConfig).mainHasKey(), "main never answered this box's key");
+  void aFirstJoinNeverAsksMainAboutAKeyItJustMade() throws Exception {
+    assertFalse(join(writeHostConfig(), "mady", NEVER_ASKED).mainHasKey());
   }
 
   @Test
-  void aReJoinAsAnotherHandleOrToAnotherMainHandsItsOperatorTheLine() throws Exception {
+  void aReJoinMainDoesNotWelcomeAsThisHandleHandsItsOperatorTheLine() throws Exception {
     var hostConfig = writeHostConfig();
     join(hostConfig);
-    syncedWith("sail@maindevbox");
-    syncedWith("sail@othermain");
 
+    assertFalse(join(hostConfig).mainHasKey(), "main could not be asked");
     assertFalse(
-        JoinCommand.plan(
-                hostConfig,
-                dir.resolve("sail.db"),
-                identity(),
-                "sail@maindevbox",
-                "ada",
-                null,
-                null,
-                NO_MAIN,
-                pin())
-            .mainHasKey(),
-        "main holds the key under the old handle");
-    assertFalse(
-        JoinCommand.plan(
-                hostConfig,
-                dir.resolve("sail.db"),
-                identity(),
-                "sail@othermain",
-                "ada",
-                null,
-                null,
-                NO_MAIN,
-                pin())
-            .mainHasKey(),
-        "another main never had it");
+        join(hostConfig, "mady", mainServing(ADA)).mainHasKey(),
+        "main holds the key under another handle");
   }
 
   @Test
-  void aReJoinWithANewSyncKeyHandsItsOperatorTheLineUntilASyncSucceedsWithIt() throws Exception {
+  void aReJoinWithAKeyMadeByHandHandsItsOperatorTheLineWithoutAskingMain() throws Exception {
     var hostConfig = writeHostConfig();
     join(hostConfig);
-    syncedWith("sail@maindevbox");
     Files.delete(dir.resolve("sync_ed25519"));
+    Files.delete(dir.resolve("sync_ed25519.pub"));
 
-    assertFalse(join(hostConfig).mainHasKey(), "the key is new");
-    assertFalse(join(hostConfig).mainHasKey(), "no sync has succeeded with the new key");
-    syncedWith("sail@maindevbox");
-    assertTrue(join(hostConfig).mainHasKey());
-  }
-
-  @Test
-  void aReJoinAfterAHandleChangeHandsItsOperatorTheLineUntilASyncSucceedsAsIt() throws Exception {
-    var hostConfig = writeHostConfig();
-    join(hostConfig);
-    syncedWith("sail@maindevbox");
-    var asAda =
-        (Callable<JoinCommand.Plan>)
-            () ->
-                JoinCommand.plan(
-                    hostConfig,
-                    dir.resolve("sail.db"),
-                    identity(),
-                    "sail@maindevbox",
-                    "ada",
-                    null,
-                    null,
-                    NO_MAIN,
-                    pin());
-
-    assertFalse(asAda.call().mainHasKey(), "main holds the key under the old handle");
-    assertFalse(asAda.call().mainHasKey(), "no sync has succeeded as the new handle");
-    syncedWith("sail@maindevbox");
-    assertTrue(asAda.call().mainHasKey());
+    assertFalse(join(hostConfig, "mady", NEVER_ASKED).mainHasKey());
   }
 
   private final class StubKeygen implements ShellExec {

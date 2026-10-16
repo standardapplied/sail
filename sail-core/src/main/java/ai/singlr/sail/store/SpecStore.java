@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.identity.ProjectScope;
@@ -575,8 +576,8 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         + id
         + "' is not in its retained history: history keeps the newest "
         + ChangeLog.HISTORY_REVISIONS
-        + " revisions of each spec and every deletion. Pick one of those from 'sail spec history "
-        + id
+        + " revisions of each spec and every deletion. Pick one of those from '"
+        + OperatorCommand.here().sail("spec history " + id)
         + "'.";
   }
 

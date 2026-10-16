@@ -4,7 +4,6 @@
  */
 package ai.singlr.sail.store;
 
-import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.sync.SyncEngine;
 import ai.singlr.sail.sync.SyncSession;
@@ -70,30 +69,13 @@ public final class SyncHealth {
         peer);
   }
 
-  /**
-   * Drops everything recorded about syncing with {@code peer}, as if this box never had. A round
-   * still in flight finishes without recording: it ran as the identity the forget retired.
-   */
-  public void forget(String peer) {
-    db.execute("DELETE FROM sync_health WHERE peer = ?", peer);
-  }
-
-  /**
-   * Starts a round against {@code peer} and returns its id. Only the round that began last may
-   * record how it ended: an older one, or one whose peer was forgotten and begun again, is obsolete
-   * and records nothing.
-   */
-  public String begin(String peer, Instant at) {
-    var round = DateTimeUtils.newId().toString();
+  public void begin(String peer, Instant at) {
     db.execute(
         """
-        INSERT INTO sync_health (peer, last_attempt_at, state, round_id) VALUES (?, ?, 'syncing', ?)
-        ON CONFLICT(peer) DO UPDATE SET last_attempt_at = excluded.last_attempt_at, state = 'syncing',
-            round_id = excluded.round_id""",
+        INSERT INTO sync_health (peer, last_attempt_at, state) VALUES (?, ?, 'syncing')
+        ON CONFLICT(peer) DO UPDATE SET last_attempt_at = excluded.last_attempt_at, state = 'syncing'""",
         peer,
-        at.toString(),
-        round);
-    return round;
+        at.toString());
   }
 
   /**
@@ -101,14 +83,13 @@ public final class SyncHealth {
    * deferred transaction that another connection commits under cannot upgrade to a writer, and a
    * finished round would be recorded as still syncing.
    */
-  public boolean succeeded(String peer, String round, Instant at, SyncEngine.Report report) {
-    return succeeded(peer, round, at, report, 0, 0, 0, List.of());
+  public boolean succeeded(String peer, Instant at, SyncEngine.Report report) {
+    return succeeded(peer, at, report, 0, 0, 0, List.of());
   }
 
   /** A completed round, with the offers main denied in it. */
   public boolean succeeded(
       String peer,
-      String round,
       Instant at,
       SyncEngine.Report report,
       long fetchedBytes,
@@ -117,22 +98,13 @@ public final class SyncHealth {
       List<SyncSession.Denial> denials) {
     return db.transaction(
         () -> {
-          var previous =
-              db.queryOne(
-                  "SELECT consecutive_failures FROM sync_health WHERE peer = ? AND round_id = ?",
-                  row -> row.integer(0) > 0,
-                  peer,
-                  round);
-          if (previous.isEmpty()) {
-            return false;
-          }
-          var recovered = previous.get();
+          var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
           betweenReadAndWrite.run();
           db.execute(
               """
         UPDATE sync_health SET last_attempt_at = ?, last_success_at = ?, consecutive_failures = 0,
             last_error_kind = NULL, last_error = NULL, last_report = ?, state = 'in_sync',
-            stale_since = NULL WHERE peer = ? AND round_id = ?""",
+            stale_since = NULL WHERE peer = ?""",
               at.toString(),
               at.toString(),
               YamlUtil.dumpJson(
@@ -153,29 +125,24 @@ public final class SyncHealth {
                       freedBytes,
                       "denials",
                       denials.stream().map(SyncSession.Denial::toMap).toList())),
-              peer,
-              round);
+              peer);
           return recovered;
         });
   }
 
-  public int failed(String peer, String round, Instant at, String kind, String error) {
+  public int failed(String peer, Instant at, String kind, String error) {
     return db.transaction(
         () -> {
           db.execute(
               """
         UPDATE sync_health SET last_attempt_at = ?, consecutive_failures = consecutive_failures + 1,
             last_error_kind = ?, last_error = ?, state = 'stale',
-            stale_since = coalesce(stale_since, ?) WHERE peer = ? AND round_id = ?""",
+            stale_since = coalesce(stale_since, ?) WHERE peer = ?""",
               at.toString(),
               kind,
               error,
               at.toString(),
-              peer,
-              round);
-          if (db.changes() == 0) {
-            return 0;
-          }
+              peer);
           return find(peer).orElseThrow().consecutiveFailures();
         });
   }

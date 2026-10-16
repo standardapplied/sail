@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.FileSource;
 import ai.singlr.sail.engine.HostFileSource;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -507,7 +508,7 @@ public final class ProjectFilesCommand implements Runnable {
                 "  @|yellow ⚠|@ kept "
                     + copy
                     + ": the upgrade could not tell it from your edit ("
-                    + MaterializedFiles.UNDECIDED_REMEDY
+                    + MaterializedFiles.undecidedRemedy(OperatorCommand.here())
                     + ")"));
       }
     }

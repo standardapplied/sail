@@ -121,8 +121,8 @@ class SyncCliTest {
       var peer = "sail@main";
       assertEquals(peer, HostSync.config().main());
       var previous = Instant.now().minusSeconds(2);
-      health.succeeded(
-          peer, health.begin(peer, previous), previous, new SyncEngine.Report(0, 0, 0, 0));
+      health.begin(peer, previous);
+      health.succeeded(peer, previous, new SyncEngine.Report(0, 0, 0, 0));
       db.execute(
           "INSERT INTO schema_version (version, applied_at) VALUES (?, datetime('now'))",
           schema.currentVersion() + 1);
@@ -144,7 +144,7 @@ class SyncCliTest {
       } else {
         var failures = Integer.parseInt(args[0]);
         for (var i = 0; i < failures; i++) {
-          health.failed(peer, health.begin(peer, previous), previous, "unreachable", "offline");
+          health.failed(peer, previous, "unreachable", "offline");
         }
         for (var invocation = 0; invocation < 2; invocation++) {
           try (var scheduler =

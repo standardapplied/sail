@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -1065,7 +1066,7 @@ public final class PagedSyncSession implements SyncSession {
           }
           var denial = new SyncSession.Denial(type, denied.id(), denied.reason());
           denials.add(denial);
-          notice.accept(denial.describe());
+          notice.accept(denial.describe(OperatorCommand.here()));
           yield new CommitOutcome.Denied(
               denied.reason(),
               currentRev(offer.id()),

@@ -818,8 +818,10 @@ first pins main's ed25519 host key into the invoking account's `known_hosts` (`M
 `ssh-keyscan -H` on port 22, appended when absent, kept when equal, refused when it differs or
 cannot be read, all before the host config is written), then generates the box's sync key and
 prints the `sudo sail fde add … --key … --main-host-key SHA256:…` line for the operator to run
-on main. A re-join of the main the box last synced with, as the same handle with the sync key
-it already had, says main already has the key instead (`--json` still carries the line).
+on main. A re-join with the sync key the box already had opens one sync session to main as the
+joined handle (`SyncOperations.welcomedAs`): a welcome as that handle means main holds the key,
+and the join says so instead of printing the line (`--json` still carries it); anything else,
+main unreachable included, is no evidence, and the line is printed.
 Each step runs through `Main.report`, so a refusal inside init is printed once with no trace,
 then "Setup stopped" once. Main's `fde add` compares that fingerprint to its own host key before its
 transaction and refuses a mismatch, so a join that something else answered is never

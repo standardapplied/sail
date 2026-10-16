@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -134,7 +135,7 @@ public final class MaterializedFilesMigration implements DataMigration {
                 + " undecided: its copy on disk matches no version this box still holds, so it may"
                 + " be your unpublished edit or a version this box wrote before history was"
                 + " compacted. It is kept and not published; "
-                + MaterializedFiles.UNDECIDED_REMEDY);
+                + MaterializedFiles.undecidedRemedy(OperatorCommand.here()));
       }
     }
     return copyIs;

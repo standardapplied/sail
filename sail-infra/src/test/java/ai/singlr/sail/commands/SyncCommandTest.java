@@ -191,10 +191,9 @@ class SyncCommandTest {
           "nothing attempted yet: no state, no timestamps");
 
       var health = new SyncHealth(db);
-      var round = health.begin("sail@main", Instant.parse("2026-09-14T00:00:00Z"));
+      health.begin("sail@main", Instant.parse("2026-09-14T00:00:00Z"));
       health.failed(
           "sail@main",
-          round,
           Instant.parse("2026-09-14T00:00:00Z"),
           "protocol",
           "message: page exceeded 4 MiB");

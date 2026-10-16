@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.Objects;
 
 /**
@@ -39,8 +40,11 @@ public final class MaterializedFiles {
   }
 
   /** What to do with a copy the upgrade's seed could not tell from a person's edit. */
-  public static final String UNDECIDED_REMEDY =
-      "delete to take main's, or capture with 'sail project files add' if yours";
+  public static String undecidedRemedy(OperatorCommand operator) {
+    return "delete to take main's, or capture with '"
+        + operator.sail("project files add")
+        + "' if yours";
+  }
 
   private final Sqlite db;
 
