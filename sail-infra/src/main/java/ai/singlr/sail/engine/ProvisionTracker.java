@@ -19,8 +19,7 @@ import java.util.Optional;
  * its own phase enum and creates a tracker parameterized by that enum. The tracker handles
  * persistence, resume detection, and lifecycle.
  *
- * <p>State is persisted to YAML after each phase via atomic write-then-rename for crash safety, and
- * kept once the final phase is recorded: it says which inputs the finished run provisioned from. In
+ * <p>State is persisted to YAML after each phase via atomic write-then-rename for crash safety. In
  * dry-run mode, state is tracked in memory only — no disk writes.
  *
  * <p>Not thread-safe. Provisioning is single-threaded by design.
@@ -64,9 +63,10 @@ public final class ProvisionTracker<P extends Enum<P>> {
     var loaded = ProvisionState.fromMap(YamlUtil.parseFile(stateFile));
     if (!Objects.equals(loaded.inputs(), inputs)) {
       superseded = loaded;
+      var now = DateTimeUtils.now().toString();
       this.state =
           new ProvisionState(
-              null, loaded.startedAt(), DateTimeUtils.now().toString(), null, inputs);
+              null, Objects.requireNonNullElse(loaded.startedAt(), now), now, null, inputs);
       persist();
     } else {
       this.state = isKnownPhase(loaded.completedPhase()) ? loaded : ProvisionState.empty(inputs);
@@ -174,12 +174,24 @@ public final class ProvisionTracker<P extends Enum<P>> {
   }
 
   /**
-   * Returns {@code true} if a prior incomplete run exists — the state file is present and the last
-   * completed phase is not the final phase in the enum.
+   * Deletes the state file. Called when provisioning completes successfully: a finished run is
+   * recorded on what it provisioned, and the file holds only the progress of an unfinished one.
+   */
+  public void cleanup() throws IOException {
+    if (dryRun) {
+      return;
+    }
+    Files.deleteIfExists(stateFile);
+  }
+
+  /**
+   * Returns {@code true} if a prior incomplete run exists — one was started, by an earlier run or a
+   * restart {@link #load} persisted, and the last completed phase is not the final phase in the
+   * enum. A {@link #reset} ends it, in a dry run as well, where the file stays on disk.
    */
   public boolean hasIncompleteRun() {
     if (state.completedPhase() == null) {
-      return Files.exists(stateFile);
+      return state.startedAt() != null;
     }
     var completed = Enum.valueOf(phaseType, state.completedPhase());
     return completed.ordinal() < phases[phases.length - 1].ordinal();

@@ -93,19 +93,9 @@ public final class SailPaths {
     return PROJECTS_DIR.resolve(name);
   }
 
-  /**
-   * Returns the provision state file: {@code <dataDir>/projects/<name>/provision-state.yaml}. It
-   * sits beside the control-plane database rather than in the executing user's home because
-   * provisioning runs under {@code sudo} while a plain apply runs as the operator: both must read
-   * the same record, or the operator never sees the run root completed.
-   */
+  /** Returns the provision state file: {@code ~/.sail/projects/<name>/provision-state.yaml}. */
   public static Path provisionState(String name) {
-    return provisionState(dataDir(), name);
-  }
-
-  /** Pure resolver; visible for tests so resolution can be exercised without the environment. */
-  static Path provisionState(Path dataDir, String name) {
-    return dataDir.resolve("projects").resolve(name).resolve("provision-state.yaml");
+    return projectDir(name).resolve("provision-state.yaml");
   }
 
   /** Returns the update check cache file: {@code ~/.sail/update-check.yaml}. */

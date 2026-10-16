@@ -168,6 +168,41 @@ class ProvisionTrackerTest {
   }
 
   @Test
+  void cleanupDeletesStateFile() throws Exception {
+    var file = stateFile();
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    tracker.load(X);
+    tracker.advance(TestPhase.COMPLETE);
+
+    assertTrue(Files.exists(file));
+
+    tracker.cleanup();
+
+    assertFalse(Files.exists(file));
+  }
+
+  @Test
+  void cleanupNoOpWhenNoFile() throws Exception {
+    var tracker = new ProvisionTracker<>(TestPhase.class, stateFile(), false);
+    tracker.load(X);
+
+    assertDoesNotThrow(() -> tracker.cleanup());
+  }
+
+  @Test
+  void dryRunCleanupIsNoOp() throws Exception {
+    var file = stateFile();
+    var realTracker = new ProvisionTracker<>(TestPhase.class, file, false);
+    realTracker.load(X);
+    realTracker.advance(TestPhase.STEP_ONE);
+    assertTrue(Files.exists(file));
+
+    var dryTracker = new ProvisionTracker<>(TestPhase.class, file, true);
+    dryTracker.cleanup();
+    assertTrue(Files.exists(file));
+  }
+
+  @Test
   void dryRunDoesNotWriteStateToDisk() throws Exception {
     var file = stateFile();
     var tracker = new ProvisionTracker<>(TestPhase.class, file, true);
@@ -365,6 +400,7 @@ class ProvisionTrackerTest {
     dryTracker.reset();
 
     assertFalse(dryTracker.isCompleted(TestPhase.STEP_ONE));
+    assertFalse(dryTracker.hasIncompleteRun());
     assertTrue(Files.exists(file), "State file should remain on disk in dry-run mode");
   }
 
@@ -421,6 +457,18 @@ class ProvisionTrackerTest {
     assertNull(persisted.get("completed_phase"));
     assertEquals("2026-10-09T00:00:00Z", persisted.get("started_at"));
     assertEquals(X, persisted.get("inputs"));
+  }
+
+  @Test
+  void aStateWithoutAStartTimeRestartsAsAStartedRun() throws Exception {
+    var file = stateFile();
+    Files.writeString(file, "completed_phase: STEP_TWO\ninputs: x\n");
+    var tracker = new ProvisionTracker<>(TestPhase.class, file, false);
+
+    tracker.load(Y);
+
+    assertTrue(tracker.hasIncompleteRun());
+    assertNotNull(YamlUtil.parseFile(file).get("started_at"));
   }
 
   @Test

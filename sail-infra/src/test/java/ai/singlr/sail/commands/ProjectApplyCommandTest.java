@@ -25,7 +25,6 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.PairingTrust;
-import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -348,46 +347,23 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void aPlainApplyReadsTheRecordRootWroteAndConvergesOnly(@TempDir Path dataDir) throws Exception {
-    var stateFile = dataDir.resolve("projects/web/provision-state.yaml");
-    ProjectApplyCommand.tracker(stateFile, false, true)
-        .load("inputs-x")
-        .advance(ProjectPhase.COMPLETE);
-
-    var plain = ProjectApplyCommand.tracker(stateFile, false, false).load("inputs-x");
-
-    assertTrue(plain.isComplete());
-    assertFalse(plain.hasIncompleteRun());
-  }
-
-  @Test
-  void aPlainApplyNeverRewritesTheRecord(@TempDir Path dataDir) throws Exception {
-    var stateFile = dataDir.resolve("projects/web/provision-state.yaml");
-    ProjectApplyCommand.tracker(stateFile, false, true)
-        .load("inputs-x")
-        .advance(ProjectPhase.COMPLETE);
-    var written = Files.readString(stateFile);
-
-    var plain = ProjectApplyCommand.tracker(stateFile, false, false).load("inputs-y");
-
-    assertFalse(plain.isComplete());
-    assertEquals(written, Files.readString(stateFile));
-  }
-
-  @Test
   void theRecheckLineSaysWhyAnExistingContainerIsProvisionedAgain() {
-    assertEquals(
-        "The descriptor changed since the interrupted run: every step is checked again.",
-        ProjectApplyCommand.recheckLine(
-            new ProvisionState("SSH_CONFIGURED", null, null, null, "inputs-x")));
-    assertEquals(
-        "The descriptor changed since the last provisioning run: every step is checked again.",
-        ProjectApplyCommand.recheckLine(
-            new ProvisionState("COMPLETE", null, null, null, "inputs-x")));
-    assertEquals(
+    var interrupted = new ProvisionState("SSH_CONFIGURED", null, null, null, "inputs-x");
+    var finished = new ProvisionState("COMPLETE", null, null, null, "inputs-x");
+    var changedSinceInterrupted =
+        "The descriptor changed since the interrupted run: every step is checked again.";
+    var changedSinceFinished =
+        "The descriptor changed since the last provisioning run: every step is checked again.";
+    var noRecord =
         "No record of the descriptor this container was provisioned from: every step is checked"
-            + " again.",
-        ProjectApplyCommand.recheckLine(null));
+            + " again.";
+
+    assertEquals(changedSinceInterrupted, ProjectApplyCommand.recheckLine(interrupted, true));
+    assertEquals(changedSinceInterrupted, ProjectApplyCommand.recheckLine(interrupted, false));
+    assertEquals(changedSinceFinished, ProjectApplyCommand.recheckLine(null, true));
+    assertEquals(changedSinceFinished, ProjectApplyCommand.recheckLine(finished, true));
+    assertEquals(noRecord, ProjectApplyCommand.recheckLine(null, false));
+    assertEquals(noRecord, ProjectApplyCommand.recheckLine(finished, false));
   }
 
   private static String otherUserRefusal(String project, String user) {

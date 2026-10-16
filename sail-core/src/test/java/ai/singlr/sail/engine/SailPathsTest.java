@@ -34,17 +34,11 @@ class SailPathsTest {
   }
 
   @Test
-  void provisionStateIsUnderTheDataDir() {
-    assertEquals(
-        SailPaths.dataDir().resolve("projects/test/provision-state.yaml"),
-        SailPaths.provisionState("test"));
-  }
+  void provisionStateIsInsideProjectDir() {
+    var stateFile = SailPaths.provisionState("test");
 
-  @Test
-  void provisionStateIsSharedOnAProvisionedHost() {
-    assertEquals(
-        Path.of("/var/lib/sail/projects/acme/provision-state.yaml"),
-        SailPaths.provisionState(SailPaths.systemDataDir(), "acme"));
+    assertTrue(stateFile.startsWith(SailPaths.projectDir("test")));
+    assertTrue(stateFile.toString().endsWith("provision-state.yaml"));
   }
 
   @Test

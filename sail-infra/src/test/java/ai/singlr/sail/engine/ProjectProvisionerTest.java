@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -24,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -229,7 +229,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void aFinishedRunRecordsCompleteWithTheInputsItProvisionedFrom() throws Exception {
+  void aFinishedRunRecordsItsInputsOnTheContainerAndRemovesItsProgress() throws Exception {
     var shell = allSuccessShell();
     var stateFile = tempDir.resolve("provision-state.yaml");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
@@ -237,10 +237,62 @@ class ProjectProvisionerTest {
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
-    var persisted = YamlUtil.parseFile(stateFile);
-    assertEquals("COMPLETE", persisted.get("completed_phase"));
-    assertEquals(ProjectProvisioner.inputs(fullConfig()), persisted.get("inputs"));
-    assertNull(persisted.get("error"));
+    assertTrue(
+        shell
+            .invocations()
+            .contains(
+                "incus config set acme-health user.sail.inputs="
+                    + ProjectProvisioner.inputs(fullConfig())));
+    assertTrue(tracker.isComplete());
+    assertFalse(Files.exists(stateFile));
+  }
+
+  @Test
+  void aFailureToRecordTheInputsFailsTheLastStep() throws Exception {
+    var shell = allSuccessShell().onFail("incus config set acme-health user.sail.inputs", "denied");
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    var provisioner = new ProjectProvisioner(shell, tracker, null);
+
+    var thrown =
+        assertThrows(
+            IOException.class, () -> provisioner.provision(fullConfig(), hostYaml(), null, null));
+
+    assertEquals("Failed to record the provisioned descriptor: denied", thrown.getMessage());
+    assertEquals("SPECS_SCAFFOLD_CREATED", YamlUtil.parseFile(stateFile).get("completed_phase"));
+  }
+
+  @Test
+  void theInputsAContainerRecordsAreReadFromTheContainer() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus config get web user.sail.inputs", "abc123\n")
+            .onOk("incus config get legacy user.sail.inputs", "\n")
+            .onFail("incus config get gone user.sail.inputs", "Instance not found");
+
+    assertEquals(Optional.of("abc123"), ProjectProvisioner.provisionedInputs(shell, "web"));
+    assertEquals(Optional.empty(), ProjectProvisioner.provisionedInputs(shell, "legacy"));
+    assertEquals(Optional.empty(), ProjectProvisioner.provisionedInputs(shell, "gone"));
+  }
+
+  @Test
+  void aDryRunResetOfStaleProgressPreviewsEveryStepAndKeepsTheFile() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
+    var before = Files.readString(stateFile);
+    var tracker = dryRunTracker();
+    tracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    tracker.reset();
+
+    var steps = new ArrayList<String>();
+    new ProjectProvisioner(new ShellExecutor(true), tracker, new RecordingListener(steps))
+        .provision(minimalConfig(), hostYaml(), null, null);
+
+    assertEquals("step:1/20:Launching container simple...", steps.getFirst());
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertEquals(before, Files.readString(stateFile));
   }
 
   @Test
@@ -358,9 +410,11 @@ class ProjectProvisionerTest {
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
     assertTrue(shell.invocations().contains("incus exec simple -- id dev"));
     assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
-    var persisted = YamlUtil.parseFile(stateFile);
-    assertEquals("COMPLETE", persisted.get("completed_phase"));
-    assertEquals(ProjectProvisioner.inputs(edited), persisted.get("inputs"));
+    assertTrue(
+        shell
+            .invocations()
+            .contains(
+                "incus config set simple user.sail.inputs=" + ProjectProvisioner.inputs(edited)));
   }
 
   @Test
@@ -383,8 +437,6 @@ class ProjectProvisionerTest {
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
     assertTrue(shell.invocations().contains("incus exec simple -- useradd -m -s /bin/bash dev"));
-    assertEquals(
-        ProjectProvisioner.inputs(minimalConfig()), YamlUtil.parseFile(stateFile).get("inputs"));
   }
 
   @Test
@@ -413,9 +465,6 @@ class ProjectProvisionerTest {
   void aRuntimeAddedToAFinishedContainersDescriptorIsInstalledAndTheRestIsAlreadyThere()
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
-    var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
-    setupTracker.advance(ProjectPhase.COMPLETE);
     var withNode = minimalConfigWith(new SailYaml.Runtimes(0, "22", null));
 
     var shell = provisionedSimpleShell().onFail("node --version", "not found");
@@ -428,9 +477,10 @@ class ProjectProvisionerTest {
     assertTrue(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq nodejs")));
     assertAlreadyProvisioned(steps, cmds);
     assertTrue(steps.contains("done:10/20:Node.js 22"), steps.toString());
-    var persisted = YamlUtil.parseFile(stateFile);
-    assertEquals("COMPLETE", persisted.get("completed_phase"));
-    assertEquals(ProjectProvisioner.inputs(withNode), persisted.get("inputs"));
+    assertTrue(
+        cmds.contains(
+            "incus config set simple user.sail.inputs=" + ProjectProvisioner.inputs(withNode)));
+    assertFalse(Files.exists(stateFile));
   }
 
   /** A running {@code simple} whose user, limits, Podman and cron already exist. */
@@ -456,7 +506,9 @@ class ProjectProvisionerTest {
     assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
     assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus launch")));
     assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus restart")));
-    assertFalse(cmds.stream().anyMatch(c -> c.startsWith("incus config set")));
+    assertFalse(
+        cmds.stream()
+            .anyMatch(c -> c.startsWith("incus config set") && !c.contains("user.sail.inputs=")));
     assertFalse(cmds.stream().anyMatch(c -> c.contains("useradd")));
     assertFalse(cmds.stream().anyMatch(c -> c.endsWith("apt-get install -y -qq podman")));
   }

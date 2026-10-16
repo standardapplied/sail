@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Pattern;
 
@@ -45,6 +46,8 @@ public final class ProjectProvisioner {
   private static final String MAVEN_PRIMARY_BASE_URL = "https://dlcdn.apache.org/maven/maven-3/";
   private static final String MAVEN_ARCHIVE_BASE_URL =
       "https://archive.apache.org/dist/maven/maven-3/";
+
+  private static final String INPUTS_KEY = "user.sail.inputs";
 
   static final List<String> BASELINE_PACKAGES =
       List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
@@ -77,12 +80,18 @@ public final class ProjectProvisioner {
 
   /**
    * Runs all provisioning steps with resume support. On failure, the current phase is recorded in
-   * the tracker and the exception is re-thrown.
+   * the tracker and the exception is re-thrown. A tracker its owner already loaded for this
+   * descriptor is used as it stands, so a reset the owner made in a dry run is not read back from
+   * the file it left in place. On success the container records the inputs it was provisioned from
+   * and the progress file is removed.
    */
   public void provision(
       SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
       throws Exception {
-    tracker.load(inputs(config));
+    var inputs = inputs(config);
+    if (!inputs.equals(tracker.currentState().inputs())) {
+      tracker.load(inputs);
+    }
     try {
       launchContainer(config, host);
       setDiskQuota(config, host);
@@ -105,6 +114,7 @@ public final class ProjectProvisioner {
       installSkills(config);
       recordSpecsPhase();
       writeProjectState(config);
+      tracker.cleanup();
     } catch (Exception e) {
       if (currentPhase != null) {
         tracker.recordFailure(currentPhase, e.getMessage());
@@ -120,6 +130,21 @@ public final class ProjectProvisioner {
   public static String inputs(SailYaml config) {
     var descriptor = YamlUtil.dumpToString(config.toMap());
     return HexFormat.of().formatHex(Hashes.sha256(descriptor.getBytes(StandardCharsets.UTF_8)));
+  }
+
+  /**
+   * The inputs the container {@code name} was last provisioned from, read from the Incus instance
+   * itself so that every identity on the host, root or operator, reads the same record and a
+   * deleted container takes its record with it. Empty when the container has none: it was never
+   * provisioned to the end by this release, or it does not exist.
+   */
+  public static Optional<String> provisionedInputs(ShellExec shell, String name)
+      throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(List.of("incus", "config", "get", name, INPUTS_KEY));
+    if (!result.ok() || result.stdout().isBlank()) {
+      return Optional.empty();
+    }
+    return Optional.of(result.stdout().strip());
   }
 
   private void launchContainer(SailYaml config, HostYaml host) throws Exception {
@@ -1185,6 +1210,11 @@ public final class ProjectProvisioner {
             """
             .formatted(name, DateTimeUtils.now());
     pushFileToContainer(name, "/etc/sail/project.yaml", yaml);
+    var recorded =
+        shell.exec(List.of("incus", "config", "set", name, INPUTS_KEY + "=" + inputs(config)));
+    if (!recorded.ok()) {
+      throw new IOException("Failed to record the provisioned descriptor: " + recorded.stderr());
+    }
 
     tracker.advance(currentPhase);
     stepDone(20, "Project config saved");

@@ -208,20 +208,9 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
-    var tracker = tracker(SailPaths.provisionState(config.name()), dryRun, ConsoleHelper.isRoot());
-    tracker.load(ProjectProvisioner.inputs(config));
-    if (action == Action.CREATED && (tracker.hasIncompleteRun() || tracker.isComplete())) {
-      if (!json) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|faint Stale state detected — container '"
-                    + config.name()
-                    + "' no longer exists. Starting fresh.|@"));
-      }
-      tracker.reset();
-    }
-    if (action == Action.CREATED || !tracker.isComplete()) {
-      provision(config, sailYamlPath, shell, tracker, action == Action.CREATED);
+    var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
+    if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config)))) {
+      provision(config, sailYamlPath, shell, action == Action.CREATED, recorded.isPresent());
       action = Action.CREATED;
     }
 
@@ -306,10 +295,9 @@ public final class ProjectApplyCommand implements Runnable {
         Outcome outcome;
         if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
-          var tracker = tracker(SailPaths.provisionState(project), dryRun, ConsoleHelper.isRoot());
-          tracker.load(ProjectProvisioner.inputs(targetPlan.config()));
-          if (!tracker.isComplete()) {
-            provision(targetPlan.config(), sailYamlPath, shell, tracker, false);
+          var recorded = ProjectProvisioner.provisionedInputs(observer, project);
+          if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(targetPlan.config())))) {
+            provision(targetPlan.config(), sailYamlPath, shell, false, recorded.isPresent());
             action = Action.CREATED;
           }
           outcome = converge(observer, shell, targetPlan.config(), sailYamlPath);
@@ -590,29 +578,19 @@ public final class ProjectApplyCommand implements Runnable {
   }
 
   /**
-   * Why an existing container is provisioned again from its first step: the descriptor it was
-   * recorded for ({@code superseded}) is not this one, or nothing recorded one at all.
+   * Why an existing container is provisioned again from its first step: the interrupted run's
+   * progress ({@code superseded}) was recorded for another descriptor, the container was last
+   * provisioned from another descriptor ({@code recorded}), or the container records none at all.
    */
-  static String recheckLine(ProvisionState superseded) {
-    if (superseded == null) {
-      return "No record of the descriptor this container was provisioned from: every step is"
-          + " checked again.";
+  static String recheckLine(ProvisionState superseded, boolean recorded) {
+    if (superseded != null && !ProjectPhase.COMPLETE.name().equals(superseded.completedPhase())) {
+      return "The descriptor changed since the interrupted run: every step is checked again.";
     }
-    var since =
-        ProjectPhase.COMPLETE.name().equals(superseded.completedPhase())
-            ? "the last provisioning run"
-            : "the interrupted run";
-    return "The descriptor changed since " + since + ": every step is checked again.";
-  }
-
-  /**
-   * Only a run that may provision records progress. A plain apply reads the record root wrote, to
-   * tell whether the container needs provisioning at all, but never rewrites it: a restart it
-   * persisted would land in a directory it cannot write before {@link #requireRootToProvision}
-   * could say what to run instead.
-   */
-  static ProvisionTracker<ProjectPhase> tracker(Path stateFile, boolean dryRun, boolean isRoot) {
-    return new ProvisionTracker<>(ProjectPhase.class, stateFile, dryRun || !isRoot);
+    if (recorded) {
+      return "The descriptor changed since the last provisioning run: every step is checked again.";
+    }
+    return "No record of the descriptor this container was provisioned from: every step is checked"
+        + " again.";
   }
 
   /** Only provisioning needs root; converging a live container does not. */
@@ -632,13 +610,10 @@ public final class ProjectApplyCommand implements Runnable {
    * container whose descriptor changed since it was provisioned.
    *
    * @param fresh whether the container is created by this run
+   * @param recorded whether the container records the descriptor it was last provisioned from
    */
   private void provision(
-      SailYaml config,
-      Path sailYamlPath,
-      ShellExecutor shell,
-      ProvisionTracker<ProjectPhase> tracker,
-      boolean fresh)
+      SailYaml config, Path sailYamlPath, ShellExecutor shell, boolean fresh, boolean recorded)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
     ProjectCatalog.requireUnpruned(config.name());
@@ -650,11 +625,24 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
+    var tracker =
+        new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun)
+            .load(ProjectProvisioner.inputs(config));
+    if (fresh && (tracker.hasIncompleteRun() || tracker.isComplete()) && !json) {
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Stale state detected — container '"
+                  + config.name()
+                  + "' no longer exists. Starting fresh.|@"));
+    }
+    if (fresh || tracker.isComplete()) {
+      tracker.reset();
+    }
     var superseded = tracker.superseded();
     var resuming = tracker.hasIncompleteRun() && superseded.isEmpty();
     if (!fresh && !resuming && !json) {
       System.out.println(
-          Ansi.AUTO.string("  @|faint " + recheckLine(superseded.orElse(null)) + "|@"));
+          Ansi.AUTO.string("  @|faint " + recheckLine(superseded.orElse(null), recorded) + "|@"));
     }
     if (resuming) {
       if (!json) {
