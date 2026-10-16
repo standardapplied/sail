@@ -48,6 +48,7 @@ public final class ProjectProvisioner {
       "https://archive.apache.org/dist/maven/maven-3/";
 
   private static final String INPUTS_KEY = "user.sail.inputs";
+  private static final String RESTART_PENDING_KEY = "user.sail.restart_pending";
 
   static final List<String> BASELINE_PACKAGES =
       List.of("curl", "wget", "git", "sudo", "openssh-server", "gh", "ripgrep");
@@ -264,13 +265,14 @@ public final class ProjectProvisioner {
     limits.put("security.nesting", "true");
     limits.put("raw.lxc", "lxc.apparmor.profile=unconfined");
     var detail = "Resources " + cpu + " CPU, " + memory + " RAM";
-    if (isConfigured(name, limits)) {
+    if (!isRestartPending(name) && isConfigured(name, limits)) {
       tracker.advance(currentPhase);
       stepDone(3, detail + " (already set)");
       return;
     }
     var set = new ArrayList<>(List.of("incus", "config", "set", name));
     limits.forEach((key, value) -> set.add(key + "=" + value));
+    set.add(RESTART_PENDING_KEY + "=true");
     var result = shell.exec(set);
     if (!result.ok()) {
       throw new IOException("Failed to set resource limits: " + result.stderr());
@@ -279,8 +281,22 @@ public final class ProjectProvisioner {
     if (!restart.ok()) {
       throw new IOException("Failed to restart container after config: " + restart.stderr());
     }
+    var cleared = shell.exec(List.of("incus", "config", "set", name, RESTART_PENDING_KEY + "="));
+    if (!cleared.ok()) {
+      throw new IOException("Failed to clear the pending restart: " + cleared.stderr());
+    }
     tracker.advance(currentPhase);
     stepDone(3, detail);
+  }
+
+  /**
+   * Whether settings were stored by a run that never completed the restart they need: {@code
+   * raw.lxc} takes effect only at start, so stored settings alone do not prove the step's effect.
+   */
+  private boolean isRestartPending(String name)
+      throws IOException, InterruptedException, TimeoutException {
+    var pending = shell.exec(List.of("incus", "config", "get", name, RESTART_PENDING_KEY));
+    return !pending.ok() || !pending.stdout().isBlank();
   }
 
   /**

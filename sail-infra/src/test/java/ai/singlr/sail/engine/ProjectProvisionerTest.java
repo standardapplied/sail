@@ -24,6 +24,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -131,38 +132,50 @@ class ProjectProvisionerTest {
     }
   }
 
-  /** Keeps the container's {@code user.sail.inputs} record as Incus would, around its script. */
-  private static final class InputsRecordingShell implements ShellExec {
-    final PushRecordingShell pushes;
-    final Map<String, String> inputs = new LinkedHashMap<>();
+  /**
+   * Keeps every key {@code incus config set} stores, keyed "{@code <container> <key>}", and answers
+   * {@code incus config get} from it as Incus would: an unset {@code user.*} key reads empty, any
+   * other unset key reads from the script.
+   */
+  private static final class ConfigRecordingShell implements ShellExec {
+    final ShellExec script;
+    final Map<String, String> config = new LinkedHashMap<>();
 
-    InputsRecordingShell(PushRecordingShell pushes) {
-      this.pushes = pushes;
+    ConfigRecordingShell(ShellExec script) {
+      this.script = script;
     }
 
     @Override
-    public Result exec(List<String> command) throws IOException {
+    public Result exec(List<String> command)
+        throws IOException, InterruptedException, TimeoutException {
       return exec(command, null, Duration.ZERO);
     }
 
     @Override
-    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+    public Result exec(List<String> command, Path workDir, Duration timeout)
+        throws IOException, InterruptedException, TimeoutException {
+      var result = script.exec(command, workDir, timeout);
       if (command.size() == 5 && command.subList(0, 3).equals(List.of("incus", "config", "get"))) {
-        if (command.get(4).equals("user.sail.inputs")) {
-          return new Result(0, inputs.getOrDefault(command.get(3), "") + "\n", "");
+        var key = command.get(3) + " " + command.get(4);
+        if (config.containsKey(key)) {
+          return new Result(0, config.get(key) + "\n", "");
+        }
+        return command.get(4).startsWith("user.") ? new Result(0, "\n", "") : result;
+      }
+      if (result.ok()
+          && command.size() > 4
+          && command.subList(0, 3).equals(List.of("incus", "config", "set"))) {
+        for (var pair : command.subList(4, command.size())) {
+          var key = command.get(3) + " " + pair.substring(0, pair.indexOf('='));
+          var value = pair.substring(pair.indexOf('=') + 1);
+          if (value.isEmpty()) {
+            config.remove(key);
+          } else {
+            config.put(key, value);
+          }
         }
       }
-      if (command.size() == 5
-          && command.subList(0, 3).equals(List.of("incus", "config", "set"))
-          && command.get(4).startsWith("user.sail.inputs=")) {
-        var value = command.get(4).substring("user.sail.inputs=".length());
-        if (value.isEmpty()) {
-          inputs.remove(command.get(3));
-        } else {
-          inputs.put(command.get(3), value);
-        }
-      }
-      return pushes.exec(command, workDir, timeout);
+      return result;
     }
 
     @Override
@@ -547,13 +560,13 @@ class ProjectProvisionerTest {
             null,
             null,
             new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA mallory@laptop")));
-    var shell =
-        new InputsRecordingShell(
-            new PushRecordingShell(
-                provisionedSimpleShell()
-                    .onFail("node --version", "not found")
-                    .onFail("apt-get install -y -qq nodejs", "E: Unable to locate package")));
-    shell.inputs.put("simple", ProjectProvisioner.inputs(finished));
+    var pushes =
+        new PushRecordingShell(
+            provisionedSimpleShell()
+                .onFail("node --version", "not found")
+                .onFail("apt-get install -y -qq nodejs", "E: Unable to locate package"));
+    var shell = new ConfigRecordingShell(pushes);
+    shell.config.put("simple user.sail.inputs", ProjectProvisioner.inputs(finished));
 
     assertThrows(
         IOException.class,
@@ -564,7 +577,7 @@ class ProjectProvisionerTest {
 
     assertEquals(
         "ssh-ed25519 AAAA mallory@laptop\n",
-        shell.pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+        pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertEquals(Optional.empty(), ProjectProvisioner.provisionedInputs(shell, "simple"));
 
     var steps = new ArrayList<String>();
@@ -575,7 +588,7 @@ class ProjectProvisionerTest {
         .provision(finished, hostYaml(), null, null);
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
-    assertEquals("", shell.pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals("", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertEquals(
         Optional.of(ProjectProvisioner.inputs(finished)),
         ProjectProvisioner.provisionedInputs(shell, "simple"));
@@ -600,6 +613,62 @@ class ProjectProvisionerTest {
         failure.getMessage());
     assertEquals("incus config set simple user.sail.inputs=", shell.invocations().getLast());
     assertEquals("CONTAINER_LAUNCHED", YamlUtil.parseFile(stateFile).get("completed_phase"));
+  }
+
+  @Test
+  void aRestartThatFailedAfterTheLimitsWereStoredIsRetried() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var script = provisionedSimpleShell().onceOnFail("incus restart simple", "shutdown timed out");
+    var shell = new ConfigRecordingShell(script);
+    shell.config.put("simple limits.cpu", "1");
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                new ProjectProvisioner(
+                        shell, new ProvisionTracker<>(ProjectPhase.class, stateFile, false), null)
+                    .provision(minimalConfig(), hostYaml(), null, null));
+
+    assertEquals(
+        "Failed to restart container after config: shutdown timed out", failure.getMessage());
+    assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
+    assertEquals("2", shell.config.get("simple limits.cpu"));
+    assertEquals("true", shell.config.get("simple user.sail.restart_pending"));
+
+    var steps = new ArrayList<String>();
+    new ProjectProvisioner(
+            shell,
+            new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
+            new RecordingListener(steps))
+        .provision(minimalConfig(), hostYaml(), null, null);
+
+    assertTrue(steps.contains("done:3/20:Resources 2 CPU, 4GB RAM"), steps.toString());
+    assertEquals(
+        2, script.invocations().stream().filter(c -> c.equals("incus restart simple")).count());
+    assertFalse(shell.config.containsKey("simple user.sail.restart_pending"));
+  }
+
+  @Test
+  void aPendingRestartThatCannotBeClearedFailsTheStep() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var shell =
+        new ConfigRecordingShell(
+            provisionedSimpleShell()
+                .onFail("incus config set simple user.sail.restart_pending=", "denied"));
+    shell.config.put("simple limits.cpu", "1");
+
+    var failure =
+        assertThrows(
+            IOException.class,
+            () ->
+                new ProjectProvisioner(
+                        shell, new ProvisionTracker<>(ProjectPhase.class, stateFile, false), null)
+                    .provision(minimalConfig(), hostYaml(), null, null));
+
+    assertEquals("Failed to clear the pending restart: denied", failure.getMessage());
+    assertEquals("DISK_QUOTA_SET", YamlUtil.parseFile(stateFile).get("completed_phase"));
+    assertEquals("true", shell.config.get("simple user.sail.restart_pending"));
   }
 
   /** A running {@code simple} whose user, limits, Podman and cron already exist. */
