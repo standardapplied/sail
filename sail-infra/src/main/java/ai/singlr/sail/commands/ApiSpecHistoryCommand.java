@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,7 +78,10 @@ public final class ApiSpecHistoryCommand implements Runnable {
       }
       System.out.println();
       System.out.println(
-          Ansi.AUTO.string("  @|faint Restore one with: sail spec restore " + specId + " <rev>|@"));
+          Ansi.AUTO.string(
+              "  @|faint Restore one with: "
+                  + OperatorCommand.here().sail("spec restore " + specId + " <rev>")
+                  + "|@"));
     }
   }
 }

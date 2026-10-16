@@ -41,8 +41,33 @@ public final class MainHostKey {
         new ShellExecutor(false), Path.of(System.getProperty("user.home"), ".ssh", "known_hosts"));
   }
 
-  /** Pins {@code host}'s ed25519 key on port 22 and returns its {@code SHA256:} fingerprint. */
-  public String pin(String host) throws IOException, InterruptedException, TimeoutException {
+  /**
+   * How a node recovers from main's host key no longer being the one it pinned for {@code target}:
+   * drop the old pin, then join again, which pins the new one.
+   */
+  public static String rebuiltRecovery(String target) {
+    return "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R "
+        + hostOf(target)
+        + "' and re-run 'sudo sail init --main "
+        + target
+        + "'; otherwise something between this box and main is answering for it.";
+  }
+
+  /** The bare host of a sync target, whose SSH host key is pinned: no {@code user@}, no port. */
+  public static String hostOf(String target) {
+    var trimmed = target.strip();
+    var at = trimmed.indexOf('@');
+    var host = at >= 0 ? trimmed.substring(at + 1) : trimmed;
+    var colon = host.indexOf(':');
+    return colon >= 0 ? host.substring(0, colon) : host;
+  }
+
+  /**
+   * Pins the ed25519 key of {@code target}'s host on port 22 and returns its {@code SHA256:}
+   * fingerprint.
+   */
+  public String pin(String target) throws IOException, InterruptedException, TimeoutException {
+    var host = hostOf(target);
     var scan = shell.exec(List.of("ssh-keyscan", "-H", "-t", "ed25519", "-T", "5", host));
     var line =
         scan.stdout()
@@ -50,7 +75,7 @@ public final class MainHostKey {
             .map(String::strip)
             .filter(scanned -> keyOf(scanned).isPresent())
             .findFirst()
-            .orElseThrow(() -> unread(host, scan.stderr()));
+            .orElseThrow(() -> unread(host, target, scan.stderr()));
     var key = keyOf(line).orElseThrow();
     var entries = entries(host);
     if (entries.stream()
@@ -64,7 +89,7 @@ public final class MainHostKey {
               + knownHosts
               + ", so ssh would refuse it at every sync. Give main a new host key, or remove the"
               + " revocation if it was a mistake, then re-run sudo sail init --main "
-              + host
+              + target
               + ".");
     }
     var pinned =
@@ -84,10 +109,8 @@ public final class MainHostKey {
               + key.fingerprint()
               + ", but this box pinned "
               + pinned.getFirst().fingerprint()
-              + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R "
-              + host
-              + "' and re-run; otherwise something between this box and main is answering for"
-              + " it.");
+              + ". "
+              + rebuiltRecovery(target));
     }
     return key.fingerprint();
   }
@@ -146,7 +169,7 @@ public final class MainHostKey {
     }
   }
 
-  private static IllegalStateException unread(String host, String stderr) {
+  private static IllegalStateException unread(String host, String target, String stderr) {
     var reason =
         stderr
             .lines()
@@ -160,7 +183,7 @@ public final class MainHostKey {
             + "'s SSH host key on port 22: "
             + reason
             + ". Check the address and firewall, then re-run sudo sail init --main "
-            + host
+            + target
             + ".");
   }
 }

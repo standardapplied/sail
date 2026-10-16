@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.identity.Actor;
@@ -69,7 +70,10 @@ final class ProjectMutations {
     return new IllegalStateException(
         "No project '"
             + name
-            + "' in the catalog. Create it with 'sail project apply', or sync it from main with"
-            + " 'sail sync'.");
+            + "' in the catalog. Create it with '"
+            + OperatorCommand.here().sail("project apply")
+            + "', or sync it from main with '"
+            + OperatorCommand.here().sail("sync")
+            + "'.");
   }
 }

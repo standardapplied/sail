@@ -608,7 +608,7 @@ class FdeCommandTest {
         + other
         + " on its own box instead: set it up with 'sudo sail init --main "
         + main
-        + "', then run 'sail fde pair "
+        + "', then run 'sudo sail fde pair "
         + other
         + " --host <its address>' there.";
   }
@@ -722,7 +722,7 @@ class FdeCommandTest {
     assertEquals(1, fde("pair", "client", "--host", "c.acme.dev"));
     assertEquals(
         "This box holds no email for 'client', and a connect code names one. Set it on main with"
-            + " 'sail fde update client --email <email>', run 'sudo sail sync' here, then pair"
+            + " 'sudo sail fde update client --email <email>', run 'sudo sail sync' here, then pair"
             + " again.",
         refusal);
 

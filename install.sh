@@ -127,6 +127,6 @@ if [ "$OS" = "Darwin" ]; then
   info "  sail spec list <project>"
 else
   info "Get started:"
-  info "  sail host init      # provision your server"
-  info "  sail upgrade        # update to the latest version"
+  info "  sudo sail init --as-main        # make this box the org's main"
+  info "  sudo sail init --main <main>    # or join an existing main"
 fi

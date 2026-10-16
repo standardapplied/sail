@@ -10,6 +10,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -90,7 +91,9 @@ final class SpecPruner {
           ErrorCode.INVALID_REQUEST,
           "A policy prune runs on main, which decides it on its own copy; a node prunes specs by"
               + " id and projects.",
-          "Run it on main, or name the specs: sail spec prune <id...>.");
+          "Run it on main, or name the specs: "
+              + OperatorCommand.here().sail("spec prune <id...>")
+              + ".");
     }
     var handle = principal(actor.handle());
     IntFunction<List<Erasure.Target>> select = limit -> roots(request, limit);
@@ -230,7 +233,9 @@ final class SpecPruner {
       return blobs.gc(BlobStore.Compaction.NONE, true).freed();
     } catch (RuntimeException e) {
       System.err.println(
-          "  [prune] erased, but could not collect its content; 'sail sync gc' frees it: "
+          "  [prune] erased, but could not collect its content; '"
+              + OperatorCommand.here().sail("sync gc")
+              + "' frees it: "
               + e.getMessage());
       return 0;
     }

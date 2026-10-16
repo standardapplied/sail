@@ -229,16 +229,29 @@ public final class SyncOperations {
   }
 
   /**
+   * Whether main holds this box's sync key as {@code handle}: one session opened through {@code
+   * channels} as the box {@code config} names is welcomed as that handle. Anything short of that,
+   * main unreachable included, is no evidence that it does.
+   */
+  public static boolean welcomedAs(SyncConfig config, Channels channels, String handle) {
+    try (var channel = channels.open(config.main());
+        var session =
+            SyncSession.open(
+                channel.reader(), channel.writer(), hello(config), SyncOperations::notice)) {
+      return session.handle().filter(handle::equals).isPresent();
+    } catch (Exception notWelcomed) {
+      notice(Objects.toString(notWelcomed.getMessage(), notWelcomed.getClass().getSimpleName()));
+      return false;
+    }
+  }
+
+  /**
    * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
    */
   private static SyncSession open(Channel channel, SyncConfig config, Sqlite db, String target) {
     try {
       return SyncSession.open(
-          channel.reader(),
-          channel.writer(),
-          SyncWire.Hello.of(SailVersion.version(), requireBoxId(config)),
-          SyncOperations::notice,
-          db);
+          channel.reader(), channel.writer(), hello(config), SyncOperations::notice, db);
     } catch (SyncTransportException e) {
       if (!"unreachable".equals(e.kind())) {
         throw e;
@@ -255,8 +268,12 @@ public final class SyncOperations {
   static String explained(String failure, String said, String target) {
     var message = failure + " ssh said: " + said;
     return HOST_KEY_FAILED.equals(said)
-        ? message + " — re-run 'sudo sail init --main " + target + "' to pin main's host key."
+        ? message + " " + MainHostKey.rebuiltRecovery(target)
         : message;
+  }
+
+  private static SyncWire.Hello hello(SyncConfig config) {
+    return SyncWire.Hello.of(SailVersion.version(), requireBoxId(config));
   }
 
   private static String requireBoxId(SyncConfig config) {
@@ -321,7 +338,9 @@ public final class SyncOperations {
     }
     return new MainTarget(
         null,
-        "Single devbox — nothing to sync. Add a second box with: sail host sync --main <user@host>.");
+        "Single devbox — nothing to sync. Add a second box with: "
+            + OperatorCommand.here().sail("host sync --main <user@host>")
+            + ".");
   }
 
   public static List<Event> pulledMessageEvents(
@@ -423,7 +442,9 @@ public final class SyncOperations {
                       + report.skipped().size()
                       + " locally-modified file(s) in '"
                       + project
-                      + "' (capture with 'sail project files add', or delete to take main's): "
+                      + "' (capture with '"
+                      + OperatorCommand.here().sail("project files add")
+                      + "', or delete to take main's): "
                       + String.join(", ", report.skipped()),
                   Ansi.AUTO));
         }
@@ -435,7 +456,7 @@ public final class SyncOperations {
                       + " file(s) in '"
                       + project
                       + "' the upgrade could not tell from your edits ("
-                      + MaterializedFiles.UNDECIDED_REMEDY
+                      + MaterializedFiles.undecidedRemedy(OperatorCommand.here())
                       + "): "
                       + String.join(", ", report.undecided()),
                   Ansi.AUTO));

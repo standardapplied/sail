@@ -214,9 +214,7 @@ final class ReviewOperations {
 
   private void requireStore() {
     if (reviewStore == null || specStore == null) {
-      throw new ApiException(
-          ErrorCode.INTERNAL,
-          "Review store not available. Start the server with 'sail server start'.");
+      throw new ApiException(ErrorCode.INTERNAL, SailOperations.storeUnavailable("Review store"));
     }
   }
 }

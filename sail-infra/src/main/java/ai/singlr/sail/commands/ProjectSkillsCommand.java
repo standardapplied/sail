@@ -15,6 +15,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FilePicker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.gen.SpecSkillGenerator;
@@ -99,7 +100,9 @@ public final class ProjectSkillsCommand implements Runnable {
     }
     if (rows.isEmpty()) {
       return Ansi.AUTO.string(
-          "  @|faint No skills: share one with 'sail project skills add <folder>'.|@\n");
+          "  @|faint No skills: share one with '"
+              + OperatorCommand.here().sail("project skills add <folder>")
+              + "'.|@\n");
     }
     var name = width("SKILL", rows.stream().map(Row::name).toList());
     var files = width("FILES", rows.stream().map(row -> String.valueOf(row.files())).toList());

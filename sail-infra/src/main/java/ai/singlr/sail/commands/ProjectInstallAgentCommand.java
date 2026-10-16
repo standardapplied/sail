@@ -9,7 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.harness.Harness;
@@ -60,21 +60,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '"
-                  + name
-                  + "' does not exist."
-                  + "\n  Create it first with: sail project apply "
-                  + name);
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireRunning(state, name);
 
     var check = shell.exec(ContainerExec.asDevUser(name, List.of("which", tool.binaryName())));
     if (check.ok()) {

@@ -16,6 +16,8 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.GitCredentials;
+import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -70,7 +72,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!dryRun && !Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
 
     if (!dryRun) {
@@ -158,7 +160,8 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     out.println();
-    Banner.printProjectCreated(config.name(), config.sshUser(), out, ansi);
+    var operator = OperatorCommand.here();
+    Banner.printProjectCreated(config.name(), operator, out, ansi);
 
     var mgr = new ContainerManager(shell);
     var currentState = mgr.queryState(config.name());
@@ -167,7 +170,15 @@ public final class ProjectDemoCommand implements Runnable {
       var serverUser = System.getProperty("user.name");
       if (serverIp != null) {
         Banner.printSshConfig(
-            config.name(), serverIp, serverUser, r.ipv4(), "~/.ssh/id_ed25519", out, ansi);
+            config.name(),
+            HostInfo.hostname(),
+            serverIp,
+            serverUser,
+            r.ipv4(),
+            "~/.ssh/id_ed25519",
+            operator,
+            out,
+            ansi);
       }
 
       var ports = ContainerExec.queryServicePorts(shell, config.name());

@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WebhookNotifier;
@@ -168,9 +169,8 @@ public final class AgentWatchCommand implements Runnable {
       return false;
     }
     throw new IllegalStateException(
-        "No agent session running. Launch one with: sail agent start "
-            + name
-            + " --background --task '...'");
+        "No agent session running. Launch one with: "
+            + OperatorCommand.here().sail("agent start " + name + " --background --task '...'"));
   }
 
   private void execute() throws Exception {
@@ -421,7 +421,8 @@ public final class AgentWatchCommand implements Runnable {
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         name,
         "Agent exited",
-        "Agent process is no longer running. Run: sail agent report " + name);
+        "Agent process is no longer running. Run: "
+            + OperatorCommand.here().sail("agent report " + name));
   }
 
   private void notifyTriggered(
@@ -444,7 +445,7 @@ public final class AgentWatchCommand implements Runnable {
         Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
         name,
         "Watch complete",
-        "Agent session ended. Run: sail agent report " + name);
+        "Agent session ended. Run: " + OperatorCommand.here().sail("agent report " + name));
   }
 
   private static void sendNotification(

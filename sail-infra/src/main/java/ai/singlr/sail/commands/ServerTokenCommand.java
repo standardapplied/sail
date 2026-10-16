@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.TokenStore;
 import java.time.Duration;
@@ -119,7 +120,11 @@ public final class ServerTokenCommand implements Runnable {
           .orElseThrow(
               () ->
                   new IllegalArgumentException(
-                      "No FDE with handle '" + fde + "'. Add it with 'sail fde add " + fde + "'."));
+                      "No FDE with handle '"
+                          + fde
+                          + "'. Add it with '"
+                          + OperatorCommand.here().sail("fde add " + fde)
+                          + "'."));
     }
   }
 
@@ -136,7 +141,10 @@ public final class ServerTokenCommand implements Runnable {
             try (var operations = OperationsFactory.open()) {
               var tokens = operations.identity().tokens();
               if (tokens.isEmpty()) {
-                System.out.println("  No tokens. Run 'sail server init' to create one.");
+                System.out.println(
+                    "  No tokens. Run '"
+                        + OperatorCommand.here().sail("server init")
+                        + "' to create one.");
                 return;
               }
               for (var token : tokens) {

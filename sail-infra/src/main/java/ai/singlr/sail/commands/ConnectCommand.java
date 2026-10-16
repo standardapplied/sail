@@ -7,9 +7,13 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -69,29 +73,12 @@ public final class ConnectCommand implements Runnable {
       resolvedServerIp = hostYaml.serverIp();
     }
     if (resolvedServerIp == null) {
-      throw new IllegalStateException(
-          "Server IP not configured. Fix with one of:\n"
-              + "  - sudo sail host config set server-ip <your-server-ip>\n"
-              + "  - Or pass: sail project connect "
-              + name
-              + " --server-ip <your-server-ip>");
+      throw new IllegalStateException(serverIpUnset(name, OperatorCommand.here()));
     }
 
     var state = mgr.queryState(name);
-    var containerIp =
-        switch (state) {
-          case ContainerState.Running r -> r.ipv4();
-          case ContainerState.Stopped ignored ->
-              throw new IllegalStateException(
-                  "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-          case ContainerState.NotCreated ignored ->
-              throw new IllegalStateException(
-                  "Project '"
-                      + name
-                      + "' does not exist. Create it with: sail project apply <name>");
-          case ContainerState.Error e ->
-              throw new IllegalStateException("Container error: " + e.message());
-        };
+    ContainerStateGuard.requireRunning(state, name);
+    var containerIp = state instanceof ContainerState.Running running ? running.ipv4() : null;
 
     if (containerIp == null) {
       throw new IllegalStateException(
@@ -130,7 +117,13 @@ public final class ConnectCommand implements Runnable {
     }
     System.out.println(
         connectSnippet(
-            resolvedServerIp, resolvedServerUser, name, containerIp, containerUser, identityFile));
+            HostInfo.hostname(),
+            resolvedServerIp,
+            resolvedServerUser,
+            name,
+            containerIp,
+            containerUser,
+            identityFile));
   }
 
   /**
@@ -144,6 +137,14 @@ public final class ConnectCommand implements Runnable {
     } catch (RuntimeException e) {
       return "dev";
     }
+  }
+
+  /** Connect's refusal on a box with no server IP, naming both ways to give it one. */
+  static String serverIpUnset(String name, OperatorCommand operator) {
+    return "Server IP not configured. Fix with one of:\n"
+        + "  - sudo sail host config set server-ip <your-server-ip>\n"
+        + "  - Or pass: "
+        + operator.sail("project connect " + name + " --server-ip <your-server-ip>");
   }
 
   static Map<String, Object> connectJson(
@@ -166,17 +167,19 @@ public final class ConnectCommand implements Runnable {
   }
 
   static String connectSnippet(
+      String boxHost,
       String serverIp,
       String serverUser,
       String name,
       String containerIp,
       String containerUser,
       String identityFile) {
+    var alias = Banner.projectSshAlias(name, boxHost);
     var snippet =
         """
         # Add to ~/.ssh/config on your Mac:
 
-        Host singular-server
+        Host %s
             HostName %s
             User %s
             IdentityFile %s
@@ -184,25 +187,27 @@ public final class ConnectCommand implements Runnable {
         Host %s
             HostName %s
             User %s
-            ProxyJump singular-server
+            ProxyJump %s
             IdentityFile %s
 
         # Then connect:
         #   ssh %s
         #   zed ssh://%s@%s/home/%s/workspace"""
             .formatted(
+                boxHost,
                 serverIp,
                 serverUser,
                 identityFile,
-                name,
+                alias,
                 containerIp,
                 containerUser,
+                boxHost,
                 identityFile,
-                name,
+                alias,
                 containerUser,
-                name,
+                alias,
                 containerUser);
-    return snippet + agentAuth(Harnesses.all(), name);
+    return snippet + agentAuth(Harnesses.all(), alias);
   }
 
   /**

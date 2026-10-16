@@ -13,6 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DaemonSecretInstaller;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.NetworkDetector;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -127,7 +128,7 @@ public final class HostConfigSetCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

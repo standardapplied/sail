@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.ProjectStore;
 import java.util.ArrayList;
@@ -56,8 +57,11 @@ public final class ProjectListCommand implements Runnable {
       System.out.println();
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint No projects found.|@ Create one with: @|bold sail project apply|@,"
-                  + " or pull a team project with: @|bold sail sync|@"));
+              "  @|faint No projects found.|@ Create one with: @|bold "
+                  + OperatorCommand.here().sail("project apply")
+                  + "|@, or pull a team project with: @|bold "
+                  + OperatorCommand.here().sail("sync")
+                  + "|@"));
       System.out.println();
       return;
     }

@@ -149,7 +149,7 @@ public final class EnrollCommand implements Runnable {
         + result.exitCode()
         + ")."
         + (stderr.isEmpty() ? "" : "\n  ssh said: " + stderr)
-        + "\n  Not registered yet? An admin runs: sail fde add <handle> --key \"<your pubkey>\"";
+        + "\n  Not registered yet? An admin runs: sudo sail fde add <handle> --key \"<your pubkey>\"";
   }
 
   private static String unexpectedTicket(String stdout) {

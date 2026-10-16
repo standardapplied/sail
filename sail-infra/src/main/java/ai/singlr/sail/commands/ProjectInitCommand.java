@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
@@ -150,9 +151,9 @@ public final class ProjectInitCommand implements Runnable {
         .toAbsolutePath()
         .normalize()
         .equals(defaultOutputPath(name).toAbsolutePath().normalize())) {
-      return "sail project apply " + name;
+      return OperatorCommand.here().sail("project apply " + name);
     }
-    return "sail project apply " + name + " -f " + outputPath;
+    return OperatorCommand.here().sail("project apply " + name + " -f " + outputPath);
   }
 
   private SailYaml collectInputs(PrintStream out, Ansi ansi) {

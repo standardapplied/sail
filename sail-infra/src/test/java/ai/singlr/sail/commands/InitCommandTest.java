@@ -6,18 +6,32 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
+import ai.singlr.sail.Main;
+import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
+import ai.singlr.sail.engine.ShellExec;
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
+import picocli.CommandLine.Command;
+import picocli.CommandLine.Model.CommandSpec;
+import picocli.CommandLine.Spec;
 
 class InitCommandTest {
 
@@ -33,7 +47,14 @@ class InitCommandTest {
   @BeforeEach
   void freshBox() {
     hostConfig = tempDir.resolve("host.yaml");
+    gitConfig.put("user.name", "Root Person");
+    gitConfig.put("user.email", "root@box");
   }
+
+  private final Map<String, String> gitConfig = new HashMap<>();
+  private final Map<String, String> answers = new HashMap<>();
+  private final LocalIdentity identity =
+      new LocalIdentity(new GitConfig(), Path.of("no-workstation-key.pub"));
 
   private int init(String... args) {
     refusal = null;
@@ -41,7 +62,14 @@ class InitCommandTest {
         new CommandLine(
             new InitCommand(
                 () ->
-                    new InitCommand.Box(root, sudoUser, hostConfig, this::homeOf, this::runStep)));
+                    new InitCommand.Box(
+                        root,
+                        sudoUser,
+                        hostConfig,
+                        this::homeOf,
+                        identity,
+                        answers::get,
+                        this::runStep)));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
           refusal = failure.getMessage();
@@ -60,6 +88,9 @@ class InitCommandTest {
   }
 
   private void runStep(Object command, String... args) {
+    if (command instanceof HostInitCommand host) {
+      assertFalse(host.standalone(), "host init inside init prints no next step of its own");
+    }
     var step = (command.getClass().getSimpleName() + " " + String.join(" ", args)).strip();
     ran.add(step);
     if (step.equals(failing)) {
@@ -203,5 +234,176 @@ class InitCommandTest {
     assertEquals(0, init("--main", "maindevbox"));
 
     assertEquals(List.of("HostServiceInstallCommand", "JoinCommand maindevbox"), ran);
+  }
+
+  /** {@code git config --global} of one account: {@code --get} reads it, a key and value set it. */
+  private final class GitConfig implements ShellExec {
+    @Override
+    public Result exec(List<String> command) {
+      assertEquals(List.of("git", "config", "--global"), command.subList(0, 3));
+      if (command.get(3).equals("--get")) {
+        var value = gitConfig.get(command.get(4));
+        return value == null ? new Result(1, "", "") : new Result(0, value + "\n", "");
+      }
+      gitConfig.put(command.get(3), command.get(4));
+      return new Result(0, "", "");
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) {
+      return exec(command);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
+
+  private static final String BY_NAME =
+      """
+      name: gamma
+      git:
+        name: ${GIT_NAME}
+        email: ${GIT_EMAIL}
+      ssh:
+        user: dev
+      """;
+
+  @Test
+  void aNodesNameAndEmailBecomeRootsGitIdentitySoAByNameApplyResolvesIt() {
+    gitConfig.clear();
+    assertEquals(0, init("--main", "m", "--name", "A B", "--email", "a@b"));
+
+    assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
+    assertEquals(
+        List.of(
+            "HostInitCommand --yes",
+            "HostServiceInstallCommand",
+            "JoinCommand m --name A B --email a@b"),
+        ran);
+    var git = ProjectDefinitions.resolveForProvisioning(BY_NAME, identity::valueFor).git();
+    assertEquals("A B", git.name());
+    assertEquals("a@b", git.email());
+  }
+
+  @Test
+  void aBoxThatAlreadyHasAGitIdentityKeepsIt() {
+    gitConfig.put("user.name", "Root Person");
+    gitConfig.put("user.email", "root@box");
+
+    assertEquals(0, init("--main", "m", "--name", "A B", "--email", "a@b"));
+
+    assertEquals(Map.of("user.name", "Root Person", "user.email", "root@box"), gitConfig);
+    assertEquals("JoinCommand m --name A B --email a@b", ran.getLast());
+  }
+
+  @Test
+  void aMainTakesItsGitIdentityFromInitSoItsSecondApplyByNameConverges() {
+    gitConfig.clear();
+    assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
+
+    assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
+    var git = ProjectDefinitions.resolveForProvisioning(BY_NAME, identity::valueFor).git();
+    assertEquals("A B", git.name());
+    assertEquals("a@b", git.email());
+  }
+
+  @Test
+  void aBoxWithNoGitIdentityAsksForIt() {
+    gitConfig.clear();
+    answers.put("Your full name", " A B ");
+    answers.put("Your email", "a@b");
+
+    assertEquals(0, init("--as-main"));
+
+    assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
+  }
+
+  @Test
+  void theIdentityIsAskedBeforeTheFirstStepAndGivenOnlyOnceSetupFinished() {
+    gitConfig.clear();
+    answers.put("Your full name", "A B");
+    failing = "HostServiceInstallCommand";
+
+    assertEquals(1, init("--as-main", "--email", "a@b"));
+
+    assertEquals(Map.of(), gitConfig);
+    failing = null;
+    answers.clear();
+    assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
+    assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
+  }
+
+  @Test
+  void aBoxLeftWithNoGitIdentityIsRefusedBeforeAnyStep() {
+    gitConfig.clear();
+
+    assertEquals(1, init("--main", "m"));
+
+    assertEquals(
+        "This box has no git user.name set, so a project here can't take on your identity."
+            + " Re-run with --name \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
+    assertEquals(Map.of(), gitConfig);
+  }
+
+  @Test
+  void aBlankAnswerIsNoIdentity() {
+    gitConfig.remove("user.email");
+    answers.put("Your email", "  ");
+
+    assertEquals(1, init("--as-main"));
+
+    assertEquals(
+        "This box has no git user.email set, so a project here can't take on your identity."
+            + " Re-run with --email \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Command(name = "refusing")
+  static final class Refusing implements Runnable {
+    @Spec CommandSpec spec;
+
+    @Override
+    public void run() {
+      CliCommand.run(
+          spec,
+          () -> {
+            throw new IllegalStateException("main's SSH host key changed.");
+          });
+    }
+  }
+
+  @Test
+  void aStepsRefusalIsPrintedOnceWithNoTraceAndSetupStoppedOnce() {
+    var originalErr = System.err;
+    var err = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      var init =
+          new CommandLine(
+              new InitCommand(
+                  () ->
+                      new InitCommand.Box(
+                          root,
+                          sudoUser,
+                          hostConfig,
+                          this::homeOf,
+                          identity,
+                          answers::get,
+                          (command, args) -> InitCommand.runCommand(new Refusing()))));
+      init.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
+
+      assertEquals(1, init.execute("--main", "m"));
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertEquals(
+        "  ✗ main's SSH host key changed.\n  ✗ Setup stopped — the step above failed.\n",
+        err.toString(StandardCharsets.UTF_8));
   }
 }

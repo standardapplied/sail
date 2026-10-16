@@ -134,7 +134,10 @@ public final class ProjectApplier {
     return new ApplyResult(added, 0, skipped, List.of());
   }
 
-  /** Clones new repos. Repos whose target directory already exists are skipped. */
+  /**
+   * Clones new repos. A repo whose target directory already exists is skipped when it is a checkout
+   * of the definition's repository, and refused otherwise ({@link RepoOrigin}).
+   */
   public ApplyResult applyRepos(
       String name,
       List<SailYaml.Repo> repos,
@@ -155,6 +158,7 @@ public final class ProjectApplier {
       var targetDir = "/home/" + sshUser + "/workspace/" + repo.path();
       var check = probes.exec(ContainerExec.asDevUser(name, List.of("test", "-d", targetDir)));
       if (check.ok()) {
+        RepoOrigin.require(probes, name, targetDir, repo);
         out.println("  [skip] Repo '" + repo.path() + "' already cloned");
         skipped++;
         continue;
@@ -433,10 +437,9 @@ public final class ProjectApplier {
             || !normalizedSize(config.resources().memory())
                 .equals(normalizedSize(liveLimits.memory())))) {
       warnings.add(
-          "CPU and memory changes are not applied by 'sail project apply'."
-              + " Use 'sail project resources set "
-              + config.name()
-              + " ...' instead.");
+          "CPU and memory changes are not applied by 'sail project apply'. Use '"
+              + OperatorCommand.here().sail("project resources set " + config.name() + " ...")
+              + "' instead.");
     }
     return warnings;
   }

@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -125,7 +126,8 @@ public final class AgentReviewCommand implements Runnable {
     if (reviews.isEmpty()) {
       lines.add(
           "    @|yellow ⚠|@ No reviews have run for this attempt. The pipeline reviews when the"
-              + " agent stops; follow it with: sail agent log <project> --review");
+              + " agent stops; follow it with: "
+              + OperatorCommand.here().sail("agent log <project> --review"));
       return lines;
     }
     for (var review : reviews) {

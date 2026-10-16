@@ -209,8 +209,8 @@ public final class ProjectProvisioner {
               + config.name()
               + ": "
               + e.getMessage()
-              + ". Run 'sail project apply "
-              + config.name()
+              + ". Run '"
+              + OperatorCommand.here().sail("project apply " + config.name())
               + "' to retry.");
     }
   }
@@ -468,7 +468,7 @@ public final class ProjectProvisioner {
               + ", but sail runs every agent, shell and hook as uid 1000. The image '"
               + image
               + "' has another user at uid 1000; use an image without one (ubuntu/24.04 has only"
-              + " 'ubuntu', which sail removes), then run 'sail project destroy "
+              + " 'ubuntu', which sail removes), then run 'sudo sail project destroy "
               + name
               + "' and 'sudo sail project apply "
               + name
@@ -950,6 +950,7 @@ public final class ProjectProvisioner {
 
       var check = execAsDevUser(name, List.of("test", "-d", targetDir));
       if (check.ok()) {
+        RepoOrigin.require(shell, name, targetDir, repo);
         continue;
       }
 

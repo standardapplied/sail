@@ -178,8 +178,8 @@ public final class ConflictOperations {
           """
           '%s' was recorded before conflicts kept main's revision, so main's side cannot be \
           adopted as main made it.
-          Run 'sail sync' to re-record it, then resolve."""
-              .formatted(conflict.entityId()));
+          Run '%s' to re-record it, then resolve."""
+              .formatted(conflict.entityId(), OperatorCommand.here().sail("sync")));
     }
   }
 
@@ -211,8 +211,10 @@ public final class ConflictOperations {
     if (!(madeFrom instanceof String named) || named.isBlank()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
-          "A merged record must start from 'sail conflicts show %s --template'."
-              .formatted(conflict.entityId()));
+          "A merged record must start from '%s'."
+              .formatted(
+                  OperatorCommand.here()
+                      .sail("conflicts show " + conflict.entityId() + " --template")));
     }
     if (!named.equals(fingerprint(conflict))) {
       throw new ApiException(
@@ -256,12 +258,13 @@ public final class ConflictOperations {
           ErrorCode.CONFLICT,
           """
           '%s' changed on this box after this conflict was recorded (%s).
-          Run 'sail sync' to refresh it, then %s."""
+          Run '%s' to refresh it, then %s."""
               .formatted(
                   conflict.entityId(),
                   drift.stream()
                       .map(ConflictOperations::displayField)
                       .collect(Collectors.joining(", ")),
+                  OperatorCommand.here().sail("sync"),
                   then));
     }
   }

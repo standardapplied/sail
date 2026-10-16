@@ -11,8 +11,10 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSetupSweep;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ResourceChecker;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
@@ -61,7 +63,7 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, r, System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, null, System.out, Ansi.AUTO);
+        Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
         printTunnelHints(shell);
         printOvercommitHints(mgr);
       }
@@ -80,13 +82,13 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, new ContainerState.Running(ip), System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, null, System.out, Ansi.AUTO);
+        Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
         printTunnelHints(shell);
         printOvercommitHints(mgr);
       }
       case ContainerState.NotCreated ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
+              ContainerStateGuard.notCreated(name, OperatorCommand.here()));
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }

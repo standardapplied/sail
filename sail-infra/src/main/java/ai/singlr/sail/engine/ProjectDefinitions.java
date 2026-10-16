@@ -93,8 +93,11 @@ public final class ProjectDefinitions {
                     new IllegalStateException(
                         "No descriptor found for project '"
                             + name
-                            + "'. Author one with 'sail project init', or sync it from main with"
-                            + " 'sail sync'."));
+                            + "'. Author one with '"
+                            + OperatorCommand.here().sail("project init")
+                            + "', or sync it from main with '"
+                            + OperatorCommand.here().sail("sync")
+                            + "'."));
     return SailYaml.fromMap(YamlUtil.parseMap(text));
   }
 
@@ -140,11 +143,11 @@ public final class ProjectDefinitions {
               + "', but sail runs every agent, shell and hook as 'dev' (uid 1000, /home/dev)."
               + " Remove 'ssh.user' from "
               + name
-              + "'s descriptor (or set it to dev) with 'sail project edit "
-              + name
+              + "'s descriptor (or set it to dev) with '"
+              + OperatorCommand.here().sail("project edit " + name)
               + "', then apply again. A container already created as '"
               + user
-              + "' must be recreated: 'sail project destroy "
+              + "' must be recreated: 'sudo sail project destroy "
               + name
               + "', then 'sudo sail project apply "
               + name

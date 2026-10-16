@@ -9,6 +9,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalog;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import java.io.IOException;
@@ -74,8 +75,11 @@ public final class ProjectEditCommand implements Runnable {
                     new IllegalStateException(
                         "No project '"
                             + name
-                            + "' to edit. Create it with 'sail project apply', or sync it from"
-                            + " main with 'sail sync'."));
+                            + "' to edit. Create it with '"
+                            + OperatorCommand.here().sail("project apply")
+                            + "', or sync it from main with '"
+                            + OperatorCommand.here().sail("sync")
+                            + "'."));
 
     var edited = file != null ? Files.readString(Path.of(file)) : edit(editor, name, current);
     if (edited.equals(current)) {

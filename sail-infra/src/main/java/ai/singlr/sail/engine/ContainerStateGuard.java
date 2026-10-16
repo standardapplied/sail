@@ -16,29 +16,44 @@ public final class ContainerStateGuard {
 
   /** Requires the container to be running; throws otherwise. */
   public static void requireRunning(ContainerState state, String name) {
+    requireRunning(state, name, OperatorCommand.here());
+  }
+
+  static void requireRunning(ContainerState state, String name, OperatorCommand operator) {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
+              "Project '"
+                  + name
+                  + "' is stopped. Start it with: "
+                  + operator.sail("project start " + name));
+      default -> requireCreated(state, name, operator);
     }
   }
 
   /** Requires the container to exist (running or stopped); throws otherwise. */
   public static void requireCreated(ContainerState state, String name) {
+    requireCreated(state, name, OperatorCommand.here());
+  }
+
+  static void requireCreated(ContainerState state, String name, OperatorCommand operator) {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored -> {}
       case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
+          throw new IllegalStateException(notCreated(name, operator));
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }
+  }
+
+  /** What a command told of a project with no container says. */
+  public static String notCreated(String name, OperatorCommand operator) {
+    return "Project '"
+        + name
+        + "' does not exist. Run '"
+        + operator.sail("project apply <name>")
+        + "' first.";
   }
 }

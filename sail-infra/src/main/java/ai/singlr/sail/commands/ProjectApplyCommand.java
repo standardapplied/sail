@@ -20,9 +20,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectCatalog;
@@ -369,9 +371,8 @@ public final class ProjectApplyCommand implements Runnable {
     }
     return project
         + ": catalog entry exists but the container carries no sail-api-sock device — possibly a"
-        + " foreign container reusing the name. Skipped; claim it explicitly with 'sail project"
-        + " apply "
-        + project
+        + " foreign container reusing the name. Skipped; claim it explicitly with '"
+        + OperatorCommand.here().sail("project apply " + project)
         + "' if it is yours.";
   }
 
@@ -621,7 +622,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
@@ -673,7 +674,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     if (!json) {
       System.out.println();
-      Banner.printProjectCreated(config.name(), config.sshUser(), System.out, Ansi.AUTO);
+      Banner.printProjectCreated(config.name(), OperatorCommand.here(), System.out, Ansi.AUTO);
     }
   }
 
@@ -685,29 +686,34 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var serverIp = hostYaml.serverIp();
+    var operator = OperatorCommand.here();
     if (serverIp != null) {
       Banner.printSshConfig(
           config.name(),
+          HostInfo.hostname(),
           serverIp,
           System.getProperty("user.name"),
           r.ipv4(),
           WorkstationIdentity.identityFile(),
+          operator,
           System.out,
           Ansi.AUTO);
     } else {
       System.out.println();
-      System.out.println(
-          Ansi.AUTO.string(
-              "    @|yellow Server IP not configured.|@"
-                  + " Run: sudo sail host config set server-ip <your-server-ip>"));
-      System.out.println(
-          Ansi.AUTO.string(
-              "    Then: sail project connect " + config.name() + " for SSH config snippet."));
+      System.out.println(Ansi.AUTO.string(serverIpUnsetLines(config.name(), operator)));
     }
     var ports = ContainerExec.queryServicePorts(shell, config.name());
     if (!ports.isEmpty()) {
       Banner.printSshTunnels(config.name(), config.sshUser(), ports, System.out, Ansi.AUTO);
     }
+  }
+
+  /** What apply prints for a box with no server IP: the command that sets it, then connect's. */
+  static String serverIpUnsetLines(String project, OperatorCommand operator) {
+    return "    @|yellow Server IP not configured.|@ Run: sudo sail host config set server-ip"
+        + " <your-server-ip>\n    Then: "
+        + operator.sail("project connect " + project)
+        + " for SSH config snippet.";
   }
 
   private Map<String, String> resolveGitTokens(SailYaml config) {
@@ -745,7 +751,8 @@ public final class ProjectApplyCommand implements Runnable {
                 + "Provide the token via one of:\n"
                 + "  --git-token <token>\n"
                 + "  GITHUB_TOKEN environment variable\n\n"
-                + "Then re-run: sail project apply <name>");
+                + "Then re-run: "
+                + OperatorCommand.here().sail("project apply <name>"));
       }
     }
     return Map.copyOf(tokens);
@@ -780,13 +787,20 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var sailYamlPath = resolveSailYamlPath(name, file);
     if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + sailYamlPath.toAbsolutePath()
-              + "\n  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
-              + " specify one with --file.");
+      throw new IllegalStateException(descriptorNotFound(sailYamlPath, OperatorCommand.here()));
     }
     return new Definition(Files.readString(sailYamlPath), sailYamlPath);
+  }
+
+  /** The refusal of an apply that finds no definition of its project at {@code path}. */
+  static String descriptorNotFound(Path path, OperatorCommand operator) {
+    return "Project descriptor not found: "
+        + path.toAbsolutePath()
+        + "\n  Run '"
+        + operator.sail("project init")
+        + "' to author one, sync it from main with '"
+        + operator.sail("sync")
+        + "', or specify one with --file.";
   }
 
   /**

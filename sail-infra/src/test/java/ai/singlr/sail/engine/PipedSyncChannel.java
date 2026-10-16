@@ -45,7 +45,11 @@ public final class PipedSyncChannel {
         return toServer;
       }
 
+      /**
+       * Closes this node's end first, as ssh's would, so a main left mid-hello sees EOF and exits.
+       */
       public void close() throws IOException {
+        toServer.close();
         try {
           thread.join();
           if (error.get() != null) throw new IOException("main failed", error.get());
@@ -53,7 +57,6 @@ public final class PipedSyncChannel {
           Thread.currentThread().interrupt();
           throw new IOException(e);
         } finally {
-          toServer.close();
           fromServer.close();
         }
       }

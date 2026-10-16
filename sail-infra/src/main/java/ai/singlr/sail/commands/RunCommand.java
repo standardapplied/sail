@@ -30,6 +30,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailWatcher;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SailPaths;
@@ -419,7 +420,8 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (background) {
-      Banner.printAgentLaunched(name, task, branchName, System.out, Ansi.AUTO);
+      Banner.printAgentLaunched(
+          name, task, branchName, OperatorCommand.here(), System.out, Ansi.AUTO);
       session
           .watcher()
           .ifPresent(

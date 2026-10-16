@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
 import java.io.BufferedReader;
@@ -176,9 +177,9 @@ public final class AgentLogCommand implements Runnable {
     }
     System.out.println(
         Ansi.AUTO.string(
-            "  @|faint No agent log found. Launch an agent with: sail agent run "
-                + name
-                + " --task \"...\" --background|@"));
+            "  @|faint No agent log found. Launch an agent with: "
+                + OperatorCommand.here().sail("agent run " + name + " --task \"...\" --background")
+                + "|@"));
   }
 
   /**

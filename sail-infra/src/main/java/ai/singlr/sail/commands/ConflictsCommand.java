@@ -11,6 +11,7 @@ import ai.singlr.sail.api.Resolution;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
@@ -115,8 +116,13 @@ public final class ConflictsCommand implements Callable<Integer> {
                   + c.detectedAt()
                   + ")|@\n"));
     }
-    out.append(Ansi.AUTO.string("  Run @|bold sail conflicts show <id>|@ to inspect, "));
-    out.append(Ansi.AUTO.string("@|bold sail conflicts resolve <id> --mine|--theirs|--merge|@."));
+    var operator = OperatorCommand.here();
+    out.append(
+        Ansi.AUTO.string(
+            "  Run @|bold " + operator.sail("conflicts show <id>") + "|@ to inspect, "));
+    out.append(
+        Ansi.AUTO.string(
+            "@|bold " + operator.sail("conflicts resolve <id> --mine|--theirs|--merge") + "|@."));
     return out.toString();
   }
 
@@ -311,7 +317,9 @@ public final class ConflictsCommand implements Callable<Integer> {
           Ansi.AUTO.string(
               "  @|green ✓|@ Resolved @|yellow "
                   + address.entity
-                  + "|@. Run @|bold sail sync|@ to propagate."));
+                  + "|@. Run @|bold "
+                  + OperatorCommand.here().sail("sync")
+                  + "|@ to propagate."));
     }
   }
 }

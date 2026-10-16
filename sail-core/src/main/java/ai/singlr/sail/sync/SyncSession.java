@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.Sqlite;
 import java.io.InputStream;
@@ -55,10 +56,10 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     }
 
     /** The denial as the FDE reads it: what main refused, why, and where their version is kept. */
-    public String describe() {
+    public String describe(OperatorCommand operator) {
       var kept =
           "spec".equals(type)
-              ? "Yours is in its history: sail spec history " + id + "."
+              ? "Yours is in its history: " + operator.sail("spec history " + id) + "."
               : "Yours stays in this box's change log.";
       var why = reason.endsWith(".") ? reason : reason + ".";
       return type + " " + id + ": main denied this change — " + why + " " + kept;

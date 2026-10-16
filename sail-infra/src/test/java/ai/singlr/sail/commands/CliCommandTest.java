@@ -7,13 +7,17 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.Main;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,6 +59,72 @@ class CliCommandTest {
 
     assertEquals("boom", error.getMessage());
     assertTrue(capturedErr.toString(StandardCharsets.UTF_8).contains("boom"));
+  }
+
+  @Test
+  void aRefusalIsPrintedOnceWithItsFixThenTheHintAndMarkedPrinted() {
+    var command = new CommandLine(new TestCommand());
+    var refusal =
+        new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.");
+
+    var error =
+        assertThrows(
+            CommandLine.ExecutionException.class,
+            () ->
+                CliCommand.run(
+                    command.getCommandSpec(),
+                    "  try --dry-run",
+                    () -> {
+                      throw refusal;
+                    }));
+
+    assertEquals(
+        "  ✗ The roster is unsynced.\nRun 'sail sync'.\n  try --dry-run\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+    assertEquals(refusal, error.getCause());
+    assertTrue(CliCommand.printed(refusal));
+    assertFalse(CliCommand.printed(new IllegalStateException("never run")));
+  }
+
+  @Test
+  void aRefusalThatNamesNoFixIsPrintedAsItsMessageAlone() {
+    var command = new CommandLine(new TestCommand());
+
+    assertThrows(
+        CommandLine.ExecutionException.class,
+        () ->
+            CliCommand.run(
+                command.getCommandSpec(),
+                () -> {
+                  throw new ApiException(
+                      ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
+                      "Project 'acme' is not in the catalog.");
+                }));
+
+    assertEquals(
+        "  ✗ Project 'acme' is not in the catalog.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void theTopLevelHandlerPrintsNothingThisRunAlreadyPrinted() {
+    var line = new CommandLine(new TestCommand());
+    var err = new StringWriter();
+    line.setErr(new PrintWriter(err));
+    var printed = new IllegalStateException("main's SSH host key changed.");
+    assertThrows(
+        CommandLine.ExecutionException.class,
+        () ->
+            CliCommand.run(
+                line.getCommandSpec(),
+                () -> {
+                  throw printed;
+                }));
+
+    assertEquals(1, Main.report(printed, line));
+    assertEquals("", err.toString());
+    assertEquals(
+        "  ✗ main's SSH host key changed.\n", capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @Test

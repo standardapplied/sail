@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.FileSource;
 import ai.singlr.sail.engine.HostFileSource;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
@@ -447,7 +448,9 @@ class ProjectFilesCommandTest {
     assertEquals(2, lines.size(), lines.toString());
     assertTrue(lines.get(0).contains("kept local edit: acme/edited.txt (unchanged)"), lines.get(0));
     assertTrue(lines.get(1).contains("kept acme/stale.conf"), lines.get(1));
-    assertTrue(lines.get(1).contains(MaterializedFiles.UNDECIDED_REMEDY), lines.get(1));
+    assertTrue(
+        lines.get(1).contains(MaterializedFiles.undecidedRemedy(OperatorCommand.PLAIN)),
+        lines.get(1));
   }
 
   @Test

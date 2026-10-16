@@ -84,7 +84,7 @@ class MainHostKeyTest {
     Files.writeString(knownHosts(), pinned);
     var hostKey = new MainHostKey(new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts());
 
-    var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("maindevbox"));
+    var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("sail@maindevbox"));
 
     assertEquals(
         "maindevbox's SSH host key is "
@@ -92,9 +92,26 @@ class MainHostKeyTest {
             + ", but this box pinned "
             + MAIN.fingerprint()
             + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
-            + " re-run; otherwise something between this box and main is answering for it.",
+            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
+            + " box and main is answering for it.",
         refused.getMessage());
     assertEquals(pinned, Files.readString(knownHosts()));
+  }
+
+  @Test
+  void theRecoveryIsOneSentenceWhereverAChangedKeyIsMet() {
+    assertEquals(
+        "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R 10.128.0.7' and re-run"
+            + " 'sudo sail init --main sail@10.128.0.7:2222'; otherwise something between this box"
+            + " and main is answering for it.",
+        MainHostKey.rebuiltRecovery("sail@10.128.0.7:2222"));
+  }
+
+  @Test
+  void aTargetsHostDropsItsUserAndPort() {
+    assertEquals("host", MainHostKey.hostOf("sail@host"));
+    assertEquals("10.0.0.1", MainHostKey.hostOf(" sail@10.0.0.1:2222 "));
+    assertEquals("maindevbox", MainHostKey.hostOf("maindevbox"));
   }
 
   @Test

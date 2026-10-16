@@ -254,13 +254,108 @@ class ProjectApplierTest {
 
   @Test
   void applyReposSkipsExistingRepo() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("test -d /home/dev/workspace/backend");
+    var shell =
+        new ScriptedShellExecutor()
+            .onOk("test -d /home/dev/workspace/backend")
+            .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
+            .onOk(
+                "git -C /home/dev/workspace/backend remote get-url origin",
+                "https://github.com/org/backend.git\n");
     var applier = applier(shell);
 
     var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
     var result = applier.applyRepos(CONTAINER, repos, "dev", null, null);
 
     assertEquals(0, result.added());
+    assertEquals(1, result.skipped());
+  }
+
+  private static ScriptedShellExecutor checkout(ShellExec.Result origin) {
+    return new ScriptedShellExecutor()
+        .onOk("test -d /home/dev/workspace/backend")
+        .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
+        .on("git -C /home/dev/workspace/backend remote get-url origin", origin);
+  }
+
+  @Test
+  void aCheckoutOfAnotherRepositoryIsRefusedAndLeftAsItIs() {
+    var shell = checkout(new ShellExec.Result(0, "https://github.com/org/old.git\n", ""));
+    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+
+    assertEquals(
+        "Repo 'backend' is a clone of https://github.com/org/old.git, but the definition says"
+            + " https://github.com/org/backend.git. Move it aside (it may hold work) or fix the URL.",
+        refused.getMessage());
+    assertEquals(
+        List.of(),
+        shell.invocations().stream()
+            .filter(c -> c.contains("git clone") || c.contains("rm ") || c.contains("set-url"))
+            .toList());
+  }
+
+  @Test
+  void aDirectoryThatIsNoCheckoutIsRefused() {
+    var shell =
+        checkout(new ShellExec.Result(128, "", "fatal: not a git repository (or any parent)"));
+    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+
+    assertEquals(
+        "Repo 'backend' is not a git checkout, but the definition says"
+            + " https://github.com/org/backend.git. Move it aside (it may hold work) or fix the URL.",
+        refused.getMessage());
+  }
+
+  @Test
+  void aCheckoutWithNoOriginIsRefused() {
+    var shell = checkout(new ShellExec.Result(2, "", "error: No such remote 'origin'"));
+    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+
+    assertEquals(
+        "Repo 'backend' is a clone with no origin, but the definition says"
+            + " https://github.com/org/backend.git. Move it aside (it may hold work) or fix the URL.",
+        refused.getMessage());
+  }
+
+  @Test
+  void aRefusalNeverEchoesATokenInTheCheckoutsUrl() {
+    var shell =
+        checkout(
+            new ShellExec.Result(0, "https://x-access-token:ghp_s3cret@github.com/org/old\n", ""));
+    var repos = List.of(new SailYaml.Repo("https://github.com/org/backend.git", "backend", null));
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> applier(shell).applyRepos(CONTAINER, repos, "dev", null, null));
+
+    assertEquals(
+        "Repo 'backend' is a clone of https://github.com/org/old, but the definition says"
+            + " https://github.com/org/backend.git. Move it aside (it may hold work) or fix the URL.",
+        refused.getMessage());
+  }
+
+  @Test
+  void aCheckoutSwitchedBetweenSshAndHttpsStillConverges() throws Exception {
+    var shell = checkout(new ShellExec.Result(0, "ssh://git@GitHub.com/org/backend/\n", ""));
+    var repos = List.of(new SailYaml.Repo("git@github.com:org/backend.git", "backend", null));
+
+    var result = applier(shell).applyRepos(CONTAINER, repos, "dev", null, null);
+
     assertEquals(1, result.skipped());
   }
 

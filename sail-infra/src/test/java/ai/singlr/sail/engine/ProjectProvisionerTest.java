@@ -1046,7 +1046,7 @@ class ProjectProvisionerTest {
     var expected =
         "User 'dev' in simple has uid 1001, but sail runs every agent, shell and hook as uid 1000."
             + " The image 'ubuntu/24.04' has another user at uid 1000; use an image without one"
-            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sail project"
+            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sudo sail project"
             + " destroy simple' and 'sudo sail project apply simple'.";
     assertEquals(expected, failure.getMessage());
     var persisted = YamlUtil.parseFile(stateFile);
@@ -1542,7 +1542,11 @@ class ProjectProvisionerTest {
         .onOk("useradd")
         .onFail("which podman", "")
         .onFail("test -f /etc/profile.d/testcontainers.sh", "")
-        .onFail("crontab -l", "no crontab");
+        .onFail("crontab -l", "no crontab")
+        .onOk("rev-parse --is-inside-work-tree --show-prefix", "true\n\n")
+        .onOk(
+            "git -C /home/dev/workspace/api remote get-url origin",
+            "https://github.com/acme/api.git\n");
   }
 
   @Test
@@ -1947,7 +1951,12 @@ class ProjectProvisionerTest {
   @Test
   void repoAlreadyExistsIsSkipped() throws Exception {
     var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
-    var shell = shellThroughStep10().onOk("test -d /home/dev/workspace/acme", "");
+    var shell =
+        shellThroughStep10()
+            .onOk("test -d /home/dev/workspace/acme", "")
+            .onOk(
+                "git -C /home/dev/workspace/acme remote get-url origin",
+                "git@github.com:acme/app\n");
     var steps = new ArrayList<String>();
     var provisioner = new ProjectProvisioner(shell, tracker(), new RecordingListener(steps));
 
@@ -1975,6 +1984,32 @@ class ProjectProvisionerTest {
         cmds.stream()
             .anyMatch(c -> c.contains("git clone --branch develop") && c.contains("acme/app")),
         "Should use --branch flag when branch is specified");
+  }
+
+  @Test
+  void aCheckoutOfAnotherRepositoryStopsTheStepBeforeItIsRecorded() {
+    var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", null));
+    var shell =
+        shellThroughStep10()
+            .onOk("test -d /home/dev/workspace/acme", "")
+            .onOk(
+                "git -C /home/dev/workspace/acme remote get-url origin",
+                "https://github.com/acme/legacy.git\n");
+    var tracker = tracker();
+    var provisioner = new ProjectProvisioner(shell, tracker, null);
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> provisioner.provision(configWithRepos(repos), hostYaml(), null, null));
+
+    assertEquals(
+        "Repo 'acme' is a clone of https://github.com/acme/legacy.git, but the definition says"
+            + " https://github.com/acme/app.git. Move it aside (it may hold work) or fix the URL.",
+        refused.getMessage());
+    assertEquals("REPOS_CLONED", tracker.currentState().error().failedPhase());
+    assertFalse(tracker.isCompleted(ProjectPhase.REPOS_CLONED));
+    assertFalse(shell.invocations().stream().anyMatch(c -> c.contains("git clone")));
   }
 
   @Test

@@ -487,43 +487,55 @@ public final class Banner {
   }
 
   /** Prints the project creation success message with Zed connect hint. */
-  public static void printProjectCreated(String name, String sshUser, PrintStream out, Ansi ansi) {
-    var user = Objects.requireNonNullElse(sshUser, "dev");
+  public static void printProjectCreated(
+      String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
     out.println(amber(ansi, "  @|bold,green \u2713 Project " + name + " created.|@"));
-    printZedConnect(name, user, out, ansi);
+    printZedConnect(name, operator, out, ansi);
   }
 
   /**
    * Prints the SSH config snippet that the user should add to {@code ~/.ssh/config} on their Mac.
    * This is the same output as {@code sail project connect} but printed inline after project
-   * creation.
+   * creation. The jump host is aliased {@code boxHost}, this box's hostname.
    */
   public static void printSshConfig(
       String name,
+      String boxHost,
       String serverIp,
       String serverUser,
       String containerIp,
       String identityFile,
+      OperatorCommand operator,
       PrintStream out,
       Ansi ansi) {
+    var alias = projectSshAlias(name, boxHost);
     out.println();
     out.println(amber(ansi, "    @|faint # Add to ~/.ssh/config on your Mac:|@"));
     out.println();
-    out.println(amber(ansi, "    @|faint Host singular-server|@"));
+    out.println(amber(ansi, "    @|faint Host " + boxHost + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + serverIp + "|@"));
     out.println(amber(ansi, "    @|faint     User " + serverUser + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
-    out.println(amber(ansi, "    @|faint Host " + name + "|@"));
+    out.println(amber(ansi, "    @|faint Host " + alias + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + containerIp + "|@"));
     out.println(amber(ansi, "    @|faint     User dev|@"));
-    out.println(amber(ansi, "    @|faint     ProxyJump singular-server|@"));
+    out.println(amber(ansi, "    @|faint     ProxyJump " + boxHost + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
     out.println(
-        amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + name + "/home/dev/workspace"));
-    out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + name));
-    out.println(amber(ansi, "    @|bold \u2192 Shell:|@   sudo sail project shell " + name));
+        amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + alias + "/home/dev/workspace"));
+    out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + alias));
+    out.println(
+        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
+  }
+
+  /**
+   * The alias a project's container is reached by: its name, unless that is the box's own alias,
+   * which ssh would read as one host and jump the container through itself.
+   */
+  public static String projectSshAlias(String name, String boxHost) {
+    return name.equalsIgnoreCase(boxHost) ? name + ".project" : name;
   }
 
   /** Prints resume information when a prior incomplete provisioning run is detected. */
@@ -546,9 +558,12 @@ public final class Banner {
   }
 
   /** Prints the connect and shell hints after a container starts. */
-  public static void printZedConnect(String name, String sshUser, PrintStream out, Ansi ansi) {
-    out.println(amber(ansi, "    @|bold \u2192 Connect:|@ sail project connect " + name));
-    out.println(amber(ansi, "    @|bold \u2192 Shell:|@   sudo sail project shell " + name));
+  public static void printZedConnect(
+      String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
+    out.println(
+        amber(ansi, "    @|bold \u2192 Connect:|@ " + operator.sail("project connect " + name)));
+    out.println(
+        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
   }
 
   /**
@@ -572,7 +587,13 @@ public final class Banner {
     out.println(
         amber(
             ansi,
-            "    @|bold \u2192 Ports:|@   ssh " + tunnelArgs + " " + user + "@" + name + " -N"));
+            "    @|bold \u2192 Ports:|@   ssh "
+                + tunnelArgs
+                + " "
+                + user
+                + "@"
+                + projectSshAlias(name, HostInfo.hostname())
+                + " -N"));
   }
 
   /** Prints the agent auth tunnel hint: forwarding {@code port} for subscription-based login. */
@@ -585,7 +606,7 @@ public final class Banner {
                 + ":localhost:"
                 + port
                 + " "
-                + name));
+                + projectSshAlias(name, HostInfo.hostname())));
   }
 
   /** Prints a container status line — green ✓ for running, faint ■ for stopped. */
@@ -998,7 +1019,9 @@ public final class Banner {
     out.println(
         amber(
             ansi,
-            "    @|faint Use 'sail project stop <name>' to stop projects and free resources.|@"));
+            "    @|faint Use '"
+                + OperatorCommand.here().sail("project stop <name>")
+                + "' to stop projects and free resources.|@"));
   }
 
   /** Prints agent session status with optional git activity and task progress. */
@@ -1059,7 +1082,12 @@ public final class Banner {
     }
     out.println(amber(ansi, "    @|bold Log:|@        " + info.logPath()));
     if (info.running()) {
-      out.println(amber(ansi, "    @|faint Tail output: sail agent log " + name + " --follow|@"));
+      out.println(
+          amber(
+              ansi,
+              "    @|faint Tail output: "
+                  + OperatorCommand.here().sail("agent log " + name + " --follow")
+                  + "|@"));
     }
   }
 
@@ -1076,7 +1104,12 @@ public final class Banner {
 
   /** Prints confirmation after a background agent launch. */
   public static void printAgentLaunched(
-      String name, String task, String branch, PrintStream out, Ansi ansi) {
+      String name,
+      String task,
+      String branch,
+      OperatorCommand operator,
+      PrintStream out,
+      Ansi ansi) {
     out.println(amber(ansi, "  @|green \u2713|@ Agent launched in background"));
     if (task != null) {
       out.println(amber(ansi, "    @|bold Task:|@    " + prettifyTask(task)));
@@ -1084,8 +1117,9 @@ public final class Banner {
     if (Strings.isNotBlank(branch)) {
       out.println(amber(ansi, "    @|bold Branch:|@  " + branch));
     }
-    out.println(amber(ansi, "    @|bold Log:|@     sail agent log " + name + " --follow"));
-    out.println(amber(ansi, "    @|bold Stop:|@    sail agent stop " + name));
+    out.println(
+        amber(ansi, "    @|bold Log:|@     " + operator.sail("agent log " + name + " --follow")));
+    out.println(amber(ansi, "    @|bold Stop:|@    " + operator.sail("agent stop " + name)));
   }
 
   /** Prints a list of other running projects (informational). */
@@ -1201,7 +1235,11 @@ public final class Banner {
 
     out.println(amber(ansi, "  @|bold Next Steps:|@"));
     out.println(
-        amber(ansi, "    sail agent log " + name + " --tail 50    @|faint # see agent output|@"));
+        amber(
+            ansi,
+            "    "
+                + OperatorCommand.here().sail("agent log " + name + " --tail 50")
+                + "    @|faint # see agent output|@"));
     var remaining =
         report.specs().stream()
             .filter(s -> s.status() == SpecStatus.PENDING || s.status() == SpecStatus.IN_PROGRESS)
@@ -1210,8 +1248,8 @@ public final class Banner {
       out.println(
           amber(
               ansi,
-              "    sail spec dispatch --project "
-                  + name
+              "    "
+                  + OperatorCommand.here().sail("spec dispatch --project " + name)
                   + "   @|faint # continue "
                   + remaining
                   + " remaining specs|@"));

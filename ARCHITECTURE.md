@@ -707,7 +707,9 @@ process's stdio as a newline-framed JSON RPC pipe. Auth is pure SSH keys, with
 join` generated, so a missing key fails fast. Host keys are checked in batch mode against the
 account's `known_hosts`, where join pinned main's ed25519 key (see Onboarding); a round that
 fails on it quotes ssh's own last stderr line ("ssh said: Host key verification failed.") and
-names `sudo sail init --main <main>` to pin it again. On main, that key sits on the locked `sail`
+names the whole recovery in `MainHostKey.rebuiltRecovery`'s words, the same sentence join's
+refusal of a changed key carries: remove the old pin with `sudo ssh-keygen -R <host>`, then
+re-run `sudo sail init --main <target>`. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
@@ -727,7 +729,10 @@ deterministic, so every box agrees on an identity-free definition and the engine
 
 Each box resolves the placeholders locally, once, at provision time
 (`ProjectDefinitions.resolveForProvisioning` calling `LocalIdentity`). Git fields come from
-the box's local `git config`. The definition `agent run` launches under
+the box's local `git config`: on a box `sudo sail init` set up, root's, which init gives the
+`--name` and `--email` it is passed (or asked for) when root has none, never overwriting one.
+A missing value names the command that sets it for the account it is read from, `sudo git
+config --global …` when root's identity is read for a `sudo` caller. The definition `agent run` launches under
 (`ProjectDefinitions.definitionWithBoxIdentity`) names the same identity: the row's
 `${GIT_NAME}` and `${GIT_EMAIL}` are replaced
 by the box's git values where it has them and left as they are where it has none, and no
@@ -778,7 +783,10 @@ clone a project's source repos into its container at provision time, not to move
   `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
   own box. For such an account, `sudo` resolves a project's personal placeholders from that account's
   home (`SailPaths.identityHome`), even beside root's system unit, so its plain and `sudo`
-  applies record the same descriptor.
+  applies record the same descriptor. Every `sail` command a box prints for its operator to
+  type is rendered by `OperatorCommand`, which asks `RuntimeMode.detect` of the `sudo` caller's
+  own home: a caller whose plain `sail` would be Refused reads it with `sudo`, and root logged
+  in directly, or an account on its own box, reads it plain.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
@@ -810,7 +818,12 @@ first pins main's ed25519 host key into the invoking account's `known_hosts` (`M
 `ssh-keyscan -H` on port 22, appended when absent, kept when equal, refused when it differs or
 cannot be read, all before the host config is written), then generates the box's sync key and
 prints the `sudo sail fde add … --key … --main-host-key SHA256:…` line for the operator to run
-on main. Main's `fde add` compares that fingerprint to its own host key before its
+on main. A re-join with the sync key the box already had opens one sync session to main as the
+joined handle (`SyncOperations.welcomedAs`): a welcome as that handle means main holds the key,
+and the join says so instead of printing the line (`--json` still carries it); anything else,
+main unreachable included, is no evidence, and the line is printed.
+Each step runs through `Main.report`, so a refusal inside init is printed once with no trace,
+then "Setup stopped" once. Main's `fde add` compares that fingerprint to its own host key before its
 transaction and refuses a mismatch, so a join that something else answered is never
 authorized. The granular commands it orchestrates (`host init`, `host
 service install`, `host ssh-identity`, `host sync`, `join`) all remain usable on their own.
@@ -849,7 +862,10 @@ and clones the source repos, pushes the shared `files/` bundle, starts the Podma
 under `--restart=always`, installs the agent CLIs, and generates agent context.
 `ProjectApplier` is the live-delta path for `sail project apply` on an already-running
 container. CPU and memory changes that need a restart are applied by the dedicated resources
-path, not silently here.
+path, not silently here. Neither path deletes or re-clones a checkout already in the
+container, which may hold work: one whose `origin` is not the definition's repository, or that
+is no git checkout, is refused before the step is recorded (`RepoOrigin`, which reads the same
+host and path as one repository whatever the scheme, user, port or `.git`).
 
 **The `sail-api` service** (`SystemdServiceInstaller`) is the per-box control plane: a `sail
 server start` systemd unit, in system scope under root (`/etc/systemd/system`, which `sail

@@ -17,21 +17,27 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.MainHostKey;
+import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -41,6 +47,12 @@ class JoinCommandTest {
       target -> {
         throw new IOException("a unit test reaches no main");
       };
+  private static final SyncOperations.Channels NEVER_ASKED =
+      target -> {
+        throw new AssertionError("main has nothing to say about a key this join made");
+      };
+  private static final Actor MADY = Actor.sync("mady", Role.MEMBER);
+  private static final Actor ADA = Actor.sync("ada", Role.MEMBER);
 
   private static final String PUB =
       "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITESTKEYBLOB sail-sync:mady";
@@ -66,6 +78,14 @@ class JoinCommandTest {
   @TempDir Path dir;
 
   private SshPublicKey answering = MAIN;
+  private SyncBox main;
+
+  @AfterEach
+  void tearDown() {
+    if (main != null) {
+      main.close();
+    }
+  }
 
   private Path knownHosts() {
     return dir.resolve("ssh").resolve("known_hosts");
@@ -102,11 +122,8 @@ class JoinCommandTest {
         PosixFilePermissions.toString(Files.getPosixFilePermissions(knownHosts().getParent())));
     assertEquals(
         "rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(knownHosts())));
-    assertTrue(
-        JoinCommand.render(plan, false).contains("--main-host-key " + MAIN.fingerprint()),
-        JoinCommand.render(plan, false));
-    assertEquals(
-        MAIN.fingerprint(), YamlUtil.parseMap(JoinCommand.render(plan, true)).get("main_host_key"));
+    assertTrue(human(plan).contains("--main-host-key " + MAIN.fingerprint()), human(plan));
+    assertEquals(MAIN.fingerprint(), YamlUtil.parseMap(json(plan)).get("main_host_key"));
   }
 
   @Test
@@ -136,7 +153,8 @@ class JoinCommandTest {
             + ", but this box pinned "
             + MAIN.fingerprint()
             + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
-            + " re-run; otherwise something between this box and main is answering for it.",
+            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
+            + " box and main is answering for it.",
         refused.getMessage());
     assertEquals(before, Files.readString(hostConfig));
     assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
@@ -152,7 +170,7 @@ class JoinCommandTest {
 
     assertEquals(
         "Couldn't read maindevbox's SSH host key on port 22: no ed25519 host key came back. Check"
-            + " the address and firewall, then re-run sudo sail init --main maindevbox.",
+            + " the address and firewall, then re-run sudo sail init --main sail@maindevbox.",
         refused.getMessage());
     assertEquals(before, Files.readString(hostConfig));
     assertFalse(Files.exists(dir.resolve("sync_ed25519")), "no sync key is made");
@@ -363,13 +381,6 @@ class JoinCommandTest {
   }
 
   @Test
-  void hostForProbeStripsTheUserAndPort() {
-    assertEquals("host", JoinCommand.hostForProbe("sail@host"));
-    assertEquals("10.0.0.1", JoinCommand.hostForProbe("sail@10.0.0.1:2222"));
-    assertEquals("maindevbox", JoinCommand.hostForProbe("maindevbox"));
-  }
-
-  @Test
   void defaultHandlePrefersThisBoxesSoleFde() {
     assertEquals("mady", JoinCommand.defaultHandle(List.of("mady"), "ignored", "ignored"));
   }
@@ -451,8 +462,9 @@ class JoinCommandTest {
     var out =
         JoinCommand.render(
             new JoinCommand.Plan(
-                "sail@host", "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()),
-            true);
+                "sail@host", "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint(), false),
+            true,
+            OperatorCommand.PLAIN);
 
     assertTrue(out.contains("\"target\""));
     assertTrue(out.contains("\"authorize_command\""));
@@ -462,20 +474,101 @@ class JoinCommandTest {
     assertEquals(MAIN.fingerprint(), YamlUtil.parseMap(out).get("main_host_key"));
   }
 
-  @Test
-  void renderHumanShowsTheTargetAndAuthorizeLine() {
-    var out =
-        JoinCommand.render(
-            new JoinCommand.Plan("sail@host", "mady", null, null, PUB, MAIN.fingerprint()), false);
+  private static String human(JoinCommand.Plan plan) {
+    return JoinCommand.render(plan, false, new OperatorCommand(true));
+  }
 
-    assertTrue(out.contains("sail@host"));
-    assertTrue(
-        out.contains(
-            "sudo sail fde add mady --role member --key \""
-                + PUB
-                + "\" --main-host-key "
-                + MAIN.fingerprint()));
-    assertTrue(out.contains("finish here with sudo sail sync"));
+  private static String json(JoinCommand.Plan plan) {
+    return JoinCommand.render(plan, true, new OperatorCommand(true));
+  }
+
+  @Test
+  void aFirstJoinHandsMainsOperatorTheLineThatAuthorizesThisBox() throws Exception {
+    var plan = join(writeHostConfig());
+
+    assertFalse(plan.mainHasKey());
+    assertEquals(
+        """
+
+            ✓ This box is now a node syncing to sail@maindevbox.
+
+            Send this to the operator of sail@maindevbox — they run it once:
+
+              sudo sail fde add mady --role member --key "%s" --main-host-key %s
+
+            Once they have, finish here with sudo sail sync. Only a public key leaves this box — \
+        never a secret."""
+            .formatted(PUB, MAIN.fingerprint()),
+        human(plan));
+  }
+
+  private JoinCommand.Plan join(Path hostConfig, String handle, SyncOperations.Channels channels)
+      throws Exception {
+    return JoinCommand.plan(
+        hostConfig,
+        dir.resolve("sail.db"),
+        identity(),
+        "sail@maindevbox",
+        handle,
+        null,
+        null,
+        channels,
+        pin());
+  }
+
+  private SyncOperations.Channels mainServing(Actor as) {
+    main = new SyncBox("main");
+    return target -> PipedSyncChannel.to(main.server(as));
+  }
+
+  @Test
+  void reJoiningTheMainThatWelcomesThisBoxsKeyAsksItsOperatorForNothing() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+
+    var plan = join(hostConfig, "mady", mainServing(MADY));
+
+    assertTrue(plan.mainHasKey());
+    assertEquals(
+        """
+
+            ✓ This box is now a node syncing to sail@maindevbox.
+
+            Main already has this box's key. Finish with sudo sail sync.\
+        """,
+        human(plan));
+    assertEquals(
+        "sudo sail fde add mady --role member --key \""
+            + PUB
+            + "\" --main-host-key "
+            + MAIN.fingerprint(),
+        YamlUtil.parseMap(json(plan)).get("authorize_command"));
+  }
+
+  @Test
+  void aFirstJoinNeverAsksMainAboutAKeyItJustMade() throws Exception {
+    assertFalse(join(writeHostConfig(), "mady", NEVER_ASKED).mainHasKey());
+  }
+
+  @Test
+  void aReJoinMainDoesNotWelcomeAsThisHandleHandsItsOperatorTheLine() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+
+    assertFalse(join(hostConfig).mainHasKey(), "main could not be asked");
+    assertFalse(
+        join(hostConfig, "mady", mainServing(ADA)).mainHasKey(),
+        "main holds the key under another handle");
+  }
+
+  @Test
+  void aReJoinWithAKeyMadeByHandHandsItsOperatorTheLineWithoutAskingMain() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+    Files.delete(dir.resolve("sync_ed25519"));
+    Files.delete(dir.resolve("sync_ed25519.pub"));
+
+    assertFalse(join(hostConfig, "mady", NEVER_ASKED).mainHasKey());
   }
 
   private final class StubKeygen implements ShellExec {
