@@ -535,7 +535,7 @@ public final class Banner {
    * which ssh would read as one host and jump the container through itself.
    */
   public static String projectSshAlias(String name, String boxHost) {
-    return name.equalsIgnoreCase(boxHost) ? name + "-project" : name;
+    return name.equalsIgnoreCase(boxHost) ? name + ".project" : name;
   }
 
   /** Prints resume information when a prior incomplete provisioning run is detected. */

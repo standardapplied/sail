@@ -92,20 +92,40 @@ class ConnectCommandTest {
             User uday
             IdentityFile ~/.ssh/id_ed25519
 
-        Host gamma-project
+        Host gamma.project
             HostName 10.0.0.2
             User dev
             ProxyJump Gamma
             IdentityFile ~/.ssh/id_ed25519
 
         # Then connect:
-        #   ssh gamma-project
-        #   zed ssh://dev@gamma-project/home/dev/workspace
+        #   ssh gamma.project
+        #   zed ssh://dev@gamma.project/home/dev/workspace
         #
         # Agent auth (port forwarding for subscription login):
-        #   ssh -N -L 3000:localhost:3000 gamma-project""",
+        #   ssh -N -L 3000:localhost:3000 gamma.project""",
         ConnectCommand.connectSnippet(
             "Gamma", "192.0.2.1", "uday", "gamma", "10.0.0.2", "dev", "~/.ssh/id_ed25519"));
+  }
+
+  @Test
+  void aProjectNamedLikeTheBoxNeverSharesAnAliasWithAnotherProject() {
+    var config =
+        ConnectCommand.connectSnippet(
+                "box", "192.0.2.1", "uday", "box", "10.0.0.2", "dev", "~/.ssh/id_ed25519")
+            + "\n"
+            + ConnectCommand.connectSnippet(
+                "box", "192.0.2.1", "uday", "box-project", "10.0.0.3", "dev", "~/.ssh/id_ed25519");
+
+    assertEquals("10.0.0.2", firstHostName(config, "box.project"));
+    assertEquals("10.0.0.3", firstHostName(config, "box-project"));
+  }
+
+  private static String firstHostName(String config, String alias) {
+    var lines = config.lines().map(String::strip).toList();
+    var block = lines.indexOf("Host " + alias);
+    assertTrue(block >= 0, "no Host " + alias + " in\n" + config);
+    return lines.get(block + 1).substring("HostName ".length());
   }
 
   @Test
