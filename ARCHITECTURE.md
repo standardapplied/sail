@@ -704,7 +704,10 @@ A purge erases a project's rows everywhere, not other boxes' containers: their p
 A node reaches main over a single SSH subprocess, `ssh sail@main sail _sync`, using that
 process's stdio as a newline-framed JSON RPC pipe. Auth is pure SSH keys, with
 `PasswordAuthentication=no` and `IdentitiesOnly=yes` pinning the sail-managed key that `sail
-join` generated, so a missing key fails fast. On main, that key sits on the locked `sail`
+join` generated, so a missing key fails fast. Host keys are checked in batch mode against the
+account's `known_hosts`, where join pinned main's ed25519 key (see Onboarding); a round that
+fails on it quotes ssh's own last stderr line ("ssh said: Host key verification failed.") and
+names `sudo sail init --main <main>` to pin it again. On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
@@ -762,8 +765,18 @@ clone a project's source repos into its container at provision time, not to move
 
 `Main` chooses a mode at startup through `RuntimeMode.detect()`:
 
-- **Host mode.** `~/.sail/host.yaml` exists, which is the default. Commands execute locally:
+- **Host mode.** A host config (`/var/lib/sail/host.yaml` or `~/.sail/host.yaml`) exists, or
+  nothing else applies, which is the default. Commands execute locally:
   lifecycle commands drive `incus` and `podman`, and API commands hit the local `sail-api`.
+- **Refused.** The box's `sail-api` is root's system unit (`/etc/systemd/system/sail-api.service`),
+  the account is not root, names no `SAIL_DATA_DIR`, and sees no host config, neither
+  `/var/lib/sail/host.yaml` nor its own. Its `~/.sail` would silently diverge from root's state,
+  so `Main` runs nothing: it prints "sail-api on this box runs as root, so <user>'s sail would
+  see none of its specs, projects or FDEs. Run it with sudo: sudo sail <args>" and exits 1.
+  Only `--version`, `-V`, `--help` and `-h` are exempt. The `sail` gateway account reads
+  `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
+  own box. On such a box, `sudo` resolves a project's personal placeholders from that account's
+  home (`SailPaths.identityHome`), so its plain and `sudo` applies record the same descriptor.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
@@ -785,12 +798,19 @@ There is one convergent, idempotent, root-aware command per box, `sail init`:
 - `sudo sail init --as-main` makes this box the org's source of truth.
 - `sudo sail init --main <target>` joins an existing main as a node.
 
-It figures out what is missing and does only that, decided by a pure, unit-tested
-`InitPlan`: provision the host if needed, install and start `sail-api` (a system service
-under root, or a per-user service for the `sudo` user otherwise), and take on identity. On
-main that means publishing the SSH identity and declaring `--as-main`. On a node it means
-`join`, which generates the box's sync key and prints the `sail fde add … --key …` line for
-the operator to run on main. The granular commands it orchestrates (`host init`, `host
+It requires root and figures out what is missing and does only that, decided by a pure,
+unit-tested `InitPlan`: provision the host if needed, install and start `sail-api` as the
+system service (whoever invoked `sudo`; init never runs a step as another account), and take
+on identity. A `sudo` user who already runs `sail-api` as a user service is refused before
+anything is written, since a second control plane would contend for its port. On main that
+means publishing the SSH identity and declaring `--as-main`. On a node it means `join`, which
+first pins main's ed25519 host key into the invoking account's `known_hosts` (`MainHostKey`:
+`ssh-keyscan -H` on port 22, appended when absent, kept when equal, refused when it differs or
+cannot be read, all before the host config is written), then generates the box's sync key and
+prints the `sudo sail fde add … --key … --main-host-key SHA256:…` line for the operator to run
+on main. Main's `fde add` compares that fingerprint to its own host key before its
+transaction and refuses a mismatch, so a join that something else answered is never
+authorized. The granular commands it orchestrates (`host init`, `host
 service install`, `host ssh-identity`, `host sync`, `join`) all remain usable on their own.
 
 A thin client, a Mac that drives a box but runs no control plane, is set up separately with
@@ -830,8 +850,9 @@ container. CPU and memory changes that need a restart are applied by the dedicat
 path, not silently here.
 
 **The `sail-api` service** (`SystemdServiceInstaller`) is the per-box control plane: a `sail
-server start` systemd unit, in system scope under root (`/etc/systemd/system`) or in user
-scope per-user (`systemctl --user` with linger). It opens the control-plane SQLite database,
+server start` systemd unit, in system scope under root (`/etc/systemd/system`, which `sail
+init` always installs) or in user scope (`systemctl --user` with linger) for an account that
+owns a box in its own home and runs `sail host service install` itself. It opens the control-plane SQLite database,
 runs registered migrations, ensures an admin token, and serves the REST API and the SSE
 event stream (`/v1/events/stream`) on loopback, the passkey endpoints when configured, and
 a Unix-socket listener so project containers publish events and drive `spec` over the
