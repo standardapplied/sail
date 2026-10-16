@@ -15,6 +15,7 @@ import ai.singlr.sail.api.SyncViews;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
@@ -137,7 +138,11 @@ public final class SyncCommand implements Callable<Integer> {
                   ? ", " + freed + " bytes freed"
                   : "");
     return status.get("pending_conflicts") instanceof Integer pending && pending > 0
-        ? health + " — " + pending + " conflict(s) need your decision: sail conflicts"
+        ? health
+            + " — "
+            + pending
+            + " conflict(s) need your decision: "
+            + OperatorCommand.here().sail("conflicts")
         : health;
   }
 
@@ -283,7 +288,9 @@ public final class SyncCommand implements Callable<Integer> {
       lines.add(
           Banner.errorLine(
               report.conflicts()
-                  + " conflict(s) need your decision. Run 'sail conflicts' to resolve.",
+                  + " conflict(s) need your decision. Run '"
+                  + OperatorCommand.here().sail("conflicts")
+                  + "' to resolve.",
               Ansi.AUTO));
     }
     return String.join("\n", lines);

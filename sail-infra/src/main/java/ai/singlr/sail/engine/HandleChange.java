@@ -161,7 +161,11 @@ public final class HandleChange {
         + ". Stop them or let them finish"
         + (before.isMain()
             ? ""
-            : ", run 'sail sync' while main still knows this box as '" + from + "'")
+            : ", run '"
+                + OperatorCommand.here().sail("sync")
+                + "' while main still knows this box as '"
+                + from
+                + "'")
         + ", then change the handle.";
   }
 

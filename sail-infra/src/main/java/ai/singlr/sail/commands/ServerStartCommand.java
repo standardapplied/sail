@@ -45,6 +45,7 @@ import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -412,7 +413,9 @@ public final class ServerStartCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ No sync handle configured — interactive container sessions get no"
-                  + " ambient credential ('sail host config set sync-handle <fde>' enables it)"));
+                  + " ambient credential ('"
+                  + OperatorCommand.here().sail("host config set sync-handle <fde>")
+                  + "' enables it)"));
       return;
     }
     try {

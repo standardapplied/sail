@@ -60,7 +60,7 @@ public final class HostSyncCommand implements Runnable {
   private void execute() throws Exception {
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     var host = HostYaml.fromMap(YamlUtil.parseFile(path));
 

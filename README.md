@@ -54,7 +54,8 @@ sudo sail init --as-main --name "Ada Lovelace" --email ada@example.com
 ```
 
 `--name` and `--email` become the box's git identity when it has none (they are asked for when
-left out), so the projects it applies commit as you. An identity the box already has is kept.
+left out, and init stops before any step without them), so the projects it applies commit as
+you. An identity the box already has is kept.
 
 Authorize each engineer with the line their `sudo sail init --main` printed. It carries the
 fingerprint of main's host key that their box pinned, and main refuses the line when that is not

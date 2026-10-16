@@ -72,7 +72,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!dryRun && !Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
 
     if (!dryRun) {

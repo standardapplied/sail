@@ -9,6 +9,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -75,20 +76,8 @@ public final class ConnectCommand implements Runnable {
     }
 
     var state = mgr.queryState(name);
-    var containerIp =
-        switch (state) {
-          case ContainerState.Running r -> r.ipv4();
-          case ContainerState.Stopped ignored ->
-              throw new IllegalStateException(
-                  "Project '" + name + "' is stopped. Start it with: sail project start " + name);
-          case ContainerState.NotCreated ignored ->
-              throw new IllegalStateException(
-                  "Project '"
-                      + name
-                      + "' does not exist. Create it with: sail project apply <name>");
-          case ContainerState.Error e ->
-              throw new IllegalStateException("Container error: " + e.message());
-        };
+    ContainerStateGuard.requireRunning(state, name);
+    var containerIp = state instanceof ContainerState.Running running ? running.ipv4() : null;
 
     if (containerIp == null) {
       throw new IllegalStateException(

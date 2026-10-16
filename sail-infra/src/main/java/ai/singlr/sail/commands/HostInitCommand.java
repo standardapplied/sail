@@ -189,7 +189,7 @@ public final class HostInitCommand implements Runnable {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|yellow Server IP:|@ could not auto-detect."
-                    + " Pass --server-ip or run: sail host config set server-ip <ip>"));
+                    + " Pass --server-ip or run: sudo sail host config set server-ip <ip>"));
       }
     } else if (!json) {
       System.out.println(Ansi.AUTO.string("  @|bold Server IP:|@ " + resolvedServerIp));
@@ -252,6 +252,12 @@ public final class HostInitCommand implements Runnable {
               System.out.println();
               System.out.println(Ansi.AUTO.string(line));
             });
+  }
+
+  /** The refusal of a command that needs this box provisioned, on a box that is not. */
+  static IllegalStateException notInitialized(OperatorCommand operator) {
+    return new IllegalStateException(
+        "Server not initialized. Run '" + operator.sail("host init") + "' first.");
   }
 
   /**

@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -35,8 +36,8 @@ final class ContainerWorkspace {
             Banner.errorLine(
                 "Project '"
                     + project
-                    + "' is not running. Run 'sail project switch "
-                    + project
+                    + "' is not running. Run '"
+                    + OperatorCommand.here().sail("project switch " + project)
                     + "'.",
                 Ansi.AUTO));
         return Optional.empty();

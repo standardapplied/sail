@@ -11,6 +11,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.HostToken;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.ReleaseFetcher;
 import ai.singlr.sail.engine.SailBinary;
@@ -642,20 +643,26 @@ public final class UpgradeCommand implements Runnable {
         process.destroyForcibly();
         if (!json) {
           System.err.println(
-              "    Migrate sub-process timed out after 2m. Run 'sail migrate' manually.");
+              "    Migrate sub-process timed out after 2m. Run '"
+                  + OperatorCommand.here().sail("migrate")
+                  + "' manually.");
         }
       } else if (process.exitValue() != 0 && !json) {
         System.err.println(
             "    Migrate sub-process exited with code "
                 + process.exitValue()
-                + ". Run 'sail migrate' manually.");
+                + ". Run '"
+                + OperatorCommand.here().sail("migrate")
+                + "' manually.");
       }
     } catch (Throwable e) {
       if (!json) {
         System.err.println(
             "    Could not spawn migrate sub-process: "
                 + e.getMessage()
-                + ". The sail-api restart will retry; or run 'sail migrate' manually.");
+                + ". The sail-api restart will retry; or run '"
+                + OperatorCommand.here().sail("migrate")
+                + "' manually.");
       }
     }
   }
@@ -692,7 +699,9 @@ public final class UpgradeCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|bold Update available:|@ " + shown(installed) + " \u2192 " + latest));
-      System.out.println(Ansi.AUTO.string("  @|faint Run 'sail upgrade' to install.|@"));
+      System.out.println(
+          Ansi.AUTO.string(
+              "  @|faint Run '" + OperatorCommand.here().sail("upgrade") + "' to install.|@"));
     } else {
       System.out.println(
           Ansi.AUTO.string(

@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.Stty;
 import ai.singlr.sail.harness.Harness;
@@ -252,7 +253,9 @@ public final class AgentAttachCommand implements Runnable {
       throw new IllegalStateException(
           "The latest run of '"
               + project
-              + "' changed while opening the session; run sail agent attach again.");
+              + "' changed while opening the session; run "
+              + OperatorCommand.here().sail("agent attach")
+              + " again.");
     }
     requireNoLiveConflict(planned, latest.running(), project);
   }
@@ -402,8 +405,9 @@ public final class AgentAttachCommand implements Runnable {
           "Run "
               + run.id()
               + " recorded a malformed session id; refusing to build a resume command from it."
-              + " Attach fresh with: sail agent attach --json to inspect, or start a new session"
-              + " inside the container.");
+              + " Attach fresh with: "
+              + OperatorCommand.here().sail("agent attach --json")
+              + " to inspect, or start a new session inside the container.");
     }
     return run.sessionId();
   }
@@ -418,8 +422,8 @@ public final class AgentAttachCommand implements Runnable {
         + " is live — attaching would fork a second concurrent agent over the same conversation"
         + " and worktree. Reply in "
         + room
-        + " to steer it (delivered mid-run), or stop it first with: sail agent stop "
-        + project
+        + " to steer it (delivered mid-run), or stop it first with: "
+        + OperatorCommand.here().sail("agent stop " + project)
         + ".";
   }
 

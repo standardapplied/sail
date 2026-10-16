@@ -128,7 +128,7 @@ public final class JoinCommand implements Runnable {
       MainHostKey mainHostKey)
       throws Exception {
     if (!Files.exists(hostConfig)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);

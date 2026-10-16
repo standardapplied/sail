@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.Stty;
 import java.util.List;
@@ -77,7 +78,10 @@ public final class SessionCommand {
             size[0]);
       }
       System.out.println(
-          "Session '" + name + "' started. Attach with: sail session attach " + name);
+          "Session '"
+              + name
+              + "' started. Attach with: "
+              + OperatorCommand.here().sail("session attach " + name));
       return 0;
     }
   }
@@ -108,7 +112,8 @@ public final class SessionCommand {
           return 0;
         }
         if (sessions.isEmpty()) {
-          System.out.println("No sessions. Start one with: sail session new <name>");
+          System.out.println(
+              "No sessions. Start one with: " + OperatorCommand.here().sail("session new <name>"));
           return 0;
         }
         for (var session : sessions) {

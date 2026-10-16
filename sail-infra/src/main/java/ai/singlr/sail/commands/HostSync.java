@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 
 /**
  * This box's sync role, read from {@code host.yaml}, and the questions the rest of the CLI asks of
@@ -53,7 +54,7 @@ final class HostSync {
    */
   static String propagationHint(SyncConfig sync) {
     if (isNode(sync)) {
-      return "Run sail sync to propagate.";
+      return "Run " + OperatorCommand.here().sail("sync") + " to propagate.";
     }
     if (sync.isMain()) {
       return "Other boxes pull it on their next sync.";

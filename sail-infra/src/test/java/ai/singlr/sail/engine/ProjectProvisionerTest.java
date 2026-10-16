@@ -1046,7 +1046,7 @@ class ProjectProvisionerTest {
     var expected =
         "User 'dev' in simple has uid 1001, but sail runs every agent, shell and hook as uid 1000."
             + " The image 'ubuntu/24.04' has another user at uid 1000; use an image without one"
-            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sail project"
+            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sudo sail project"
             + " destroy simple' and 'sudo sail project apply simple'.";
     assertEquals(expected, failure.getMessage());
     var persisted = YamlUtil.parseFile(stateFile);

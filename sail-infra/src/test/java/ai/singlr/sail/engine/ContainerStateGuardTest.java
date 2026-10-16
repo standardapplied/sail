@@ -40,6 +40,27 @@ class ContainerStateGuardTest {
   }
 
   @Test
+  void aSudoCallerIsToldToStartOrCreateTheProjectWithSudo() {
+    var sudo = new OperatorCommand(true);
+
+    assertEquals(
+        "Project 'demo' is stopped. Start it with: sudo sail project start demo",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    ContainerStateGuard.requireRunning(new ContainerState.Stopped(), "demo", sudo))
+            .getMessage());
+    assertEquals(
+        "Project 'demo' does not exist. Run 'sudo sail project apply <name>' first.",
+        assertThrows(
+                IllegalStateException.class,
+                () ->
+                    ContainerStateGuard.requireCreated(
+                        new ContainerState.NotCreated(), "demo", sudo))
+            .getMessage());
+  }
+
+  @Test
   void requireRunningRejectsErrorWithMessage() {
     var ex =
         assertThrows(

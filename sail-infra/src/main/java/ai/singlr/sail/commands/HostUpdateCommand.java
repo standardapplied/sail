@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.nio.file.Files;
@@ -44,7 +45,7 @@ public final class HostUpdateCommand implements Runnable {
   private void execute() throws Exception {
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

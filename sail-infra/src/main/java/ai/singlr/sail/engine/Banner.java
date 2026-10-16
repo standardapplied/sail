@@ -1004,7 +1004,9 @@ public final class Banner {
     out.println(
         amber(
             ansi,
-            "    @|faint Use 'sail project stop <name>' to stop projects and free resources.|@"));
+            "    @|faint Use '"
+                + OperatorCommand.here().sail("project stop <name>")
+                + "' to stop projects and free resources.|@"));
   }
 
   /** Prints agent session status with optional git activity and task progress. */
@@ -1065,7 +1067,12 @@ public final class Banner {
     }
     out.println(amber(ansi, "    @|bold Log:|@        " + info.logPath()));
     if (info.running()) {
-      out.println(amber(ansi, "    @|faint Tail output: sail agent log " + name + " --follow|@"));
+      out.println(
+          amber(
+              ansi,
+              "    @|faint Tail output: "
+                  + OperatorCommand.here().sail("agent log " + name + " --follow")
+                  + "|@"));
     }
   }
 
@@ -1216,8 +1223,8 @@ public final class Banner {
       out.println(
           amber(
               ansi,
-              "    sail spec dispatch --project "
-                  + name
+              "    "
+                  + OperatorCommand.here().sail("spec dispatch --project " + name)
                   + "   @|faint # continue "
                   + remaining
                   + " remaining specs|@"));

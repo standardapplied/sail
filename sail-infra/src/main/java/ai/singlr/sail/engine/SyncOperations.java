@@ -321,7 +321,9 @@ public final class SyncOperations {
     }
     return new MainTarget(
         null,
-        "Single devbox — nothing to sync. Add a second box with: sail host sync --main <user@host>.");
+        "Single devbox — nothing to sync. Add a second box with: "
+            + OperatorCommand.here().sail("host sync --main <user@host>")
+            + ".");
   }
 
   public static List<Event> pulledMessageEvents(
@@ -423,7 +425,9 @@ public final class SyncOperations {
                       + report.skipped().size()
                       + " locally-modified file(s) in '"
                       + project
-                      + "' (capture with 'sail project files add', or delete to take main's): "
+                      + "' (capture with '"
+                      + OperatorCommand.here().sail("project files add")
+                      + "', or delete to take main's): "
                       + String.join(", ", report.skipped()),
                   Ansi.AUTO));
         }

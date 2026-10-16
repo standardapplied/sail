@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -97,8 +98,9 @@ final class CurrentProject {
                 new IllegalStateException(
                     "No project given and none could be inferred (no sail.yaml in the current"
                         + " directory tree, no current project). Name the project on the command"
-                        + " line (-p/--project or the <project> argument), or run 'sail project"
-                        + " switch <project>' first."));
+                        + " line (-p/--project or the <project> argument), or run '"
+                        + OperatorCommand.here().sail("project switch <project>")
+                        + "' first."));
   }
 
   /**
@@ -127,8 +129,9 @@ final class CurrentProject {
                     new IllegalStateException(
                         "No project given and none could be inferred (no sail.yaml in the current"
                             + " directory tree, no current project). Pass -p/--project <project>"
-                            + " (or --all-projects for every project), or run 'sail project switch"
-                            + " <project>' first."));
+                            + " (or --all-projects for every project), or run '"
+                            + OperatorCommand.here().sail("project switch <project>")
+                            + "' first."));
     return Optional.of(inferred);
   }
 }

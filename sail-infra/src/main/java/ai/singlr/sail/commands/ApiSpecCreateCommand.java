@@ -9,6 +9,7 @@ import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -179,9 +180,10 @@ public final class ApiSpecCreateCommand implements Runnable {
                   + ")|@"));
       System.out.println(
           Ansi.AUTO.string(
-              "  @|faint Review and edit it, then promote: sail spec update "
-                  + spec.get("id")
-                  + " --status pending|@"));
+              "  @|faint Review and edit it, then promote: "
+                  + OperatorCommand.here()
+                      .sail("spec update " + spec.get("id") + " --status pending")
+                  + "|@"));
     }
   }
 

@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -53,13 +54,7 @@ public final class SwitchCommand implements Runnable {
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    if (state instanceof ContainerState.NotCreated) {
-      throw new IllegalStateException(
-          "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
-    }
-    if (state instanceof ContainerState.Error e) {
-      throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireCreated(state, name);
 
     if (!dryRun) {
       CurrentProject.set(name);

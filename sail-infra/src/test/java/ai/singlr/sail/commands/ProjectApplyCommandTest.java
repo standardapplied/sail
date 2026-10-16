@@ -376,7 +376,7 @@ class ProjectApplyCommandTest {
         + project
         + "', then apply again. A container already created as '"
         + user
-        + "' must be recreated: 'sail project destroy "
+        + "' must be recreated: 'sudo sail project destroy "
         + project
         + "', then 'sudo sail project apply "
         + project

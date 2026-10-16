@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -141,6 +142,9 @@ public final class LogsCommand implements Runnable {
     }
     System.out.println();
     System.out.println(
-        Ansi.AUTO.string("  Usage: @|bold sail project logs " + name + " <service>|@"));
+        Ansi.AUTO.string(
+            "  Usage: @|bold "
+                + OperatorCommand.here().sail("project logs " + name + " <service>")
+                + "|@"));
   }
 }

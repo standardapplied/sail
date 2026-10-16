@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorAuthorizedKeys;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -208,7 +209,7 @@ public final class FdeCommand implements Runnable {
               + handle
               + " on its own box instead: set it up with 'sudo sail init --main "
               + Objects.requireNonNullElse(box.main(), host)
-              + "', then run 'sail fde pair "
+              + "', then run 'sudo sail fde pair "
               + handle
               + " --host <its address>' there.");
     }
@@ -340,8 +341,8 @@ public final class FdeCommand implements Runnable {
                 throw new IllegalArgumentException(
                     "FDE '"
                         + handle
-                        + "' already exists. Change it with 'sail fde update "
-                        + handle
+                        + "' already exists. Change it with '"
+                        + OperatorCommand.here().sail("fde update " + handle)
                         + "'.");
               }
               var fde = db.transaction(() -> add(fdeStore, key));
@@ -351,7 +352,11 @@ public final class FdeCommand implements Runnable {
                           + fde.handle()
                           + " ("
                           + fde.role()
-                          + (scoped ? ", scoped: grant projects with 'sail fde grant'" : "")
+                          + (scoped
+                              ? ", scoped: grant projects with '"
+                                  + OperatorCommand.here().sail("fde grant")
+                                  + "'"
+                              : "")
                           + ")"));
               if (key != null) {
                 System.out.println(
@@ -548,7 +553,11 @@ public final class FdeCommand implements Runnable {
     var fdes = new FdeStore(db);
     if (grant && new ProjectStore(db).findByName(project).isEmpty()) {
       throw new IllegalArgumentException(
-          "Unknown project '" + project + "'. List the catalog with 'sail project list'.");
+          "Unknown project '"
+              + project
+              + "'. List the catalog with '"
+              + OperatorCommand.here().sail("project list")
+              + "'.");
     }
     var changed = fdes.grantsOf(handle).admits(project) != grant;
     if (changed && !dryRun) {
@@ -855,7 +864,9 @@ public final class FdeCommand implements Runnable {
           System.out.println(
               "  Containers of "
                   + stale
-                  + " trust this key only after their next 'sail project apply'.");
+                  + " trust this key only after their next '"
+                  + OperatorCommand.here().sail("project apply")
+                  + "'.");
         }
       }
     }
@@ -893,8 +904,8 @@ public final class FdeCommand implements Runnable {
             "FDE '"
                 + handle
                 + "' is disabled on this box, so a code for it would open nothing. Remove it"
-                + " with 'sail fde rm "
-                + handle
+                + " with '"
+                + OperatorCommand.here().sail("fde rm " + handle)
                 + "' and pair again.");
       }
       var address = email != null ? email : existing.map(FdeStore.Fde::email).orElse(null);
@@ -904,7 +915,7 @@ public final class FdeCommand implements Runnable {
                 + handle
                 + "', and a connect code names one. "
                 + (box.node()
-                    ? "Set it on main with 'sail fde update "
+                    ? "Set it on main with 'sudo sail fde update "
                         + handle
                         + " --email <email>', run 'sudo sail sync' here, then pair again."
                     : "Pass --email <email>."));
@@ -1043,7 +1054,10 @@ public final class FdeCommand implements Runnable {
               var fdeStore = new FdeStore(db);
               var fdes = fdeStore.list();
               if (fdes.isEmpty()) {
-                System.out.println("  No FDEs. Add one with 'sail fde add <handle>'.");
+                System.out.println(
+                    "  No FDEs. Add one with '"
+                        + OperatorCommand.here().sail("fde add <handle>")
+                        + "'.");
                 return;
               }
               Banner.printFdeTable(fdes, fdeStore::scopeOf, System.out, Ansi.AUTO);
@@ -1167,8 +1181,8 @@ public final class FdeCommand implements Runnable {
                                 new IllegalArgumentException(
                                     "Unknown FDE '"
                                         + handle
-                                        + "'. Add it with 'sail fde add "
-                                        + handle
+                                        + "'. Add it with '"
+                                        + OperatorCommand.here().sail("fde add " + handle)
                                         + "'."));
                 registerKey(db, fde, publicKey);
               }
@@ -1204,7 +1218,10 @@ public final class FdeCommand implements Runnable {
                                 () ->
                                     new IllegalArgumentException("Unknown FDE '" + handle + "'."));
                 if (keys.isEmpty()) {
-                  System.out.println("  No SSH keys. Register one with 'sail fde key add'.");
+                  System.out.println(
+                      "  No SSH keys. Register one with '"
+                          + OperatorCommand.here().sail("fde key add")
+                          + "'.");
                   return;
                 }
                 Banner.printFdeKeyTable(keys, System.out, Ansi.AUTO);
@@ -1265,7 +1282,9 @@ public final class FdeCommand implements Runnable {
                             "'"
                                 + target
                                 + "' is neither a known FDE handle nor a SHA256:"
-                                + " fingerprint. See 'sail fde key list'."));
+                                + " fingerprint. See '"
+                                + OperatorCommand.here().sail("fde key list")
+                                + "'."));
         var keys = keyStore.listForFde(fde.id());
         if (keys.isEmpty()) {
           System.out.println(
@@ -1275,7 +1294,8 @@ public final class FdeCommand implements Runnable {
         if (keys.size() > 1) {
           System.out.println("  '" + target + "' has " + keys.size() + " keys; specify one:");
           for (var key : keys) {
-            System.out.println("    sail fde key rm " + key.fingerprint());
+            System.out.println(
+                "    " + OperatorCommand.here().sail("fde key rm " + key.fingerprint()));
           }
           return Optional.empty();
         }
@@ -1307,8 +1327,8 @@ public final class FdeCommand implements Runnable {
       if (credentials.isEmpty()) {
         return "'"
             + handle
-            + "' has no passkeys. Enroll one with 'sail fde enroll "
-            + handle
+            + "' has no passkeys. Enroll one with '"
+            + OperatorCommand.here().sail("fde enroll " + handle)
             + "'.";
       }
       return "No passkey of '"
@@ -1365,8 +1385,8 @@ public final class FdeCommand implements Runnable {
                   System.out.println(
                       "  No passkeys for '"
                           + handle
-                          + "'. Enroll one with 'sail fde enroll "
-                          + handle
+                          + "'. Enroll one with '"
+                          + OperatorCommand.here().sail("fde enroll " + handle)
                           + "'.");
                   return;
                 }
@@ -1448,8 +1468,8 @@ public final class FdeCommand implements Runnable {
                       Ansi.AUTO.string(
                           "  @|faint '"
                               + handle
-                              + "' has no passkeys left. Re-enroll with 'sail fde enroll "
-                              + handle
+                              + "' has no passkeys left. Re-enroll with '"
+                              + OperatorCommand.here().sail("fde enroll " + handle)
                               + "'.|@"));
                 }
               }

@@ -107,7 +107,7 @@ public final class ProjectCatalog {
           "Project '"
               + name
               + "' is outside the projects main grants this box, so main would take nothing of it."
-              + " Ask an admin to grant it on main: sail fde grant <handle> "
+              + " Ask an admin to grant it on main: sudo sail fde grant <handle> "
               + name
               + ".");
     }

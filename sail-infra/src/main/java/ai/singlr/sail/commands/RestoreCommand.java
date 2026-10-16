@@ -63,8 +63,8 @@ public final class RestoreCommand implements Runnable {
         throw new IllegalStateException(
             "No snapshots exist for '"
                 + name
-                + "'. Create one with: sail project snapshot create "
-                + name);
+                + "'. Create one with: "
+                + OperatorCommand.here().sail("project snapshot create " + name));
       }
       label = snapshots.getLast().name();
     } else {

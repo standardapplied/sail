@@ -371,9 +371,8 @@ public final class ProjectApplyCommand implements Runnable {
     }
     return project
         + ": catalog entry exists but the container carries no sail-api-sock device — possibly a"
-        + " foreign container reusing the name. Skipped; claim it explicitly with 'sail project"
-        + " apply "
-        + project
+        + " foreign container reusing the name. Skipped; claim it explicitly with '"
+        + OperatorCommand.here().sail("project apply " + project)
         + "' if it is yours.";
   }
 
@@ -623,7 +622,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw new IllegalStateException("Server not initialized. Run 'sail host init' first.");
+      throw HostInitCommand.notInitialized(OperatorCommand.here());
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
@@ -752,7 +751,8 @@ public final class ProjectApplyCommand implements Runnable {
                 + "Provide the token via one of:\n"
                 + "  --git-token <token>\n"
                 + "  GITHUB_TOKEN environment variable\n\n"
-                + "Then re-run: sail project apply <name>");
+                + "Then re-run: "
+                + OperatorCommand.here().sail("project apply <name>"));
       }
     }
     return Map.copyOf(tokens);
@@ -787,13 +787,20 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var sailYamlPath = resolveSailYamlPath(name, file);
     if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(
-          "Project descriptor not found: "
-              + sailYamlPath.toAbsolutePath()
-              + "\n  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
-              + " specify one with --file.");
+      throw new IllegalStateException(descriptorNotFound(sailYamlPath, OperatorCommand.here()));
     }
     return new Definition(Files.readString(sailYamlPath), sailYamlPath);
+  }
+
+  /** The refusal of an apply that finds no definition of its project at {@code path}. */
+  static String descriptorNotFound(Path path, OperatorCommand operator) {
+    return "Project descriptor not found: "
+        + path.toAbsolutePath()
+        + "\n  Run '"
+        + operator.sail("project init")
+        + "' to author one, sync it from main with '"
+        + operator.sail("sync")
+        + "', or specify one with --file.";
   }
 
   /**

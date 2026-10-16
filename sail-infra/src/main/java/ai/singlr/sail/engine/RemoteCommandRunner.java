@@ -134,7 +134,8 @@ public final class RemoteCommandRunner {
         + "\n  Commands authenticate as your FDE through the '"
         + config.user()
         + "' user. If access was denied:"
-        + "\n    - not registered yet? an admin runs: sail fde add <handle> --key \"<your pubkey>\""
+        + "\n    - not registered yet? an admin runs: sudo sail fde add <handle> --key"
+        + " \"<your pubkey>\""
         + "\n    - registered before the host ran 0.13.53+? upgrade the host, or run:"
         + " sudo sail host keys sync";
   }

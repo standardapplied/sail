@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
@@ -27,7 +28,10 @@ public final class ServerStatusCommand implements Runnable {
     var dbPath = SailPaths.controlPlaneDb();
     if (!Files.exists(dbPath)) {
       System.out.println(
-          Ansi.AUTO.string("  @|yellow ⚠|@ Server not initialized. Run 'sail server init'."));
+          Ansi.AUTO.string(
+              "  @|yellow ⚠|@ Server not initialized. Run '"
+                  + OperatorCommand.here().sail("server init")
+                  + "'."));
       return;
     }
 

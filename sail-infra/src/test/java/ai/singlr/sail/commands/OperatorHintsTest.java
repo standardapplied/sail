@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -38,7 +39,10 @@ class OperatorHintsTest {
         zed.toString(StandardCharsets.UTF_8),
         Ansi.OFF.string(ProjectApplyCommand.serverIpUnsetLines("gamma", operator)),
         ConnectCommand.serverIpUnset("gamma", operator),
-        Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()));
+        Ansi.OFF.string(HostInitCommand.nextStep(true, true, operator).orElseThrow()),
+        ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), operator),
+        HostInitCommand.notInitialized(operator).getMessage(),
+        ContainerStateGuard.notCreated("gamma", operator));
   }
 
   @Test
@@ -60,7 +64,12 @@ class OperatorHintsTest {
                 + "  - sudo sail host config set server-ip <your-server-ip>\n"
                 + "  - Or pass: sudo sail project connect gamma --server-ip <your-server-ip>",
             "  ✓ sail API service already installed — nothing to do here; 'sudo sail upgrade'"
-                + " keeps it current."),
+                + " keeps it current.",
+            "Project descriptor not found: /srv/gamma/sail.yaml\n"
+                + "  Run 'sudo sail project init' to author one, sync it from main with 'sudo sail"
+                + " sync', or specify one with --file.",
+            "Server not initialized. Run 'sudo sail host init' first.",
+            "Project 'gamma' does not exist. Run 'sudo sail project apply <name>' first."),
         hints(SUDO));
   }
 
@@ -81,7 +90,12 @@ class OperatorHintsTest {
                 + "  - sudo sail host config set server-ip <your-server-ip>\n"
                 + "  - Or pass: sail project connect gamma --server-ip <your-server-ip>",
             "  ✓ sail API service already installed — nothing to do here; 'sail upgrade' keeps it"
-                + " current."),
+                + " current.",
+            "Project descriptor not found: /srv/gamma/sail.yaml\n"
+                + "  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
+                + " specify one with --file.",
+            "Server not initialized. Run 'sail host init' first.",
+            "Project 'gamma' does not exist. Run 'sail project apply <name>' first."),
         hints(PLAIN));
   }
 

@@ -437,10 +437,9 @@ public final class ProjectApplier {
             || !normalizedSize(config.resources().memory())
                 .equals(normalizedSize(liveLimits.memory())))) {
       warnings.add(
-          "CPU and memory changes are not applied by 'sail project apply'."
-              + " Use 'sail project resources set "
-              + config.name()
-              + " ...' instead.");
+          "CPU and memory changes are not applied by 'sail project apply'. Use '"
+              + OperatorCommand.here().sail("project resources set " + config.name() + " ...")
+              + "' instead.");
     }
     return warnings;
   }

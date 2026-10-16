@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSetupSweep;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -87,7 +88,7 @@ public final class UpCommand implements Runnable {
       }
       case ContainerState.NotCreated ignored ->
           throw new IllegalStateException(
-              "Project '" + name + "' does not exist. Run 'sail project apply <name>' first.");
+              ContainerStateGuard.notCreated(name, OperatorCommand.here()));
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }

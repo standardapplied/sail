@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectRenamer;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -73,7 +74,11 @@ public final class ProjectRenameCommand implements Runnable {
       operations.schema().initialize();
       if (operations.catalog().project(name).isEmpty()) {
         throw new IllegalStateException(
-            "No project '" + name + "' in the catalog. Run 'sail project list' to see projects.");
+            "No project '"
+                + name
+                + "' in the catalog. Run '"
+                + OperatorCommand.here().sail("project list")
+                + "' to see projects.");
       }
       if (operations.catalog().project(newName).isPresent()) {
         throw new IllegalStateException("A project named '" + newName + "' already exists.");
@@ -141,7 +146,11 @@ public final class ProjectRenameCommand implements Runnable {
     for (var warning : result.warnings()) {
       System.out.println(
           Ansi.AUTO.string(
-              "  @|yellow ⚠|@ " + warning + " — run 'sail project apply " + result.to() + "'"));
+              "  @|yellow ⚠|@ "
+                  + warning
+                  + " — run '"
+                  + OperatorCommand.here().sail("project apply " + result.to())
+                  + "'"));
     }
     System.out.println();
     System.out.println(

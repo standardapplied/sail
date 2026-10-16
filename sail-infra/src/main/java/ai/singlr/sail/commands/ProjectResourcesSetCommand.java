@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -182,8 +183,8 @@ public final class ProjectResourcesSetCommand implements Runnable {
           throw new IllegalStateException(
               "Project '"
                   + name
-                  + "' does not exist. Run 'sail project apply "
-                  + name
+                  + "' does not exist. Run '"
+                  + OperatorCommand.here().sail("project apply " + name)
                   + "' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
