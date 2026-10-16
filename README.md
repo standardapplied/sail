@@ -50,8 +50,11 @@ Stand up the main. One idempotent command provisions the box, installs the contr
 declares it the source of truth:
 
 ```bash
-sudo sail init --as-main
+sudo sail init --as-main --name "Ada Lovelace" --email ada@example.com
 ```
+
+`--name` and `--email` become the box's git identity when it has none (they are asked for when
+left out), so the projects it applies commit as you. An identity the box already has is kept.
 
 Authorize each engineer with the line their `sudo sail init --main` printed. It carries the
 fingerprint of main's host key that their box pinned, and main refuses the line when that is not
@@ -65,7 +68,8 @@ sudo sail fde add mady --role member --key "ssh-ed25519 AAAA... sail-sync@madybo
 Join a node:
 
 ```bash
-sudo sail init --main <main-ip>   # provision, install sail-api, pin main's SSH host key,
+sudo sail init --main <main-ip> --name "Mady M" --email mady@example.com
+                                  # provision, install sail-api, pin main's SSH host key,
                                   # generate this box's sync key, and print the fde add line
 sudo sail sync                    # pull specs, projects and shared files from main
 sudo sail sync status --json      # stored health, last success, and any failure reason
@@ -120,7 +124,8 @@ sail project connect web # print SSH config for your editor
 
 The synced definition is identity-free. Per-engineer fields are placeholders (`${GIT_NAME}`,
 `${GIT_EMAIL}`, `${SSH_PUBLIC_KEY}`) resolved from your own box at provision time, so a
-teammate's project commits as you and trusts only your key.
+teammate's project commits as you and trusts only your key. On a box `sudo sail init` set up, the
+git identity is root's, the one `sudo sail init --name … --email …` gave it.
 
 ```yaml
 # sail.yaml (name, resources and image are the only required fields)

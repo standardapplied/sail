@@ -29,17 +29,23 @@ public final class LocalIdentity {
   private final ShellExec shell;
   private final Path sshPublicKeyPath;
   private final Path home;
+  private final boolean sudo;
 
   /** This process's git identity and the workstation key at {@code sshPublicKeyPath}. */
   public LocalIdentity(ShellExec shell, Path sshPublicKeyPath) {
-    this(shell, sshPublicKeyPath, null);
+    this(shell, sshPublicKeyPath, null, false);
   }
 
-  /** The identity of the account whose home is {@code home}: its git config and its key. */
-  LocalIdentity(ShellExec shell, Path sshPublicKeyPath, Path home) {
+  /**
+   * The identity of the account whose home is {@code home}: its git config and its key. {@code
+   * sudo} when that account is root acting for a {@code sudo} caller, who sets root's git config
+   * with {@code sudo}.
+   */
+  LocalIdentity(ShellExec shell, Path sshPublicKeyPath, Path home, boolean sudo) {
     this.shell = shell;
     this.sshPublicKeyPath = sshPublicKeyPath;
     this.home = home;
+    this.sudo = sudo;
   }
 
   /**
@@ -47,9 +53,20 @@ public final class LocalIdentity {
    * ({@link SailPaths#identityHome()}).
    */
   public static LocalIdentity detect() {
-    var home = SailPaths.identityHome();
+    return detect(
+        new ShellExecutor(false),
+        SailPaths.isRoot(),
+        SailPaths.identityHome(),
+        SailPaths.invokingHome());
+  }
+
+  /**
+   * The identity at {@code home}, read for the person whose home is {@code invokingHome}: root's
+   * own, when root reads it for a {@code sudo} caller, is set with {@code sudo}.
+   */
+  static LocalIdentity detect(ShellExec shell, boolean root, Path home, Path invokingHome) {
     return new LocalIdentity(
-        new ShellExecutor(false), SailPaths.workstationPublicKeyPath(home), home);
+        shell, SailPaths.workstationPublicKeyPath(home), home, root && !home.equals(invokingHome));
   }
 
   /**
@@ -58,17 +75,49 @@ public final class LocalIdentity {
    * where {@link #valueFor} would hard-fail instead.
    */
   public Optional<String> gitValue(String placeholder) {
-    var key =
-        switch (placeholder) {
-          case PlaceholderResolver.GIT_NAME -> "user.name";
-          case PlaceholderResolver.GIT_EMAIL -> "user.email";
-          default -> null;
-        };
+    var key = gitKey(placeholder);
     if (key == null) {
       return Optional.empty();
     }
     var value = run(gitConfigCommand(key));
     return Strings.isBlank(value) ? Optional.empty() : Optional.of(value);
+  }
+
+  /**
+   * Writes {@code value} as this identity's git value for a {@code ${GIT_NAME}}/{@code
+   * ${GIT_EMAIL}} placeholder, into the account's global git config, so a later apply resolves it.
+   */
+  public void adoptGit(String placeholder, String value)
+      throws InterruptedException, TimeoutException {
+    var key = gitKey(placeholder);
+    if (key == null) {
+      throw new IllegalArgumentException("${" + placeholder + "} is not a git identity field");
+    }
+    String failure;
+    try {
+      var result = shell.exec(withHome(List.of("git", "config", "--global", key, value)));
+      if (result.ok()) {
+        return;
+      }
+      failure = result.stderr().strip();
+    } catch (IOException unrunnable) {
+      failure = unrunnable.getMessage();
+    }
+    throw new IllegalStateException(
+        "Couldn't set this box's git "
+            + key
+            + ": "
+            + failure
+            + "\n  Set it yourself and re-run: "
+            + gitFix(key));
+  }
+
+  private static String gitKey(String placeholder) {
+    return switch (placeholder) {
+      case PlaceholderResolver.GIT_NAME -> "user.name";
+      case PlaceholderResolver.GIT_EMAIL -> "user.email";
+      default -> null;
+    };
   }
 
   /** Resolves one known placeholder name to this box's value, failing loud if it is not set. */
@@ -86,7 +135,10 @@ public final class LocalIdentity {
    * {@code git config --global} of this identity's account, with its home passed as an argument.
    */
   List<String> gitConfigCommand(String key) {
-    var command = List.of("git", "config", "--global", "--get", key);
+    return withHome(List.of("git", "config", "--global", "--get", key));
+  }
+
+  private List<String> withHome(List<String> command) {
     if (home == null) {
       return command;
     }
@@ -102,11 +154,15 @@ public final class LocalIdentity {
           "This box has no git "
               + key
               + " set, so a project here can't take on your identity.\n"
-              + "  Set it once and re-run: git config --global "
-              + key
-              + " \"...\"");
+              + "  Set it once and re-run: "
+              + gitFix(key));
     }
     return value;
+  }
+
+  /** The command that sets {@code key} for the account whose git config this identity reads. */
+  private String gitFix(String key) {
+    return (sudo ? "sudo " : "") + "git config --global " + key + " \"...\"";
   }
 
   private String sshPublicKey() {

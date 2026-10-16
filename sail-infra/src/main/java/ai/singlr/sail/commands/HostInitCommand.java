@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.DiskDetector;
 import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.NetworkDetector;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PrerequisiteChecker;
 import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
@@ -22,6 +23,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -77,6 +79,26 @@ public final class HostInitCommand implements Runnable {
   private boolean json;
 
   @Spec private CommandSpec spec;
+
+  private final boolean standalone;
+
+  public HostInitCommand() {
+    this(true);
+  }
+
+  private HostInitCommand(boolean standalone) {
+    this.standalone = standalone;
+  }
+
+  /** Host init as {@code sail init}'s first step, which prints no next step of its own. */
+  static HostInitCommand initStep() {
+    return new HostInitCommand(false);
+  }
+
+  /** Whether this host init runs on its own rather than as a step of {@code sail init}. */
+  boolean standalone() {
+    return standalone;
+  }
 
   @Override
   public void run() {
@@ -224,22 +246,30 @@ public final class HostInitCommand implements Runnable {
     }
 
     DemoSeeder.seedIfAbsent();
-    printApiServiceNextSteps();
+    nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), OperatorCommand.here())
+        .ifPresent(
+            line -> {
+              System.out.println();
+              System.out.println(Ansi.AUTO.string(line));
+            });
   }
 
-  private static void printApiServiceNextSteps() {
-    System.out.println();
-    if (Files.exists(SailPaths.SYSTEM_UNIT)) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|green ✓|@ sail API service already installed — nothing to do here;"
-                  + " 'sail upgrade' keeps it current."));
-      return;
+  /**
+   * What a standalone host init tells its operator to run next; nothing inside {@code sail init},
+   * which goes on to install sail-api itself.
+   */
+  static Optional<String> nextStep(
+      boolean standalone, boolean apiInstalled, OperatorCommand operator) {
+    if (!standalone) {
+      return Optional.empty();
     }
-    System.out.println(
-        Ansi.AUTO.string(
-            "  @|bold Next step:|@ sudo sail init --as-main, or sudo sail init --main <main>,"
-                + " installs sail-api and connects this box."));
+    return Optional.of(
+        apiInstalled
+            ? "  @|green ✓|@ sail API service already installed — nothing to do here; '"
+                + operator.sail("upgrade")
+                + "' keeps it current."
+            : "  @|bold Next step:|@ sudo sail init --as-main, or sudo sail init --main <main>,"
+                + " installs sail-api and connects this box.");
   }
 
   private String detectAndSelectDisk(ShellExec shell) throws Exception {

@@ -255,7 +255,7 @@ public final class SyncOperations {
   static String explained(String failure, String said, String target) {
     var message = failure + " ssh said: " + said;
     return HOST_KEY_FAILED.equals(said)
-        ? message + " — re-run 'sudo sail init --main " + target + "' to pin main's host key."
+        ? message + " " + MainHostKey.rebuiltRecovery(target)
         : message;
   }
 

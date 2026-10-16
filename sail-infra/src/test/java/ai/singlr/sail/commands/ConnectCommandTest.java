@@ -9,8 +9,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.StubHarness;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.OptionalInt;
 import org.junit.jupiter.api.Test;
@@ -21,7 +26,7 @@ class ConnectCommandTest {
   void snippetUsesTheProjectsContainerUserNotAHardcodedDev() {
     var snippet =
         ConnectCommand.connectSnippet(
-            "10.0.0.1", "uday", "acme", "10.1.1.5", "engineer", "~/.ssh/id_ed25519");
+            "mainbox", "10.0.0.1", "uday", "acme", "10.1.1.5", "engineer", "~/.ssh/id_ed25519");
 
     assertTrue(snippet.contains("User engineer"), "container ssh user from the definition");
     assertTrue(snippet.contains("zed ssh://engineer@acme/home/engineer/workspace"));
@@ -32,7 +37,7 @@ class ConnectCommandTest {
   void snippetPointsIdentityFileAtTheRegisteredKey() {
     var snippet =
         ConnectCommand.connectSnippet(
-            "10.0.0.1", "uday", "acme", "10.1.1.5", "engineer", "~/.ssh/id_rsa");
+            "mainbox", "10.0.0.1", "uday", "acme", "10.1.1.5", "engineer", "~/.ssh/id_rsa");
 
     assertTrue(snippet.contains("IdentityFile ~/.ssh/id_rsa"), "uses the derived identity file");
     assertFalse(snippet.contains("id_ed25519"), "no hardcoded ed25519 when another key is set");
@@ -55,7 +60,7 @@ class ConnectCommandTest {
         """
         # Add to ~/.ssh/config on your Mac:
 
-        Host singular-server
+        Host mainbox
             HostName 10.0.0.1
             User uday
             IdentityFile ~/.ssh/id_ed25519
@@ -63,7 +68,7 @@ class ConnectCommandTest {
         Host acme
             HostName 10.1.1.5
             User dev
-            ProxyJump singular-server
+            ProxyJump mainbox
             IdentityFile ~/.ssh/id_ed25519
 
         # Then connect:
@@ -73,7 +78,42 @@ class ConnectCommandTest {
         # Agent auth (port forwarding for subscription login):
         #   ssh -N -L 3000:localhost:3000 acme""",
         ConnectCommand.connectSnippet(
-            "10.0.0.1", "uday", "acme", "10.1.1.5", "dev", "~/.ssh/id_ed25519"));
+            "mainbox", "10.0.0.1", "uday", "acme", "10.1.1.5", "dev", "~/.ssh/id_ed25519"));
+  }
+
+  @Test
+  void noHintNamesTheOldProductsJumpHost() throws Exception {
+    try (var sources = Files.walk(Path.of("src", "main"))) {
+      var naming =
+          sources
+              .filter(Files::isRegularFile)
+              .filter(file -> read(file).contains("singular-server"))
+              .toList();
+
+      assertEquals(List.of(), naming);
+    }
+  }
+
+  private static String read(Path file) {
+    try {
+      return Files.readString(file);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
+  }
+
+  @Test
+  void aBoxWithNoServerIpIsToldBothFixesAsItsOperatorTypesThem() {
+    assertEquals(
+        "Server IP not configured. Fix with one of:\n"
+            + "  - sudo sail host config set server-ip <your-server-ip>\n"
+            + "  - Or pass: sudo sail project connect acme --server-ip <your-server-ip>",
+        ConnectCommand.serverIpUnset("acme", new OperatorCommand(true)));
+    assertEquals(
+        "Server IP not configured. Fix with one of:\n"
+            + "  - sudo sail host config set server-ip <your-server-ip>\n"
+            + "  - Or pass: sail project connect acme --server-ip <your-server-ip>",
+        ConnectCommand.serverIpUnset("acme", OperatorCommand.PLAIN));
   }
 
   private static Harness loggingInThrough(String name, int port) {

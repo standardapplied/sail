@@ -20,9 +20,11 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.GitCredentials;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectCatalog;
@@ -673,7 +675,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     if (!json) {
       System.out.println();
-      Banner.printProjectCreated(config.name(), config.sshUser(), System.out, Ansi.AUTO);
+      Banner.printProjectCreated(config.name(), OperatorCommand.here(), System.out, Ansi.AUTO);
     }
   }
 
@@ -685,29 +687,34 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var serverIp = hostYaml.serverIp();
+    var operator = OperatorCommand.here();
     if (serverIp != null) {
       Banner.printSshConfig(
           config.name(),
+          HostInfo.hostname(),
           serverIp,
           System.getProperty("user.name"),
           r.ipv4(),
           WorkstationIdentity.identityFile(),
+          operator,
           System.out,
           Ansi.AUTO);
     } else {
       System.out.println();
-      System.out.println(
-          Ansi.AUTO.string(
-              "    @|yellow Server IP not configured.|@"
-                  + " Run: sudo sail host config set server-ip <your-server-ip>"));
-      System.out.println(
-          Ansi.AUTO.string(
-              "    Then: sail project connect " + config.name() + " for SSH config snippet."));
+      System.out.println(Ansi.AUTO.string(serverIpUnsetLines(config.name(), operator)));
     }
     var ports = ContainerExec.queryServicePorts(shell, config.name());
     if (!ports.isEmpty()) {
       Banner.printSshTunnels(config.name(), config.sshUser(), ports, System.out, Ansi.AUTO);
     }
+  }
+
+  /** What apply prints for a box with no server IP: the command that sets it, then connect's. */
+  static String serverIpUnsetLines(String project, OperatorCommand operator) {
+    return "    @|yellow Server IP not configured.|@ Run: sudo sail host config set server-ip"
+        + " <your-server-ip>\n    Then: "
+        + operator.sail("project connect " + project)
+        + " for SSH config snippet.";
   }
 
   private Map<String, String> resolveGitTokens(SailYaml config) {

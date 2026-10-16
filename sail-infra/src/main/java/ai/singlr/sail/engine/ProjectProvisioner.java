@@ -950,6 +950,7 @@ public final class ProjectProvisioner {
 
       var check = execAsDevUser(name, List.of("test", "-d", targetDir));
       if (check.ok()) {
+        RepoOrigin.require(shell, name, targetDir, repo);
         continue;
       }
 

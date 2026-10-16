@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.util.LinkedHashMap;
@@ -101,7 +102,7 @@ public final class RestoreCommand implements Runnable {
     }
 
     Banner.printSnapshotRestored(name, label, System.out, Ansi.AUTO);
-    Banner.printZedConnect(name, null, System.out, Ansi.AUTO);
+    Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);

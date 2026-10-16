@@ -5,8 +5,10 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.Main;
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.config.PlaceholderResolver;
+import ai.singlr.sail.engine.LocalIdentity;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
@@ -56,10 +58,18 @@ public final class InitCommand implements Runnable {
   @Option(names = "--handle", description = "Your FDE handle on main (node only; else prompted).")
   private String handle;
 
-  @Option(names = "--name", description = "Your full name for the roster (node only).")
+  @Option(
+      names = "--name",
+      description =
+          "Your full name: this box's git user.name when it has none, and a node's roster name"
+              + " (else prompted).")
   private String fullName;
 
-  @Option(names = "--email", description = "Your email for the roster (node only).")
+  @Option(
+      names = "--email",
+      description =
+          "Your email: this box's git user.email when it has none, and a node's roster email"
+              + " (else prompted).")
   private String email;
 
   @Spec private CommandSpec spec;
@@ -76,11 +86,18 @@ public final class InitCommand implements Runnable {
 
   /**
    * What init reads from this box and how it runs a step: whether it runs as root, the account that
-   * invoked {@code sudo}, the host config, where an account's home is, and the granular command
-   * each step runs. A test scripts the steps and puts the homes under a temporary directory.
+   * invoked {@code sudo}, the host config, where an account's home is, the git identity a project
+   * applied here takes on, how it asks the operator a question, and the granular command each step
+   * runs. A test scripts the steps and puts the homes under a temporary directory.
    */
   record Box(
-      boolean root, String sudoUser, Path hostConfig, Function<String, Path> homeOf, Steps steps) {
+      boolean root,
+      String sudoUser,
+      Path hostConfig,
+      Function<String, Path> homeOf,
+      LocalIdentity identity,
+      Prompt prompt,
+      Steps steps) {
 
     static Box here() {
       return new Box(
@@ -88,8 +105,16 @@ public final class InitCommand implements Runnable {
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
+          LocalIdentity.detect(),
+          InitCommand::ask,
           InitCommand::runCommand);
     }
+  }
+
+  /** Asks the operator for {@code label}, answering {@code null} when there is no terminal. */
+  @FunctionalInterface
+  interface Prompt {
+    String ask(String label);
   }
 
   /** Runs one granular command with its arguments, failing when it fails. */
@@ -103,11 +128,13 @@ public final class InitCommand implements Runnable {
     CliCommand.run(spec, this::execute);
   }
 
-  private void execute() {
+  private void execute() throws Exception {
     var intent = InitIntent.resolve(asMain, main);
     var box = this.box.get();
     requireRoot(box.root());
     requireNoUserService(box.sudoUser(), box.homeOf());
+    var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name");
+    var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email");
 
     var provisioned = Files.exists(box.hostConfig());
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
@@ -115,20 +142,58 @@ public final class InitCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
     }
     for (var step : InitPlan.plan(intent, provisioned)) {
-      runStep(step, box.steps());
+      runStep(step, box.steps(), name.value(), mail.value());
     }
+    name.adopt(box.identity());
+    mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
       printMainNextSteps();
     }
   }
 
-  private void runStep(InitPlan.Step step, Steps steps) {
+  /**
+   * The operator's {@code placeholder} value: {@code flag}, or else asked for when this box's git
+   * identity holds none. Asked before the first step, so a long setup waits on no question, and
+   * adopted after the last, once the box is provisioned.
+   */
+  private static GitChoice gitChoice(Box box, String placeholder, String flag, String label) {
+    if (box.identity().gitValue(placeholder).isPresent()) {
+      return new GitChoice(placeholder, flag, false);
+    }
+    var chosen = Strings.isNotBlank(flag) ? flag : box.prompt().ask(label);
+    return Strings.isBlank(chosen)
+        ? new GitChoice(placeholder, null, false)
+        : new GitChoice(placeholder, chosen.strip(), true);
+  }
+
+  /**
+   * A git identity value init carries: {@code value} is what a node's roster entry is given, and
+   * {@code unset} says the box's git identity has none, so init gives it this one; an identity the
+   * box already holds is never overwritten.
+   */
+  private record GitChoice(String placeholder, String value, boolean unset) {
+    void adopt(LocalIdentity identity) throws Exception {
+      if (unset) {
+        identity.adoptGit(placeholder, value);
+      }
+    }
+  }
+
+  private static String ask(String label) {
+    if (System.console() == null) {
+      return null;
+    }
+    System.out.print(Ansi.AUTO.string("  " + label + "? "));
+    return ConsoleHelper.readLine();
+  }
+
+  private void runStep(InitPlan.Step step, Steps steps, String name, String mail) {
     switch (step) {
-      case PROVISION -> steps.run(new HostInitCommand(), "--yes");
+      case PROVISION -> steps.run(HostInitCommand.initStep(), "--yes");
       case INSTALL_API_SYSTEM -> steps.run(new HostServiceInstallCommand());
       case SSH_IDENTITY -> steps.run(new HostSshIdentityCommand());
       case SYNC_AS_MAIN -> steps.run(new HostSyncCommand(), "--as-main");
-      case JOIN_MAIN -> steps.run(new JoinCommand(), joinArgs());
+      case JOIN_MAIN -> steps.run(new JoinCommand(), joinArgs(name, mail));
     }
   }
 
@@ -170,20 +235,20 @@ public final class InitCommand implements Runnable {
     }
   }
 
-  private String[] joinArgs() {
+  private String[] joinArgs(String name, String mail) {
     var args = new ArrayList<String>();
     args.add(main);
     if (Strings.isNotBlank(handle)) {
       args.add("--handle");
       args.add(handle);
     }
-    if (Strings.isNotBlank(fullName)) {
+    if (Strings.isNotBlank(name)) {
       args.add("--name");
-      args.add(fullName);
+      args.add(name);
     }
-    if (Strings.isNotBlank(email)) {
+    if (Strings.isNotBlank(mail)) {
       args.add("--email");
-      args.add(email);
+      args.add(mail);
     }
     return args.toArray(String[]::new);
   }
@@ -202,11 +267,15 @@ public final class InitCommand implements Runnable {
                 + " SHA256:…|@"));
   }
 
-  private static void runCommand(Object command, String... args) {
-    var code = new CommandLine(command).execute(args);
-    if (code != 0) {
-      throw new IllegalStateException(
-          Banner.errorLine("Setup stopped — the step above failed.", Ansi.OFF).strip());
+  /**
+   * Runs a step as {@code sail} runs a command, its failure reported by {@link Main#report} once
+   * and without a trace, then stops the setup.
+   */
+  static void runCommand(Object command, String... args) {
+    var line = new CommandLine(command);
+    line.setExecutionExceptionHandler((failure, failed, parsed) -> Main.report(failure, failed));
+    if (line.execute(args) != 0) {
+      throw new IllegalStateException("Setup stopped — the step above failed.");
     }
   }
 }

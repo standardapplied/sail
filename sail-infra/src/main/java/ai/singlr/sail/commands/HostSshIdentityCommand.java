@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
@@ -56,11 +57,15 @@ public final class HostSshIdentityCommand implements Runnable {
           execute(plan);
           syncKeys();
           System.out.println();
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|green ✓|@ SSH-key login enabled. Register engineers with"
-                      + " 'sail fde add <handle> --key \"<pubkey>\"'."));
+          System.out.println(Ansi.AUTO.string(enabledLine(OperatorCommand.here())));
         });
+  }
+
+  /** What a provisioned box tells its operator, with the command that registers an engineer. */
+  static String enabledLine(OperatorCommand operator) {
+    return "  @|green ✓|@ SSH-key login enabled. Register engineers with '"
+        + operator.sail("fde add <handle> --key \"<pubkey>\"")
+        + "'.";
   }
 
   private static void printPlan(List<SshIdentityProvisioner.Step> plan) {

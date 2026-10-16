@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SshSyncChannel;
 import ai.singlr.sail.engine.SyncOperations;
@@ -147,27 +148,37 @@ public final class HostSyncCommand implements Runnable {
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
-    if (sync.isMain()) {
-      System.out.println(Ansi.AUTO.string("  @|bold,green ✓|@ This box is @|bold main|@."));
-    } else if (sync.main() != null) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|bold,green ✓|@ This box is a @|bold node|@ syncing to @|bold "
-                  + sync.main()
-                  + "|@."));
-    } else {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|faint No sync role set.|@ Run @|bold sail host sync --as-main|@ or"
-                  + " @|bold sail host sync --main <target>|@."));
-    }
-    System.out.println(Ansi.AUTO.string("  " + fdeLine(sync)));
+    System.out.println(roleLines(sync, OperatorCommand.here(), Ansi.AUTO));
   }
 
-  private static String fdeLine(SyncConfig sync) {
+  /** The box's role and its FDE as printed, naming the command that sets whichever is missing. */
+  static String roleLines(SyncConfig sync, OperatorCommand operator, Ansi ansi) {
+    return ansi.string("  " + roleLine(sync, operator))
+        + "\n"
+        + ansi.string("  " + fdeLine(sync, operator));
+  }
+
+  private static String roleLine(SyncConfig sync, OperatorCommand operator) {
+    if (sync.isMain()) {
+      return "@|bold,green ✓|@ This box is @|bold main|@.";
+    }
+    if (sync.main() != null) {
+      return "@|bold,green ✓|@ This box is a @|bold node|@ syncing to @|bold "
+          + sync.main()
+          + "|@.";
+    }
+    return "@|faint No sync role set.|@ Run @|bold "
+        + operator.sail("host sync --as-main")
+        + "|@ or @|bold "
+        + operator.sail("host sync --main <target>")
+        + "|@.";
+  }
+
+  private static String fdeLine(SyncConfig sync, OperatorCommand operator) {
     return sync.handle() != null
         ? "@|faint FDE:|@ @|bold " + sync.handle() + "|@"
-        : "@|faint No FDE set — dispatch can't pick this box's specs. Set it:|@ @|bold sail host"
-            + " config set sync-handle <handle>|@";
+        : "@|faint No FDE set — dispatch can't pick this box's specs. Set it:|@ @|bold "
+            + operator.sail("host config set sync-handle <handle>")
+            + "|@";
   }
 }

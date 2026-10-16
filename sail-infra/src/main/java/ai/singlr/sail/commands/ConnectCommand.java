@@ -9,7 +9,9 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -69,12 +71,7 @@ public final class ConnectCommand implements Runnable {
       resolvedServerIp = hostYaml.serverIp();
     }
     if (resolvedServerIp == null) {
-      throw new IllegalStateException(
-          "Server IP not configured. Fix with one of:\n"
-              + "  - sudo sail host config set server-ip <your-server-ip>\n"
-              + "  - Or pass: sail project connect "
-              + name
-              + " --server-ip <your-server-ip>");
+      throw new IllegalStateException(serverIpUnset(name, OperatorCommand.here()));
     }
 
     var state = mgr.queryState(name);
@@ -130,7 +127,13 @@ public final class ConnectCommand implements Runnable {
     }
     System.out.println(
         connectSnippet(
-            resolvedServerIp, resolvedServerUser, name, containerIp, containerUser, identityFile));
+            HostInfo.hostname(),
+            resolvedServerIp,
+            resolvedServerUser,
+            name,
+            containerIp,
+            containerUser,
+            identityFile));
   }
 
   /**
@@ -144,6 +147,14 @@ public final class ConnectCommand implements Runnable {
     } catch (RuntimeException e) {
       return "dev";
     }
+  }
+
+  /** Connect's refusal on a box with no server IP, naming both ways to give it one. */
+  static String serverIpUnset(String name, OperatorCommand operator) {
+    return "Server IP not configured. Fix with one of:\n"
+        + "  - sudo sail host config set server-ip <your-server-ip>\n"
+        + "  - Or pass: "
+        + operator.sail("project connect " + name + " --server-ip <your-server-ip>");
   }
 
   static Map<String, Object> connectJson(
@@ -166,6 +177,7 @@ public final class ConnectCommand implements Runnable {
   }
 
   static String connectSnippet(
+      String boxHost,
       String serverIp,
       String serverUser,
       String name,
@@ -176,7 +188,7 @@ public final class ConnectCommand implements Runnable {
         """
         # Add to ~/.ssh/config on your Mac:
 
-        Host singular-server
+        Host %s
             HostName %s
             User %s
             IdentityFile %s
@@ -184,19 +196,21 @@ public final class ConnectCommand implements Runnable {
         Host %s
             HostName %s
             User %s
-            ProxyJump singular-server
+            ProxyJump %s
             IdentityFile %s
 
         # Then connect:
         #   ssh %s
         #   zed ssh://%s@%s/home/%s/workspace"""
             .formatted(
+                boxHost,
                 serverIp,
                 serverUser,
                 identityFile,
                 name,
                 containerIp,
                 containerUser,
+                boxHost,
                 identityFile,
                 name,
                 containerUser,

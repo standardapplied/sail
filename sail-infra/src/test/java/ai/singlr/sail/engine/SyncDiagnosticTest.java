@@ -65,7 +65,9 @@ class SyncDiagnosticTest {
   void anUnpinnedOrChangedHostKeyNamesTheRemedy() throws Exception {
     assertEquals(
         "hello: Sync channel closed before main replied. ssh said: Host key verification failed."
-            + " — re-run 'sudo sail init --main sail@main' to pin main's host key.",
+            + " If main was rebuilt, remove the old key with 'sudo ssh-keygen -R main' and re-run"
+            + " 'sudo sail init --main sail@main'; otherwise something between this box and main"
+            + " is answering for it.",
         syncFailure("Host key verification failed."));
   }
 

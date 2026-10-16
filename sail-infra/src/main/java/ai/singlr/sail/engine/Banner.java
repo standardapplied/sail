@@ -487,29 +487,31 @@ public final class Banner {
   }
 
   /** Prints the project creation success message with Zed connect hint. */
-  public static void printProjectCreated(String name, String sshUser, PrintStream out, Ansi ansi) {
-    var user = Objects.requireNonNullElse(sshUser, "dev");
+  public static void printProjectCreated(
+      String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
     out.println(amber(ansi, "  @|bold,green \u2713 Project " + name + " created.|@"));
-    printZedConnect(name, user, out, ansi);
+    printZedConnect(name, operator, out, ansi);
   }
 
   /**
    * Prints the SSH config snippet that the user should add to {@code ~/.ssh/config} on their Mac.
    * This is the same output as {@code sail project connect} but printed inline after project
-   * creation.
+   * creation. The jump host is aliased {@code boxHost}, this box's hostname.
    */
   public static void printSshConfig(
       String name,
+      String boxHost,
       String serverIp,
       String serverUser,
       String containerIp,
       String identityFile,
+      OperatorCommand operator,
       PrintStream out,
       Ansi ansi) {
     out.println();
     out.println(amber(ansi, "    @|faint # Add to ~/.ssh/config on your Mac:|@"));
     out.println();
-    out.println(amber(ansi, "    @|faint Host singular-server|@"));
+    out.println(amber(ansi, "    @|faint Host " + boxHost + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + serverIp + "|@"));
     out.println(amber(ansi, "    @|faint     User " + serverUser + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
@@ -517,13 +519,14 @@ public final class Banner {
     out.println(amber(ansi, "    @|faint Host " + name + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + containerIp + "|@"));
     out.println(amber(ansi, "    @|faint     User dev|@"));
-    out.println(amber(ansi, "    @|faint     ProxyJump singular-server|@"));
+    out.println(amber(ansi, "    @|faint     ProxyJump " + boxHost + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
     out.println(
         amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + name + "/home/dev/workspace"));
     out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + name));
-    out.println(amber(ansi, "    @|bold \u2192 Shell:|@   sudo sail project shell " + name));
+    out.println(
+        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
   }
 
   /** Prints resume information when a prior incomplete provisioning run is detected. */
@@ -546,9 +549,12 @@ public final class Banner {
   }
 
   /** Prints the connect and shell hints after a container starts. */
-  public static void printZedConnect(String name, String sshUser, PrintStream out, Ansi ansi) {
-    out.println(amber(ansi, "    @|bold \u2192 Connect:|@ sail project connect " + name));
-    out.println(amber(ansi, "    @|bold \u2192 Shell:|@   sudo sail project shell " + name));
+  public static void printZedConnect(
+      String name, OperatorCommand operator, PrintStream out, Ansi ansi) {
+    out.println(
+        amber(ansi, "    @|bold \u2192 Connect:|@ " + operator.sail("project connect " + name)));
+    out.println(
+        amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
   }
 
   /**

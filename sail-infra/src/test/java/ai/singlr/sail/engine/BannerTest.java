@@ -467,27 +467,66 @@ class BannerTest {
     }
   }
 
-  @Test
-  void projectCreatedShowsNameAndZedConnect() {
+  private static String created(OperatorCommand operator) {
     var out = new ByteArrayOutputStream();
-    Banner.printProjectCreated("acme-health", "dev", new PrintStream(out), Ansi.OFF);
-    var output = out.toString(StandardCharsets.UTF_8);
-
-    assertTrue(output.contains("\u2713"));
-    assertTrue(output.contains("acme-health"));
-    assertTrue(output.contains("sail project connect acme-health"));
-    assertTrue(output.contains("sail project shell acme-health"));
+    Banner.printProjectCreated("acme-health", operator, new PrintStream(out), Ansi.OFF);
+    return out.toString(StandardCharsets.UTF_8);
   }
 
   @Test
-  void projectCreatedWithoutSshDefaultsToDev() {
-    var out = new ByteArrayOutputStream();
-    Banner.printProjectCreated("simple", null, new PrintStream(out), Ansi.OFF);
-    var output = out.toString(StandardCharsets.UTF_8);
+  void aCreatedProjectNamesItsConnectAndShellCommandsAsTheOperatorTypesThem() {
+    assertEquals(
+        """
+          \u2713 Project acme-health created.
+            \u2192 Connect: sudo sail project connect acme-health
+            \u2192 Shell:   sudo sail project shell acme-health
+        """,
+        created(new OperatorCommand(true)));
+    assertEquals(
+        """
+          \u2713 Project acme-health created.
+            \u2192 Connect: sail project connect acme-health
+            \u2192 Shell:   sail project shell acme-health
+        """,
+        created(OperatorCommand.PLAIN));
+  }
 
-    assertTrue(output.contains("simple"));
-    assertTrue(output.contains("sail project connect simple"));
-    assertTrue(output.contains("sail project shell simple"));
+  @Test
+  void theSshConfigJumpsThroughTheBoxByItsHostname() {
+    var out = new ByteArrayOutputStream();
+
+    Banner.printSshConfig(
+        "acme",
+        "mainbox",
+        "34.1.2.3",
+        "dev",
+        "10.1.1.5",
+        "~/.ssh/id_ed25519",
+        new OperatorCommand(true),
+        new PrintStream(out),
+        Ansi.OFF);
+
+    assertEquals(
+        """
+
+            # Add to ~/.ssh/config on your Mac:
+
+            Host mainbox
+                HostName 34.1.2.3
+                User dev
+                IdentityFile ~/.ssh/id_ed25519
+
+            Host acme
+                HostName 10.1.1.5
+                User dev
+                ProxyJump mainbox
+                IdentityFile ~/.ssh/id_ed25519
+
+            \u2192 Zed:     zed ssh://dev@acme/home/dev/workspace
+            \u2192 SSH:     ssh acme
+            \u2192 Shell:   sudo sail project shell acme
+        """,
+        out.toString(StandardCharsets.UTF_8));
   }
 
   @Test

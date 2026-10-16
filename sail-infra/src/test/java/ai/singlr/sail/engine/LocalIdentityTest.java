@@ -60,10 +60,93 @@ class LocalIdentityTest {
   }
 
   @Test
-  void failsLoudWhenGitNameIsUnset() {
+  void anAccountsOwnMissingIdentityNamesItsOwnGitConfig() {
     var error =
         assertThrows(IllegalStateException.class, () -> identity(Map.of()).valueFor("GIT_NAME"));
-    assertTrue(error.getMessage().contains("git config --global user.name"));
+    assertEquals(
+        "This box has no git user.name set, so a project here can't take on your identity.\n"
+            + "  Set it once and re-run: git config --global user.name \"...\"",
+        error.getMessage());
+  }
+
+  private static String missing(LocalIdentity identity) {
+    return assertThrows(IllegalStateException.class, () -> identity.valueFor("GIT_EMAIL"))
+        .getMessage();
+  }
+
+  @Test
+  void rootsMissingIdentityUnderSudoNamesTheSudoThatSetsRootsGitConfig() {
+    var noGit = stubGit(Map.of(), new ArrayList<>());
+
+    assertEquals(
+        "This box has no git user.email set, so a project here can't take on your identity.\n"
+            + "  Set it once and re-run: sudo git config --global user.email \"...\"",
+        missing(LocalIdentity.detect(noGit, true, dir.resolve("root"), dir.resolve("dev"))));
+  }
+
+  @Test
+  void anIdentityReadForItsOwnAccountNamesPlainGitConfig() {
+    var noGit = stubGit(Map.of(), new ArrayList<>());
+    var plain =
+        "This box has no git user.email set, so a project here can't take on your identity.\n"
+            + "  Set it once and re-run: git config --global user.email \"...\"";
+
+    assertEquals(
+        plain, missing(LocalIdentity.detect(noGit, true, dir.resolve("dev"), dir.resolve("dev"))));
+    assertEquals(
+        plain,
+        missing(LocalIdentity.detect(noGit, true, dir.resolve("root"), dir.resolve("root"))));
+    assertEquals(
+        plain,
+        missing(LocalIdentity.detect(noGit, false, dir.resolve("dev"), dir.resolve("mady"))));
+  }
+
+  @Test
+  void adoptingAGitValueWritesTheAccountsGlobalConfig() throws Exception {
+    var home = dir.resolve("root");
+    var commands = new ArrayList<List<String>>();
+    var identity =
+        new LocalIdentity(stubGit(Map.of(), commands), home.resolve("key.pub"), home, true);
+
+    identity.adoptGit("GIT_NAME", "A B");
+
+    assertEquals(
+        List.of(List.of("env", "HOME=" + home, "git", "config", "--global", "user.name", "A B")),
+        commands);
+  }
+
+  @Test
+  void aGitValueGitRefusesToWriteFailsNamingTheCommandThatSetsIt() {
+    var identity =
+        new LocalIdentity(
+            new ScriptedShellExecutor().onFail("git config", "error: could not lock config file"),
+            keyPath);
+
+    var error =
+        assertThrows(IllegalStateException.class, () -> identity.adoptGit("GIT_EMAIL", "a@b"));
+
+    assertEquals(
+        "Couldn't set this box's git user.email: error: could not lock config file\n"
+            + "  Set it yourself and re-run: git config --global user.email \"...\"",
+        error.getMessage());
+    assertThrows(IllegalArgumentException.class, () -> identity.adoptGit("SSH_PUBLIC_KEY", "k"));
+  }
+
+  @Test
+  void aBoxWithoutGitFailsNamingTheCommandThatSetsTheValue() {
+    var identity =
+        new LocalIdentity(
+            new ScriptedShellExecutor()
+                .onThrow("git config", new IOException("Cannot run program \"git\"")),
+            keyPath);
+
+    var error =
+        assertThrows(IllegalStateException.class, () -> identity.adoptGit("GIT_NAME", "A B"));
+
+    assertEquals(
+        "Couldn't set this box's git user.name: Cannot run program \"git\"\n"
+            + "  Set it yourself and re-run: git config --global user.name \"...\"",
+        error.getMessage());
   }
 
   @Test
@@ -109,7 +192,7 @@ class LocalIdentityTest {
     var commands = new ArrayList<List<String>>();
     var shell = stubGit(Map.of("user.name", "Mady M"), commands);
 
-    var identity = new LocalIdentity(shell, home.resolve(".sail/workstation_key.pub"), home);
+    var identity = new LocalIdentity(shell, home.resolve(".sail/workstation_key.pub"), home, false);
 
     assertEquals("Mady M", identity.valueFor("GIT_NAME"));
     assertEquals(VALID_KEY, identity.valueFor("SSH_PUBLIC_KEY"));
@@ -154,7 +237,7 @@ class LocalIdentityTest {
 
   private static LocalIdentity home(Path home, Map<String, String> git) {
     return new LocalIdentity(
-        stubGit(git, new ArrayList<>()), home.resolve(".sail/workstation_key.pub"), home);
+        stubGit(git, new ArrayList<>()), home.resolve(".sail/workstation_key.pub"), home, false);
   }
 
   private static ShellExec stubGit(Map<String, String> config, List<List<String>> commands) {

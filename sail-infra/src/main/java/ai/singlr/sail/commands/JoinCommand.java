@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.MainHostKey;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshSyncChannel;
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncHealth;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
@@ -101,7 +103,7 @@ public final class JoinCommand implements Runnable {
             resolvedEmail,
             SshSyncChannel::open,
             MainHostKey.here());
-    print(plan);
+    System.out.println(render(plan, json, OperatorCommand.here()));
   }
 
   /**
@@ -109,9 +111,10 @@ public final class JoinCommand implements Runnable {
    * {@code target} as a node. The pin comes first, so a main whose key cannot be read or differs
    * from the one pinned leaves no half-joined box. A change of handle is refused while a run main
    * holds under the old one would be stranded, and once written every run main has not taken is
-   * stamped with the new one ({@link HandleChange}), in the box's database {@code db}. Pure of any
-   * prompting or stdout so it can be exercised directly in tests with a {@code @TempDir} config and
-   * a stub identity.
+   * stamped with the new one ({@link HandleChange}), in the box's database {@code db}. Main already
+   * holds this box's key when the box re-joins the main it synced with before, as the same handle,
+   * with the sync key it had then. Pure of any prompting or stdout so it can be exercised directly
+   * in tests with a {@code @TempDir} config and a stub identity.
    */
   static Plan plan(
       Path hostConfig,
@@ -129,16 +132,35 @@ public final class JoinCommand implements Runnable {
     }
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);
-    var pinned = mainHostKey.pin(hostForProbe(target));
+    var pinned = mainHostKey.pin(target);
+    var keyHeld = identity.exists();
     var publicKey = identity.ensure("sail-sync:" + handle);
     var host = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
+    var before = host.sync();
+    var mainHasKey =
+        keyHeld
+            && target.equals(before.main())
+            && handle.equals(before.handle())
+            && syncedWith(db, target);
     var updated =
         HostConfigSetCommand.applyChange(
             HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
             "sync-handle",
             handle);
     HandleChange.write(hostConfig, db, host, updated, channels);
-    return new Plan(target, handle, name, email, publicKey, pinned);
+    return new Plan(target, handle, name, email, publicKey, pinned, mainHasKey);
+  }
+
+  private static boolean syncedWith(Path db, String target) {
+    if (!Files.exists(db)) {
+      return false;
+    }
+    try (var sqlite = Sqlite.open(db)) {
+      return new SyncHealth(sqlite)
+          .find(target)
+          .map(health -> health.lastSuccessAt() != null)
+          .orElse(false);
+    }
   }
 
   private static void requireWritable(Path hostConfig, String target) {
@@ -175,15 +197,6 @@ public final class JoinCommand implements Runnable {
             + "@…' will be rejected. Use sail@"
             + trimmed.substring(at + 1)
             + " (or just the host).");
-  }
-
-  /** Bare host whose SSH host key is pinned: strips any {@code user@} prefix and {@code :port}. */
-  static String hostForProbe(String target) {
-    var trimmed = target.strip();
-    var at = trimmed.indexOf('@');
-    var host = at >= 0 ? trimmed.substring(at + 1) : trimmed;
-    var colon = host.indexOf(':');
-    return colon >= 0 ? host.substring(0, colon) : host;
   }
 
   /**
@@ -326,12 +339,8 @@ public final class JoinCommand implements Runnable {
     return line.toString();
   }
 
-  private void print(Plan plan) {
-    System.out.println(render(plan, json));
-  }
-
   /** Renders the join result — machine JSON or the human next-steps block. Pure for testing. */
-  static String render(Plan plan, boolean json) {
+  static String render(Plan plan, boolean json, OperatorCommand operator) {
     var authorize =
         authorizeLine(
             plan.handle(), plan.name(), plan.email(), plan.publicKey(), plan.mainHostKey());
@@ -346,6 +355,17 @@ public final class JoinCommand implements Runnable {
       map.put("authorize_command", authorize);
       return YamlUtil.dumpJson(map);
     }
+    var sync = operator.sail("sync");
+    if (plan.mainHasKey()) {
+      return Ansi.AUTO.string(
+          """
+
+              @|bold,green ✓|@ This box is now a @|bold node|@ syncing to @|bold %s|@.
+
+              Main already has this box's key. Finish with @|bold %s|@.\
+          """
+              .formatted(plan.target(), sync));
+    }
     return Ansi.AUTO.string(
         """
 
@@ -355,14 +375,14 @@ public final class JoinCommand implements Runnable {
 
               @|cyan %s|@
 
-            Once they have, finish here with @|bold sudo sail sync|@. Only a public key leaves \
-        this box — never a secret."""
-            .formatted(plan.target(), plan.target(), authorize));
+            Once they have, finish here with @|bold %s|@. Only a public key leaves this box — \
+        never a secret."""
+            .formatted(plan.target(), plan.target(), authorize, sync));
   }
 
   /**
-   * Result of a join: the target, the chosen handle, this node's public sync key and the
-   * fingerprint of main's host key it pinned.
+   * Result of a join: the target, the chosen handle, this node's public sync key, the fingerprint
+   * of main's host key it pinned, and whether main already holds that sync key.
    */
   record Plan(
       String target,
@@ -370,5 +390,6 @@ public final class JoinCommand implements Runnable {
       String name,
       String email,
       String publicKey,
-      String mainHostKey) {}
+      String mainHostKey,
+      boolean mainHasKey) {}
 }
