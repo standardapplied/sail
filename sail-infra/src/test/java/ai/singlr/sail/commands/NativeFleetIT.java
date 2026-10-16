@@ -142,7 +142,7 @@ class NativeFleetIT {
   }
 
   @Test
-  void aNodePinsMainsHostKeyAtJoinAndARekeyedMainFailsItsSyncNamingTheRemedy() throws Exception {
+  void aNodeRecoversFromARekeyedMainByFollowingWhatItsSyncPrinted() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.candidate());
       main.serving(() -> main.createSpecs("pinned", 2, 1_000));
@@ -160,9 +160,19 @@ class NativeFleetIT {
               .output()
               .contains(
                   "hello: Sync channel closed before main replied. ssh said: Host key verification"
-                      + " failed. — re-run 'sudo sail init --main sail@localhost' to pin main's"
-                      + " host key."),
+                      + " failed. If main was rebuilt, remove the old key with 'sudo ssh-keygen -R"
+                      + " localhost' and re-run 'sudo sail init --main sail@localhost'; otherwise"
+                      + " something between this box and main is answering for it."),
           refused::output);
+
+      mady.shOk("ssh-keygen -R localhost");
+      var rejoined = mady.sailOk("join", "sail@localhost", "--handle", "mady");
+
+      assertTrue(
+          rejoined.contains("Main already has this box's key. Finish with sail sync."), rejoined);
+      assertFalse(rejoined.contains("fde add"), rejoined);
+      mady.sailOk("sync");
+      fleet.assertConverged(mady);
     }
   }
 
