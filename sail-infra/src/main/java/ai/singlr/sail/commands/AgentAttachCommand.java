@@ -9,6 +9,7 @@ import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.LiveMembers;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -108,7 +109,7 @@ public final class AgentAttachCommand implements Runnable {
       }
       open.add("--command");
       open.addAll(command);
-      return open.stream().map(AgentAttachCommand::shellWord).collect(Collectors.joining(" "))
+      return open.stream().map(Strings::shellWord).collect(Collectors.joining(" "))
           + "\nsail session attach "
           + session;
     }
@@ -524,9 +525,5 @@ public final class AgentAttachCommand implements Runnable {
     cmd.add("--");
     cmd.addAll(args);
     return List.copyOf(cmd);
-  }
-
-  private static String shellWord(String word) {
-    return word.matches("[A-Za-z0-9._/=:-]+") ? word : "'" + word.replace("'", "'\\''") + "'";
   }
 }

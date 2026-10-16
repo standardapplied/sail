@@ -15,6 +15,7 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -68,5 +69,28 @@ class MainTest {
     assertEquals(1, code);
     assertFalse(err.toString().isBlank());
     assertTrue(err.toString().contains("IllegalStateException"), err.toString());
+  }
+
+  @Test
+  void anAccountThatDoesNotOwnTheBoxIsToldItsCommandWithSudo() {
+    assertEquals(
+        "sail-api on this box runs as root, so dev's sail would see none of its specs, projects or"
+            + " FDEs. Run it with sudo: sudo sail spec create --id a --title 'b c'",
+        Main.refusal("dev", new String[] {"spec", "create", "--id", "a", "--title", "b c"}));
+    assertEquals(
+        "sail-api on this box runs as root, so dev's sail would see none of its specs, projects or"
+            + " FDEs. Run it with sudo: sudo sail",
+        Main.refusal("dev", new String[0]));
+  }
+
+  @Test
+  void onlyHelpAndTheVersionAreExemptFromTheRefusal() {
+    for (var flag : List.of("--version", "-V", "--help", "-h")) {
+      assertTrue(Main.exempt(new String[] {flag}), flag);
+    }
+    assertTrue(Main.exempt(new String[] {"spec", "list", "--help"}));
+    assertFalse(Main.exempt(new String[] {"spec", "list"}));
+    assertFalse(Main.exempt(new String[] {"sync"}));
+    assertFalse(Main.exempt(new String[0]));
   }
 }

@@ -148,4 +148,33 @@ class SailPathsTest {
     assertTrue(SailPaths.dataDirOverridden(link.toString()));
     assertTrue(SailPaths.dataDirOverridden(tempDir.resolve("missing").toString()));
   }
+
+  @Test
+  void theSystemUnitIsRootsSailApi() {
+    assertEquals(Path.of("/etc/systemd/system/sail-api.service"), SailPaths.SYSTEM_UNIT);
+  }
+
+  @Test
+  void sudoOnABoxAnAccountOwnsInItsHomeResolvesThatAccountsIdentity() throws Exception {
+    var homes = tempDir.resolve("home");
+    Files.createDirectories(homes.resolve("dev/.sail"));
+    Files.writeString(homes.resolve("dev/.sail/host.yaml"), "storage_backend: dir\n");
+    var root = tempDir.resolve("root");
+
+    assertEquals(homes.resolve("dev"), SailPaths.identityHome(true, "dev", false, homes, root));
+  }
+
+  @Test
+  void everyOtherAccountResolvesItsOwnIdentity() throws Exception {
+    var homes = tempDir.resolve("home");
+    Files.createDirectories(homes.resolve("dev/.sail"));
+    Files.writeString(homes.resolve("dev/.sail/host.yaml"), "storage_backend: dir\n");
+    var own = tempDir.resolve("own");
+
+    assertEquals(own, SailPaths.identityHome(true, "dev", true, homes, own), "a root box");
+    assertEquals(own, SailPaths.identityHome(false, "dev", false, homes, own), "not root");
+    assertEquals(own, SailPaths.identityHome(true, null, false, homes, own), "no sudo");
+    assertEquals(own, SailPaths.identityHome(true, "root", false, homes, own), "sudo by root");
+    assertEquals(own, SailPaths.identityHome(true, "mady", false, homes, own), "mady owns none");
+  }
 }

@@ -11,21 +11,48 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.RemoteCommandRunner;
 import ai.singlr.sail.engine.RuntimeMode;
+import java.util.Arrays;
+import java.util.Set;
 import picocli.CommandLine;
 
 public final class Main {
 
   private Main() {}
 
+  private static final Set<String> EXEMPT = Set.of("--version", "-V", "--help", "-h");
+
   public static void main(String[] args) {
-    if (RuntimeMode.detect() instanceof RuntimeMode.Client client) {
-      System.exit(new RemoteCommandRunner(client.config()).execute(args));
+    switch (RuntimeMode.detect()) {
+      case RuntimeMode.Client client ->
+          System.exit(new RemoteCommandRunner(client.config()).execute(args));
+      case RuntimeMode.Refused refused when !exempt(args) -> {
+        System.err.println(refusal(System.getProperty("user.name"), args));
+        System.exit(1);
+      }
+      default -> {}
     }
     AutoUpgrader.upgradeIfAvailable(args);
     var cmd = new CommandLine(new Sail());
     cmd.setExecutionExceptionHandler((ex, commandLine, parseResult) -> report(ex, commandLine));
     var exitCode = cmd.execute(args);
     System.exit(exitCode);
+  }
+
+  /** Whether {@code args} only ask for help or the version, which every account may. */
+  static boolean exempt(String[] args) {
+    return Arrays.stream(args).anyMatch(EXEMPT::contains);
+  }
+
+  /** What an account that does not own this box is told, with its command to paste back. */
+  static String refusal(String user, String[] args) {
+    var command = new StringBuilder("sudo sail");
+    for (var arg : args) {
+      command.append(' ').append(Strings.shellWord(arg));
+    }
+    return "sail-api on this box runs as root, so "
+        + user
+        + "'s sail would see none of its specs, projects or FDEs. Run it with sudo: "
+        + command;
   }
 
   /**

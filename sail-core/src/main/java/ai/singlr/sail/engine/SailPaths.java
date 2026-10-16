@@ -33,6 +33,12 @@ public final class SailPaths {
 
   private static final Path SYSTEM_DATA_DIR = Path.of("/var/lib/sail");
 
+  /**
+   * The system {@code sail-api} unit, present on a box whose control plane is root's. Its presence
+   * is what tells another account's CLI that the box's state is not its own.
+   */
+  public static final Path SYSTEM_UNIT = Path.of("/etc/systemd/system/sail-api.service");
+
   /** The provisioned system data directory, where a host's control-plane database lives. */
   public static Path systemDataDir() {
     return SYSTEM_DATA_DIR;
@@ -150,6 +156,30 @@ public final class SailPaths {
    */
   public static Path workstationPublicKeyPath() {
     return SAIL_DIR.resolve("workstation_key.pub");
+  }
+
+  /**
+   * The home a project's personal placeholders resolve from: the {@code sudo} user's when root acts
+   * for an account that owns this box in its own home, so its plain and sudo applies resolve alike,
+   * and this account's otherwise, root's included on a box whose sail-api is root's.
+   */
+  public static Path identityHome() {
+    return identityHome(
+        isRoot(),
+        System.getenv("SUDO_USER"),
+        Files.exists(SYSTEM_UNIT),
+        Path.of("/home"),
+        Path.of(System.getProperty("user.home")));
+  }
+
+  /** Pure of the process, so every account's resolution is exercised directly. */
+  static Path identityHome(
+      boolean root, String sudoUser, boolean systemUnit, Path homes, Path ownHome) {
+    if (!root || systemUnit || Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
+      return ownHome;
+    }
+    var sudoHome = homes.resolve(sudoUser);
+    return Files.exists(sudoHome.resolve(".sail").resolve("host.yaml")) ? sudoHome : ownHome;
   }
 
   /**

@@ -59,4 +59,13 @@ class StringsTest {
     assertEquals("a\uD83D\uDE00", Strings.clip("a\uD83D\uDE00b", 2));
     assertEquals("", Strings.clip("abc", 0));
   }
+
+  @Test
+  void shellWordLeavesASafeWordBareAndQuotesAnyOtherToPasteBack() {
+    assertEquals("--title", Strings.shellWord("--title"));
+    assertEquals("/var/lib/sail=a:b.c", Strings.shellWord("/var/lib/sail=a:b.c"));
+    assertEquals("'b c'", Strings.shellWord("b c"));
+    assertEquals("'it'\\''s'", Strings.shellWord("it's"));
+    assertEquals("''", Strings.shellWord(""));
+  }
 }

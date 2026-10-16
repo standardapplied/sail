@@ -98,7 +98,7 @@ public final class SystemdServiceInstaller {
     this.mode = Objects.requireNonNull(mode, "mode");
     var home = Objects.requireNonNull(userHome, "userHome");
     if (mode == Mode.SYSTEM) {
-      this.serviceFilePath = Path.of("/etc/systemd/system").resolve(UNIT_FILENAME);
+      this.serviceFilePath = SailPaths.SYSTEM_UNIT;
       this.systemdLinkPath = null;
     } else {
       this.serviceFilePath = home.resolve(".sail/services").resolve(UNIT_FILENAME);

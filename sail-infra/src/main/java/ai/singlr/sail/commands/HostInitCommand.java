@@ -19,11 +19,8 @@ import ai.singlr.sail.engine.ProvisionListener;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SystemdServiceInstaller;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import picocli.CommandLine.Command;
@@ -227,91 +224,22 @@ public final class HostInitCommand implements Runnable {
     }
 
     DemoSeeder.seedIfAbsent();
-    printApiServiceNextSteps(shell);
+    printApiServiceNextSteps();
   }
 
-  private void printApiServiceNextSteps(ShellExec shell) {
-    var sudoUser = System.getenv("SUDO_USER");
+  private static void printApiServiceNextSteps() {
     System.out.println();
-    if (apiServiceInstalled(targetHome(sudoUser))) {
+    if (Files.exists(SailPaths.SYSTEM_UNIT)) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|green ✓|@ sail API service already installed — nothing to do here;"
                   + " 'sail upgrade' keeps it current."));
       return;
     }
-    System.out.println(Ansi.AUTO.string("  @|bold Next step:|@ enable the sail API service."));
-    if (Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser)) {
-      enableLingerForUser(shell, sudoUser);
-      System.out.println(Ansi.AUTO.string("    Run as @|bold " + sudoUser + "|@ (without sudo):"));
-    } else {
-      System.out.println("    Run as your dev user (without sudo):");
-    }
-    System.out.println(Ansi.AUTO.string("      @|bold sail host service install|@"));
-  }
-
-  /**
-   * Resolves the home of the engineer who will own the user-level API service: the {@code
-   * SUDO_USER} when {@code init} runs under sudo, otherwise the current user's home.
-   */
-  private static Path targetHome(String sudoUser) {
-    if (Strings.isNotBlank(sudoUser) && !"root".equals(sudoUser)) {
-      return Path.of("/home/" + sudoUser);
-    }
-    return Path.of(System.getProperty("user.home"));
-  }
-
-  /**
-   * True when the per-user {@code sail-api} unit already exists under {@code userHome}. Lets {@code
-   * init} skip the install prompt on a box that was set up before (an idempotent re-init), since
-   * the service is purely file-state that root can read for any user.
-   */
-  static boolean apiServiceInstalled(Path userHome) {
-    if (userHome == null) {
-      return false;
-    }
-    return new SystemdServiceInstaller(
-            new ShellExecutor(false),
-            SystemdServiceInstaller.Mode.USER,
-            userHome,
-            SailPaths::installedBinary,
-            "127.0.0.1",
-            7070,
-            "sail")
-        .isInstalled();
-  }
-
-  private void enableLingerForUser(ShellExec shell, String user) {
-    try {
-      var result = shell.exec(List.of("loginctl", "enable-linger", user));
-      if (result.ok()) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|green \u2713|@ Enabled systemd linger for user '"
-                    + user
-                    + "' (service survives logout)."));
-      } else {
-        System.err.println(
-            Banner.errorLine(
-                "Could not enable linger for '"
-                    + user
-                    + "': "
-                    + result.stderr().strip()
-                    + ". Run manually: sudo loginctl enable-linger "
-                    + user,
-                Ansi.AUTO));
-      }
-    } catch (Exception e) {
-      System.err.println(
-          Banner.errorLine(
-              "Could not enable linger for '"
-                  + user
-                  + "': "
-                  + e.getMessage()
-                  + ". Run manually: sudo loginctl enable-linger "
-                  + user,
-              Ansi.AUTO));
-    }
+    System.out.println(
+        Ansi.AUTO.string(
+            "  @|bold Next step:|@ sudo sail init --as-main, or sudo sail init --main <main>,"
+                + " installs sail-api and connects this box."));
   }
 
   private String detectAndSelectDisk(ShellExec shell) throws Exception {
