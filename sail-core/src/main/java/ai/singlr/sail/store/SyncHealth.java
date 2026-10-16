@@ -69,7 +69,10 @@ public final class SyncHealth {
         peer);
   }
 
-  /** Drops everything recorded about syncing with {@code peer}, as if this box never had. */
+  /**
+   * Drops everything recorded about syncing with {@code peer}, as if this box never had. A round
+   * still in flight finishes without recording: it ran as the identity the forget retired.
+   */
   public void forget(String peer) {
     db.execute("DELETE FROM sync_health WHERE peer = ?", peer);
   }
@@ -103,7 +106,11 @@ public final class SyncHealth {
       List<SyncSession.Denial> denials) {
     return db.transaction(
         () -> {
-          var recovered = find(peer).orElseThrow().consecutiveFailures() > 0;
+          var previous = find(peer);
+          if (previous.isEmpty()) {
+            return false;
+          }
+          var recovered = previous.get().consecutiveFailures() > 0;
           betweenReadAndWrite.run();
           db.execute(
               """
@@ -148,7 +155,7 @@ public final class SyncHealth {
               error,
               at.toString(),
               peer);
-          return find(peer).orElseThrow().consecutiveFailures();
+          return find(peer).map(Health::consecutiveFailures).orElse(0);
         });
   }
 

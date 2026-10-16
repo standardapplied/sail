@@ -82,6 +82,33 @@ class ConnectCommandTest {
   }
 
   @Test
+  void aProjectNamedLikeTheBoxGetsItsOwnAliasSoSshNeverJumpsThroughItself() {
+    assertEquals(
+        """
+        # Add to ~/.ssh/config on your Mac:
+
+        Host Gamma
+            HostName 192.0.2.1
+            User uday
+            IdentityFile ~/.ssh/id_ed25519
+
+        Host gamma-project
+            HostName 10.0.0.2
+            User dev
+            ProxyJump Gamma
+            IdentityFile ~/.ssh/id_ed25519
+
+        # Then connect:
+        #   ssh gamma-project
+        #   zed ssh://dev@gamma-project/home/dev/workspace
+        #
+        # Agent auth (port forwarding for subscription login):
+        #   ssh -N -L 3000:localhost:3000 gamma-project""",
+        ConnectCommand.connectSnippet(
+            "Gamma", "192.0.2.1", "uday", "gamma", "10.0.0.2", "dev", "~/.ssh/id_ed25519"));
+  }
+
+  @Test
   void noHintNamesTheOldProductsJumpHost() throws Exception {
     try (var sources = Files.walk(Path.of("src", "main"))) {
       var naming =

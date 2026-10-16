@@ -530,6 +530,44 @@ class BannerTest {
   }
 
   @Test
+  void aProjectNamedLikeTheBoxIsReachedByItsOwnAliasAndShelledIntoByItsName() {
+    var out = new ByteArrayOutputStream();
+
+    Banner.printSshConfig(
+        "gamma",
+        "gamma",
+        "192.0.2.1",
+        "dev",
+        "10.0.0.2",
+        "~/.ssh/id_ed25519",
+        OperatorCommand.PLAIN,
+        new PrintStream(out),
+        Ansi.OFF);
+
+    assertEquals(
+        """
+
+            # Add to ~/.ssh/config on your Mac:
+
+            Host gamma
+                HostName 192.0.2.1
+                User dev
+                IdentityFile ~/.ssh/id_ed25519
+
+            Host gamma-project
+                HostName 10.0.0.2
+                User dev
+                ProxyJump gamma
+                IdentityFile ~/.ssh/id_ed25519
+
+            \u2192 Zed:     zed ssh://dev@gamma-project/home/dev/workspace
+            \u2192 SSH:     ssh gamma-project
+            \u2192 Shell:   sail project shell gamma
+        """,
+        out.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   void resumeInfoShowsCompletedPhaseAndError() {
     var state =
         new ProvisionState(
@@ -860,6 +898,23 @@ class BannerTest {
     assertTrue(
         output.endsWith("ssh -N -L 4100:localhost:4100 acme" + System.lineSeparator()), output);
     assertTrue(output.contains("Agent auth"));
+  }
+
+  @Test
+  void aProjectNamedLikeTheBoxIsTunnelledToByItsOwnAlias() {
+    var box = HostInfo.hostname();
+    var ports = new ByteArrayOutputStream();
+    var agentAuth = new ByteArrayOutputStream();
+
+    Banner.printSshTunnels(box, null, List.of(5432), new PrintStream(ports), Ansi.OFF);
+    Banner.printAgentAuthTunnel(box, 4100, new PrintStream(agentAuth), Ansi.OFF);
+
+    assertEquals(
+        "    \u2192 Ports:   ssh -L 5432:localhost:5432 dev@" + box + "-project -N\n",
+        ports.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        "    \u2192 Agent auth: ssh -N -L 4100:localhost:4100 " + box + "-project\n",
+        agentAuth.toString(StandardCharsets.UTF_8));
   }
 
   @Test

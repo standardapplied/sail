@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.ContainerStateGuard;
@@ -173,6 +174,7 @@ public final class ConnectCommand implements Runnable {
       String containerIp,
       String containerUser,
       String identityFile) {
+    var alias = Banner.projectSshAlias(name, boxHost);
     var snippet =
         """
         # Add to ~/.ssh/config on your Mac:
@@ -196,16 +198,16 @@ public final class ConnectCommand implements Runnable {
                 serverIp,
                 serverUser,
                 identityFile,
-                name,
+                alias,
                 containerIp,
                 containerUser,
                 boxHost,
                 identityFile,
-                name,
+                alias,
                 containerUser,
-                name,
+                alias,
                 containerUser);
-    return snippet + agentAuth(Harnesses.all(), name);
+    return snippet + agentAuth(Harnesses.all(), alias);
   }
 
   /**

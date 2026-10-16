@@ -72,6 +72,22 @@ class SyncHealthTest {
   }
 
   @Test
+  void aRoundThatFinishesAfterItsPeerWasForgottenRecordsNothing() {
+    var t0 = Instant.parse("2026-09-17T00:00:00Z");
+    health.begin("sail@main", t0);
+    health.forget("sail@main");
+
+    assertFalse(health.succeeded("sail@main", t0.plusSeconds(1), SyncEngine.Report.NONE));
+    assertTrue(health.find("sail@main").isEmpty());
+
+    health.begin("sail@main", t0);
+    health.forget("sail@main");
+
+    assertEquals(0, health.failed("sail@main", t0.plusSeconds(2), "unreachable", "ssh: exit 255"));
+    assertTrue(health.find("sail@main").isEmpty());
+  }
+
+  @Test
   void theLastRoundsDenialsAreKeptUntilTheNextRoundReplacesThem() {
     var t0 = Instant.parse("2026-09-17T00:00:00Z");
     health.begin("main", t0);

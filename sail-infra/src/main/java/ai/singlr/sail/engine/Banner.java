@@ -508,6 +508,7 @@ public final class Banner {
       OperatorCommand operator,
       PrintStream out,
       Ansi ansi) {
+    var alias = projectSshAlias(name, boxHost);
     out.println();
     out.println(amber(ansi, "    @|faint # Add to ~/.ssh/config on your Mac:|@"));
     out.println();
@@ -516,17 +517,25 @@ public final class Banner {
     out.println(amber(ansi, "    @|faint     User " + serverUser + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
-    out.println(amber(ansi, "    @|faint Host " + name + "|@"));
+    out.println(amber(ansi, "    @|faint Host " + alias + "|@"));
     out.println(amber(ansi, "    @|faint     HostName " + containerIp + "|@"));
     out.println(amber(ansi, "    @|faint     User dev|@"));
     out.println(amber(ansi, "    @|faint     ProxyJump " + boxHost + "|@"));
     out.println(amber(ansi, "    @|faint     IdentityFile " + identityFile + "|@"));
     out.println();
     out.println(
-        amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + name + "/home/dev/workspace"));
-    out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + name));
+        amber(ansi, "    @|bold \u2192 Zed:|@     zed ssh://dev@" + alias + "/home/dev/workspace"));
+    out.println(amber(ansi, "    @|bold \u2192 SSH:|@     ssh " + alias));
     out.println(
         amber(ansi, "    @|bold \u2192 Shell:|@   " + operator.sail("project shell " + name)));
+  }
+
+  /**
+   * The alias a project's container is reached by: its name, unless that is the box's own alias,
+   * which ssh would read as one host and jump the container through itself.
+   */
+  public static String projectSshAlias(String name, String boxHost) {
+    return name.equalsIgnoreCase(boxHost) ? name + "-project" : name;
   }
 
   /** Prints resume information when a prior incomplete provisioning run is detected. */
@@ -578,7 +587,13 @@ public final class Banner {
     out.println(
         amber(
             ansi,
-            "    @|bold \u2192 Ports:|@   ssh " + tunnelArgs + " " + user + "@" + name + " -N"));
+            "    @|bold \u2192 Ports:|@   ssh "
+                + tunnelArgs
+                + " "
+                + user
+                + "@"
+                + projectSshAlias(name, HostInfo.hostname())
+                + " -N"));
   }
 
   /** Prints the agent auth tunnel hint: forwarding {@code port} for subscription-based login. */
@@ -591,7 +606,7 @@ public final class Banner {
                 + ":localhost:"
                 + port
                 + " "
-                + name));
+                + projectSshAlias(name, HostInfo.hostname())));
   }
 
   /** Prints a container status line — green ✓ for running, faint ■ for stopped. */
