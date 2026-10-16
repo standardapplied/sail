@@ -773,10 +773,12 @@ clone a project's source repos into its container at provision time, not to move
   `/var/lib/sail/host.yaml` nor its own. Its `~/.sail` would silently diverge from root's state,
   so `Main` runs nothing: it prints "sail-api on this box runs as root, so <user>'s sail would
   see none of its specs, projects or FDEs. Run it with sudo: sudo sail <args>" and exits 1.
-  Only `--version`, `-V`, `--help` and `-h` are exempt. The `sail` gateway account reads
+  Only `--version`, `-V`, `--help` and `-h` are exempt, when picocli reads them as a request for
+  help (not after `--`, where they belong to the command). The `sail` gateway account reads
   `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
-  own box. On such a box, `sudo` resolves a project's personal placeholders from that account's
-  home (`SailPaths.identityHome`), so its plain and `sudo` applies record the same descriptor.
+  own box. For such an account, `sudo` resolves a project's personal placeholders from that account's
+  home (`SailPaths.identityHome`), even beside root's system unit, so its plain and `sudo`
+  applies record the same descriptor.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.

@@ -25,6 +25,7 @@ import java.util.concurrent.TimeoutException;
 public final class MainHostKey {
 
   private static final String TYPE = "ssh-ed25519";
+  private static final String REVOKED = "@revoked";
 
   private final ShellExec shell;
   private final Path knownHosts;
@@ -51,7 +52,27 @@ public final class MainHostKey {
             .findFirst()
             .orElseThrow(() -> unread(host, scan.stderr()));
     var key = keyOf(line).orElseThrow();
-    var pinned = pinned(host);
+    var entries = entries(host);
+    if (entries.stream()
+        .filter(entry -> entry.startsWith(REVOKED))
+        .anyMatch(entry -> sameKey(entry, key))) {
+      throw new IllegalStateException(
+          host
+              + "'s SSH host key "
+              + key.fingerprint()
+              + " is revoked in "
+              + knownHosts
+              + ", so ssh would refuse it at every sync. Give main a new host key, or remove the"
+              + " revocation if it was a mistake, then re-run sudo sail init --main "
+              + host
+              + ".");
+    }
+    var pinned =
+        entries.stream()
+            .filter(entry -> !entry.startsWith("@"))
+            .map(MainHostKey::keyOf)
+            .flatMap(Optional::stream)
+            .toList();
     if (pinned.isEmpty()) {
       append(line);
       return key.fingerprint();
@@ -71,13 +92,26 @@ public final class MainHostKey {
     return key.fingerprint();
   }
 
-  private List<SshPublicKey> pinned(String host)
+  /**
+   * The {@code known_hosts} lines naming {@code host}, markers kept: an {@code @revoked} key is
+   * never a pin, and an {@code @cert-authority} key signs host certificates rather than being one.
+   */
+  private List<String> entries(String host)
       throws IOException, InterruptedException, TimeoutException {
     if (!Files.exists(knownHosts)) {
       return List.of();
     }
     var found = shell.exec(List.of("ssh-keygen", "-F", host, "-f", knownHosts.toString()));
-    return found.stdout().lines().map(MainHostKey::keyOf).flatMap(Optional::stream).toList();
+    return found
+        .stdout()
+        .lines()
+        .map(String::strip)
+        .filter(entry -> !entry.startsWith("#"))
+        .toList();
+  }
+
+  private static boolean sameKey(String entry, SshPublicKey key) {
+    return keyOf(entry).map(named -> named.blob().equals(key.blob())).orElse(false);
   }
 
   private void append(String line) throws IOException {
@@ -95,7 +129,7 @@ public final class MainHostKey {
     Files.writeString(knownHosts, separator + line + "\n", StandardOpenOption.APPEND);
   }
 
-  /** The ed25519 key a {@code known_hosts} line names, whatever its host field or marker. */
+  /** The ed25519 key a {@code known_hosts} line names, whatever its host field. */
   private static Optional<SshPublicKey> keyOf(String line) {
     if (line.startsWith("#")) {
       return Optional.empty();

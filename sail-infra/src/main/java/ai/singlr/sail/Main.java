@@ -11,15 +11,11 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
 import ai.singlr.sail.engine.RemoteCommandRunner;
 import ai.singlr.sail.engine.RuntimeMode;
-import java.util.Arrays;
-import java.util.Set;
 import picocli.CommandLine;
 
 public final class Main {
 
   private Main() {}
-
-  private static final Set<String> EXEMPT = Set.of("--version", "-V", "--help", "-h");
 
   public static void main(String[] args) {
     switch (RuntimeMode.detect()) {
@@ -38,9 +34,23 @@ public final class Main {
     System.exit(exitCode);
   }
 
-  /** Whether {@code args} only ask for help or the version, which every account may. */
+  /**
+   * Whether picocli reads {@code args} as a request for help or the version, which every account
+   * may; a {@code --help} it would pass on as an argument, after {@code --} say, runs the command.
+   */
   static boolean exempt(String[] args) {
-    return Arrays.stream(args).anyMatch(EXEMPT::contains);
+    try {
+      for (var parsed = new CommandLine(new Sail()).parseArgs(args);
+          parsed != null;
+          parsed = parsed.subcommand()) {
+        if (parsed.isUsageHelpRequested() || parsed.isVersionHelpRequested()) {
+          return true;
+        }
+      }
+      return false;
+    } catch (CommandLine.ParameterException invalid) {
+      return false;
+    }
   }
 
   /** What an account that does not own this box is told, with its command to paste back. */

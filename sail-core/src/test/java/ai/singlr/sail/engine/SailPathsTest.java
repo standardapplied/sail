@@ -161,7 +161,7 @@ class SailPathsTest {
     Files.writeString(homes.resolve("dev/.sail/host.yaml"), "storage_backend: dir\n");
     var root = tempDir.resolve("root");
 
-    assertEquals(homes.resolve("dev"), SailPaths.identityHome(true, "dev", false, homes, root));
+    assertEquals(homes.resolve("dev"), SailPaths.identityHome(true, "dev", homes, root));
   }
 
   @Test
@@ -171,10 +171,9 @@ class SailPathsTest {
     Files.writeString(homes.resolve("dev/.sail/host.yaml"), "storage_backend: dir\n");
     var own = tempDir.resolve("own");
 
-    assertEquals(own, SailPaths.identityHome(true, "dev", true, homes, own), "a root box");
-    assertEquals(own, SailPaths.identityHome(false, "dev", false, homes, own), "not root");
-    assertEquals(own, SailPaths.identityHome(true, null, false, homes, own), "no sudo");
-    assertEquals(own, SailPaths.identityHome(true, "root", false, homes, own), "sudo by root");
-    assertEquals(own, SailPaths.identityHome(true, "mady", false, homes, own), "mady owns none");
+    assertEquals(own, SailPaths.identityHome(false, "dev", homes, own), "not root");
+    assertEquals(own, SailPaths.identityHome(true, null, homes, own), "no sudo");
+    assertEquals(own, SailPaths.identityHome(true, "root", homes, own), "sudo by root");
+    assertEquals(own, SailPaths.identityHome(true, "mady", homes, own), "mady owns none");
   }
 }

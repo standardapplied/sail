@@ -93,4 +93,12 @@ class MainTest {
     assertFalse(Main.exempt(new String[] {"sync"}));
     assertFalse(Main.exempt(new String[0]));
   }
+
+  @Test
+  void aHelpFlagPicocliPassesOnAsAnArgumentIsNoExemption() {
+    assertFalse(
+        Main.exempt(
+            new String[] {"project", "exec", "acme", "--", "sh", "-c", "touch /tmp/x", "--help"}));
+    assertFalse(Main.exempt(new String[] {"spec", "list", "--no-such-flag"}));
+  }
 }

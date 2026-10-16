@@ -138,6 +138,48 @@ class MainHostKeyTest {
     assertEquals("maindevbox ssh-rsa AAAA\n" + hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }
 
+  @Test
+  void aRevokedKeyIsRefusedAndNoPinIsWritten() throws Exception {
+    Files.createDirectories(knownHosts().getParent());
+    var revoked = "@revoked maindevbox " + MAIN.type() + " " + MAIN.blob() + "\n";
+    Files.writeString(knownHosts(), revoked);
+    var hostKey = new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts());
+
+    var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("maindevbox"));
+
+    assertEquals(
+        "maindevbox's SSH host key "
+            + MAIN.fingerprint()
+            + " is revoked in "
+            + knownHosts()
+            + ", so ssh would refuse it at every sync. Give main a new host key, or remove the"
+            + " revocation if it was a mistake, then re-run sudo sail init --main maindevbox.",
+        refused.getMessage());
+    assertEquals(revoked, Files.readString(knownHosts()));
+  }
+
+  @Test
+  void aRevocationOfAnotherKeyIsNoPinSoMainsIsAdded() throws Exception {
+    Files.createDirectories(knownHosts().getParent());
+    var revoked = "@revoked maindevbox " + IMPOSTOR.type() + " " + IMPOSTOR.blob() + "\n";
+    Files.writeString(knownHosts(), revoked);
+
+    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+
+    assertEquals(revoked + hashed(MAIN) + "\n", Files.readString(knownHosts()));
+  }
+
+  @Test
+  void aCertificateAuthorityIsNoPinSoMainsIsAdded() throws Exception {
+    Files.createDirectories(knownHosts().getParent());
+    var authority = "@cert-authority maindevbox " + IMPOSTOR.type() + " " + IMPOSTOR.blob() + "\n";
+    Files.writeString(knownHosts(), authority);
+
+    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+
+    assertEquals(authority + hashed(MAIN) + "\n", Files.readString(knownHosts()));
+  }
+
   private static String mode(Path path) throws IOException {
     return PosixFilePermissions.toString(Files.getPosixFilePermissions(path));
   }

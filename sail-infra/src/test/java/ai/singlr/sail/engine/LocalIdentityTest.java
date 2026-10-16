@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -117,20 +118,34 @@ class LocalIdentityTest {
   }
 
   @Test
-  void aSudoApplyOnAnAccountsOwnBoxResolvesWhatItsPlainApplyDoes() throws IOException {
-    var home = dir.resolve("home/dev");
-    Files.createDirectories(home.resolve(".sail"));
-    Files.writeString(home.resolve(".sail/host.yaml"), "storage_backend: dir\n");
-    Files.writeString(home.resolve(".sail/workstation_key.pub"), VALID_KEY + "\n");
-    var git = Map.of("user.name", "Mady M", "user.email", "mady@example.com");
-    var plain = home(SailPaths.identityHome(false, null, false, dir.resolve("home"), home), git);
-    var sudo =
-        home(
-            SailPaths.identityHome(true, "dev", false, dir.resolve("home"), dir.resolve("r")), git);
+  void aSudoApplyOnAnAccountsOwnBoxRecordsTheDigestItsPlainApplyDoes() throws IOException {
+    var homes = dir.resolve("home");
+    var dev = homes.resolve("dev");
+    var root = dir.resolve("root");
+    Files.createDirectories(dev.resolve(".sail"));
+    Files.createDirectories(root.resolve(".sail"));
+    Files.writeString(dev.resolve(".sail/host.yaml"), "storage_backend: dir\n");
+    Files.writeString(dev.resolve(".sail/workstation_key.pub"), VALID_KEY + "\n");
+    Files.writeString(
+        root.resolve(".sail/workstation_key.pub"), TestSshKeys.ed25519("root", "root@box") + "\n");
+    var plain = inputs(SailPaths.identityHome(false, null, homes, dev), dev);
+    var sudo = inputs(SailPaths.identityHome(true, "dev", homes, root), dev);
 
-    for (var placeholder : List.of("GIT_NAME", "GIT_EMAIL", "SSH_PUBLIC_KEY")) {
-      assertEquals(plain.valueFor(placeholder), sudo.valueFor(placeholder), placeholder);
-    }
+    assertEquals(plain, sudo);
+  }
+
+  private static String inputs(Path home, Path dev) {
+    var git =
+        home.equals(dev)
+            ? Map.of("user.name", "Mady M", "user.email", "mady@example.com")
+            : Map.of("user.name", "root", "user.email", "root@box");
+    var config =
+        ProjectDefinitions.resolveForProvisioning(
+            "name: acme\n"
+                + "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\n"
+                + "ssh:\n  user: dev\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n",
+            home(home, git));
+    return ProjectProvisioner.inputs(config);
   }
 
   private static LocalIdentity home(Path home, Map<String, String> git) {
