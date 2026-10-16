@@ -343,6 +343,18 @@ class HostConfigSetCommandTest {
   }
 
   @Test
+  void aMainHostThatReadsAsAnOptionIsRefused() {
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> HostConfigSetCommand.validate("sync-main", "-oProxyCommand"));
+
+    assertEquals(
+        "Invalid main target: '-oProxyCommand'. Expected an SSH target, e.g. sail@maindevbox.",
+        refused.getMessage());
+  }
+
+  @Test
   void validateAcceptsRealisticValues() {
     HostConfigSetCommand.validate("server-ip", "192.168.1.100");
     HostConfigSetCommand.validate("webauthn-rp-id", "sail.example.dev");

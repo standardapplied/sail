@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -15,16 +16,20 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -53,7 +58,127 @@ class JoinCommandTest {
           "2026-02-18T01:00:00Z",
           WebauthnConfig.disabled());
 
+  private static final SshPublicKey MAIN =
+      SshPublicKey.parse(TestSshKeys.ed25519("main", "root@main"));
+  private static final SshPublicKey IMPOSTOR =
+      SshPublicKey.parse(TestSshKeys.ed25519("impostor", "root@elsewhere"));
+
   @TempDir Path dir;
+
+  private SshPublicKey answering = MAIN;
+
+  private Path knownHosts() {
+    return dir.resolve("ssh").resolve("known_hosts");
+  }
+
+  private MainHostKey pin() {
+    return new MainHostKey(new Keyscan(), knownHosts());
+  }
+
+  private static String hashed(SshPublicKey key) {
+    return "|1|c2FsdA==|aG1hYw== " + key.type() + " " + key.blob();
+  }
+
+  private JoinCommand.Plan join(Path hostConfig) throws Exception {
+    return JoinCommand.plan(
+        hostConfig,
+        dir.resolve("sail.db"),
+        identity(),
+        "sail@maindevbox",
+        "mady",
+        null,
+        null,
+        NO_MAIN,
+        pin());
+  }
+
+  @Test
+  void joinPinsMainsHostKeyAndHandsMainItsFingerprint() throws Exception {
+    var plan = join(writeHostConfig());
+
+    assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
+    assertEquals(
+        "rwx------",
+        PosixFilePermissions.toString(Files.getPosixFilePermissions(knownHosts().getParent())));
+    assertEquals(
+        "rw-------", PosixFilePermissions.toString(Files.getPosixFilePermissions(knownHosts())));
+    assertTrue(
+        JoinCommand.render(plan, false).contains("--main-host-key " + MAIN.fingerprint()),
+        JoinCommand.render(plan, false));
+    assertEquals(
+        MAIN.fingerprint(), YamlUtil.parseMap(JoinCommand.render(plan, true)).get("main_host_key"));
+  }
+
+  @Test
+  void reJoiningTheSameMainLeavesTheKnownHostsByteIdentical() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+    var pinned = Files.readString(knownHosts());
+
+    join(hostConfig);
+
+    assertEquals(pinned, Files.readString(knownHosts()));
+  }
+
+  @Test
+  void aMainAnsweringWithAnotherKeyIsRefusedBeforeTheHostConfigIsWritten() throws Exception {
+    var hostConfig = writeHostConfig();
+    var before = Files.readString(hostConfig);
+    Files.createDirectories(knownHosts().getParent());
+    Files.writeString(knownHosts(), hashed(MAIN) + "\n");
+    answering = IMPOSTOR;
+
+    var refused = assertThrows(IllegalStateException.class, () -> join(hostConfig));
+
+    assertEquals(
+        "maindevbox's SSH host key is "
+            + IMPOSTOR.fingerprint()
+            + ", but this box pinned "
+            + MAIN.fingerprint()
+            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
+            + " re-run; otherwise something between this box and main is answering for it.",
+        refused.getMessage());
+    assertEquals(before, Files.readString(hostConfig));
+    assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
+  }
+
+  @Test
+  void aMainWhoseKeyCannotBeReadIsRefusedBeforeTheHostConfigIsWritten() throws Exception {
+    var hostConfig = writeHostConfig();
+    var before = Files.readString(hostConfig);
+    answering = null;
+
+    var refused = assertThrows(IllegalStateException.class, () -> join(hostConfig));
+
+    assertEquals(
+        "Couldn't read maindevbox's SSH host key on port 22: no ed25519 host key came back. Check"
+            + " the address and firewall, then re-run sudo sail init --main maindevbox.",
+        refused.getMessage());
+    assertEquals(before, Files.readString(hostConfig));
+    assertFalse(Files.exists(dir.resolve("sync_ed25519")), "no sync key is made");
+  }
+
+  /** {@code ssh-keyscan} answering with main's key, and {@code ssh-keygen -F} finding it. */
+  private final class Keyscan implements ShellExec {
+    @Override
+    public Result exec(List<String> command) throws IOException {
+      if (command.getFirst().equals("ssh-keygen")) {
+        return new Result(0, Files.readString(knownHosts()), "");
+      }
+      assertEquals(List.of("ssh-keyscan", "-H", "-t", "ed25519", "-T", "5"), command.subList(0, 6));
+      return answering == null ? new Result(1, "", "") : new Result(0, hashed(answering), "");
+    }
+
+    @Override
+    public Result exec(List<String> command, Path workDir, Duration timeout) throws IOException {
+      return exec(command);
+    }
+
+    @Override
+    public boolean isDryRun() {
+      return false;
+    }
+  }
 
   private Path writeHostConfig() throws IOException {
     var path = dir.resolve("host.yaml");
@@ -79,13 +204,15 @@ class JoinCommandTest {
             "mady",
             "Mady M",
             "mady@example.com",
-            NO_MAIN);
+            NO_MAIN,
+            pin());
 
     assertEquals("sail@maindevbox", plan.target());
     assertEquals("mady", plan.handle());
     assertEquals("Mady M", plan.name());
     assertEquals("mady@example.com", plan.email());
     assertEquals(PUB, plan.publicKey());
+    assertEquals(MAIN.fingerprint(), plan.mainHostKey());
 
     var written = HostYaml.fromMap(YamlUtil.parseFile(hostConfig));
     assertEquals(SyncConfig.ROLE_NODE, written.sync().role());
@@ -113,7 +240,8 @@ class JoinCommandTest {
       new SchemaManager(db).migrate();
       var run = reservedOn(db, null);
 
-      JoinCommand.plan(hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN);
+      JoinCommand.plan(
+          hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN, pin());
 
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().node());
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().owner());
@@ -138,7 +266,15 @@ class JoinCommandTest {
               IllegalStateException.class,
               () ->
                   JoinCommand.plan(
-                      hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN));
+                      hostConfig,
+                      dbPath,
+                      identity(),
+                      "sail@main",
+                      "mady",
+                      null,
+                      null,
+                      NO_MAIN,
+                      pin()));
 
       assertTrue(refused.getMessage().contains(held), refused.getMessage());
       assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle());
@@ -161,7 +297,8 @@ class JoinCommandTest {
                     "mady",
                     null,
                     null,
-                    NO_MAIN));
+                    NO_MAIN,
+                    pin()));
     assertTrue(error.getMessage().contains("host init"));
   }
 
@@ -180,23 +317,29 @@ class JoinCommandTest {
                 "mady",
                 null,
                 null,
-                NO_MAIN));
+                NO_MAIN,
+                pin()));
   }
 
   @Test
   void authorizeLineCarriesNameAndEmailWhenPresent() {
     assertEquals(
-        "sail fde add mady --role member --name \"Mady M\" --email \"mady@example.com\" --key \""
+        "sudo sail fde add mady --role member --name \"Mady M\" --email \"mady@example.com\""
+            + " --key \""
             + PUB
-            + "\"",
-        JoinCommand.authorizeLine("mady", "Mady M", "mady@example.com", PUB));
+            + "\" --main-host-key "
+            + MAIN.fingerprint(),
+        JoinCommand.authorizeLine("mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()));
   }
 
   @Test
   void authorizeLineOmitsBlankNameAndEmail() {
     assertEquals(
-        "sail fde add mady --role member --key \"" + PUB + "\"",
-        JoinCommand.authorizeLine("mady", null, "  ", PUB));
+        "sudo sail fde add mady --role member --key \""
+            + PUB
+            + "\" --main-host-key "
+            + MAIN.fingerprint(),
+        JoinCommand.authorizeLine("mady", null, "  ", PUB, MAIN.fingerprint()));
   }
 
   @Test
@@ -307,22 +450,32 @@ class JoinCommandTest {
   void renderJsonEmitsTheAuthorizeCommand() {
     var out =
         JoinCommand.render(
-            new JoinCommand.Plan("sail@host", "mady", "Mady M", "mady@example.com", PUB), true);
+            new JoinCommand.Plan(
+                "sail@host", "mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()),
+            true);
 
     assertTrue(out.contains("\"target\""));
     assertTrue(out.contains("\"authorize_command\""));
     assertTrue(out.contains("\"suggested_name\""));
     assertTrue(out.contains("Mady M"));
-    assertTrue(out.contains("sail fde add mady --role member --name"));
+    assertTrue(out.contains("sudo sail fde add mady --role member --name"));
+    assertEquals(MAIN.fingerprint(), YamlUtil.parseMap(out).get("main_host_key"));
   }
 
   @Test
   void renderHumanShowsTheTargetAndAuthorizeLine() {
-    var out = JoinCommand.render(new JoinCommand.Plan("sail@host", "mady", null, null, PUB), false);
+    var out =
+        JoinCommand.render(
+            new JoinCommand.Plan("sail@host", "mady", null, null, PUB, MAIN.fingerprint()), false);
 
     assertTrue(out.contains("sail@host"));
-    assertTrue(out.contains("sail fde add mady --role member"));
-    assertTrue(out.contains("sail sync"));
+    assertTrue(
+        out.contains(
+            "sudo sail fde add mady --role member --key \""
+                + PUB
+                + "\" --main-host-key "
+                + MAIN.fingerprint()));
+    assertTrue(out.contains("finish here with sudo sail sync"));
   }
 
   private final class StubKeygen implements ShellExec {

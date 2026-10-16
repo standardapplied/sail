@@ -59,7 +59,8 @@ public final class HostConfigSetCommand implements Runnable {
       Set.of("webauthn-rp-id", "webauthn-rp-name", "webauthn-origin", "webauthn-session-ttl-hours");
   private static final Pattern RP_ID = Pattern.compile("[a-z0-9]([a-z0-9.-]*[a-z0-9])?");
   private static final Pattern ORIGIN = Pattern.compile("https?://\\S+[^/]");
-  private static final Pattern SSH_TARGET = Pattern.compile("([a-z_][a-z0-9_-]*@)?[a-zA-Z0-9.-]+");
+  private static final Pattern SSH_TARGET =
+      Pattern.compile("([a-z_][a-z0-9_-]*@)?[a-zA-Z0-9][a-zA-Z0-9.-]*");
 
   @Parameters(index = "0", description = "Configuration key (e.g. 'server-ip', 'webauthn-rp-id').")
   private String key;
