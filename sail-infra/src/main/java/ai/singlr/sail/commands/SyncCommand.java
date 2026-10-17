@@ -176,7 +176,11 @@ public final class SyncCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
-    var operator = operator();
+    return call(operator());
+  }
+
+  /** A round worded for {@code operator}: a scheduled round reuses the one its command resolved. */
+  Integer call(OperatorCommand operator) throws Exception {
     if (watch && intervalSeconds <= 0) {
       System.err.println(
           Banner.errorLine("--interval must be a positive number of seconds.", Ansi.AUTO));

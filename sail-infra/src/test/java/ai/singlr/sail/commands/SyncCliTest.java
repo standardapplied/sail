@@ -62,6 +62,11 @@ class SyncCliTest {
     runIsolated(scenario);
   }
 
+  @Test
+  void aScheduledRoundSpeaksForTheOperatorWhoStartedTheCommand() throws Exception {
+    runIsolated("sudo-round");
+  }
+
   private void runIsolated(String scenario) throws Exception {
     var data = Files.createDirectories(home.resolve(".sail"));
     Files.writeString(
@@ -118,6 +123,10 @@ class SyncCliTest {
         verifyPreHealthUpgrade(args[0], db, operations);
         return;
       }
+      if ("sudo-round".equals(args[0])) {
+        verifyScheduledRoundWording();
+        return;
+      }
       var health = new SyncHealth(db);
       var peer = "sail@main";
       assertEquals(peer, HostSync.config().main());
@@ -137,7 +146,7 @@ class SyncCliTest {
         assertTrue(status.lastAttemptAt().isAfter(previous));
         assertEquals("store", status.lastErrorKind());
         assertTrue(status.lastError().contains("newer than this Sail binary supports"));
-        assertThrows(IllegalStateException.class, NodeSync::syncOnce);
+        assertThrows(IllegalStateException.class, () -> NodeSync.syncOnce(OperatorCommand.PLAIN));
         assertEquals(2, operations.syncStatus().consecutiveFailures());
         assertEquals(
             List.of(Event.WellKnownTypes.SYNC_DEGRADED),
@@ -170,6 +179,23 @@ class SyncCliTest {
         }
       }
     }
+  }
+
+  private static void verifyScheduledRoundWording() throws Exception {
+    Files.delete(SailPaths.hostConfigPath());
+    var output = new ByteArrayOutputStream();
+    var original = System.out;
+    try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
+      System.setOut(capture);
+      NodeSync.syncOnce(new OperatorCommand(true));
+    } finally {
+      System.setOut(original);
+    }
+    assertTrue(
+        output
+            .toString(StandardCharsets.UTF_8)
+            .contains("Add a second box with: sudo sail host sync --main <user@host>."),
+        output.toString(StandardCharsets.UTF_8));
   }
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)

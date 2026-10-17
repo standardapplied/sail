@@ -39,7 +39,7 @@ final class NodeSync {
 
   static SyncScheduler scheduler(
       SyncConfig sync, boolean noSync, Map<String, String> env, OperatorCommand operator) {
-    var scheduler = scheduler(sync, noSync, env, NodeSync::syncOnce);
+    var scheduler = scheduler(sync, noSync, env, () -> syncOnce(operator));
     if (shouldSync(sync, noSync)) {
       var operations = OperationsFactory.open(operator);
       scheduler.useHealth(operations::syncStatus, operations);
@@ -58,9 +58,12 @@ final class NodeSync {
         millis(env, FRESHEN_TTL_ENV, SyncScheduler.DEFAULT_FRESHEN_TTL));
   }
 
-  /** One reconcile round with main; {@code sail sync} reports its own errors and returns 1. */
-  static void syncOnce() throws Exception {
-    if (new SyncCommand().call() != 0) {
+  /**
+   * One reconcile round with main, worded for the operator who started the command; {@code sail
+   * sync} reports its own errors and returns 1.
+   */
+  static void syncOnce(OperatorCommand operator) throws Exception {
+    if (new SyncCommand().call(operator) != 0) {
       throw new IllegalStateException("sail sync round failed; see the log above");
     }
   }
