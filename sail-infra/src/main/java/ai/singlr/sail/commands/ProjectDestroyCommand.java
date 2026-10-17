@@ -22,10 +22,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "destroy",
@@ -54,14 +52,10 @@ public final class ProjectDestroyCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
-        "  If this is unexpected, re-run with --dry-run to see what would execute.",
-        this::execute);
+        "  If this is unexpected, re-run with --dry-run to see what would execute.", this::execute);
   }
 
   private void execute() throws Exception {

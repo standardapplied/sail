@@ -11,17 +11,13 @@ import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Spec;
 
 @Command(name = "status", description = "Show Sail server status.", mixinStandardHelpOptions = true)
 public final class ServerStatusCommand implements Runnable {
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() {

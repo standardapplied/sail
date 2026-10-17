@@ -39,10 +39,8 @@ import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code sail agent watch}: the long-running watcher of one agent run, whichever lane launched it —
@@ -123,8 +121,6 @@ public final class AgentWatchCommand implements Runnable {
   @Option(names = "--port", description = "sail-api port.", defaultValue = "7070")
   private int apiPort;
 
-  @Spec private CommandSpec commandSpec;
-
   private final Supplier<HostOperations> operations;
 
   public AgentWatchCommand() {
@@ -137,7 +133,7 @@ public final class AgentWatchCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   /**

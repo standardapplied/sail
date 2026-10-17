@@ -324,7 +324,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Adding an FDE");
@@ -443,7 +442,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             requireMainForRosterEdit("Updating an FDE");
             if (displayName == null && email == null && role == null) {
@@ -489,7 +487,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Granting a project");
@@ -527,7 +524,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Revoking a project");
@@ -617,7 +613,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             if (HostSync.isNode(HostSync.config())) {
               throw new IllegalStateException(
@@ -679,7 +674,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Removing an FDE");
@@ -786,7 +780,7 @@ public final class FdeCommand implements Runnable {
 
     @Override
     public void run() {
-      CliCommand.run(spec, this::execute);
+      CliCommand.run(this::execute);
     }
 
     private void execute() throws Exception {
@@ -1018,7 +1012,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
@@ -1048,7 +1041,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             try (var db = Sqlite.open(command.box.get().database())) {
               var fdeStore = new FdeStore(db);
@@ -1083,7 +1075,6 @@ public final class FdeCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             try (var db = Sqlite.open(dbPath())) {
               var ticket =
@@ -1170,7 +1161,6 @@ public final class FdeCommand implements Runnable {
       @Override
       public void run() {
         CliCommand.run(
-            spec,
             () -> {
               try (var db = Sqlite.open(dbPath())) {
                 var fde =
@@ -1204,7 +1194,6 @@ public final class FdeCommand implements Runnable {
       @Override
       public void run() {
         CliCommand.run(
-            spec,
             () -> {
               try (var db = Sqlite.open(dbPath())) {
                 var keyStore = new FdeSshKeyStore(db);
@@ -1244,7 +1233,6 @@ public final class FdeCommand implements Runnable {
       @Override
       public void run() {
         CliCommand.run(
-            spec,
             () -> {
               try (var db = Sqlite.open(dbPath())) {
                 var keyStore = new FdeSshKeyStore(db);
@@ -1376,7 +1364,6 @@ public final class FdeCommand implements Runnable {
       @Override
       public void run() {
         CliCommand.run(
-            spec,
             () -> {
               try (var db = Sqlite.open(dbPath())) {
                 var fde = requireFde(db, handle);
@@ -1424,7 +1411,6 @@ public final class FdeCommand implements Runnable {
       @Override
       public void run() {
         CliCommand.run(
-            spec,
             () -> {
               try (var db = Sqlite.open(dbPath())) {
                 var fde = requireFde(db, handle);

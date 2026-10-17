@@ -58,7 +58,7 @@ public final class AgentReportCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   /** The project's definition from the catalog, which a report needs. */

@@ -102,7 +102,7 @@ public final class DispatchCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

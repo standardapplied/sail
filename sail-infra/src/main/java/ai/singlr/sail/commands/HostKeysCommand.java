@@ -9,9 +9,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Repairs the {@code sail} user's {@code authorized_keys} from the SSH-key registry. Key mutations
@@ -43,12 +41,9 @@ public final class HostKeysCommand implements Runnable {
     @Option(names = "--dry-run", description = "Print the authorized_keys instead of writing it.")
     private boolean dryRun;
 
-    @Spec private CommandSpec spec;
-
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             try (var operations = OperationsFactory.open()) {
               var sync = new AuthorizedKeysSync();

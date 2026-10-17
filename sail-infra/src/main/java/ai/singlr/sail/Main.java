@@ -74,7 +74,7 @@ public final class Main {
    * non-zero exit.
    */
   public static int report(Exception thrown, CommandLine commandLine) {
-    if (CliCommand.printed(thrown)) {
+    if (thrown instanceof CliCommand.Printed) {
       return 1;
     }
     var ex = Refusals.translated(thrown);

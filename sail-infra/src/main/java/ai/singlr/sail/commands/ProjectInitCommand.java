@@ -25,9 +25,7 @@ import java.util.List;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "init",
@@ -43,11 +41,9 @@ public final class ProjectInitCommand implements Runnable {
       description = "Output file path (default: ~/.sail/projects/<name>/sail.yaml).")
   private String output;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

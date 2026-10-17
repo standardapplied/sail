@@ -10,11 +10,8 @@ import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.Banner;
 import java.io.PrintStream;
-import java.util.Arrays;
 import java.util.Objects;
-import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 
 /**
  * Runs a command body and prints its failure once: the message, a refusal's fix, then any hint. The
@@ -24,20 +21,19 @@ public final class CliCommand {
 
   private CliCommand() {}
 
-  static void run(CommandSpec commandSpec, CheckedRunnable runnable) {
-    run(commandSpec, System.err, null, runnable);
+  static void run(CheckedRunnable runnable) {
+    run(System.err, null, runnable);
   }
 
-  static void run(CommandSpec commandSpec, String failureHint, CheckedRunnable runnable) {
-    run(commandSpec, System.err, failureHint, runnable);
+  static void run(String failureHint, CheckedRunnable runnable) {
+    run(System.err, failureHint, runnable);
   }
 
-  static void run(CommandSpec commandSpec, PrintStream err, CheckedRunnable runnable) {
-    run(commandSpec, err, null, runnable);
+  static void run(PrintStream err, CheckedRunnable runnable) {
+    run(err, null, runnable);
   }
 
-  private static void run(
-      CommandSpec commandSpec, PrintStream err, String failureHint, CheckedRunnable runnable) {
+  private static void run(PrintStream err, String failureHint, CheckedRunnable runnable) {
     try {
       runnable.run();
     } catch (Exception e) {
@@ -50,20 +46,17 @@ public final class CliCommand {
       if (Strings.isNotBlank(failureHint)) {
         err.println(failureHint);
       }
-      e.addSuppressed(new Printed());
-      throw new CommandLine.ExecutionException(commandSpec.commandLine(), message, e);
+      throw new Printed(message, e);
     }
   }
 
-  /** Whether {@link #run} already printed {@code failure}. */
-  public static boolean printed(Throwable failure) {
-    return Arrays.stream(failure.getSuppressed()).anyMatch(Printed.class::isInstance);
-  }
-
-  /** Marks a failure {@link #run} printed, riding along with it to the top-level handler. */
-  private static final class Printed extends Exception {
-    Printed() {
-      super("printed by CliCommand.run", null, false, false);
+  /**
+   * A failure {@link #run} printed, carried to the top-level handler as its cause so that handler
+   * prints nothing more.
+   */
+  public static final class Printed extends RuntimeException {
+    Printed(String message, Exception cause) {
+      super(message, cause);
     }
   }
 

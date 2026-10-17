@@ -36,10 +36,8 @@ import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Opens the project's latest agent conversation. {@code --resume} is conversation resurrection, not
@@ -87,8 +85,6 @@ public final class AgentAttachCommand implements Runnable {
   @Option(names = "--socket", hidden = true, description = "Host socket override.")
   private Path socket;
 
-  @Spec private CommandSpec commandSpec;
-
   private final Supplier<HostOperations> operations;
 
   public AgentAttachCommand() {
@@ -126,7 +122,7 @@ public final class AgentAttachCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

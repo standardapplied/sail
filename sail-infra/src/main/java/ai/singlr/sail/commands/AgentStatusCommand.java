@@ -32,10 +32,8 @@ import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "status",
@@ -53,8 +51,6 @@ public final class AgentStatusCommand implements Runnable {
 
   @Mixin private IgnoredFileOption file;
 
-  @Spec private CommandSpec spec;
-
   private final Supplier<HostOperations> operations;
 
   public AgentStatusCommand() {
@@ -67,7 +63,7 @@ public final class AgentStatusCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

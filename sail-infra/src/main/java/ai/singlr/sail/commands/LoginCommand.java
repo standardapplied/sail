@@ -17,9 +17,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Signs in with a passkey and stores the resulting session token. Opens the control-plane {@code
@@ -57,12 +55,9 @@ public final class LoginCommand implements Runnable {
       defaultValue = "180")
   private int timeoutSeconds;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
         () -> {
           if (origin == null
               && !noTunnel

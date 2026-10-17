@@ -370,7 +370,6 @@ class InitCommandTest {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             throw new IllegalStateException("main's SSH host key changed.");
           });

@@ -18,10 +18,8 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Edits a project's definition in the catalog — the source of truth — and re-materializes the
@@ -47,8 +45,6 @@ public final class ProjectEditCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   private final Editor editor;
 
   public ProjectEditCommand() {
@@ -61,7 +57,7 @@ public final class ProjectEditCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

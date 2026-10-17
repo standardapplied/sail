@@ -13,9 +13,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "status",
@@ -29,11 +27,9 @@ public final class HostServiceStatusCommand implements Runnable {
   @Option(names = "--show-unit", description = "Print the rendered systemd unit file and exit.")
   private boolean showUnit;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

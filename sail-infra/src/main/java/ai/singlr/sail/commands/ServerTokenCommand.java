@@ -65,7 +65,6 @@ public final class ServerTokenCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             var ttl = resolveTtl(noExpiry, ttlDays);
             try (var operations = OperationsFactory.open()) {
@@ -136,7 +135,6 @@ public final class ServerTokenCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             try (var operations = OperationsFactory.open()) {
               var tokens = operations.identity().tokens();
@@ -170,7 +168,6 @@ public final class ServerTokenCommand implements Runnable {
     @Override
     public void run() {
       CliCommand.run(
-          spec,
           () -> {
             try (var operations = OperationsFactory.open()) {
               var revoked = operations.identity().revokeToken(name);

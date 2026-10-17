@@ -34,9 +34,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "demo",
@@ -55,11 +53,9 @@ public final class ProjectDemoCommand implements Runnable {
   @Option(names = "--git-token", description = "Access token for cloning private repos over HTTPS.")
   private String gitToken;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

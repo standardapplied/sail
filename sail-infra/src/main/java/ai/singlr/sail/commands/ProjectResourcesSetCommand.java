@@ -25,10 +25,8 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "set",
@@ -60,8 +58,6 @@ public final class ProjectResourcesSetCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   private final ShellExec shellOverride;
   private final BooleanSupplier rootChecker;
   private final PrintStream out;
@@ -81,7 +77,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, err, this::execute);
+    CliCommand.run(err, this::execute);
   }
 
   private void execute() throws Exception {

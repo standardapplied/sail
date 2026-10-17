@@ -56,10 +56,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * The one verb that makes a project container match intent, from any starting state. Desired state
@@ -108,8 +106,6 @@ public final class ProjectApplyCommand implements Runnable {
       defaultValue = "${GITHUB_TOKEN}")
   private String gitToken;
 
-  @Spec private CommandSpec spec;
-
   private final Supplier<Path> database;
 
   public ProjectApplyCommand() {
@@ -139,7 +135,7 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

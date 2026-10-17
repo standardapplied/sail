@@ -17,10 +17,8 @@ import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Shows the review pipeline's state for a project's specs: every attempt's iterations, stage
@@ -49,11 +47,9 @@ public final class AgentReviewCommand implements Runnable {
 
   @Mixin private ConnectionOptions connection;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   @SuppressWarnings("unchecked")

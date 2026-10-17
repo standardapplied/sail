@@ -7,7 +7,6 @@ package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -43,16 +42,12 @@ class CliCommandTest {
   }
 
   @Test
-  void wrapsFailuresAsExecutionExceptions() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
-
+  void wrapsFailuresAsPrinted() {
     var error =
         assertThrows(
-            CommandLine.ExecutionException.class,
+            CliCommand.Printed.class,
             () ->
                 CliCommand.run(
-                    spec,
                     () -> {
                       throw new IllegalStateException("boom");
                     }));
@@ -62,17 +57,15 @@ class CliCommandTest {
   }
 
   @Test
-  void aRefusalIsPrintedOnceWithItsFixThenTheHintAndMarkedPrinted() {
-    var command = new CommandLine(new TestCommand());
+  void aRefusalIsPrintedOnceWithItsFixThenTheHintAndThrownAsPrinted() {
     var refusal =
         new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.");
 
     var error =
         assertThrows(
-            CommandLine.ExecutionException.class,
+            CliCommand.Printed.class,
             () ->
                 CliCommand.run(
-                    command.getCommandSpec(),
                     "  try --dry-run",
                     () -> {
                       throw refusal;
@@ -82,19 +75,14 @@ class CliCommandTest {
         "  ✗ The roster is unsynced.\nRun 'sail sync'.\n  try --dry-run\n",
         capturedErr.toString(StandardCharsets.UTF_8));
     assertEquals(refusal, error.getCause());
-    assertTrue(CliCommand.printed(refusal));
-    assertFalse(CliCommand.printed(new IllegalStateException("never run")));
   }
 
   @Test
   void aRefusalThatNamesNoFixIsPrintedAsItsMessageAlone() {
-    var command = new CommandLine(new TestCommand());
-
     assertThrows(
-        CommandLine.ExecutionException.class,
+        CliCommand.Printed.class,
         () ->
             CliCommand.run(
-                command.getCommandSpec(),
                 () -> {
                   throw new ApiException(
                       ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
@@ -111,16 +99,17 @@ class CliCommandTest {
     var line = new CommandLine(new TestCommand());
     var err = new StringWriter();
     line.setErr(new PrintWriter(err));
-    var printed = new IllegalStateException("main's SSH host key changed.");
-    assertThrows(
-        CommandLine.ExecutionException.class,
-        () ->
-            CliCommand.run(
-                line.getCommandSpec(),
-                () -> {
-                  throw printed;
-                }));
+    var failure = new IllegalStateException("main's SSH host key changed.");
+    var printed =
+        assertThrows(
+            CliCommand.Printed.class,
+            () ->
+                CliCommand.run(
+                    () -> {
+                      throw failure;
+                    }));
 
+    assertEquals(failure, printed.getCause());
     assertEquals(1, Main.report(printed, line));
     assertEquals("", err.toString());
     assertEquals(
@@ -145,15 +134,11 @@ class CliCommandTest {
 
   @Test
   void usesExceptionTypeWhenMessageIsMissing() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
-
     var error =
         assertThrows(
-            CommandLine.ExecutionException.class,
+            CliCommand.Printed.class,
             () ->
                 CliCommand.run(
-                    spec,
                     () -> {
                       throw new IllegalStateException();
                     }));
@@ -163,14 +148,10 @@ class CliCommandTest {
 
   @Test
   void printsFailureHintsWhenProvided() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
-
     assertThrows(
-        CommandLine.ExecutionException.class,
+        CliCommand.Printed.class,
         () ->
             CliCommand.run(
-                spec,
                 "try --dry-run",
                 () -> {
                   throw new IllegalStateException("boom");
@@ -181,24 +162,18 @@ class CliCommandTest {
 
   @Test
   void returnsWhenCommandSucceeds() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
-
-    assertDoesNotThrow(() -> CliCommand.run(spec, () -> {}));
+    assertDoesNotThrow(() -> CliCommand.run(() -> {}));
     assertEquals("", capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @Test
   void writesToCustomErrorStream() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
     var err = new ByteArrayOutputStream();
 
     assertThrows(
-        CommandLine.ExecutionException.class,
+        CliCommand.Printed.class,
         () ->
             CliCommand.run(
-                spec,
                 new PrintStream(err),
                 () -> {
                   throw new IllegalStateException("custom");
@@ -210,14 +185,10 @@ class CliCommandTest {
 
   @Test
   void ignoresBlankFailureHints() {
-    var command = new CommandLine(new TestCommand());
-    var spec = command.getCommandSpec();
-
     assertThrows(
-        CommandLine.ExecutionException.class,
+        CliCommand.Printed.class,
         () ->
             CliCommand.run(
-                spec,
                 " ",
                 () -> {
                   throw new IllegalStateException("boom");

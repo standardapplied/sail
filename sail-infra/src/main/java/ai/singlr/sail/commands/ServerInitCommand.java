@@ -13,8 +13,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "init",
@@ -22,11 +20,9 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class ServerInitCommand implements Runnable {
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

@@ -15,9 +15,7 @@ import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Provisions a host for SSH-key FDE login: the locked-down {@code sail} user, the shared {@code
@@ -35,12 +33,9 @@ public final class HostSshIdentityCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print the plan instead of executing it.")
   private boolean dryRun;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
         () -> {
           var plan =
               SshIdentityProvisioner.plan(

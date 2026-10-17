@@ -7,9 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.engine.ShellExecutor;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "logs",
@@ -20,11 +18,9 @@ public final class HostServiceLogsCommand implements Runnable {
   @Option(names = "-n", description = "Number of lines to show.", defaultValue = "200")
   private int lines;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
