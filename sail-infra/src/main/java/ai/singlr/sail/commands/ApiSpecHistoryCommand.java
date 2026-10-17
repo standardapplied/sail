@@ -15,10 +15,8 @@ import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "history",
@@ -36,15 +34,14 @@ public final class ApiSpecHistoryCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidSpecId(specId);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
@@ -80,7 +77,7 @@ public final class ApiSpecHistoryCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint Restore one with: "
-                  + OperatorCommand.here().sail("spec restore " + specId + " <rev>")
+                  + operator.sail("spec restore " + specId + " <rev>")
                   + "|@"));
     }
   }

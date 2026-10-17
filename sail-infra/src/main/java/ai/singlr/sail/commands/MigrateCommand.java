@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
 import ai.singlr.sail.engine.SailPaths;
@@ -51,9 +52,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Single command that runs every pending schema + data migration on the control-plane database.
@@ -67,9 +66,6 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class MigrateCommand implements Runnable {
 
-  /** Every one-shot data migration tracked in {@code data_migrations}. Add new ones at the end. */
-  public static final List<DataMigration> REGISTRY = DataMigrations.ALL;
-
   @Option(
       names = "--non-interactive",
       description = "Skip prompts; leave ambiguous rows for manual follow-up.")
@@ -78,22 +74,22 @@ public final class MigrateCommand implements Runnable {
   @Option(names = "--json", description = "Output JSON instead of human-readable text.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
-    runMigrations(nonInteractive, json);
+    var operator = OperatorCommand.here();
+    runMigrations(nonInteractive, json, operator);
   }
 
   /**
    * Runs every pending migration on this box's database and converges the host around it, within
    * the {@link Scope} this binary and {@code SAIL_DATA_DIR} allow.
    */
-  public static List<DataMigrator.Run> runMigrations(boolean nonInteractive, boolean jsonOutput) {
+  public static List<DataMigrator.Run> runMigrations(
+      boolean nonInteractive, boolean jsonOutput, OperatorCommand operator) {
     var dbPath = SailPaths.controlPlaneDb();
     return runMigrations(
         dbPath,
@@ -104,7 +100,8 @@ public final class MigrateCommand implements Runnable {
             dbPath,
             SailPaths.binaryPath(),
             SailPaths.findInstalledBinary()),
-        ON_THIS_BOX);
+        ON_THIS_BOX,
+        operator);
   }
 
   /**
@@ -177,7 +174,8 @@ public final class MigrateCommand implements Runnable {
       boolean nonInteractive,
       boolean jsonOutput,
       Scope scope,
-      Convergence convergence) {
+      Convergence convergence,
+      OperatorCommand operator) {
     if (scope instanceof Scope.Refused refused) {
       throw new IllegalStateException(refused.why());
     }
@@ -189,7 +187,7 @@ public final class MigrateCommand implements Runnable {
     try (var db = Sqlite.open(dbPath)) {
       var prompter = nonInteractive ? DataMigration.Prompter.NON_INTERACTIVE : ttyPrompter();
       var animate = !jsonOutput && System.console() != null;
-      var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput);
+      var runs = applyMigrations(db, dbPath.toString(), prompter, animate, jsonOutput, operator);
       Actor.run(Actor.system(), () -> convergence.imports().accept(db, jsonOutput));
       if (scope instanceof Scope.DatabaseOnly databaseOnly) {
         (jsonOutput ? System.err : System.out).println(Ansi.AUTO.string(databaseOnly.why()));
@@ -598,12 +596,13 @@ public final class MigrateCommand implements Runnable {
       String dbPath,
       DataMigration.Prompter prompter,
       boolean animate,
-      boolean jsonOutput) {
+      boolean jsonOutput,
+      OperatorCommand operator) {
     var result =
         phase(
             animate,
             "Migrating database schema",
-            () -> MigrationRunner.applyAll(db, REGISTRY, prompter));
+            () -> MigrationRunner.applyAll(db, DataMigrations.all(operator), prompter));
     if (!jsonOutput) {
       printSummary(dbPath, result.schemaBefore(), result.schemaAfter(), result.dataRuns());
     }

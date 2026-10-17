@@ -786,7 +786,11 @@ clone a project's source repos into its container at provision time, not to move
   applies record the same descriptor. Every `sail` command a box prints for its operator to
   type is rendered by `OperatorCommand`, which asks `RuntimeMode.detect` of the `sudo` caller's
   own home: a caller whose plain `sail` would be Refused reads it with `sudo`, and root logged
-  in directly, or an account on its own box, reads it plain.
+  in directly, or an account on its own box, reads it plain. The operator is resolved once per
+  command, at the command's door (`OperatorCommand.here()` in the command class), and passed
+  down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
+  operator as a parameter, so its `sudo` wording is a plain unit assertion
+  (`OperatorHintsTest` scans the sources for the seam).
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
@@ -1836,7 +1840,7 @@ command the installer sends against a real shell under a temporary directory;
   `agent.methodology` and `agent_context` fail `SailYaml.fromMap` with one sentence each
   saying where the text now goes, so a row that arrives by sync with one is
   `ProjectReader.Unreadable` with that sentence. `StagePromptsMigration`
-  (`stages-are-prompts-v1`, in `DataMigrations.ALL`, needing nothing of the box's files)
+  (`stages-are-prompts-v1`, in `DataMigrations.all`, needing nothing of the box's files)
   rewrites every definition the catalog holds without those keys through
   `ProjectStore.upsert`, a journalled revision that syncs, listing per project what it
   dropped and where it belongs; a second run changes nothing. The refusal is for what comes

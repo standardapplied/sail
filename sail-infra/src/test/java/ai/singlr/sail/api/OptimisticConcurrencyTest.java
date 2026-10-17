@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
@@ -53,7 +54,8 @@ class OptimisticConcurrencyTest {
             ProjectReader.ofCatalog(new ProjectStore(db)),
             bus,
             persister,
-            specStore);
+            specStore,
+            OperatorCommand.PLAIN);
     server =
         new SailApiServer(
             "127.0.0.1",

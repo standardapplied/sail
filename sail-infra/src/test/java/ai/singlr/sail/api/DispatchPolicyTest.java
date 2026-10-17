@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.util.List;
@@ -43,7 +44,7 @@ class DispatchPolicyTest {
   private static DispatchDecision.Refused refuse(Actor actor, Spec spec, String localHandle) {
     return assertInstanceOf(
         DispatchDecision.Refused.class,
-        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle)));
+        Actor.call(actor, () -> DispatchPolicy.check(spec, localHandle, OperatorCommand.PLAIN)));
   }
 
   @Test
@@ -99,7 +100,8 @@ class DispatchPolicyTest {
   void memberDispatchingOwnLocalSpecIsAllowed() {
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
+        Actor.call(
+            member(NODE), () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
   }
 
   @Test
@@ -107,7 +109,7 @@ class DispatchPolicyTest {
     var admin = new Actor("ops", Role.ADMIN, Actor.Lane.API);
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE)));
+        Actor.call(admin, () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
   }
 
   @Test
@@ -120,7 +122,9 @@ class DispatchPolicyTest {
   void cliOperatorDispatchingOwnSpecIsAllowed() {
     assertInstanceOf(
         DispatchDecision.Allowed.class,
-        Actor.call(Actor.cliOperator(NODE), () -> DispatchPolicy.check(spec(NODE), NODE)));
+        Actor.call(
+            Actor.cliOperator(NODE),
+            () -> DispatchPolicy.check(spec(NODE), NODE, OperatorCommand.PLAIN)));
   }
 
   @Test

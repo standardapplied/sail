@@ -8,17 +8,13 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.engine.ShellExecutor;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Spec;
 
 @Command(name = "stop", description = "Stop the sail API service.", mixinStandardHelpOptions = true)
 public final class HostServiceStopCommand implements Runnable {
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

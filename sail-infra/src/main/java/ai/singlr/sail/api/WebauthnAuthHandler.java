@@ -50,12 +50,15 @@ public final class WebauthnAuthHandler implements HttpHandler {
   private final ApiAuth auth;
   private final List<String> origins;
   private final String enrollOrigin;
+  private final OperatorCommand operator;
 
   public WebauthnAuthHandler(
       PasskeyCeremonies ceremonies,
       EnrollmentTickets enrollment,
       ApiAuth auth,
-      List<String> origins) {
+      List<String> origins,
+      OperatorCommand operator) {
+    this.operator = Objects.requireNonNull(operator, "operator");
     this.ceremonies = ceremonies;
     this.enrollment = enrollment;
     this.auth = Objects.requireNonNull(auth, "auth");
@@ -94,7 +97,7 @@ public final class WebauthnAuthHandler implements HttpHandler {
           ErrorCode.PASSKEY_NOT_CONFIGURED,
           "Passkey login is not configured on this server.",
           "Set the webauthn block in host.yaml or pass --origin to '"
-              + OperatorCommand.here().sail("server start")
+              + operator.sail("server start")
               + "'.");
     }
     var path = exchange.getRequestURI().getPath();

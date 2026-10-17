@@ -14,6 +14,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.EventStore;
@@ -59,6 +60,11 @@ class SyncCliTest {
   @ValueSource(strings = {"upgrade-freshen", "upgrade-agent-stop"})
   void cliFreshnessMigratesThePreHealthSchemaAndContinuesLocally(String scenario) throws Exception {
     runIsolated(scenario);
+  }
+
+  @Test
+  void aScheduledRoundSpeaksForTheOperatorWhoStartedTheCommand() throws Exception {
+    runIsolated("sudo-round");
   }
 
   private void runIsolated(String scenario) throws Exception {
@@ -110,11 +116,15 @@ class SyncCliTest {
 
   public static void main(String[] args) throws Exception {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb());
-        var operations = OperationsFactory.open()) {
+        var operations = OperationsFactory.open(OperatorCommand.PLAIN)) {
       var schema = new SchemaManager(db);
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
         verifyPreHealthUpgrade(args[0], db, operations);
+        return;
+      }
+      if ("sudo-round".equals(args[0])) {
+        verifyScheduledRoundWording();
         return;
       }
       var health = new SyncHealth(db);
@@ -136,7 +146,7 @@ class SyncCliTest {
         assertTrue(status.lastAttemptAt().isAfter(previous));
         assertEquals("store", status.lastErrorKind());
         assertTrue(status.lastError().contains("newer than this Sail binary supports"));
-        assertThrows(IllegalStateException.class, NodeSync::syncOnce);
+        assertThrows(IllegalStateException.class, () -> NodeSync.syncOnce(OperatorCommand.PLAIN));
         assertEquals(2, operations.syncStatus().consecutiveFailures());
         assertEquals(
             List.of(Event.WellKnownTypes.SYNC_DEGRADED),
@@ -148,7 +158,11 @@ class SyncCliTest {
         }
         for (var invocation = 0; invocation < 2; invocation++) {
           try (var scheduler =
-              NodeSync.scheduler(HostSync.config(), false, Map.of(NodeSync.FRESHEN_TTL_ENV, "1"))) {
+              NodeSync.scheduler(
+                  HostSync.config(),
+                  false,
+                  Map.of(NodeSync.FRESHEN_TTL_ENV, "1"),
+                  OperatorCommand.PLAIN)) {
             var errors = new ByteArrayOutputStream();
             var original = System.err;
             try (var capture = new PrintStream(errors, true, StandardCharsets.UTF_8)) {
@@ -165,6 +179,23 @@ class SyncCliTest {
         }
       }
     }
+  }
+
+  private static void verifyScheduledRoundWording() throws Exception {
+    Files.delete(SailPaths.hostConfigPath());
+    var output = new ByteArrayOutputStream();
+    var original = System.out;
+    try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
+      System.setOut(capture);
+      NodeSync.syncOnce(new OperatorCommand(true));
+    } finally {
+      System.setOut(original);
+    }
+    assertTrue(
+        output
+            .toString(StandardCharsets.UTF_8)
+            .contains("Add a second box with: sudo sail host sync --main <user@host>."),
+        output.toString(StandardCharsets.UTF_8));
   }
 
   private static void verifyPreHealthUpgrade(String scenario, Sqlite db, HostOperations operations)
@@ -243,7 +274,7 @@ class SyncCliTest {
       }
       assertTrue(output.toString(StandardCharsets.UTF_8).contains("No running agent session"));
     } else {
-      try (var scheduler = NodeSync.scheduler(false)) {
+      try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
         scheduler.freshenRead();
       }
     }
@@ -256,7 +287,7 @@ class SyncCliTest {
     assertEquals(
         List.of(Event.WellKnownTypes.SYNC_DEGRADED),
         new EventStore(db).recent(10).stream().map(EventStore.EventRow::type).toList());
-    try (var scheduler = NodeSync.scheduler(false)) {
+    try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
       scheduler.freshenRead();
     }
     assertEquals(status, operations.syncStatus());

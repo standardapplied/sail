@@ -20,9 +20,7 @@ import java.util.Map;
 import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Self-enrolls a passkey from a thin client with no admin round-trip. The command mints an
@@ -45,8 +43,6 @@ public final class EnrollCommand implements Runnable {
       defaultValue = "300")
   private int timeoutSeconds;
 
-  @Spec private CommandSpec spec;
-
   private final ShellExec shell;
 
   public EnrollCommand() {
@@ -62,7 +58,6 @@ public final class EnrollCommand implements Runnable {
   @Override
   public void run() {
     CliCommand.run(
-        spec,
         () -> {
           var client = requireThinClient();
           var ticket = mintTicket(client);

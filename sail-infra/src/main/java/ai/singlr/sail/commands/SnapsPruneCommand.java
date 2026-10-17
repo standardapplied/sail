@@ -24,7 +24,6 @@ import java.util.List;
 import java.util.Set;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -63,11 +62,9 @@ public final class SnapsPruneCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @picocli.CommandLine.Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

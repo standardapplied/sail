@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -57,7 +58,13 @@ class OperationsFactoryTest {
         var bus = new EventBus();
         var operations =
             OperationsFactory.create(
-                box.db, shell, bus, null, SyncScheduler.disabled(), SessionYield.NONE)) {
+                box.db,
+                shell,
+                bus,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)) {
       Acting.system(() -> new ProjectStore(box.db).upsert("proj", "name: proj\n"));
       var preview = new DispatchOperations.AdhocRequest("task", null, null, true, true);
       var plain = operations.dispatching().startAdhoc("proj", preview, "node");
@@ -118,7 +125,7 @@ class OperationsFactoryTest {
     var previous = environment.put("SAIL_DATA_DIR", tempDir.toString());
     try {
       HostOperations closed;
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(OperatorCommand.PLAIN)) {
         closed = operations;
         assertEquals(
             0, operations.schema().version(), "ordinary opens preserve bootstrap behavior");
@@ -131,7 +138,8 @@ class OperationsFactoryTest {
       }
       assertThrows(IllegalStateException.class, () -> closed.schema().version());
       assertTrue(Files.isRegularFile(tempDir.resolve("sail.db")));
-      try (var operations = OperationsFactory.open(tempDir.resolve("sail.db"))) {
+      try (var operations =
+          OperationsFactory.open(tempDir.resolve("sail.db"), OperatorCommand.PLAIN)) {
         assertEquals("test", operations.identity().tokens().getFirst().name());
       }
       var shell = new ShellExecutor(true);
@@ -143,12 +151,14 @@ class OperationsFactoryTest {
               DispatchOperations.shellLauncher(shell),
               DispatchOperations.Listener.NONE,
               StopOperations.Listener.NONE);
-      try (var operations = OperationsFactory.open(shell, hooks, SessionYield.NONE)) {
+      try (var operations =
+          OperationsFactory.open(shell, hooks, SessionYield.NONE, OperatorCommand.PLAIN)) {
         assertEquals("test", operations.identity().tokens().getFirst().name());
         assertNotNull(operations.syncStatus());
       }
       assertThrows(
-          NullPointerException.class, () -> OperationsFactory.open(shell, null, SessionYield.NONE));
+          NullPointerException.class,
+          () -> OperationsFactory.open(shell, null, SessionYield.NONE, OperatorCommand.PLAIN));
     } finally {
       if (previous == null) environment.remove("SAIL_DATA_DIR");
       else environment.put("SAIL_DATA_DIR", previous);

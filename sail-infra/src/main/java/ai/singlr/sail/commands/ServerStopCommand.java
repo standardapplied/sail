@@ -7,8 +7,6 @@ package ai.singlr.sail.commands;
 
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "stop",
@@ -16,12 +14,9 @@ import picocli.CommandLine.Spec;
     mixinStandardHelpOptions = true)
 public final class ServerStopCommand implements Runnable {
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
         () -> {
           System.out.println(
               Ansi.AUTO.string(

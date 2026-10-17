@@ -33,10 +33,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "set",
@@ -86,18 +84,17 @@ public final class HostConfigSetCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   ShellExec shell;
   Path userHome;
   SystemdServiceInstaller.Mode serviceMode;
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (!SETTABLE_KEYS.contains(key)) {
       throw new IllegalArgumentException(
           "Unknown config key: '" + key + "'. Settable keys: " + String.join(", ", SETTABLE_KEYS));
@@ -128,7 +125,7 @@ public final class HostConfigSetCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
@@ -141,7 +138,12 @@ public final class HostConfigSetCommand implements Runnable {
 
     var stamped =
         HandleChange.write(
-            hostYamlPath, SailPaths.controlPlaneDb(), hostYaml, updated, SshSyncChannel::open);
+            hostYamlPath,
+            SailPaths.controlPlaneDb(),
+            hostYaml,
+            updated,
+            SshSyncChannel::open,
+            operator);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -17,6 +17,7 @@ import ai.singlr.sail.auth.PasskeyCeremonies;
 import ai.singlr.sail.auth.PasskeyException;
 import ai.singlr.sail.auth.PasskeyService;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.FdeStore;
@@ -90,7 +91,8 @@ class WebauthnAuthHandlerTest {
             new EventBus(),
             null,
             null,
-            new WebauthnAuthHandler(ceremonies, enrollment, TestAuth.tokens(db), origins));
+            new WebauthnAuthHandler(
+                ceremonies, enrollment, TestAuth.tokens(db), origins, OperatorCommand.PLAIN));
     server.start();
   }
 

@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -102,7 +103,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -125,7 +126,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               null,
@@ -158,7 +159,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               null,
@@ -177,7 +178,7 @@ class ApiCoverageEdgesTest {
         new SailApiServer(
             "127.0.0.1",
             0,
-            new SailOperations(),
+            new SailOperations(OperatorCommand.PLAIN),
             new FixedTokenTestAuth("tok"),
             null,
             null,
@@ -196,7 +197,7 @@ class ApiCoverageEdgesTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               null,

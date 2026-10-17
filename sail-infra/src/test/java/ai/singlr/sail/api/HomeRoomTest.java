@@ -18,6 +18,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -116,7 +117,8 @@ class HomeRoomTest {
             null,
             specStore,
             new ReviewStore(db),
-            new RunStore(db))
+            new RunStore(db),
+            OperatorCommand.PLAIN)
         .useMessages(new MessageStore(db))
         .useRooms(roomStore)
         .useLaunchExecutor(Runnable::run);
@@ -455,7 +457,8 @@ class HomeRoomTest {
             null,
             specStore,
             new ReviewStore(db),
-            new RunStore(db));
+            new RunStore(db),
+            OperatorCommand.PLAIN);
 
     var refused =
         assertThrows(

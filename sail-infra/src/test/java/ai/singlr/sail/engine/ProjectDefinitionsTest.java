@@ -139,7 +139,8 @@ class ProjectDefinitionsTest {
                 + "resources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n"
                 + "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\n"
                 + "ssh:\n  user: dev\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n",
-            identity);
+            identity,
+            OperatorCommand.PLAIN);
 
     assertEquals("Mady M", config.git().name());
     assertEquals("mady@example.com", config.git().email());
@@ -153,7 +154,8 @@ class ProjectDefinitionsTest {
     var identity =
         new LocalIdentity(gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"));
 
-    var config = ProjectDefinitions.resolveForProvisioning(redacted, identity);
+    var config =
+        ProjectDefinitions.resolveForProvisioning(redacted, identity, OperatorCommand.PLAIN);
 
     assertEquals("Mady O'Neil", config.git().name());
   }
@@ -168,7 +170,9 @@ class ProjectDefinitionsTest {
             Files.readString(examples.resolve("node-api.yaml")));
 
     for (var definition : definitions) {
-      var config = ProjectDefinitions.resolveForProvisioning(definition, field -> "value");
+      var config =
+          ProjectDefinitions.resolveForProvisioning(
+              definition, field -> "value", OperatorCommand.PLAIN);
       assertEquals("dev", config.ssh().user(), config.name());
     }
   }
@@ -178,7 +182,9 @@ class ProjectDefinitionsTest {
     var noIdentity = new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"));
     var config =
         ProjectDefinitions.resolveForProvisioning(
-            "name: acme\nresources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n", noIdentity);
+            "name: acme\nresources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n",
+            noIdentity,
+            OperatorCommand.PLAIN);
     assertEquals("acme", config.name());
   }
 
@@ -189,8 +195,8 @@ class ProjectDefinitionsTest {
             "name: acme\n"
                 + "resources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n"
                 + "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\n",
-            placeholder ->
-                "GIT_NAME".equals(placeholder) ? "Prompted Person" : "typed@example.com");
+            placeholder -> "GIT_NAME".equals(placeholder) ? "Prompted Person" : "typed@example.com",
+            OperatorCommand.PLAIN);
 
     assertEquals("Prompted Person", config.git().name());
     assertEquals("typed@example.com", config.git().email());

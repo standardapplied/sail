@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -35,7 +36,8 @@ class ProjectMutationsTest {
   void currentDefinitionReadsAnExplicitFile() throws Exception {
     var file = dir.resolve("custom.yaml");
     Files.writeString(file, "name: acme\n");
-    assertEquals("name: acme\n", ProjectMutations.currentDefinition("acme", file));
+    assertEquals(
+        "name: acme\n", ProjectMutations.currentDefinition("acme", file, OperatorCommand.PLAIN));
   }
 
   @Test
@@ -43,7 +45,9 @@ class ProjectMutationsTest {
     var error =
         assertThrows(
             IllegalStateException.class,
-            () -> ProjectMutations.currentDefinition("ghost", dir.resolve("absent.yaml")));
+            () ->
+                ProjectMutations.currentDefinition(
+                    "ghost", dir.resolve("absent.yaml"), OperatorCommand.PLAIN));
     assertTrue(error.getMessage().contains("sail project apply"));
     assertTrue(error.getMessage().contains("sail sync"));
   }
@@ -78,7 +82,7 @@ class ProjectMutationsTest {
 
   @Test
   void notFoundNamesBothRemedies() {
-    var message = ProjectMutations.notFound("acme").getMessage();
+    var message = ProjectMutations.notFound("acme", OperatorCommand.PLAIN).getMessage();
     assertTrue(message.contains("sail project apply"));
     assertTrue(message.contains("sail sync"));
     assertFalse(message.contains("null"));

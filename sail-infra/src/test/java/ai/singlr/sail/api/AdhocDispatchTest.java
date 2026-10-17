@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -124,7 +125,8 @@ class AdhocDispatchTest {
         (project, config) -> "",
         launcher,
         listener,
-        SessionYield.NONE);
+        SessionYield.NONE,
+        OperatorCommand.PLAIN);
   }
 
   private static StubShell liveAgentShell() {
@@ -514,7 +516,8 @@ class AdhocDispatchTest {
                 launchedCommands.add(command);
               }
             },
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
 
     var session =
         ops.startAdhoc(
@@ -644,7 +647,8 @@ class AdhocDispatchTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
 
     ops.startAdhoc(
         "acme", new DispatchOperations.AdhocRequest("task", null, "app/api", true, false), HANDLE);

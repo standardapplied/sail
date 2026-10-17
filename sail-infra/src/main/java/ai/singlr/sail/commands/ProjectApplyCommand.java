@@ -56,10 +56,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * The one verb that makes a project container match intent, from any starting state. Desired state
@@ -108,8 +106,6 @@ public final class ProjectApplyCommand implements Runnable {
       defaultValue = "${GITHUB_TOKEN}")
   private String gitToken;
 
-  @Spec private CommandSpec spec;
-
   private final Supplier<Path> database;
 
   public ProjectApplyCommand() {
@@ -139,10 +135,11 @@ public final class ProjectApplyCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (json && dryRun) {
       throw new IllegalArgumentException(
           "--json and --dry-run cannot be combined: dry-run narrates the underlying shell"
@@ -156,31 +153,32 @@ public final class ProjectApplyCommand implements Runnable {
       throw new IllegalArgumentException("--file applies to a single project, not --all.");
     }
     if (dryRun) {
-      converge();
+      converge(operator);
       return;
     }
     try (var held = PairingTrust.hold(database.get())) {
-      converge();
+      converge(operator);
     }
   }
 
-  private void converge() throws Exception {
+  private void converge(OperatorCommand operator) throws Exception {
     if (all) {
-      applyAll();
+      applyAll(operator);
     } else {
-      applyOne();
+      applyOne(operator);
     }
   }
 
-  private void applyOne() throws Exception {
-    var definition = loadDefinition();
+  private void applyOne(OperatorCommand operator) throws Exception {
+    var definition = loadDefinition(operator);
     var sailYamlPath = definition.path();
 
     var identity =
         new InteractiveIdentity(
             LocalIdentity.detect(),
             InteractiveIdentity.canPrompt(yes, json, dryRun, ConsoleHelper.hasConsole()));
-    SailYaml config = ProjectDefinitions.resolveForProvisioning(definition.text(), identity);
+    SailYaml config =
+        ProjectDefinitions.resolveForProvisioning(definition.text(), identity, operator);
     if (config.name() == null || config.name().isBlank()) {
       throw new IllegalStateException("sail.yaml must have a 'name' field.");
     }
@@ -212,7 +210,8 @@ public final class ProjectApplyCommand implements Runnable {
 
     var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
     if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config)))) {
-      provision(config, sailYamlPath, shell, action == Action.CREATED, recorded.isPresent());
+      provision(
+          config, sailYamlPath, shell, action == Action.CREATED, recorded.isPresent(), operator);
       action = Action.CREATED;
     }
 
@@ -221,7 +220,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var outcome = converge(observer, shell, config, sailYamlPath);
+    var outcome = converge(observer, shell, config, sailYamlPath, operator);
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(jsonSummary(config.name(), action, outcome)));
@@ -237,7 +236,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println("    " + homeRoom);
     }
     if (action == Action.CREATED) {
-      printConnectHints(config, observer, observed);
+      printConnectHints(config, observer, observed, operator);
     }
   }
 
@@ -251,7 +250,7 @@ public final class ProjectApplyCommand implements Runnable {
    * interrupted provisioning run finishes its remaining phases instead of being skipped. This is
    * the post-upgrade retrofit: one command brings the whole box current.
    */
-  private void applyAll() throws Exception {
+  private void applyAll(OperatorCommand operator) throws Exception {
     var observer = new ShellExecutor(false);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -275,7 +274,7 @@ public final class ProjectApplyCommand implements Runnable {
       var definition = definitionFor(project);
       try {
         if (!sailManaged(project, devices)) {
-          var warning = unmanagedSkipWarning(project, definition.isPresent());
+          var warning = unmanagedSkipWarning(project, definition.isPresent(), operator);
           if (warning != null) {
             if (json) {
               var row = new LinkedHashMap<String, Object>();
@@ -288,7 +287,7 @@ public final class ProjectApplyCommand implements Runnable {
           }
           continue;
         }
-        var targetPlan = planTarget(project, target.state(), definition.orElse(null));
+        var targetPlan = planTarget(project, target.state(), definition.orElse(null), operator);
         var action = targetPlan.action();
         if (action == Action.STARTED) {
           mgr.start(project);
@@ -299,10 +298,11 @@ public final class ProjectApplyCommand implements Runnable {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
           var recorded = ProjectProvisioner.provisionedInputs(observer, project);
           if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(targetPlan.config())))) {
-            provision(targetPlan.config(), sailYamlPath, shell, false, recorded.isPresent());
+            provision(
+                targetPlan.config(), sailYamlPath, shell, false, recorded.isPresent(), operator);
             action = Action.CREATED;
           }
-          outcome = converge(observer, shell, targetPlan.config(), sailYamlPath);
+          outcome = converge(observer, shell, targetPlan.config(), sailYamlPath, operator);
         } else {
           outcome = convergeMachineryOnly(observer, shell, project);
         }
@@ -365,14 +365,15 @@ public final class ProjectApplyCommand implements Runnable {
    * A catalog row pointing at a container the trust gate refused is a disagreement worth narrating,
    * with the explicit escape hatch; a foreign container with no row is not Sail's to mention.
    */
-  static String unmanagedSkipWarning(String project, boolean hasDefinition) {
+  static String unmanagedSkipWarning(
+      String project, boolean hasDefinition, OperatorCommand operator) {
     if (!hasDefinition) {
       return null;
     }
     return project
         + ": catalog entry exists but the container carries no sail-api-sock device — possibly a"
         + " foreign container reusing the name. Skipped; claim it explicitly with '"
-        + OperatorCommand.here().sail("project apply " + project)
+        + operator.sail("project apply " + project)
         + "' if it is yours.";
   }
 
@@ -384,12 +385,13 @@ public final class ProjectApplyCommand implements Runnable {
    * still untouched — the same fail-fast contract the single-project path keeps. A target without a
    * descriptor plans a machinery-only convergence ({@code config} null).
    */
-  static TargetPlan planTarget(String project, ContainerState state, String definitionText) {
+  static TargetPlan planTarget(
+      String project, ContainerState state, String definitionText, OperatorCommand operator) {
     var action = plan(state);
     if (definitionText == null) {
       return new TargetPlan(action, null);
     }
-    var config = ProjectDefinitions.resolveForProvisioning(definitionText);
+    var config = ProjectDefinitions.resolveForProvisioning(definitionText, operator);
     requireMatchingName(project, config.name(), null);
     return new TargetPlan(action, config);
   }
@@ -458,7 +460,11 @@ public final class ProjectApplyCommand implements Runnable {
    * {@code shell}, which a dry run swaps for command narration.
    */
   private Outcome converge(
-      ShellExecutor observer, ShellExecutor shell, SailYaml config, Path sailYamlPath)
+      ShellExecutor observer,
+      ShellExecutor shell,
+      SailYaml config,
+      Path sailYamlPath,
+      OperatorCommand operator)
       throws Exception {
     var project = config.name();
     var observed = new ContainerManager(observer);
@@ -468,7 +474,8 @@ public final class ProjectApplyCommand implements Runnable {
 
     var applier = new ProjectApplier(observer, shell, progressOut(json));
     var info = observed.queryInfo(project);
-    var warnings = new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits()));
+    var warnings =
+        new ArrayList<>(applier.checkUnsupportedChanges(config, info.limits(), operator));
     var sshUser = config.sshUser();
     var token = Strings.isNotBlank(gitToken) ? gitToken : null;
 
@@ -484,7 +491,7 @@ public final class ProjectApplyCommand implements Runnable {
     results.add(applier.applyAgentTools(project, agentInstall));
     results.add(applier.applyGitConfig(project, config.git(), sshUser));
     HomeRoom.Outcome homeRoom;
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       results.add(
           applier.applySkills(project, config, new ProjectSkills(operations::projectFiles)));
       results.add(applier.applyCleanupCron(project, sshUser));
@@ -614,7 +621,12 @@ public final class ProjectApplyCommand implements Runnable {
    * @param recorded whether the container records the descriptor it was last provisioned from
    */
   private void provision(
-      SailYaml config, Path sailYamlPath, ShellExecutor shell, boolean fresh, boolean recorded)
+      SailYaml config,
+      Path sailYamlPath,
+      ShellExecutor shell,
+      boolean fresh,
+      boolean recorded,
+      OperatorCommand operator)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
     ProjectCatalog.requireUnpruned(config.name());
@@ -622,7 +634,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
@@ -663,22 +675,23 @@ public final class ProjectApplyCommand implements Runnable {
       }
     }
 
-    var gitTokens = resolveGitTokens(config);
+    var gitTokens = resolveGitTokens(config, operator);
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       var provisioner =
           new ProjectProvisioner(
-              shell, tracker, listener, new ProjectSkills(operations::projectFiles));
+              shell, tracker, listener, new ProjectSkills(operations::projectFiles), operator);
       provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
     }
 
     if (!json) {
       System.out.println();
-      Banner.printProjectCreated(config.name(), OperatorCommand.here(), System.out, Ansi.AUTO);
+      Banner.printProjectCreated(config.name(), operator, System.out, Ansi.AUTO);
     }
   }
 
-  private void printConnectHints(SailYaml config, ShellExecutor shell, ContainerManager mgr)
+  private void printConnectHints(
+      SailYaml config, ShellExecutor shell, ContainerManager mgr, OperatorCommand operator)
       throws Exception {
     var state = mgr.queryState(config.name());
     if (!(state instanceof ContainerState.Running r) || r.ipv4() == null) {
@@ -686,7 +699,6 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(SailPaths.hostConfigPath()));
     var serverIp = hostYaml.serverIp();
-    var operator = OperatorCommand.here();
     if (serverIp != null) {
       Banner.printSshConfig(
           config.name(),
@@ -716,7 +728,7 @@ public final class ProjectApplyCommand implements Runnable {
         + " for SSH config snippet.";
   }
 
-  private Map<String, String> resolveGitTokens(SailYaml config) {
+  private Map<String, String> resolveGitTokens(SailYaml config, OperatorCommand operator) {
     if (config.git() == null || !"token".equals(config.git().auth())) {
       return Map.of();
     }
@@ -752,7 +764,7 @@ public final class ProjectApplyCommand implements Runnable {
                 + "  --git-token <token>\n"
                 + "  GITHUB_TOKEN environment variable\n\n"
                 + "Then re-run: "
-                + OperatorCommand.here().sail("project apply <name>"));
+                + operator.sail("project apply <name>"));
       }
     }
     return Map.copyOf(tokens);
@@ -777,7 +789,7 @@ public final class ProjectApplyCommand implements Runnable {
     return file == null && name != null;
   }
 
-  private Definition loadDefinition() throws IOException {
+  private Definition loadDefinition(OperatorCommand operator) throws IOException {
     if (usesCatalog(file, name)) {
       NameValidator.requireValidProjectName(name);
       var catalog = ProjectDefinitions.definition(name, null);
@@ -787,7 +799,7 @@ public final class ProjectApplyCommand implements Runnable {
     }
     var sailYamlPath = resolveSailYamlPath(name, file);
     if (!Files.exists(sailYamlPath)) {
-      throw new IllegalStateException(descriptorNotFound(sailYamlPath, OperatorCommand.here()));
+      throw new IllegalStateException(descriptorNotFound(sailYamlPath, operator));
     }
     return new Definition(Files.readString(sailYamlPath), sailYamlPath);
   }

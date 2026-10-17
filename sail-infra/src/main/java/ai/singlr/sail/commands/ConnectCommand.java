@@ -28,10 +28,8 @@ import java.util.OptionalInt;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "connect",
@@ -53,14 +51,13 @@ public final class ConnectCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
@@ -73,11 +70,11 @@ public final class ConnectCommand implements Runnable {
       resolvedServerIp = hostYaml.serverIp();
     }
     if (resolvedServerIp == null) {
-      throw new IllegalStateException(serverIpUnset(name, OperatorCommand.here()));
+      throw new IllegalStateException(serverIpUnset(name, operator));
     }
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
     var containerIp = state instanceof ContainerState.Running running ? running.ipv4() : null;
 
     if (containerIp == null) {
@@ -89,7 +86,7 @@ public final class ConnectCommand implements Runnable {
 
     var resolvedServerUser =
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
-    var containerUser = resolveContainerUser(name);
+    var containerUser = resolveContainerUser(name, operator);
 
     var identityFile = WorkstationIdentity.identityFile();
 
@@ -131,9 +128,9 @@ public final class ConnectCommand implements Runnable {
    * when the descriptor can't be read — a running container is reason enough to print a snippet, so
    * a missing descriptor degrades to the default rather than failing.
    */
-  private static String resolveContainerUser(String name) {
+  private static String resolveContainerUser(String name, OperatorCommand operator) {
     try {
-      return ProjectDefinitions.load(name, null).sshUser();
+      return ProjectDefinitions.load(name, null, operator).sshUser();
     } catch (RuntimeException e) {
       return "dev";
     }

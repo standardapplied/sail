@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.harness.Harnesses;
@@ -68,7 +69,8 @@ class RoomsSurfaceTest {
                 null,
                 specStore,
                 new ReviewStore(db),
-                new RunStore(db))
+                new RunStore(db),
+                OperatorCommand.PLAIN)
             .useMessages(new MessageStore(db))
             .useRooms(roomStore);
   }
@@ -323,7 +325,8 @@ class RoomsSurfaceTest {
                 null,
                 specStore,
                 new ReviewStore(db),
-                new RunStore(db))
+                new RunStore(db),
+                OperatorCommand.PLAIN)
             .useMessages(new MessageStore(db));
 
     assertEquals(
@@ -363,7 +366,8 @@ class RoomsSurfaceTest {
                 null,
                 specStore,
                 new ReviewStore(db),
-                new RunStore(db))
+                new RunStore(db),
+                OperatorCommand.PLAIN)
             .useRooms(roomStore);
     create("quiet-room", "Quiet");
 
@@ -419,7 +423,8 @@ class RoomsSurfaceTest {
             null,
             null,
             new ReviewStore(db),
-            new RunStore(db));
+            new RunStore(db),
+            OperatorCommand.PLAIN);
     var posted =
         Actor.call(
             admin(),
@@ -438,7 +443,8 @@ class RoomsSurfaceTest {
                 null,
                 null,
                 new ReviewStore(db),
-                new RunStore(db))
+                new RunStore(db),
+                OperatorCommand.PLAIN)
             .useRooms(roomStore);
     create("no-spec-store", "NoSpecs");
     var listed =

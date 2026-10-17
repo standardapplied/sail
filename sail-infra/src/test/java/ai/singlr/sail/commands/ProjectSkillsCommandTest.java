@@ -14,6 +14,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.gen.SpecSkillGenerator;
@@ -68,7 +69,7 @@ class ProjectSkillsCommandTest {
   }
 
   private HostOperations operations() {
-    return OperationsFactory.open(database);
+    return OperationsFactory.open(database, OperatorCommand.PLAIN);
   }
 
   private void share(String path, String content) {
@@ -100,19 +101,19 @@ class ProjectSkillsCommandTest {
   private record Ran(int exit, String out, String err, Exception escaped) {}
 
   private Ran ls(String... args) {
-    return run(new ProjectSkillsCommand.Ls(this::operations), args);
+    return run(new ProjectSkillsCommand.Ls(ignored -> operations()), args);
   }
 
   private Ran add(String... args) {
-    return run(new ProjectSkillsCommand.Add(this::operations), args);
+    return run(new ProjectSkillsCommand.Add(ignored -> operations()), args);
   }
 
   private Ran rm(String... args) {
-    return run(new ProjectSkillsCommand.Rm(this::operations), args);
+    return run(new ProjectSkillsCommand.Rm(ignored -> operations()), args);
   }
 
   private Ran show(String... args) {
-    return run(new ProjectSkillsCommand.Show(this::operations), args);
+    return run(new ProjectSkillsCommand.Show(ignored -> operations()), args);
   }
 
   private static Ran run(Object command, String... args) {

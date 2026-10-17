@@ -11,6 +11,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -18,10 +19,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "remove",
@@ -47,22 +46,22 @@ public final class ProjectRemoveServiceCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var ansi = Ansi.AUTO;
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var operator = ProjectMutations.catalogOperator(name, explicit, dryRun);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
     var config =
-        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
+        SailYaml.fromMap(
+            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
     if (config.services() == null || !config.services().containsKey(serviceName)) {
       throw new IllegalStateException(
           "Service '" + serviceName + "' is not defined in project '" + name + "'.");
@@ -72,7 +71,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     var applier = new ProjectApplier(shell, out);
     var result = applier.removeServices(name, List.of(serviceName));
@@ -86,7 +85,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
         dryRun,
         out,
         "remove service '" + serviceName + "' from the catalog",
-        operator);
+        actor);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

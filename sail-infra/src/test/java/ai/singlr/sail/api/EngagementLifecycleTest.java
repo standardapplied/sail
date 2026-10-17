@@ -15,6 +15,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -108,7 +109,8 @@ class EngagementLifecycleTest {
             (project, config) -> "",
             command -> 0,
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE)
+            SessionYield.NONE,
+            OperatorCommand.PLAIN)
         .useMessages(new MessageStore(db))
         .useRooms(roomStore);
   }
@@ -396,7 +398,8 @@ class EngagementLifecycleTest {
                   null,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  OperatorCommand.PLAIN)
               .useMessages(new MessageStore(db))
               .useRooms(roomStore)
               .useLaunchExecutor(
@@ -445,7 +448,8 @@ class EngagementLifecycleTest {
                   null,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  OperatorCommand.PLAIN)
               .useMessages(new MessageStore(db))
               .useRooms(roomStore)
               .useLaunchExecutor(Runnable::run);
@@ -558,7 +562,8 @@ class EngagementLifecycleTest {
                 (project, config) -> "",
                 command -> 0,
                 DispatchOperations.Listener.NONE,
-                SessionYield.NONE)
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useMessages(new MessageStore(db));
     seedSpec("auth");
 

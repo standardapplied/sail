@@ -14,12 +14,7 @@ public final class ContainerStateGuard {
 
   private ContainerStateGuard() {}
 
-  /** Requires the container to be running; throws otherwise. */
-  public static void requireRunning(ContainerState state, String name) {
-    requireRunning(state, name, OperatorCommand.here());
-  }
-
-  static void requireRunning(ContainerState state, String name, OperatorCommand operator) {
+  public static void requireRunning(ContainerState state, String name, OperatorCommand operator) {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored ->
@@ -32,12 +27,7 @@ public final class ContainerStateGuard {
     }
   }
 
-  /** Requires the container to exist (running or stopped); throws otherwise. */
-  public static void requireCreated(ContainerState state, String name) {
-    requireCreated(state, name, OperatorCommand.here());
-  }
-
-  static void requireCreated(ContainerState state, String name, OperatorCommand operator) {
+  public static void requireCreated(ContainerState state, String name, OperatorCommand operator) {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored -> {}

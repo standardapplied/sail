@@ -88,7 +88,8 @@ class HandleChangeTest {
 
   private List<String> apply(SyncConfig before, SyncConfig after, SyncOperations.Channels channels)
       throws Exception {
-    return HandleChange.apply(dbPath, before, after, channels, () -> written.set(true));
+    return HandleChange.apply(
+        dbPath, before, after, channels, OperatorCommand.PLAIN, () -> written.set(true));
   }
 
   private String run(String handle, String project) {
@@ -192,7 +193,12 @@ class HandleChangeTest {
 
     var stamped =
         HandleChange.apply(
-            dbPath, node("ada"), node("uday"), UNREACHABLE, () -> during.set(run("ada", "p")));
+            dbPath,
+            node("ada"),
+            node("uday"),
+            UNREACHABLE,
+            OperatorCommand.PLAIN,
+            () -> during.set(run("ada", "p")));
 
     assertEquals(List.of(during.get()), stamped);
     assertEquals("uday", runs.findById(during.get()).orElseThrow().owner());
@@ -217,6 +223,7 @@ class HandleChangeTest {
             STANDALONE,
             node("ada"),
             UNREACHABLE,
+            OperatorCommand.PLAIN,
             () -> written.set(true)));
     assertTrue(written.get());
   }
@@ -338,7 +345,8 @@ class HandleChangeTest {
             target -> {
               opened.incrementAndGet();
               return PipedSyncChannel.to(main.server(UDAY));
-            });
+            },
+            OperatorCommand.PLAIN);
     var failure = new AtomicReference<Throwable>();
     var round = new AtomicReference<Thread>();
 

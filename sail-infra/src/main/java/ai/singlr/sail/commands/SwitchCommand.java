@@ -19,10 +19,8 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "switch",
@@ -41,20 +39,19 @@ public final class SwitchCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name);
+    ContainerStateGuard.requireCreated(state, name, operator);
 
     if (!dryRun) {
       CurrentProject.set(name);
@@ -98,7 +95,7 @@ public final class SwitchCommand implements Runnable {
       return;
     }
 
-    Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
+    Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);
@@ -111,7 +108,7 @@ public final class SwitchCommand implements Runnable {
       var hostInfo = new HostDetector().detect();
       var capacity = new ResourceChecker.HostCapacity(hostInfo.threads(), hostInfo.memoryMb());
       var overcommit = ResourceChecker.check(running, capacity);
-      Banner.printOvercommitWarning(overcommit, System.out, Ansi.AUTO);
+      Banner.printOvercommitWarning(overcommit, operator, System.out, Ansi.AUTO);
     } catch (Exception ignored) {
     }
   }

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import java.nio.file.Path;
 import java.util.List;
@@ -228,12 +229,9 @@ class StagePromptsMigrationTest {
 
   @Test
   void theMigrationIsRegisteredAndNeedsNothingOfTheBoxsFiles() {
-    var migration =
-        DataMigrations.ALL.stream()
-            .filter(m -> m.name().equals(StagePromptsMigration.NAME))
-            .findFirst()
-            .orElseThrow();
-
-    assertTrue(DataMigrations.databaseOnly().contains(migration));
+    for (var registry :
+        List.of(DataMigrations.all(OperatorCommand.PLAIN), DataMigrations.databaseOnly())) {
+      assertTrue(registry.stream().anyMatch(StagePromptsMigration.class::isInstance));
+    }
   }
 }

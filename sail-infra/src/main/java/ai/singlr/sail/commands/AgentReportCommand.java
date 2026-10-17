@@ -16,14 +16,14 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.RunStore;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -44,32 +44,31 @@ public final class AgentReportCommand implements Runnable {
 
   @Mixin private IgnoredFileOption file;
 
-  @picocli.CommandLine.Spec private CommandSpec spec;
-
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentReportCommand() {
     this(OperationsFactory::open);
   }
 
-  AgentReportCommand(Supplier<HostOperations> operations) {
+  AgentReportCommand(Function<OperatorCommand, HostOperations> operations) {
     this.operations = operations;
   }
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   /** The project's definition from the catalog, which a report needs. */
-  SailYaml definition() {
-    try (var operations = this.operations.get()) {
-      return operations.catalog().definitions().require(name);
+  SailYaml definition(OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
+      return operations.catalog().definitions().require(name, operator);
     }
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
@@ -85,26 +84,31 @@ public final class AgentReportCommand implements Runnable {
     }
 
     var reporter = new AgentReporter(shell);
-    var report = reporter.generate(name, definition(), projectSpecs(name), latestSession(name));
+    var report =
+        reporter.generate(
+            name,
+            definition(operator),
+            projectSpecs(name, operator),
+            latestSession(name, operator));
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(report.toMap()));
       return;
     }
 
-    Banner.printAgentReport(name, report, System.out, Ansi.AUTO);
+    Banner.printAgentReport(name, report, operator, System.out, Ansi.AUTO);
   }
 
-  List<Spec> projectSpecs(String project) {
-    try (var operations = this.operations.get()) {
+  List<Spec> projectSpecs(String project, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
       return operations.catalog().projectSpecs(project);
     } catch (Exception ignored) {
       return List.of();
     }
   }
 
-  RunStore.RunRow latestSession(String project) {
-    try (var operations = this.operations.get()) {
+  RunStore.RunRow latestSession(String project, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
       return operations.dispatching().latestRun(project, NodeIdentity.handle()).orElse(null);
     } catch (Exception ignored) {
       return null;

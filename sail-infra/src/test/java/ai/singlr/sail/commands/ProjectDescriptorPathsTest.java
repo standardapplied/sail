@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -41,7 +42,7 @@ class ProjectDescriptorPathsTest {
 
     assertEquals(
         "sail project apply acme-health",
-        ProjectInitCommand.nextApplyCommand("acme-health", outputPath));
+        ProjectInitCommand.nextApplyCommand("acme-health", outputPath, OperatorCommand.PLAIN));
   }
 
   @Test
@@ -50,7 +51,7 @@ class ProjectDescriptorPathsTest {
 
     assertEquals(
         "sail project apply acme-health -f " + outputPath,
-        ProjectInitCommand.nextApplyCommand("acme-health", outputPath));
+        ProjectInitCommand.nextApplyCommand("acme-health", outputPath, OperatorCommand.PLAIN));
   }
 
   @Test

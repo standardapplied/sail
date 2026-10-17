@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.io.IOException;
@@ -22,10 +23,8 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "destroy",
@@ -54,17 +53,14 @@ public final class ProjectDestroyCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
-        "  If this is unexpected, re-run with --dry-run to see what would execute.",
-        this::execute);
+        "  If this is unexpected, re-run with --dry-run to see what would execute.", this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
 
     if (!json) {
@@ -92,7 +88,7 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println();
       Banner.printContainerStatus(name, state, System.out, Ansi.AUTO);
     }
-    var erases = purge ? rehearsePurge() : null;
+    var erases = purge ? rehearsePurge(operator) : null;
     if (erases != null && !json) {
       System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
     }
@@ -119,7 +115,7 @@ public final class ProjectDestroyCommand implements Runnable {
         deleteDirectory(projectDir);
       }
     }
-    var destroyed = purge ? purgeFromCatalog(erases) : null;
+    var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);
   }
@@ -135,19 +131,19 @@ public final class ProjectDestroyCommand implements Runnable {
   }
 
   /** What the purge will erase, rehearsed through the one prune method before anything goes. */
-  private String rehearsePurge() {
-    try (var operations = OperationsFactory.open()) {
+  private String rehearsePurge(OperatorCommand operator) {
+    try (var operations = OperationsFactory.open(operator)) {
       return operations.catalog().purgeSummary(name);
     }
   }
 
   /** Prunes the project everywhere, through the one prune method. Idempotent once erased. */
-  private HostCatalog.Destroyed purgeFromCatalog(String erases) {
+  private HostCatalog.Destroyed purgeFromCatalog(String erases, OperatorCommand operator) {
     if (dryRun) {
       System.out.println("[dry-run] erase '" + name + "' everywhere: " + erases);
       return new HostCatalog.Destroyed(name, false, false);
     }
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       return operations.catalog().destroy(name, true);
     }
   }

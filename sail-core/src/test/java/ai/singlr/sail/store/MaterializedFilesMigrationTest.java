@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.ActingAs;
 import java.io.IOException;
@@ -53,7 +54,11 @@ class MaterializedFilesMigrationTest {
   }
 
   private List<DataMigrator.Run> migrate() {
-    return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir)))
+    return migrate(OperatorCommand.PLAIN);
+  }
+
+  private List<DataMigrator.Run> migrate(OperatorCommand operator) {
+    return new DataMigrator(db, List.of(new MaterializedFilesMigration(projectsDir, operator)))
         .run(
             ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
             DataMigration.Prompter.NON_INTERACTIVE);
@@ -87,6 +92,24 @@ class MaterializedFilesMigrationTest {
 
   private String hashOf(String text) {
     return files.blobs().putText(text);
+  }
+
+  @Test
+  void anUndecidedCopysRemedyIsWordedForTheOperator() throws IOException {
+    ContentFixtures.put(files, "acme", "edited.txt", "v1");
+    copy("acme", "edited.txt", "mine");
+
+    beforeUpgrade();
+    var run = migrate(new OperatorCommand(true)).getFirst();
+
+    assertEquals(
+        List.of(
+            "Recorded the copy this box wrote of 0 shared file(s)",
+            "Left acme/edited.txt undecided: its copy on disk matches no version this box still"
+                + " holds, so it may be your unpublished edit or a version this box wrote before"
+                + " history was compacted. It is kept and not published; delete to take main's, or"
+                + " capture with 'sudo sail project files add' if yours"),
+        run.report().notes());
   }
 
   @Test

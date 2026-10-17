@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -73,7 +74,9 @@ class DispatchOperationsResolveSpecTest {
 
   private static BuildDispatch.SpecResolution resolve(
       String specId, boolean restart, List<Spec> specs, SpecStore store) {
-    return Actor.call(OPERATOR, () -> BuildDispatch.resolveSpec(specs, specId, restart, FDE));
+    return Actor.call(
+        OPERATOR,
+        () -> BuildDispatch.resolveSpec(specs, specId, restart, FDE, OperatorCommand.PLAIN));
   }
 
   @Test

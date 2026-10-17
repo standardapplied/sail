@@ -24,6 +24,7 @@ import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
@@ -190,7 +191,7 @@ class ProjectApplyCommandTest {
             ApiException.class,
             () ->
                 ProjectApplyCommand.ensureHomeRoom(
-                    new SailOperations(),
+                    new SailOperations(OperatorCommand.PLAIN),
                     claudeProject(),
                     "ada",
                     () -> {
@@ -326,7 +327,10 @@ class ProjectApplyCommandTest {
             IllegalArgumentException.class,
             () ->
                 ProjectApplyCommand.planTarget(
-                    "alpha", new ContainerState.Stopped(), "name: alpha\nssh:\n  user: bob\n"));
+                    "alpha",
+                    new ContainerState.Stopped(),
+                    "name: alpha\nssh:\n  user: bob\n",
+                    OperatorCommand.PLAIN));
 
     assertEquals(otherUserRefusal("alpha", "bob"), thrown.getMessage());
   }
@@ -335,12 +339,16 @@ class ProjectApplyCommandTest {
   void planTargetAcceptsDevAndAnSshBlockThatNamesNoUser() {
     var dev =
         ProjectApplyCommand.planTarget(
-            "alpha", new ContainerState.Stopped(), "name: alpha\nssh:\n  user: dev\n");
+            "alpha",
+            new ContainerState.Stopped(),
+            "name: alpha\nssh:\n  user: dev\n",
+            OperatorCommand.PLAIN);
     var keysOnly =
         ProjectApplyCommand.planTarget(
             "alpha",
             new ContainerState.Stopped(),
-            "name: alpha\nssh:\n  authorized_keys:\n    - ssh-ed25519 AAAA alice@laptop\n");
+            "name: alpha\nssh:\n  authorized_keys:\n    - ssh-ed25519 AAAA alice@laptop\n",
+            OperatorCommand.PLAIN);
 
     assertEquals("dev", dev.config().sshUser());
     assertEquals("dev", keysOnly.config().sshUser());
@@ -485,7 +493,7 @@ class ProjectApplyCommandTest {
             IllegalStateException.class,
             () ->
                 ProjectApplyCommand.planTarget(
-                    "alpha", new ContainerState.Stopped(), "name: beta\n"));
+                    "alpha", new ContainerState.Stopped(), "name: beta\n", OperatorCommand.PLAIN));
     assertTrue(
         thrown.getMessage().contains("beta"),
         "a bad descriptor must fail before bulk apply starts the container, leaving observed"
@@ -510,7 +518,8 @@ class ProjectApplyCommandTest {
                           - name: sign-off
                             type: human
                             skill: acme-review
-                    """));
+                    """,
+                    OperatorCommand.PLAIN));
     assertTrue(
         thrown
             .getMessage()
@@ -521,12 +530,14 @@ class ProjectApplyCommandTest {
   @Test
   void planTargetResolvesActionAndConfigForAValidTarget() {
     var plan =
-        ProjectApplyCommand.planTarget("alpha", new ContainerState.Stopped(), "name: alpha\n");
+        ProjectApplyCommand.planTarget(
+            "alpha", new ContainerState.Stopped(), "name: alpha\n", OperatorCommand.PLAIN);
     assertEquals(ProjectApplyCommand.Action.STARTED, plan.action());
     assertEquals("alpha", plan.config().name());
 
     var machineryOnly =
-        ProjectApplyCommand.planTarget("legacy", new ContainerState.Running("10.0.0.4"), null);
+        ProjectApplyCommand.planTarget(
+            "legacy", new ContainerState.Running("10.0.0.4"), null, OperatorCommand.PLAIN);
     assertEquals(ProjectApplyCommand.Action.CONVERGED, machineryOnly.action());
     assertEquals(null, machineryOnly.config(), "no descriptor means machinery-only convergence");
   }
@@ -595,14 +606,14 @@ class ProjectApplyCommandTest {
 
   @Test
   void aCatalogRowWithoutTheDeviceGetsAVisibleWarningNotASilentSkip() {
-    var warning = ProjectApplyCommand.unmanagedSkipWarning("web", true);
+    var warning = ProjectApplyCommand.unmanagedSkipWarning("web", true, OperatorCommand.PLAIN);
     assertTrue(warning.contains("web"));
     assertTrue(
         warning.contains("sail project apply web"),
         "the operator is told the explicit single-project escape hatch");
     assertEquals(
         null,
-        ProjectApplyCommand.unmanagedSkipWarning("stranger", false),
+        ProjectApplyCommand.unmanagedSkipWarning("stranger", false, OperatorCommand.PLAIN),
         "a foreign container with no catalog row is not Sail's to narrate");
   }
 

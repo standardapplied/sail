@@ -11,6 +11,7 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
@@ -20,10 +21,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "install-agent",
@@ -45,14 +44,13 @@ public final class ProjectInstallAgentCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var tool = Harnesses.of(agentName);
 
@@ -60,7 +58,7 @@ public final class ProjectInstallAgentCommand implements Runnable {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     var check = shell.exec(ContainerExec.asDevUser(name, List.of("which", tool.binaryName())));
     if (check.ok()) {

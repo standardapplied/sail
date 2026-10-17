@@ -73,7 +73,7 @@ class ConflictOperationsTest {
     node = new SyncBox(tempDir, "node");
     new FdeStore(main.db).add("node", null, null, "admin");
     replicas = SyncedEntities.replicas(node.db, node.id, node.id);
-    operations = new ConflictOperations(node.db);
+    operations = new ConflictOperations(node.db, OperatorCommand.PLAIN);
   }
 
   @AfterEach

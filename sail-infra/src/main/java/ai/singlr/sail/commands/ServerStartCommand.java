@@ -53,6 +53,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.EnrollmentTicketStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.ExpiredRowSweeper;
@@ -80,9 +81,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Starts the control-plane server. The API is a single-trust-level surface: every issued token is a
@@ -135,14 +134,13 @@ public final class ServerStartCommand implements Runnable {
               + " host.yaml webauthn origins.")
   private List<String> origins;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     BindPolicy.requireBindable(host, allowRemote);
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
@@ -152,7 +150,7 @@ public final class ServerStartCommand implements Runnable {
     Runtime.getRuntime().addShutdownHook(new Thread(shutdown::shutdown, "sail-shutdown"));
     var migrationResult =
         MigrationRunner.applyAll(
-            db, MigrateCommand.REGISTRY, DataMigration.Prompter.NON_INTERACTIVE);
+            db, DataMigrations.all(operator), DataMigration.Prompter.NON_INTERACTIVE);
     if (migrationResult.schemaAfter() > migrationResult.schemaBefore()) {
       System.out.println(
           Ansi.AUTO.string(
@@ -203,7 +201,7 @@ public final class ServerStartCommand implements Runnable {
     var messageStore = new MessageStore(db);
     var projectStore = new ProjectStore(db);
     var boxCredentialStore = new BoxCredentialStore(db);
-    provisionBoxCredential(boxCredentialStore);
+    provisionBoxCredential(boxCredentialStore, operator);
     var operations =
         OperationsFactory.create(
             db,
@@ -211,7 +209,8 @@ public final class ServerStartCommand implements Runnable {
             bus,
             persister,
             SyncScheduler.disabled(),
-            new PtyHostYield());
+            new PtyHostYield(),
+            operator);
     var syncScheduler =
         NodeSync.scheduler(
             HostSync.config(),
@@ -219,7 +218,7 @@ public final class ServerStartCommand implements Runnable {
             System.getenv(),
             () -> {
               var round = operations.sync(new SyncRequest(null));
-              System.out.println(SyncCommand.render(round, false));
+              System.out.println(SyncCommand.render(round, false, operator));
             });
     operations.useSyncScheduler(syncScheduler);
     shutdown.register(syncScheduler);
@@ -270,7 +269,11 @@ public final class ServerStartCommand implements Runnable {
     var tokenAuth = new TokenAuth(tokenStore, roles);
     var passkeyHandler =
         new WebauthnAuthHandler(
-            passkeyService, enrollment, tokenAuth, configured ? webauthn.origins() : null);
+            passkeyService,
+            enrollment,
+            tokenAuth,
+            configured ? webauthn.origins() : null,
+            operator);
     var auth = new SessionAwareAuth(new AuthSessionStore(db), roster, roles, tokenAuth);
 
     var server =
@@ -407,14 +410,14 @@ public final class ServerStartCommand implements Runnable {
    * sail-launched session. Skipped with a loud note when the box has no sync handle — the socket
    * then keeps refusing interactive callers, which is fail-closed, not broken.
    */
-  private static void provisionBoxCredential(BoxCredentialStore store) {
+  private static void provisionBoxCredential(BoxCredentialStore store, OperatorCommand operator) {
     var handle = NodeIdentity.handle();
     if (Strings.isBlank(handle)) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ No sync handle configured — interactive container sessions get no"
                   + " ambient credential ('"
-                  + OperatorCommand.here().sail("host config set sync-handle <fde>")
+                  + operator.sail("host config set sync-handle <fde>")
                   + "' enables it)"));
       return;
     }

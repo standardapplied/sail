@@ -26,8 +26,9 @@ final class ProjectMutations {
   private ProjectMutations() {}
 
   /** The current definition text, catalog-first; throws with guidance if the project is unknown. */
-  static String currentDefinition(String name, Path explicitFile) {
-    return ProjectDefinitions.definition(name, explicitFile).orElseThrow(() -> notFound(name));
+  static String currentDefinition(String name, Path explicitFile, OperatorCommand operator) {
+    return ProjectDefinitions.definition(name, explicitFile)
+        .orElseThrow(() -> notFound(name, operator));
   }
 
   /**
@@ -66,14 +67,14 @@ final class ProjectMutations {
     ProjectDefinitions.persist(name, explicitFile, definition, operator);
   }
 
-  static IllegalStateException notFound(String name) {
+  static IllegalStateException notFound(String name, OperatorCommand operator) {
     return new IllegalStateException(
         "No project '"
             + name
             + "' in the catalog. Create it with '"
-            + OperatorCommand.here().sail("project apply")
+            + operator.sail("project apply")
             + "', or sync it from main with '"
-            + OperatorCommand.here().sail("sync")
+            + operator.sail("sync")
             + "'.");
   }
 }

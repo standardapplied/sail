@@ -20,9 +20,7 @@ import java.util.function.Supplier;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * One command to bring a box fully online and connect it to the org. It converges from whatever
@@ -71,8 +69,6 @@ public final class InitCommand implements Runnable {
           "Your email: this box's git user.email when it has none, and a node's roster email"
               + " (else prompted).")
   private String email;
-
-  @Spec private CommandSpec spec;
 
   private final Supplier<Box> box;
 
@@ -125,7 +121,7 @@ public final class InitCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

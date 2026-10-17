@@ -35,14 +35,13 @@ import java.util.LinkedHashMap;
 import java.util.Objects;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * {@code sail agent watch}: the long-running watcher of one agent run, whichever lane launched it —
@@ -123,21 +122,19 @@ public final class AgentWatchCommand implements Runnable {
   @Option(names = "--port", description = "sail-api port.", defaultValue = "7070")
   private int apiPort;
 
-  @Spec private CommandSpec commandSpec;
-
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentWatchCommand() {
     this(OperationsFactory::open);
   }
 
-  AgentWatchCommand(Supplier<HostOperations> operations) {
+  AgentWatchCommand(Function<OperatorCommand, HostOperations> operations) {
     this.operations = operations;
   }
 
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   /**
@@ -160,7 +157,8 @@ public final class AgentWatchCommand implements Runnable {
    * A run whose agent is gone has its stop published when its unit still says how it ended, and
    * then nothing is left to watch; one whose unit says nothing of it never ran.
    */
-  boolean watchable(ShellExec shell, RunWatch.StopPublisher publisher) throws Exception {
+  boolean watchable(ShellExec shell, RunWatch.StopPublisher publisher, OperatorCommand operator)
+      throws Exception {
     if (!new AgentPresence(shell).gone(name, resolveUnit())) {
       return true;
     }
@@ -170,28 +168,30 @@ public final class AgentWatchCommand implements Runnable {
     }
     throw new IllegalStateException(
         "No agent session running. Launch one with: "
-            + OperatorCommand.here().sail("agent start " + name + " --background --task '...'"));
+            + operator.sail("agent start " + name + " --background --task '...'"));
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
     var guardrails = guardrails();
     var started = parseStartedAt(startedAt);
     var shell = new ShellExecutor(dryRun);
-    requireRunning(shell);
+    requireRunning(shell, operator);
 
-    var notifications = notifications();
+    var notifications = notifications(operator);
     var notifier = buildNotifier(notifications);
 
     var publisher = resolvePublisher();
-    if (!watchable(shell, publisher)) {
+    if (!watchable(shell, publisher, operator)) {
       return;
     }
     announceStart(guardrails, RunWatch.deadline(started, guardrails.maxDuration()));
 
     try (var feed = new StreamFeed(ServerConnectionConfig.resolve().token())) {
-      watch(shell, feed, publisher, narrator(notifier, notifications), DateTimeUtils::now).run();
+      watch(shell, feed, publisher, narrator(notifier, notifications, operator), DateTimeUtils::now)
+          .run();
     }
   }
 
@@ -274,7 +274,8 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private RunWatch.Narrator narrator(WebhookNotifier notifier, Notifications notifications) {
+  private RunWatch.Narrator narrator(
+      WebhookNotifier notifier, Notifications notifications, OperatorCommand operator) {
     return new RunWatch.Narrator() {
       @Override
       public void tripped(
@@ -285,12 +286,12 @@ public final class AgentWatchCommand implements Runnable {
 
       @Override
       public void exited() {
-        handleAgentExited(notifier, notifications);
+        handleAgentExited(notifier, notifications, operator);
       }
 
       @Override
       public void ended() {
-        notifySessionDone(notifier, notifications);
+        notifySessionDone(notifier, notifications, operator);
       }
 
       @Override
@@ -326,16 +327,16 @@ public final class AgentWatchCommand implements Runnable {
     };
   }
 
-  private void requireRunning(ShellExecutor shell) throws Exception {
+  private void requireRunning(ShellExecutor shell, OperatorCommand operator) throws Exception {
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
   }
 
   /** The project's notifications as the catalog holds them when the watch starts. */
-  Notifications notifications() {
-    try (var operations = this.operations.get()) {
-      var config = operations.catalog().definitions().require(name);
+  Notifications notifications(OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
+      var config = operations.catalog().definitions().require(name, operator);
       return config.agent() != null ? config.agent().notifications() : null;
     }
   }
@@ -405,7 +406,8 @@ public final class AgentWatchCommand implements Runnable {
     }
   }
 
-  private void handleAgentExited(WebhookNotifier notifier, Notifications notifications) {
+  private void handleAgentExited(
+      WebhookNotifier notifier, Notifications notifications, OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
@@ -421,8 +423,7 @@ public final class AgentWatchCommand implements Runnable {
         Event.WellKnownTypes.AGENT_SESSION_STOPPED,
         name,
         "Agent exited",
-        "Agent process is no longer running. Run: "
-            + OperatorCommand.here().sail("agent report " + name));
+        "Agent process is no longer running. Run: " + operator.sail("agent report " + name));
   }
 
   private void notifyTriggered(
@@ -438,14 +439,15 @@ public final class AgentWatchCommand implements Runnable {
         triggered.detail() + ". Action: " + triggered.action());
   }
 
-  private void notifySessionDone(WebhookNotifier notifier, Notifications notifications) {
+  private void notifySessionDone(
+      WebhookNotifier notifier, Notifications notifications, OperatorCommand operator) {
     sendNotification(
         notifier,
         notifications,
         Event.WellKnownTypes.AGENT_SESSION_COMPLETED,
         name,
         "Watch complete",
-        "Agent session ended. Run: " + OperatorCommand.here().sail("agent report " + name));
+        "Agent session ended. Run: " + operator.sail("agent report " + name));
   }
 
   private static void sendNotification(

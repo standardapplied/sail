@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -115,7 +116,14 @@ class OneDecisionTest {
     agentRun = reserve("mine", null, "build");
     roomRun = reserve(null, "den", DispatchGate.ROOM_ROLE);
     operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(
+                db,
+                SHELL,
+                null,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useControlPlane(
                 db,
                 tempDir,
@@ -126,7 +134,8 @@ class OneDecisionTest {
                     () -> MAIN,
                     target -> {
                       throw new IOException("main unavailable");
-                    }));
+                    },
+                    OperatorCommand.PLAIN));
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -247,7 +256,7 @@ class OneDecisionTest {
           "forbidden_not_assignee",
           NOT_ADAS_ROOM);
     }
-    var access = new HostAccess(db, TestAuth.roles(db, MAIN));
+    var access = new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN);
     var terminal =
         assertThrows(
             IOException.class, () -> access.admit("den", "acme", access.identity(session, null)));

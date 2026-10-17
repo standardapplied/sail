@@ -16,6 +16,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -126,7 +127,8 @@ class HostSyncCommandTest {
             "devbox",
             target -> {
               throw new IOException("a box becoming main asks no one");
-            });
+            },
+            OperatorCommand.PLAIN);
 
     assertTrue(role.isMain());
     assertTrue(HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync().isMain());

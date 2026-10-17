@@ -27,10 +27,8 @@ import java.util.List;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Joins this box to a main devbox as a sync node in one step: generates the sail-managed sync key
@@ -76,14 +74,13 @@ public final class JoinCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var normalized = normalizeTarget(target);
     nonSailUserWarning(target)
         .ifPresent(warning -> System.err.println(Banner.errorLine(warning, Ansi.AUTO)));
@@ -101,8 +98,9 @@ public final class JoinCommand implements Runnable {
             resolvedName,
             resolvedEmail,
             SshSyncChannel::open,
-            MainHostKey.here());
-    System.out.println(render(plan, json, OperatorCommand.here()));
+            MainHostKey.here(),
+            operator);
+    System.out.println(render(plan, json, operator));
   }
 
   /**
@@ -125,10 +123,11 @@ public final class JoinCommand implements Runnable {
       String name,
       String email,
       SyncOperations.Channels channels,
-      MainHostKey mainHostKey)
+      MainHostKey mainHostKey,
+      OperatorCommand operator)
       throws Exception {
     if (!Files.exists(hostConfig)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);
@@ -140,9 +139,10 @@ public final class JoinCommand implements Runnable {
             HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
             "sync-handle",
             handle);
-    HandleChange.write(hostConfig, db, host, updated, channels);
+    HandleChange.write(hostConfig, db, host, updated, channels, operator);
     var publicKey = identity.ensure("sail-sync:" + handle);
-    var mainHasKey = keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle);
+    var mainHasKey =
+        keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle, operator);
     return new Plan(target, handle, name, email, publicKey, pinned, mainHasKey);
   }
 

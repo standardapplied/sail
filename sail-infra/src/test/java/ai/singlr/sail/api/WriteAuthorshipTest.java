@@ -13,6 +13,7 @@ import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -227,7 +228,13 @@ class WriteAuthorshipTest {
 
   private SailOperations operations(Supplier<SyncConfig> config) {
     return OperationsFactory.create(
-            db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            db,
+            SHELL,
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE,
+            OperatorCommand.PLAIN)
         .useControlPlane(
             db,
             tempDir,
@@ -238,7 +245,8 @@ class WriteAuthorshipTest {
                 config,
                 target -> {
                   throw new IOException("main unavailable");
-                }));
+                },
+                OperatorCommand.PLAIN));
   }
 
   private SailApiServer server(SailOperations operations) throws IOException {

@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,9 +15,7 @@ import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "list",
@@ -65,17 +64,16 @@ public final class ApiSpecListCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
     var config = connection.resolve();
-    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
+    var resolvedProject =
+        CurrentProject.scope(project, allProjects, OperatorCommand.here()).orElse(null);
     var resolvedStatus = statusFilter(status, allStatuses);
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       var params = new StringBuilder("/v1/specs?");

@@ -18,9 +18,7 @@ import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(name = "create", description = "Create a new spec.", mixinStandardHelpOptions = true)
 public final class ApiSpecCreateCommand implements Runnable {
@@ -100,16 +98,15 @@ public final class ApiSpecCreateCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (fromReview != null) {
-      executeFromReview();
+      executeFromReview(operator);
       return;
     }
     if (id == null || title == null) {
@@ -119,7 +116,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     }
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
-    var resolvedProject = CurrentProject.require(project);
+    var resolvedProject = CurrentProject.require(project, operator);
 
     var body = new LinkedHashMap<String, Object>();
     body.put("id", id);
@@ -152,7 +149,7 @@ public final class ApiSpecCreateCommand implements Runnable {
   }
 
   @SuppressWarnings("unchecked")
-  private void executeFromReview() throws Exception {
+  private void executeFromReview(OperatorCommand operator) throws Exception {
     NameValidator.requireValidSpecId(fromReview);
     requireNoDerivedOptions();
     var config = connection.resolve();
@@ -181,8 +178,7 @@ public final class ApiSpecCreateCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint Review and edit it, then promote: "
-                  + OperatorCommand.here()
-                      .sail("spec update " + spec.get("id") + " --status pending")
+                  + operator.sail("spec update " + spec.get("id") + " --status pending")
                   + "|@"));
     }
   }

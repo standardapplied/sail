@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -62,7 +63,7 @@ class GlobalSpecOperationsTest {
     new SchemaManager(db).migrate();
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
-    ops = new GlobalSpecOperations(specStore, reviewStore);
+    ops = new GlobalSpecOperations(specStore, reviewStore, OperatorCommand.PLAIN);
   }
 
   @AfterEach
@@ -251,7 +252,9 @@ class GlobalSpecOperationsTest {
   @Test
   void updateSetsClearsAndRejectsTheWakeModeOnTheRoom() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of())));
 
     var set =
@@ -289,7 +292,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aMemberClaimingAnUnassignedSpecSetsItsWakeInTheSameUpdate() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     var bob = new Actor("bob", Role.MEMBER, Actor.Lane.API);
     Acting.by(bob, () -> withRooms.create(createReq(Map.of())));
 
@@ -416,7 +421,7 @@ class GlobalSpecOperationsTest {
   void boardCountsNoResidualFindingsWithoutAReviewStore() {
     Acting.by(ADMIN, () -> ops.create(createReq(Map.of("status", "done"))));
 
-    var board = new GlobalSpecOperations(specStore, null).board(null);
+    var board = new GlobalSpecOperations(specStore, null, OperatorCommand.PLAIN).board(null);
 
     assertEquals(0, board.doneOpenFindings());
   }
@@ -642,7 +647,7 @@ class GlobalSpecOperationsTest {
       var seen = new ArrayList<Event>();
       var latch = new CountDownLatch(1);
       bus.subscribe(BusTesting.latching(capture(seen), latch));
-      mutation.accept(new GlobalSpecOperations(specStore, reviewStore, bus));
+      mutation.accept(new GlobalSpecOperations(specStore, reviewStore, bus, OperatorCommand.PLAIN));
       BusTesting.awaitDelivery(latch);
       return seen.getFirst();
     }
@@ -669,7 +674,7 @@ class GlobalSpecOperationsTest {
 
   @Test
   void operationsWithoutStoreThrowInternal() {
-    var noStore = new GlobalSpecOperations(null);
+    var noStore = new GlobalSpecOperations(null, OperatorCommand.PLAIN);
     var ex = assertThrows(ApiException.class, () -> noStore.list(SpecStore.SpecFilter.all()));
     assertEquals(ErrorCode.INTERNAL, ex.failure().errorCode());
   }
@@ -783,7 +788,8 @@ class GlobalSpecOperationsTest {
   @Test
   void aNodeMarkingItsFollowUpDoneLeavesTheSourceFindingsToMain() {
     var node =
-        new GlobalSpecOperations(specStore, reviewStore, null, null, () -> null, () -> false);
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> null, () -> false, OperatorCommand.PLAIN);
     Acting.by(ADMIN, () -> node.create(createReq(Map.of("status", "done"))));
     var reviewId = seedPassedReviewWithOpenFinding("auth");
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
@@ -821,7 +827,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aMoveToDoneWhoseLastRowFailsMovesNothing() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("status", "in_progress"))));
     var reviewId = seedPassedReviewWithOpenFinding("auth");
     db.execute(
@@ -853,7 +861,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aDeleteWhoseLastRowFailsDeletesNothing() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(ADMIN, () -> withRooms.create(createReq(Map.of("status", "done"))));
     var reviewId = seedPassedReviewWithOpenFinding("auth");
     var findingId = reviewStore.findingsForReview(reviewId).getFirst().id();
@@ -1018,7 +1028,7 @@ class GlobalSpecOperationsTest {
 
   @Test
   void historyAndRestoreWithoutStoreThrowInternal() {
-    var noStore = new GlobalSpecOperations(null);
+    var noStore = new GlobalSpecOperations(null, OperatorCommand.PLAIN);
     assertEquals(
         ErrorCode.INTERNAL,
         assertThrows(ApiException.class, () -> noStore.history("x")).failure().errorCode());
@@ -1034,7 +1044,9 @@ class GlobalSpecOperationsTest {
   @Test
   void createMintsTheSpecsIdentityRoomWhenARoomAggregateIsWired() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
 
     Acting.by(
         UDAY_ADMIN,
@@ -1074,7 +1086,9 @@ class GlobalSpecOperationsTest {
   @Test
   void deleteTombstonesTheIdentityRoomAndAReusedIdGetsAFreshRoom() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(
         ADMIN,
         () ->
@@ -1101,7 +1115,9 @@ class GlobalSpecOperationsTest {
   @Test
   void anEditPreservesTheEngagementMirrorAndTheRoomLink() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(
         ADMIN,
         () ->
@@ -1129,7 +1145,9 @@ class GlobalSpecOperationsTest {
   @Test
   void createIntoAnExistingRoomAttachesInsteadOfMinting() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1173,7 +1191,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aSpecCannotBeBornInARoomThatDoesNotExistOrBelongsElsewhere() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1213,7 +1233,9 @@ class GlobalSpecOperationsTest {
 
   @Test
   void aHomeRoomNeedsARoomAggregateOnThisBox() {
-    var noRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> null);
+    var noRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> null, OperatorCommand.PLAIN);
     var refused =
         assertThrows(
             ApiException.class,
@@ -1227,7 +1249,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aSpecsIdIsReservedForTheRoomItMints() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
 
     var missing =
         assertThrows(
@@ -1272,7 +1296,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aSpecBornOverItsOwnersRoomOrByAnAdminAdoptsThatRoomAndMintsNone() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1294,7 +1320,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aSpecBornInAnotherRoomNeverShadowsTheRoomOnItsId() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     for (var id : List.of("auth", "lounge")) {
       Acting.as(
           "uday",
@@ -1345,7 +1373,8 @@ class GlobalSpecOperationsTest {
           }
           return rooms;
         };
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, raced);
+    var withRooms =
+        new GlobalSpecOperations(specStore, reviewStore, null, null, raced, OperatorCommand.PLAIN);
 
     assertThrows(
         RuntimeException.class,
@@ -1359,7 +1388,9 @@ class GlobalSpecOperationsTest {
   @Test
   void deletingASpecBornElsewhereLeavesItsHomeRoomAndANamesakeRoomAlone() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "ada",
         () ->
@@ -1397,7 +1428,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aWakeEditOnASpecBornElsewhereLandsOnItsHomeRoom() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1431,7 +1464,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aWakeThroughASpecBornInSomeoneElsesRoomIsRefusedWithTheRoomOwnersText() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1481,7 +1516,9 @@ class GlobalSpecOperationsTest {
   @Test
   void aMemberCannotBindTheirSpecIntoSomebodyElsesRoom() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "ada",
         () ->
@@ -1547,7 +1584,9 @@ class GlobalSpecOperationsTest {
   @Test
   void anIdentityIdThatCollidesWithAnotherProjectsRoomIsRefused() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.as(
         "uday",
         () ->
@@ -1579,7 +1618,9 @@ class GlobalSpecOperationsTest {
   @Test
   void anExplicitWakeEditWritesTheRoomRow() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(
         ADMIN,
         () ->
@@ -1611,7 +1652,9 @@ class GlobalSpecOperationsTest {
   @Test
   void anEditWithoutAWakeChangeLeavesTheRoomRowAlone() {
     var rooms = new RoomStore(db);
-    var withRooms = new GlobalSpecOperations(specStore, reviewStore, null, null, () -> rooms);
+    var withRooms =
+        new GlobalSpecOperations(
+            specStore, reviewStore, null, null, () -> rooms, OperatorCommand.PLAIN);
     Acting.by(
         ADMIN,
         () ->

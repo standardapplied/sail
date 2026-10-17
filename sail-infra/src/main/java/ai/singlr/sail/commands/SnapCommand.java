@@ -10,15 +10,14 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "create",
@@ -41,21 +40,20 @@ public final class SnapCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name);
+    ContainerStateGuard.requireCreated(state, name, operator);
 
     if (label == null) {
       label = SnapshotManager.defaultLabel();

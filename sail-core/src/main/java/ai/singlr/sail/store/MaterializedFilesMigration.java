@@ -42,10 +42,15 @@ public final class MaterializedFilesMigration implements DataMigration {
   public static final String NAME = "materialized-files-v1";
 
   private final Path projectsDir;
+  private final OperatorCommand operator;
 
-  /** Seeding from the copies under {@code projectsDir}, each at {@code <project>/files/<path>}. */
-  public MaterializedFilesMigration(Path projectsDir) {
+  /**
+   * Seeding from the copies under {@code projectsDir}, each at {@code <project>/files/<path>}, with
+   * the remedy for an undecided copy worded for {@code operator}.
+   */
+  public MaterializedFilesMigration(Path projectsDir, OperatorCommand operator) {
     this.projectsDir = Objects.requireNonNull(projectsDir, "projectsDir");
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   @Override
@@ -80,7 +85,7 @@ public final class MaterializedFilesMigration implements DataMigration {
             || files.recordedMaterialization(id)) {
           continue;
         }
-        switch (seed(db, files, id, project, path, copy, notes)) {
+        switch (seed(db, files, id, project, path, copy, notes, operator)) {
           case OURS -> recorded++;
           case UNDECIDED -> undecided++;
           default -> skipped++;
@@ -102,7 +107,8 @@ public final class MaterializedFilesMigration implements DataMigration {
       String project,
       String path,
       Path copy,
-      List<String> notes) {
+      List<String> notes,
+      OperatorCommand operator) {
     String hash;
     int mode;
     try (var input = Files.newInputStream(copy)) {
@@ -135,7 +141,7 @@ public final class MaterializedFilesMigration implements DataMigration {
                 + " undecided: its copy on disk matches no version this box still holds, so it may"
                 + " be your unpublished edit or a version this box wrote before history was"
                 + " compacted. It is kept and not published; "
-                + MaterializedFiles.undecidedRemedy(OperatorCommand.here()));
+                + MaterializedFiles.undecidedRemedy(operator));
       }
     }
     return copyIs;

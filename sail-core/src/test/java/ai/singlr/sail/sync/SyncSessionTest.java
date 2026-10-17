@@ -31,7 +31,11 @@ class SyncSessionTest {
   private static SyncSession open(
       String serverLines, ai.singlr.sail.sync.ByteStreams.Output out, List<String> notices) {
     return SyncSession.open(
-        new ai.singlr.sail.sync.ByteStreams.Input(serverLines), out, HELLO, notices::add);
+        new ai.singlr.sail.sync.ByteStreams.Input(serverLines),
+        out,
+        HELLO,
+        notices::add,
+        ignored -> {});
   }
 
   @Test
@@ -153,7 +157,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Input(older),
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
-            notices::add)) {
+            notices::add,
+            ignored -> {})) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertEquals(1, notices.size());
@@ -171,7 +176,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Input(dev),
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
-            notices::add)) {
+            notices::add,
+            ignored -> {})) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertTrue(notices.isEmpty());
@@ -192,7 +198,11 @@ class SyncSessionTest {
         UncheckedIOException.class,
         () ->
             SyncSession.open(
-                new ai.singlr.sail.sync.ByteStreams.Input(""), brokenWriter(), HELLO, n -> {}));
+                new ai.singlr.sail.sync.ByteStreams.Input(""),
+                brokenWriter(),
+                HELLO,
+                n -> {},
+                ignored -> {}));
   }
 
   @Test

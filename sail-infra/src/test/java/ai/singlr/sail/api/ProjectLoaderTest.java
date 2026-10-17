@@ -27,7 +27,9 @@ class ProjectLoaderTest {
   void aProjectIsItsDefinitionAndItsContainerState() {
     var loader =
         new ProjectLoader(
-            listing("[{\"name\":\"acme\",\"status\":\"Running\"}]"), p -> Optional.of(ACME));
+            listing("[{\"name\":\"acme\",\"status\":\"Running\"}]"),
+            p -> Optional.of(ACME),
+            OperatorCommand.PLAIN);
 
     var loaded = loader.load("acme");
 
@@ -37,7 +39,7 @@ class ProjectLoaderTest {
 
   @Test
   void aProjectWithNoRowIsNotFoundWithTheReadersOwnError() {
-    var loader = new ProjectLoader(listing("[]"), p -> Optional.empty());
+    var loader = new ProjectLoader(listing("[]"), p -> Optional.empty(), OperatorCommand.PLAIN);
 
     var refused = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -53,7 +55,8 @@ class ProjectLoaderTest {
             listing("[]"),
             p -> {
               throw unreadable;
-            });
+            },
+            OperatorCommand.PLAIN);
 
     var failed = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -67,7 +70,8 @@ class ProjectLoaderTest {
     var loader =
         new ProjectLoader(
             new ScriptedShellExecutor().onThrow("incus list", new IOException("incus unreachable")),
-            p -> Optional.of(ACME));
+            p -> Optional.of(ACME),
+            OperatorCommand.PLAIN);
 
     var failed = assertThrows(ApiException.class, () -> loader.load("acme"));
 
@@ -79,7 +83,9 @@ class ProjectLoaderTest {
   void aStoppedProjectIsRefusedWithTheCommandThatStartsIt() {
     var loader =
         new ProjectLoader(
-            listing("[{\"name\":\"gamma\",\"status\":\"Stopped\"}]"), p -> Optional.of(ACME));
+            listing("[{\"name\":\"gamma\",\"status\":\"Stopped\"}]"),
+            p -> Optional.of(ACME),
+            OperatorCommand.PLAIN);
 
     var refused = assertThrows(ApiException.class, () -> loader.loadRunning("gamma"));
 
@@ -92,7 +98,9 @@ class ProjectLoaderTest {
 
   @Test
   void aLoaderNeedsAReader() {
-    assertThrows(NullPointerException.class, () -> new ProjectLoader(listing("[]"), null));
+    assertThrows(
+        NullPointerException.class,
+        () -> new ProjectLoader(listing("[]"), null, OperatorCommand.PLAIN));
   }
 
   private static ShellExec listing(String json) {

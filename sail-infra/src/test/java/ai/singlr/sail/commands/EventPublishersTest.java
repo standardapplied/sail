@@ -31,6 +31,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.HostToken;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -221,7 +222,8 @@ class EventPublishersTest {
                           Actor.sync(ME, Role.MEMBER),
                           () -> SyncServerCommand.roster(main.db, Actor.main()),
                           SyncTransitionSink.NONE,
-                          SyncWire.UPGRADE_FLOOR)));
+                          SyncWire.UPGRADE_FLOOR)),
+              OperatorCommand.PLAIN);
 
       Acting.by(new Actor(ME, Role.MEMBER, Actor.Lane.CLI), () -> sync.sync(new SyncRequest(null)));
 
@@ -323,7 +325,13 @@ class EventPublishersTest {
     serverOperations =
         TestControlPlane.on(
             OperationsFactory.create(
-                box.db, shell(), bus, null, SyncScheduler.disabled(), SessionYield.NONE),
+                box.db,
+                shell(),
+                bus,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN),
             box.db,
             tempDir,
             config);
@@ -353,7 +361,8 @@ class EventPublishersTest {
             (project, config) -> "snap-1",
             command -> 0,
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE),
+            SessionYield.NONE,
+            OperatorCommand.PLAIN),
         box.db,
         tempDir,
         NODE);

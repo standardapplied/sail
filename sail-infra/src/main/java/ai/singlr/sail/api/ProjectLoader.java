@@ -23,10 +23,12 @@ final class ProjectLoader {
 
   private final ShellExec shell;
   private final ProjectReader definitions;
+  private final OperatorCommand operator;
 
-  ProjectLoader(ShellExec shell, ProjectReader definitions) {
+  ProjectLoader(ShellExec shell, ProjectReader definitions, OperatorCommand operator) {
     this.shell = shell;
     this.definitions = Objects.requireNonNull(definitions, "definitions");
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   LoadedProject load(String project) {
@@ -41,7 +43,7 @@ final class ProjectLoader {
 
   private SailYaml definition(String project) {
     try {
-      return definitions.require(project);
+      return definitions.require(project, operator);
     } catch (ProjectReader.Unreadable e) {
       throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, e.getMessage(), e);
     }
@@ -53,7 +55,7 @@ final class ProjectLoader {
       case ContainerState.Running ignored -> {
         return loaded;
       }
-      case ContainerState.Stopped ignored -> throw stopped(project, OperatorCommand.here());
+      case ContainerState.Stopped ignored -> throw stopped(project, operator);
       case ContainerState.NotCreated ignored ->
           throw new ApiException(
               ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");

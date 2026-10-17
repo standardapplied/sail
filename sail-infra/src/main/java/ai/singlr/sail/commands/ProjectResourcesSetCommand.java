@@ -25,10 +25,8 @@ import java.util.Objects;
 import java.util.function.BooleanSupplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "set",
@@ -60,8 +58,6 @@ public final class ProjectResourcesSetCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   private final ShellExec shellOverride;
   private final BooleanSupplier rootChecker;
   private final PrintStream out;
@@ -81,10 +77,11 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, err, this::execute);
+    CliCommand.run(err, this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     requireRequestedChange();
 
@@ -94,10 +91,11 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var operator = ProjectMutations.catalogOperator(name, explicit, dryRun);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
     var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
     var config =
-        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
+        SailYaml.fromMap(
+            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
     if (config.resources() == null) {
       throw new IllegalStateException(
           "sail.yaml must have a resources section with cpu, memory, and disk.");
@@ -112,7 +110,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
     var queryManager = new ContainerManager(queryShell());
     var info = queryManager.queryInfo(name);
-    requireExistingProject(info.state());
+    requireExistingProject(info.state(), operator);
 
     var cpuOrMemoryRequested = cpu != null || memory != null;
     var liveLimitsChanged = cpuOrMemoryRequested && limitsDiffer(info.limits(), desiredResources);
@@ -143,7 +141,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
           dryRun,
           out,
           "record resources for '" + name + "' in the catalog",
-          operator);
+          actor);
     }
 
     var applyManager = new ContainerManager(applyShell());
@@ -175,7 +173,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
     }
   }
 
-  private void requireExistingProject(ContainerState state) {
+  private void requireExistingProject(ContainerState state, OperatorCommand operator) {
     switch (state) {
       case ContainerState.Running ignored -> {}
       case ContainerState.Stopped ignored -> {}
@@ -184,7 +182,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
               "Project '"
                   + name
                   + "' does not exist. Run '"
-                  + OperatorCommand.here().sail("project apply " + name)
+                  + operator.sail("project apply " + name)
                   + "' first.");
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());

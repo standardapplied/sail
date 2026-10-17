@@ -8,12 +8,14 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -21,7 +23,9 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -31,6 +35,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
+import ai.singlr.sail.webauthn.RegisteredCredential;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -66,6 +71,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class FdeCommandTest {
 
@@ -1241,7 +1247,7 @@ class FdeCommandTest {
             (db, json) -> {},
             (db, json) -> MigrateCommand.revokeOtherFdesPairings(db, this::box, json));
     assertFalse(
-        MigrateCommand.REGISTRY.stream()
+        DataMigrations.all(OperatorCommand.PLAIN).stream()
             .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
         "every lane runs the registry; only the box's own convergence revokes");
 
@@ -1250,13 +1256,19 @@ class FdeCommandTest {
         true,
         true,
         new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-        convergence);
+        convergence,
+        OperatorCommand.PLAIN);
 
     assertEquals("client", handleOf(tokens[0]));
     assertEquals(1, loginsOf("client").size());
 
     MigrateCommand.runMigrations(
-        tempDir.resolve("sail.db"), true, true, new MigrateCommand.Scope.Box(), convergence);
+        tempDir.resolve("sail.db"),
+        true,
+        true,
+        new MigrateCommand.Scope.Box(),
+        convergence,
+        OperatorCommand.PLAIN);
 
     assertNull(handleOf(tokens[0]));
     assertEquals(List.of(), loginsOf("client"));
@@ -2062,9 +2074,165 @@ class FdeCommandTest {
   }
 
   @Test
+  void everyCommandAnFdeVerbNamesIsWordedForTheOperator() {
+    var sudo = new OperatorCommand(true);
+    var ada = new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", "2026");
+    String unknownProject;
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      unknownProject =
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> FdeCommand.scopeEdit(db, "ada", "ghost", true, false, false, sudo))
+              .getMessage();
+    }
+
+    assertEquals(
+        List.of(
+            "FDE 'ada' already exists. Change it with 'sudo sail fde update ada'.",
+            "  ✓ FDE added: ada (member, scoped: grant projects with 'sudo sail fde grant')",
+            "Unknown project 'ghost'. List the catalog with 'sudo sail project list'.",
+            "  Containers of acme, beta trust this key only after their next 'sudo sail project"
+                + " apply'.",
+            "FDE 'ada' is disabled on this box, so a code for it would open nothing. Remove it with"
+                + " 'sudo sail fde rm ada' and pair again.",
+            "  No FDEs. Add one with 'sudo sail fde add <handle>'.",
+            "Unknown FDE 'ada'. Add it with 'sudo sail fde add ada'.",
+            "  No SSH keys. Register one with 'sudo sail fde key add'.",
+            "'ada' is neither a known FDE handle nor a SHA256: fingerprint. See 'sudo sail fde key"
+                + " list'.",
+            "    sudo sail fde key rm SHA256:abc",
+            "'ada' has no passkeys. Enroll one with 'sudo sail fde enroll ada'.",
+            "  No passkeys for 'ada'. Enroll one with 'sudo sail fde enroll ada'.",
+            "  'ada' has no passkeys left. Re-enroll with 'sudo sail fde enroll ada'."),
+        List.of(
+            FdeCommand.alreadyExists("ada", sudo),
+            Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
+            unknownProject,
+            FdeCommand.trustedAfterApply("acme, beta", sudo),
+            FdeCommand.disabledForPairing("ada", sudo),
+            FdeCommand.noFdes(sudo),
+            FdeCommand.unknownFde("ada", sudo),
+            FdeCommand.noKeys(sudo),
+            FdeCommand.neitherHandleNorFingerprint("ada", sudo),
+            FdeCommand.keyRemoval("SHA256:abc", sudo),
+            FdeCommand.Passkey.noMatchMessage("ada", "zz", List.of(), sudo),
+            FdeCommand.noPasskeys("ada", sudo),
+            Ansi.OFF.string(FdeCommand.noPasskeysLeft("ada", sudo))));
+  }
+
+  @Test
+  void updateChangesOnlyWhatIsPassedAndRefusesAnEmptyOrUnknownEdit() {
+    assertEquals(0, fde("add", "ada", "--name", "Ada", "--email", "ada@example.com"));
+
+    assertEquals(0, fde("update", "ada", "--role", "admin"));
+
+    assertEquals(List.of("  ✓ Updated ada (admin)"), printed());
+    var updated = inDb(db -> new FdeStore(db).byHandle("ada").orElseThrow());
+    assertEquals("admin", updated.role());
+    assertEquals("Ada", updated.displayName());
+    assertEquals("ada@example.com", updated.email());
+    assertEquals(1, fde("update", "ada"));
+    assertEquals("Nothing to update. Pass --name, --email, and/or --role.", refusal);
+    assertEquals(1, fde("update", "ghost", "--role", "admin"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+  }
+
+  @Test
+  void keyVerbsRegisterListAndRemoveAnFdesKeysOnThisBox() {
+    var desk = SshPublicKey.parse(TestSshKeys.ed25519("desk", "me@desk"));
+    assertEquals(0, fde("add", "ada"));
+
+    assertEquals(0, fde("key", "list"));
+    assertEquals(List.of("  No SSH keys. Register one with 'sail fde key add'."), printed());
+
+    assertEquals(0, fde("key", "add", "ada", LAPTOP.line()));
+    assertEquals("  ✓ Registered key for ada: " + LAPTOP.fingerprint(), printed().getFirst());
+    assertEquals(1, fde("key", "add", "ada", LAPTOP.line()));
+    assertEquals("That key (" + LAPTOP.fingerprint() + ") is already registered.", refusal);
+    assertEquals(1, fde("key", "add", "ghost", desk.line()));
+    assertEquals("Unknown FDE 'ghost'. Add it with 'sail fde add ghost'.", refusal);
+
+    assertEquals(0, fde("key", "list", "ada"));
+    assertTrue(printed().stream().anyMatch(line -> line.contains(LAPTOP.fingerprint())));
+    assertEquals(1, fde("key", "list", "ghost"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+
+    assertEquals(0, fde("key", "add", "ada", desk.line()));
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals(
+        List.of(
+            "  'ada' has 2 keys; specify one:",
+            "    sail fde key rm " + LAPTOP.fingerprint(),
+            "    sail fde key rm " + desk.fingerprint()),
+        printed());
+    assertEquals(0, fde("key", "rm", desk.fingerprint()));
+    assertEquals("  ✓ Removed key " + desk.fingerprint(), printed().getFirst());
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals("  ✓ Removed key " + LAPTOP.fingerprint(), printed().getFirst());
+    assertEquals(List.of(), inDb(db -> new FdeSshKeyStore(db).list()));
+
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals(List.of("  ⚠ No SSH keys registered for 'ada'."), printed());
+    assertEquals(0, fde("key", "rm", "SHA256:nope"));
+    assertEquals(List.of("  ⚠ No key with fingerprint SHA256:nope"), printed());
+    assertEquals(1, fde("key", "rm", "ghost"));
+    assertEquals(
+        "'ghost' is neither a known FDE handle nor a SHA256: fingerprint. See 'sail fde key"
+            + " list'.",
+        refusal);
+  }
+
+  @Test
+  void passkeyVerbsListAndRevokeAnFdesPasskeysAndOptionallyItsSessions() {
+    assertEquals(0, fde("add", "ada"));
+    var fdeId = inDb(db -> new FdeStore(db).byHandle("ada").orElseThrow().id());
+    var id = "alpha".getBytes(StandardCharsets.UTF_8);
+
+    assertEquals(0, fde("passkey", "list", "ada"));
+    assertEquals(
+        List.of("  No passkeys for 'ada'. Enroll one with 'sail fde enroll ada'."), printed());
+    assertEquals(1, fde("passkey", "list", "ghost"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+
+    inDb(
+        db -> {
+          new WebauthnCredentialStore(db)
+              .save(
+                  new RegisteredCredential(id, new byte[] {1}, -7, 0, null, false, false),
+                  fdeId,
+                  "macbook");
+          return new AuthSessionStore(db).create(fdeId, Duration.ofHours(1));
+        });
+    assertEquals(0, fde("passkey", "list", "ada"));
+    assertTrue(printed().stream().anyMatch(line -> line.contains("macbook")), printed().toString());
+
+    assertEquals(1, fde("passkey", "rm", "ada", "--credential", "zz"));
+    assertEquals(
+        FdeCommand.Passkey.noMatchMessage(
+            "ada",
+            "zz",
+            inDb(db -> new WebauthnCredentialStore(db).listForFde(fdeId)),
+            OperatorCommand.PLAIN),
+        refusal);
+
+    assertEquals(
+        0, fde("passkey", "rm", "ada", "--credential", Passkeys.encodeId(id), "--revoke-sessions"));
+
+    assertEquals(
+        List.of(
+            "  ✓ Revoked passkey 'macbook' (" + Passkeys.shortId(id) + ") of ada",
+            "  ✓ Revoked 1 active web session(s) of ada",
+            "  'ada' has no passkeys left. Re-enroll with 'sail fde enroll ada'."),
+        printed());
+    assertEquals(List.of(), inDb(db -> new WebauthnCredentialStore(db).listForFde(fdeId)));
+  }
+
+  @Test
   void passkeyNoMatchMessageListsRegisteredCredentials() {
     var credentials = List.of(credential("alpha", "macbook"), credential("bravo", null));
-    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", credentials);
+    var message =
+        FdeCommand.Passkey.noMatchMessage("uday", "zz", credentials, OperatorCommand.PLAIN);
     assertTrue(message.contains("No passkey of 'uday' matches 'zz'"));
     assertTrue(message.contains(Passkeys.encodeId("alpha".getBytes(StandardCharsets.UTF_8))));
     assertTrue(message.contains("macbook"));
@@ -2073,7 +2241,7 @@ class FdeCommandTest {
 
   @Test
   void passkeyNoMatchMessagePointsAtEnrollWhenNoneRegistered() {
-    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", List.of());
+    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", List.of(), OperatorCommand.PLAIN);
     assertTrue(message.contains("'uday' has no passkeys"));
     assertTrue(message.contains("sail fde enroll uday"));
   }

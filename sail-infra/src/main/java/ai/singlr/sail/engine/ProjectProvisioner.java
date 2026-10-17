@@ -57,26 +57,33 @@ public final class ProjectProvisioner {
   private final ProvisionTracker<ProjectPhase> tracker;
   private final ProvisionListener listener;
   private final ProjectSkills skills;
+  private final OperatorCommand operator;
   private ProjectPhase currentPhase;
 
   public ProjectProvisioner(
-      ShellExec shell, ProvisionTracker<ProjectPhase> tracker, ProvisionListener listener) {
-    this(shell, tracker, listener, ProjectSkills.none());
+      ShellExec shell,
+      ProvisionTracker<ProjectPhase> tracker,
+      ProvisionListener listener,
+      OperatorCommand operator) {
+    this(shell, tracker, listener, ProjectSkills.none(), operator);
   }
 
   /**
    * @param skills where the project's skills are read from, installed for every harness the project
    *     installs; {@link ProjectSkills#none()} installs sail's own alone
+   * @param operator how the person reading a warning's retry command types sail
    */
   public ProjectProvisioner(
       ShellExec shell,
       ProvisionTracker<ProjectPhase> tracker,
       ProvisionListener listener,
-      ProjectSkills skills) {
+      ProjectSkills skills,
+      OperatorCommand operator) {
     this.shell = shell;
     this.tracker = tracker;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.skills = Objects.requireNonNull(skills, "skills");
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /**
@@ -210,7 +217,7 @@ public final class ProjectProvisioner {
               + ": "
               + e.getMessage()
               + ". Run '"
-              + OperatorCommand.here().sail("project apply " + config.name())
+              + operator.sail("project apply " + config.name())
               + "' to retry.");
     }
   }

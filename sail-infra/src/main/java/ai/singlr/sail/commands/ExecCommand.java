@@ -10,14 +10,13 @@ import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "exec",
@@ -39,20 +38,19 @@ public final class ExecCommand implements Runnable {
       description = "Output in JSON format (captures output, not interactive).")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     var fullCmd = ContainerExec.asDevUser(name, command);
 

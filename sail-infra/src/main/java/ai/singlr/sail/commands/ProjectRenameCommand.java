@@ -18,10 +18,8 @@ import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Renames a project on this box. Re-keys the catalog, specs, shared files, on-disk state, the Incus
@@ -49,14 +47,13 @@ public final class ProjectRenameCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     NameValidator.requireValidProjectName(newName);
     if (name.equals(newName)) {
@@ -70,14 +67,14 @@ public final class ProjectRenameCommand implements Runnable {
           "Root privileges required. Run with: sudo sail project rename " + name + " " + newName);
     }
 
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       operations.schema().initialize();
       if (operations.catalog().project(name).isEmpty()) {
         throw new IllegalStateException(
             "No project '"
                 + name
                 + "' in the catalog. Run '"
-                + OperatorCommand.here().sail("project list")
+                + operator.sail("project list")
                 + "' to see projects.");
       }
       if (operations.catalog().project(newName).isPresent()) {
@@ -96,7 +93,7 @@ public final class ProjectRenameCommand implements Runnable {
       var renamer =
           new ProjectRenamer(operations, new ShellExecutor(false), SailPaths.projectsDir());
       var result = renamer.rename(name, newName);
-      emit(result);
+      emit(result, operator);
     }
   }
 
@@ -120,7 +117,7 @@ public final class ProjectRenameCommand implements Runnable {
     System.out.println("[dry-run]   local only: not propagated to other boxes via sail sync");
   }
 
-  private void emit(ProjectRenamer.Result result) {
+  private void emit(ProjectRenamer.Result result, OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("action", "rename");
@@ -149,7 +146,7 @@ public final class ProjectRenameCommand implements Runnable {
               "  @|yellow ⚠|@ "
                   + warning
                   + " — run '"
-                  + OperatorCommand.here().sail("project apply " + result.to())
+                  + operator.sail("project apply " + result.to())
                   + "'"));
     }
     System.out.println();

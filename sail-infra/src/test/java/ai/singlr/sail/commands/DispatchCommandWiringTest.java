@@ -23,6 +23,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -135,7 +136,8 @@ class DispatchCommandWiringTest {
               (project, config) -> "",
               command -> 0,
               DispatchOperations.Listener.NONE,
-              SessionYield.NONE);
+              SessionYield.NONE,
+              OperatorCommand.PLAIN);
         });
   }
 
@@ -167,7 +169,8 @@ class DispatchCommandWiringTest {
             () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
             target -> {
               throw new IOException("main unavailable");
-            }));
+            },
+            OperatorCommand.PLAIN));
     assertInstanceOf(
         DispatchOperations.Dispatched.class,
         DispatchCommand.dispatchAsOperator(operations, "acme", request(), HANDLE));
@@ -216,7 +219,8 @@ class DispatchCommandWiringTest {
             () -> new SyncConfig("node", "sail@main", HANDLE, "box"),
             target -> {
               throw new IOException("main unavailable");
-            }));
+            },
+            OperatorCommand.PLAIN));
 
     assertEquals(
         List.of("e2e"),
@@ -276,7 +280,8 @@ class DispatchCommandWiringTest {
             new ProjectStore(db),
             SyncScheduler.disabled(),
             new FdeStore(db),
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
     var served = server.runs("acme", null);
     assertTrue(
         served.isSuccess(), "/v1/runs answers from the rows a CLI-lane dispatch just recorded");

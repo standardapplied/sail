@@ -25,9 +25,7 @@ import java.util.List;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "init",
@@ -43,14 +41,13 @@ public final class ProjectInitCommand implements Runnable {
       description = "Output file path (default: ~/.sail/projects/<name>/sail.yaml).")
   private String output;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var ansi = Ansi.AUTO;
     var out = System.out;
 
@@ -87,7 +84,7 @@ public final class ProjectInitCommand implements Runnable {
     out.println(
         ansi.string(
             "    @|faint Next:|@ review the file, then run @|bold "
-                + nextApplyCommand(config.name(), outputPath)
+                + nextApplyCommand(config.name(), outputPath, operator)
                 + "|@"));
   }
 
@@ -146,14 +143,14 @@ public final class ProjectInitCommand implements Runnable {
     return SailPaths.projectDir(name).resolve(SailPaths.PROJECT_DESCRIPTOR);
   }
 
-  static String nextApplyCommand(String name, Path outputPath) {
+  static String nextApplyCommand(String name, Path outputPath, OperatorCommand operator) {
     if (outputPath
         .toAbsolutePath()
         .normalize()
         .equals(defaultOutputPath(name).toAbsolutePath().normalize())) {
-      return OperatorCommand.here().sail("project apply " + name);
+      return operator.sail("project apply " + name);
     }
-    return OperatorCommand.here().sail("project apply " + name + " -f " + outputPath);
+    return operator.sail("project apply " + name + " -f " + outputPath);
   }
 
   private SailYaml collectInputs(PrintStream out, Ansi ansi) {

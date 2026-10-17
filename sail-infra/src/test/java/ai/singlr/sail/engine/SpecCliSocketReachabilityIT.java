@@ -92,7 +92,8 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
                   null,
                   ai.singlr.sail.api.SyncScheduler.disabled(),
                   fdeStore,
-                  SessionYield.NONE)
+                  SessionYield.NONE,
+                  OperatorCommand.PLAIN)
               .useMessages(new MessageStore(db))
               .useBoxCredentials(boxStore)
               .useRooms(new RoomStore(db));

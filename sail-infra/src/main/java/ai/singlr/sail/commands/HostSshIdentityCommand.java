@@ -15,9 +15,7 @@ import java.nio.file.Files;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Provisions a host for SSH-key FDE login: the locked-down {@code sail} user, the shared {@code
@@ -35,13 +33,11 @@ public final class HostSshIdentityCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print the plan instead of executing it.")
   private boolean dryRun;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
     CliCommand.run(
-        spec,
         () -> {
+          var operator = OperatorCommand.here();
           var plan =
               SshIdentityProvisioner.plan(
                   SailPaths.sailDir(), SshIdentityProvisioner.DEFAULT_DATA_DIR);
@@ -55,9 +51,9 @@ public final class HostSshIdentityCommand implements Runnable {
           requireRoot();
           System.out.println();
           execute(plan);
-          syncKeys();
+          syncKeys(operator);
           System.out.println();
-          System.out.println(Ansi.AUTO.string(enabledLine(OperatorCommand.here())));
+          System.out.println(Ansi.AUTO.string(enabledLine(operator)));
         });
   }
 
@@ -111,8 +107,8 @@ public final class HostSshIdentityCommand implements Runnable {
    * required up front, and the plan just created the sail user's {@code .ssh}), so they fail loud
    * instead of letting the operator believe SSH login works.
    */
-  private static void syncKeys() throws Exception {
-    try (var operations = OperationsFactory.open()) {
+  private static void syncKeys(OperatorCommand operator) throws Exception {
+    try (var operations = OperationsFactory.open(operator)) {
       switch (new AuthorizedKeysSync().sync(operations.identity()::sshKeys)) {
         case AuthorizedKeysSync.Synced synced ->
             System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));

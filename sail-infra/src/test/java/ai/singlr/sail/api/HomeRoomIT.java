@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AbstractIncusIT;
 import ai.singlr.sail.engine.ContainerFilePush;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -104,7 +105,8 @@ class HomeRoomIT extends AbstractIncusIT {
                   null,
                   new SpecStore(db),
                   new ReviewStore(db),
-                  new RunStore(db))
+                  new RunStore(db),
+                  OperatorCommand.PLAIN)
               .useMessages(new MessageStore(db))
               .useRooms(rooms);
 

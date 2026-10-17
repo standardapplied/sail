@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SshdKeepalive;
@@ -80,7 +81,7 @@ class MigrateCommandTest {
   @Test
   void applyMigrationsBringsTheSchemaCurrent() {
     MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
+        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
 
     assertTrue(
         new SchemaManager(db).currentVersion() > 0, "schema should have migrated from empty");
@@ -89,7 +90,7 @@ class MigrateCommandTest {
   @Test
   void migratedSchemaExposesTheCurrentSpecColumns() {
     MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
+        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
 
     assertDoesNotThrow(() -> new SpecStore(db).findById("none"));
   }
@@ -97,7 +98,7 @@ class MigrateCommandTest {
   @Test
   void migrateRegistersTheV1DataFloorOnce() {
     MigrateCommand.applyMigrations(
-        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true);
+        db, "test.db", DataMigration.Prompter.NON_INTERACTIVE, false, true, OperatorCommand.PLAIN);
 
     assertEquals(
         1L,
@@ -164,7 +165,12 @@ class MigrateCommandTest {
             IllegalStateException.class,
             () ->
                 MigrateCommand.runMigrations(
-                    fresh, true, true, new MigrateCommand.Scope.Refused("staged"), record(steps)));
+                    fresh,
+                    true,
+                    true,
+                    new MigrateCommand.Scope.Refused("staged"),
+                    record(steps),
+                    OperatorCommand.PLAIN));
 
     assertEquals("staged", refused.getMessage());
     assertFalse(Files.exists(fresh.getParent()));
@@ -184,7 +190,8 @@ class MigrateCommandTest {
                     true,
                     true,
                     new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-                    record(steps)));
+                    record(steps),
+                    OperatorCommand.PLAIN));
 
     assertEquals(List.of("imports"), steps);
     assertTrue(err.contains("only the copy"), err);
@@ -198,7 +205,12 @@ class MigrateCommandTest {
     var steps = new ArrayList<String>();
 
     MigrateCommand.runMigrations(
-        tempDir.resolve("box/sail.db"), true, true, new MigrateCommand.Scope.Box(), record(steps));
+        tempDir.resolve("box/sail.db"),
+        true,
+        true,
+        new MigrateCommand.Scope.Box(),
+        record(steps),
+        OperatorCommand.PLAIN);
 
     assertEquals(List.of("imports", "host"), steps);
   }
@@ -213,7 +225,8 @@ class MigrateCommandTest {
         true,
         new MigrateCommand.Scope.DatabaseOnly("only the copy"),
         new MigrateCommand.Convergence(
-            (db, json) -> importedAs.add(Actor.current()), (db, json) -> {}));
+            (db, json) -> importedAs.add(Actor.current()), (db, json) -> {}),
+        OperatorCommand.PLAIN);
 
     assertEquals(List.of(Actor.system()), importedAs);
   }

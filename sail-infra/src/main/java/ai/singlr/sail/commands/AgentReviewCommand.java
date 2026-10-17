@@ -17,10 +17,8 @@ import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Shows the review pipeline's state for a project's specs: every attempt's iterations, stage
@@ -49,16 +47,15 @@ public final class AgentReviewCommand implements Runnable {
 
   @Mixin private ConnectionOptions connection;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    project = CurrentProject.require(project);
+    var operator = OperatorCommand.here();
+    project = CurrentProject.require(project, operator);
     NameValidator.requireValidProjectName(project);
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
@@ -87,7 +84,7 @@ public final class AgentReviewCommand implements Runnable {
         if (json) {
           continue;
         }
-        for (var line : render(id, Objects.toString(spec.get("status"), ""), reviews)) {
+        for (var line : render(id, Objects.toString(spec.get("status"), ""), reviews, operator)) {
           System.out.println(Ansi.AUTO.string(line));
         }
         if (specId != null) {
@@ -120,14 +117,18 @@ public final class AgentReviewCommand implements Runnable {
   }
 
   /** Human rendering of one spec's review history; pure for tests. */
-  static List<String> render(String specId, String specStatus, List<Map<String, Object>> reviews) {
+  static List<String> render(
+      String specId,
+      String specStatus,
+      List<Map<String, Object>> reviews,
+      OperatorCommand operator) {
     var lines = new ArrayList<String>();
     lines.add("  @|bold " + specId + "|@  @|faint (" + specStatus + ")|@");
     if (reviews.isEmpty()) {
       lines.add(
           "    @|yellow ⚠|@ No reviews have run for this attempt. The pipeline reviews when the"
               + " agent stops; follow it with: "
-              + OperatorCommand.here().sail("agent log <project> --review"));
+              + operator.sail("agent log <project> --review"));
       return lines;
     }
     for (var review : reviews) {

@@ -28,10 +28,8 @@ import java.util.List;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "logs",
@@ -67,25 +65,24 @@ public final class AgentLogCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
-    var logPath = resolveLogPath(name, lane());
+    var logPath = resolveLogPath(name, lane(), operator);
     if (logPath == null) {
-      printNoLog();
+      printNoLog(operator);
       return;
     }
 
@@ -113,7 +110,7 @@ public final class AgentLogCommand implements Runnable {
       var result = shell.exec(cmd);
       if (!result.ok()) {
         if (result.stderr().contains("No such file")) {
-          printNoLog();
+          printNoLog(operator);
           return;
         }
         throw new IOException("Failed to read agent log: " + result.stderr());
@@ -149,8 +146,8 @@ public final class AgentLogCommand implements Runnable {
    * log ({@code ~/.sail/runs/<id>/agent.log}) — a build, a reviewer and a fix agent alike — so a
    * lane only selects which run, never another file shape.
    */
-  private String resolveLogPath(String project, Optional<Lane> lane) {
-    try (var operations = OperationsFactory.open()) {
+  private String resolveLogPath(String project, Optional<Lane> lane, OperatorCommand operator) {
+    try (var operations = OperationsFactory.open(operator)) {
       var dispatching = operations.dispatching();
       var node = NodeIdentity.handle();
       return logPathFrom(
@@ -166,7 +163,7 @@ public final class AgentLogCommand implements Runnable {
     return run.map(row -> AgentUnit.readableLogPath(row.id(), row.logPath())).orElse(null);
   }
 
-  private void printNoLog() {
+  private void printNoLog(OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
@@ -178,7 +175,7 @@ public final class AgentLogCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string(
             "  @|faint No agent log found. Launch an agent with: "
-                + OperatorCommand.here().sail("agent run " + name + " --task \"...\" --background")
+                + operator.sail("agent run " + name + " --task \"...\" --background")
                 + "|@"));
   }
 

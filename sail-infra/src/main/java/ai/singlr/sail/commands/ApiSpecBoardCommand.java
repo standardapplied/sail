@@ -7,13 +7,12 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(name = "board", description = "Show spec board summary.", mixinStandardHelpOptions = true)
 public final class ApiSpecBoardCommand implements Runnable {
@@ -35,16 +34,15 @@ public final class ApiSpecBoardCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec commandSpec;
-
   @Override
   public void run() {
-    CliCommand.run(commandSpec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
     var config = connection.resolve();
-    var resolvedProject = CurrentProject.scope(project, allProjects).orElse(null);
+    var resolvedProject =
+        CurrentProject.scope(project, allProjects, OperatorCommand.here()).orElse(null);
     var path =
         resolvedProject != null ? "/v1/specs/board?project=" + resolvedProject : "/v1/specs/board";
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {

@@ -914,7 +914,8 @@ class ProjectApplierTest {
     var config = minimalConfig("claude-code");
 
     var warnings =
-        applier.checkUnsupportedChanges(config, new ContainerManager.ResourceLimits("4", "12GB"));
+        applier.checkUnsupportedChanges(
+            config, new ContainerManager.ResourceLimits("4", "12GB"), OperatorCommand.PLAIN);
 
     assertFalse(warnings.isEmpty());
     assertTrue(warnings.getFirst().contains("project resources set"));
@@ -929,7 +930,7 @@ class ProjectApplierTest {
     var config =
         new SailYaml("test", null, null, null, null, null, null, null, null, null, agent, null);
 
-    var warnings = applier.checkUnsupportedChanges(config, null);
+    var warnings = applier.checkUnsupportedChanges(config, null, OperatorCommand.PLAIN);
 
     assertTrue(warnings.isEmpty());
   }

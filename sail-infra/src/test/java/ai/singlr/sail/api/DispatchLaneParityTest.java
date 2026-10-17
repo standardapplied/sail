@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
@@ -144,7 +145,8 @@ class DispatchLaneParityTest {
             (project, config) -> "",
             command -> 0,
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
     var cliOutcome =
         Actor.call(
             ADMIN,
@@ -205,7 +207,8 @@ class DispatchLaneParityTest {
               ConnectEnvironment::detect,
               SyncScheduler.disabled(),
               new FdeStore(api.db()),
-              SessionYield.NONE);
+              SessionYield.NONE,
+              OperatorCommand.PLAIN);
 
       var result =
           Actor.call(

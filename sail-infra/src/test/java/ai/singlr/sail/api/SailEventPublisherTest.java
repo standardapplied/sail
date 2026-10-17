@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -57,7 +58,8 @@ class SailEventPublisherTest {
                   new ShellExecutor(true),
                   TestProjects.reading(tmp.resolve("sail.yaml")),
                   bus,
-                  persister),
+                  persister,
+                  OperatorCommand.PLAIN),
               db,
               tmp);
       try (var server =
@@ -101,7 +103,7 @@ class SailEventPublisherTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

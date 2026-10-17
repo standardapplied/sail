@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -285,7 +286,13 @@ class AuthorityAuditTest {
 
   private SailOperations operations(Sqlite box, SyncConfig config, String id) {
     return OperationsFactory.create(
-            box, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            box,
+            SHELL,
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE,
+            OperatorCommand.PLAIN)
         .useControlPlane(
             box,
             tempDir,
@@ -296,7 +303,8 @@ class AuthorityAuditTest {
                 () -> config,
                 target -> {
                   throw new IOException("main unavailable");
-                }));
+                },
+                OperatorCommand.PLAIN));
   }
 
   private HttpResponse<String> http(String method, String path, String credential, String json)

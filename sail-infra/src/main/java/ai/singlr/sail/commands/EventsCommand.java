@@ -23,9 +23,7 @@ import java.util.Map;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "events",
@@ -69,11 +67,9 @@ public final class EventsCommand implements Runnable {
   @Option(names = "--json", description = "Print one JSON event per line (raw bus payload).")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {

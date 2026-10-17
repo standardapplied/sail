@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -34,7 +35,7 @@ class ProjectReaderTest {
           () -> store.upsert("acme", ACME + "git:\n  name: Mady\n  email: mady@example.dev\n"));
       var reader = ProjectReader.ofCatalog(store);
 
-      var acme = reader.require("acme");
+      var acme = reader.require("acme", OperatorCommand.PLAIN);
 
       assertEquals("codex", acme.agent().type());
       assertEquals("${GIT_NAME}", acme.git().name(), "placeholders are left as the row holds them");
@@ -47,7 +48,8 @@ class ProjectReaderTest {
     var reader = ProjectReader.ofCatalog(null);
 
     assertTrue(reader.read("acme").isEmpty(), "a null store holds no project");
-    var refused = assertThrows(ApiException.class, () -> reader.require("acme"));
+    var refused =
+        assertThrows(ApiException.class, () -> reader.require("acme", OperatorCommand.PLAIN));
 
     assertEquals(ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND, refused.failure().errorCode());
     assertEquals("Project 'acme' is not in the catalog.", refused.getMessage());
@@ -150,7 +152,7 @@ class ProjectReaderTest {
 
     assertTrue(reader.read("acme").isEmpty());
     Files.writeString(file, ACME);
-    assertEquals("codex", reader.require("anything").agent().type());
+    assertEquals("codex", reader.require("anything", OperatorCommand.PLAIN).agent().type());
     Files.writeString(file, "agent: [unterminated");
     var unreadable = assertThrows(ProjectReader.Unreadable.class, () -> reader.read("acme"));
     assertTrue(unreadable.getMessage().startsWith("The definition of project 'acme'"));

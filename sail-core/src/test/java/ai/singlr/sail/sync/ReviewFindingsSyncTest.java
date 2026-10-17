@@ -16,6 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -260,7 +261,7 @@ class ReviewFindingsSyncTest {
     }
 
     var first = main.specs.history("followup").getFirst().rev();
-    Acting.as("root", () -> main.specs.restore("followup", first));
+    Acting.as("root", () -> main.specs.restore("followup", first, OperatorCommand.PLAIN));
     round(ada);
     round(bob);
     Acting.as("root", () -> main.specs.updateStatus("followup", SpecStatus.DONE));

@@ -27,9 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "init",
@@ -78,8 +76,6 @@ public final class HostInitCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   private final boolean standalone;
 
   public HostInitCommand() {
@@ -103,12 +99,11 @@ public final class HostInitCommand implements Runnable {
   @Override
   public void run() {
     CliCommand.run(
-        spec,
-        "  If this is unexpected, re-run with --dry-run to see what would execute.",
-        this::execute);
+        "  If this is unexpected, re-run with --dry-run to see what would execute.", this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (!VALID_BACKENDS.contains(storage)) {
       throw new IllegalArgumentException(
           "Invalid storage backend: '" + storage + "'. Must be 'dir' or 'zfs'.");
@@ -246,7 +241,7 @@ public final class HostInitCommand implements Runnable {
     }
 
     DemoSeeder.seedIfAbsent();
-    nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), OperatorCommand.here())
+    nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), operator)
         .ifPresent(
             line -> {
               System.out.println();

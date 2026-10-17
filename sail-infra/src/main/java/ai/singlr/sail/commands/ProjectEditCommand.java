@@ -18,10 +18,8 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Edits a project's definition in the catalog — the source of truth — and re-materializes the
@@ -47,8 +45,6 @@ public final class ProjectEditCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   private final Editor editor;
 
   public ProjectEditCommand() {
@@ -61,13 +57,14 @@ public final class ProjectEditCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var operator = CliOperator.current();
-    ProjectCatalog.requireRecordable(name, operator);
+    var actor = CliOperator.current();
+    ProjectCatalog.requireRecordable(name, actor);
     var current =
         ProjectDefinitions.definition(name, null)
             .orElseThrow(
@@ -76,9 +73,9 @@ public final class ProjectEditCommand implements Runnable {
                         "No project '"
                             + name
                             + "' to edit. Create it with '"
-                            + OperatorCommand.here().sail("project apply")
+                            + operator.sail("project apply")
                             + "', or sync it from main with '"
-                            + OperatorCommand.here().sail("sync")
+                            + operator.sail("sync")
                             + "'."));
 
     var edited = file != null ? Files.readString(Path.of(file)) : edit(editor, name, current);
@@ -90,7 +87,7 @@ public final class ProjectEditCommand implements Runnable {
     }
 
     validate(name, edited);
-    ProjectDefinitions.persist(name, null, edited, operator);
+    ProjectDefinitions.persist(name, null, edited, actor);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.FdeStore;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * The pre-launch admission checks every run lane runs before it reserves a container or takes a
@@ -29,10 +30,12 @@ public final class LaunchAdmission {
 
   private final ShellExec shell;
   private final FdeStore fdeStore;
+  private final OperatorCommand operator;
 
-  public LaunchAdmission(ShellExec shell, FdeStore fdeStore) {
+  public LaunchAdmission(ShellExec shell, FdeStore fdeStore, OperatorCommand operator) {
     this.shell = shell;
     this.fdeStore = fdeStore;
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /**
@@ -40,7 +43,8 @@ public final class LaunchAdmission {
    * set, and this box owns the room (assignee, else creator). Whether the actor may change the room
    * is the room rule's, decided where its roster is written.
    */
-  public static void requireAllowedForRoom(String roomId, String owner, String localHandle) {
+  public static void requireAllowedForRoom(
+      String roomId, String owner, String localHandle, OperatorCommand operator) {
     var actor = Actor.current();
     if (actor.agentLane()) {
       throw new ApiException(
@@ -52,7 +56,7 @@ public final class LaunchAdmission {
       throw new ApiException(
           ErrorCode.COMMAND_FAILED,
           "This box has no FDE handle, so room ownership cannot be established.",
-          handleHint(OperatorCommand.here()));
+          handleHint(operator));
     }
     if (!Ownership.owns(localHandle, owner)) {
       throw new ApiException(
@@ -66,8 +70,9 @@ public final class LaunchAdmission {
    * Refuses when the actor may not act on {@code spec} from the box identified by {@code
    * localHandle}.
    */
-  public static void requireAllowed(Spec spec, String localHandle) {
-    if (DispatchPolicy.check(spec, localHandle) instanceof DispatchDecision.Refused refused) {
+  public static void requireAllowed(Spec spec, String localHandle, OperatorCommand operator) {
+    if (DispatchPolicy.check(spec, localHandle, operator)
+        instanceof DispatchDecision.Refused refused) {
       throw new ApiException(refused.code(), refused.message(), refused.fix());
     }
   }
@@ -104,7 +109,7 @@ public final class LaunchAdmission {
                 project,
                 List.of("bash", "-lc", "command -v -- \"$1\"", "bash", harness.binaryName())));
     if (!found.ok()) {
-      throw notInstalled(harness, project, OperatorCommand.here());
+      throw notInstalled(harness, project, operator);
     }
   }
 

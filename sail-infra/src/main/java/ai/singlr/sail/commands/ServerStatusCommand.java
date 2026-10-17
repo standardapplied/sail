@@ -11,31 +11,28 @@ import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
-import picocli.CommandLine.Spec;
 
 @Command(name = "status", description = "Show Sail server status.", mixinStandardHelpOptions = true)
 public final class ServerStatusCommand implements Runnable {
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() {
+    var operator = OperatorCommand.here();
     var dbPath = SailPaths.controlPlaneDb();
     if (!Files.exists(dbPath)) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ Server not initialized. Run '"
-                  + OperatorCommand.here().sail("server init")
+                  + operator.sail("server init")
                   + "'."));
       return;
     }
 
-    try (var operations = OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath, operator)) {
       var tokens = operations.identity().tokens();
 
       System.out.println(Ansi.AUTO.string("  @|bold Sail Server|@"));

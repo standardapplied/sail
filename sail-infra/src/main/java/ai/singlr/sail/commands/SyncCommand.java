@@ -29,7 +29,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -57,24 +57,29 @@ import picocli.CommandLine.Option;
     subcommands = {SyncCommand.Status.class, SyncCommand.Gc.class})
 public final class SyncCommand implements Callable<Integer> {
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   @Command(
       name = "gc",
       description = "Compact history to what every box keeps and free content nothing references.",
       mixinStandardHelpOptions = true)
   static final class Gc implements Callable<Integer> {
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Gc() {
       this(OperationsFactory::open);
     }
 
-    Gc(Supplier<HostOperations> operations) {
+    Gc(Function<OperatorCommand, HostOperations> operations) {
       this.operations = operations;
     }
 
     @Override
     public Integer call() {
-      try (var ops = operations.get()) {
+      var operator = operator();
+      try (var ops = operations.apply(operator)) {
         var collected = ops.schema().collectContent();
         System.out.println(
             "Compacted "
@@ -95,28 +100,29 @@ public final class SyncCommand implements Callable<Integer> {
     @Option(names = "--json", description = "Output sync health as JSON.")
     private boolean json;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Status() {
       this(OperationsFactory::open);
     }
 
-    Status(Supplier<HostOperations> operations) {
+    Status(Function<OperatorCommand, HostOperations> operations) {
       this.operations = operations;
     }
 
     @Override
     public Integer call() throws Exception {
-      try (var ops = operations.get()) {
+      var operator = operator();
+      try (var ops = operations.apply(operator)) {
         var status = SyncViews.status(ops.syncStatus());
         status.put("pending_conflicts", ops.conflicts().size());
-        System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status));
+        System.out.println(json ? YamlUtil.dumpJson(status) : renderStatus(status, operator));
       }
       return 0;
     }
   }
 
-  static String renderStatus(Map<String, Object> status) {
+  static String renderStatus(Map<String, Object> status, OperatorCommand operator) {
     var main = status.get("main");
     var health =
         switch (Objects.toString(status.get("state"), "")) {
@@ -142,7 +148,7 @@ public final class SyncCommand implements Callable<Integer> {
             + " — "
             + pending
             + " conflict(s) need your decision: "
-            + OperatorCommand.here().sail("conflicts")
+            + operator.sail("conflicts")
         : health;
   }
 
@@ -170,20 +176,27 @@ public final class SyncCommand implements Callable<Integer> {
 
   @Override
   public Integer call() throws Exception {
+    return call(operator());
+  }
+
+  /** A round worded for {@code operator}: a scheduled round reuses the one its command resolved. */
+  Integer call(OperatorCommand operator) throws Exception {
     if (watch && intervalSeconds <= 0) {
       System.err.println(
           Banner.errorLine("--interval must be a positive number of seconds.", Ansi.AUTO));
       return 1;
     }
     var sync = HostSync.config();
-    var resolution = resolveMain(main, sync);
+    var resolution = resolveMain(main, sync, operator);
     if (resolution.target() == null) {
       System.out.println(Ansi.AUTO.string("  @|faint " + resolution.message() + "|@"));
       return 0;
     }
     var target = resolution.target();
-    try (var operations = OperationsFactory.open()) {
-      return watch ? watchLoop(operations, target) : runOnce(operations, target);
+    try (var operations = OperationsFactory.open(operator)) {
+      return watch
+          ? watchLoop(operations, target, operator)
+          : runOnce(operations, target, operator);
     } catch (RuntimeException e) {
       System.err.println(Banner.errorLine(reason(e), Ansi.AUTO));
       return 1;
@@ -197,15 +210,15 @@ public final class SyncCommand implements Callable<Integer> {
    */
   record MainTarget(String target, String message) {}
 
-  static MainTarget resolveMain(String flag, SyncConfig sync) {
-    var target = SyncOperations.resolveMain(flag, sync);
+  static MainTarget resolveMain(String flag, SyncConfig sync, OperatorCommand operator) {
+    var target = SyncOperations.resolveMain(flag, sync, operator);
     return new MainTarget(target.target(), target.message());
   }
 
-  private int runOnce(Operations operations, String target) {
+  private int runOnce(Operations operations, String target, OperatorCommand operator) {
     try {
       var round = operations.sync(new SyncRequest(target));
-      System.out.println(render(round, json));
+      System.out.println(render(round, json, operator));
       return 0;
     } catch (Exception e) {
       System.err.println(
@@ -223,11 +236,12 @@ public final class SyncCommand implements Callable<Integer> {
     return message;
   }
 
-  private int watchLoop(Operations operations, String target) throws InterruptedException {
+  private int watchLoop(Operations operations, String target, OperatorCommand operator)
+      throws InterruptedException {
     while (true) {
       try {
         var round = operations.sync(new SyncRequest(target));
-        System.out.println(render(round, json));
+        System.out.println(render(round, json, operator));
       } catch (InterruptedException e) {
         throw e;
       } catch (Exception e) {
@@ -257,7 +271,7 @@ public final class SyncCommand implements Callable<Integer> {
     return SyncOperations.boardUpdatedEvent(host, report);
   }
 
-  static String render(SyncReport round, boolean json) {
+  static String render(SyncReport round, boolean json, OperatorCommand operator) {
     var report = round.report();
     if (json) {
       return YamlUtil.dumpJson(SyncViews.round(round));
@@ -289,7 +303,7 @@ public final class SyncCommand implements Callable<Integer> {
           Banner.errorLine(
               report.conflicts()
                   + " conflict(s) need your decision. Run '"
-                  + OperatorCommand.here().sail("conflicts")
+                  + operator.sail("conflicts")
                   + "' to resolve.",
               Ansi.AUTO));
     }

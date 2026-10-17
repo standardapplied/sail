@@ -16,16 +16,15 @@ import ai.singlr.sail.engine.ContainerManager.ContainerInfo;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "config",
@@ -45,23 +44,22 @@ public final class ProjectConfigCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
 
-    var config = ProjectDefinitions.load(name, ProjectDefinitions.explicitFile(file));
+    var config = ProjectDefinitions.load(name, ProjectDefinitions.explicitFile(file), operator);
 
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
     var info = mgr.queryInfo(name);
-    var agentSession = loadAgentSession(shell, name, info.state());
-    var specSummary = loadSpecSummary(shell, config, info.state());
+    var agentSession = loadAgentSession(shell, name, info.state(), operator);
+    var specSummary = loadSpecSummary(shell, config, info.state(), operator);
 
     if (json) {
       printJson(config, info, agentSession, specSummary);
@@ -152,16 +150,18 @@ public final class ProjectConfigCommand implements Runnable {
   }
 
   private static AgentSession.SessionInfo loadAgentSession(
-      ShellExecutor shell, String containerName, ContainerState state) throws Exception {
+      ShellExecutor shell, String containerName, ContainerState state, OperatorCommand operator)
+      throws Exception {
     if (!(state instanceof ContainerState.Running)) {
       return null;
     }
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       return operations.dispatching().projectSession(containerName, NodeIdentity.handle());
     }
   }
 
-  private SpecSnapshot loadSpecSummary(ShellExecutor shell, SailYaml config, ContainerState state)
+  private SpecSnapshot loadSpecSummary(
+      ShellExecutor shell, SailYaml config, ContainerState state, OperatorCommand operator)
       throws Exception {
     if (!(state instanceof ContainerState.Running)) {
       return SpecSnapshot.unavailable("project_stopped");
@@ -169,7 +169,7 @@ public final class ProjectConfigCommand implements Runnable {
     if (config.agent() == null) {
       return SpecSnapshot.unavailable("specs_not_configured");
     }
-    try (var operations = OperationsFactory.open()) {
+    try (var operations = OperationsFactory.open(operator)) {
       return SpecSnapshot.available(SpecCatalog.summarize(operations.catalog().projectSpecs(name)));
     } catch (Exception e) {
       return SpecSnapshot.unavailable("specs_unavailable");

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
@@ -33,7 +34,8 @@ class WebauthnPageHandlerTest {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
     var tokenStore = new TokenStore(db);
-    var passkeyHandler = new WebauthnAuthHandler(null, null, TestAuth.tokens(db), null);
+    var passkeyHandler =
+        new WebauthnAuthHandler(null, null, TestAuth.tokens(db), null, OperatorCommand.PLAIN);
     server =
         new SailApiServer(
             "127.0.0.1",

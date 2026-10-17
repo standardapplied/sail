@@ -20,10 +20,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "logs",
@@ -48,23 +46,22 @@ public final class LogsCommand implements Runnable {
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     if (service == null) {
-      listServices(shell);
+      listServices(shell, operator);
       return;
     }
 
@@ -107,7 +104,7 @@ public final class LogsCommand implements Runnable {
     }
   }
 
-  private void listServices(ShellExecutor shell) throws Exception {
+  private void listServices(ShellExecutor shell, OperatorCommand operator) throws Exception {
     var cmd = ContainerExec.asDevUser(name, List.of("podman", "ps", "--format", "{{.Names}}"));
     var result = shell.exec(cmd);
 
@@ -143,8 +140,6 @@ public final class LogsCommand implements Runnable {
     System.out.println();
     System.out.println(
         Ansi.AUTO.string(
-            "  Usage: @|bold "
-                + OperatorCommand.here().sail("project logs " + name + " <service>")
-                + "|@"));
+            "  Usage: @|bold " + operator.sail("project logs " + name + " <service>") + "|@"));
   }
 }

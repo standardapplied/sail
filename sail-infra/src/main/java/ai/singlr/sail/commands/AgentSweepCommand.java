@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
 import java.util.LinkedHashMap;
@@ -27,10 +28,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Runs the entropy-sweep prompt as a foreground ad-hoc session through the shared {@link
@@ -78,27 +77,26 @@ public final class AgentSweepCommand implements Runnable {
   @Option(names = "--dry-run", description = "Print commands instead of executing them.")
   private boolean dryRun;
 
-  @Spec private CommandSpec spec;
-
   @Override
   public void run() {
-    CliCommand.run(spec, this::execute);
+    CliCommand.run(this::execute);
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
 
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var operations = operations(shell, launchCommand)) {
+    try (var operations = operations(shell, launchCommand, operator)) {
       var request =
           new DispatchOperations.AdhocRequest(SWEEP_PROMPT, null, null, false, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -118,7 +116,7 @@ public final class AgentSweepCommand implements Runnable {
   }
 
   private HostOperations operations(
-      ShellExecutor shell, AtomicReference<List<String>> launchCommand) {
+      ShellExecutor shell, AtomicReference<List<String>> launchCommand, OperatorCommand operator) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -145,7 +143,8 @@ public final class AgentSweepCommand implements Runnable {
             DispatchOperations.terminalLauncher(),
             listener,
             StopOperations.Listener.NONE),
-        new PtyHostYield());
+        new PtyHostYield(),
+        operator);
   }
 
   private void render(DispatchOperations.AdhocSession session, List<String> command) {

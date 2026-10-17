@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
@@ -408,7 +409,7 @@ class SnapshotOperationsTest {
           agent:
             type: claude-code
           """);
-      return new ProjectLoader(shell, TestProjects.reading(yaml));
+      return new ProjectLoader(shell, TestProjects.reading(yaml), OperatorCommand.PLAIN);
     } catch (IOException e) {
       throw new IllegalStateException(e);
     }
