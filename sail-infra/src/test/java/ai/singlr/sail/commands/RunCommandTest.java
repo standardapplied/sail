@@ -19,7 +19,6 @@ import ai.singlr.sail.config.Spec;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.LocalIdentity;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
