@@ -24,6 +24,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.stream.Collectors;
@@ -35,10 +36,13 @@ public final class ConflictOperations {
 
   private final Sqlite db;
   private final SyncConflicts conflicts;
+  private final OperatorCommand operator;
 
-  public ConflictOperations(Sqlite db) {
+  /** Over {@code db}, with every command a refusal names worded for {@code operator}. */
+  public ConflictOperations(Sqlite db, OperatorCommand operator) {
     this.db = db;
     this.conflicts = new SyncConflicts(db);
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   public List<SyncConflicts.Conflict> list() {
@@ -171,7 +175,7 @@ public final class ConflictOperations {
    * A resolve adopts main's side at the revision main minted it, which a conflict parked before
    * conflicts kept it does not name. The next round re-records every parked conflict with it.
    */
-  private static void requireMainsRevision(SyncConflicts.Conflict conflict) {
+  private void requireMainsRevision(SyncConflicts.Conflict conflict) {
     if (Strings.isBlank(conflict.remoteRev())) {
       throw new ApiException(
           ErrorCode.CONFLICT,
@@ -179,7 +183,7 @@ public final class ConflictOperations {
           '%s' was recorded before conflicts kept main's revision, so main's side cannot be \
           adopted as main made it.
           Run '%s' to re-record it, then resolve."""
-              .formatted(conflict.entityId(), OperatorCommand.here().sail("sync")));
+              .formatted(conflict.entityId(), operator.sail("sync")));
     }
   }
 
@@ -207,14 +211,12 @@ public final class ConflictOperations {
     }
   }
 
-  private static void requireMadeFrom(SyncConflicts.Conflict conflict, Object madeFrom) {
+  private void requireMadeFrom(SyncConflicts.Conflict conflict, Object madeFrom) {
     if (!(madeFrom instanceof String named) || named.isBlank()) {
       throw new ApiException(
           ErrorCode.BAD_REQUEST,
           "A merged record must start from '%s'."
-              .formatted(
-                  OperatorCommand.here()
-                      .sail("conflicts show " + conflict.entityId() + " --template")));
+              .formatted(operator.sail("conflicts show " + conflict.entityId() + " --template")));
     }
     if (!named.equals(fingerprint(conflict))) {
       throw new ApiException(
@@ -264,7 +266,7 @@ public final class ConflictOperations {
                   drift.stream()
                       .map(ConflictOperations::displayField)
                       .collect(Collectors.joining(", ")),
-                  OperatorCommand.here().sail("sync"),
+                  operator.sail("sync"),
                   then));
     }
   }

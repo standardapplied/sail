@@ -103,6 +103,7 @@ public final class HostInitCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (!VALID_BACKENDS.contains(storage)) {
       throw new IllegalArgumentException(
           "Invalid storage backend: '" + storage + "'. Must be 'dir' or 'zfs'.");
@@ -240,7 +241,7 @@ public final class HostInitCommand implements Runnable {
     }
 
     DemoSeeder.seedIfAbsent();
-    nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), OperatorCommand.here())
+    nextStep(standalone, Files.exists(SailPaths.SYSTEM_UNIT), operator)
         .ifPresent(
             line -> {
               System.out.println();

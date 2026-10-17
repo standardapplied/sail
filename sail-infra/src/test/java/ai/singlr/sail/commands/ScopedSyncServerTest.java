@@ -9,12 +9,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
@@ -56,7 +58,8 @@ class ScopedSyncServerTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, MigrateCommand.REGISTRY, DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(
+          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
     }
     main = SyncDatabase.converge(mainPath, "main");
     mainDb = main.db();
@@ -175,6 +178,7 @@ class ScopedSyncServerTest {
             toServer,
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
             notice -> {},
+            ignored -> {},
             nodeDb)) {
       var replicas = SyncedEntities.replicas(nodeDb, "node-box", "nia");
       for (var entity : SyncedEntities.all()) {

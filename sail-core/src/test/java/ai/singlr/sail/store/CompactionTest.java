@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.SyncBox;
@@ -62,6 +63,30 @@ class CompactionTest {
     assertEquals(
         changes.head("spec", "busy").orElseThrow().seq(),
         changes.history("spec", "busy").getLast().seq());
+  }
+
+  @Test
+  void aCompactedRevisionCannotBeRestoredAndTheRemedyIsWordedForTheOperator() {
+    edits("busy", 30);
+    var first = changes.history("spec", "busy").getFirst().rev();
+
+    new BlobStore(db).gc(BlobStore.Compaction.ALL, false);
+
+    var sudo = new OperatorCommand(true);
+    assertEquals(
+        "Revision '"
+            + first
+            + "' of spec 'busy' is not in its retained history: history keeps the newest 20"
+            + " revisions of each spec and every deletion. Pick one of those from 'sudo sail spec"
+            + " history busy'.",
+        specs.unrestorable("busy", first, sudo));
+    assertEquals(
+        specs.unrestorable("busy", first, sudo),
+        assertThrows(IllegalArgumentException.class, () -> specs.restore("busy", first, sudo))
+            .getMessage());
+    assertEquals(
+        "No revision '0-x' recorded for spec 'never'.",
+        specs.unrestorable("never", "0-x", OperatorCommand.PLAIN));
   }
 
   @Test

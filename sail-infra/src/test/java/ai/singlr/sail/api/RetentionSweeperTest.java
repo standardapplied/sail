@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -62,7 +63,7 @@ class RetentionSweeperTest {
     specs = new SpecStore(db);
     sweeper =
         new RetentionSweeper(
-            new SpecPruner(db, null, main::get, clock::get),
+            new SpecPruner(db, null, main::get, clock::get, OperatorCommand.PLAIN),
             policy::get,
             new BlobStore(db),
             main::get,
@@ -138,7 +139,7 @@ class RetentionSweeperTest {
     busyHistory();
     var failing =
         new RetentionSweeper(
-            new SpecPruner(db, null, main::get, clock::get),
+            new SpecPruner(db, null, main::get, clock::get, OperatorCommand.PLAIN),
             () -> {
               throw new IllegalStateException("host.yaml: retention.messages is not an age");
             },
@@ -170,7 +171,7 @@ class RetentionSweeperTest {
   void aSweepThatCannotTellWhetherThisBoxIsMainReportsItAndDoesNotEndTheSchedule() {
     var confused =
         new RetentionSweeper(
-            new SpecPruner(db, null, main::get, clock::get),
+            new SpecPruner(db, null, main::get, clock::get, OperatorCommand.PLAIN),
             policy::get,
             new BlobStore(db),
             () -> {

@@ -80,6 +80,7 @@ public final class JoinCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var normalized = normalizeTarget(target);
     nonSailUserWarning(target)
         .ifPresent(warning -> System.err.println(Banner.errorLine(warning, Ansi.AUTO)));
@@ -97,8 +98,9 @@ public final class JoinCommand implements Runnable {
             resolvedName,
             resolvedEmail,
             SshSyncChannel::open,
-            MainHostKey.here());
-    System.out.println(render(plan, json, OperatorCommand.here()));
+            MainHostKey.here(),
+            operator);
+    System.out.println(render(plan, json, operator));
   }
 
   /**
@@ -121,10 +123,11 @@ public final class JoinCommand implements Runnable {
       String name,
       String email,
       SyncOperations.Channels channels,
-      MainHostKey mainHostKey)
+      MainHostKey mainHostKey,
+      OperatorCommand operator)
       throws Exception {
     if (!Files.exists(hostConfig)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);
@@ -136,9 +139,10 @@ public final class JoinCommand implements Runnable {
             HostSyncCommand.configure(host, false, target, HostInfo.hostname()),
             "sync-handle",
             handle);
-    HandleChange.write(hostConfig, db, host, updated, channels);
+    HandleChange.write(hostConfig, db, host, updated, channels, operator);
     var publicKey = identity.ensure("sail-sync:" + handle);
-    var mainHasKey = keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle);
+    var mainHasKey =
+        keyBefore && SyncOperations.welcomedAs(updated.sync(), channels, handle, operator);
     return new Plan(target, handle, name, email, publicKey, pinned, mainHasKey);
   }
 

@@ -8,11 +8,13 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
+import java.util.Objects;
 
 /**
  * Review-workflow operations against the {@link ReviewStore}. Split out of {@code SailOperations}
@@ -25,10 +27,12 @@ final class ReviewOperations {
 
   private final ReviewStore reviewStore;
   private final SpecStore specStore;
+  private final OperatorCommand operator;
 
-  ReviewOperations(ReviewStore reviewStore, SpecStore specStore) {
+  ReviewOperations(ReviewStore reviewStore, SpecStore specStore, OperatorCommand operator) {
     this.reviewStore = reviewStore;
     this.specStore = specStore;
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   ReviewListResponse listForSpec(String specId) {
@@ -214,7 +218,8 @@ final class ReviewOperations {
 
   private void requireStore() {
     if (reviewStore == null || specStore == null) {
-      throw new ApiException(ErrorCode.INTERNAL, SailOperations.storeUnavailable("Review store"));
+      throw new ApiException(
+          ErrorCode.INTERNAL, SailOperations.storeUnavailable("Review store", operator));
     }
   }
 }

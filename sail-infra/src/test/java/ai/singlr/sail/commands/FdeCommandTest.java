@@ -14,6 +14,7 @@ import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -22,6 +23,7 @@ import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
@@ -1241,7 +1243,7 @@ class FdeCommandTest {
             (db, json) -> {},
             (db, json) -> MigrateCommand.revokeOtherFdesPairings(db, this::box, json));
     assertFalse(
-        MigrateCommand.REGISTRY.stream()
+        DataMigrations.all(OperatorCommand.PLAIN).stream()
             .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
         "every lane runs the registry; only the box's own convergence revokes");
 
@@ -1250,13 +1252,19 @@ class FdeCommandTest {
         true,
         true,
         new MigrateCommand.Scope.DatabaseOnly("only the copy"),
-        convergence);
+        convergence,
+        OperatorCommand.PLAIN);
 
     assertEquals("client", handleOf(tokens[0]));
     assertEquals(1, loginsOf("client").size());
 
     MigrateCommand.runMigrations(
-        tempDir.resolve("sail.db"), true, true, new MigrateCommand.Scope.Box(), convergence);
+        tempDir.resolve("sail.db"),
+        true,
+        true,
+        new MigrateCommand.Scope.Box(),
+        convergence,
+        OperatorCommand.PLAIN);
 
     assertNull(handleOf(tokens[0]));
     assertEquals(List.of(), loginsOf("client"));
@@ -2064,7 +2072,8 @@ class FdeCommandTest {
   @Test
   void passkeyNoMatchMessageListsRegisteredCredentials() {
     var credentials = List.of(credential("alpha", "macbook"), credential("bravo", null));
-    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", credentials);
+    var message =
+        FdeCommand.Passkey.noMatchMessage("uday", "zz", credentials, OperatorCommand.PLAIN);
     assertTrue(message.contains("No passkey of 'uday' matches 'zz'"));
     assertTrue(message.contains(Passkeys.encodeId("alpha".getBytes(StandardCharsets.UTF_8))));
     assertTrue(message.contains("macbook"));
@@ -2073,7 +2082,7 @@ class FdeCommandTest {
 
   @Test
   void passkeyNoMatchMessagePointsAtEnrollWhenNoneRegistered() {
-    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", List.of());
+    var message = FdeCommand.Passkey.noMatchMessage("uday", "zz", List.of(), OperatorCommand.PLAIN);
     assertTrue(message.contains("'uday' has no passkeys"));
     assertTrue(message.contains("sail fde enroll uday"));
   }

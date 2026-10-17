@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.net.URI;
@@ -54,7 +55,7 @@ public final class AgentStreamCommand implements Runnable {
   private String runId;
 
   private void execute() throws Exception {
-    project = CurrentProject.require(project);
+    project = CurrentProject.require(project, OperatorCommand.here());
     var config = connection.resolve();
     if (runId == null) {
       runId = latestRunId(config);

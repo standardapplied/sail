@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -234,7 +235,8 @@ class SailOperationsSyncTest {
             null,
             null,
             () -> new ConnectEnvironment("203.0.113.7", "uday", true),
-            scheduler),
+            scheduler,
+            OperatorCommand.PLAIN),
         db,
         tempDir);
   }

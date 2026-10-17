@@ -35,7 +35,7 @@ public final class DispatchPolicy {
    * localHandle}. Rules are checked in order — node identity, execution locality, caller
    * capability, then ownership — so the most fundamental precondition names the refusal.
    */
-  public static DispatchDecision check(Spec spec, String localHandle) {
+  public static DispatchDecision check(Spec spec, String localHandle, OperatorCommand operator) {
     var actor = Actor.current();
     if (actor.agentLane()) {
       return agentLaneForbidden("dispatch specs");
@@ -44,7 +44,7 @@ public final class DispatchPolicy {
       return nodeHandleUnset();
     }
     if (!localHandle.equals(spec.assignee())) {
-      return runsOnOtherNode(spec, localHandle, OperatorCommand.here());
+      return runsOnOtherNode(spec, localHandle, operator);
     }
     if (!actor.canWrite()) {
       return new DispatchDecision.Refused(

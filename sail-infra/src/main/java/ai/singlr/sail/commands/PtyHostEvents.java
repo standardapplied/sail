@@ -10,6 +10,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyEvents;
 import ai.singlr.sail.pty.PtySession;
@@ -34,14 +35,16 @@ final class PtyHostEvents implements PtyEvents {
 
   private final Path dbPath;
   private final Path dropsPath;
+  private final OperatorCommand operator;
 
-  PtyHostEvents() {
-    this(SailPaths.controlPlaneDb(), PtyEventDrops.fileOf(SailPaths.ptySocketPath()));
+  PtyHostEvents(OperatorCommand operator) {
+    this(SailPaths.controlPlaneDb(), PtyEventDrops.fileOf(SailPaths.ptySocketPath()), operator);
   }
 
-  PtyHostEvents(Path dbPath, Path dropsPath) {
+  PtyHostEvents(Path dbPath, Path dropsPath, OperatorCommand operator) {
     this.dbPath = dbPath;
     this.dropsPath = dropsPath;
+    this.operator = operator;
   }
 
   @Override
@@ -75,7 +78,7 @@ final class PtyHostEvents implements PtyEvents {
 
   private void insert(
       String type, PtySession.Origin origin, String agent, Map<String, Object> data) {
-    try (var operations = OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath, operator)) {
       operations
           .pty()
           .recordEvent(

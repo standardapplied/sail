@@ -94,6 +94,7 @@ public final class HostConfigSetCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (!SETTABLE_KEYS.contains(key)) {
       throw new IllegalArgumentException(
           "Unknown config key: '" + key + "'. Settable keys: " + String.join(", ", SETTABLE_KEYS));
@@ -124,7 +125,7 @@ public final class HostConfigSetCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
@@ -137,7 +138,12 @@ public final class HostConfigSetCommand implements Runnable {
 
     var stamped =
         HandleChange.write(
-            hostYamlPath, SailPaths.controlPlaneDb(), hostYaml, updated, SshSyncChannel::open);
+            hostYamlPath,
+            SailPaths.controlPlaneDb(),
+            hostYaml,
+            updated,
+            SshSyncChannel::open,
+            operator);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.HostIdentity;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.engine.HostToken;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -26,10 +27,11 @@ public final class ServerInitCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());
 
-    try (var operations = OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath, operator)) {
       var migration = operations.schema().initialize();
       var before = migration.before();
       var after = migration.after();

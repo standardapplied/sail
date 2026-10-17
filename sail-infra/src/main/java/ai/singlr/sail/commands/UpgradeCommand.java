@@ -96,13 +96,14 @@ public final class UpgradeCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     requireProvisionedData(System.getenv("SAIL_DATA_DIR"));
     if ("dev".equals(SailVersion.version())) {
       throw new IllegalStateException(
           "Cannot upgrade a development build. Install a release version first.");
     }
     if (localBinary != null) {
-      installLocal();
+      installLocal(operator);
       return;
     }
     var target = installedBinary.get();
@@ -115,7 +116,7 @@ public final class UpgradeCommand implements Runnable {
     var versionTag = "v" + latest;
 
     if (checkOnly) {
-      printCheckResult(installed, latest);
+      printCheckResult(installed, latest, operator);
       return;
     }
     if (targetVersion == null && installed.filter(v -> v.compareTo(latest) >= 0).isPresent()) {
@@ -139,7 +140,7 @@ public final class UpgradeCommand implements Runnable {
         System.out.println(Banner.stepLine(2, 4, "Verifying checksum...", Ansi.AUTO));
       }
       System.out.println("[dry-run] Verify SHA-256 checksum");
-      install(null, target, installed, latest, new Steps(3, 4));
+      install(null, target, installed, latest, new Steps(3, 4), operator);
       return;
     }
     var binary =
@@ -173,7 +174,7 @@ public final class UpgradeCommand implements Runnable {
       System.out.println(Banner.stepDoneLine(2, 4, "Checksum verified", Ansi.AUTO));
     }
     try (var staged = SailBinary.stage(binary, target)) {
-      install(staged, target, installed, latest, new Steps(3, 4));
+      install(staged, target, installed, latest, new Steps(3, 4), operator);
     }
   }
 
@@ -245,7 +246,7 @@ public final class UpgradeCommand implements Runnable {
    * run backwards. The installed bytes themselves are a no-op, so a repeated upgrade restarts
    * nothing; a different build of the same version is reinstalled.
    */
-  private void installLocal() throws Exception {
+  private void installLocal(OperatorCommand operator) throws Exception {
     if (checkOnly) {
       throw new IllegalArgumentException(
           "--check asks GitHub for the latest release, which --binary does not use. Pass either"
@@ -268,15 +269,16 @@ public final class UpgradeCommand implements Runnable {
       return;
     }
     if (dryRun) {
-      verifyAndInstall(null, file, file, target);
+      verifyAndInstall(null, file, file, target, operator);
       return;
     }
     try (var staged = SailBinary.stage(binary, target)) {
-      verifyAndInstall(staged, staged.file(), file, target);
+      verifyAndInstall(staged, staged.file(), file, target, operator);
     }
   }
 
-  private void verifyAndInstall(SailBinary.Staged staged, Path runnable, Path file, Path target)
+  private void verifyAndInstall(
+      SailBinary.Staged staged, Path runnable, Path file, Path target, OperatorCommand operator)
       throws IOException {
     SemVer offered;
     try {
@@ -296,7 +298,7 @@ public final class UpgradeCommand implements Runnable {
       System.out.println(
           Banner.stepDoneLine(1, 3, "Verified " + file + " (sail " + offered + ")", Ansi.AUTO));
     }
-    install(staged, target, installed, offered, new Steps(2, 3));
+    install(staged, target, installed, offered, new Steps(2, 3), operator);
   }
 
   /**
@@ -384,7 +386,12 @@ public final class UpgradeCommand implements Runnable {
    * nothing, so {@code staged} is null there.
    */
   private void install(
-      SailBinary.Staged staged, Path binaryPath, Optional<SemVer> from, SemVer to, Steps steps)
+      SailBinary.Staged staged,
+      Path binaryPath,
+      Optional<SemVer> from,
+      SemVer to,
+      Steps steps,
+      OperatorCommand operator)
       throws IOException {
     if (!json) {
       System.out.println(
@@ -404,7 +411,7 @@ public final class UpgradeCommand implements Runnable {
 
     RestartStatus restartStatus;
     if (provisioned.getAsBoolean()) {
-      migrateDatabase(binaryPath);
+      migrateDatabase(binaryPath, operator);
       restartStatus = restartSailApi(steps);
     } else {
       restartStatus = RestartStatus.SKIPPED_CLIENT;
@@ -574,7 +581,7 @@ public final class UpgradeCommand implements Runnable {
    * has bitten us every release since 0.13.4. (The host-level steps — relocating {@code host.yaml},
    * syncing {@code authorized_keys} — run only in the full {@code migrate}, as they need root.)
    */
-  private void migrateDatabase(Path binaryPath) {
+  private void migrateDatabase(Path binaryPath, OperatorCommand operator) {
     var dbPath = SailPaths.controlPlaneDb();
     if (dryRun) {
       if (!json) {
@@ -586,8 +593,8 @@ public final class UpgradeCommand implements Runnable {
       }
       return;
     }
-    bootstrapAdminToken(dbPath);
-    runNewBinaryMigrate(binaryPath);
+    bootstrapAdminToken(dbPath, operator);
+    runNewBinaryMigrate(binaryPath, operator);
   }
 
   /**
@@ -595,10 +602,10 @@ public final class UpgradeCommand implements Runnable {
    * was introduced, so the OLD binary is safe to do this. Everything else (new schema migrations,
    * new data migrations) is handled by the sub-process that runs the NEW binary.
    */
-  private void bootstrapAdminToken(Path dbPath) {
+  private void bootstrapAdminToken(Path dbPath, OperatorCommand operator) {
     try {
       SailPaths.ensureDataDir(dbPath.getParent());
-      try (var operations = OperationsFactory.open(dbPath)) {
+      try (var operations = OperationsFactory.open(dbPath, operator)) {
         if (operations.schema().version() == 0) {
           operations.schema().initialize();
         }
@@ -628,7 +635,7 @@ public final class UpgradeCommand implements Runnable {
    * auto-upgrades: it must migrate as the version just installed, not fetch another. Tolerates
    * non-zero exits; the {@code sail-api} restart afterwards is a second chance.
    */
-  private void runNewBinaryMigrate(Path binaryPath) {
+  private void runNewBinaryMigrate(Path binaryPath, OperatorCommand operator) {
     try {
       var builder =
           new ProcessBuilder(binaryPath.toString(), "migrate", "--non-interactive").inheritIO();
@@ -640,7 +647,7 @@ public final class UpgradeCommand implements Runnable {
         if (!json) {
           System.err.println(
               "    Migrate sub-process timed out after 2m. Run '"
-                  + OperatorCommand.here().sail("migrate")
+                  + operator.sail("migrate")
                   + "' manually.");
         }
       } else if (process.exitValue() != 0 && !json) {
@@ -648,7 +655,7 @@ public final class UpgradeCommand implements Runnable {
             "    Migrate sub-process exited with code "
                 + process.exitValue()
                 + ". Run '"
-                + OperatorCommand.here().sail("migrate")
+                + operator.sail("migrate")
                 + "' manually.");
       }
     } catch (Throwable e) {
@@ -657,7 +664,7 @@ public final class UpgradeCommand implements Runnable {
             "    Could not spawn migrate sub-process: "
                 + e.getMessage()
                 + ". The sail-api restart will retry; or run '"
-                + OperatorCommand.here().sail("migrate")
+                + operator.sail("migrate")
                 + "' manually.");
       }
     }
@@ -683,7 +690,8 @@ public final class UpgradeCommand implements Runnable {
     }
   }
 
-  private void printCheckResult(Optional<SemVer> installed, SemVer latest) {
+  private void printCheckResult(
+      Optional<SemVer> installed, SemVer latest, OperatorCommand operator) {
     var available = installed.map(current -> current.compareTo(latest) < 0).orElse(true);
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -696,8 +704,7 @@ public final class UpgradeCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|bold Update available:|@ " + shown(installed) + " \u2192 " + latest));
       System.out.println(
-          Ansi.AUTO.string(
-              "  @|faint Run '" + OperatorCommand.here().sail("upgrade") + "' to install.|@"));
+          Ansi.AUTO.string("  @|faint Run '" + operator.sail("upgrade") + "' to install.|@"));
     } else {
       System.out.println(
           Ansi.AUTO.string(

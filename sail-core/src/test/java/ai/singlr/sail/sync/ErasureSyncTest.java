@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -101,7 +102,11 @@ class ErasureSyncTest {
     var refused =
         assertThrows(
             IllegalArgumentException.class,
-            () -> node.specs.restore("old", erasure(node.db, erased.entities().getFirst()).rev()));
+            () ->
+                node.specs.restore(
+                    "old",
+                    erasure(node.db, erased.entities().getFirst()).rev(),
+                    OperatorCommand.PLAIN));
     assertTrue(refused.getMessage().contains("was pruned"), refused.getMessage());
 
     assertConverged();

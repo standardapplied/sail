@@ -85,7 +85,7 @@ public final class ProjectDefinitions {
   }
 
   /** Loads and parses the definition into a {@link SailYaml}, database-first. */
-  public static SailYaml load(String name, Path explicitFile) {
+  public static SailYaml load(String name, Path explicitFile, OperatorCommand operator) {
     var text =
         definition(name, explicitFile)
             .orElseThrow(
@@ -94,9 +94,9 @@ public final class ProjectDefinitions {
                         "No descriptor found for project '"
                             + name
                             + "'. Author one with '"
-                            + OperatorCommand.here().sail("project init")
+                            + operator.sail("project init")
                             + "', or sync it from main with '"
-                            + OperatorCommand.here().sail("sync")
+                            + operator.sail("sync")
                             + "'."));
     return SailYaml.fromMap(YamlUtil.parseMap(text));
   }
@@ -108,12 +108,13 @@ public final class ProjectDefinitions {
    * is parsed unchanged and never touches the local identity. This is the seam where the fleet's
    * identity-free definition becomes a container that commits as the engineer and trusts their key.
    */
-  public static SailYaml resolveForProvisioning(String definitionText) {
-    return resolveForProvisioning(definitionText, LocalIdentity.detect());
+  public static SailYaml resolveForProvisioning(String definitionText, OperatorCommand operator) {
+    return resolveForProvisioning(definitionText, LocalIdentity.detect(), operator);
   }
 
-  static SailYaml resolveForProvisioning(String definitionText, LocalIdentity identity) {
-    return resolveForProvisioning(definitionText, identity::valueFor);
+  static SailYaml resolveForProvisioning(
+      String definitionText, LocalIdentity identity, OperatorCommand operator) {
+    return resolveForProvisioning(definitionText, identity::valueFor, operator);
   }
 
   /**
@@ -122,9 +123,9 @@ public final class ProjectDefinitions {
    * the source decides where each value comes from, the definition stays identity-free until here.
    */
   public static SailYaml resolveForProvisioning(
-      String definitionText, UnaryOperator<String> values) {
+      String definitionText, UnaryOperator<String> values, OperatorCommand operator) {
     var config = SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
-    requireDevUser(config);
+    requireDevUser(config, operator);
     return config;
   }
 
@@ -133,7 +134,7 @@ public final class ProjectDefinitions {
    * {@code dev} (uid 1000, {@code /home/dev}). Refused here, where only provisioning reads a
    * descriptor, and not when one is parsed, so sync, connect and listing still read such a row.
    */
-  private static void requireDevUser(SailYaml config) {
+  private static void requireDevUser(SailYaml config, OperatorCommand operator) {
     var user = config.sshUser();
     if (!"dev".equals(user)) {
       var name = config.name();
@@ -144,7 +145,7 @@ public final class ProjectDefinitions {
               + " Remove 'ssh.user' from "
               + name
               + "'s descriptor (or set it to dev) with '"
-              + OperatorCommand.here().sail("project edit " + name)
+              + operator.sail("project edit " + name)
               + "', then apply again. A container already created as '"
               + user
               + "' must be recreated: 'sudo sail project destroy "
@@ -163,8 +164,8 @@ public final class ProjectDefinitions {
    * cannot be read, fails before anything is replaced.
    */
   public static SailYaml definitionWithBoxIdentity(
-      HostCatalog catalog, String name, LocalIdentity identity) {
-    catalog.definitions().require(name);
+      HostCatalog catalog, String name, LocalIdentity identity, OperatorCommand operator) {
+    catalog.definitions().require(name, operator);
     var text = catalog.project(name).orElseThrow().definition();
     var values = new LinkedHashMap<String, String>();
     for (var field : List.of(PlaceholderResolver.GIT_NAME, PlaceholderResolver.GIT_EMAIL)) {

@@ -19,6 +19,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WatcherSpawner;
@@ -69,20 +70,21 @@ public final class AgentStopCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
-    try (var sync = NodeSync.scheduler(syncOptions.noSync())) {
-      execute(sync);
+    try (var sync = NodeSync.scheduler(syncOptions.noSync(), operator)) {
+      execute(sync, operator);
     }
   }
 
-  private void execute(SyncScheduler sync) throws Exception {
+  private void execute(SyncScheduler sync, OperatorCommand operator) throws Exception {
     sync.freshenRead();
     var shell = new ShellExecutor(false);
     var handle = Objects.toString(HostSync.handle(), "");
     try (var operations =
         OperationsFactory.open(
-            shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE)) {
+            shell, hooks(shell, this::publishLifecycle, listener()), SessionYield.NONE, operator)) {
       var outcome = stopAsOperator(operations, name, handle, dryRun);
       render(outcome);
       if (!dryRun && outcome.mutated()) {
@@ -114,8 +116,10 @@ public final class AgentStopCommand implements Runnable {
       Sqlite db,
       ShellExec shell,
       DispatchOperations.EventSink events,
-      StopOperations.Listener listener) {
-    return OperationsFactory.create(db, shell, hooks(shell, events, listener), SessionYield.NONE);
+      StopOperations.Listener listener,
+      OperatorCommand operator) {
+    return OperationsFactory.create(
+        db, shell, hooks(shell, events, listener), SessionYield.NONE, operator);
   }
 
   private static OperationHooks hooks(

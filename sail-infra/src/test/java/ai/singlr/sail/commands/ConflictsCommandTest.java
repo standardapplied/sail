@@ -21,6 +21,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -81,13 +82,15 @@ class ConflictsCommandTest {
 
   @Test
   void renderListEmptyIsClean() {
-    assertTrue(ConflictsCommand.renderList(List.of(), false).contains("No conflicts"));
+    assertTrue(
+        ConflictsCommand.renderList(List.of(), false, OperatorCommand.PLAIN)
+            .contains("No conflicts"));
   }
 
   @Test
   void renderListJsonCarriesEntityAndFields() {
     conflicts.record("spec", "auth", "{}", "{}", "{}", null, null, List.of("title"));
-    var out = ConflictsCommand.renderList(conflicts.pending(), true);
+    var out = ConflictsCommand.renderList(conflicts.pending(), true, OperatorCommand.PLAIN);
     assertTrue(out.contains("\"entity\": \"auth\""));
     assertTrue(out.contains("\"title\""));
   }
@@ -95,7 +98,7 @@ class ConflictsCommandTest {
   @Test
   void renderListHumanNamesTheConflictingEntity() {
     conflicts.record("spec", "auth", "{}", "{}", "{}", null, null, List.of("title"));
-    var out = ConflictsCommand.renderList(conflicts.pending(), false);
+    var out = ConflictsCommand.renderList(conflicts.pending(), false, OperatorCommand.PLAIN);
     assertTrue(out.contains("auth"));
     assertTrue(out.contains("title"));
   }
@@ -140,7 +143,7 @@ class ConflictsCommandTest {
   @Test
   void renderListJsonCarriesEntityType() {
     conflicts.record("file", "acme/x.txt", "{}", "{}", "{}", null, null, List.of("content"));
-    var out = ConflictsCommand.renderList(conflicts.pending(), true);
+    var out = ConflictsCommand.renderList(conflicts.pending(), true, OperatorCommand.PLAIN);
     assertTrue(out.contains("\"type\": \"file\""));
   }
 
@@ -200,7 +203,8 @@ class ConflictsCommandTest {
       Acting.system(() -> nodeFiles.put("acme", "file", new ByteArrayInputStream(mine), 0644));
       SyncBox.round(main.db, node.db, "file");
 
-      var conflict = new ConflictOperations(node.db).find("file", "acme/file");
+      var conflict =
+          new ConflictOperations(node.db, OperatorCommand.PLAIN).find("file", "acme/file");
       assertEquals(List.of("content"), conflict.fields());
       var diff =
           ConflictMerge.diff(
@@ -224,7 +228,13 @@ class ConflictsCommandTest {
   private HostOperations operations() {
     var config = new SyncConfig("node", "sail@main", "node");
     return OperationsFactory.create(
-            db, new ShellExecutor(true), null, null, SyncScheduler.disabled(), SessionYield.NONE)
+            db,
+            new ShellExecutor(true),
+            null,
+            null,
+            SyncScheduler.disabled(),
+            SessionYield.NONE,
+            OperatorCommand.PLAIN)
         .useControlPlane(
             db,
             tempDir,
@@ -235,7 +245,8 @@ class ConflictsCommandTest {
                 () -> config,
                 target -> {
                   throw new IOException("main unavailable");
-                }));
+                },
+                OperatorCommand.PLAIN));
   }
 
   private void parkASpecAndItsRoomUnderOneId() {
@@ -298,7 +309,7 @@ class ConflictsCommandTest {
   }
 
   private ConflictsCommand.Show show() {
-    return new ConflictsCommand.Show(this::operations);
+    return new ConflictsCommand.Show(ignored -> operations());
   }
 
   private ConflictsCommand.Resolve resolve() {
@@ -306,7 +317,7 @@ class ConflictsCommandTest {
   }
 
   private ConflictsCommand.Resolve resolve(Editor editor) {
-    return new ConflictsCommand.Resolve(this::operations, editor);
+    return new ConflictsCommand.Resolve(ignored -> operations(), editor);
   }
 
   private static Editor mergingTitle(List<Path> opened, Runnable meanwhile) {
@@ -327,7 +338,7 @@ class ConflictsCommandTest {
   void theListVerbPrintsWhatIsParkedOnThisBox() {
     parkASpecAndItsRoomUnderOneId();
 
-    var listed = run(new ConflictsCommand(this::operations), "--json");
+    var listed = run(new ConflictsCommand(ignored -> operations()), "--json");
 
     assertEquals(0, listed.exit());
     assertEquals(

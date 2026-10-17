@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -38,13 +39,13 @@ class AgentReportCommandTest {
       Acting.system(
           () -> new ProjectStore(db).upsert("acme", "name: acme\nagent:\n  type: codex\n"));
     }
-    var acme = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
+    var acme = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
     new CommandLine(acme).parseArgs("acme", "-f", "/abs/sail.yaml");
-    var absent = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
+    var absent = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
     new CommandLine(absent).parseArgs("absent");
 
-    assertEquals("codex", acme.definition().agent().type());
-    var refused = assertThrows(ApiException.class, absent::definition);
+    assertEquals("codex", acme.definition(OperatorCommand.PLAIN).agent().type());
+    var refused = assertThrows(ApiException.class, () -> absent.definition(OperatorCommand.PLAIN));
     assertEquals("Project 'absent' is not in the catalog.", refused.getMessage());
   }
 
@@ -76,9 +77,9 @@ class AgentReportCommandTest {
       Acting.system(() -> new SpecStore(db).create(specRow("auth", "acme", "Add auth")));
       Acting.system(() -> new SpecStore(db).create(specRow("other", "elsewhere", "Unrelated")));
     }
-    var command = new AgentReportCommand(() -> OperationsFactory.open(dbPath));
+    var command = new AgentReportCommand(operator -> OperationsFactory.open(dbPath, operator));
 
-    var specs = command.projectSpecs("acme");
+    var specs = command.projectSpecs("acme", OperatorCommand.PLAIN);
 
     assertEquals(1, specs.size());
     assertEquals("auth", specs.getFirst().id());
@@ -88,11 +89,11 @@ class AgentReportCommandTest {
   void projectSpecsReturnsEmptyWhenTheDatabaseIsUnavailable() {
     var command =
         new AgentReportCommand(
-            () -> {
+            ignored -> {
               throw new IllegalStateException("no control-plane database");
             });
 
-    assertTrue(command.projectSpecs("acme").isEmpty());
+    assertTrue(command.projectSpecs("acme", OperatorCommand.PLAIN).isEmpty());
   }
 
   private static SpecStore.SpecRow specRow(String id, String project, String title) {

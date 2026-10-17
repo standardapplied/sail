@@ -44,6 +44,7 @@ public final class UpCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
@@ -59,9 +60,9 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, r, System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
+        Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
-        printOvercommitHints(mgr);
+        printOvercommitHints(mgr, operator);
       }
       case ContainerState.Stopped ignored -> {
         if (!json) {
@@ -78,13 +79,12 @@ public final class UpCommand implements Runnable {
         Banner.printBranding(System.out, Ansi.AUTO);
         System.out.println();
         Banner.printContainerStatus(name, new ContainerState.Running(ip), System.out, Ansi.AUTO);
-        Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
+        Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
         printTunnelHints(shell);
-        printOvercommitHints(mgr);
+        printOvercommitHints(mgr, operator);
       }
       case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              ContainerStateGuard.notCreated(name, OperatorCommand.here()));
+          throw new IllegalStateException(ContainerStateGuard.notCreated(name, operator));
       case ContainerState.Error e ->
           throw new IllegalStateException("Container error: " + e.message());
     }
@@ -106,7 +106,7 @@ public final class UpCommand implements Runnable {
     }
   }
 
-  private void printOvercommitHints(ContainerManager mgr) {
+  private void printOvercommitHints(ContainerManager mgr, OperatorCommand operator) {
     try {
       var containers = mgr.listAll();
       var running =
@@ -117,7 +117,7 @@ public final class UpCommand implements Runnable {
       var hostInfo = new HostDetector().detect();
       var capacity = new ResourceChecker.HostCapacity(hostInfo.threads(), hostInfo.memoryMb());
       var overcommit = ResourceChecker.check(running, capacity);
-      Banner.printOvercommitWarning(overcommit, System.out, Ansi.AUTO);
+      Banner.printOvercommitWarning(overcommit, operator, System.out, Ansi.AUTO);
     } catch (Exception ignored) {
     }
   }

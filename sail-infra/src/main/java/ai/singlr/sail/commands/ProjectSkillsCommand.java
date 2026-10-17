@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
@@ -63,6 +64,10 @@ public final class ProjectSkillsCommand implements Runnable {
     new picocli.CommandLine(this).usage(System.out);
   }
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   /**
    * One folder under {@code .sail/skills/} as {@code ls} shows it.
    *
@@ -83,7 +88,7 @@ public final class ProjectSkillsCommand implements Runnable {
     return skills.all(project).stream().map(Row::of).toList();
   }
 
-  static String render(String project, List<Row> rows, boolean json) {
+  static String render(String project, List<Row> rows, boolean json, OperatorCommand operator) {
     if (json) {
       var list =
           rows.stream()
@@ -101,7 +106,7 @@ public final class ProjectSkillsCommand implements Runnable {
     if (rows.isEmpty()) {
       return Ansi.AUTO.string(
           "  @|faint No skills: share one with '"
-              + OperatorCommand.here().sail("project skills add <folder>")
+              + operator.sail("project skills add <folder>")
               + "'.|@\n");
     }
     var name = width("SKILL", rows.stream().map(Row::name).toList());
@@ -131,24 +136,29 @@ public final class ProjectSkillsCommand implements Runnable {
     @Option(names = "--json", description = "Output as JSON.")
     private boolean json;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Ls() {
-      this(OperationsFactory::open);
+      this.operations = OperationsFactory::open;
     }
 
     Ls(Supplier<HostOperations> operations) {
-      this.operations = operations;
+      this.operations = ignored -> operations.get();
     }
 
     @Override
     public Integer call() {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
-      try (var operations = this.operations.get()) {
-        operations.catalog().definitions().require(project);
+      try (var operations = this.operations.apply(operator)) {
+        operations.catalog().definitions().require(project, operator);
         System.out.print(
-            render(project, rows(project, new ProjectSkills(operations::projectFiles)), json));
+            render(
+                project,
+                rows(project, new ProjectSkills(operations::projectFiles)),
+                json,
+                operator));
         return 0;
       }
     }
@@ -172,19 +182,20 @@ public final class ProjectSkillsCommand implements Runnable {
     @Option(names = "--name", description = "The skill's name (default: the folder's name).")
     private String name;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Add() {
-      this(OperationsFactory::open);
+      this.operations = OperationsFactory::open;
     }
 
     Add(Supplier<HostOperations> operations) {
-      this.operations = operations;
+      this.operations = ignored -> operations.get();
     }
 
     @Override
     public Integer call() throws Exception {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
       var source = folder.toAbsolutePath().normalize();
       if (!Files.isDirectory(source, LinkOption.NOFOLLOW_LINKS)) {
@@ -194,7 +205,7 @@ public final class ProjectSkillsCommand implements Runnable {
       var skillName = Strings.isNotBlank(name) ? name : source.getFileName().toString();
       ProjectSkills.requireOwnName(skillName);
       var local = read(source, skillName);
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         var files = operations.projectFiles(project);
         for (var file : local) {
           var problem = files.limits().problem(file.size());
@@ -293,23 +304,24 @@ public final class ProjectSkillsCommand implements Runnable {
     @Parameters(index = "0", description = "The skill's name.")
     private String name;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Rm() {
-      this(OperationsFactory::open);
+      this.operations = OperationsFactory::open;
     }
 
     Rm(Supplier<HostOperations> operations) {
-      this.operations = operations;
+      this.operations = ignored -> operations.get();
     }
 
     @Override
     public Integer call() throws Exception {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
       StageSkill.requireName(name);
       var folder = StageSkill.projectFolder(name);
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         var files = operations.projectFiles(project);
         var paths =
             files.list().stream()
@@ -357,26 +369,27 @@ public final class ProjectSkillsCommand implements Runnable {
     @Parameters(index = "0", description = "The skill's name.")
     private String name;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Show() {
-      this(OperationsFactory::open);
+      this.operations = OperationsFactory::open;
     }
 
     Show(Supplier<HostOperations> operations) {
-      this.operations = operations;
+      this.operations = ignored -> operations.get();
     }
 
     @Override
     public Integer call() throws IOException {
+      var operator = operator();
       if (SpecSkillGenerator.NAME.equals(name)) {
         System.out.print(SpecSkillGenerator.skillMd());
         return 0;
       }
-      project = CurrentProject.require(project);
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
       StageSkill.requireName(name);
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         var manifest =
             operations
                 .projectFiles(project)

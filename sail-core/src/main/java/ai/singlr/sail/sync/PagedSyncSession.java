@@ -5,7 +5,6 @@
 
 package ai.singlr.sail.sync;
 
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -89,6 +88,7 @@ public final class PagedSyncSession implements SyncSession {
   private List<SyncSession.Denial> denials = new ArrayList<>();
   private List<SyncSession.Refusal> refusals = new ArrayList<>();
   private Consumer<String> notice = ignored -> {};
+  private Consumer<SyncSession.Denial> onDenial = ignored -> {};
   private String broken;
   private String handle;
   private long mainFileMax;
@@ -124,6 +124,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.asked = asked;
     copy.contentFields = contentFields;
     copy.notice = notice;
+    copy.onDenial = onDenial;
     copy.handle = handle;
     copy.mainFileMax = mainFileMax;
     copy.scope = scope;
@@ -137,7 +138,8 @@ public final class PagedSyncSession implements SyncSession {
       OutputStream out,
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
-      Consumer<String> notice) {
+      Consumer<String> notice,
+      Consumer<SyncSession.Denial> onDenial) {
     if (welcome.protocol() != SyncWire.PROTOCOL) {
       throw new SyncTransportException(
           "refused",
@@ -165,6 +167,7 @@ public final class PagedSyncSession implements SyncSession {
     }
     var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
     session.notice = notice;
+    session.onDenial = onDenial;
     session.handle = welcome.handle();
     session.mainFileMax = welcome.fileMax();
     session.scope = welcome.scope();
@@ -1066,7 +1069,7 @@ public final class PagedSyncSession implements SyncSession {
           }
           var denial = new SyncSession.Denial(type, denied.id(), denied.reason());
           denials.add(denial);
-          notice.accept(denial.describe(OperatorCommand.here()));
+          onDenial.accept(denial);
           yield new CommitOutcome.Denied(
               denied.reason(),
               currentRev(offer.id()),

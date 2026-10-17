@@ -38,13 +38,14 @@ public final class SnapsCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name);
+    ContainerStateGuard.requireCreated(state, name, operator);
 
     var snapshots = snapMgr.list(name);
 
@@ -62,7 +63,7 @@ public final class SnapsCommand implements Runnable {
               "  @|faint No snapshots for "
                   + name
                   + ". Create one with:|@ @|bold "
-                  + OperatorCommand.here().sail("project snapshot create " + name)
+                  + operator.sail("project snapshot create " + name)
                   + "|@"));
       return;
     }

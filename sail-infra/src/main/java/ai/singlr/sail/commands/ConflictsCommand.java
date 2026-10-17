@@ -21,7 +21,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -50,14 +50,18 @@ public final class ConflictsCommand implements Callable<Integer> {
   @Option(names = "--json", description = "Output the pending conflicts as JSON.")
   private boolean json;
 
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
 
   public ConflictsCommand() {
     this(OperationsFactory::open);
   }
 
-  ConflictsCommand(Supplier<HostOperations> operations) {
+  ConflictsCommand(Function<OperatorCommand, HostOperations> operations) {
     this.operations = operations;
+  }
+
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
   }
 
   /** Which conflict a verb acts on: ids are unique only within a type. */
@@ -74,14 +78,16 @@ public final class ConflictsCommand implements Callable<Integer> {
 
   @Override
   public Integer call() {
-    try (var operations = this.operations.get()) {
+    var operator = operator();
+    try (var operations = this.operations.apply(operator)) {
       var pending = operations.conflicts();
-      System.out.println(renderList(pending, json));
+      System.out.println(renderList(pending, json, operator));
       return 0;
     }
   }
 
-  static String renderList(List<SyncConflicts.Conflict> pending, boolean json) {
+  static String renderList(
+      List<SyncConflicts.Conflict> pending, boolean json, OperatorCommand operator) {
     if (json) {
       var rows =
           pending.stream()
@@ -116,7 +122,6 @@ public final class ConflictsCommand implements Callable<Integer> {
                   + c.detectedAt()
                   + ")|@\n"));
     }
-    var operator = OperatorCommand.here();
     out.append(
         Ansi.AUTO.string(
             "  Run @|bold " + operator.sail("conflicts show <id>") + "|@ to inspect, "));
@@ -139,19 +144,20 @@ public final class ConflictsCommand implements Callable<Integer> {
         description = "Print the record to edit and pass to 'resolve --merge-file' (specs only).")
     private boolean template;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
 
     Show() {
       this(OperationsFactory::open);
     }
 
-    Show(Supplier<HostOperations> operations) {
+    Show(Function<OperatorCommand, HostOperations> operations) {
       this.operations = operations;
     }
 
     @Override
     public Integer call() {
-      try (var operations = this.operations.get()) {
+      var operator = operator();
+      try (var operations = this.operations.apply(operator)) {
         if (template) {
           System.out.print(operations.conflictMergeTemplate(address.type, address.entity));
           return 0;
@@ -208,14 +214,14 @@ public final class ConflictsCommand implements Callable<Integer> {
 
     @Mixin private Address address;
 
-    private final Supplier<HostOperations> operations;
+    private final Function<OperatorCommand, HostOperations> operations;
     private final Editor editor;
 
     Resolve() {
       this(OperationsFactory::open, Editor.fromEnvironment());
     }
 
-    Resolve(Supplier<HostOperations> operations, Editor editor) {
+    Resolve(Function<OperatorCommand, HostOperations> operations, Editor editor) {
       this.operations = operations;
       this.editor = editor;
     }
@@ -236,13 +242,14 @@ public final class ConflictsCommand implements Callable<Integer> {
 
     @Override
     public Integer call() throws Exception {
+      var operator = operator();
       var strategy = strategy(mine, theirs, merge || mergeFile != null);
       if (strategy == null) {
         System.err.println(
             Banner.errorLine("Choose exactly one of --mine, --theirs, or --merge.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         var conflict = operations.conflict(address.type, address.entity);
         if (conflict == null) {
           System.err.println(
@@ -251,9 +258,14 @@ public final class ConflictsCommand implements Callable<Integer> {
         }
         var type = conflict.entityType();
         if (strategy == Resolution.Strategy.MERGE && mergeFile == null) {
-          return mergeInEditor(operations, type);
+          return mergeInEditor(operations, type, operator);
         }
-        resolve(operations, type, strategy, mergeFile == null ? null : Files.readString(mergeFile));
+        resolve(
+            operations,
+            type,
+            strategy,
+            mergeFile == null ? null : Files.readString(mergeFile),
+            operator);
         return 0;
       }
     }
@@ -274,7 +286,7 @@ public final class ConflictsCommand implements Callable<Integer> {
      * refused before the editor opens; once the engineer has saved, the file outlives any refusal
      * of the resolve, as reference for the redo.
      */
-    private int mergeInEditor(HostOperations operations, String type)
+    private int mergeInEditor(HostOperations operations, String type, OperatorCommand operator)
         throws IOException, InterruptedException {
       var template = operations.conflictMergeTemplate(type, address.entity);
       var file = Files.writeString(Files.createTempFile("sail-merge-", ".yaml"), template);
@@ -282,7 +294,7 @@ public final class ConflictsCommand implements Callable<Integer> {
         return 1;
       }
       try {
-        resolve(operations, type, Resolution.Strategy.MERGE, Files.readString(file));
+        resolve(operations, type, Resolution.Strategy.MERGE, Files.readString(file), operator);
       } catch (IOException | RuntimeException e) {
         System.err.println(
             Banner.warnLine("Your merge is kept for reference at " + file + ".", Ansi.AUTO));
@@ -309,7 +321,11 @@ public final class ConflictsCommand implements Callable<Integer> {
     }
 
     private void resolve(
-        HostOperations operations, String type, Resolution.Strategy strategy, String merged) {
+        HostOperations operations,
+        String type,
+        Resolution.Strategy strategy,
+        String merged,
+        OperatorCommand operator) {
       Actor.run(
           operations.identity().operator(),
           () -> operations.resolveConflict(type, address.entity, new Resolution(strategy, merged)));
@@ -318,7 +334,7 @@ public final class ConflictsCommand implements Callable<Integer> {
               "  @|green ✓|@ Resolved @|yellow "
                   + address.entity
                   + "|@. Run @|bold "
-                  + OperatorCommand.here().sail("sync")
+                  + operator.sail("sync")
                   + "|@ to propagate."));
     }
   }

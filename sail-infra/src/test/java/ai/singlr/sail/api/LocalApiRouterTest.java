@@ -16,6 +16,7 @@ import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -177,7 +178,7 @@ class LocalApiRouterTest {
           TestOperations.OWNER, () -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       parkTitle(box, local, "remote");
-      var conflicts = new ConflictOperations(box.db);
+      var conflicts = new ConflictOperations(box.db, OperatorCommand.PLAIN);
       var rev = box.specs.revOf("auth");
       var lane =
           new LocalApiRouter(

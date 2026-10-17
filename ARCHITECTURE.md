@@ -786,7 +786,11 @@ clone a project's source repos into its container at provision time, not to move
   applies record the same descriptor. Every `sail` command a box prints for its operator to
   type is rendered by `OperatorCommand`, which asks `RuntimeMode.detect` of the `sudo` caller's
   own home: a caller whose plain `sail` would be Refused reads it with `sudo`, and root logged
-  in directly, or an account on its own box, reads it plain.
+  in directly, or an account on its own box, reads it plain. The operator is resolved once per
+  command, at the command's door (`OperatorCommand.here()` in the command class), and passed
+  down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
+  operator as a parameter, so its `sudo` wording is a plain unit assertion
+  (`OperatorHintsTest` scans the sources for the seam).
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.

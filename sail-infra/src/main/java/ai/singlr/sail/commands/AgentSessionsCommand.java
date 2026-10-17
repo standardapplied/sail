@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,7 +42,7 @@ public final class AgentSessionsCommand implements Runnable {
 
   @SuppressWarnings("unchecked")
   private void execute() throws Exception {
-    project = CurrentProject.require(project);
+    project = CurrentProject.require(project, OperatorCommand.here());
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token())) {
       var result = client.get("/v1/runs?project=" + project);

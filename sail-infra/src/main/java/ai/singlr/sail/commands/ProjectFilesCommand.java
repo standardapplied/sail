@@ -67,6 +67,10 @@ public final class ProjectFilesCommand implements Runnable {
     new picocli.CommandLine(this).usage(System.out);
   }
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   @Command(
       name = "add",
       description =
@@ -107,10 +111,11 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
       if (source != null) {
-        return addOne();
+        return addOne(operator);
       }
       if (System.console() == null) {
         System.err.println(
@@ -118,10 +123,10 @@ public final class ProjectFilesCommand implements Runnable {
                 "Give a file to share, or run in a terminal to browse and pick.", Ansi.AUTO));
         return 1;
       }
-      return pick();
+      return pick(operator);
     }
 
-    private Integer addOne() throws Exception {
+    private Integer addOne(OperatorCommand operator) throws Exception {
       var path = Strings.isNotBlank(as) ? as : source.getFileName().toString();
       if (!Files.isRegularFile(source)) {
         System.err.println(Banner.errorLine("Not a file: " + source, Ansi.AUTO));
@@ -131,7 +136,7 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Unsafe share path: '" + path + "'.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(operator)) {
         var files = operations.projectFiles(project);
         var problem = files.limits().problem(Files.size(source));
         if (problem.isPresent()) {
@@ -153,15 +158,15 @@ public final class ProjectFilesCommand implements Runnable {
                     + "|@ on @|bold "
                     + project
                     + "|@."
-                    + propagationSuffix()));
+                    + propagationSuffix(operator)));
       }
       return 0;
     }
 
     private record Browse(FileSource source, Path root) {}
 
-    private Integer pick() throws Exception {
-      var browse = resolveBrowse();
+    private Integer pick(OperatorCommand operator) throws Exception {
+      var browse = resolveBrowse(operator);
       if (browse == null) {
         return 1;
       }
@@ -175,10 +180,13 @@ public final class ProjectFilesCommand implements Runnable {
       }
       var state = new FilePicker.State(browse.root(), browse.root(), picked.get());
       return shareSelected(
-          browse.source(), browse.root(), FilePicker.selectedFiles(browse.source(), state));
+          browse.source(),
+          browse.root(),
+          FilePicker.selectedFiles(browse.source(), state),
+          operator);
     }
 
-    private Browse resolveBrowse() {
+    private Browse resolveBrowse(OperatorCommand operator) {
       if (from != null) {
         var root = from.toAbsolutePath().normalize();
         if (!Files.isDirectory(root)) {
@@ -187,7 +195,7 @@ public final class ProjectFilesCommand implements Runnable {
         }
         return new Browse(new HostFileSource(), root);
       }
-      var workspace = ContainerWorkspace.resolve(project);
+      var workspace = ContainerWorkspace.resolve(project, operator);
       if (workspace.isEmpty()) {
         return null;
       }
@@ -225,7 +233,8 @@ public final class ProjectFilesCommand implements Runnable {
       }
     }
 
-    private Integer shareSelected(FileSource fileSource, Path root, List<Path> selected)
+    private Integer shareSelected(
+        FileSource fileSource, Path root, List<Path> selected, OperatorCommand operator)
         throws Exception {
       if (selected.isEmpty()) {
         System.out.println(Ansi.AUTO.string("  @|faint Nothing selected.|@"));
@@ -237,7 +246,7 @@ public final class ProjectFilesCommand implements Runnable {
         return 0;
       }
       Shared shared;
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(operator)) {
         shared =
             Actor.call(
                 operations.identity().operator(),
@@ -253,7 +262,7 @@ public final class ProjectFilesCommand implements Runnable {
                   + "|@ file(s) on @|bold "
                   + project
                   + "|@."
-                  + propagationSuffix()));
+                  + propagationSuffix(operator)));
       return 0;
     }
 
@@ -320,9 +329,10 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(operator)) {
         var rows = operations.projectFiles(project).list();
         if (json || rows.isEmpty()) {
           System.out.println(render(rows, project, json));
@@ -371,9 +381,10 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(operator)) {
         var bytes = operations.projectFiles(project).get(path).orElse(null);
         if (bytes == null) {
           System.err.println(
@@ -410,9 +421,10 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Override
     public Integer call() throws Exception {
-      project = CurrentProject.require(project);
+      var operator = operator();
+      project = CurrentProject.require(project, operator);
       NameValidator.requireValidProjectName(project);
-      try (var operations = OperationsFactory.open()) {
+      try (var operations = OperationsFactory.open(operator)) {
         if (!Actor.call(
             operations.identity().operator(),
             () -> operations.projectFiles(project).remove(path))) {
@@ -423,7 +435,10 @@ public final class ProjectFilesCommand implements Runnable {
       }
       System.out.println(
           Ansi.AUTO.string(
-              "  @|green ✓|@ Stopped sharing @|bold " + path + "|@." + propagationSuffix()));
+              "  @|green ✓|@ Stopped sharing @|bold "
+                  + path
+                  + "|@."
+                  + propagationSuffix(operator)));
       return 0;
     }
 
@@ -456,13 +471,14 @@ public final class ProjectFilesCommand implements Runnable {
         System.err.println(Banner.errorLine("Pass --project OR --all, not both.", Ansi.AUTO));
         return 1;
       }
-      try (var operations = OperationsFactory.open()) {
+      var operator = operator();
+      try (var operations = OperationsFactory.open(operator)) {
         var targets =
             all
                 ? operations.catalog().projectsWithFiles()
-                : List.of(CurrentProject.require(project));
+                : List.of(CurrentProject.require(project, operator));
         var report = export(operations::projectFiles, targets);
-        print(report);
+        print(report, operator);
         System.out.println(
             Ansi.AUTO.string(
                 "  @|green ✓|@ Pulled: "
@@ -497,7 +513,7 @@ public final class ProjectFilesCommand implements Runnable {
       return new ExportReport(written, deleted, List.copyOf(skipped), List.copyOf(undecided));
     }
 
-    static void print(ExportReport report) {
+    static void print(ExportReport report, OperatorCommand operator) {
       for (var skip : report.skipped()) {
         System.err.println(
             Ansi.AUTO.string("  @|yellow ⚠|@ kept local edit: " + skip + " (unchanged)"));
@@ -508,15 +524,15 @@ public final class ProjectFilesCommand implements Runnable {
                 "  @|yellow ⚠|@ kept "
                     + copy
                     + ": the upgrade could not tell it from your edit ("
-                    + MaterializedFiles.undecidedRemedy(OperatorCommand.here())
+                    + MaterializedFiles.undecidedRemedy(operator)
                     + ")"));
       }
     }
   }
 
   /** A leading-space propagation hint, or empty on a standalone box where sync does not apply. */
-  static String propagationSuffix() {
-    var hint = HostSync.propagationHint(HostSync.config());
+  static String propagationSuffix(OperatorCommand operator) {
+    var hint = HostSync.propagationHint(HostSync.config(), operator);
     return hint.isEmpty() ? "" : " " + hint;
   }
 }

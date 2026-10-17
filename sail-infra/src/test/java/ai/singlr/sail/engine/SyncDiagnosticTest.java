@@ -32,7 +32,8 @@ class SyncDiagnosticTest {
       new SchemaManager(db).migrate();
       var config = new SyncConfig("node", "sail@main", "mady", "box-1");
       var operations =
-          new SyncOperations(db, "node", home, () -> config, target -> closed(sshSaid));
+          new SyncOperations(
+              db, "node", home, () -> config, target -> closed(sshSaid), OperatorCommand.PLAIN);
       return assertThrows(
               SyncTransportException.class, () -> operations.sync(new SyncRequest(null)))
           .getMessage();

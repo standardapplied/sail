@@ -35,6 +35,10 @@ public final class SessionCommand {
     return socket != null ? socket : SailPaths.ptySocketPath();
   }
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   @Command(
       name = "new",
       description = "Create a session (default: a shell in --project's container).")
@@ -66,6 +70,7 @@ public final class SessionCommand {
 
     @Override
     public Integer call() throws Exception {
+      var operator = operator();
       var size = Stty.size(new int[] {24, 80});
       try (var client = SessionClient.connect(socketOrDefault(socket))) {
         client.create(
@@ -81,7 +86,7 @@ public final class SessionCommand {
           "Session '"
               + name
               + "' started. Attach with: "
-              + OperatorCommand.here().sail("session attach " + name));
+              + operator.sail("session attach " + name));
       return 0;
     }
   }
@@ -102,6 +107,7 @@ public final class SessionCommand {
 
     @Override
     public Integer call() throws Exception {
+      var operator = operator();
       var socketPath = socketOrDefault(socket);
       try (var client = SessionClient.connect(socketPath)) {
         var sessions = client.list();
@@ -112,8 +118,7 @@ public final class SessionCommand {
           return 0;
         }
         if (sessions.isEmpty()) {
-          System.out.println(
-              "No sessions. Start one with: " + OperatorCommand.here().sail("session new <name>"));
+          System.out.println("No sessions. Start one with: " + operator.sail("session new <name>"));
           return 0;
         }
         for (var session : sessions) {

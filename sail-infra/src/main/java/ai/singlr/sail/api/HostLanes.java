@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.HostAccess;
 import ai.singlr.sail.engine.HostToken;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectCatalogRename;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -262,15 +263,16 @@ final class HostLanes {
     }
   }
 
-  record Pty(Sqlite db, RoleRule roles, EventStore events) implements HostPty {
+  record Pty(Sqlite db, RoleRule roles, EventStore events, OperatorCommand operator)
+      implements HostPty {
     @Override
     public PtyIdentity identity(String token, String boxHandle) throws IOException {
-      return new HostAccess(db, roles).identity(token, boxHandle);
+      return new HostAccess(db, roles, operator).identity(token, boxHandle);
     }
 
     @Override
     public void admitRoom(String room, String project, PtyIdentity identity) throws IOException {
-      new HostAccess(db, roles).admit(room, project, identity);
+      new HostAccess(db, roles, operator).admit(room, project, identity);
     }
 
     @Override

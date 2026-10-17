@@ -19,6 +19,7 @@ import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -72,7 +73,8 @@ class ApiSpecPruneCommandTest {
                       bus,
                       persister,
                       specs,
-                      new ReviewStore(db))
+                      new ReviewStore(db),
+                      OperatorCommand.PLAIN)
                   .useRooms(new RoomStore(db))
                   .useControlPlane(
                       db,
@@ -84,7 +86,8 @@ class ApiSpecPruneCommandTest {
                           SyncConfig::unset,
                           target -> {
                             throw new IOException("no main");
-                          }));
+                          },
+                          OperatorCommand.PLAIN));
           server =
               new SailApiServer(
                   "127.0.0.1", 0, operations, TestAuth.tokens(db), bus, persister, null, null);

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.OperatorCommand;
 import org.junit.jupiter.api.Test;
 
 class HostSyncTest {
@@ -24,7 +25,7 @@ class HostSyncTest {
     assertTrue(HostSync.isStandalone(STANDALONE));
     assertFalse(HostSync.hasPeers(STANDALONE));
     assertFalse(HostSync.isNode(STANDALONE));
-    assertEquals("", HostSync.propagationHint(STANDALONE));
+    assertEquals("", HostSync.propagationHint(STANDALONE, OperatorCommand.PLAIN));
   }
 
   @Test
@@ -32,7 +33,8 @@ class HostSyncTest {
     assertFalse(HostSync.isStandalone(NODE));
     assertTrue(HostSync.hasPeers(NODE));
     assertTrue(HostSync.isNode(NODE));
-    assertEquals("Run sail sync to propagate.", HostSync.propagationHint(NODE));
+    assertEquals(
+        "Run sail sync to propagate.", HostSync.propagationHint(NODE, OperatorCommand.PLAIN));
   }
 
   @Test
@@ -40,6 +42,6 @@ class HostSyncTest {
     assertFalse(HostSync.isStandalone(MAIN));
     assertTrue(HostSync.hasPeers(MAIN));
     assertFalse(HostSync.isNode(MAIN));
-    assertTrue(HostSync.propagationHint(MAIN).contains("pull"));
+    assertTrue(HostSync.propagationHint(MAIN, OperatorCommand.PLAIN).contains("pull"));
   }
 }

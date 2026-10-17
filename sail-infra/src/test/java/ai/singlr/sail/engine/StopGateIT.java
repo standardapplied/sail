@@ -83,7 +83,8 @@ class StopGateIT extends AbstractIncusIT {
               null,
               SyncScheduler.disabled(),
               roster,
-              SessionYield.NONE);
+              SessionYield.NONE,
+              OperatorCommand.PLAIN);
       TestControlPlane.standalone(operations, db, socketDir);
       try (var server = new LocalApiSocket(operations, socketDir.resolve("api.sock"))) {
         server.start();

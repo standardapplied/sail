@@ -104,8 +104,9 @@ public final class ApiSpecCreateCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (fromReview != null) {
-      executeFromReview();
+      executeFromReview(operator);
       return;
     }
     if (id == null || title == null) {
@@ -115,7 +116,7 @@ public final class ApiSpecCreateCommand implements Runnable {
     }
     NameValidator.requireValidSpecId(id);
     var config = connection.resolve();
-    var resolvedProject = CurrentProject.require(project);
+    var resolvedProject = CurrentProject.require(project, operator);
 
     var body = new LinkedHashMap<String, Object>();
     body.put("id", id);
@@ -148,7 +149,7 @@ public final class ApiSpecCreateCommand implements Runnable {
   }
 
   @SuppressWarnings("unchecked")
-  private void executeFromReview() throws Exception {
+  private void executeFromReview(OperatorCommand operator) throws Exception {
     NameValidator.requireValidSpecId(fromReview);
     requireNoDerivedOptions();
     var config = connection.resolve();
@@ -177,8 +178,7 @@ public final class ApiSpecCreateCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint Review and edit it, then promote: "
-                  + OperatorCommand.here()
-                      .sail("spec update " + spec.get("id") + " --status pending")
+                  + operator.sail("spec update " + spec.get("id") + " --status pending")
                   + "|@"));
     }
   }

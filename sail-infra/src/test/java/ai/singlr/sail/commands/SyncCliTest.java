@@ -14,6 +14,7 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.EventStore;
@@ -110,7 +111,7 @@ class SyncCliTest {
 
   public static void main(String[] args) throws Exception {
     try (var db = Sqlite.open(SailPaths.controlPlaneDb());
-        var operations = OperationsFactory.open()) {
+        var operations = OperationsFactory.open(OperatorCommand.PLAIN)) {
       var schema = new SchemaManager(db);
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
@@ -148,7 +149,11 @@ class SyncCliTest {
         }
         for (var invocation = 0; invocation < 2; invocation++) {
           try (var scheduler =
-              NodeSync.scheduler(HostSync.config(), false, Map.of(NodeSync.FRESHEN_TTL_ENV, "1"))) {
+              NodeSync.scheduler(
+                  HostSync.config(),
+                  false,
+                  Map.of(NodeSync.FRESHEN_TTL_ENV, "1"),
+                  OperatorCommand.PLAIN)) {
             var errors = new ByteArrayOutputStream();
             var original = System.err;
             try (var capture = new PrintStream(errors, true, StandardCharsets.UTF_8)) {
@@ -243,7 +248,7 @@ class SyncCliTest {
       }
       assertTrue(output.toString(StandardCharsets.UTF_8).contains("No running agent session"));
     } else {
-      try (var scheduler = NodeSync.scheduler(false)) {
+      try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
         scheduler.freshenRead();
       }
     }
@@ -256,7 +261,7 @@ class SyncCliTest {
     assertEquals(
         List.of(Event.WellKnownTypes.SYNC_DEGRADED),
         new EventStore(db).recent(10).stream().map(EventStore.EventRow::type).toList());
-    try (var scheduler = NodeSync.scheduler(false)) {
+    try (var scheduler = NodeSync.scheduler(false, OperatorCommand.PLAIN)) {
       scheduler.freshenRead();
     }
     assertEquals(status, operations.syncStatus());

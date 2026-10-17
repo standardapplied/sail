@@ -24,8 +24,8 @@ public interface ProjectReader {
   Optional<SailYaml> read(String project);
 
   /** The project's definition, or a not-found error saying how to get one. */
-  default SailYaml require(String project) {
-    return read(project).orElseThrow(() -> absent(project, OperatorCommand.here()));
+  default SailYaml require(String project, OperatorCommand operator) {
+    return read(project).orElseThrow(() -> absent(project, operator));
   }
 
   /** The not-found error for a project this box holds no definition of. */

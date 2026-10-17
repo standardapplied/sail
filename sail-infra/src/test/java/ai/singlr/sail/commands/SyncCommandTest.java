@@ -20,6 +20,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -68,7 +69,8 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  SessionYield.NONE,
+                  OperatorCommand.PLAIN)
               .useControlPlane(
                   db,
                   Path.of(System.getProperty("java.io.tmpdir")),
@@ -79,7 +81,8 @@ class SyncCommandTest {
                       SyncConfig::unset,
                       target -> {
                         throw new IOException("offline");
-                      }));
+                      },
+                      OperatorCommand.PLAIN));
       var output = new ByteArrayOutputStream();
       var previous = System.out;
       try (var stream = new PrintStream(output)) {
@@ -115,7 +118,8 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  SessionYield.NONE,
+                  OperatorCommand.PLAIN)
               .useControlPlane(
                   db,
                   home,
@@ -126,7 +130,8 @@ class SyncCommandTest {
                       SyncConfig::unset,
                       target -> {
                         throw new IOException("offline");
-                      }));
+                      },
+                      OperatorCommand.PLAIN));
       var previous = System.out;
       try (var stream = new PrintStream(new ByteArrayOutputStream())) {
         System.setOut(stream);
@@ -156,7 +161,8 @@ class SyncCommandTest {
                   null,
                   null,
                   SyncScheduler.disabled(),
-                  SessionYield.NONE)
+                  SessionYield.NONE,
+                  OperatorCommand.PLAIN)
               .useControlPlane(
                   db,
                   home,
@@ -167,7 +173,8 @@ class SyncCommandTest {
                       () -> config,
                       target -> {
                         throw new IOException("main unavailable");
-                      }));
+                      },
+                      OperatorCommand.PLAIN));
       Supplier<SyncCommand.Status> status = () -> new SyncCommand.Status(() -> operations);
       assertEquals(
           Map.of(
@@ -203,7 +210,7 @@ class SyncCommandTest {
       assertEquals(1, stale.get("consecutive_failures"));
       assertEquals(
           "Stale since 2026-09-14T00:00:00Z — message: page exceeded 4 MiB",
-          SyncCommand.renderStatus(stale));
+          SyncCommand.renderStatus(stale, OperatorCommand.PLAIN));
 
       new SyncConflicts(db)
           .record("spec", "auth", "base", "mine", "theirs", null, null, List.of("title"));
@@ -213,14 +220,23 @@ class SyncCommandTest {
     assertEquals(
         "In sync with main — 1 conflict(s) need your decision: sail conflicts",
         SyncCommand.renderStatus(
-            Map.of("state", "in_sync", "main", "main", "pending_conflicts", 1)),
+            Map.of("state", "in_sync", "main", "main", "pending_conflicts", 1),
+            OperatorCommand.PLAIN),
         "a round that parked a conflict is not the whole truth");
     assertEquals(
-        "Syncing with main", SyncCommand.renderStatus(Map.of("state", "syncing", "main", "main")));
+        "Syncing with main",
+        SyncCommand.renderStatus(
+            Map.of("state", "syncing", "main", "main"), OperatorCommand.PLAIN));
     assertEquals(
-        "In sync with main", SyncCommand.renderStatus(Map.of("state", "in_sync", "main", "main")));
-    assertEquals("No sync round yet with main", SyncCommand.renderStatus(Map.of("main", "main")));
-    assertEquals("Not a node: nothing to sync with.", SyncCommand.renderStatus(Map.of()));
+        "In sync with main",
+        SyncCommand.renderStatus(
+            Map.of("state", "in_sync", "main", "main"), OperatorCommand.PLAIN));
+    assertEquals(
+        "No sync round yet with main",
+        SyncCommand.renderStatus(Map.of("main", "main"), OperatorCommand.PLAIN));
+    assertEquals(
+        "Not a node: nothing to sync with.",
+        SyncCommand.renderStatus(Map.of(), OperatorCommand.PLAIN));
     assertEquals(
         "In sync with main — 10 bytes fetched, 2 bytes sent, 4096 bytes freed",
         SyncCommand.renderStatus(
@@ -236,7 +252,8 @@ class SyncCommandTest {
                 "bytes_sent",
                 2,
                 "bytes_freed",
-                4096L)),
+                4096L),
+            OperatorCommand.PLAIN),
         "a round whose collection freed content says how much");
   }
 
@@ -265,7 +282,9 @@ class SyncCommandTest {
   void resolveMainPrefersTheExplicitFlag() {
     var resolved =
         SyncCommand.resolveMain(
-            "sail@override", new SyncConfig(SyncConfig.ROLE_NODE, "sail@cfg", null));
+            "sail@override",
+            new SyncConfig(SyncConfig.ROLE_NODE, "sail@cfg", null),
+            OperatorCommand.PLAIN);
     assertEquals("sail@override", resolved.target());
   }
 
@@ -273,13 +292,17 @@ class SyncCommandTest {
   void resolveMainFallsBackToTheConfiguredMain() {
     var resolved =
         SyncCommand.resolveMain(
-            null, new SyncConfig(SyncConfig.ROLE_NODE, "sail@maindevbox", null));
+            null,
+            new SyncConfig(SyncConfig.ROLE_NODE, "sail@maindevbox", null),
+            OperatorCommand.PLAIN);
     assertEquals("sail@maindevbox", resolved.target());
   }
 
   @Test
   void resolveMainHasNoTargetWhenThisBoxIsMain() {
-    var resolved = SyncCommand.resolveMain(null, new SyncConfig(SyncConfig.ROLE_MAIN, null, null));
+    var resolved =
+        SyncCommand.resolveMain(
+            null, new SyncConfig(SyncConfig.ROLE_MAIN, null, null), OperatorCommand.PLAIN);
     assertNull(resolved.target());
     assertTrue(resolved.message().contains("main devbox"));
   }
@@ -287,7 +310,8 @@ class SyncCommandTest {
   @Test
   void theMainBoxNeverSyncsAgainstAnotherBoxEvenWhenAsked() {
     var resolved =
-        SyncCommand.resolveMain("sail@other", new SyncConfig(SyncConfig.ROLE_MAIN, null, null));
+        SyncCommand.resolveMain(
+            "sail@other", new SyncConfig(SyncConfig.ROLE_MAIN, null, null), OperatorCommand.PLAIN);
 
     assertNull(resolved.target());
     assertTrue(resolved.message().contains("main devbox"));
@@ -295,7 +319,7 @@ class SyncCommandTest {
 
   @Test
   void resolveMainHasNoTargetAndGuidesWhenStandalone() {
-    var resolved = SyncCommand.resolveMain("  ", SyncConfig.unset());
+    var resolved = SyncCommand.resolveMain("  ", SyncConfig.unset(), OperatorCommand.PLAIN);
     assertNull(resolved.target());
     assertTrue(resolved.message().contains("Single devbox"));
     assertTrue(resolved.message().contains("sail host sync --main"));
@@ -311,7 +335,8 @@ class SyncCommandTest {
                 List.of(
                     new SyncSession.TypeReport(
                         "spec", new SyncEngine.Report(1, 2, 3, 4), 2, 40, false, null, 456, 123))),
-            true);
+            true,
+            OperatorCommand.PLAIN);
     var report = YamlUtil.parseMap(json);
     assertEquals(456, report.get("bytes_fetched"));
     assertEquals(123, report.get("bytes_sent"));
@@ -356,14 +381,14 @@ class SyncCommandTest {
 
   @Test
   void aRoundWhoseOnlyNewsIsADenialIsNotReportedAsAlreadyInSync() {
-    var text = SyncCommand.render(deniedRound(), false);
+    var text = SyncCommand.render(deniedRound(), false, OperatorCommand.PLAIN);
     assertFalse(text.contains("Already in sync"), text);
     assertTrue(text.contains("Synced with main"), text);
   }
 
   @Test
   void rendersDenialsInJsonByTypeIdAndReason() {
-    var report = YamlUtil.parseMap(SyncCommand.render(deniedRound(), true));
+    var report = YamlUtil.parseMap(SyncCommand.render(deniedRound(), true, OperatorCommand.PLAIN));
     assertEquals(
         List.of(
             Map.of("type", "spec", "id", "auth", "reason", "your role is read-only"),
@@ -395,8 +420,8 @@ class SyncCommandTest {
                 new Settlement.Settled(
                     "message", "m1", new Settlement.How.Withdrawn(), "room 'lab' is gone here")));
 
-    var text = SyncCommand.render(round, false);
-    var json = YamlUtil.parseMap(SyncCommand.render(round, true));
+    var text = SyncCommand.render(round, false, OperatorCommand.PLAIN);
+    var json = YamlUtil.parseMap(SyncCommand.render(round, true, OperatorCommand.PLAIN));
 
     assertFalse(text.contains("Already in sync"), text);
     assertTrue(
@@ -431,7 +456,8 @@ class SyncCommandTest {
                 null,
                 List.of(
                     new SyncSession.TypeReport("spec", SyncEngine.Report.NONE, 0, 0, true, null))),
-            false);
+            false,
+            OperatorCommand.PLAIN);
     assertTrue(text.contains("Already in sync"));
     assertFalse(text.contains("spec"), "a skipped type earns no line");
   }
@@ -447,7 +473,8 @@ class SyncCommandTest {
                     new SyncSession.TypeReport(
                         "spec", new SyncEngine.Report(2, 1, 0, 0), 3, 12, false, null),
                     new SyncSession.TypeReport("file", SyncEngine.Report.NONE, 0, 0, true, null))),
-            false);
+            false,
+            OperatorCommand.PLAIN);
     assertTrue(text.contains("pulled"));
     assertFalse(text.contains("conflict"));
     assertTrue(text.contains("spec:"), text);
@@ -463,7 +490,8 @@ class SyncCommandTest {
                 new SyncEngine.Report(0, 0, 0, 2),
                 null,
                 List.of(SyncSession.TypeReport.failed("run", "run: main is away"))),
-            false);
+            false,
+            OperatorCommand.PLAIN);
     assertTrue(text.contains("2 conflict(s) need your decision"));
     assertTrue(text.contains("sail conflicts"));
     assertTrue(text.contains("run: main is away"), "a failed type is named");

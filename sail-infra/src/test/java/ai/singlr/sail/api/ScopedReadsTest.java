@@ -16,6 +16,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
@@ -319,7 +320,8 @@ class ScopedReadsTest {
                     () -> new ConnectEnvironment("203.0.113.7", "ops", true),
                     SyncScheduler.disabled(),
                     new FdeStore(db),
-                    SessionYield.NONE)
+                    SessionYield.NONE,
+                    OperatorCommand.PLAIN)
                 .useMessages(new MessageStore(db))
                 .useRooms(new RoomStore(db))
                 .useEvents(new EventStore(db)),
@@ -1087,7 +1089,8 @@ class ScopedReadsTest {
             new ProjectStore(db),
             null,
             new FdeStore(db),
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
 
     var run = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     Acting.system(
@@ -1277,7 +1280,7 @@ class ScopedReadsTest {
   @Test
   void theTerminalDoorRefusesARoomOutsideTheFdesScopeAsOneThatDoesNotExist() throws Exception {
     Acting.system(this::bravoArrives);
-    var door = new HostAccess(db, TestAuth.roles(db));
+    var door = new HostAccess(db, TestAuth.roles(db), OperatorCommand.PLAIN);
 
     var outside =
         assertThrows(

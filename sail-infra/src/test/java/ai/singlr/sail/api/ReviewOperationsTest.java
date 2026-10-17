@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -69,7 +70,7 @@ class ReviewOperationsTest {
                     null,
                     List.of(),
                     List.of("api", "web"))));
-    ops = new ReviewOperations(reviewStore, specStore);
+    ops = new ReviewOperations(reviewStore, specStore, OperatorCommand.PLAIN);
   }
 
   @AfterEach
@@ -404,7 +405,7 @@ class ReviewOperationsTest {
     Actor.call(
         UDAY_ADMIN,
         () ->
-            new GlobalSpecOperations(specStore, reviewStore)
+            new GlobalSpecOperations(specStore, reviewStore, OperatorCommand.PLAIN)
                 .update("auth-followup", SpecUpdateRequest.fromMap(Map.of("status", "done"))));
 
     var afterDone =
@@ -414,7 +415,7 @@ class ReviewOperationsTest {
 
   @Test
   void operationsWithoutStoreThrowInternal() {
-    var noStore = new ReviewOperations(null, new SpecStore(db));
+    var noStore = new ReviewOperations(null, new SpecStore(db), OperatorCommand.PLAIN);
     var ex = assertThrows(ApiException.class, () -> noStore.listForSpec("auth"));
     assertEquals(ErrorCode.INTERNAL, ex.failure().errorCode());
   }

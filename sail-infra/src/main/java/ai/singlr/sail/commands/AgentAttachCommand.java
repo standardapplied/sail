@@ -31,6 +31,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
@@ -85,13 +86,13 @@ public final class AgentAttachCommand implements Runnable {
   @Option(names = "--socket", hidden = true, description = "Host socket override.")
   private Path socket;
 
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentAttachCommand() {
     this(OperationsFactory::open);
   }
 
-  AgentAttachCommand(Supplier<HostOperations> operations) {
+  AgentAttachCommand(Function<OperatorCommand, HostOperations> operations) {
     this.operations = operations;
   }
 
@@ -126,20 +127,21 @@ public final class AgentAttachCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
 
-    var latest = latest();
+    var latest = latest(operator);
     var run = latest.run();
-    var sessionId = validatedSessionId(run);
+    var sessionId = validatedSessionId(run, operator);
     var member = takesFromMember(run, sessionId);
     if (run != null && LIVE_STATUSES.contains(run.status()) && !member) {
-      throw new IllegalStateException(refusal(run, name));
+      throw new IllegalStateException(refusal(run, name, operator));
     }
-    var harness = run != null ? Harnesses.of(run.agent()) : resolveHarness();
+    var harness = run != null ? Harnesses.of(run.agent()) : resolveHarness(operator);
     var command = buildResumeCommand(harness, sessionId);
     if (sessionId == null) {
-      attachFresh(run, harness, buildIncusExecWithTty(name, command));
+      attachFresh(run, harness, buildIncusExecWithTty(name, command), operator);
       return;
     }
     requireNoLiveConflict(run, besides(run, latest.running()), name);
@@ -159,16 +161,23 @@ public final class AgentAttachCommand implements Runnable {
               + "'.");
     }
     announceResume(run, harness, sessionId, plan);
-    requireRunning();
+    requireRunning(operator);
     if (member) {
-      endMember(run);
+      endMember(run, operator);
     }
     var size = Stty.size(new int[] {24, 80});
     var hostSocket = SessionCommand.socketOrDefault(socket);
     try (var client = SessionClient.connect(hostSocket)) {
       var opened =
           openLocked(
-              new PtyHostYield(hostSocket), this::latest, run, client, plan, size[1], size[0]);
+              new PtyHostYield(hostSocket),
+              () -> latest(operator),
+              run,
+              client,
+              plan,
+              size[1],
+              size[0],
+              operator);
       System.out.println(
           Ansi.AUTO.string(
               opened
@@ -200,8 +209,8 @@ public final class AgentAttachCommand implements Runnable {
    * conversation would corrupt it, and the member loses nothing — it resumes on the room's next
    * message once the terminal is closed.
    */
-  private void endMember(RunStore.RunRow run) {
-    try (var operations = this.operations.get()) {
+  private void endMember(RunStore.RunRow run, OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
       if (!operations.dispatching().endLiveMember(run.id(), MEMBER_DISPLACED)) {
         throw new IllegalStateException(
             "Run "
@@ -232,25 +241,27 @@ public final class AgentAttachCommand implements Runnable {
       SessionClient client,
       ResumePlan plan,
       int cols,
-      int rows)
+      int rows,
+      OperatorCommand operator)
       throws IOException {
     try (var hold = hostYield.lock(plan.project())) {
-      requireStillLatestAndIdle(planned, latest.get(), plan.project());
+      requireStillLatestAndIdle(planned, latest.get(), plan.project(), operator);
       return openOrJoin(client, plan, cols, rows);
     }
   }
 
-  static void requireStillLatestAndIdle(RunStore.RunRow planned, Latest latest, String project) {
+  static void requireStillLatestAndIdle(
+      RunStore.RunRow planned, Latest latest, String project, OperatorCommand operator) {
     var current = latest.run();
     if (current != null && LIVE_STATUSES.contains(current.status())) {
-      throw new IllegalStateException(refusal(current, project));
+      throw new IllegalStateException(refusal(current, project, operator));
     }
     if (current == null || !current.id().equals(planned.id())) {
       throw new IllegalStateException(
           "The latest run of '"
               + project
               + "' changed while opening the session; run "
-              + OperatorCommand.here().sail("agent attach")
+              + operator.sail("agent attach")
               + " again.");
     }
     requireNoLiveConflict(planned, latest.running(), project);
@@ -314,7 +325,8 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void attachFresh(RunStore.RunRow run, Harness harness, List<String> command)
+  private void attachFresh(
+      RunStore.RunRow run, Harness harness, List<String> command, OperatorCommand operator)
       throws Exception {
     if (json) {
       System.out.println(YamlUtil.dumpJson(plan(run, harness, null, command)));
@@ -325,7 +337,7 @@ public final class AgentAttachCommand implements Runnable {
       return;
     }
     announceFresh(run);
-    requireRunning();
+    requireRunning(operator);
     var process = new ProcessBuilder(command).inheritIO().start();
     var exitCode = process.waitFor();
     if (exitCode != 0) {
@@ -334,9 +346,9 @@ public final class AgentAttachCommand implements Runnable {
     }
   }
 
-  private void requireRunning() throws Exception {
+  private void requireRunning(OperatorCommand operator) throws Exception {
     var state = new ContainerManager(new ShellExecutor(false)).queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
   }
 
   /**
@@ -346,11 +358,11 @@ public final class AgentAttachCommand implements Runnable {
    * is never unreachable for want of a room row. An unreadable database fails closed through {@link
    * #orRefuse}.
    */
-  private Latest latest() {
+  private Latest latest(OperatorCommand operator) {
     return orRefuse(
         name,
         () -> {
-          try (var operations = this.operations.get()) {
+          try (var operations = this.operations.apply(operator)) {
             var node = NodeIdentity.handle();
             var run = operations.dispatching().latestRun(name, node).orElse(null);
             return run == null
@@ -392,7 +404,7 @@ public final class AgentAttachCommand implements Runnable {
    * would be parsed by the agent CLI as an option, not a session id. A malformed id fails loud
    * rather than resuming something else.
    */
-  private static String validatedSessionId(RunStore.RunRow run) {
+  private static String validatedSessionId(RunStore.RunRow run, OperatorCommand operator) {
     if (run == null || run.sessionId() == null) {
       return null;
     }
@@ -402,13 +414,13 @@ public final class AgentAttachCommand implements Runnable {
               + run.id()
               + " recorded a malformed session id; refusing to build a resume command from it."
               + " Attach fresh with: "
-              + OperatorCommand.here().sail("agent attach --json")
+              + operator.sail("agent attach --json")
               + " to inspect, or start a new session inside the container.");
     }
     return run.sessionId();
   }
 
-  private static String refusal(RunStore.RunRow run, String project) {
+  private static String refusal(RunStore.RunRow run, String project, OperatorCommand operator) {
     var room =
         run.specId() == null
             ? "its spec room"
@@ -419,7 +431,7 @@ public final class AgentAttachCommand implements Runnable {
         + " and worktree. Reply in "
         + room
         + " to steer it (delivered mid-run), or stop it first with: "
-        + OperatorCommand.here().sail("agent stop " + project)
+        + operator.sail("agent stop " + project)
         + ".";
   }
 
@@ -487,8 +499,8 @@ public final class AgentAttachCommand implements Runnable {
     return map;
   }
 
-  Harness resolveHarness() {
-    try (var operations = this.operations.get()) {
+  Harness resolveHarness(OperatorCommand operator) {
+    try (var operations = this.operations.apply(operator)) {
       return operations
           .catalog()
           .definitions()

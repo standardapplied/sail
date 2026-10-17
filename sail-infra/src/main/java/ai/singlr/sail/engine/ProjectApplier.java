@@ -429,7 +429,8 @@ public final class ProjectApplier {
   }
 
   /** Checks for config sections that cannot be changed post-creation and returns warnings. */
-  public List<String> checkUnsupportedChanges(SailYaml config, ResourceLimits liveLimits) {
+  public List<String> checkUnsupportedChanges(
+      SailYaml config, ResourceLimits liveLimits, OperatorCommand operator) {
     var warnings = new ArrayList<String>();
     if (config.resources() != null
         && liveLimits != null
@@ -438,7 +439,7 @@ public final class ProjectApplier {
                 .equals(normalizedSize(liveLimits.memory())))) {
       warnings.add(
           "CPU and memory changes are not applied by 'sail project apply'. Use '"
-              + OperatorCommand.here().sail("project resources set " + config.name() + " ...")
+              + operator.sail("project resources set " + config.name() + " ...")
               + "' instead.");
     }
     return warnings;

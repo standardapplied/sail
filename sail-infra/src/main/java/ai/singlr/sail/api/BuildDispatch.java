@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.DispatchRepos;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.WorkPrompt;
 import ai.singlr.sail.identity.Actor;
@@ -27,6 +28,7 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -54,6 +56,7 @@ public final class BuildDispatch {
   private final DispatchOperations.Listener listener;
   private final DispatchOperations.EventSink events;
   private final ShellExec shell;
+  private final OperatorCommand operator;
 
   public BuildDispatch(
       ProjectLoader projects,
@@ -67,7 +70,9 @@ public final class BuildDispatch {
       DispatchOperations.Snapshotter snapshotter,
       DispatchOperations.Listener listener,
       DispatchOperations.EventSink events,
-      ShellExec shell) {
+      ShellExec shell,
+      OperatorCommand operator) {
+    this.operator = Objects.requireNonNull(operator, "operator");
     this.projects = projects;
     this.specStore = specStore;
     this.reviewStore = reviewStore;
@@ -131,7 +136,8 @@ public final class BuildDispatch {
             request.specId(),
             request.restart(),
             localHandle,
-            spec -> earlierReviewsInScope(spec.id()));
+            spec -> earlierReviewsInScope(spec.id()),
+            operator);
     if (resolution.spec() == null) {
       return new DispatchOperations.NoSpecs();
     }
@@ -265,20 +271,26 @@ public final class BuildDispatch {
    * refusal fires before any mutation, so a refused caller can never reset a status.
    */
   static SpecResolution resolveSpec(
-      List<Spec> specs, String specId, boolean restart, String localHandle) {
-    return resolveSpec(specs, specId, restart, localHandle, spec -> true);
+      List<Spec> specs,
+      String specId,
+      boolean restart,
+      String localHandle,
+      OperatorCommand operator) {
+    return resolveSpec(specs, specId, restart, localHandle, spec -> true, operator);
   }
 
   /**
-   * {@link #resolveSpec(List, String, boolean, String)}, picking the next ready spec among those
-   * {@code dispatchable} admits when none is named; a named spec is resolved whatever it says.
+   * {@link #resolveSpec(List, String, boolean, String, OperatorCommand)}, picking the next ready
+   * spec among those {@code dispatchable} admits when none is named; a named spec is resolved
+   * whatever it says.
    */
   static SpecResolution resolveSpec(
       List<Spec> specs,
       String specId,
       boolean restart,
       String localHandle,
-      Predicate<Spec> dispatchable) {
+      Predicate<Spec> dispatchable,
+      OperatorCommand operator) {
     var spec = Strings.isBlank(specId) ? null : SpecCatalog.findById(specs, specId);
     if (spec == null) {
       if (RestartResolution.decide(specId, null, restart)
@@ -289,10 +301,10 @@ public final class BuildDispatch {
       if (next == null) {
         return SpecResolution.none();
       }
-      LaunchAdmission.requireAllowed(next, localHandle);
+      LaunchAdmission.requireAllowed(next, localHandle, operator);
       return SpecResolution.of(next);
     }
-    LaunchAdmission.requireAllowed(spec, localHandle);
+    LaunchAdmission.requireAllowed(spec, localHandle, operator);
     return switch (RestartResolution.decide(specId, spec, restart)) {
       case RestartResolution.Refused refused -> throw refusal(refused);
       case RestartResolution.NotRestarted ignored -> {

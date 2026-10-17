@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -50,7 +51,10 @@ class AgentReviewCommandTest {
         String.join(
             "\n",
             AgentReviewCommand.render(
-                "mast-app-shell", "review", List.of(superseded, PASSED_REVIEW)));
+                "mast-app-shell",
+                "review",
+                List.of(superseded, PASSED_REVIEW),
+                OperatorCommand.PLAIN));
 
     assertTrue(out.contains("mast-app-shell"));
     assertTrue(out.contains("iteration 1"), out);
@@ -63,7 +67,9 @@ class AgentReviewCommandTest {
 
   @Test
   void saysLoudlyWhenNoReviewHasRunAndPointsAtTheLiveLog() {
-    var out = String.join("\n", AgentReviewCommand.render("auth", "review", List.of()));
+    var out =
+        String.join(
+            "\n", AgentReviewCommand.render("auth", "review", List.of(), OperatorCommand.PLAIN));
 
     assertTrue(out.contains("No reviews have run"), out);
     assertTrue(
@@ -88,7 +94,10 @@ class AgentReviewCommandTest {
                     "finding_count", 0,
                     "error", "Quota exceeded. Check your plan.\nsecond line")));
 
-    var out = String.join("\n", AgentReviewCommand.render("auth", "review", List.of(errored)));
+    var out =
+        String.join(
+            "\n",
+            AgentReviewCommand.render("auth", "review", List.of(errored), OperatorCommand.PLAIN));
 
     assertTrue(out.contains("error:"), out);
     assertTrue(out.contains("Quota exceeded. Check your plan."), out);

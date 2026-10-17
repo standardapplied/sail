@@ -106,14 +106,15 @@ public final class DispatchCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(project);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(project, operator);
     NameValidator.requireValidProjectName(name);
-    try (var sync = NodeSync.scheduler(syncOptions.noSync())) {
-      execute(sync);
+    try (var sync = NodeSync.scheduler(syncOptions.noSync(), operator)) {
+      execute(sync, operator);
     }
   }
 
-  private void execute(SyncScheduler sync) throws Exception {
+  private void execute(SyncScheduler sync, OperatorCommand operator) throws Exception {
     sync.freshenRead();
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);
@@ -134,8 +135,9 @@ public final class DispatchCommand implements Runnable {
                 DispatchOperations.terminalLauncher(),
                 renderer(sync),
                 StopOperations.Listener.NONE),
-            new PtyHostYield())) {
-      render(dispatchAsOperator(operations, name, request, handle));
+            new PtyHostYield(),
+            operator)) {
+      render(dispatchAsOperator(operations, name, request, handle), operator);
     }
   }
 
@@ -152,13 +154,15 @@ public final class DispatchCommand implements Runnable {
       DispatchOperations.Snapshotter snapshotter,
       DispatchOperations.AgentLauncher launcher,
       DispatchOperations.Listener listener,
-      SessionYield sessionYield) {
+      SessionYield sessionYield,
+      OperatorCommand operator) {
     return OperationsFactory.create(
         db,
         shell,
         new OperationHooks(
             events, watcherSpawner, snapshotter, launcher, listener, StopOperations.Listener.NONE),
-        sessionYield);
+        sessionYield,
+        operator);
   }
 
   /**
@@ -179,7 +183,7 @@ public final class DispatchCommand implements Runnable {
     }
   }
 
-  private void render(DispatchOperations.Outcome outcome) {
+  private void render(DispatchOperations.Outcome outcome, OperatorCommand operator) {
     switch (outcome) {
       case DispatchOperations.NoSpecs ignored -> printNoSpecs();
       case DispatchOperations.Dispatched dispatched -> {
@@ -192,12 +196,7 @@ public final class DispatchCommand implements Runnable {
           return;
         }
         Banner.printAgentLaunched(
-            name,
-            dispatched.task(),
-            dispatched.branch(),
-            OperatorCommand.here(),
-            System.out,
-            Ansi.AUTO);
+            name, dispatched.task(), dispatched.branch(), operator, System.out, Ansi.AUTO);
         dispatched
             .watcher()
             .ifPresent(

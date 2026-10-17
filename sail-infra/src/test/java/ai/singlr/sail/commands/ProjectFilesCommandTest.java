@@ -439,7 +439,8 @@ class ProjectFilesCommandTest {
     try {
       ProjectFilesCommand.Export.print(
           new ProjectFilesCommand.Export.ExportReport(
-              1, 0, List.of("acme/edited.txt"), List.of("acme/stale.conf")));
+              1, 0, List.of("acme/edited.txt"), List.of("acme/stale.conf")),
+          OperatorCommand.PLAIN);
     } finally {
       System.setErr(err);
     }

@@ -1067,10 +1067,83 @@ class BannerTest {
   }
 
   @Test
+  void everyCommandABannerNamesIsWordedForTheOperator() {
+    for (var operator : List.of(OperatorCommand.PLAIN, new OperatorCommand(true))) {
+      var sail = operator.sail("");
+      var overcommit = new ByteArrayOutputStream();
+      Banner.printOvercommitWarning(
+          new ResourceChecker.OvercommitStatus(12, 6, 49152, 32768),
+          operator,
+          new PrintStream(overcommit),
+          Ansi.OFF);
+      var status = new ByteArrayOutputStream();
+      Banner.printAgentStatus(
+          "gamma",
+          new AgentSession.SessionInfo(true, 42, "auth", "2026-03-02T01:00:00Z", "sail/x", "/l"),
+          0,
+          0,
+          Map.of(),
+          operator,
+          new PrintStream(status),
+          Ansi.OFF);
+      var report = new ByteArrayOutputStream();
+      Banner.printAgentReport(
+          "gamma",
+          new AgentReporter.Report(
+              "gamma",
+              "Completed",
+              "2026-03-02T01:00:00Z",
+              "2026-03-02T04:42:00Z",
+              "3h 42m",
+              "sail/x",
+              List.of(
+                  new Spec(
+                      "docs",
+                      "gamma",
+                      "Update docs",
+                      SpecStatus.PENDING,
+                      null,
+                      List.of(),
+                      List.of(),
+                      null,
+                      null,
+                      null,
+                      null)),
+              1,
+              5,
+              false,
+              null,
+              null,
+              false,
+              null,
+              0),
+          operator,
+          new PrintStream(report),
+          Ansi.OFF);
+
+      assertEquals(
+          List.of(
+              "    Use '" + sail + "project stop <name>' to stop projects and free resources.",
+              "    Tail output: " + sail + "agent log gamma --follow",
+              "    " + sail + "agent log gamma --tail 50    # see agent output",
+              "    " + sail + "spec dispatch --project gamma   # continue 1 remaining specs"),
+          commandLines(overcommit, status, report),
+          operator.toString());
+    }
+  }
+
+  private static List<String> commandLines(ByteArrayOutputStream... outputs) {
+    return List.of(outputs).stream()
+        .flatMap(output -> output.toString(StandardCharsets.UTF_8).lines())
+        .filter(line -> line.contains("sail "))
+        .toList();
+  }
+
+  @Test
   void overcommitWarningShowsCpuAndMemory() {
     var status = new ResourceChecker.OvercommitStatus(12, 6, 49152, 32768);
     var out = new ByteArrayOutputStream();
-    Banner.printOvercommitWarning(status, new PrintStream(out), Ansi.OFF);
+    Banner.printOvercommitWarning(status, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Overcommit warning"));
@@ -1083,7 +1156,7 @@ class BannerTest {
   void overcommitWarningCpuOnly() {
     var status = new ResourceChecker.OvercommitStatus(12, 6, 16384, 32768);
     var out = new ByteArrayOutputStream();
-    Banner.printOvercommitWarning(status, new PrintStream(out), Ansi.OFF);
+    Banner.printOvercommitWarning(status, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("CPU 12/6"));
@@ -1094,7 +1167,7 @@ class BannerTest {
   void overcommitWarningNotOvercommittedPrintsNothing() {
     var status = new ResourceChecker.OvercommitStatus(4, 12, 8192, 32768);
     var out = new ByteArrayOutputStream();
-    Banner.printOvercommitWarning(status, new PrintStream(out), Ansi.OFF);
+    Banner.printOvercommitWarning(status, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.isEmpty());
@@ -1231,7 +1304,8 @@ class BannerTest {
             null,
             0);
     var out = new ByteArrayOutputStream();
-    Banner.printAgentReport("acme-health", report, new PrintStream(out), Ansi.OFF);
+    Banner.printAgentReport(
+        "acme-health", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Agent Report"));
@@ -1269,7 +1343,7 @@ class BannerTest {
             null,
             null);
     var out = new ByteArrayOutputStream();
-    Banner.printAgentReport("acme", report, new PrintStream(out), Ansi.OFF);
+    Banner.printAgentReport("acme", report, OperatorCommand.PLAIN, new PrintStream(out), Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Killed by guardrail"));

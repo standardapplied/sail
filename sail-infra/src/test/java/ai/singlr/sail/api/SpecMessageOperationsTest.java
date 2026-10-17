@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
@@ -57,7 +58,8 @@ class SpecMessageOperationsTest {
                 bus,
                 null,
                 new SpecStore(db),
-                new ReviewStore(db))
+                new ReviewStore(db),
+                OperatorCommand.PLAIN)
             .useMessages(new MessageStore(db))
             .useRooms(new RoomStore(db));
   }
@@ -325,7 +327,8 @@ class SpecMessageOperationsTest {
                 bus,
                 null,
                 new SpecStore(db),
-                new ReviewStore(db))
+                new ReviewStore(db),
+                OperatorCommand.PLAIN)
             .useMessages(new MessageStore(db))
             .useRooms(rooms);
 

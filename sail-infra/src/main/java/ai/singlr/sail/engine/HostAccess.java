@@ -24,13 +24,13 @@ import java.util.Objects;
  * FDE a session token names, or with no token this box's FDE, and acts with the role {@link
  * RoleRule} gives it; a disabled FDE is refused.
  */
-public record HostAccess(Sqlite db, RoleRule roles) {
+public record HostAccess(Sqlite db, RoleRule roles, OperatorCommand operator) {
   public PtyIdentity identity(String token, String boxHandle) throws IOException {
     if (Strings.isBlank(token)) {
       if (Strings.isBlank(boxHandle)) {
         throw new IOException(
             "This box has no FDE identity. Set one with '"
-                + OperatorCommand.here().sail("host config set sync-handle")
+                + operator.sail("host config set sync-handle")
                 + "' or connect through the gateway.");
       }
       return new PtyIdentity(boxHandle, roleOf(boxHandle) == Role.ADMIN);
@@ -82,7 +82,7 @@ public record HostAccess(Sqlite db, RoleRule roles) {
           "FDE '"
               + handle
               + "' is disabled or not in this box's roster. Ask an admin to re-enable it, or run '"
-              + OperatorCommand.here().sail("sync")
+              + operator.sail("sync")
               + "' on a node that has not synced its roster.");
     }
     return actor.get();

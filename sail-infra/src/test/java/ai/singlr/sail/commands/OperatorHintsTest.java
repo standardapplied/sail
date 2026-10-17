@@ -12,12 +12,16 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine.Help.Ansi;
 
@@ -133,6 +137,47 @@ class OperatorHintsTest {
     assertEquals(Optional.empty(), HostInitCommand.nextStep(false, true, SUDO));
     assertEquals(false, HostInitCommand.initStep().standalone());
     assertEquals(true, new HostInitCommand().standalone());
+  }
+
+  @Test
+  void theOperatorIsResolvedOnceAtEachCommandsDoorAndNowhereBelow() throws Exception {
+    var seam = "OperatorCommand.here()";
+    var below = new ArrayList<String>();
+    var twice = new ArrayList<String>();
+    for (var root : List.of(Path.of("..", "sail-core", "src", "main"), Path.of("src", "main"))) {
+      try (var sources = Files.walk(root)) {
+        for (var file : sources.filter(Files::isRegularFile).toList()) {
+          var calls = read(file).split(Pattern.quote(seam), -1).length - 1;
+          if (calls == 0) {
+            continue;
+          }
+          if (!atADoor(file)) {
+            below.add(file.toString());
+          }
+          if (calls > 1) {
+            twice.add(file.toString());
+          }
+        }
+      }
+    }
+
+    assertEquals(List.of(), below, "the operator is asked below a command's door");
+    assertEquals(List.of(), twice, "a command asks who its operator is more than once");
+  }
+
+  private static boolean atADoor(Path file) {
+    var name = file.getFileName().toString();
+    var inCommands = file.getParent().endsWith(Path.of("ai", "singlr", "sail", "commands"));
+    return inCommands && (name.endsWith("Command.java") || name.equals("CliCommand.java"))
+        || file.getParent().endsWith(Path.of("ai", "singlr", "sail")) && name.equals("Main.java");
+  }
+
+  private static String read(Path file) {
+    try {
+      return Files.readString(file);
+    } catch (IOException e) {
+      throw new UncheckedIOException(e);
+    }
   }
 
   @Test

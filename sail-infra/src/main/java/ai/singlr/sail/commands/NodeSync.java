@@ -10,6 +10,7 @@ import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.Map;
 import picocli.CommandLine.Help.Ansi;
@@ -27,8 +28,8 @@ final class NodeSync {
 
   private NodeSync() {}
 
-  static SyncScheduler scheduler(boolean noSync) {
-    return scheduler(HostSync.config(), noSync, System.getenv());
+  static SyncScheduler scheduler(boolean noSync, OperatorCommand operator) {
+    return scheduler(HostSync.config(), noSync, System.getenv(), operator);
   }
 
   /** Whether this box propagates automatically: a node that has not opted out. Pure for testing. */
@@ -36,10 +37,11 @@ final class NodeSync {
     return !noSync && HostSync.isNode(sync);
   }
 
-  static SyncScheduler scheduler(SyncConfig sync, boolean noSync, Map<String, String> env) {
+  static SyncScheduler scheduler(
+      SyncConfig sync, boolean noSync, Map<String, String> env, OperatorCommand operator) {
     var scheduler = scheduler(sync, noSync, env, NodeSync::syncOnce);
     if (shouldSync(sync, noSync)) {
-      var operations = OperationsFactory.open();
+      var operations = OperationsFactory.open(operator);
       scheduler.useHealth(operations::syncStatus, operations);
     }
     return scheduler;

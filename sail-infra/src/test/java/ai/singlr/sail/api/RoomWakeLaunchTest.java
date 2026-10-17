@@ -17,6 +17,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ContainerSailSetup;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
@@ -144,7 +145,8 @@ class RoomWakeLaunchTest {
             (project, config) -> "",
             launcher,
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE)
+            SessionYield.NONE,
+            OperatorCommand.PLAIN)
         .useMessages(messageStore)
         .useRooms(new RoomStore(db));
   }
@@ -174,7 +176,8 @@ class RoomWakeLaunchTest {
               return 0;
             },
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
     seedSpec("auth");
 
     ops.startRoomRun("acme", "auth", HANDLE);
@@ -1281,7 +1284,8 @@ class RoomWakeLaunchTest {
                   null,
                   specStore,
                   new ReviewStore(db),
-                  runStore)
+                  runStore,
+                  OperatorCommand.PLAIN)
               .useMessages(messageStore);
 
       var runId = sailOps.startRoomRun("acme", "auth", HANDLE);

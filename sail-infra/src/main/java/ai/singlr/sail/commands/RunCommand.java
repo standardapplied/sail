@@ -108,18 +108,17 @@ public final class RunCommand implements Runnable {
 
   @picocli.CommandLine.Spec private CommandSpec spec;
 
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
   private final LocalIdentity identity;
   private final Function<Boolean, ShellExec> shells;
   private final DispatchOperations.AgentLauncher terminal;
   private SailEventPublisher eventPublisher;
 
   public RunCommand() {
-    this(
-        OperationsFactory::open,
-        LocalIdentity.detect(),
-        ShellExecutor::new,
-        DispatchOperations.terminalLauncher());
+    this.operations = OperationsFactory::open;
+    this.identity = LocalIdentity.detect();
+    this.shells = ShellExecutor::new;
+    this.terminal = DispatchOperations.terminalLauncher();
   }
 
   /**
@@ -132,7 +131,7 @@ public final class RunCommand implements Runnable {
       LocalIdentity identity,
       Function<Boolean, ShellExec> shells,
       DispatchOperations.AgentLauncher terminal) {
-    this.operations = operations;
+    this.operations = ignored -> operations.get();
     this.identity = identity;
     this.shells = shells;
     this.terminal = terminal;
@@ -144,7 +143,8 @@ public final class RunCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    name = CurrentProject.require(name);
+    var operator = OperatorCommand.here();
+    name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
 
     if (!json) {
@@ -152,26 +152,29 @@ public final class RunCommand implements Runnable {
     }
 
     SailYaml config;
-    try (var operations = this.operations.get()) {
-      config = ProjectDefinitions.definitionWithBoxIdentity(operations.catalog(), name, identity);
+    try (var operations = this.operations.apply(operator)) {
+      config =
+          ProjectDefinitions.definitionWithBoxIdentity(
+              operations.catalog(), name, identity, operator);
     }
 
     var shell = shells.apply(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     if (!path.isBlank()) {
       validateSafePath(path, "--path");
     }
 
-    launchAgent(shell, config);
+    launchAgent(shell, config, operator);
   }
 
-  private void launchAgent(ShellExec shell, SailYaml config) throws Exception {
+  private void launchAgent(ShellExec shell, SailYaml config, OperatorCommand operator)
+      throws Exception {
     if (task == null && config.agent() != null) {
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         var nextSpec = SpecCatalog.nextReady(operations.catalog().projectSpecs(name));
         if (nextSpec != null) {
           var specBody =
@@ -222,9 +225,9 @@ public final class RunCommand implements Runnable {
     }
 
     if (task != null) {
-      launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label);
+      launchTaskSession(shell, config, workDir, branchName, snapshotTaken, label, operator);
     } else {
-      installSkills(shell, harness);
+      installSkills(shell, harness, operator);
       launchInteractive(sshUser, workDir, fullPermissions, harness);
     }
   }
@@ -235,12 +238,13 @@ public final class RunCommand implements Runnable {
    * skills add}, {@code rm} or an edit sees the folders the project holds now. A preview ({@code
    * --dry-run}, {@code --json}) installs nothing.
    */
-  private void installSkills(ShellExec shell, Harness harness) throws Exception {
+  private void installSkills(ShellExec shell, Harness harness, OperatorCommand operator)
+      throws Exception {
     if (dryRun || json) {
       return;
     }
     ProjectSkillInstaller.Report report;
-    try (var operations = this.operations.get()) {
+    try (var operations = this.operations.apply(operator)) {
       report =
           ProjectSkillInstaller.installProject(
               shell, name, harness, new ProjectSkills(operations::projectFiles));
@@ -301,13 +305,14 @@ public final class RunCommand implements Runnable {
       String workDir,
       String branchName,
       boolean snapshotTaken,
-      String label)
+      String label,
+      OperatorCommand operator)
       throws Exception {
     var snapshotLabel = snapshotTaken ? label : null;
     var handle = Objects.toString(HostSync.handle(), "");
     var describeOnly = json || dryRun;
     var launchCommand = new AtomicReference<List<String>>();
-    try (var operations = operations(shell, launchCommand)) {
+    try (var operations = operations(shell, launchCommand, operator)) {
       var request =
           new DispatchOperations.AdhocRequest(task, branchName, path, background, describeOnly);
       DispatchOperations.AdhocSession session;
@@ -337,7 +342,7 @@ public final class RunCommand implements Runnable {
         throw new IllegalStateException(
             Strings.isBlank(action) ? e.getMessage() : e.getMessage() + " " + action, e);
       }
-      render(session, launchCommand.get(), branchName);
+      render(session, launchCommand.get(), branchName, operator);
     }
   }
 
@@ -351,7 +356,8 @@ public final class RunCommand implements Runnable {
     return e.failure().errorCode() == ErrorCode.AGENT_LAUNCH_FAILED && !activeSession;
   }
 
-  private HostOperations operations(ShellExec shell, AtomicReference<List<String>> launchCommand) {
+  private HostOperations operations(
+      ShellExec shell, AtomicReference<List<String>> launchCommand, OperatorCommand operator) {
     var listener =
         new DispatchOperations.Listener() {
           @Override
@@ -398,11 +404,15 @@ public final class RunCommand implements Runnable {
             terminal,
             listener,
             StopOperations.Listener.NONE),
-        new PtyHostYield());
+        new PtyHostYield(),
+        operator);
   }
 
   private void render(
-      DispatchOperations.AdhocSession session, List<String> command, String branchName) {
+      DispatchOperations.AdhocSession session,
+      List<String> command,
+      String branchName,
+      OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("name", name);
@@ -420,8 +430,7 @@ public final class RunCommand implements Runnable {
       return;
     }
     if (background) {
-      Banner.printAgentLaunched(
-          name, task, branchName, OperatorCommand.here(), System.out, Ansi.AUTO);
+      Banner.printAgentLaunched(name, task, branchName, operator, System.out, Ansi.AUTO);
       session
           .watcher()
           .ifPresent(

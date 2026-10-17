@@ -246,18 +246,28 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
 
   /**
    * Opens a session with {@code hello}. A {@link SyncWire.Welcome} yields the paged session, with
-   * one line of {@code notice} when this node runs ahead of main's version; a refusal or anything
+   * one line of {@code notice} when this node runs ahead of main's version, and each offer main
+   * denies handed to {@code denied} as it settles, for the caller to word; a refusal or anything
    * else fails naming it. An answer that is a message but names no {@code op} is what every
    * protocol before 4 put on the wire, so it fails naming the remedy — upgrade main. Anything that
    * is not a message at all is reported as what it is, never blamed on main's version.
    */
   static SyncSession open(
-      InputStream in, OutputStream out, SyncWire.Hello hello, Consumer<String> notice, Sqlite db) {
-    return ((PagedSyncSession) open(in, out, hello, notice)).content(db);
+      InputStream in,
+      OutputStream out,
+      SyncWire.Hello hello,
+      Consumer<String> notice,
+      Consumer<Denial> denied,
+      Sqlite db) {
+    return ((PagedSyncSession) open(in, out, hello, notice, denied)).content(db);
   }
 
   static SyncSession open(
-      InputStream in, OutputStream out, SyncWire.Hello hello, Consumer<String> notice) {
+      InputStream in,
+      OutputStream out,
+      SyncWire.Hello hello,
+      Consumer<String> notice,
+      Consumer<Denial> denied) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
     if (SyncWire.predatesOps(line)) {
@@ -276,7 +286,8 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
           "protocol", context + ": main did not answer with a sync message: " + e.getMessage(), e);
     }
     return switch (response) {
-      case SyncWire.Welcome welcome -> PagedSyncSession.open(in, out, hello, welcome, notice);
+      case SyncWire.Welcome welcome ->
+          PagedSyncSession.open(in, out, hello, welcome, notice, denied);
       case SyncWire.Refuse refuse ->
           throw new SyncTransportException("refused", context + ": " + refuse.reason(), null);
       case SyncWire.Failed failed ->

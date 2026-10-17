@@ -250,7 +250,8 @@ class FilesAuditTest {
     mainDb.execute("DELETE FROM materialized_files");
 
     var seed =
-        new DataMigrator(mainDb, List.of(new MaterializedFilesMigration(projectsDir)))
+        new DataMigrator(
+                mainDb, List.of(new MaterializedFilesMigration(projectsDir, OperatorCommand.PLAIN)))
             .run(
                 ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
                 DataMigration.Prompter.NON_INTERACTIVE)

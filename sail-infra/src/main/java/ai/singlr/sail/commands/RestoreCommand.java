@@ -45,13 +45,14 @@ public final class RestoreCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name);
+    ContainerStateGuard.requireCreated(state, name, operator);
 
     if (label == null) {
       var snapshots = snapMgr.list(name);
@@ -60,7 +61,7 @@ public final class RestoreCommand implements Runnable {
             "No snapshots exist for '"
                 + name
                 + "'. Create one with: "
-                + OperatorCommand.here().sail("project snapshot create " + name));
+                + operator.sail("project snapshot create " + name));
       }
       label = snapshots.getLast().name();
     } else {
@@ -98,7 +99,7 @@ public final class RestoreCommand implements Runnable {
     }
 
     Banner.printSnapshotRestored(name, label, System.out, Ansi.AUTO);
-    Banner.printZedConnect(name, OperatorCommand.here(), System.out, Ansi.AUTO);
+    Banner.printZedConnect(name, operator, System.out, Ansi.AUTO);
     try {
       var ports = ContainerExec.queryServicePorts(shell, name);
       Banner.printSshTunnels(name, null, ports, System.out, Ansi.AUTO);

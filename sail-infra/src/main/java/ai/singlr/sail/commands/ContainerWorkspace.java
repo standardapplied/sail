@@ -28,7 +28,7 @@ final class ContainerWorkspace {
   private ContainerWorkspace() {}
 
   /** The workspace directory for a running project, or empty (with a printed reason) otherwise. */
-  static Optional<Path> resolve(String project) {
+  static Optional<Path> resolve(String project, OperatorCommand operator) {
     try {
       var state = new ContainerManager(new ShellExecutor(false)).queryState(project);
       if (!(state instanceof ContainerState.Running)) {
@@ -37,7 +37,7 @@ final class ContainerWorkspace {
                 "Project '"
                     + project
                     + "' is not running. Run '"
-                    + OperatorCommand.here().sail("project switch " + project)
+                    + operator.sail("project switch " + project)
                     + "'.",
                 Ansi.AUTO));
         return Optional.empty();
@@ -48,11 +48,11 @@ final class ContainerWorkspace {
               "Could not reach project '" + project + "': " + e.getMessage(), Ansi.AUTO));
       return Optional.empty();
     }
-    return Optional.of(Path.of("/home/" + sshUser(project) + "/workspace"));
+    return Optional.of(Path.of("/home/" + sshUser(project, operator) + "/workspace"));
   }
 
-  private static String sshUser(String project) {
-    try (var operations = OperationsFactory.open()) {
+  private static String sshUser(String project, OperatorCommand operator) {
+    try (var operations = OperationsFactory.open(operator)) {
       return operations
           .catalog()
           .project(project)

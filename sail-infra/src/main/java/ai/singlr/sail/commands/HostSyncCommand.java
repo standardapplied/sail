@@ -54,14 +54,15 @@ public final class HostSyncCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
     var host = HostYaml.fromMap(YamlUtil.parseFile(path));
 
     if (!asMain && mainTarget == null) {
-      printRole(host.sync());
+      printRole(host.sync(), operator);
       return;
     }
     if (asMain && mainTarget != null) {
@@ -81,7 +82,9 @@ public final class HostSyncCommand implements Runnable {
             asMain,
             mainTarget,
             HostInfo.hostname(),
-            SshSyncChannel::open));
+            SshSyncChannel::open,
+            operator),
+        operator);
   }
 
   /**
@@ -96,10 +99,11 @@ public final class HostSyncCommand implements Runnable {
       boolean asMain,
       String mainTarget,
       String hostname,
-      SyncOperations.Channels channels)
+      SyncOperations.Channels channels,
+      OperatorCommand operator)
       throws Exception {
     var updated = configure(host, asMain, mainTarget, hostname);
-    HandleChange.write(hostYamlPath, db, host, updated, channels);
+    HandleChange.write(hostYamlPath, db, host, updated, channels, operator);
     return updated.sync();
   }
 
@@ -134,7 +138,7 @@ public final class HostSyncCommand implements Runnable {
     return host.withSync(sync.withBoxId(boxId));
   }
 
-  private void printRole(SyncConfig sync) {
+  private void printRole(SyncConfig sync, OperatorCommand operator) {
     if (json) {
       var map = new LinkedHashMap<String, Object>();
       map.put("role", sync.role());
@@ -144,7 +148,7 @@ public final class HostSyncCommand implements Runnable {
       System.out.println(YamlUtil.dumpJson(map));
       return;
     }
-    System.out.println(roleLines(sync, OperatorCommand.here(), Ansi.AUTO));
+    System.out.println(roleLines(sync, operator, Ansi.AUTO));
   }
 
   /** The box's role and its FDE as printed, naming the command that sets whichever is missing. */

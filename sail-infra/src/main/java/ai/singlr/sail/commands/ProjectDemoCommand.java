@@ -59,6 +59,7 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var ansi = Ansi.AUTO;
     var out = System.out;
 
@@ -68,7 +69,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!dryRun && !Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(OperatorCommand.here());
+      throw HostInitCommand.notInitialized(operator);
     }
 
     if (!dryRun) {
@@ -100,7 +101,7 @@ public final class ProjectDemoCommand implements Runnable {
       out.println();
     }
 
-    var yamlContent = loadDemoDefinition(out, ansi);
+    var yamlContent = loadDemoDefinition(out, ansi, operator);
     var resolvedYaml = resolveAutoDetected(yamlContent, out, ansi);
 
     var outputDir = Path.of(DEMO_PROJECT);
@@ -143,7 +144,7 @@ public final class ProjectDemoCommand implements Runnable {
     tracker.reset();
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new ProjectProvisioner(shell, tracker, listener);
+    var provisioner = new ProjectProvisioner(shell, tracker, listener, operator);
     provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath);
 
     if (json) {
@@ -156,7 +157,6 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     out.println();
-    var operator = OperatorCommand.here();
     Banner.printProjectCreated(config.name(), operator, out, ansi);
 
     var mgr = new ContainerManager(shell);
@@ -184,8 +184,8 @@ public final class ProjectDemoCommand implements Runnable {
     }
   }
 
-  private String loadDemoDefinition(PrintStream out, Ansi ansi) {
-    try (var operations = OperationsFactory.open()) {
+  private String loadDemoDefinition(PrintStream out, Ansi ansi, OperatorCommand operator) {
+    try (var operations = OperationsFactory.open(operator)) {
       var definition = operations.catalog().demoDefinition();
       if (!json) {
         out.println(ansi.string("  @|green \u2713|@ demo project loaded from the catalog"));

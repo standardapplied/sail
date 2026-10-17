@@ -231,7 +231,8 @@ class LocalIdentityTest {
             "name: acme\n"
                 + "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\n"
                 + "ssh:\n  user: dev\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n",
-            home(home, git));
+            home(home, git),
+            OperatorCommand.PLAIN);
     return ProjectProvisioner.inputs(config);
   }
 

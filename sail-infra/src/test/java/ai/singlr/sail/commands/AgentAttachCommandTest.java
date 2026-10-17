@@ -17,6 +17,7 @@ import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyEvents;
@@ -48,13 +49,13 @@ class AgentAttachCommandTest {
   @Test
   void theHarnessIsTheCatalogRowsAgentAndTheDefaultForAProjectWithNoRow() {
     var dbPath = seeded("acme", "name: acme\nagent:\n  type: codex\n");
-    var acme = new AgentAttachCommand(() -> OperationsFactory.open(dbPath));
+    var acme = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath, operator));
     new CommandLine(acme).parseArgs("acme");
-    var absent = new AgentAttachCommand(() -> OperationsFactory.open(dbPath));
+    var absent = new AgentAttachCommand(operator -> OperationsFactory.open(dbPath, operator));
     new CommandLine(absent).parseArgs("absent", "-f", "/abs/sail.yaml");
 
-    assertEquals("codex", acme.resolveHarness().yamlName());
-    assertSame(Harnesses.DEFAULT, absent.resolveHarness());
+    assertEquals("codex", acme.resolveHarness(OperatorCommand.PLAIN).yamlName());
+    assertSame(Harnesses.DEFAULT, absent.resolveHarness(OperatorCommand.PLAIN));
   }
 
   @Test
@@ -161,14 +162,16 @@ class AgentAttachCommandTest {
   void aCompletedLatestRunIsStillResumableAndAnythingElseRefuses() {
     var completed = row("r1", "completed");
     assertDoesNotThrow(
-        () -> AgentAttachCommand.requireStillLatestAndIdle(completed, latest(completed), "acme"));
+        () ->
+            AgentAttachCommand.requireStillLatestAndIdle(
+                completed, latest(completed), "acme", OperatorCommand.PLAIN));
 
     var live =
         assertThrows(
             IllegalStateException.class,
             () ->
                 AgentAttachCommand.requireStillLatestAndIdle(
-                    completed, latest(row("r2", "running")), "acme"));
+                    completed, latest(row("r2", "running")), "acme", OperatorCommand.PLAIN));
     assertTrue(live.getMessage().startsWith("Run r2 is live"), live.getMessage());
 
     var newer =
@@ -176,13 +179,13 @@ class AgentAttachCommandTest {
             IllegalStateException.class,
             () ->
                 AgentAttachCommand.requireStillLatestAndIdle(
-                    completed, latest(row("r2", "completed")), "acme"));
+                    completed, latest(row("r2", "completed")), "acme", OperatorCommand.PLAIN));
     assertTrue(newer.getMessage().contains("changed while opening"), newer.getMessage());
     assertThrows(
         IllegalStateException.class,
         () ->
             AgentAttachCommand.requireStillLatestAndIdle(
-                completed, AgentAttachCommand.Latest.NONE, "acme"));
+                completed, AgentAttachCommand.Latest.NONE, "acme", OperatorCommand.PLAIN));
   }
 
   /**
@@ -199,7 +202,10 @@ class AgentAttachCommandTest {
                 IllegalStateException.class,
                 () ->
                     AgentAttachCommand.requireStillLatestAndIdle(
-                        completed, latest(completed, wholeContainer), "acme"))
+                        completed,
+                        latest(completed, wholeContainer),
+                        "acme",
+                        OperatorCommand.PLAIN))
             .getMessage()
             .contains("live in container 'acme'"));
 
@@ -209,7 +215,7 @@ class AgentAttachCommandTest {
             IllegalStateException.class,
             () ->
                 AgentAttachCommand.requireStillLatestAndIdle(
-                    completed, latest(completed, fullTurn), "acme"));
+                    completed, latest(completed, fullTurn), "acme", OperatorCommand.PLAIN));
     assertTrue(
         refused.getMessage().startsWith("Run turn (room-full) is live in repo(s) [app]"),
         refused.getMessage());
@@ -219,7 +225,7 @@ class AgentAttachCommandTest {
     assertDoesNotThrow(
         () ->
             AgentAttachCommand.requireStillLatestAndIdle(
-                completed, latest(completed, elsewhere, wake), "acme"),
+                completed, latest(completed, elsewhere, wake), "acme", OperatorCommand.PLAIN),
         "a disjoint repo and the read-only lane hold nothing the resume would take");
   }
 
@@ -346,7 +352,7 @@ class AgentAttachCommandTest {
                   () -> {
                     try {
                       AgentAttachCommand.openLocked(
-                          hostYield, latest, planned, client, plan, 80, 24);
+                          hostYield, latest, planned, client, plan, 80, 24, OperatorCommand.PLAIN);
                     } catch (Throwable t) {
                       refused.set(t);
                     } finally {

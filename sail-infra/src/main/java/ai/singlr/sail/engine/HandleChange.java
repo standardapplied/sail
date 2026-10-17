@@ -48,13 +48,15 @@ public final class HandleChange {
       Path dbPath,
       HostYaml current,
       HostYaml updated,
-      SyncOperations.Channels channels)
+      SyncOperations.Channels channels,
+      OperatorCommand operator)
       throws Exception {
     return apply(
         dbPath,
         current.sync(),
         updated.sync(),
         channels,
+        operator,
         () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
   }
 
@@ -73,6 +75,7 @@ public final class HandleChange {
       SyncConfig before,
       SyncConfig after,
       SyncOperations.Channels channels,
+      OperatorCommand operator,
       Write write)
       throws Exception {
     var renamed = !Objects.equals(before.handle(), after.handle());
@@ -84,14 +87,14 @@ public final class HandleChange {
     try (var db = Sqlite.open(dbPath);
         var rounds = SyncOperations.holdRounds(db)) {
       var runs = new RunStore(db);
-      var held = renamed ? heldByMain(db, before, after, channels) : Set.<String>of();
+      var held = renamed ? heldByMain(db, before, after, channels, operator) : Set.<String>of();
       if (renamed) {
         var stranded =
             before.isMain()
                 ? runs.liveUnder(before.handle())
                 : runs.heldUnder(before.handle(), held);
         if (!stranded.isEmpty()) {
-          throw new IllegalStateException(refusal(before, after, stranded));
+          throw new IllegalStateException(refusal(before, after, stranded, operator));
         }
       }
       write.run();
@@ -108,12 +111,16 @@ public final class HandleChange {
    * handle and never re-stamped. When main cannot be asked, nothing is changed.
    */
   private static Set<String> heldByMain(
-      Sqlite db, SyncConfig before, SyncConfig after, SyncOperations.Channels channels) {
+      Sqlite db,
+      SyncConfig before,
+      SyncConfig after,
+      SyncOperations.Channels channels,
+      OperatorCommand operator) {
     if (!before.isNode() || new RunStore(db).unacknowledged().isEmpty()) {
       return Set.of();
     }
     try {
-      return SyncOperations.acknowledgeHeld(db, BoxIdentity.resolved(before), channels);
+      return SyncOperations.acknowledgeHeld(db, BoxIdentity.resolved(before), channels, operator);
     } catch (Exception e) {
       throw new IllegalStateException(
           "Cannot change this box's sync handle from '"
@@ -131,7 +138,10 @@ public final class HandleChange {
   }
 
   private static String refusal(
-      SyncConfig before, SyncConfig after, List<RunStore.RunRow> stranded) {
+      SyncConfig before,
+      SyncConfig after,
+      List<RunStore.RunRow> stranded,
+      OperatorCommand operator) {
     var named =
         stranded.stream()
             .map(
@@ -162,7 +172,7 @@ public final class HandleChange {
         + (before.isMain()
             ? ""
             : ", run '"
-                + OperatorCommand.here().sail("sync")
+                + operator.sail("sync")
                 + "' while main still knows this box as '"
                 + from
                 + "'")

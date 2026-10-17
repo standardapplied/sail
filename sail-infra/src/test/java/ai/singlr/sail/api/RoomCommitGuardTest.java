@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.store.RunStore;
@@ -251,7 +252,10 @@ class RoomCommitGuardTest {
             });
     var guard =
         new RoomCommitGuard(
-            runStore, new ProjectLoader(shell, TestProjects.reading(yaml)), events::add, shell);
+            runStore,
+            new ProjectLoader(shell, TestProjects.reading(yaml), OperatorCommand.PLAIN),
+            events::add,
+            shell);
 
     guard.guardRoomRun("acme", "run-1");
 

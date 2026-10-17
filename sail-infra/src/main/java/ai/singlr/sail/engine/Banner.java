@@ -992,7 +992,10 @@ public final class Banner {
 
   /** Prints a yellow overcommit warning with resource totals. */
   public static void printOvercommitWarning(
-      ResourceChecker.OvercommitStatus status, PrintStream out, Ansi ansi) {
+      ResourceChecker.OvercommitStatus status,
+      OperatorCommand operator,
+      PrintStream out,
+      Ansi ansi) {
     if (!status.isOvercommitted()) {
       return;
     }
@@ -1020,7 +1023,7 @@ public final class Banner {
         amber(
             ansi,
             "    @|faint Use '"
-                + OperatorCommand.here().sail("project stop <name>")
+                + operator.sail("project stop <name>")
                 + "' to stop projects and free resources.|@"));
   }
 
@@ -1031,6 +1034,7 @@ public final class Banner {
       int commitCount,
       long lastCommitMinutesAgo,
       Map<String, Integer> taskCounts,
+      OperatorCommand operator,
       PrintStream out,
       Ansi ansi) {
     var statusStr = info.running() ? "Running" : "Stopped";
@@ -1086,7 +1090,7 @@ public final class Banner {
           amber(
               ansi,
               "    @|faint Tail output: "
-                  + OperatorCommand.here().sail("agent log " + name + " --follow")
+                  + operator.sail("agent log " + name + " --follow")
                   + "|@"));
     }
   }
@@ -1144,7 +1148,11 @@ public final class Banner {
 
   /** Prints a comprehensive morning-after agent report. */
   public static void printAgentReport(
-      String name, AgentReporter.Report report, PrintStream out, Ansi ansi) {
+      String name,
+      AgentReporter.Report report,
+      OperatorCommand operator,
+      PrintStream out,
+      Ansi ansi) {
     out.println();
     out.println(amber(ansi, "  @|bold Agent Report \u2014 " + name + "|@"));
     out.println(
@@ -1238,7 +1246,7 @@ public final class Banner {
         amber(
             ansi,
             "    "
-                + OperatorCommand.here().sail("agent log " + name + " --tail 50")
+                + operator.sail("agent log " + name + " --tail 50")
                 + "    @|faint # see agent output|@"));
     var remaining =
         report.specs().stream()
@@ -1249,7 +1257,7 @@ public final class Banner {
           amber(
               ansi,
               "    "
-                  + OperatorCommand.here().sail("spec dispatch --project " + name)
+                  + operator.sail("spec dispatch --project " + name)
                   + "   @|faint # continue "
                   + remaining
                   + " remaining specs|@"));

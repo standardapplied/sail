@@ -84,6 +84,7 @@ public final class SyncOperations {
   private final Supplier<SyncConfig> configuration;
   private final Channels channels;
   private final Consumer<Event> events;
+  private final OperatorCommand operator;
   private SailEventPublisher publisher;
 
   public SyncOperations(
@@ -91,24 +92,30 @@ public final class SyncOperations {
       String host,
       Path projectsDir,
       Supplier<SyncConfig> configuration,
-      Channels channels) {
-    this(db, host, projectsDir, configuration, channels, null);
+      Channels channels,
+      OperatorCommand operator) {
+    this(db, host, projectsDir, configuration, channels, null, operator);
   }
 
-  /** {@code events} receives every event a round publishes; {@code null} means the local API. */
+  /**
+   * {@code events} receives every event a round publishes; {@code null} means the local API. Every
+   * command a round's notice names is worded for {@code operator}.
+   */
   public SyncOperations(
       Sqlite db,
       String host,
       Path projectsDir,
       Supplier<SyncConfig> configuration,
       Channels channels,
-      Consumer<Event> events) {
+      Consumer<Event> events,
+      OperatorCommand operator) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
     this.configuration = configuration;
     this.channels = channels;
     this.events = events == null ? this::publishQuietly : events;
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   public SyncConfig configuration() {
@@ -122,7 +129,7 @@ public final class SyncOperations {
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
     try (var rounds = holdRounds(db)) {
       var config = configuration.get();
-      var target = resolveMain(request.main(), config);
+      var target = resolveMain(request.main(), config, operator);
       if (target.target() == null) {
         return new SyncReport(SyncEngine.Report.NONE, target.message());
       }
@@ -158,7 +165,7 @@ public final class SyncOperations {
     var files = new FileStore(db);
     var projects = new ProjectStore(db);
     try (var channel = channels.open(target);
-        var session = open(channel, config, db, target)) {
+        var session = open(channel, config, db, target, operator)) {
       var handle = Objects.toString(config.handle(), "");
       var replicas = SyncedEntities.replicas(db, config.boxId(), handle);
       return reconcile(session, handle, replicas, messages, specs, files, projects);
@@ -220,10 +227,10 @@ public final class SyncOperations {
    * by is not checked: a handle change asks it before deciding which runs it may re-stamp. Returns
    * the runs main holds.
    */
-  public static Set<String> acknowledgeHeld(Sqlite db, SyncConfig config, Channels channels)
-      throws Exception {
+  public static Set<String> acknowledgeHeld(
+      Sqlite db, SyncConfig config, Channels channels, OperatorCommand operator) throws Exception {
     try (var channel = channels.open(config.main());
-        var session = open(channel, config, db, config.main())) {
+        var session = open(channel, config, db, config.main(), operator)) {
       return NodeRound.acknowledgeHeld(session, db);
     }
   }
@@ -233,11 +240,16 @@ public final class SyncOperations {
    * channels} as the box {@code config} names is welcomed as that handle. Anything short of that,
    * main unreachable included, is no evidence that it does.
    */
-  public static boolean welcomedAs(SyncConfig config, Channels channels, String handle) {
+  public static boolean welcomedAs(
+      SyncConfig config, Channels channels, String handle, OperatorCommand operator) {
     try (var channel = channels.open(config.main());
         var session =
             SyncSession.open(
-                channel.reader(), channel.writer(), hello(config), SyncOperations::notice)) {
+                channel.reader(),
+                channel.writer(),
+                hello(config),
+                SyncOperations::notice,
+                denial -> notice(denial.describe(operator)))) {
       return session.handle().filter(handle::equals).isPresent();
     } catch (Exception notWelcomed) {
       notice(Objects.toString(notWelcomed.getMessage(), notWelcomed.getClass().getSimpleName()));
@@ -248,10 +260,16 @@ public final class SyncOperations {
   /**
    * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
    */
-  private static SyncSession open(Channel channel, SyncConfig config, Sqlite db, String target) {
+  private static SyncSession open(
+      Channel channel, SyncConfig config, Sqlite db, String target, OperatorCommand operator) {
     try {
       return SyncSession.open(
-          channel.reader(), channel.writer(), hello(config), SyncOperations::notice, db);
+          channel.reader(),
+          channel.writer(),
+          hello(config),
+          SyncOperations::notice,
+          denial -> notice(denial.describe(operator)),
+          db);
     } catch (SyncTransportException e) {
       if (!"unreachable".equals(e.kind())) {
         throw e;
@@ -325,7 +343,7 @@ public final class SyncOperations {
    * with nothing, whatever it is asked: a round adopts the other side's versions and roster, which
    * would overwrite the fleet's source of truth.
    */
-  public static MainTarget resolveMain(String flag, SyncConfig sync) {
+  public static MainTarget resolveMain(String flag, SyncConfig sync, OperatorCommand operator) {
     if (sync.isMain()) {
       return new MainTarget(
           null, "This box is the main devbox — other boxes sync to it; it has nothing to sync to.");
@@ -339,7 +357,7 @@ public final class SyncOperations {
     return new MainTarget(
         null,
         "Single devbox — nothing to sync. Add a second box with: "
-            + OperatorCommand.here().sail("host sync --main <user@host>")
+            + operator.sail("host sync --main <user@host>")
             + ".");
   }
 
@@ -443,7 +461,7 @@ public final class SyncOperations {
                       + " locally-modified file(s) in '"
                       + project
                       + "' (capture with '"
-                      + OperatorCommand.here().sail("project files add")
+                      + operator.sail("project files add")
                       + "', or delete to take main's): "
                       + String.join(", ", report.skipped()),
                   Ansi.AUTO));
@@ -456,7 +474,7 @@ public final class SyncOperations {
                       + " file(s) in '"
                       + project
                       + "' the upgrade could not tell from your edits ("
-                      + MaterializedFiles.undecidedRemedy(OperatorCommand.here())
+                      + MaterializedFiles.undecidedRemedy(operator)
                       + "): "
                       + String.join(", ", report.undecided()),
                   Ansi.AUTO));

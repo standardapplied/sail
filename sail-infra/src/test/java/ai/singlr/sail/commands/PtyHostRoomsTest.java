@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
@@ -69,7 +70,7 @@ class PtyHostRoomsTest {
                                 null,
                                 null)));
           }
-          rooms = new PtyHostRooms(path);
+          rooms = new PtyHostRooms(path, OperatorCommand.PLAIN);
         });
   }
 

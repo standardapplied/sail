@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ConnectEnvironment;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -31,11 +32,12 @@ import java.util.function.Function;
 public final class OperationsFactory {
   private OperationsFactory() {}
 
-  public static HostOperations open() {
-    return open(SailPaths.controlPlaneDb());
+  /** Every command a reply names is worded for {@code operator}, the caller of this process. */
+  public static HostOperations open(OperatorCommand operator) {
+    return open(SailPaths.controlPlaneDb(), operator);
   }
 
-  public static HostOperations open(Path path) {
+  public static HostOperations open(Path path, OperatorCommand operator) {
     return open(
         path,
         db ->
@@ -45,12 +47,13 @@ public final class OperationsFactory {
                 null,
                 null,
                 SyncScheduler.disabled(),
-                SessionYield.NONE));
+                SessionYield.NONE,
+                operator));
   }
 
   public static HostOperations open(
-      ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
-    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, hooks, sessionYield));
+      ShellExec shell, OperationHooks hooks, SessionYield sessionYield, OperatorCommand operator) {
+    return open(SailPaths.controlPlaneDb(), db -> create(db, shell, hooks, sessionYield, operator));
   }
 
   private static HostOperations open(Path path, Function<Sqlite, SailOperations> create) {
@@ -64,8 +67,12 @@ public final class OperationsFactory {
   }
 
   public static SailOperations create(
-      Sqlite db, ShellExec shell, OperationHooks hooks, SessionYield sessionYield) {
-    return create(db, shell, null, null, SyncScheduler.disabled(), sessionYield, hooks);
+      Sqlite db,
+      ShellExec shell,
+      OperationHooks hooks,
+      SessionYield sessionYield,
+      OperatorCommand operator) {
+    return create(db, shell, null, null, SyncScheduler.disabled(), sessionYield, hooks, operator);
   }
 
   public static SailOperations create(
@@ -74,7 +81,8 @@ public final class OperationsFactory {
       EventBus bus,
       EventSubscriber audit,
       SyncScheduler scheduler,
-      SessionYield sessionYield) {
+      SessionYield sessionYield,
+      OperatorCommand operator) {
     return create(
         db,
         shell,
@@ -90,7 +98,8 @@ public final class OperationsFactory {
             DispatchOperations.autoSnapshotter(shell),
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
-            StopOperations.Listener.NONE));
+            StopOperations.Listener.NONE),
+        operator);
   }
 
   private static SailOperations create(
@@ -100,7 +109,8 @@ public final class OperationsFactory {
       EventSubscriber audit,
       SyncScheduler scheduler,
       SessionYield sessionYield,
-      OperationHooks hooks) {
+      OperationHooks hooks,
+      OperatorCommand operator) {
     var projectStore = new ProjectStore(db);
     return new SailOperations(
             shell,
@@ -116,7 +126,8 @@ public final class OperationsFactory {
             scheduler,
             new FdeStore(db),
             sessionYield,
-            hooks)
+            hooks,
+            operator)
         .useMessages(new MessageStore(db))
         .useRooms(new RoomStore(db))
         .useBoxCredentials(new BoxCredentialStore(db))
@@ -129,6 +140,7 @@ public final class OperationsFactory {
                 HostInfo.hostname(),
                 SailPaths.projectsDir(),
                 BoxIdentity::config,
-                SshSyncChannel::open));
+                SshSyncChannel::open,
+                operator));
   }
 }

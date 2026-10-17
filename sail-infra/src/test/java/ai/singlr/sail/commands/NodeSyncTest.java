@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -43,8 +44,8 @@ class NodeSyncTest {
 
   @Test
   void mainAndOptedOutBoxesGetTheNoOpScheduler() {
-    try (var main = NodeSync.scheduler(SyncConfig.unset(), false, Map.of());
-        var optedOut = NodeSync.scheduler(NODE, true, Map.of())) {
+    try (var main = NodeSync.scheduler(SyncConfig.unset(), false, Map.of(), OperatorCommand.PLAIN);
+        var optedOut = NodeSync.scheduler(NODE, true, Map.of(), OperatorCommand.PLAIN)) {
       main.syncNow();
       optedOut.afterWrite();
     }
@@ -93,7 +94,9 @@ class NodeSyncTest {
 
   @Test
   void aNodeGetsALiveSchedulerWiredToTheConfiguredWindows() {
-    try (var scheduler = NodeSync.scheduler(NODE, false, Map.of(NodeSync.DEBOUNCE_ENV, "50"))) {
+    try (var scheduler =
+        NodeSync.scheduler(
+            NODE, false, Map.of(NodeSync.DEBOUNCE_ENV, "50"), OperatorCommand.PLAIN)) {
       assertNotNull(scheduler);
     }
   }

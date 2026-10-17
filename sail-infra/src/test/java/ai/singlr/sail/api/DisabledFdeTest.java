@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.HostAccess;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
@@ -85,7 +86,14 @@ class DisabledFdeTest {
     boxCredential = new BoxCredentialStore(db).replace("mady");
     runCredential = reserveRun("mady", "acme", "seed");
     operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(
+                db,
+                SHELL,
+                null,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useControlPlane(
                 db,
                 tempDir,
@@ -96,7 +104,8 @@ class DisabledFdeTest {
                     () -> MAIN,
                     target -> {
                       throw new IOException("main unavailable");
-                    }));
+                    },
+                    OperatorCommand.PLAIN));
     server =
         new SailApiServer(
             "127.0.0.1",
@@ -126,7 +135,10 @@ class DisabledFdeTest {
     assertEquals("mady", CliOperator.of(MAIN, new FdeStore(db)).handle());
     assertInstanceOf(SshGateway.Authorized.class, gateway());
     assertEquals(
-        "mady", new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null).fde());
+        "mady",
+        new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN)
+            .identity(session, null)
+            .fde());
   }
 
   @Test
@@ -148,7 +160,9 @@ class DisabledFdeTest {
     var terminal =
         assertThrows(
             IOException.class,
-            () -> new HostAccess(db, TestAuth.roles(db, MAIN)).identity(session, null));
+            () ->
+                new HostAccess(db, TestAuth.roles(db, MAIN), OperatorCommand.PLAIN)
+                    .identity(session, null));
     assertTrue(terminal.getMessage().contains("disabled"), "the terminal");
   }
 

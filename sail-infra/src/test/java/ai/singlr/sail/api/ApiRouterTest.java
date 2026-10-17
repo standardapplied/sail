@@ -19,6 +19,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
 import ai.singlr.sail.engine.FileMaterializer;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.identity.Acting;
@@ -119,13 +120,14 @@ class ApiRouterTest {
           new TestOperations() {
             @Override
             public SyncConflicts.Conflict conflict(String type, String id) {
-              return new ConflictOperations(box.db).find(type, id);
+              return new ConflictOperations(box.db, OperatorCommand.PLAIN).find(type, id);
             }
 
             @Override
             public SyncConflicts.Conflict resolveConflict(
                 String type, String id, Resolution resolution) {
-              return new ConflictOperations(box.db).resolve(type, id, resolution);
+              return new ConflictOperations(box.db, OperatorCommand.PLAIN)
+                  .resolve(type, id, resolution);
             }
           };
       try (var server = serverWith(operations, true)) {
@@ -188,7 +190,7 @@ class ApiRouterTest {
       Acting.system(() -> box.specs.create(SyncBox.spec("auth", "local", "pending")));
       var local = box.specs.comparableSnapshot("auth");
       park(box, "spec", local, "title", "remote");
-      var conflicts = new ConflictOperations(box.db);
+      var conflicts = new ConflictOperations(box.db, OperatorCommand.PLAIN);
       var rev = box.specs.revOf("auth");
       var operations =
           new TestOperations() {

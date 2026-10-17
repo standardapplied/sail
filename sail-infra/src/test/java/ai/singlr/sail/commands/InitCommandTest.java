@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
@@ -282,7 +283,10 @@ class InitCommandTest {
             "HostServiceInstallCommand",
             "JoinCommand m --name A B --email a@b"),
         ran);
-    var git = ProjectDefinitions.resolveForProvisioning(BY_NAME, identity::valueFor).git();
+    var git =
+        ProjectDefinitions.resolveForProvisioning(
+                BY_NAME, identity::valueFor, OperatorCommand.PLAIN)
+            .git();
     assertEquals("A B", git.name());
     assertEquals("a@b", git.email());
   }
@@ -304,7 +308,10 @@ class InitCommandTest {
     assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
-    var git = ProjectDefinitions.resolveForProvisioning(BY_NAME, identity::valueFor).git();
+    var git =
+        ProjectDefinitions.resolveForProvisioning(
+                BY_NAME, identity::valueFor, OperatorCommand.PLAIN)
+            .git();
     assertEquals("A B", git.name());
     assertEquals("a@b", git.email());
   }

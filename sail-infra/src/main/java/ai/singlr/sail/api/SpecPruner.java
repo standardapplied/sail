@@ -66,9 +66,16 @@ final class SpecPruner {
   private final EventBus eventBus;
   private final BooleanSupplier authoritative;
   private final Supplier<Instant> clock;
+  private final OperatorCommand operator;
 
-  SpecPruner(Sqlite db, EventBus eventBus, BooleanSupplier authoritative, Supplier<Instant> clock) {
+  SpecPruner(
+      Sqlite db,
+      EventBus eventBus,
+      BooleanSupplier authoritative,
+      Supplier<Instant> clock,
+      OperatorCommand operator) {
     this.db = Objects.requireNonNull(db, "db");
+    this.operator = Objects.requireNonNull(operator, "operator");
     this.specs = new SpecStore(db);
     this.messages = new MessageStore(db);
     this.runs = new RunStore(db);
@@ -91,9 +98,7 @@ final class SpecPruner {
           ErrorCode.INVALID_REQUEST,
           "A policy prune runs on main, which decides it on its own copy; a node prunes specs by"
               + " id and projects.",
-          "Run it on main, or name the specs: "
-              + OperatorCommand.here().sail("spec prune <id...>")
-              + ".");
+          "Run it on main, or name the specs: " + operator.sail("spec prune <id...>") + ".");
     }
     var handle = principal(actor.handle());
     IntFunction<List<Erasure.Target>> select = limit -> roots(request, limit);
@@ -234,7 +239,7 @@ final class SpecPruner {
     } catch (RuntimeException e) {
       System.err.println(
           "  [prune] erased, but could not collect its content; '"
-              + OperatorCommand.here().sail("sync gc")
+              + operator.sail("sync gc")
               + "' frees it: "
               + e.getMessage());
       return 0;

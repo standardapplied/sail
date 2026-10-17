@@ -52,9 +52,9 @@ final class HostSync {
    * The trailing hint after a "shared/changed" message: a node is told to run sync; a main is told
    * peers will pull; a standalone box is told nothing.
    */
-  static String propagationHint(SyncConfig sync) {
+  static String propagationHint(SyncConfig sync, OperatorCommand operator) {
     if (isNode(sync)) {
-      return "Run " + OperatorCommand.here().sail("sync") + " to propagate.";
+      return "Run " + operator.sail("sync") + " to propagate.";
     }
     if (sync.isMain()) {
       return "Other boxes pull it on their next sync.";

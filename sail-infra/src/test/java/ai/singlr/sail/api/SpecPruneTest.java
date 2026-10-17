@@ -15,6 +15,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
@@ -76,8 +77,10 @@ class SpecPruneTest {
     specs = new SpecStore(db);
     rooms = new RoomStore(db);
     bus = new EventBus();
-    pruner = new SpecPruner(db, bus, authoritative::get, clock::get);
-    ops = new GlobalSpecOperations(specs, null, bus, new RunStore(db), () -> rooms);
+    pruner = new SpecPruner(db, bus, authoritative::get, clock::get, OperatorCommand.PLAIN);
+    ops =
+        new GlobalSpecOperations(
+            specs, null, bus, new RunStore(db), () -> rooms, OperatorCommand.PLAIN);
   }
 
   @AfterEach
@@ -560,7 +563,8 @@ class SpecPruneTest {
   void pruningNeedsARequest() {
     assertThrows(NullPointerException.class, () -> Actor.call(ADMIN, () -> pruner.prune(null)));
     assertThrows(
-        NullPointerException.class, () -> new SpecPruner(null, bus, () -> true, clock::get));
+        NullPointerException.class,
+        () -> new SpecPruner(null, bus, () -> true, clock::get, OperatorCommand.PLAIN));
   }
 
   private void archived(String id, String owner) {

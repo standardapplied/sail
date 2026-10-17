@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
@@ -54,7 +55,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -93,7 +94,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -158,7 +159,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,
@@ -251,7 +252,7 @@ class EventStreamClientTest {
           new SailApiServer(
               "127.0.0.1",
               0,
-              new SailOperations(),
+              new SailOperations(OperatorCommand.PLAIN),
               new FixedTokenTestAuth("tok"),
               bus,
               persister,

@@ -40,22 +40,19 @@ final class GlobalSpecOperations {
   private final RunStore runStore;
   private final Supplier<RoomStore> rooms;
   private final BooleanSupplier authoritative;
+  private final OperatorCommand operator;
 
-  GlobalSpecOperations(SpecStore specStore) {
-    this(specStore, null, null);
+  GlobalSpecOperations(SpecStore specStore, OperatorCommand operator) {
+    this(specStore, null, null, operator);
   }
 
-  GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore) {
-    this(specStore, reviewStore, null);
-  }
-
-  GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore, EventBus eventBus) {
-    this(specStore, reviewStore, eventBus, null);
+  GlobalSpecOperations(SpecStore specStore, ReviewStore reviewStore, OperatorCommand operator) {
+    this(specStore, reviewStore, null, operator);
   }
 
   GlobalSpecOperations(
-      SpecStore specStore, ReviewStore reviewStore, EventBus eventBus, RunStore runStore) {
-    this(specStore, reviewStore, eventBus, runStore, () -> null);
+      SpecStore specStore, ReviewStore reviewStore, EventBus eventBus, OperatorCommand operator) {
+    this(specStore, reviewStore, eventBus, null, operator);
   }
 
   GlobalSpecOperations(
@@ -63,8 +60,18 @@ final class GlobalSpecOperations {
       ReviewStore reviewStore,
       EventBus eventBus,
       RunStore runStore,
-      Supplier<RoomStore> rooms) {
-    this(specStore, reviewStore, eventBus, runStore, rooms, () -> true);
+      OperatorCommand operator) {
+    this(specStore, reviewStore, eventBus, runStore, () -> null, operator);
+  }
+
+  GlobalSpecOperations(
+      SpecStore specStore,
+      ReviewStore reviewStore,
+      EventBus eventBus,
+      RunStore runStore,
+      Supplier<RoomStore> rooms,
+      OperatorCommand operator) {
+    this(specStore, reviewStore, eventBus, runStore, rooms, () -> true, operator);
   }
 
   /**
@@ -78,13 +85,15 @@ final class GlobalSpecOperations {
       EventBus eventBus,
       RunStore runStore,
       Supplier<RoomStore> rooms,
-      BooleanSupplier authoritative) {
+      BooleanSupplier authoritative,
+      OperatorCommand operator) {
     this.specStore = specStore;
     this.reviewStore = reviewStore;
     this.eventBus = eventBus;
     this.runStore = runStore;
     this.rooms = rooms;
     this.authoritative = authoritative;
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   GlobalSpecsListResponse list(SpecStore.SpecFilter filter) {
@@ -190,8 +199,7 @@ final class GlobalSpecOperations {
       throw new ApiException(
           ErrorCode.CONFLICT,
           "Spec '" + request.id() + "' already exists.",
-          "Pick another spec id, or edit it with: "
-              + OperatorCommand.here().sail("spec update " + request.id()));
+          "Pick another spec id, or edit it with: " + operator.sail("spec update " + request.id()));
     }
     var attached = row.withRoomId(home != null ? home.id() : request.id());
     specStore.create(
@@ -218,9 +226,7 @@ final class GlobalSpecOperations {
       throw new ApiException(
           ErrorCode.INTERNAL,
           "This box keeps no rooms, so a spec cannot be born in room '" + roomId + "'.",
-          "Start the server with '"
-              + OperatorCommand.here().sail("server start")
-              + "' or omit the room.");
+          "Start the server with '" + operator.sail("server start") + "' or omit the room.");
     }
     return Scoped.row(Actor.reader(), store.findById(roomId), RoomStore.RoomRow::project)
         .orElseThrow(() -> Refusals.roomNotFound(roomId));
@@ -529,7 +535,7 @@ final class GlobalSpecOperations {
     var store = rooms.get();
     specStore.atomically(
         () -> {
-          specStore.restore(specId, request.rev());
+          specStore.restore(specId, request.rev(), operator);
           if (store != null && !existing.live()) {
             var row = specStore.findById(specId).orElseThrow();
             if (row.roomIdOrIdentity().equals(specId)) {
@@ -568,7 +574,8 @@ final class GlobalSpecOperations {
   private Map<String, Object> revision(String specId, String rev) {
     var revision = specStore.comparableAtRev(specId, rev);
     if (revision == null || !Actor.reader().scope().admits(Snapshots.text(revision, "project"))) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev));
+      throw new ApiException(
+          ErrorCode.INVALID_REQUEST, specStore.unrestorable(specId, rev, operator));
     }
     return revision;
   }
@@ -624,7 +631,8 @@ final class GlobalSpecOperations {
 
   private void requireStore() {
     if (specStore == null) {
-      throw new ApiException(ErrorCode.INTERNAL, SailOperations.storeUnavailable("Spec store"));
+      throw new ApiException(
+          ErrorCode.INTERNAL, SailOperations.storeUnavailable("Spec store", operator));
     }
   }
 

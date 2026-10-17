@@ -532,14 +532,15 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
    * restore}) — the current state is never discarded, it becomes part of history too, so a restore
    * is itself reversible. Re-creates the spec if it had been deleted, from any revision history
    * still keeps — its tombstone included. A pruned spec has no history left to restore from, and
-   * says so; a revision compaction dropped says that too.
+   * says so; a revision compaction dropped says that too, naming the command as {@code operator}
+   * types it.
    */
-  public void restore(String id, String rev) {
+  public void restore(String id, String rev, OperatorCommand operator) {
     var entry =
         changeLog
             .at(ENTITY, id, rev)
             .filter(found -> found.kind() != ChangeLog.Kind.ERASURE)
-            .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev)));
+            .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev, operator)));
     var snapshot = YamlUtil.parseMap(entry.snapshot());
     db.transaction(
         () -> {
@@ -562,7 +563,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   }
 
   /** Why {@code rev} of spec {@code id} cannot be restored, naming what can be done instead. */
-  public String unrestorable(String id, String rev) {
+  public String unrestorable(String id, String rev, OperatorCommand operator) {
     var head = changeLog.head(ENTITY, id).orElse(null);
     if (head == null) {
       return "No revision '" + rev + "' recorded for spec '" + id + "'.";
@@ -577,7 +578,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         + "' is not in its retained history: history keeps the newest "
         + ChangeLog.HISTORY_REVISIONS
         + " revisions of each spec and every deletion. Pick one of those from '"
-        + OperatorCommand.here().sail("spec history " + id)
+        + operator.sail("spec history " + id)
         + "'.";
   }
 

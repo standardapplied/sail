@@ -84,11 +84,12 @@ final class CurrentProject {
    * {@code sail.yaml}, otherwise the current project. Throws with actionable guidance when none is
    * available.
    */
-  static String require(String explicit) {
-    return require(explicit, fromCwd().orElse(null), file());
+  static String require(String explicit, OperatorCommand operator) {
+    return require(explicit, fromCwd().orElse(null), file(), operator);
   }
 
-  static String require(String explicit, String cwdProject, Path stateFile) {
+  static String require(
+      String explicit, String cwdProject, Path stateFile, OperatorCommand operator) {
     if (Strings.isNotBlank(explicit)) {
       return explicit;
     }
@@ -99,7 +100,7 @@ final class CurrentProject {
                     "No project given and none could be inferred (no sail.yaml in the current"
                         + " directory tree, no current project). Name the project on the command"
                         + " line (-p/--project or the <project> argument), or run '"
-                        + OperatorCommand.here().sail("project switch <project>")
+                        + operator.sail("project switch <project>")
                         + "' first."));
   }
 
@@ -107,12 +108,16 @@ final class CurrentProject {
    * Resolves the project filter for listing commands: empty means every project (requested with
    * {@code --all-projects} or {@code --project '*'}), otherwise {@link #require} semantics apply.
    */
-  static Optional<String> scope(String explicit, boolean allProjects) {
-    return scope(explicit, allProjects, fromCwd().orElse(null), file());
+  static Optional<String> scope(String explicit, boolean allProjects, OperatorCommand operator) {
+    return scope(explicit, allProjects, fromCwd().orElse(null), file(), operator);
   }
 
   static Optional<String> scope(
-      String explicit, boolean allProjects, String cwdProject, Path stateFile) {
+      String explicit,
+      boolean allProjects,
+      String cwdProject,
+      Path stateFile,
+      OperatorCommand operator) {
     if (allProjects && Strings.isNotBlank(explicit) && !"*".equals(explicit)) {
       throw new IllegalArgumentException("Pass either --project or --all-projects, not both.");
     }
@@ -130,7 +135,7 @@ final class CurrentProject {
                         "No project given and none could be inferred (no sail.yaml in the current"
                             + " directory tree, no current project). Pass -p/--project <project>"
                             + " (or --all-projects for every project), or run '"
-                            + OperatorCommand.here().sail("project switch <project>")
+                            + operator.sail("project switch <project>")
                             + "' first."));
     return Optional.of(inferred);
   }

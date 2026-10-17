@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.authority.PostingRule;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
@@ -23,18 +24,20 @@ import java.nio.file.Path;
 final class PtyHostRooms implements PtyRooms {
 
   private final Path dbPath;
+  private final OperatorCommand operator;
 
-  PtyHostRooms() {
-    this(SailPaths.controlPlaneDb());
+  PtyHostRooms(OperatorCommand operator) {
+    this(SailPaths.controlPlaneDb(), operator);
   }
 
-  PtyHostRooms(Path dbPath) {
+  PtyHostRooms(Path dbPath, OperatorCommand operator) {
     this.dbPath = dbPath;
+    this.operator = operator;
   }
 
   @Override
   public void admit(String roomId, String project, PtyIdentity who) throws IOException {
-    try (var operations = OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath, operator)) {
       operations.pty().admitRoom(roomId, project, who);
     }
   }

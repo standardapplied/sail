@@ -108,7 +108,14 @@ class ProjectRenamerTest {
     new FdeStore(db).add("ada", null, null, "member");
     var shell = runningShell();
     try (var operations =
-        OperationsFactory.create(db, shell, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(
+                db,
+                shell,
+                null,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useControlPlane(
                 db,
                 tempDir,
@@ -119,7 +126,8 @@ class ProjectRenamerTest {
                     () -> adasNode,
                     target -> {
                       throw new IOException("main unavailable");
-                    }))) {
+                    },
+                    OperatorCommand.PLAIN))) {
       var refused =
           assertThrows(
               ApiException.class,
@@ -136,7 +144,7 @@ class ProjectRenamerTest {
   }
 
   private ProjectRenamer renamer(ScriptedShellExecutor shell) {
-    return new ProjectRenamer(db, shell, projectsDir);
+    return new ProjectRenamer(db, shell, projectsDir, OperatorCommand.PLAIN);
   }
 
   @Test

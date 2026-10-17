@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.fail;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -768,6 +769,7 @@ public final class SyncBox implements AutoCloseable {
             nodeOut.apply(tee),
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
             notices::add,
+            denial -> notices.add(denial.describe(OperatorCommand.PLAIN)),
             db);
     return new Link(session, log, notices, thread);
   }

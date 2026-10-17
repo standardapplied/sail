@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SnapshotManager;
 import java.util.LinkedHashMap;
@@ -43,6 +44,7 @@ public final class SnapDeleteCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     NameValidator.requireValidSnapshotLabel(label);
 
@@ -51,7 +53,7 @@ public final class SnapDeleteCommand implements Runnable {
     var snapMgr = new SnapshotManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireCreated(state, name);
+    ContainerStateGuard.requireCreated(state, name, operator);
 
     if (!json) {
       Banner.printBranding(System.out, Ansi.AUTO);

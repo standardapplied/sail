@@ -153,6 +153,10 @@ public final class FdeCommand implements Runnable {
     return SailPaths.controlPlaneDb();
   }
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   /**
    * Refuses to touch a pairing from the SSH gateway: its key line is in the operator's login, which
    * only the operator's own account writes.
@@ -325,6 +329,7 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Adding an FDE");
             if (scoped) {
@@ -341,7 +346,7 @@ public final class FdeCommand implements Runnable {
                     "FDE '"
                         + handle
                         + "' already exists. Change it with '"
-                        + OperatorCommand.here().sail("fde update " + handle)
+                        + operator.sail("fde update " + handle)
                         + "'.");
               }
               var fde = db.transaction(() -> add(fdeStore, key));
@@ -352,9 +357,7 @@ public final class FdeCommand implements Runnable {
                           + " ("
                           + fde.role()
                           + (scoped
-                              ? ", scoped: grant projects with '"
-                                  + OperatorCommand.here().sail("fde grant")
-                                  + "'"
+                              ? ", scoped: grant projects with '" + operator.sail("fde grant") + "'"
                               : "")
                           + ")"));
               if (key != null) {
@@ -488,11 +491,12 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Granting a project");
             requireNotThisBoxsOwn(box, handle);
             try (var db = Sqlite.open(box.database())) {
-              System.out.println(scopeEdit(db, handle, project, true, dryRun, json));
+              System.out.println(scopeEdit(db, handle, project, true, dryRun, json, operator));
             }
           });
     }
@@ -525,10 +529,11 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Revoking a project");
             try (var db = Sqlite.open(box.database())) {
-              System.out.println(scopeEdit(db, handle, project, false, dryRun, json));
+              System.out.println(scopeEdit(db, handle, project, false, dryRun, json, operator));
             }
           });
     }
@@ -543,7 +548,13 @@ public final class FdeCommand implements Runnable {
    * it.
    */
   static String scopeEdit(
-      Sqlite db, String handle, String project, boolean grant, boolean dryRun, boolean json) {
+      Sqlite db,
+      String handle,
+      String project,
+      boolean grant,
+      boolean dryRun,
+      boolean json,
+      OperatorCommand operator) {
     NameValidator.requireValidFdeHandle(handle);
     NameValidator.requireValidProjectName(project);
     var fdes = new FdeStore(db);
@@ -552,7 +563,7 @@ public final class FdeCommand implements Runnable {
           "Unknown project '"
               + project
               + "'. List the catalog with '"
-              + OperatorCommand.here().sail("project list")
+              + operator.sail("project list")
               + "'.");
     }
     var changed = fdes.grantsOf(handle).admits(project) != grant;
@@ -784,6 +795,7 @@ public final class FdeCommand implements Runnable {
     }
 
     private void execute() throws Exception {
+      var operator = operator();
       var box = command.box.get();
       validate();
       requireOwnFde(box, handle, host);
@@ -804,7 +816,7 @@ public final class FdeCommand implements Runnable {
                   + "' yet, and main's roster names the FDEs here. Run 'sudo sail sync', then pair"
                   + " again.");
         }
-        var address = address(box, existing);
+        var address = address(box, existing, operator);
         var hostKey = hostKey(box.hostKey());
         var pinned = hostKey.type() + " " + hostKey.blob();
         var replaced =
@@ -859,7 +871,7 @@ public final class FdeCommand implements Runnable {
               "  Containers of "
                   + stale
                   + " trust this key only after their next '"
-                  + OperatorCommand.here().sail("project apply")
+                  + operator.sail("project apply")
                   + "'.");
         }
       }
@@ -892,14 +904,14 @@ public final class FdeCommand implements Runnable {
     }
 
     /** The email the code names: the one passed, else the one this box holds for the FDE. */
-    private String address(Box box, Optional<FdeStore.Fde> existing) {
+    private String address(Box box, Optional<FdeStore.Fde> existing, OperatorCommand operator) {
       if (existing.isPresent() && !existing.get().active()) {
         throw new IllegalStateException(
             "FDE '"
                 + handle
                 + "' is disabled on this box, so a code for it would open nothing. Remove it"
                 + " with '"
-                + OperatorCommand.here().sail("fde rm " + handle)
+                + operator.sail("fde rm " + handle)
                 + "' and pair again.");
       }
       var address = email != null ? email : existing.map(FdeStore.Fde::email).orElse(null);
@@ -1042,14 +1054,13 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             try (var db = Sqlite.open(command.box.get().database())) {
               var fdeStore = new FdeStore(db);
               var fdes = fdeStore.list();
               if (fdes.isEmpty()) {
                 System.out.println(
-                    "  No FDEs. Add one with '"
-                        + OperatorCommand.here().sail("fde add <handle>")
-                        + "'.");
+                    "  No FDEs. Add one with '" + operator.sail("fde add <handle>") + "'.");
                 return;
               }
               Banner.printFdeTable(fdes, fdeStore::scopeOf, System.out, Ansi.AUTO);
@@ -1162,6 +1173,7 @@ public final class FdeCommand implements Runnable {
       public void run() {
         CliCommand.run(
             () -> {
+              var operator = operator();
               try (var db = Sqlite.open(dbPath())) {
                 var fde =
                     new FdeStore(db)
@@ -1172,7 +1184,7 @@ public final class FdeCommand implements Runnable {
                                     "Unknown FDE '"
                                         + handle
                                         + "'. Add it with '"
-                                        + OperatorCommand.here().sail("fde add " + handle)
+                                        + operator.sail("fde add " + handle)
                                         + "'."));
                 registerKey(db, fde, publicKey);
               }
@@ -1195,6 +1207,7 @@ public final class FdeCommand implements Runnable {
       public void run() {
         CliCommand.run(
             () -> {
+              var operator = operator();
               try (var db = Sqlite.open(dbPath())) {
                 var keyStore = new FdeSshKeyStore(db);
                 var keys =
@@ -1208,9 +1221,7 @@ public final class FdeCommand implements Runnable {
                                     new IllegalArgumentException("Unknown FDE '" + handle + "'."));
                 if (keys.isEmpty()) {
                   System.out.println(
-                      "  No SSH keys. Register one with '"
-                          + OperatorCommand.here().sail("fde key add")
-                          + "'.");
+                      "  No SSH keys. Register one with '" + operator.sail("fde key add") + "'.");
                   return;
                 }
                 Banner.printFdeKeyTable(keys, System.out, Ansi.AUTO);
@@ -1234,12 +1245,13 @@ public final class FdeCommand implements Runnable {
       public void run() {
         CliCommand.run(
             () -> {
+              var operator = operator();
               try (var db = Sqlite.open(dbPath())) {
                 var keyStore = new FdeSshKeyStore(db);
                 var fingerprint =
                     target.startsWith("SHA256:")
                         ? Optional.of(target)
-                        : resolveByHandle(db, keyStore);
+                        : resolveByHandle(db, keyStore, operator);
                 if (fingerprint.isEmpty()) {
                   return;
                 }
@@ -1260,7 +1272,8 @@ public final class FdeCommand implements Runnable {
        * Resolves a handle to the single key it owns, or empty after printing guidance — no keys, or
        * several (removing all on an ambiguous request would be a surprise revocation).
        */
-      private Optional<String> resolveByHandle(Sqlite db, FdeSshKeyStore keyStore) {
+      private Optional<String> resolveByHandle(
+          Sqlite db, FdeSshKeyStore keyStore, OperatorCommand operator) {
         var fde =
             new FdeStore(db)
                 .byHandle(target)
@@ -1271,7 +1284,7 @@ public final class FdeCommand implements Runnable {
                                 + target
                                 + "' is neither a known FDE handle nor a SHA256:"
                                 + " fingerprint. See '"
-                                + OperatorCommand.here().sail("fde key list")
+                                + operator.sail("fde key list")
                                 + "'."));
         var keys = keyStore.listForFde(fde.id());
         if (keys.isEmpty()) {
@@ -1282,8 +1295,7 @@ public final class FdeCommand implements Runnable {
         if (keys.size() > 1) {
           System.out.println("  '" + target + "' has " + keys.size() + " keys; specify one:");
           for (var key : keys) {
-            System.out.println(
-                "    " + OperatorCommand.here().sail("fde key rm " + key.fingerprint()));
+            System.out.println("    " + operator.sail("fde key rm " + key.fingerprint()));
           }
           return Optional.empty();
         }
@@ -1311,12 +1323,15 @@ public final class FdeCommand implements Runnable {
     }
 
     static String noMatchMessage(
-        String handle, String prefix, List<WebauthnCredentialStore.Credential> credentials) {
+        String handle,
+        String prefix,
+        List<WebauthnCredentialStore.Credential> credentials,
+        OperatorCommand operator) {
       if (credentials.isEmpty()) {
         return "'"
             + handle
             + "' has no passkeys. Enroll one with '"
-            + OperatorCommand.here().sail("fde enroll " + handle)
+            + operator.sail("fde enroll " + handle)
             + "'.";
       }
       return "No passkey of '"
@@ -1365,6 +1380,7 @@ public final class FdeCommand implements Runnable {
       public void run() {
         CliCommand.run(
             () -> {
+              var operator = operator();
               try (var db = Sqlite.open(dbPath())) {
                 var fde = requireFde(db, handle);
                 var credentials = new WebauthnCredentialStore(db).listForFde(fde.id());
@@ -1373,7 +1389,7 @@ public final class FdeCommand implements Runnable {
                       "  No passkeys for '"
                           + handle
                           + "'. Enroll one with '"
-                          + OperatorCommand.here().sail("fde enroll " + handle)
+                          + operator.sail("fde enroll " + handle)
                           + "'.");
                   return;
                 }
@@ -1412,6 +1428,7 @@ public final class FdeCommand implements Runnable {
       public void run() {
         CliCommand.run(
             () -> {
+              var operator = operator();
               try (var db = Sqlite.open(dbPath())) {
                 var fde = requireFde(db, handle);
                 var store = new WebauthnCredentialStore(db);
@@ -1421,7 +1438,7 @@ public final class FdeCommand implements Runnable {
                       case Passkeys.Match m -> m.credential();
                       case Passkeys.NotFound _ ->
                           throw new IllegalArgumentException(
-                              noMatchMessage(handle, credential, credentials));
+                              noMatchMessage(handle, credential, credentials, operator));
                       case Passkeys.Ambiguous a ->
                           throw new IllegalArgumentException(
                               ambiguousMessage(handle, credential, a.candidates()));
@@ -1455,7 +1472,7 @@ public final class FdeCommand implements Runnable {
                           "  @|faint '"
                               + handle
                               + "' has no passkeys left. Re-enroll with '"
-                              + OperatorCommand.here().sail("fde enroll " + handle)
+                              + operator.sail("fde enroll " + handle)
                               + "'.|@"));
                 }
               }

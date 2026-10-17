@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectApplier;
 import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -70,19 +71,21 @@ public final class ProjectAddServiceCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
     var ansi = Ansi.AUTO;
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var operator = ProjectMutations.catalogOperator(name, explicit, dryRun);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
     var config =
-        SailYaml.fromMap(YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit)));
+        SailYaml.fromMap(
+            YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));
     var shell = new ShellExecutor(dryRun);
     var mgr = new ContainerManager(shell);
     var state = mgr.queryState(name);
 
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     String svcName;
     SailYaml.Service service;
@@ -114,7 +117,7 @@ public final class ProjectAddServiceCommand implements Runnable {
         dryRun,
         out,
         "record service '" + svcName + "' in the catalog",
-        operator);
+        actor);
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

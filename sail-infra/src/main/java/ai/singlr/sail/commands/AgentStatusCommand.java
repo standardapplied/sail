@@ -21,6 +21,7 @@ import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.GuardrailChecker;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.time.Duration;
 import java.time.Instant;
@@ -28,7 +29,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
@@ -51,13 +52,13 @@ public final class AgentStatusCommand implements Runnable {
 
   @Mixin private IgnoredFileOption file;
 
-  private final Supplier<HostOperations> operations;
+  private final Function<OperatorCommand, HostOperations> operations;
 
   public AgentStatusCommand() {
     this(OperationsFactory::open);
   }
 
-  AgentStatusCommand(Supplier<HostOperations> operations) {
+  AgentStatusCommand(Function<OperatorCommand, HostOperations> operations) {
     this.operations = operations;
   }
 
@@ -67,14 +68,15 @@ public final class AgentStatusCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (name == null) {
-      executeAll();
+      executeAll(operator);
     } else {
-      executeSingle();
+      executeSingle(operator);
     }
   }
 
-  private void executeAll() throws Exception {
+  private void executeAll(OperatorCommand operator) throws Exception {
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
     var containers = mgr.listAll();
@@ -94,7 +96,7 @@ public final class AgentStatusCommand implements Runnable {
     var checker = new GuardrailChecker(shell);
     var summaries = new ArrayList<AgentSummary>();
     List<Probe> probes;
-    try (var operations = this.operations.get()) {
+    try (var operations = this.operations.apply(operator)) {
       var definitions = operations.catalog().definitions();
       probes =
           runningContainers.stream()
@@ -177,17 +179,17 @@ public final class AgentStatusCommand implements Runnable {
     Banner.printAgentStatusTable(rows, System.out, Ansi.AUTO);
   }
 
-  private void executeSingle() throws Exception {
+  private void executeSingle(OperatorCommand operator) throws Exception {
     NameValidator.requireValidProjectName(name);
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
     var state = mgr.queryState(name);
-    ContainerStateGuard.requireRunning(state, name);
+    ContainerStateGuard.requireRunning(state, name, operator);
 
     AgentSession.SessionInfo info;
     SailYaml config;
-    try (var operations = this.operations.get()) {
+    try (var operations = this.operations.apply(operator)) {
       info = operations.dispatching().projectSession(name, NodeIdentity.handle());
       config = operations.catalog().definitions().read(name).orElse(null);
     }
@@ -217,7 +219,7 @@ public final class AgentStatusCommand implements Runnable {
 
     Map<String, Integer> taskCounts = null;
     if (config != null && config.agent() != null && info != null) {
-      try (var operations = this.operations.get()) {
+      try (var operations = this.operations.apply(operator)) {
         taskCounts = SpecCatalog.statusCounts(operations.catalog().projectSpecs(name));
       } catch (Exception ignored) {
       }
@@ -253,7 +255,7 @@ public final class AgentStatusCommand implements Runnable {
     }
 
     Banner.printAgentStatus(
-        name, info, commitCount, lastCommitMinutesAgo, taskCounts, System.out, Ansi.AUTO);
+        name, info, commitCount, lastCommitMinutesAgo, taskCounts, operator, System.out, Ansi.AUTO);
   }
 
   /** What the listing reads of one running project before anything long-running starts. */

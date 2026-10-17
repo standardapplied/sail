@@ -109,7 +109,8 @@ class JoinCommandTest {
         null,
         null,
         NO_MAIN,
-        pin());
+        pin(),
+        OperatorCommand.PLAIN);
   }
 
   @Test
@@ -223,7 +224,8 @@ class JoinCommandTest {
             "Mady M",
             "mady@example.com",
             NO_MAIN,
-            pin());
+            pin(),
+            OperatorCommand.PLAIN);
 
     assertEquals("sail@maindevbox", plan.target());
     assertEquals("mady", plan.handle());
@@ -259,7 +261,16 @@ class JoinCommandTest {
       var run = reservedOn(db, null);
 
       JoinCommand.plan(
-          hostConfig, dbPath, identity(), "sail@main", "mady", null, null, NO_MAIN, pin());
+          hostConfig,
+          dbPath,
+          identity(),
+          "sail@main",
+          "mady",
+          null,
+          null,
+          NO_MAIN,
+          pin(),
+          OperatorCommand.PLAIN);
 
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().node());
       assertEquals("mady", new RunStore(db).findById(run).orElseThrow().owner());
@@ -292,7 +303,8 @@ class JoinCommandTest {
                       null,
                       null,
                       NO_MAIN,
-                      pin()));
+                      pin(),
+                      OperatorCommand.PLAIN));
 
       assertTrue(refused.getMessage().contains(held), refused.getMessage());
       assertEquals("ada", HostYaml.fromMap(YamlUtil.parseFile(hostConfig)).sync().handle());
@@ -316,7 +328,8 @@ class JoinCommandTest {
                     null,
                     null,
                     NO_MAIN,
-                    pin()));
+                    pin(),
+                    OperatorCommand.PLAIN));
     assertTrue(error.getMessage().contains("host init"));
   }
 
@@ -336,7 +349,8 @@ class JoinCommandTest {
                 null,
                 null,
                 NO_MAIN,
-                pin()));
+                pin(),
+                OperatorCommand.PLAIN));
   }
 
   @Test
@@ -513,7 +527,8 @@ class JoinCommandTest {
         null,
         null,
         channels,
-        pin());
+        pin(),
+        OperatorCommand.PLAIN);
   }
 
   private SyncOperations.Channels mainServing(Actor as) {

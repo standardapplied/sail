@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ContainerAgentProcess;
 import ai.singlr.sail.engine.ContainerExec;
 import ai.singlr.sail.engine.ContainerFilePush;
 import ai.singlr.sail.engine.LiveStream;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectSkillInstaller;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.ShellExec;
@@ -186,7 +187,8 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             (project, config) -> "",
             DispatchOperations.shellLauncher(shell),
             DispatchOperations.Listener.NONE,
-            SessionYield.NONE);
+            SessionYield.NONE,
+            OperatorCommand.PLAIN);
     var config =
         ReviewPipelineConfig.fromMap(
             Map.of(

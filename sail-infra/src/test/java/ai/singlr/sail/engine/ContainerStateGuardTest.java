@@ -16,7 +16,9 @@ class ContainerStateGuardTest {
   @Test
   void requireRunningPassesWhenRunning() {
     assertDoesNotThrow(
-        () -> ContainerStateGuard.requireRunning(new ContainerState.Running("10.0.0.5"), "demo"));
+        () ->
+            ContainerStateGuard.requireRunning(
+                new ContainerState.Running("10.0.0.5"), "demo", OperatorCommand.PLAIN));
   }
 
   @Test
@@ -24,7 +26,9 @@ class ContainerStateGuardTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> ContainerStateGuard.requireRunning(new ContainerState.Stopped(), "demo"));
+            () ->
+                ContainerStateGuard.requireRunning(
+                    new ContainerState.Stopped(), "demo", OperatorCommand.PLAIN));
     assertEquals(
         "Project 'demo' is stopped. Start it with: sail project start demo", ex.getMessage());
   }
@@ -34,7 +38,9 @@ class ContainerStateGuardTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> ContainerStateGuard.requireRunning(new ContainerState.NotCreated(), "demo"));
+            () ->
+                ContainerStateGuard.requireRunning(
+                    new ContainerState.NotCreated(), "demo", OperatorCommand.PLAIN));
     assertEquals(
         "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
   }
@@ -65,20 +71,26 @@ class ContainerStateGuardTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> ContainerStateGuard.requireRunning(new ContainerState.Error("boom"), "demo"));
+            () ->
+                ContainerStateGuard.requireRunning(
+                    new ContainerState.Error("boom"), "demo", OperatorCommand.PLAIN));
     assertEquals("Container error: boom", ex.getMessage());
   }
 
   @Test
   void requireCreatedPassesWhenRunning() {
     assertDoesNotThrow(
-        () -> ContainerStateGuard.requireCreated(new ContainerState.Running(null), "demo"));
+        () ->
+            ContainerStateGuard.requireCreated(
+                new ContainerState.Running(null), "demo", OperatorCommand.PLAIN));
   }
 
   @Test
   void requireCreatedPassesWhenStopped() {
     assertDoesNotThrow(
-        () -> ContainerStateGuard.requireCreated(new ContainerState.Stopped(), "demo"));
+        () ->
+            ContainerStateGuard.requireCreated(
+                new ContainerState.Stopped(), "demo", OperatorCommand.PLAIN));
   }
 
   @Test
@@ -86,7 +98,9 @@ class ContainerStateGuardTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> ContainerStateGuard.requireCreated(new ContainerState.NotCreated(), "demo"));
+            () ->
+                ContainerStateGuard.requireCreated(
+                    new ContainerState.NotCreated(), "demo", OperatorCommand.PLAIN));
     assertEquals(
         "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
   }
@@ -96,7 +110,9 @@ class ContainerStateGuardTest {
     var ex =
         assertThrows(
             IllegalStateException.class,
-            () -> ContainerStateGuard.requireCreated(new ContainerState.Error("boom"), "demo"));
+            () ->
+                ContainerStateGuard.requireCreated(
+                    new ContainerState.Error("boom"), "demo", OperatorCommand.PLAIN));
     assertEquals("Container error: boom", ex.getMessage());
   }
 }

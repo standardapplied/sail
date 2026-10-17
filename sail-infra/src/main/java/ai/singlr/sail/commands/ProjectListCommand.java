@@ -38,9 +38,10 @@ public final class ProjectListCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     var shell = new ShellExecutor(false);
     var containers = new ContainerManager(shell).listAll();
-    var projects = merge(containers, catalogNames());
+    var projects = merge(containers, catalogNames(operator));
 
     if (json) {
       System.out.println(renderJson(projects));
@@ -54,9 +55,9 @@ public final class ProjectListCommand implements Runnable {
       System.out.println(
           Ansi.AUTO.string(
               "  @|faint No projects found.|@ Create one with: @|bold "
-                  + OperatorCommand.here().sail("project apply")
+                  + operator.sail("project apply")
                   + "|@, or pull a team project with: @|bold "
-                  + OperatorCommand.here().sail("sync")
+                  + operator.sail("sync")
                   + "|@"));
       System.out.println();
       return;
@@ -82,8 +83,8 @@ public final class ProjectListCommand implements Runnable {
     return byName.values().stream().sorted(Comparator.comparing(ContainerInfo::name)).toList();
   }
 
-  private static List<String> catalogNames() {
-    try (var operations = OperationsFactory.open()) {
+  private static List<String> catalogNames(OperatorCommand operator) {
+    try (var operations = OperationsFactory.open(operator)) {
       return operations.catalog().projects().stream().map(ProjectStore.ProjectRow::name).toList();
     } catch (RuntimeException e) {
       return List.of();

@@ -21,17 +21,18 @@ public final class ServerStatusCommand implements Runnable {
   }
 
   private void execute() {
+    var operator = OperatorCommand.here();
     var dbPath = SailPaths.controlPlaneDb();
     if (!Files.exists(dbPath)) {
       System.out.println(
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ Server not initialized. Run '"
-                  + OperatorCommand.here().sail("server init")
+                  + operator.sail("server init")
                   + "'."));
       return;
     }
 
-    try (var operations = OperationsFactory.open(dbPath)) {
+    try (var operations = OperationsFactory.open(dbPath, operator)) {
       var tokens = operations.identity().tokens();
 
       System.out.println(Ansi.AUTO.string("  @|bold Sail Server|@"));

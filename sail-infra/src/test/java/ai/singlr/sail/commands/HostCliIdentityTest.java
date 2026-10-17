@@ -23,6 +23,7 @@ import ai.singlr.sail.api.TestAuth;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HostToken;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
@@ -229,7 +230,14 @@ class HostCliIdentityTest {
   private void serve(SyncConfig config) throws IOException {
     box.set(config);
     operations =
-        OperationsFactory.create(db, SHELL, null, null, SyncScheduler.disabled(), SessionYield.NONE)
+        OperationsFactory.create(
+                db,
+                SHELL,
+                null,
+                null,
+                SyncScheduler.disabled(),
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useControlPlane(
                 db,
                 tempDir,
@@ -240,7 +248,8 @@ class HostCliIdentityTest {
                     box::get,
                     target -> {
                       throw new IOException("main unavailable");
-                    }));
+                    },
+                    OperatorCommand.PLAIN));
     server =
         new SailApiServer(
             "127.0.0.1",

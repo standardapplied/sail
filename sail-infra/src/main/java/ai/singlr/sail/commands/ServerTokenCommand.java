@@ -34,6 +34,10 @@ public final class ServerTokenCommand implements Runnable {
     new picocli.CommandLine(this).usage(System.out);
   }
 
+  private static OperatorCommand operator() {
+    return OperatorCommand.here();
+  }
+
   @Command(
       name = "create",
       description = "Create a new API token.",
@@ -66,9 +70,10 @@ public final class ServerTokenCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             var ttl = resolveTtl(noExpiry, ttlDays);
-            try (var operations = OperationsFactory.open()) {
-              var fdeId = resolveFdeId(operations);
+            try (var operations = OperationsFactory.open(operator)) {
+              var fdeId = resolveFdeId(operations, operator);
               var created = operations.identity().createToken(name, role, fdeId, ttl);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
@@ -108,7 +113,7 @@ public final class ServerTokenCommand implements Runnable {
       return Duration.ofDays(ttlDays);
     }
 
-    private String resolveFdeId(HostOperations operations) {
+    private String resolveFdeId(HostOperations operations, OperatorCommand operator) {
       if (Strings.isBlank(fde)) {
         return null;
       }
@@ -122,7 +127,7 @@ public final class ServerTokenCommand implements Runnable {
                       "No FDE with handle '"
                           + fde
                           + "'. Add it with '"
-                          + OperatorCommand.here().sail("fde add " + fde)
+                          + operator.sail("fde add " + fde)
                           + "'."));
     }
   }
@@ -136,13 +141,12 @@ public final class ServerTokenCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
-            try (var operations = OperationsFactory.open()) {
+            var operator = operator();
+            try (var operations = OperationsFactory.open(operator)) {
               var tokens = operations.identity().tokens();
               if (tokens.isEmpty()) {
                 System.out.println(
-                    "  No tokens. Run '"
-                        + OperatorCommand.here().sail("server init")
-                        + "' to create one.");
+                    "  No tokens. Run '" + operator.sail("server init") + "' to create one.");
                 return;
               }
               for (var token : tokens) {
@@ -169,7 +173,8 @@ public final class ServerTokenCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
-            try (var operations = OperationsFactory.open()) {
+            var operator = operator();
+            try (var operations = OperationsFactory.open(operator)) {
               var revoked = operations.identity().revokeToken(name);
               if (revoked) {
                 System.out.println(Ansi.AUTO.string("  @|green ✓|@ Token '" + name + "' revoked."));

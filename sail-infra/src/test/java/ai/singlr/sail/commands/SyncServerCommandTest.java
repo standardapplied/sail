@@ -14,11 +14,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
 import ai.singlr.sail.store.MigrationRunner;
@@ -74,7 +76,8 @@ class SyncServerCommandTest {
   void setUp() {
     var mainPath = tempDir.resolve("main.db");
     try (var db = Sqlite.open(mainPath)) {
-      MigrationRunner.applyAll(db, MigrateCommand.REGISTRY, DataMigration.Prompter.NON_INTERACTIVE);
+      MigrationRunner.applyAll(
+          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
     }
     mainReplicaDb = SyncDatabase.converge(mainPath, "main");
     mainDb = mainReplicaDb.db();
@@ -161,6 +164,7 @@ class SyncServerCommandTest {
             toServer,
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
             n -> {},
+            ignored -> {},
             nodeDb)) {
       return Actor.call(Actor.main(), () -> session.reconcile(entityType, replica)).report();
     } finally {
@@ -246,6 +250,7 @@ class SyncServerCommandTest {
                       toServer,
                       SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
                       n -> {},
+                      ignored -> {},
                       nodeDb));
       assertTrue(refused.getMessage().contains("main's own FDE"), refused.getMessage());
       assertTrue(refused.getMessage().contains("main ('main')"), refused.getMessage());

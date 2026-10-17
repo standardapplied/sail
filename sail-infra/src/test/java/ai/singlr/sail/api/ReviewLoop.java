@@ -15,6 +15,7 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentSession;
 import ai.singlr.sail.engine.AgentUnit;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SharedProjectFiles;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.engine.StageSkill;
@@ -174,7 +175,8 @@ final class ReviewLoop implements AutoCloseable {
                 (project, descriptor) -> "",
                 this::launch,
                 DispatchOperations.Listener.NONE,
-                SessionYield.NONE)
+                SessionYield.NONE,
+                OperatorCommand.PLAIN)
             .useMessages(messages)
             .useRooms(new RoomStore(db))
             .useProjectSkills(skills());
@@ -475,7 +477,14 @@ final class ReviewLoop implements AutoCloseable {
   /** The stop executor this server would run, halting agents through {@code halter}. */
   StopOperations stops(StopOperations.AgentHalter halter) {
     return new StopOperations(
-        container, reader, specs, runs, bus::publish, halter, StopOperations.Listener.NONE);
+        container,
+        reader,
+        specs,
+        runs,
+        bus::publish,
+        halter,
+        StopOperations.Listener.NONE,
+        OperatorCommand.PLAIN);
   }
 
   /** Every agent this loop launches from now on says what {@code script} says, then exits. */
