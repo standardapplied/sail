@@ -30,7 +30,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -70,11 +69,11 @@ public final class SyncCommand implements Callable<Integer> {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Gc() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Gc(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Gc(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override
@@ -104,11 +103,11 @@ public final class SyncCommand implements Callable<Integer> {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Status() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Status(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Status(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override

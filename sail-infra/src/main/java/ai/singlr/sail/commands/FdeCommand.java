@@ -176,6 +176,83 @@ public final class FdeCommand implements Runnable {
     return "sail-mast:" + handle;
   }
 
+  static String alreadyExists(String handle, OperatorCommand operator) {
+    return "FDE '"
+        + handle
+        + "' already exists. Change it with '"
+        + operator.sail("fde update " + handle)
+        + "'.";
+  }
+
+  static String added(FdeStore.Fde fde, boolean scoped, OperatorCommand operator) {
+    return "  @|green ✓|@ FDE added: "
+        + fde.handle()
+        + " ("
+        + fde.role()
+        + (scoped ? ", scoped: grant projects with '" + operator.sail("fde grant") + "'" : "")
+        + ")";
+  }
+
+  static String trustedAfterApply(String projects, OperatorCommand operator) {
+    return "  Containers of "
+        + projects
+        + " trust this key only after their next '"
+        + operator.sail("project apply")
+        + "'.";
+  }
+
+  static String disabledForPairing(String handle, OperatorCommand operator) {
+    return "FDE '"
+        + handle
+        + "' is disabled on this box, so a code for it would open nothing. Remove it with '"
+        + operator.sail("fde rm " + handle)
+        + "' and pair again.";
+  }
+
+  static String noFdes(OperatorCommand operator) {
+    return "  No FDEs. Add one with '" + operator.sail("fde add <handle>") + "'.";
+  }
+
+  static String unknownFde(String handle, OperatorCommand operator) {
+    return "Unknown FDE '"
+        + handle
+        + "'. Add it with '"
+        + operator.sail("fde add " + handle)
+        + "'.";
+  }
+
+  static String noKeys(OperatorCommand operator) {
+    return "  No SSH keys. Register one with '" + operator.sail("fde key add") + "'.";
+  }
+
+  static String neitherHandleNorFingerprint(String target, OperatorCommand operator) {
+    return "'"
+        + target
+        + "' is neither a known FDE handle nor a SHA256: fingerprint. See '"
+        + operator.sail("fde key list")
+        + "'.";
+  }
+
+  static String keyRemoval(String fingerprint, OperatorCommand operator) {
+    return "    " + operator.sail("fde key rm " + fingerprint);
+  }
+
+  static String noPasskeys(String handle, OperatorCommand operator) {
+    return "  No passkeys for '"
+        + handle
+        + "'. Enroll one with '"
+        + operator.sail("fde enroll " + handle)
+        + "'.";
+  }
+
+  static String noPasskeysLeft(String handle, OperatorCommand operator) {
+    return "  @|faint '"
+        + handle
+        + "' has no passkeys left. Re-enroll with '"
+        + operator.sail("fde enroll " + handle)
+        + "'.|@";
+  }
+
   /**
    * This box's own FDE acts as an admin here whatever its roster row says ({@code
    * RoleRule.scopeOf}), so a scope on it would hold no one: refused, as an admin's is.
@@ -342,24 +419,10 @@ public final class FdeCommand implements Runnable {
             try (var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               if (fdeStore.byHandle(handle).isPresent()) {
-                throw new IllegalArgumentException(
-                    "FDE '"
-                        + handle
-                        + "' already exists. Change it with '"
-                        + operator.sail("fde update " + handle)
-                        + "'.");
+                throw new IllegalArgumentException(alreadyExists(handle, operator));
               }
               var fde = db.transaction(() -> add(fdeStore, key));
-              System.out.println(
-                  Ansi.AUTO.string(
-                      "  @|green ✓|@ FDE added: "
-                          + fde.handle()
-                          + " ("
-                          + fde.role()
-                          + (scoped
-                              ? ", scoped: grant projects with '" + operator.sail("fde grant") + "'"
-                              : "")
-                          + ")"));
+              System.out.println(Ansi.AUTO.string(added(fde, scoped, operator)));
               if (key != null) {
                 System.out.println(
                     Ansi.AUTO.string(
@@ -867,12 +930,7 @@ public final class FdeCommand implements Runnable {
         var stale = projects.collect(Collectors.joining(", "));
         if (!stale.isEmpty()) {
           System.out.println();
-          System.out.println(
-              "  Containers of "
-                  + stale
-                  + " trust this key only after their next '"
-                  + operator.sail("project apply")
-                  + "'.");
+          System.out.println(trustedAfterApply(stale, operator));
         }
       }
     }
@@ -906,13 +964,7 @@ public final class FdeCommand implements Runnable {
     /** The email the code names: the one passed, else the one this box holds for the FDE. */
     private String address(Box box, Optional<FdeStore.Fde> existing, OperatorCommand operator) {
       if (existing.isPresent() && !existing.get().active()) {
-        throw new IllegalStateException(
-            "FDE '"
-                + handle
-                + "' is disabled on this box, so a code for it would open nothing. Remove it"
-                + " with '"
-                + operator.sail("fde rm " + handle)
-                + "' and pair again.");
+        throw new IllegalStateException(disabledForPairing(handle, operator));
       }
       var address = email != null ? email : existing.map(FdeStore.Fde::email).orElse(null);
       if (address == null) {
@@ -1059,8 +1111,7 @@ public final class FdeCommand implements Runnable {
               var fdeStore = new FdeStore(db);
               var fdes = fdeStore.list();
               if (fdes.isEmpty()) {
-                System.out.println(
-                    "  No FDEs. Add one with '" + operator.sail("fde add <handle>") + "'.");
+                System.out.println(noFdes(operator));
                 return;
               }
               Banner.printFdeTable(fdes, fdeStore::scopeOf, System.out, Ansi.AUTO);
@@ -1179,13 +1230,7 @@ public final class FdeCommand implements Runnable {
                     new FdeStore(db)
                         .byHandle(handle)
                         .orElseThrow(
-                            () ->
-                                new IllegalArgumentException(
-                                    "Unknown FDE '"
-                                        + handle
-                                        + "'. Add it with '"
-                                        + operator.sail("fde add " + handle)
-                                        + "'."));
+                            () -> new IllegalArgumentException(unknownFde(handle, operator)));
                 registerKey(db, fde, publicKey);
               }
             });
@@ -1220,8 +1265,7 @@ public final class FdeCommand implements Runnable {
                                 () ->
                                     new IllegalArgumentException("Unknown FDE '" + handle + "'."));
                 if (keys.isEmpty()) {
-                  System.out.println(
-                      "  No SSH keys. Register one with '" + operator.sail("fde key add") + "'.");
+                  System.out.println(noKeys(operator));
                   return;
                 }
                 Banner.printFdeKeyTable(keys, System.out, Ansi.AUTO);
@@ -1280,12 +1324,7 @@ public final class FdeCommand implements Runnable {
                 .orElseThrow(
                     () ->
                         new IllegalArgumentException(
-                            "'"
-                                + target
-                                + "' is neither a known FDE handle nor a SHA256:"
-                                + " fingerprint. See '"
-                                + operator.sail("fde key list")
-                                + "'."));
+                            neitherHandleNorFingerprint(target, operator)));
         var keys = keyStore.listForFde(fde.id());
         if (keys.isEmpty()) {
           System.out.println(
@@ -1295,7 +1334,7 @@ public final class FdeCommand implements Runnable {
         if (keys.size() > 1) {
           System.out.println("  '" + target + "' has " + keys.size() + " keys; specify one:");
           for (var key : keys) {
-            System.out.println("    " + operator.sail("fde key rm " + key.fingerprint()));
+            System.out.println(keyRemoval(key.fingerprint(), operator));
           }
           return Optional.empty();
         }
@@ -1385,12 +1424,7 @@ public final class FdeCommand implements Runnable {
                 var fde = requireFde(db, handle);
                 var credentials = new WebauthnCredentialStore(db).listForFde(fde.id());
                 if (credentials.isEmpty()) {
-                  System.out.println(
-                      "  No passkeys for '"
-                          + handle
-                          + "'. Enroll one with '"
-                          + operator.sail("fde enroll " + handle)
-                          + "'.");
+                  System.out.println(noPasskeys(handle, operator));
                   return;
                 }
                 Banner.printFdePasskeyTable(credentials, handle, System.out, Ansi.AUTO);
@@ -1467,13 +1501,7 @@ public final class FdeCommand implements Runnable {
                               + " pass --revoke-sessions to end them now.|@"));
                 }
                 if (credentials.size() == 1) {
-                  System.out.println(
-                      Ansi.AUTO.string(
-                          "  @|faint '"
-                              + handle
-                              + "' has no passkeys left. Re-enroll with '"
-                              + operator.sail("fde enroll " + handle)
-                              + "'.|@"));
+                  System.out.println(Ansi.AUTO.string(noPasskeysLeft(handle, operator)));
                 }
               }
             });

@@ -101,19 +101,19 @@ class ProjectSkillsCommandTest {
   private record Ran(int exit, String out, String err, Exception escaped) {}
 
   private Ran ls(String... args) {
-    return run(new ProjectSkillsCommand.Ls(this::operations), args);
+    return run(new ProjectSkillsCommand.Ls(ignored -> operations()), args);
   }
 
   private Ran add(String... args) {
-    return run(new ProjectSkillsCommand.Add(this::operations), args);
+    return run(new ProjectSkillsCommand.Add(ignored -> operations()), args);
   }
 
   private Ran rm(String... args) {
-    return run(new ProjectSkillsCommand.Rm(this::operations), args);
+    return run(new ProjectSkillsCommand.Rm(ignored -> operations()), args);
   }
 
   private Ran show(String... args) {
-    return run(new ProjectSkillsCommand.Show(this::operations), args);
+    return run(new ProjectSkillsCommand.Show(ignored -> operations()), args);
   }
 
   private static Ran run(Object command, String... args) {

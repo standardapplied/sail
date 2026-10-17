@@ -87,7 +87,7 @@ class SyncCommandTest {
       var previous = System.out;
       try (var stream = new PrintStream(output)) {
         System.setOut(stream);
-        assertEquals(0, new SyncCommand.Gc(() -> operations).call());
+        assertEquals(0, new SyncCommand.Gc(ignored -> operations).call());
       } finally {
         System.setOut(previous);
       }
@@ -135,7 +135,7 @@ class SyncCommandTest {
       var previous = System.out;
       try (var stream = new PrintStream(new ByteArrayOutputStream())) {
         System.setOut(stream);
-        assertEquals(0, new SyncCommand.Gc(() -> operations).call());
+        assertEquals(0, new SyncCommand.Gc(ignored -> operations).call());
       } finally {
         System.setOut(previous);
       }
@@ -175,7 +175,7 @@ class SyncCommandTest {
                         throw new IOException("main unavailable");
                       },
                       OperatorCommand.PLAIN));
-      Supplier<SyncCommand.Status> status = () -> new SyncCommand.Status(() -> operations);
+      Supplier<SyncCommand.Status> status = () -> new SyncCommand.Status(ignored -> operations);
       assertEquals(
           Map.of(
               "role",

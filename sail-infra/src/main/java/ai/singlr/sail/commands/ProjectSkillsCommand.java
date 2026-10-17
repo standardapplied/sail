@@ -32,7 +32,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.stream.Stream;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -139,11 +138,11 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Ls() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Ls(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Ls(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override
@@ -185,11 +184,11 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Add() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Add(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Add(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override
@@ -307,11 +306,11 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Rm() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Rm(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Rm(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override
@@ -372,11 +371,11 @@ public final class ProjectSkillsCommand implements Runnable {
     private final Function<OperatorCommand, HostOperations> operations;
 
     Show() {
-      this.operations = OperationsFactory::open;
+      this(OperationsFactory::open);
     }
 
-    Show(Supplier<HostOperations> operations) {
-      this.operations = ignored -> operations.get();
+    Show(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
     }
 
     @Override

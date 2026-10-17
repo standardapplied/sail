@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
@@ -68,6 +69,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class FdeCommandTest {
 
@@ -2067,6 +2069,54 @@ class FdeCommandTest {
       assertEquals(true, json.get("released"));
       assertEquals("laptop", json.get("box"));
     }
+  }
+
+  @Test
+  void everyCommandAnFdeVerbNamesIsWordedForTheOperator() {
+    var sudo = new OperatorCommand(true);
+    var ada = new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", "2026");
+    String unknownProject;
+    try (var db = Sqlite.openMemory()) {
+      new SchemaManager(db).migrate();
+      unknownProject =
+          assertThrows(
+                  IllegalArgumentException.class,
+                  () -> FdeCommand.scopeEdit(db, "ada", "ghost", true, false, false, sudo))
+              .getMessage();
+    }
+
+    assertEquals(
+        List.of(
+            "FDE 'ada' already exists. Change it with 'sudo sail fde update ada'.",
+            "  ✓ FDE added: ada (member, scoped: grant projects with 'sudo sail fde grant')",
+            "Unknown project 'ghost'. List the catalog with 'sudo sail project list'.",
+            "  Containers of acme, beta trust this key only after their next 'sudo sail project"
+                + " apply'.",
+            "FDE 'ada' is disabled on this box, so a code for it would open nothing. Remove it with"
+                + " 'sudo sail fde rm ada' and pair again.",
+            "  No FDEs. Add one with 'sudo sail fde add <handle>'.",
+            "Unknown FDE 'ada'. Add it with 'sudo sail fde add ada'.",
+            "  No SSH keys. Register one with 'sudo sail fde key add'.",
+            "'ada' is neither a known FDE handle nor a SHA256: fingerprint. See 'sudo sail fde key"
+                + " list'.",
+            "    sudo sail fde key rm SHA256:abc",
+            "'ada' has no passkeys. Enroll one with 'sudo sail fde enroll ada'.",
+            "  No passkeys for 'ada'. Enroll one with 'sudo sail fde enroll ada'.",
+            "  'ada' has no passkeys left. Re-enroll with 'sudo sail fde enroll ada'."),
+        List.of(
+            FdeCommand.alreadyExists("ada", sudo),
+            Ansi.OFF.string(FdeCommand.added(ada, true, sudo)),
+            unknownProject,
+            FdeCommand.trustedAfterApply("acme, beta", sudo),
+            FdeCommand.disabledForPairing("ada", sudo),
+            FdeCommand.noFdes(sudo),
+            FdeCommand.unknownFde("ada", sudo),
+            FdeCommand.noKeys(sudo),
+            FdeCommand.neitherHandleNorFingerprint("ada", sudo),
+            FdeCommand.keyRemoval("SHA256:abc", sudo),
+            FdeCommand.Passkey.noMatchMessage("ada", "zz", List.of(), sudo),
+            FdeCommand.noPasskeys("ada", sudo),
+            Ansi.OFF.string(FdeCommand.noPasskeysLeft("ada", sudo))));
   }
 
   @Test

@@ -49,7 +49,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -115,10 +114,11 @@ public final class RunCommand implements Runnable {
   private SailEventPublisher eventPublisher;
 
   public RunCommand() {
-    this.operations = OperationsFactory::open;
-    this.identity = LocalIdentity.detect();
-    this.shells = ShellExecutor::new;
-    this.terminal = DispatchOperations.terminalLauncher();
+    this(
+        OperationsFactory::open,
+        LocalIdentity.detect(),
+        ShellExecutor::new,
+        DispatchOperations.terminalLauncher());
   }
 
   /**
@@ -127,11 +127,11 @@ public final class RunCommand implements Runnable {
    *     ssh}, and a task session's agent command
    */
   RunCommand(
-      Supplier<HostOperations> operations,
+      Function<OperatorCommand, HostOperations> operations,
       LocalIdentity identity,
       Function<Boolean, ShellExec> shells,
       DispatchOperations.AgentLauncher terminal) {
-    this.operations = ignored -> operations.get();
+    this.operations = operations;
     this.identity = identity;
     this.shells = shells;
     this.terminal = terminal;
