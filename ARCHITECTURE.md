@@ -1840,7 +1840,7 @@ command the installer sends against a real shell under a temporary directory;
   `agent.methodology` and `agent_context` fail `SailYaml.fromMap` with one sentence each
   saying where the text now goes, so a row that arrives by sync with one is
   `ProjectReader.Unreadable` with that sentence. `StagePromptsMigration`
-  (`stages-are-prompts-v1`, in `DataMigrations.ALL`, needing nothing of the box's files)
+  (`stages-are-prompts-v1`, in `DataMigrations.all`, needing nothing of the box's files)
   rewrites every definition the catalog holds without those keys through
   `ProjectStore.upsert`, a journalled revision that syncs, listing per project what it
   dropped and where it belongs; a second run changes nothing. The refusal is for what comes

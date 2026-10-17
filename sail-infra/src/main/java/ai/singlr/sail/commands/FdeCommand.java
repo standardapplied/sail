@@ -52,11 +52,9 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.ParentCommand;
-import picocli.CommandLine.Spec;
 
 /**
  * Manages Forward Deployed Engineers — the human principals that own API tokens and are attributed
@@ -109,7 +107,7 @@ public final class FdeCommand implements Runnable {
     static Box here() {
       var sync = HostSync.config();
       return new Box(
-          dbPath(),
+          SailPaths.controlPlaneDb(),
           System.getProperty("user.name"),
           sync.handle(),
           Path.of(System.getProperty("user.home")),
@@ -144,13 +142,13 @@ public final class FdeCommand implements Runnable {
     this.box = box;
   }
 
+  private Path database() {
+    return box.get().database();
+  }
+
   @Override
   public void run() {
     new picocli.CommandLine(this).usage(System.out);
-  }
-
-  private static Path dbPath() {
-    return SailPaths.controlPlaneDb();
   }
 
   private static OperatorCommand operator() {
@@ -301,10 +299,6 @@ public final class FdeCommand implements Runnable {
    * so an add/update/remove on a node is silently overwritten by the next sync — failing loud with
    * the right place to run it is far better than losing the edit.
    */
-  private static void requireMainForRosterEdit(String action) {
-    requireMainForRosterEdit(HostSync.isNode(HostSync.config()), action);
-  }
-
   private static void requireMainForRosterEdit(boolean node, String action) {
     if (node) {
       throw new IllegalStateException(rosterEditOnNodeMessage(action));
@@ -399,8 +393,6 @@ public final class FdeCommand implements Runnable {
     private String mainHostKey;
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
@@ -503,18 +495,19 @@ public final class FdeCommand implements Runnable {
     @Option(names = "--role", description = "New role: admin, member, or viewer.")
     private String role;
 
-    @Spec private CommandSpec spec;
+    @ParentCommand private FdeCommand command;
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
-            requireMainForRosterEdit("Updating an FDE");
+            var box = command.box.get();
+            requireMainForRosterEdit(box.node(), "Updating an FDE");
             if (displayName == null && email == null && role == null) {
               throw new IllegalArgumentException(
                   "Nothing to update. Pass --name, --email, and/or --role.");
             }
-            try (var db = Sqlite.open(dbPath())) {
+            try (var db = Sqlite.open(box.database())) {
               var updated =
                   new FdeStore(db)
                       .update(handle, displayName, email, role)
@@ -547,8 +540,6 @@ public final class FdeCommand implements Runnable {
     private boolean json;
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
@@ -585,8 +576,6 @@ public final class FdeCommand implements Runnable {
     private boolean json;
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
@@ -682,20 +671,20 @@ public final class FdeCommand implements Runnable {
     @Option(names = "--json", description = "Output in JSON format.")
     private boolean json;
 
-    @Spec private CommandSpec spec;
+    @ParentCommand private FdeCommand command;
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
-            if (HostSync.isNode(HostSync.config())) {
+            if (command.box.get().node()) {
               throw new IllegalStateException(
                   "Main records the box each FDE syncs from, and a node records none. Run 'sail"
                       + " fde release-box "
                       + handle
                       + "' on main.");
             }
-            try (var db = Sqlite.open(dbPath())) {
+            try (var db = Sqlite.open(command.database())) {
               System.out.println(release(new FdeBoxes(db), handle, json));
             }
           });
@@ -742,8 +731,6 @@ public final class FdeCommand implements Runnable {
     private boolean force;
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
@@ -847,8 +834,6 @@ public final class FdeCommand implements Runnable {
     private boolean asWorkstationKey;
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     private record MintedKey(SshPublicKey publicKey, String privateKey) {}
 
@@ -1071,8 +1056,6 @@ public final class FdeCommand implements Runnable {
 
     @ParentCommand private FdeCommand command;
 
-    @Spec private CommandSpec spec;
-
     @Override
     public void run() {
       CliCommand.run(
@@ -1099,8 +1082,6 @@ public final class FdeCommand implements Runnable {
   static final class ListFdes implements Runnable {
 
     @ParentCommand private FdeCommand command;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
@@ -1132,13 +1113,13 @@ public final class FdeCommand implements Runnable {
     @Option(names = "--json", description = "Print the ticket as JSON.")
     private boolean json;
 
-    @Spec private CommandSpec spec;
+    @ParentCommand private FdeCommand command;
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
-            try (var db = Sqlite.open(dbPath())) {
+            try (var db = Sqlite.open(command.database())) {
               var ticket =
                   new EnrollmentService(new EnrollmentTicketStore(db), new FdeStore(db))
                       .issue(handle);
@@ -1199,9 +1180,15 @@ public final class FdeCommand implements Runnable {
       subcommands = {Key.Add.class, Key.ListKeys.class, Key.Remove.class})
   static final class Key implements Runnable {
 
+    @ParentCommand private FdeCommand command;
+
     @Override
     public void run() {
       new picocli.CommandLine(this).usage(System.out);
+    }
+
+    private Path database() {
+      return command.database();
     }
 
     @Command(
@@ -1218,14 +1205,14 @@ public final class FdeCommand implements Runnable {
           description = "SSH public key line, e.g. \"ssh-ed25519 AAAA... me@host\".")
       private String publicKey;
 
-      @Spec private CommandSpec spec;
+      @ParentCommand private Key key;
 
       @Override
       public void run() {
         CliCommand.run(
             () -> {
               var operator = operator();
-              try (var db = Sqlite.open(dbPath())) {
+              try (var db = Sqlite.open(key.database())) {
                 var fde =
                     new FdeStore(db)
                         .byHandle(handle)
@@ -1246,14 +1233,14 @@ public final class FdeCommand implements Runnable {
       @Parameters(index = "0", arity = "0..1", description = "Optional FDE handle to filter by.")
       private String handle;
 
-      @Spec private CommandSpec spec;
+      @ParentCommand private Key key;
 
       @Override
       public void run() {
         CliCommand.run(
             () -> {
               var operator = operator();
-              try (var db = Sqlite.open(dbPath())) {
+              try (var db = Sqlite.open(key.database())) {
                 var keyStore = new FdeSshKeyStore(db);
                 var keys =
                     handle == null
@@ -1283,14 +1270,14 @@ public final class FdeCommand implements Runnable {
       @Parameters(index = "0", description = "FDE handle, or a key's SHA256: fingerprint.")
       private String target;
 
-      @Spec private CommandSpec spec;
+      @ParentCommand private Key key;
 
       @Override
       public void run() {
         CliCommand.run(
             () -> {
               var operator = operator();
-              try (var db = Sqlite.open(dbPath())) {
+              try (var db = Sqlite.open(key.database())) {
                 var keyStore = new FdeSshKeyStore(db);
                 var fingerprint =
                     target.startsWith("SHA256:")
@@ -1350,9 +1337,15 @@ public final class FdeCommand implements Runnable {
       subcommands = {Passkey.ListPasskeys.class, Passkey.Remove.class})
   static final class Passkey implements Runnable {
 
+    @ParentCommand private FdeCommand command;
+
     @Override
     public void run() {
       new picocli.CommandLine(this).usage(System.out);
+    }
+
+    private Path database() {
+      return command.database();
     }
 
     private static FdeStore.Fde requireFde(Sqlite db, String handle) {
@@ -1413,14 +1406,14 @@ public final class FdeCommand implements Runnable {
       @Parameters(index = "0", description = "FDE handle.")
       private String handle;
 
-      @Spec private CommandSpec spec;
+      @ParentCommand private Passkey passkey;
 
       @Override
       public void run() {
         CliCommand.run(
             () -> {
               var operator = operator();
-              try (var db = Sqlite.open(dbPath())) {
+              try (var db = Sqlite.open(passkey.database())) {
                 var fde = requireFde(db, handle);
                 var credentials = new WebauthnCredentialStore(db).listForFde(fde.id());
                 if (credentials.isEmpty()) {
@@ -1456,14 +1449,14 @@ public final class FdeCommand implements Runnable {
           description = "Also end the FDE's active web sessions (the lost-device case).")
       private boolean revokeSessions;
 
-      @Spec private CommandSpec spec;
+      @ParentCommand private Passkey passkey;
 
       @Override
       public void run() {
         CliCommand.run(
             () -> {
               var operator = operator();
-              try (var db = Sqlite.open(dbPath())) {
+              try (var db = Sqlite.open(passkey.database())) {
                 var fde = requireFde(db, handle);
                 var store = new WebauthnCredentialStore(db);
                 var credentials = store.listForFde(fde.id());

@@ -81,9 +81,7 @@ import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Starts the control-plane server. The API is a single-trust-level surface: every issued token is a
@@ -135,8 +133,6 @@ public final class ServerStartCommand implements Runnable {
           "Allowed passkey origin (e.g. https://sail.example.dev). Repeatable. Overrides the"
               + " host.yaml webauthn origins.")
   private List<String> origins;
-
-  @Spec private CommandSpec spec;
 
   @Override
   public void run() {

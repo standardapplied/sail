@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
+import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeBoxes;
@@ -34,6 +35,7 @@ import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
+import ai.singlr.sail.webauthn.RegisteredCredential;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -2117,6 +2119,113 @@ class FdeCommandTest {
             FdeCommand.Passkey.noMatchMessage("ada", "zz", List.of(), sudo),
             FdeCommand.noPasskeys("ada", sudo),
             Ansi.OFF.string(FdeCommand.noPasskeysLeft("ada", sudo))));
+  }
+
+  @Test
+  void updateChangesOnlyWhatIsPassedAndRefusesAnEmptyOrUnknownEdit() {
+    assertEquals(0, fde("add", "ada", "--name", "Ada", "--email", "ada@example.com"));
+
+    assertEquals(0, fde("update", "ada", "--role", "admin"));
+
+    assertEquals(List.of("  ✓ Updated ada (admin)"), printed());
+    var updated = inDb(db -> new FdeStore(db).byHandle("ada").orElseThrow());
+    assertEquals("admin", updated.role());
+    assertEquals("Ada", updated.displayName());
+    assertEquals("ada@example.com", updated.email());
+    assertEquals(1, fde("update", "ada"));
+    assertEquals("Nothing to update. Pass --name, --email, and/or --role.", refusal);
+    assertEquals(1, fde("update", "ghost", "--role", "admin"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+  }
+
+  @Test
+  void keyVerbsRegisterListAndRemoveAnFdesKeysOnThisBox() {
+    var desk = SshPublicKey.parse(TestSshKeys.ed25519("desk", "me@desk"));
+    assertEquals(0, fde("add", "ada"));
+
+    assertEquals(0, fde("key", "list"));
+    assertEquals(List.of("  No SSH keys. Register one with 'sail fde key add'."), printed());
+
+    assertEquals(0, fde("key", "add", "ada", LAPTOP.line()));
+    assertEquals("  ✓ Registered key for ada: " + LAPTOP.fingerprint(), printed().getFirst());
+    assertEquals(1, fde("key", "add", "ada", LAPTOP.line()));
+    assertEquals("That key (" + LAPTOP.fingerprint() + ") is already registered.", refusal);
+    assertEquals(1, fde("key", "add", "ghost", desk.line()));
+    assertEquals("Unknown FDE 'ghost'. Add it with 'sail fde add ghost'.", refusal);
+
+    assertEquals(0, fde("key", "list", "ada"));
+    assertTrue(printed().stream().anyMatch(line -> line.contains(LAPTOP.fingerprint())));
+    assertEquals(1, fde("key", "list", "ghost"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+
+    assertEquals(0, fde("key", "add", "ada", desk.line()));
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals(
+        List.of(
+            "  'ada' has 2 keys; specify one:",
+            "    sail fde key rm " + LAPTOP.fingerprint(),
+            "    sail fde key rm " + desk.fingerprint()),
+        printed());
+    assertEquals(0, fde("key", "rm", desk.fingerprint()));
+    assertEquals("  ✓ Removed key " + desk.fingerprint(), printed().getFirst());
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals("  ✓ Removed key " + LAPTOP.fingerprint(), printed().getFirst());
+    assertEquals(List.of(), inDb(db -> new FdeSshKeyStore(db).list()));
+
+    assertEquals(0, fde("key", "rm", "ada"));
+    assertEquals(List.of("  ⚠ No SSH keys registered for 'ada'."), printed());
+    assertEquals(0, fde("key", "rm", "SHA256:nope"));
+    assertEquals(List.of("  ⚠ No key with fingerprint SHA256:nope"), printed());
+    assertEquals(1, fde("key", "rm", "ghost"));
+    assertEquals(
+        "'ghost' is neither a known FDE handle nor a SHA256: fingerprint. See 'sail fde key"
+            + " list'.",
+        refusal);
+  }
+
+  @Test
+  void passkeyVerbsListAndRevokeAnFdesPasskeysAndOptionallyItsSessions() {
+    assertEquals(0, fde("add", "ada"));
+    var fdeId = inDb(db -> new FdeStore(db).byHandle("ada").orElseThrow().id());
+    var id = "alpha".getBytes(StandardCharsets.UTF_8);
+
+    assertEquals(0, fde("passkey", "list", "ada"));
+    assertEquals(
+        List.of("  No passkeys for 'ada'. Enroll one with 'sail fde enroll ada'."), printed());
+    assertEquals(1, fde("passkey", "list", "ghost"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+
+    inDb(
+        db -> {
+          new WebauthnCredentialStore(db)
+              .save(
+                  new RegisteredCredential(id, new byte[] {1}, -7, 0, null, false, false),
+                  fdeId,
+                  "macbook");
+          return new AuthSessionStore(db).create(fdeId, Duration.ofHours(1));
+        });
+    assertEquals(0, fde("passkey", "list", "ada"));
+    assertTrue(printed().stream().anyMatch(line -> line.contains("macbook")), printed().toString());
+
+    assertEquals(1, fde("passkey", "rm", "ada", "--credential", "zz"));
+    assertEquals(
+        FdeCommand.Passkey.noMatchMessage(
+            "ada",
+            "zz",
+            inDb(db -> new WebauthnCredentialStore(db).listForFde(fdeId)),
+            OperatorCommand.PLAIN),
+        refusal);
+
+    assertEquals(
+        0, fde("passkey", "rm", "ada", "--credential", Passkeys.encodeId(id), "--revoke-sessions"));
+
+    assertEquals(
+        List.of(
+            "  ✓ Revoked passkey 'macbook' (" + Passkeys.shortId(id) + ") of ada",
+            "  ✓ Revoked 1 active web session(s) of ada",
+            "  'ada' has no passkeys left. Re-enroll with 'sail fde enroll ada'."),
+        printed());
+    assertEquals(List.of(), inDb(db -> new WebauthnCredentialStore(db).listForFde(fdeId)));
   }
 
   @Test

@@ -14,9 +14,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Initializes the client config on the engineer's Mac. Creates {@code ~/.sail/config.yaml} with the
@@ -31,8 +29,6 @@ public final class ClientInitCommand implements Runnable {
 
   @Parameters(index = "0", description = "Host server — IP address, hostname, or SSH config alias.")
   private String host;
-
-  @Spec private CommandSpec spec;
 
   @Override
   public void run() {

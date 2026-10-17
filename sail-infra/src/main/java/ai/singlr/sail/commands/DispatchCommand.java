@@ -32,7 +32,6 @@ import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 
 /**
@@ -95,8 +94,6 @@ public final class DispatchCommand implements Runnable {
   @Mixin private IgnoredFileOption file;
 
   @Mixin private SyncOptions syncOptions;
-
-  @picocli.CommandLine.Spec private CommandSpec commandSpec;
 
   private SailEventPublisher eventPublisher;
 

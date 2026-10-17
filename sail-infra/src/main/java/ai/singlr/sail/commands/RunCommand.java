@@ -53,7 +53,6 @@ import java.util.regex.Pattern;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
@@ -104,8 +103,6 @@ public final class RunCommand implements Runnable {
   private Boolean snapshot;
 
   @Mixin private IgnoredFileOption file;
-
-  @picocli.CommandLine.Spec private CommandSpec spec;
 
   private final Function<OperatorCommand, HostOperations> operations;
   private final LocalIdentity identity;

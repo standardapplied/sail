@@ -52,9 +52,7 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
-import picocli.CommandLine.Spec;
 
 /**
  * Single command that runs every pending schema + data migration on the control-plane database.
@@ -75,8 +73,6 @@ public final class MigrateCommand implements Runnable {
 
   @Option(names = "--json", description = "Output JSON instead of human-readable text.")
   private boolean json;
-
-  @Spec private CommandSpec spec;
 
   @Override
   public void run() {

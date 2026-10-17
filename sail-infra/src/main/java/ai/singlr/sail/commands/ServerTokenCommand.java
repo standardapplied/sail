@@ -12,11 +12,10 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.TokenStore;
 import java.time.Duration;
+import java.util.function.Function;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 @Command(
     name = "token",
@@ -44,6 +43,16 @@ public final class ServerTokenCommand implements Runnable {
       mixinStandardHelpOptions = true)
   static final class Create implements Runnable {
 
+    private final Function<OperatorCommand, HostOperations> operations;
+
+    Create() {
+      this(OperationsFactory::open);
+    }
+
+    Create(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
+    }
+
     @Parameters(index = "0", description = "Token name.")
     private String name;
 
@@ -64,17 +73,15 @@ public final class ServerTokenCommand implements Runnable {
     @picocli.CommandLine.Option(names = "--no-expiry", description = "Token never expires.")
     private boolean noExpiry;
 
-    @Spec private CommandSpec spec;
-
     @Override
     public void run() {
       CliCommand.run(
           () -> {
             var operator = operator();
             var ttl = resolveTtl(noExpiry, ttlDays);
-            try (var operations = OperationsFactory.open(operator)) {
-              var fdeId = resolveFdeId(operations, operator);
-              var created = operations.identity().createToken(name, role, fdeId, ttl);
+            try (var ops = operations.apply(operator)) {
+              var fdeId = resolveFdeId(ops, operator);
+              var created = ops.identity().createToken(name, role, fdeId, ttl);
               System.out.println(
                   Ansi.AUTO.string("  @|green ✓|@ Token created: " + created.name()));
               System.out.println(Ansi.AUTO.string("    @|bold " + created.token() + "|@"));
@@ -113,12 +120,11 @@ public final class ServerTokenCommand implements Runnable {
       return Duration.ofDays(ttlDays);
     }
 
-    private String resolveFdeId(HostOperations operations, OperatorCommand operator) {
+    private String resolveFdeId(HostOperations ops, OperatorCommand operator) {
       if (Strings.isBlank(fde)) {
         return null;
       }
-      return operations
-          .identity()
+      return ops.identity()
           .fde(fde)
           .map(FdeStore.Fde::id)
           .orElseThrow(
@@ -135,15 +141,23 @@ public final class ServerTokenCommand implements Runnable {
   @Command(name = "list", description = "List API tokens.", mixinStandardHelpOptions = true)
   static final class ListTokens implements Runnable {
 
-    @Spec private CommandSpec spec;
+    private final Function<OperatorCommand, HostOperations> operations;
+
+    ListTokens() {
+      this(OperationsFactory::open);
+    }
+
+    ListTokens(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
+    }
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
             var operator = operator();
-            try (var operations = OperationsFactory.open(operator)) {
-              var tokens = operations.identity().tokens();
+            try (var ops = operations.apply(operator)) {
+              var tokens = ops.identity().tokens();
               if (tokens.isEmpty()) {
                 System.out.println(
                     "  No tokens. Run '" + operator.sail("server init") + "' to create one.");
@@ -164,18 +178,26 @@ public final class ServerTokenCommand implements Runnable {
   @Command(name = "revoke", description = "Revoke an API token.", mixinStandardHelpOptions = true)
   static final class Revoke implements Runnable {
 
+    private final Function<OperatorCommand, HostOperations> operations;
+
+    Revoke() {
+      this(OperationsFactory::open);
+    }
+
+    Revoke(Function<OperatorCommand, HostOperations> operations) {
+      this.operations = operations;
+    }
+
     @Parameters(index = "0", description = "Token name to revoke.")
     private String name;
-
-    @Spec private CommandSpec spec;
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
             var operator = operator();
-            try (var operations = OperationsFactory.open(operator)) {
-              var revoked = operations.identity().revokeToken(name);
+            try (var ops = operations.apply(operator)) {
+              var revoked = ops.identity().revokeToken(name);
               if (revoked) {
                 System.out.println(Ansi.AUTO.string("  @|green ✓|@ Token '" + name + "' revoked."));
               } else {

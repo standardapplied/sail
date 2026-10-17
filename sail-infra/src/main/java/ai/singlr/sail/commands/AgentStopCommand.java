@@ -29,10 +29,8 @@ import java.util.Objects;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
-import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
-import picocli.CommandLine.Spec;
 
 /**
  * Stops the project's running agent through the shared {@link StopOperations} lane — the same
@@ -59,8 +57,6 @@ public final class AgentStopCommand implements Runnable {
   private boolean json;
 
   @Mixin private SyncOptions syncOptions;
-
-  @Spec private CommandSpec spec;
 
   private SailEventPublisher eventPublisher;
 
