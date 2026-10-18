@@ -19,10 +19,12 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -329,6 +331,16 @@ class HandleChangeTest {
     assertEquals("uday", runs.findById(own).orElseThrow().owner());
     assertEquals("mady", runs.findById(madys).orElseThrow().node(), "mady's run stays hers");
     assertEquals("mady", runs.findById(madys).orElseThrow().owner());
+  }
+
+  @Test
+  void aBoxThatStopsBeingANodeForgetsTheScopeMainNamedIt() throws Exception {
+    new SyncScope(db).record(ProjectScope.of(List.of("acme")));
+
+    apply(node("ada"), main("ada"));
+
+    assertTrue(new SyncScope(db).held().unrestricted());
+    assertTrue(written.get());
   }
 
   @Test

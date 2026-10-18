@@ -310,6 +310,43 @@ class RecordTimesSyncTest {
   }
 
   @Test
+  void aResolveKeepingMineNeverMovesMainsCreationTime() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+    var mains = times(main, "e-acme").getFirst();
+    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
+    Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.REVIEW));
+    SyncBox.round(main, ada);
+    assertEquals(
+        List.of("status"), ada.conflicts.pendingFor("spec", "e-acme").orElseThrow().fields());
+
+    SyncBox.resolve(ada, "spec", "e-acme", SyncBox.Resolve.MINE);
+
+    assertEquals(mains, times(ada, "e-acme").getFirst());
+    SyncBox.quiesce(main, ada, bob);
+    assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("e-acme").orElseThrow().status());
+    assertSameEverywhere(box -> times(box, "e-acme"));
+  }
+
+  @Test
+  void aRoomABoxBeforeTheTimesMakesKeepsItsCreatorsTime() {
+    var rooms = new RoomStore(main.db);
+    var offer = new LinkedHashMap<String, Object>();
+    offer.put("project", "acme");
+    offer.put("title", "Parlour");
+    offer.put("created_at", "2020-01-01T00:00:00Z");
+
+    var taken =
+        Actor.call(
+            Actor.sync("ada", Role.MEMBER),
+            () -> rooms.commitRevision("parlour", offer, null, rooms.authority()));
+
+    assertInstanceOf(PushOutcome.Accepted.class, taken);
+    assertEquals("2020-01-01T00:00:00Z", rooms.findById("parlour").orElseThrow().createdAt());
+  }
+
+  @Test
   void aRestoredRoomIsStampedWhenItIsRestored() {
     var rooms = new RoomStore(main.db);
     Acting.as("main", () -> rooms.create(room("lounge")));

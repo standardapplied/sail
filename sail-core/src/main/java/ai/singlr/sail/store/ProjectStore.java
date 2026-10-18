@@ -133,10 +133,11 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
    */
   public Optional<Refusal> refusesInto(
       Actor actor, String heldProject, String nextProject, boolean onMain) {
+    if (Strings.isBlank(nextProject) || nextProject.equals(heldProject)) {
+      return Optional.empty();
+    }
     var granted = new SyncScope(db).held();
-    if (Strings.isBlank(nextProject)
-        || nextProject.equals(heldProject)
-        || (findByName(nextProject).isPresent() && granted.admits(nextProject))) {
+    if (findByName(nextProject).isPresent() && granted.admits(nextProject)) {
       return Optional.empty();
     }
     var visible =

@@ -53,11 +53,34 @@ public final class ConflictDetector {
 
   /**
    * Metadata telling of one work field, by the field it tells of: a merge takes it from the side
-   * whose value of that field it keeps, so when an archive merges with an edit made elsewhere, the
-   * archive's own time rides with its status.
+   * whose value of that field it keeps ({@link #fieldMetadata}), so when an archive merges with an
+   * edit made elsewhere, the archive's own time rides with its status.
    */
   private static final Map<String, String> FIELD_METADATA =
       Map.of(Snapshots.STATUS_SINCE, "status");
+
+  /**
+   * {@code merged} carrying, for each metadata key that tells of one work field, the side's whose
+   * value of that field it keeps: {@code mine}'s when it keeps mine, {@code theirs}' when it keeps
+   * theirs, none when it keeps neither. Both a merge a round makes and one an engineer edits settle
+   * an archive's time this way.
+   */
+  public static Map<String, Object> fieldMetadata(
+      Map<String, Object> merged, Map<String, Object> mine, Map<String, Object> theirs) {
+    FIELD_METADATA.forEach(
+        (key, field) -> {
+          var kept = merged.get(field);
+          var side =
+              Objects.equals(kept, mine.get(field))
+                  ? mine
+                  : Objects.equals(kept, theirs.get(field)) ? theirs : Map.<String, Object>of();
+          merged.remove(key);
+          if (side.containsKey(key)) {
+            merged.put(key, side.get(key));
+          }
+        });
+    return merged;
+  }
 
   /**
    * A store's own merge of one field both sides changed differently — a document both edited in
@@ -192,16 +215,7 @@ public final class ConflictDetector {
             result.put(key, value);
           }
         });
-    FIELD_METADATA.forEach(
-        (key, field) -> {
-          if (remoteChanged.contains(field) && !localChanged.contains(field)) {
-            result.remove(key);
-            if (remote.containsKey(key)) {
-              result.put(key, remote.get(key));
-            }
-          }
-        });
-    return result;
+    return fieldMetadata(result, local, remote);
   }
 
   private static Object later(Object left, Object right) {

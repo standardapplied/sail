@@ -556,7 +556,8 @@ public final class RevisionJournal implements ConflictResolver {
 
   /**
    * Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it), made now
-   * ({@link Snapshots#revisedHere}).
+   * ({@link Snapshots#revisedHere}); a row this box holds keeps its creation time ({@link
+   * Snapshots#keepingCreation}), so a rebase or a resolve never moves it.
    */
   private String write(String id, Map<String, Object> state, String origin) {
     if (Snapshots.isDeletion(state)) {
@@ -568,7 +569,8 @@ public final class RevisionJournal implements ConflictResolver {
       eraseRow(id);
       return rev;
     }
-    schema.apply(id, Snapshots.revisedHere(state));
+    schema.apply(
+        id, Snapshots.revisedHere(schema.exists(id) ? Snapshots.keepingCreation(state) : state));
     return recordRevision(id, origin, false);
   }
 

@@ -159,7 +159,8 @@ public final class ConflictOperations {
                           "Merged " + displayField(field) + " must be text");
                     merged.put(field, blobs.putText((String) text));
                   }
-                  yield merged;
+                  yield ConflictDetector.fieldMetadata(
+                      merged, parse(conflict.localSnapshot()), theirs.snapshot());
                 }
               };
           var rev =
