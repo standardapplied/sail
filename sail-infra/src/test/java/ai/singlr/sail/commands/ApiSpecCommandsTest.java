@@ -38,6 +38,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,6 +52,7 @@ class ApiSpecCommandsTest {
   private SailApiServer server;
   private String token;
   private ReviewStore reviewStore;
+  private final BooleanSupplier originalTerminal = ConsoleHelper.terminal;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -84,6 +86,8 @@ class ApiSpecCommandsTest {
 
   @AfterEach
   void tearDown() {
+    ConsoleHelper.terminal = originalTerminal;
+    ConsoleHelper.resetStdin();
     if (server != null) server.close();
     if (db != null) db.close();
   }
@@ -93,18 +97,43 @@ class ApiSpecCommandsTest {
   }
 
   private String run(String... args) {
-    var original = System.out;
-    var buffer = new ByteArrayOutputStream();
-    System.setOut(new PrintStream(buffer, true, StandardCharsets.UTF_8));
+    return execute(args).out();
+  }
+
+  private record Ran(int code, String out, String err) {}
+
+  private Ran execute(String... args) {
+    var originalOut = System.out;
+    var originalErr = System.err;
+    var out = new ByteArrayOutputStream();
+    var err = new ByteArrayOutputStream();
+    System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
     try {
       System.setProperty("SAIL_SERVER", serverUrl());
       System.setProperty("SAIL_TOKEN", token);
-      new CommandLine(new SpecCommand()).execute(withDefaultProject(args));
-      return buffer.toString(StandardCharsets.UTF_8);
+      var command = new CommandLine(new SpecCommand());
+      command.setExecutionExceptionHandler((failure, line, parsed) -> 1);
+      var code = command.execute(withDefaultProject(args));
+      return new Ran(
+          code, out.toString(StandardCharsets.UTF_8), err.toString(StandardCharsets.UTF_8));
     } finally {
-      System.setOut(original);
+      System.setOut(originalOut);
+      System.setErr(originalErr);
       System.clearProperty("SAIL_SERVER");
       System.clearProperty("SAIL_TOKEN");
+    }
+  }
+
+  private Ran answering(String stdin, boolean terminal, String... args) {
+    var original = System.in;
+    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
+    ConsoleHelper.resetStdin();
+    ConsoleHelper.terminal = () -> terminal;
+    try {
+      return execute(args);
+    } finally {
+      System.setIn(original);
     }
   }
 
@@ -301,10 +330,44 @@ class ApiSpecCommandsTest {
   @Test
   void deleteSpec() {
     run("create", "--id", "doomed", "--title", "Will be deleted");
-    run("delete", "doomed", "--force");
 
+    var deleted = answering("", false, "delete", "doomed", "--force");
+
+    assertEquals(new Ran(0, "  ✓ Spec deleted: doomed\n", ""), deleted);
     var output = run("list", "--json");
     assertFalse(output.contains("doomed"));
+  }
+
+  @Test
+  void aDeleteWithNoTerminalToConfirmOnIsRefusedAndDeletesNothing() {
+    run("create", "--id", "kept", "--title", "Kept");
+
+    var refused = answering("", false, "delete", "kept");
+
+    assertEquals(
+        new Ran(1, "", "  ✗ Not deleted: no terminal to confirm on. Re-run with --force.\n"),
+        refused);
+    assertTrue(run("show", "kept", "--json").contains("\"id\": \"kept\""));
+  }
+
+  @Test
+  void aDeleteAnsweredWithAnEmptyLineOnATerminalIsCancelled() {
+    run("create", "--id", "kept", "--title", "Kept");
+
+    var cancelled = answering("\n", true, "delete", "kept");
+
+    assertEquals(new Ran(0, "  Delete spec 'kept'? [y/N]   Cancelled.\n", ""), cancelled);
+    assertTrue(run("show", "kept", "--json").contains("\"id\": \"kept\""));
+  }
+
+  @Test
+  void aDeleteAnsweredYesOnATerminalDeletes() {
+    run("create", "--id", "doomed", "--title", "Doomed");
+
+    var deleted = answering("y\n", true, "delete", "doomed");
+
+    assertEquals(
+        new Ran(0, "  Delete spec 'doomed'? [y/N]   ✓ Spec deleted: doomed\n", ""), deleted);
   }
 
   @Test
@@ -418,6 +481,27 @@ class ApiSpecCommandsTest {
     var output = run("content", "with-content", "--json");
     assertTrue(output.contains("# Spec Body"));
     assertTrue(output.contains("## Plan"));
+  }
+
+  @Test
+  void aBodyFileWithoutSetSetsTheBodyAsTheSpecCliDocumentsIt() throws Exception {
+    run("create", "--id", "drafted", "--title", "Drafted");
+    var bodyFile = Files.writeString(tempDir.resolve("b.md"), "# Drafted body");
+
+    var set = execute("content", "drafted", "--body-file", bodyFile.toString());
+
+    assertEquals(new Ran(0, "  ✓ Content updated for: drafted\n", ""), set);
+    assertEquals("# Drafted body\n", run("content", "drafted"));
+  }
+
+  @Test
+  void aPlanFileWithoutSetSetsThePlan() throws Exception {
+    run("create", "--id", "planned", "--title", "Planned");
+    var planFile = Files.writeString(tempDir.resolve("p.md"), "## Steps");
+
+    assertEquals(0, execute("content", "planned", "--plan-file", planFile.toString()).code());
+
+    assertEquals("\n--- Plan ---\n## Steps\n", run("content", "planned"));
   }
 
   @Test

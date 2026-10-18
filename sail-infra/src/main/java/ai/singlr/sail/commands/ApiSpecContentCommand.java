@@ -20,14 +20,18 @@ import picocli.CommandLine.Parameters;
 
 @Command(
     name = "content",
-    description = "Get or set a spec's body and plan.",
+    description =
+        "Get or set a spec's body and plan: --body-file or --plan-file sets them, else it prints"
+            + " them.",
     mixinStandardHelpOptions = true)
 public final class ApiSpecContentCommand implements Runnable {
 
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
-  @Option(names = "--set", description = "Set content instead of reading it.")
+  @Option(
+      names = "--set",
+      description = "Set content instead of reading it (implied by --body-file or --plan-file).")
   private boolean set;
 
   @Option(names = "--body-file", description = "Path to spec body markdown file.")
@@ -53,7 +57,7 @@ public final class ApiSpecContentCommand implements Runnable {
     var config = connection.resolve();
 
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      if (set) {
+      if (set || bodyFile != null || planFile != null) {
         var body = new LinkedHashMap<String, Object>();
         if (bodyFile != null) body.put("body", Files.readString(bodyFile));
         if (planFile != null) body.put("plan", Files.readString(planFile));

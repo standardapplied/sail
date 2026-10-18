@@ -39,13 +39,11 @@ public final class ApiSpecDeleteCommand implements Runnable {
   private void execute() throws Exception {
     NameValidator.requireValidSpecId(specId);
 
-    if (!force && !json) {
-      System.out.print("  Delete spec '" + specId + "'? [y/N] ");
-      var answer = System.console() != null ? System.console().readLine() : "y";
-      if (answer == null || !answer.strip().equalsIgnoreCase("y")) {
-        System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
-        return;
-      }
+    if (!force
+        && !json
+        && !ConsoleHelper.confirmDestructive("Delete spec '" + specId + "'?", "Not deleted")) {
+      System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
+      return;
     }
 
     var config = connection.resolve();

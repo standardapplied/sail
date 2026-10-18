@@ -779,12 +779,9 @@ public final class FdeCommand implements Runnable {
     }
 
     private boolean confirmed() {
-      if (force) {
-        return true;
-      }
-      System.out.print("  Remove FDE '" + handle + "' and revoke all its credentials? [y/N] ");
-      var answer = System.console() != null ? System.console().readLine() : "y";
-      return answer != null && answer.strip().equalsIgnoreCase("y");
+      return force
+          || ConsoleHelper.confirmDestructive(
+              "Remove FDE '" + handle + "' and revoke all its credentials?", "Not removed");
     }
   }
 
