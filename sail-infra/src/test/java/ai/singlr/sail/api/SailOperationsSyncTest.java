@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -85,6 +86,21 @@ class SailOperationsSyncTest {
             () -> operations.updateGlobalSpec("missing", update("pending")));
 
     assertInstanceOf(Result.Failure.class, result);
+    assertEquals(0, rounds.get());
+  }
+
+  @Test
+  void aSpecIntoAProjectThisBoxLacksIsRefusedAtTheDoorAndTriggersNothing() throws Exception {
+    var operations = operations(scheduler(), store -> {});
+
+    var result =
+        Acting.by(
+            Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("c-beta", "beta")));
+
+    var failure = assertInstanceOf(Result.Failure.class, result);
+    assertEquals(ErrorCode.NOT_FOUND, failure.errorCode());
+    assertEquals("Project 'beta' isn't on this box. Projects here: acme.", failure.errorMessage());
+    assertNull(failure.action());
     assertEquals(0, rounds.get());
   }
 
@@ -268,9 +284,13 @@ class SailOperationsSyncTest {
   }
 
   private static SpecCreateRequest create(String id) {
+    return create(id, "acme");
+  }
+
+  private static SpecCreateRequest create(String id, String project) {
     return new SpecCreateRequest(
         id,
-        "acme",
+        project,
         "Spec " + id,
         "pending",
         null,
