@@ -14,18 +14,29 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class HostSyncCommandTest {
 
@@ -124,6 +135,7 @@ class HostSyncCommandTest {
             named,
             true,
             null,
+            null,
             "devbox",
             target -> {
               throw new IOException("a box becoming main asks no one");
@@ -136,6 +148,149 @@ class HostSyncCommandTest {
       var stamped = new RunStore(db).findById(run).orElseThrow();
       assertEquals("ada", stamped.node());
       assertEquals("ada", stamped.owner());
+    }
+  }
+
+  private static final SyncOperations.Channels NO_ONE =
+      target -> {
+        throw new IOException("a box becoming main asks no one");
+      };
+
+  private static SyncConfig asMainOperatedBy(Path dir, String handle) throws Exception {
+    var hostYaml = dir.resolve("host.yaml");
+    var host = HostYaml.fromMap(YamlUtil.parseFile(hostYaml));
+    return HostSyncCommand.takeRole(
+        hostYaml,
+        dir.resolve("sail.db"),
+        host,
+        true,
+        null,
+        handle,
+        "devbox",
+        NO_ONE,
+        OperatorCommand.PLAIN);
+  }
+
+  private static String enrolled(Path dir, String handle) {
+    return HostSyncCommand.enrol(
+        dir.resolve("sail.db"), handle, "Ada L", "ada@example.com", OperatorCommand.PLAIN);
+  }
+
+  private static List<FdeStore.Fde> roster(Path dir) {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      return new FdeStore(db).list();
+    }
+  }
+
+  @Test
+  void aFreshMainTakesItsOperatorAsAdminAndActsAsIt(@TempDir Path dir) throws Exception {
+    YamlUtil.dumpToFile(BASE.toMap(), dir.resolve("host.yaml"));
+
+    var role = asMainOperatedBy(dir, "ada");
+    var line = enrolled(dir, "ada");
+
+    assertTrue(role.isMain());
+    assertEquals("ada", role.handle());
+    assertEquals(
+        "ada", HostYaml.fromMap(YamlUtil.parseFile(dir.resolve("host.yaml"))).sync().handle());
+    assertEquals("  @|green ✓|@ FDE added: ada (admin)", line);
+    var ada = roster(dir).getFirst();
+    assertEquals(
+        List.of("ada", "Ada L", "ada@example.com", "admin", "active"),
+        List.of(ada.handle(), ada.displayName(), ada.email(), ada.role(), ada.status()));
+    assertEquals(
+        "  ✓ This box is main.\n  FDE: ada",
+        HostSyncCommand.roleLines(role, OperatorCommand.PLAIN, Ansi.OFF));
+  }
+
+  @Test
+  void takingTheSameOperatorTwiceChangesNothingAndSaysSo(@TempDir Path dir) throws Exception {
+    YamlUtil.dumpToFile(BASE.toMap(), dir.resolve("host.yaml"));
+    asMainOperatedBy(dir, "ada");
+    enrolled(dir, "ada");
+    var config = Files.readString(dir.resolve("host.yaml"));
+    var before = roster(dir);
+
+    asMainOperatedBy(dir, "ada");
+    var line = enrolled(dir, "ada");
+
+    assertEquals(config, Files.readString(dir.resolve("host.yaml")));
+    assertEquals(before, roster(dir));
+    assertEquals("  @|faint FDE ada is already on the roster (admin).|@", line);
+  }
+
+  @Test
+  void anFdeAlreadyOnTheRosterKeepsItsRole(@TempDir Path dir) throws Exception {
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+      new FdeStore(db).add("ada", null, null, "member");
+    }
+
+    assertEquals("  @|faint FDE ada is already on the roster (member).|@", enrolled(dir, "ada"));
+    assertEquals("member", roster(dir).getFirst().role());
+  }
+
+  @Test
+  void aMainActingAsAnotherFdeIsRefusedNamingBothAndLeftAsItIs(@TempDir Path dir) throws Exception {
+    var grace =
+        HostConfigSetCommand.applyChange(
+            HostSyncCommand.configure(BASE, true, null, "devbox"), "sync-handle", "grace");
+    YamlUtil.dumpToFile(grace.toMap(), dir.resolve("host.yaml"));
+    var config = Files.readString(dir.resolve("host.yaml"));
+
+    var refused = assertThrows(IllegalStateException.class, () -> asMainOperatedBy(dir, "ada"));
+
+    assertEquals(
+        "This box already acts as 'grace', not 'ada'. Re-run with --handle grace, or change its"
+            + " handle first: sail host config set sync-handle ada",
+        refused.getMessage());
+    assertEquals(config, Files.readString(dir.resolve("host.yaml")));
+  }
+
+  @Test
+  void takingTheMainRoleWithNoHandleKeepsTheOneTheBoxHas(@TempDir Path dir) throws Exception {
+    var grace =
+        HostConfigSetCommand.applyChange(
+            HostSyncCommand.configure(BASE, true, null, "devbox"), "sync-handle", "grace");
+    YamlUtil.dumpToFile(grace.toMap(), dir.resolve("host.yaml"));
+
+    assertEquals("grace", asMainOperatedBy(dir, null).handle());
+  }
+
+  private static String refusalOf(String... args) {
+    var refusal = new String[1];
+    var command = new CommandLine(new HostSyncCommand());
+    command.setErr(new PrintWriter(new StringWriter()));
+    command.setExecutionExceptionHandler(
+        (failure, line, parsed) -> {
+          refusal[0] = failure.getMessage();
+          return 1;
+        });
+    assertEquals(1, command.execute(args));
+    return refusal[0];
+  }
+
+  @Test
+  void aHandleNamesMainsOwnFdeSoANodeIsToldWhereItsHandleIsSet() {
+    var originalErr = System.err;
+    System.setErr(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+    try {
+      assertEquals(
+          "--handle names main's own FDE, so it goes with --as-main. A node takes its handle"
+              + " when it joins: "
+              + OperatorCommand.here().sail("join <main> --handle ada"),
+          refusalOf("--main", "sail@m", "--handle", "ada"));
+      assertEquals(
+          "--name and --email describe the FDE --handle names. Pass --handle <handle> too.",
+          refusalOf("--as-main", "--email", "ada@example.com"));
+      assertEquals(
+          "Invalid email: 'not-an-email'. Must be one address, like ada@example.com.",
+          refusalOf("--as-main", "--handle", "ada", "--email", "not-an-email"));
+      assertEquals(
+          "Invalid FDE handle: 'a b'. Must match [A-Za-z0-9][A-Za-z0-9._-]*, max 63 characters.",
+          refusalOf("--as-main", "--handle", "a b"));
+    } finally {
+      System.setErr(originalErr);
     }
   }
 

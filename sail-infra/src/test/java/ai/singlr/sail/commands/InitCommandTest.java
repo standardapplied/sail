@@ -70,6 +70,7 @@ class InitCommandTest {
                         this::homeOf,
                         identity,
                         answers::get,
+                        OperatorCommand.PLAIN,
                         this::runStep)));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
@@ -98,13 +99,16 @@ class InitCommandTest {
       throw new IllegalStateException("Setup stopped — the step above failed.");
     }
     if (step.startsWith("HostInitCommand")) {
-      writeHostConfig();
+      writeHostConfig("storage_backend: dir\n");
+    }
+    if (command instanceof HostSyncCommand) {
+      writeHostConfig("storage_backend: dir\nsync:\n  role: main\n  handle: " + args[2] + "\n");
     }
   }
 
-  private void writeHostConfig() {
+  private void writeHostConfig(String yaml) {
     try {
-      Files.writeString(hostConfig, "storage_backend: dir\n");
+      Files.writeString(hostConfig, yaml);
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
@@ -134,14 +138,14 @@ class InitCommandTest {
 
   @Test
   void aSudoUsersMainIsTheSystemServiceAndNoStepRunsAsAnotherAccount() {
-    assertEquals(0, init("--as-main"));
+    assertEquals(0, init("--as-main", "--handle", "ada"));
 
     assertEquals(
         List.of(
             "HostInitCommand --yes",
             "HostServiceInstallCommand",
             "HostSshIdentityCommand",
-            "HostSyncCommand --as-main"),
+            "HostSyncCommand --as-main --handle ada"),
         ran);
   }
 
@@ -156,6 +160,69 @@ class InitCommandTest {
             "HostServiceInstallCommand",
             "JoinCommand maindevbox --handle dev --name Dev --email d@x.dev"),
         ran);
+  }
+
+  @Test
+  void aMainsOperatorIsAddedAsItsFdeWithTheNameAndEmailItWasGiven() {
+    assertEquals(
+        0, init("--as-main", "--handle", "ada", "--name", "Ada L", "--email", "ada@example.com"));
+
+    assertEquals(
+        "HostSyncCommand --as-main --handle ada --name Ada L --email ada@example.com",
+        ran.getLast());
+  }
+
+  @Test
+  void aMainsOperatorIsAskedForWhenNotGiven() {
+    answers.put("Your FDE handle", " ada ");
+
+    assertEquals(0, init("--as-main"));
+
+    assertEquals("HostSyncCommand --as-main --handle ada", ran.getLast());
+  }
+
+  @Test
+  void aMainWithNoOperatorIsRefusedBeforeAnyStep() {
+    assertEquals(1, init("--as-main"));
+
+    assertEquals(
+        "Main's operator is an FDE, the one dispatch picks this box's specs for. Re-run with"
+            + " --handle <handle>.",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Test
+  void aMainsOperatorWithAnInvalidHandleIsRefusedBeforeAnyStep() {
+    assertEquals(1, init("--as-main", "--handle", "ada lovelace"));
+
+    assertEquals(
+        "Invalid FDE handle: 'ada lovelace'. Must match [A-Za-z0-9][A-Za-z0-9._-]*, max 63"
+            + " characters.",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Test
+  void aMainAlreadyActingAsAnotherFdeIsRefusedNamingBothBeforeAnyStep() {
+    writeHostConfig("storage_backend: dir\nsync:\n  role: main\n  handle: grace\n");
+
+    assertEquals(1, init("--as-main", "--handle", "ada"));
+
+    assertEquals(
+        "This box already acts as 'grace', not 'ada'. Re-run with --handle grace, or change its"
+            + " handle first: sail host config set sync-handle ada",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Test
+  void aNodeJoiningUnderAnotherHandleIsLeftToTheJoin() {
+    writeHostConfig("storage_backend: dir\nsync:\n  role: node\n  handle: grace\n");
+
+    assertEquals(0, init("--main", "m", "--handle", "ada"));
+
+    assertEquals("JoinCommand m --handle ada", ran.getLast());
   }
 
   @Test
@@ -198,7 +265,7 @@ class InitCommandTest {
   void anotherAccountsUserServiceIsNotTheSudoUsers() throws Exception {
     installUserService("mady");
 
-    assertEquals(0, init("--as-main"));
+    assertEquals(0, init("--as-main", "--handle", "ada"));
   }
 
   @Test
@@ -206,20 +273,23 @@ class InitCommandTest {
     sudoUser = "root";
     installUserService("root");
 
-    assertEquals(0, init("--as-main"));
+    assertEquals(0, init("--as-main", "--handle", "ada"));
     sudoUser = null;
     assertEquals(0, init("--as-main"));
   }
 
   @Test
-  void reRunningOnAConvergedMainRunsOnlyItsIdempotentSteps() {
-    assertEquals(0, init("--as-main"));
+  void reRunningOnAConvergedMainRunsOnlyItsIdempotentStepsAsTheOperatorItHas() {
+    assertEquals(0, init("--as-main", "--handle", "ada"));
     ran.clear();
 
     assertEquals(0, init("--as-main"));
 
     assertEquals(
-        List.of("HostServiceInstallCommand", "HostSshIdentityCommand", "HostSyncCommand --as-main"),
+        List.of(
+            "HostServiceInstallCommand",
+            "HostSshIdentityCommand",
+            "HostSyncCommand --as-main --handle ada"),
         ran);
   }
 
@@ -305,7 +375,7 @@ class InitCommandTest {
   @Test
   void aMainTakesItsGitIdentityFromInitSoItsSecondApplyByNameConverges() {
     gitConfig.clear();
-    assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
+    assertEquals(0, init("--as-main", "--handle", "ada", "--name", "A B", "--email", "a@b"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
     var git =
@@ -322,7 +392,7 @@ class InitCommandTest {
     answers.put("Your full name", " A B ");
     answers.put("Your email", "a@b");
 
-    assertEquals(0, init("--as-main"));
+    assertEquals(0, init("--as-main", "--handle", "ada"));
 
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
   }
@@ -333,12 +403,12 @@ class InitCommandTest {
     answers.put("Your full name", "A B");
     failing = "HostServiceInstallCommand";
 
-    assertEquals(1, init("--as-main", "--email", "a@b"));
+    assertEquals(1, init("--as-main", "--handle", "ada", "--email", "a@b"));
 
     assertEquals(Map.of(), gitConfig);
     failing = null;
     answers.clear();
-    assertEquals(0, init("--as-main", "--name", "A B", "--email", "a@b"));
+    assertEquals(0, init("--as-main", "--handle", "ada", "--name", "A B", "--email", "a@b"));
     assertEquals(Map.of("user.name", "A B", "user.email", "a@b"), gitConfig);
   }
 
@@ -361,7 +431,7 @@ class InitCommandTest {
     gitConfig.remove("user.email");
     answers.put("Your email", "  ");
 
-    assertEquals(1, init("--as-main"));
+    assertEquals(1, init("--as-main", "--handle", "ada"));
 
     assertEquals(
         "This box has no git user.email set, so a project here can't take on your identity."
@@ -400,6 +470,7 @@ class InitCommandTest {
                           this::homeOf,
                           identity,
                           answers::get,
+                          OperatorCommand.PLAIN,
                           (command, args) -> InitCommand.runCommand(new Refusing()))));
       init.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
 

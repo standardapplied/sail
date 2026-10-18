@@ -7,8 +7,12 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.PlaceholderResolver;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SystemdServiceInstaller;
@@ -53,20 +57,24 @@ public final class InitCommand implements Runnable {
       description = "Join an existing main, e.g. maindevbox or sail@maindevbox.")
   private String main;
 
-  @Option(names = "--handle", description = "Your FDE handle on main (node only; else prompted).")
+  @Option(
+      names = "--handle",
+      description =
+          "Your FDE handle: main's operator, added there as admin, or the one a node's main"
+              + " authorises (else prompted).")
   private String handle;
 
   @Option(
       names = "--name",
       description =
-          "Your full name: this box's git user.name when it has none, and a node's roster name"
+          "Your full name: this box's git user.name when it has none, and your roster name"
               + " (else prompted).")
   private String fullName;
 
   @Option(
       names = "--email",
       description =
-          "Your email: this box's git user.email when it has none, and a node's roster email"
+          "Your email: this box's git user.email when it has none, and your roster email"
               + " (else prompted).")
   private String email;
 
@@ -83,8 +91,9 @@ public final class InitCommand implements Runnable {
   /**
    * What init reads from this box and how it runs a step: whether it runs as root, the account that
    * invoked {@code sudo}, the host config, where an account's home is, the git identity a project
-   * applied here takes on, how it asks the operator a question, and the granular command each step
-   * runs. A test scripts the steps and puts the homes under a temporary directory.
+   * applied here takes on, how it asks the operator a question, how it names a command to type, and
+   * the granular command each step runs. A test scripts the steps and puts the homes under a
+   * temporary directory.
    */
   record Box(
       boolean root,
@@ -93,6 +102,7 @@ public final class InitCommand implements Runnable {
       Function<String, Path> homeOf,
       LocalIdentity identity,
       Prompt prompt,
+      OperatorCommand operator,
       Steps steps) {
 
     static Box here() {
@@ -103,6 +113,7 @@ public final class InitCommand implements Runnable {
           SailPaths::accountHome,
           LocalIdentity.detect(),
           InitCommand::ask,
+          OperatorCommand.here(),
           InitCommand::runCommand);
     }
   }
@@ -129,22 +140,46 @@ public final class InitCommand implements Runnable {
     var box = this.box.get();
     requireRoot(box.root());
     requireNoUserService(box.sudoUser(), box.homeOf());
+    var provisioned = Files.exists(box.hostConfig());
+    var fde = intent instanceof InitIntent.Main ? mainHandle(box, provisioned) : handle;
     var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
     var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
 
-    var provisioned = Files.exists(box.hostConfig());
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
     if (provisioned) {
       System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
     }
     for (var step : InitPlan.plan(intent, provisioned)) {
-      runStep(step, box.steps(), name.value(), mail.value());
+      runStep(step, box.steps(), fde, name.value(), mail.value());
     }
     name.adopt(box.identity());
     mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
       printMainNextSteps();
     }
+  }
+
+  /**
+   * Main's operator, the FDE dispatch picks this box's specs for: {@code --handle}, else the handle
+   * the box already acts as, else asked for. Settled before the first step, so a box acting as
+   * another FDE is refused untouched ({@link HostSyncCommand#requireHandle}).
+   */
+  private String mainHandle(Box box, boolean provisioned) throws Exception {
+    var held =
+        provisioned ? HostYaml.fromMap(YamlUtil.parseFile(box.hostConfig())).sync().handle() : null;
+    var chosen =
+        Strings.isNotBlank(handle)
+            ? handle
+            : Strings.isNotBlank(held) ? held : box.prompt().ask("Your FDE handle");
+    if (Strings.isBlank(chosen)) {
+      throw new IllegalStateException(
+          "Main's operator is an FDE, the one dispatch picks this box's specs for. Re-run with"
+              + " --handle <handle>.");
+    }
+    var fde = chosen.strip();
+    NameValidator.requireValidFdeHandle(fde);
+    HostSyncCommand.requireHandle(held, fde, box.operator());
+    return fde;
   }
 
   /**
@@ -191,13 +226,13 @@ public final class InitCommand implements Runnable {
     return ConsoleHelper.readLine();
   }
 
-  private void runStep(InitPlan.Step step, Steps steps, String name, String mail) {
+  private void runStep(InitPlan.Step step, Steps steps, String fde, String name, String mail) {
     switch (step) {
       case PROVISION -> steps.run(HostInitCommand.initStep(), "--yes");
       case INSTALL_API_SYSTEM -> steps.run(new HostServiceInstallCommand());
       case SSH_IDENTITY -> steps.run(new HostSshIdentityCommand());
-      case SYNC_AS_MAIN -> steps.run(new HostSyncCommand(), "--as-main");
-      case JOIN_MAIN -> steps.run(new JoinCommand(), joinArgs(name, mail));
+      case SYNC_AS_MAIN -> steps.run(new HostSyncCommand(), withFde("--as-main", fde, name, mail));
+      case JOIN_MAIN -> steps.run(new JoinCommand(), withFde(main, fde, name, mail));
     }
   }
 
@@ -239,12 +274,12 @@ public final class InitCommand implements Runnable {
     }
   }
 
-  private String[] joinArgs(String name, String mail) {
+  private static String[] withFde(String first, String fde, String name, String mail) {
     var args = new ArrayList<String>();
-    args.add(main);
-    if (Strings.isNotBlank(handle)) {
+    args.add(first);
+    if (Strings.isNotBlank(fde)) {
       args.add("--handle");
-      args.add(handle);
+      args.add(fde);
     }
     if (Strings.isNotBlank(name)) {
       args.add("--name");
