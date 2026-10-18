@@ -6,6 +6,7 @@
 package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import java.util.LinkedHashMap;
@@ -202,6 +203,35 @@ class ConflictDetectorTest {
     assertEquals("in_progress", merged.result().get("status"));
     assertEquals(
         "ada", merged.result().get("_actor"), "the merging box authored the merged result");
+  }
+
+  @Test
+  void aMergeTakesTheTimeAStatusWasEnteredFromTheSideWhoseStatusItKeeps() {
+    var base = snap("title", "A", "status", "pending");
+    var local = snap("title", "A2", "status", "pending", "_updated_at", "T2");
+    var remote = snap("title", "A", "status", "archived", "_status_since", "T1");
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class, ConflictDetector.detect(base, local, remote));
+
+    assertEquals("archived", merged.result().get("status"));
+    assertEquals("T1", merged.result().get("_status_since"));
+    assertEquals("T2", merged.result().get("_updated_at"));
+  }
+
+  @Test
+  void aMergeDropsTheLocalStatusTimeWhenTheStatusItKeepsCarriesNone() {
+    var base = snap("title", "A", "status", "archived", "_status_since", "T0");
+    var local = snap("title", "A2", "status", "archived", "_status_since", "T0");
+    var remote = snap("title", "A", "status", "pending");
+
+    var merged =
+        assertInstanceOf(
+            ConflictDetector.Merged.class, ConflictDetector.detect(base, local, remote));
+
+    assertEquals("pending", merged.result().get("status"));
+    assertFalse(merged.result().containsKey("_status_since"));
   }
 
   @Test

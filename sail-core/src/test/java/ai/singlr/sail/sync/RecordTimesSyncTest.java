@@ -129,6 +129,36 @@ class RecordTimesSyncTest {
   }
 
   @Test
+  void anArchiveMergedWithAnEditElsewhereHoldsTheTimeOfTheArchiveEverywhere() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
+    var archived = archivedAt(main, "e-acme");
+    Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
+    SyncBox.quiesce(main, ada, bob);
+
+    assertEquals(archived, archivedAt(main, "e-acme"));
+    assertSameEverywhere(box -> archivedAt(box, "e-acme"));
+  }
+
+  @Test
+  void anArchiveMergedWithACancelUndoneElsewhereHoldsTheTimeOfTheArchiveEverywhere() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.CANCELLED));
+    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.PENDING));
+    Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
+    Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
+    var archived = archivedAt(main, "e-acme");
+    SyncBox.quiesce(main, ada, bob);
+
+    assertEquals(archived, archivedAt(main, "e-acme"));
+    assertSameEverywhere(box -> archivedAt(box, "e-acme"));
+  }
+
+  @Test
   void aBodyEditHoldsTheTimeItWasMadeEverywhere() {
     main.create(SyncBox.spec("m-acme", "Main's", "pending"));
     SyncBox.quiesce(main, ada, bob);
@@ -158,6 +188,33 @@ class RecordTimesSyncTest {
         box -> {
           var room = new RoomStore(box.db).findById("lounge").orElseThrow();
           return List.of(room.createdAt(), room.updatedAt());
+        });
+  }
+
+  @Test
+  void oneRoomMadeOnMainAndANodeAndMergedHoldsOneCreationTimeEverywhere() {
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(main.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "lounge", "acme", "Lounge", null, null, null, null, null, null, null)));
+    Acting.as(
+        "ada",
+        () ->
+            new RoomStore(ada.db)
+                .create(
+                    new RoomStore.RoomRow(
+                        "lounge", "acme", "Lounge", "ada", null, null, null, null, null, null)));
+
+    SyncBox.quiesce(main, ada, bob);
+
+    assertEquals(List.of(), ada.conflicts.pending());
+    assertSameEverywhere(
+        box -> {
+          var room = new RoomStore(box.db).findById("lounge").orElseThrow();
+          return List.of(room.assignee(), room.createdAt(), room.updatedAt());
         });
   }
 
