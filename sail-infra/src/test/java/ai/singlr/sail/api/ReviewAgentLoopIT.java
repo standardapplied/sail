@@ -37,6 +37,7 @@ import ai.singlr.sail.harness.Harnesses;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -170,6 +171,7 @@ class ReviewAgentLoopIT extends AbstractIncusIT {
             .formatted(CONTAINER));
     db = Sqlite.open(stateDir.resolve("loop.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, CONTAINER);
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
     runStore = new RunStore(db);

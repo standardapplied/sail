@@ -25,6 +25,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -72,6 +73,7 @@ class AgentResumeSessionIT extends AbstractIncusIT {
 
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, CONTAINER);
       var rooms = new RoomStore(db);
       Acting.as(
           "it",
