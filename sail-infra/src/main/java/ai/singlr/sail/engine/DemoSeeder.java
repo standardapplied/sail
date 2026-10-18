@@ -15,7 +15,9 @@ import ai.singlr.sail.store.Sqlite;
  * is just another database-resident project — no network, no GitHub. Idempotent: it inserts the
  * demo only when the catalog has no record of one at all, so an engineer who customised or purged
  * theirs is never clobbered or resurrected, and re-running on every install, upgrade, and daemon
- * start is a no-op once seeded.
+ * start is a no-op once seeded. Only main or a box that syncs with nobody seeds it ({@link
+ * NodeIdentity#authoritative}): a node gets the demo from main like any project, once an admin
+ * grants it, and one seeded there would be dropped by its first round.
  */
 public final class DemoSeeder {
 
@@ -45,8 +47,13 @@ public final class DemoSeeder {
    * next sync. Seeded by this box's machinery.
    */
   public static boolean seedIfAbsent(Sqlite db) {
+    return seedIfAbsent(db, NodeIdentity.authoritative());
+  }
+
+  /** As {@link #seedIfAbsent(Sqlite)} on a box that is main or standalone when {@code seeds}. */
+  static boolean seedIfAbsent(Sqlite db, boolean seeds) {
     var store = new ProjectStore(db);
-    if (store.latestRev(DemoProject.NAME) != null) {
+    if (!seeds || store.latestRev(DemoProject.NAME) != null) {
       return false;
     }
     Actor.run(Actor.system(), () -> store.upsert(DemoProject.NAME, DemoProject.DEFINITION));

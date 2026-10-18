@@ -60,6 +60,16 @@ public final class Erasure {
   }
 
   /** What one erasure removed: the entities, per type, and the events that went with them. */
+  /**
+   * What a {@linkplain #dropLocal drop} let go: every entity, and how many of them carried a change
+   * main had not taken yet.
+   */
+  public record Dropped(List<Target> entities, int unpushed) {
+    public Dropped {
+      entities = List.copyOf(entities);
+    }
+  }
+
   public record Result(List<Target> entities, int events) {
     public static final Result NONE = new Result(List.of(), 0);
 
@@ -227,9 +237,10 @@ public final class Erasure {
    * the walk reaches that history files under another project stays: the room and the runs a spec
    * left behind when it moved here are that project's, which main still sends this box and would
    * never send again. A thread is never split so: a reply is filed with the message it answers
-   * ({@link ChangeLog#projectOf}). Journals nothing and names no actor. Returns what went.
+   * ({@link ChangeLog#projectOf}). Journals nothing and names no actor. Returns what went, and how
+   * much of it main never took.
    */
-  public Result dropLocal(String project) {
+  public Dropped dropLocal(String project) {
     return db.transaction(
         () -> {
           deferReplyConstraint();
@@ -245,12 +256,22 @@ public final class Erasure {
                   "SELECT entity_type, entity_id FROM change_heads WHERE project = ? ORDER BY seq",
                   row -> new Target(row.text(0), row.text(1)),
                   project));
-          var dropped = 0;
+          var dirty = new HashMap<String, Set<String>>();
+          var unpushed =
+              (int)
+                  entities.stream()
+                      .filter(
+                          target ->
+                              dirty
+                                  .computeIfAbsent(
+                                      target.type(), type -> stores.get(type).dirtyIds())
+                                  .contains(target.id()))
+                      .count();
           for (var target : entities) {
-            dropped += remove(target);
+            remove(target);
             changeLog.forget(target.type(), target.id());
           }
-          return new Result(List.copyOf(entities), dropped);
+          return new Dropped(List.copyOf(entities), unpushed);
         });
   }
 

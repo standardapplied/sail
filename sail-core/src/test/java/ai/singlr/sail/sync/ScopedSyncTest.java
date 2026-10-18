@@ -526,6 +526,23 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aRevocationOfAProjectWhoseWorkMainHoldsSaysNothingWasUnpushed() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+    var held = count(nia.db, "SELECT count(*) FROM change_heads WHERE project = 'alpha'");
+
+    var revoked = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of(B)))));
+
+    assertEquals(
+        List.of(
+            "project alpha: dropped from this box with the "
+                + held
+                + " rows it held here — main no longer grants this box the project"),
+        revoked.settled().stream().map(Settlement.Settled::describe).toList());
+  }
+
+  @Test
   void aRevocationDropsTheProjectAtTheStartOfTheRoundUnpushedWorkIncluded() {
     seed(main, A, "nia");
     seed(main, B, "uma");
@@ -544,14 +561,14 @@ class ScopedSyncTest {
             new Settlement.Settled(
                 "project",
                 A,
-                new Settlement.How.Dropped((int) held),
+                new Settlement.How.Dropped((int) held, 1),
                 "main no longer grants this box the project")),
         revoked.settled());
     assertEquals(
         "project alpha: dropped from this box with the "
             + held
-            + " rows it held here, unpushed work included — main no longer grants this box the"
-            + " project",
+            + " rows it held here, unpushed work included (1 row never pushed) — main no longer"
+            + " grants this box the project",
         revoked.settled().getFirst().describe());
     for (var table :
         List.of(

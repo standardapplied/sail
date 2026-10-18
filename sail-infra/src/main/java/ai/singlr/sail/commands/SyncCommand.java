@@ -296,11 +296,9 @@ public final class SyncCommand implements Callable<Integer> {
                 + report.merged()
                 + "|@ merged."));
     lines.addAll(detail);
-    round.refusals().forEach(refusal -> lines.add(Banner.warnLine(refusal.describe(), Ansi.AUTO)));
-    round.settled().forEach(settled -> lines.add(Banner.warnLine(settled.describe(), Ansi.AUTO)));
     if (report.conflicts() > 0) {
       lines.add(
-          Banner.errorLine(
+          Banner.warnLine(
               report.conflicts()
                   + " conflict(s) need your decision. Run '"
                   + operator.sail("conflicts")

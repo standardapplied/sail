@@ -1485,7 +1485,12 @@ class SailOperationsSeamTest {
       assertTrue(operations.catalog().definitions().read("demo").isEmpty());
       var missing =
           assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
-      assertTrue(missing.getMessage().contains("sail migrate"), "a purged demo is not resurrected");
+      assertEquals(
+          "The demo project isn't on this box. On main or a standalone box, 'sudo sail migrate'"
+              + " seeds it; a node gets it from main once an admin grants it there: sudo sail fde"
+              + " grant <handle> demo.",
+          missing.getMessage(),
+          "a purged demo is not resurrected");
       operations.useSyncScheduler(SyncScheduler.disabled());
     }
   }
