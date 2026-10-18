@@ -538,8 +538,9 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * Writes every synced field of {@code snapshot}. The creator and creation time are written
-     * once: an update keeps the row's, except that a node adopting main's revision takes main's.
+     * Writes every synced field of {@code snapshot}, at the revision's time ({@link
+     * Snapshots#UPDATED_AT}). The creator and creation time are written once: an update keeps the
+     * row's, except that a node adopting main's revision takes main's.
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
@@ -564,7 +565,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Snapshots.text(snapshot, "roster"),
           creatorOf(id, snapshot),
           Strings.isBlank(createdAt) ? now : createdAt,
-          now,
+          Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, now),
           Snapshots.actor(snapshot),
           adopting ? 1 : 0,
           adopting && Strings.isNotBlank(createdAt) ? 1 : 0);
@@ -598,6 +599,10 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       var author = full.get("updated_by");
       if (author != null) {
         m.put(Snapshots.ACTOR, author);
+      }
+      var updated = full.get("updated_at");
+      if (updated != null) {
+        m.put(Snapshots.UPDATED_AT, updated);
       }
       return m;
     }

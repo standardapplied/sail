@@ -552,7 +552,10 @@ public final class RevisionJournal implements ConflictResolver {
         });
   }
 
-  /** Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it). */
+  /**
+   * Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it), made now
+   * ({@link Snapshots#revisedHere}).
+   */
   private String write(String id, Map<String, Object> state, String origin) {
     if (Snapshots.isDeletion(state)) {
       var marks = marksOf(state);
@@ -563,7 +566,7 @@ public final class RevisionJournal implements ConflictResolver {
       eraseRow(id);
       return rev;
     }
-    schema.apply(id, state);
+    schema.apply(id, Snapshots.revisedHere(state));
     return recordRevision(id, origin, false);
   }
 

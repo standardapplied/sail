@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -193,20 +194,23 @@ class SchemaManagerTest {
   }
 
   @Test
-  void theStatusTimesFollowEveryStatusWriteAndLeavingTheStatusClearsIt() {
+  void theStatusTimesAreTheRevisionsThatMadeTheTransitionAndLeavingTheStatusClearsIt() {
     new SchemaManager(db).migrate();
     db.execute(
         "INSERT INTO specs (id, title, status, created_at, updated_at) VALUES ('s', 's',"
-            + " 'archived', 'now', 'now')");
-    var born = since("archived_at");
-    assertTrue(born != null && born.endsWith("Z"), "an archived birth is stamped: " + born);
+            + " 'archived', 't0', '2026-01-01T00:00:00Z')");
+    assertEquals("2026-01-01T00:00:00Z", since("archived_at"));
 
-    db.execute("UPDATE specs SET title = 'renamed' WHERE id = 's'");
-    assertEquals(born, since("archived_at"), "an edit that keeps the status keeps its time");
+    db.execute(
+        "UPDATE specs SET title = 'renamed', updated_at = '2026-01-02T00:00:00Z' WHERE id = 's'");
+    assertEquals(
+        "2026-01-01T00:00:00Z", since("archived_at"), "an edit that keeps the status keeps it");
 
-    db.execute("UPDATE specs SET status = 'cancelled' WHERE id = 's'");
+    db.execute(
+        "UPDATE specs SET status = 'cancelled', updated_at = '2026-01-03T00:00:00Z'"
+            + " WHERE id = 's'");
     assertNull(since("archived_at"));
-    assertTrue(since("cancelled_at") != null);
+    assertEquals("2026-01-03T00:00:00Z", since("cancelled_at"));
 
     db.execute("UPDATE specs SET status = 'pending' WHERE id = 's'");
     assertNull(since("archived_at"));
@@ -427,6 +431,42 @@ class SchemaManagerTest {
     assertEquals(ProjectScope.all(), new SyncScope(db).held());
     assertEquals(12, new SyncState(db).checkpoint("main", "spec"));
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  @Test
+  void aStatusSinceMigratesFromThe0_52_0ReleaseToTheRevisionsTimeKeepingWhatItHeld() {
+    stageAtBaseline();
+    var prior = migrationIndex("DROP TRIGGER specs_status_since_insert");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    db.execute(
+        "INSERT INTO specs (id, project, title, status, created_at, updated_at)"
+            + " VALUES ('old', 'acme', 'Old', 'archived', 't0', '2026-01-01T00:00:00Z')");
+    var heldBefore = archivedAt("old");
+
+    new SchemaManager(db).migrate();
+    db.execute(
+        "INSERT INTO specs (id, project, title, status, created_at, updated_at)"
+            + " VALUES ('new', 'acme', 'New', 'archived', 't0', '2026-02-02T00:00:00Z')");
+    db.execute(
+        "UPDATE specs SET status = 'cancelled', updated_at = '2026-03-03T00:00:00Z'"
+            + " WHERE id = 'old'");
+
+    assertNotEquals("2026-01-01T00:00:00Z", heldBefore, "the release before stamped its clock");
+    assertEquals("2026-02-02T00:00:00Z", archivedAt("new"));
+    assertEquals(
+        Optional.of("2026-03-03T00:00:00Z"),
+        db.queryOne("SELECT cancelled_at FROM specs WHERE id = 'old'", row -> row.text(0)));
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
+  private String archivedAt(String id) {
+    return db.queryOne("SELECT archived_at FROM specs WHERE id = ?", row -> row.text(0), id)
+        .orElseThrow();
   }
 
   @Test

@@ -27,6 +27,12 @@ public final class Snapshots {
   /** Reserved metadata key carrying the creator of an entity through the sync protocol. */
   public static final String CREATOR = "_created_by";
 
+  /** Reserved metadata key carrying when an entity was created, on its creator's clock. */
+  public static final String CREATED_AT = "_created_at";
+
+  /** Reserved metadata key carrying when a revision was made, on its author's clock. */
+  public static final String UPDATED_AT = "_updated_at";
+
   private Snapshots() {}
 
   /**
@@ -69,6 +75,46 @@ public final class Snapshots {
     return map.get(key) instanceof List<?> list
         ? list.stream().map(String::valueOf).toList()
         : List.of();
+  }
+
+  /**
+   * {@code comparable} carrying when the entity {@code full} holds was created and last revised, as
+   * {@link #CREATED_AT} and {@link #UPDATED_AT}: metadata, so two boxes never conflict on a clock,
+   * yet every box applying the revision writes the author's times verbatim.
+   */
+  public static Map<String, Object> timed(
+      Map<String, Object> comparable, Map<String, Object> full) {
+    var created = full.get("created_at");
+    if (created != null) {
+      comparable.put(CREATED_AT, created);
+    }
+    var updated = full.get("updated_at");
+    if (updated != null) {
+      comparable.put(UPDATED_AT, updated);
+    }
+    return comparable;
+  }
+
+  /**
+   * The time {@code snapshot} names under {@code key}, or {@code now} when it names none: a
+   * revision from a box that predates carrying it.
+   */
+  public static String timeOr(Map<String, Object> snapshot, String key, String now) {
+    var time = text(snapshot, key);
+    return Strings.isBlank(time) ? now : time;
+  }
+
+  /**
+   * {@code state} as this box's own new revision of it: made now, so the revision time it was
+   * copied from is not carried over. Null stays null.
+   */
+  public static Map<String, Object> revisedHere(Map<String, Object> state) {
+    if (state == null || !state.containsKey(UPDATED_AT)) {
+      return state;
+    }
+    var revised = new LinkedHashMap<>(state);
+    revised.remove(UPDATED_AT);
+    return revised;
   }
 
   /**

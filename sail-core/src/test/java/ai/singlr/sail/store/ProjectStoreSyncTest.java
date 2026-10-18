@@ -12,9 +12,11 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.WriterAuthority;
+import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import java.nio.file.Path;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -53,11 +55,18 @@ class ProjectStoreSyncTest {
     return Map.of("definition", definition, "_actor", actor);
   }
 
+  private static Map<String, Object> untimed(Map<String, Object> snapshot) {
+    var work = new LinkedHashMap<>(snapshot);
+    work.remove(Snapshots.CREATED_AT);
+    work.remove(Snapshots.UPDATED_AT);
+    return work;
+  }
+
   @Test
   void upsertJournalsAComparableRevision() {
     store.upsert("acme", "name: acme\n");
 
-    assertEquals(def("name: acme\n", "uday"), store.comparableSnapshot("acme"));
+    assertEquals(def("name: acme\n", "uday"), untimed(store.comparableSnapshot("acme")));
     assertNotEquals(null, store.latestRev("acme"));
     assertTrue(store.syncEntityIds().contains("acme"));
   }
@@ -70,8 +79,8 @@ class ProjectStoreSyncTest {
     store.upsert("acme", "v2");
 
     assertNotEquals(rev1, store.latestRev("acme"));
-    assertEquals(def("v2", "uday"), store.comparableSnapshot("acme"));
-    assertEquals(def("v1", "uday"), store.comparableAtRev("acme", rev1));
+    assertEquals(def("v2", "uday"), untimed(store.comparableSnapshot("acme")));
+    assertEquals(def("v1", "uday"), untimed(store.comparableAtRev("acme", rev1)));
   }
 
   @Test
@@ -79,10 +88,48 @@ class ProjectStoreSyncTest {
   void applyRevisionAdoptsMainsStateAtItsExactRevAsTheBase() {
     store.applyRevision("acme", def("from-main", "sumesh"), "rev-xyz");
 
-    assertEquals(def("from-main", "sumesh"), store.comparableSnapshot("acme"));
+    assertEquals(def("from-main", "sumesh"), untimed(store.comparableSnapshot("acme")));
     assertEquals("sumesh", new ChangeLog(db).history("project", "acme").getLast().actor());
     assertEquals("rev-xyz", store.latestRev("acme"));
     assertEquals("rev-xyz", store.baseRevOf("acme"));
+  }
+
+  @Test
+  @ActingAs(Actor.Lane.MAIN)
+  void aRevisionCarriesItsAuthorsTimesAndEveryBoxWritesThemVerbatim() {
+    var authored = new LinkedHashMap<String, Object>(def("from-main", "sumesh"));
+    authored.put(Snapshots.CREATED_AT, "2026-01-01T00:00:00Z");
+    authored.put(Snapshots.UPDATED_AT, "2026-01-02T00:00:00Z");
+
+    store.applyRevision("acme", authored, "rev-xyz");
+
+    var row = store.findByName("acme").orElseThrow();
+    assertEquals("2026-01-01T00:00:00Z", row.createdAt());
+    assertEquals("2026-01-02T00:00:00Z", row.updatedAt());
+    assertEquals(authored, store.comparableSnapshot("acme"));
+  }
+
+  @Test
+  void anEditHereKeepsTheCreationTimeAndStampsItsOwn() {
+    Acting.by(
+        Actor.main("sumesh"),
+        () ->
+            store.applyRevision(
+                "acme",
+                Map.of(
+                    "definition",
+                    "v1",
+                    Snapshots.CREATED_AT,
+                    "2026-01-01T00:00:00Z",
+                    Snapshots.UPDATED_AT,
+                    "2026-01-02T00:00:00Z"),
+                "rev-1"));
+
+    store.upsert("acme", "v2");
+
+    var row = store.findByName("acme").orElseThrow();
+    assertEquals("2026-01-01T00:00:00Z", row.createdAt());
+    assertTrue(row.updatedAt().compareTo("2026-01-02T00:00:00Z") > 0, row.updatedAt());
   }
 
   @Test
@@ -97,7 +144,7 @@ class ProjectStoreSyncTest {
     var accepted = assertInstanceOf(PushOutcome.Accepted.class, outcome);
     assertNotEquals("rev-base", accepted.rev());
     assertEquals(accepted.rev(), store.latestRev("acme"));
-    assertEquals(def("pushed", "node"), store.comparableSnapshot("acme"));
+    assertEquals(def("pushed", "node"), untimed(store.comparableSnapshot("acme")));
   }
 
   @Test
@@ -111,7 +158,7 @@ class ProjectStoreSyncTest {
             "acme", def("racing"), "rev-base", new WriterAuthority(db, "projects"));
 
     var stale = assertInstanceOf(PushOutcome.Stale.class, outcome);
-    assertEquals(def("moved", "node"), stale.currentSnapshot());
+    assertEquals(def("moved", "node"), untimed(stale.currentSnapshot()));
   }
 
   @Test
@@ -142,7 +189,7 @@ class ProjectStoreSyncTest {
     store.resolveConflict(
         "acme", def("theirs", "mady"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
-    assertEquals(def("theirs", "mady"), store.comparableSnapshot("acme"));
+    assertEquals(def("theirs", "mady"), untimed(store.comparableSnapshot("acme")));
     var head = new ChangeLog(db).head("project", "acme").orElseThrow();
     assertEquals("mady", head.actor(), "main's revision keeps main's author, not the resolver");
     assertEquals(Actor.MAIN_HANDLE, head.peer());
@@ -155,7 +202,7 @@ class ProjectStoreSyncTest {
     store.resolveConflict(
         "acme", def("mine"), new MainVersion(def("theirs", "mady"), "9-main", "mady"));
 
-    assertEquals(def("mine", "uday"), store.comparableSnapshot("acme"));
+    assertEquals(def("mine", "uday"), untimed(store.comparableSnapshot("acme")));
     var history = new ChangeLog(db).history("project", "acme");
     assertEquals(
         "mady",

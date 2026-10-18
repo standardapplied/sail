@@ -185,6 +185,39 @@ public final class SchemaManager {
       END""";
 
   /**
+   * When a spec entered {@code archived} or {@code cancelled}: the time of the revision that made
+   * the transition ({@code updated_at}), which a box adopting it writes verbatim, so every box
+   * holds the same instant and retention ages on the author's. Supersedes {@link
+   * #STATUS_SINCE_ON_INSERT}, which stamped each box's own clock.
+   */
+  static final String STATUS_SINCE_REVISION_ON_INSERT =
+      """
+      CREATE TRIGGER specs_status_since_insert AFTER INSERT ON specs
+      WHEN NEW.status IN ('archived', 'cancelled')
+      BEGIN
+          UPDATE specs SET
+              archived_at = CASE WHEN NEW.status = 'archived'
+                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+              cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+          WHERE id = NEW.id;
+      END""";
+
+  /** As {@link #STATUS_SINCE_REVISION_ON_INSERT}, superseding {@link #STATUS_SINCE_ON_UPDATE}. */
+  static final String STATUS_SINCE_REVISION_ON_UPDATE =
+      """
+      CREATE TRIGGER specs_status_since_update AFTER UPDATE OF status ON specs
+      WHEN NEW.status IS NOT OLD.status
+      BEGIN
+          UPDATE specs SET
+              archived_at = CASE WHEN NEW.status = 'archived'
+                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END,
+              cancelled_at = CASE WHEN NEW.status = 'cancelled'
+                  THEN COALESCE(NEW.updated_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END
+          WHERE id = NEW.id;
+      END""";
+
+  /**
    * A deletion a release before {@code change_log.kind} writes — the old server keeps running while
    * the upgrade migrates, and the column's default reads it as a revision — is recorded as the
    * tombstone it is, so it still reaches main.
@@ -759,7 +792,11 @@ public final class SchemaManager {
           FDE_SCOPE,
           PROJECT_GRANTS,
           HEAD_PROJECT,
-          NODE_SCOPE);
+          NODE_SCOPE,
+          "DROP TRIGGER specs_status_since_insert",
+          STATUS_SINCE_REVISION_ON_INSERT,
+          "DROP TRIGGER specs_status_since_update",
+          STATUS_SINCE_REVISION_ON_UPDATE);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

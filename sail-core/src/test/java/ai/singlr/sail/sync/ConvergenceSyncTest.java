@@ -802,15 +802,11 @@ class ConvergenceSyncTest {
   }
 
   @Test
-  void twoBoxesMintingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
+  void twoBoxesMakingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
     upsertProject(bob, "bob", "p", "name: p\n");
     SyncBox.quiesce(main, ada, bob);
     Acting.as("bob", () -> new ProjectStore(main.db).upsert("p", "name: p\nv: 2\n"));
     upsertProject(bob, "bob", "p", "name: p\nv: 2\n");
-    assertEquals(
-        new ChangeLog(main.db).head("project", "p").orElseThrow().rev(),
-        new ChangeLog(bob.db).head("project", "p").orElseThrow().rev(),
-        "the same rev minted on both");
 
     assertConverged();
 
