@@ -7,10 +7,12 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -75,6 +77,40 @@ class UnheldProjectTest {
             "Ask an admin to grant it on main: sudo sail fde grant ada beta."),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
+  }
+
+  @Test
+  void aScopedNodeTakesNothingIntoAProjectBeyondWhatMainGrantsEvenOneItHolds() {
+    new SyncScope(db).record(ProjectScope.of(List.of("acme")));
+
+    var refused =
+        assertThrows(
+            WriteRefused.class, () -> Acting.as("ada", () -> specs.create(spec("c-beta", "beta"))));
+
+    assertEquals(
+        new Refusal(
+            Refusal.Kind.UNHELD_PROJECT,
+            "Project 'beta' isn't on this box. Projects here: acme.",
+            "Ask an admin to grant it on main: sudo sail fde grant ada beta."),
+        refused.refusal());
+    assertEquals(0, count("SELECT count(*) FROM specs"));
+  }
+
+  @Test
+  void aRestoreIsABirthIntoItsProject() {
+    Acting.as("ada", () -> specs.create(spec("idea", "beta")));
+    var born = specs.history("idea").getFirst().rev();
+    Acting.as("ada", () -> specs.delete("idea"));
+    db.execute("DELETE FROM projects WHERE name = 'beta'");
+
+    var refused =
+        assertThrows(
+            WriteRefused.class,
+            () -> Acting.as("ada", () -> specs.restore("idea", born, OperatorCommand.PLAIN)));
+
+    assertEquals(
+        "Project 'beta' isn't on this box. Projects here: acme.", refused.refusal().message());
+    assertTrue(specs.findById("idea").isEmpty());
   }
 
   @Test

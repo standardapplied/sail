@@ -340,8 +340,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         () -> {
           var ids = db.query("SELECT id FROM specs WHERE project = ?", row -> row.text(0), old);
           db.execute(
-              "UPDATE specs SET project = ?, updated_by = ? WHERE project = ?",
+              "UPDATE specs SET project = ?, updated_at = ?, updated_by = ? WHERE project = ?",
               renamed,
+              DateTimeUtils.now().toString(),
               author(),
               old);
           ids.forEach(id -> recordRevision(id, ChangeLog.Entry.LOCAL, false));
@@ -673,8 +674,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
 
   /**
    * Up to {@code limit} specs a prune policy selects: in one of {@code statuses} since before
-   * {@code cutoff} (when this box saw the spec enter it), in {@code project} when one is named, and
-   * with no run still going in it or its room — a spec still at work is never swept away.
+   * {@code cutoff} (when it entered it, on its author's clock), in {@code project} when one is
+   * named, and with no run still going in it or its room — a spec still at work is never swept
+   * away.
    */
   public List<String> prunableSince(
       List<SpecStatus> statuses, String project, Instant cutoff, int limit) {
@@ -748,6 +750,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   /** The project the head of spec {@code id} carries, which outlives its row and its erasure. */
   public Optional<String> headProject(String id) {
     return changeLog.headProject(ENTITY, id);
+  }
+
+  /** The project spec {@code id} is filed under while live ({@link ChangeLog#liveProject}). */
+  public Optional<String> liveProject(String id) {
+    return changeLog.liveProject(ENTITY, id);
   }
 
   private Map<String, Object> snapshotMap(SpecRow spec) {

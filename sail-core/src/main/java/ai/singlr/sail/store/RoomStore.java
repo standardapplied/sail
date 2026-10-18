@@ -153,7 +153,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
             return false;
           }
           var schema = new RoomSchema();
-          schema.apply(id, schema.comparable(YamlUtil.parseMap(head.snapshot())));
+          schema.apply(
+              id, Snapshots.revisedHere(schema.comparable(YamlUtil.parseMap(head.snapshot()))));
           stampAuthor(id);
           journal.recordRevision(id, "restore", false);
           return true;
@@ -224,6 +225,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    */
   public boolean isTombstoned(String id) {
     return changeLog.head(ENTITY, id).map(ChangeLog.Entry::deleted).orElse(false);
+  }
+
+  /** The project room {@code id} is filed under while live ({@link ChangeLog#liveProject}). */
+  public Optional<String> liveProject(String id) {
+    return changeLog.liveProject(ENTITY, id);
   }
 
   /**
@@ -539,17 +545,21 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
 
     /**
      * Writes every synced field of {@code snapshot}, at the revision's times ({@link
-     * Snapshots#timed}); a revision from a box that predates them names its creation time as a
-     * field, and every lane writes it verbatim, so rooms made apart and merged settle on one. The
-     * creator is written once: an update keeps the row's, except that a node adopting main's
-     * revision takes main's.
+     * Snapshots#timed}), the creation time it carries verbatim on every lane, so rooms made apart
+     * and merged settle on the one main holds; a revision from a box that predates the times names
+     * its creation time as a field, which only a node adopting main's revision takes. The creator
+     * is written once: an update keeps the row's, except that a node adopting main's revision takes
+     * main's.
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var now = DateTimeUtils.now().toString();
-      var createdAt =
-          Snapshots.timeOr(snapshot, Snapshots.CREATED_AT, Snapshots.text(snapshot, "created_at"));
       var adopting = Actor.current().lane() == Actor.Lane.MAIN;
+      var createdAt =
+          Snapshots.timeOr(
+              snapshot,
+              Snapshots.CREATED_AT,
+              adopting ? Snapshots.text(snapshot, "created_at") : null);
       db.execute(
           """
           INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,

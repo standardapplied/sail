@@ -107,6 +107,7 @@ public final class SyncWire {
   private static final String AUTHOR = "author";
   private static final String PROJECT = "project";
   private static final String CREATOR = "creator";
+  private static final String CREATED_AT = "created_at";
   private static final String GONE = "gone";
 
   private static final String OP_HELLO = "hello";
@@ -482,11 +483,13 @@ public final class SyncWire {
 
   /**
    * Main minted {@code rev} for the offer, recording {@code author} as who made it: the author the
-   * offer named, or the pusher when it named none; and {@code creator} as the creator main holds,
-   * which may not be the one the offer named, and may be none. The node records the same ones when
-   * it settles its offer; an older main sends neither.
+   * offer named, or the pusher when it named none; {@code creator} as the creator main holds, which
+   * may not be the one the offer named, and may be none; and {@code createdAt} as the creation time
+   * main holds, null when the entity carries none. The node records the same ones when it settles
+   * its offer; an older main sends none of them.
    */
-  public record Accepted(String id, String rev, String author, Snapshots.Creator creator)
+  public record Accepted(
+      String id, String rev, String author, Snapshots.Creator creator, String createdAt)
       implements Result {}
 
   /**
@@ -867,6 +870,9 @@ public final class SyncWire {
         if (accepted.creator() != null) {
           verdict.put(CREATOR, accepted.creator().handle());
         }
+        if (accepted.createdAt() != null) {
+          verdict.put(CREATED_AT, accepted.createdAt());
+        }
         map.put(ACCEPTED, verdict);
       }
       case Stale _ -> map.put(STALE, true);
@@ -897,7 +903,12 @@ public final class SyncWire {
     if (accepted != null) {
       var creator =
           accepted.containsKey(CREATOR) ? new Snapshots.Creator(string(accepted, CREATOR)) : null;
-      return new Accepted(id, string(accepted, REV), string(accepted, AUTHOR), creator);
+      return new Accepted(
+          id,
+          string(accepted, REV),
+          string(accepted, AUTHOR),
+          creator,
+          string(accepted, CREATED_AT));
     }
     if (Boolean.TRUE.equals(map.get(STALE))) {
       return new Stale(id);

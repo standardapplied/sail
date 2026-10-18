@@ -1057,9 +1057,11 @@ public final class PagedSyncSession implements SyncSession {
               SyncWire.Entry.version(
                   offer.id(),
                   accepted.rev(),
-                  Snapshots.withCreator(offer.snapshot(), accepted.creator()),
+                  Snapshots.withCreation(
+                      offer.snapshot(), accepted.creator(), accepted.createdAt()),
                   accepted.author()));
-          yield new CommitOutcome.Accepted(accepted.rev(), accepted.author(), accepted.creator());
+          yield new CommitOutcome.Accepted(
+              accepted.rev(), accepted.author(), accepted.creator(), accepted.createdAt());
         }
         case SyncWire.Stale _ ->
             new CommitOutcome.Rejected(currentRev(offer.id()), current(offer.id()));

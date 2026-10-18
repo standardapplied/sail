@@ -122,22 +122,30 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * Why {@code actor} may not put a row this box files under {@code heldProject} — null when it
-   * holds none — into {@code nextProject}: a box takes a write only into a project its catalog
-   * holds, so no round ever takes back work it accepted. A row staying in its project is never
+   * Why {@code actor} may not put a row this box files under {@code heldProject} — null when its
+   * head is no live revision — into {@code nextProject}: a box takes a write only into a project
+   * its catalog holds within the scope main last named for it ({@link SyncScope}), so no round ever
+   * takes back work it accepted; a project the catalog holds beyond that scope — applied here, or
+   * kept while a run ends — leaves with the next round. A row staying in its project is never
    * refused, whatever this box holds of it. Said as this box's own refusal, or, when {@code
-   * onMain}, as main's answer to a node: naming the projects {@code actor} may see and, on a node
-   * main scoped, the grant that unblocks it. Empty when it may.
+   * onMain}, as main's answer to a node: naming the projects {@code actor} may see of those granted
+   * and, on a node main scoped, the grant that unblocks it. Empty when it may.
    */
   public Optional<Refusal> refusesInto(
       Actor actor, String heldProject, String nextProject, boolean onMain) {
+    var granted = new SyncScope(db).held();
     if (Strings.isBlank(nextProject)
         || nextProject.equals(heldProject)
-        || findByName(nextProject).isPresent()) {
+        || (findByName(nextProject).isPresent() && granted.admits(nextProject))) {
       return Optional.empty();
     }
-    var visible = list().stream().map(ProjectRow::name).filter(actor.scope()::admits).toList();
-    var scoped = !new SyncScope(db).held().unrestricted();
+    var visible =
+        list().stream()
+            .map(ProjectRow::name)
+            .filter(actor.scope()::admits)
+            .filter(granted::admits)
+            .toList();
+    var scoped = !granted.unrestricted();
     var handle = Strings.isBlank(actor.actingFde()) ? "<handle>" : actor.actingFde();
     return Refusal.of(
         Refusal.Kind.UNHELD_PROJECT,

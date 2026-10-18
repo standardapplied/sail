@@ -57,7 +57,8 @@ public final class SpecAuthority implements WriteAuthority {
     if (writer.isPresent() || WriteAuthority.decided(actor)) {
       return writer;
     }
-    var unheld = projects.refusesInto(actor, projectOf(held), projectOf(next), false);
+    var unheld =
+        projects.refusesInto(actor, specs.liveProject(id).orElse(null), projectOf(next), false);
     if (unheld.isPresent()) {
       return unheld;
     }
@@ -215,7 +216,7 @@ public final class SpecAuthority implements WriteAuthority {
   }
 
   private static String projectOf(Map<String, Object> projection) {
-    return projection == null ? null : Snapshots.text(projection, "project");
+    return Snapshots.text(projection, "project");
   }
 
   private static String assigneeOf(Map<String, Object> projection) {

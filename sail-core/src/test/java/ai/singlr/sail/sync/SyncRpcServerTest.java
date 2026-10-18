@@ -65,7 +65,7 @@ class SyncRpcServerTest {
 
     @Override
     public CommitOutcome commit(String entityId, Map<String, Object> snapshot, String expectedRev) {
-      return new CommitOutcome.Accepted("1-x", null, null);
+      return new CommitOutcome.Accepted("1-x", null, null, null);
     }
 
     @Override
@@ -604,7 +604,7 @@ class SyncRpcServerTest {
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expected) {
             return "forged".equals(id)
                 ? new CommitOutcome.Denied("not yours", "3-m", Map.of("title", "main's"), null)
-                : new CommitOutcome.Accepted("1-x", null, null);
+                : new CommitOutcome.Accepted("1-x", null, null, null);
           }
         };
     var results =
@@ -737,7 +737,7 @@ class SyncRpcServerTest {
             if (id.equals("bad")) {
               throw new IllegalStateException("commit failed", new RuntimeException("disk full"));
             }
-            return new CommitOutcome.Accepted("1-x", null, null);
+            return new CommitOutcome.Accepted("1-x", null, null, null);
           }
         };
     var captured = new ByteArrayOutputStream();
@@ -800,7 +800,7 @@ class SyncRpcServerTest {
           @Override
           public CommitOutcome commit(String id, Map<String, Object> snapshot, String expectedRev) {
             seenPeer.set(Actor.current().peer());
-            return new CommitOutcome.Accepted("1-x", null, null);
+            return new CommitOutcome.Accepted("1-x", null, null, null);
           }
         };
     after(
@@ -913,7 +913,7 @@ class SyncRpcServerTest {
       public CommitOutcome commit(
           String entityId, Map<String, Object> snapshot, String expectedRev) {
         committed = snapshot;
-        return new CommitOutcome.Accepted("1-x", null, null);
+        return new CommitOutcome.Accepted("1-x", null, null, null);
       }
     };
   }

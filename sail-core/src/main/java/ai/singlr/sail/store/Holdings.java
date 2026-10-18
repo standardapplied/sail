@@ -35,8 +35,10 @@ public sealed interface Holdings {
 
   /**
    * The project {@code id} of {@code type} belongs to: gone once erased; on main, gone too for a
-   * spec or room put into a project main does not hold ({@link ProjectStore#refusesInto}), which
-   * the node keeps and offers again; held otherwise.
+   * spec or room born or moved into a project main does not hold ({@link
+   * ProjectStore#refusesInto}), which the node keeps and offers again — unless the project lies
+   * outside the pusher's scope, which the scope rule answers naming nothing of main's catalog; held
+   * otherwise.
    */
   Standing project(String type, String id, String project);
 
@@ -103,8 +105,8 @@ public sealed interface Holdings {
       return store(type).liveBase(id).isPresent() || head(type, id).isPresent();
     }
 
-    String headProject(String type, String id) {
-      return changeLog.headProject(type, id).orElse(null);
+    String liveProject(String type, String id) {
+      return changeLog.liveProject(type, id).orElse(null);
     }
 
     ProjectStore projects() {
@@ -169,12 +171,14 @@ public sealed interface Holdings {
       if (entries.erased(Erasure.PROJECT, project)) {
         return new Standing.Gone(Reasons.projectPruned(project));
       }
-      if (!Erasure.SPEC.equals(type) && !Erasure.ROOM.equals(type)) {
+      var pusher = Actor.current();
+      if ((!Erasure.SPEC.equals(type) && !Erasure.ROOM.equals(type))
+          || !pusher.scope().admits(project)) {
         return Standing.HELD;
       }
       return entries
           .projects()
-          .refusesInto(Actor.current(), entries.headProject(type, id), project, true)
+          .refusesInto(pusher, entries.liveProject(type, id), project, true)
           .<Standing>map(refused -> new Standing.Gone(Reasons.unheld(refused)))
           .orElse(Standing.HELD);
     }

@@ -662,6 +662,16 @@ class SpecStoreTest {
   }
 
   @Test
+  void aReprojectIsStampedWhenItIsMade() {
+    store.create(spec("a", "old", "A", "pending"));
+    db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'a'");
+
+    store.reproject("old", "renamed");
+
+    assertNotEquals("2020-01-01T00:00:00Z", store.findById("a").orElseThrow().updatedAt());
+  }
+
+  @Test
   void reprojectToTheSameNameJournalsNothing() {
     store.create(spec("a", "old", "A", "pending"));
     var rev = store.revOf("a");

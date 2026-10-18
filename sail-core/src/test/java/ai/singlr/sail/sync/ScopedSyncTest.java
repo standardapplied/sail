@@ -486,6 +486,8 @@ class ScopedSyncTest {
                             "project",
                             List.of(
                                 new MainReplica.Offer("gamma", definition, null),
+                                new MainReplica.Offer(
+                                    B, definition, new ProjectStore(main.db).latestRev(B)),
                                 new MainReplica.Offer(A, definition, null))))
                     .getLast())
             .results();
@@ -494,8 +496,13 @@ class ScopedSyncTest {
         new SyncWire.Denied(
             "gamma", "Project 'gamma' is in no project this FDE is granted.", null, null, true),
         results.get(0));
-    assertInstanceOf(SyncWire.Accepted.class, results.get(1));
+    assertEquals(
+        "Project 'beta' is in no project this FDE is granted.",
+        assertInstanceOf(SyncWire.Denied.class, results.get(1)).reason());
+    assertInstanceOf(SyncWire.Accepted.class, results.get(2));
     assertTrue(new ProjectStore(main.db).findByName("gamma").isEmpty());
+    assertEquals(
+        "name: beta\n", new ProjectStore(main.db).findByName(B).orElseThrow().definition());
     assertTrue(new ProjectStore(main.db).findByName(A).isPresent());
   }
 

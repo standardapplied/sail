@@ -6,15 +6,22 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.PushOutcome;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.function.Function;
 import org.junit.jupiter.api.AfterEach;
@@ -267,6 +274,78 @@ class RecordTimesSyncTest {
 
     assertEquals(List.of(), ada.conflicts.pending());
     assertEquals(SpecStatus.DONE, bob.specs.findById("m-acme").orElseThrow().status());
+  }
+
+  @Test
+  void aRowFromBeforeTheTimesConvergesOnMainsCreationTimeOnceMainTakesARevisionOfIt() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+    var mains = times(main, "e-acme").getFirst();
+    ada.db.execute("UPDATE specs SET created_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+
+    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
+    SyncBox.quiesce(main, ada, bob);
+
+    assertEquals(SpecStatus.IN_PROGRESS, main.specs.findById("e-acme").orElseThrow().status());
+    assertEquals(mains, times(main, "e-acme").getFirst());
+    assertSameEverywhere(box -> times(box, "e-acme"));
+  }
+
+  @Test
+  void aMergeOfferedToMainIsStampedWhenItIsMade() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.as("ada", () -> ada.specs.setContent("e-acme", "Edited offline.", ""));
+    ada.db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'e-acme'");
+    Acting.as("ada", () -> main.specs.updateStatus("e-acme", SpecStatus.IN_PROGRESS));
+    var mainsEdit = times(main, "e-acme").getLast();
+    SyncBox.quiesce(main, ada, bob);
+
+    assertTrue(
+        times(main, "e-acme").getLast().compareTo(mainsEdit) >= 0, "never before main's edit");
+    assertEquals(SpecStatus.IN_PROGRESS, bob.specs.findById("e-acme").orElseThrow().status());
+    assertEquals("Edited offline.", bob.specs.getContent("e-acme").orElseThrow().body());
+    assertSameEverywhere(box -> times(box, "e-acme"));
+  }
+
+  @Test
+  void aRestoredRoomIsStampedWhenItIsRestored() {
+    var rooms = new RoomStore(main.db);
+    Acting.as("main", () -> rooms.create(room("lounge")));
+    main.db.execute("UPDATE rooms SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'lounge'");
+    Acting.as("main", () -> rooms.delete("lounge"));
+
+    Acting.as("main", () -> rooms.restoreDeleted("lounge"));
+
+    assertNotEquals("2020-01-01T00:00:00Z", rooms.findById("lounge").orElseThrow().updatedAt());
+  }
+
+  @Test
+  void aRoomRevisionFromABoxBeforeTheTimesLeavesMainsCreationTime() {
+    var rooms = new RoomStore(main.db);
+    Acting.as("main", () -> rooms.create(room("lounge")));
+    var created = rooms.findById("lounge").orElseThrow().createdAt();
+    var offer = new LinkedHashMap<>(rooms.currentForSync("lounge"));
+    offer.remove(Snapshots.CREATED_AT);
+    offer.remove(Snapshots.UPDATED_AT);
+    offer.put("created_at", "2020-01-01T00:00:00Z");
+    offer.put("title", "Renamed");
+
+    var taken =
+        Actor.call(
+            Actor.sync("main", Role.MEMBER),
+            () ->
+                rooms.commitRevision(
+                    "lounge", offer, rooms.latestRev("lounge"), rooms.authority()));
+
+    assertInstanceOf(PushOutcome.Accepted.class, taken);
+    assertEquals(created, rooms.findById("lounge").orElseThrow().createdAt());
+    assertEquals("Renamed", rooms.findById("lounge").orElseThrow().title());
+  }
+
+  private static RoomStore.RoomRow room(String id) {
+    return new RoomStore.RoomRow(id, "acme", "Lounge", null, null, null, null, null, null, null);
   }
 
   private <T> void assertSameEverywhere(Function<SyncBox, T> read) {

@@ -43,7 +43,9 @@ public final class RoomAuthority implements WriteAuthority {
     if (!actor.canWrite()) {
       return Refusal.readOnly(held == null ? "create rooms" : "change rooms");
     }
-    var unheld = projects.refusesInto(actor, projectOf(held), projectOf(next), false);
+    var unheld =
+        projects.refusesInto(
+            actor, rooms.liveProject(id).orElse(null), Snapshots.text(next, "project"), false);
     if (unheld.isPresent()) {
       return unheld;
     }
@@ -52,10 +54,6 @@ public final class RoomAuthority implements WriteAuthority {
       return attributed;
     }
     return owned(actor, id, rooms.ownerOf(id, held));
-  }
-
-  private static String projectOf(Map<String, Object> projection) {
-    return projection == null ? null : Snapshots.text(projection, "project");
   }
 
   /**

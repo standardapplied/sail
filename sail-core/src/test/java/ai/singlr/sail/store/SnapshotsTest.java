@@ -108,10 +108,11 @@ class SnapshotsTest {
   void anAcceptedOfferNamesTheCreatorMainHoldsOnlyWhenMainSaysSo() {
     var offer = Map.<String, Object>of("title", "t", "_created_by", "alice");
 
-    assertEquals(offer, Snapshots.withCreator(offer, null));
-    assertNull(Snapshots.withCreator(offer, new Snapshots.Creator(null)).get("_created_by"));
+    assertEquals(offer, Snapshots.withCreation(offer, null, null));
+    assertNull(Snapshots.withCreation(offer, new Snapshots.Creator(null), null).get("_created_by"));
     assertEquals(
-        "carol", Snapshots.withCreator(offer, new Snapshots.Creator("carol")).get("_created_by"));
-    assertNull(Snapshots.withCreator(null, new Snapshots.Creator("carol")));
+        "carol",
+        Snapshots.withCreation(offer, new Snapshots.Creator("carol"), null).get("_created_by"));
+    assertNull(Snapshots.withCreation(null, new Snapshots.Creator("carol"), null));
   }
 }

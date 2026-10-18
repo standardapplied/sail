@@ -10,14 +10,20 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -68,6 +74,32 @@ class DemoSeederTest {
     assertTrue(store.findByName(DemoProject.NAME).isEmpty());
     assertNull(store.latestRev(DemoProject.NAME), "nothing left to offer or drop");
     assertFalse(DemoSeeder.unseed(db));
+  }
+
+  @Test
+  void aNodesFirstRoundLetsItsSeedGoWithNoNotice() throws Exception {
+    DemoSeeder.seedIfAbsent(db, true);
+    var ada = Actor.sync("ada", Role.MEMBER).withScope(ProjectScope.of(List.of("acme")));
+    try (var main = new SyncBox("main")) {
+      var syncing =
+          new SyncOperations(
+              db,
+              "box",
+              dir.resolve("projects"),
+              () -> new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box"),
+              target -> PipedSyncChannel.to(main.server(ada)),
+              OperatorCommand.PLAIN);
+      syncing.prepare();
+
+      var report =
+          Actor.call(
+              new Actor("ada", Role.MEMBER, Actor.Lane.CLI),
+              () -> syncing.sync(new SyncRequest(null)));
+
+      assertEquals(List.of(), report.settled());
+    }
+    assertTrue(store.findByName(DemoProject.NAME).isEmpty());
+    assertNull(store.latestRev(DemoProject.NAME), "nothing left to offer or drop");
   }
 
   @Test

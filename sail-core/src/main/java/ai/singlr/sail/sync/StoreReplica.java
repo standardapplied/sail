@@ -217,11 +217,14 @@ public final class StoreReplica implements LocalReplica, MainReplica {
         .orElseGet(() -> changeLog.amongNewest(store.entityType(), entityId, taken.seq()));
   }
 
-  private Snapshots.Creator recordedCreator(String entityId) {
+  private CommitOutcome.Accepted accepted(String entityId, String rev) {
     var committed = current(entityId);
-    return committed == null || !committed.containsKey(Snapshots.CREATOR)
-        ? null
-        : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
+    var creator =
+        committed == null || !committed.containsKey(Snapshots.CREATOR)
+            ? null
+            : new Snapshots.Creator(Snapshots.text(committed, Snapshots.CREATOR));
+    return new CommitOutcome.Accepted(
+        rev, author(entityId), creator, Snapshots.text(committed, Snapshots.CREATED_AT));
   }
 
   @Override
@@ -276,8 +279,7 @@ public final class StoreReplica implements LocalReplica, MainReplica {
   private CommitOutcome commitHeld(
       String entityId, Map<String, Object> snapshot, String expectedRev) {
     return switch (store.commitRevision(entityId, snapshot, expectedRev, store.authority())) {
-      case PushOutcome.Accepted a ->
-          new CommitOutcome.Accepted(a.rev(), author(entityId), recordedCreator(entityId));
+      case PushOutcome.Accepted a -> accepted(entityId, a.rev());
       case PushOutcome.Stale s -> new CommitOutcome.Rejected(s.currentRev(), s.currentSnapshot());
       case PushOutcome.Denied d ->
           new CommitOutcome.Denied(

@@ -6,11 +6,17 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import java.util.List;
@@ -56,6 +62,52 @@ class UnheldProjectSyncTest {
     assertEquals(List.of(denial), second.denials());
     assertEquals("zeta", node.specs.findById("forged").orElseThrow().project());
     assertTrue(main.specs.findById("forged").isEmpty());
+  }
+
+  @Test
+  void aScopedPusherHearsOnlyTheScopeRuleWhateverMainHolds() {
+    var scoped = Actor.sync("node", Role.MEMBER).withScope(ProjectScope.of(List.of("acme")));
+    Acting.unchecked(
+        "node",
+        () -> {
+          node.specs.create(spec("hidden", "proj"));
+          node.specs.create(spec("beyond", "zeta"));
+        });
+
+    var hidden = commitAs(scoped, "hidden");
+    var beyond = commitAs(scoped, "beyond");
+
+    assertEquals(
+        "Project 'proj' was not found.",
+        assertInstanceOf(CommitOutcome.Denied.class, hidden).reason());
+    assertEquals(
+        "Project 'zeta' was not found.",
+        assertInstanceOf(CommitOutcome.Denied.class, beyond).reason());
+  }
+
+  @Test
+  void aRestoreOverMainsTombstoneIntoAProjectMainDoesNotHoldIsDeniedAndStaysOnTheNode() {
+    HeldProjects.hold(node.db, "retired");
+    Acting.unchecked("node", () -> main.specs.create(spec("old", "retired")));
+    SyncBox.round(main, node);
+    var born = main.specs.history("old").getFirst().rev();
+    Acting.as("node", () -> main.specs.delete("old"));
+    SyncBox.round(main, node);
+
+    Acting.as("node", () -> node.specs.restore("old", born, OperatorCommand.PLAIN));
+    var report = specs(SyncBox.round(main, node));
+
+    assertEquals(
+        List.of(
+            new SyncSession.Denial(
+                "spec", "old", "Project 'retired' isn't on main. Projects there: acme, proj.")),
+        report.denials());
+    assertTrue(main.specs.findById("old").isEmpty());
+    assertEquals("retired", node.specs.findById("old").orElseThrow().project());
+  }
+
+  private CommitOutcome commitAs(Actor pusher, String id) {
+    return Actor.call(pusher, () -> main.replica.commit(id, node.specs.currentForSync(id), null));
   }
 
   @Test
