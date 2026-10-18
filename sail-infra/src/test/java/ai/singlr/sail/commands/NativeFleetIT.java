@@ -412,6 +412,55 @@ class NativeFleetIT {
     }
   }
 
+  @Test
+  void everyBoxHoldsTheAuthorsTimesAndAScopedNodeTakesNothingItWouldLose() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.catalog("alpha", "beta");
+      var nia = fleet.node("nia", fleet.candidate(), "--scoped");
+      var uma = fleet.node("uma", fleet.candidate());
+      main.sailOk("fde", "grant", "nia", "alpha");
+      main.serving(() -> main.createSpecs("m", 2, 1_000, "alpha"));
+
+      var first = nia.sailOk("sync");
+      uma.sailOk("sync");
+      assertFalse(first.contains("dropped"), first);
+
+      fleet.offline(
+          nia,
+          () -> {
+            nia.createSpecs("n", 1, 1_000, "alpha");
+            var refused = nia.api("spec", "create", "--id", "c-beta", "--title", "C", "-p", "beta");
+            assertNotEquals(0, refused.exit(), refused::output);
+            assertTrue(
+                refused
+                    .output()
+                    .contains(
+                        "Project 'beta' isn't on this box. Projects here: alpha. Ask an admin to"
+                            + " grant it on main: sudo sail fde grant nia beta."),
+                refused::output);
+          });
+      nia.sailOk("sync");
+      uma.sailOk("sync");
+
+      var times = "SELECT id, project, created_at, updated_at FROM specs ORDER BY id";
+      assertEquals(
+          "m-1|alpha\nm-2|alpha\nn-1|alpha",
+          main.query("SELECT id, project FROM specs ORDER BY id").strip());
+      assertEquals(main.query(times), nia.query(times), "nia holds main's times");
+      assertEquals(main.query(times), uma.query(times), "uma holds main's times");
+
+      main.sailOk("fde", "revoke", "nia", "alpha");
+      var revoked = nia.sailOk("sync");
+
+      assertEquals(
+          1,
+          revoked.split("project alpha: dropped from this box", -1).length - 1,
+          "the drop is announced once: " + revoked);
+      assertFalse(revoked.contains("unpushed"), revoked);
+    }
+  }
+
   private static final String DOOMED_RUN = "019fee00-0000-7000-8000-00000000d00d";
 
   private static final String RUN_OF_DOOMED =

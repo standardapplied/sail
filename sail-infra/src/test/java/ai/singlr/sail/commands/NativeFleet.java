@@ -491,9 +491,18 @@ public final class NativeFleet implements AutoCloseable {
 
     /** Runs {@code sail} against this box's control-plane server; only inside {@link #serving}. */
     public String apiOk(String... args) throws Exception {
+      return sailOk(throughApi(args));
+    }
+
+    /** Runs {@code sail args} against this box's API, as {@link #apiOk}, whatever it exits. */
+    public Result api(String... args) throws Exception {
+      return sail(throughApi(args));
+    }
+
+    private String[] throughApi(String... args) {
       var command = new ArrayList<>(List.of(args));
       command.addAll(List.of("--server", server()));
-      return sailOk(command.toArray(String[]::new));
+      return command.toArray(String[]::new);
     }
 
     /** Runs {@code sql} on this box's database, fed on stdin so it may quote freely. */
