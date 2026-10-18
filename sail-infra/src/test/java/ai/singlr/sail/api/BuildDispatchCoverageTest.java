@@ -22,6 +22,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -344,6 +345,7 @@ class BuildDispatchCoverageTest {
         () -> {
           var db = Sqlite.open(tempDir.resolve("sail.db"));
           new SchemaManager(db).migrate();
+          HeldProjects.hold(db, "acme");
           var specStore = new SpecStore(db);
           Acting.as("me", () -> specStore.create(auth("acme")));
           specStore.setContent("auth", "Do auth", "");

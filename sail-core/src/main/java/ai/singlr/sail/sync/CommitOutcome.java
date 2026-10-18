@@ -27,9 +27,11 @@ public sealed interface CommitOutcome
 
   /**
    * Main accepted the push and minted {@code rev}, recording {@code author} as who made it and
-   * holding {@code creator}, null when the entity carries no creator or main did not say.
+   * holding {@code creator} and {@code createdAt}, each null when the entity carries none or main
+   * did not say.
    */
-  record Accepted(String rev, String author, Snapshots.Creator creator) implements CommitOutcome {}
+  record Accepted(String rev, String author, Snapshots.Creator creator, String createdAt)
+      implements CommitOutcome {}
 
   /** Main moved since the node fetched; {@code current*} is its present state, left untouched. */
   record Rejected(String currentRev, Map<String, Object> currentSnapshot)
@@ -47,7 +49,8 @@ public sealed interface CommitOutcome
    * snapshot} are main's version: a revision, a tombstone (a rev with no snapshot), or nothing when
    * main holds none; {@code author} is who main recorded as making it. {@code gone} marks a denial
    * main made because a dependency it has erased can never arrive: the node settles it rather than
-   * offering it again.
+   * offering it again — unless the node itself holds the dependency, as it does a project main
+   * lacks, and then its row stays, offered again each round.
    */
   record Denied(
       String reason, String rev, Map<String, Object> snapshot, String author, boolean gone)

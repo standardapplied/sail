@@ -40,7 +40,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   private static final String ENTITY = "room";
 
   private static final Set<String> SYNC_FIELDS =
-      Set.of("project", "title", "assignee", "wake", "roster", "created_by", "created_at");
+      Set.of("project", "title", "assignee", "wake", "roster", "created_by");
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -153,7 +153,8 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
             return false;
           }
           var schema = new RoomSchema();
-          schema.apply(id, schema.comparable(YamlUtil.parseMap(head.snapshot())));
+          schema.apply(
+              id, Snapshots.revisedHere(schema.comparable(YamlUtil.parseMap(head.snapshot()))));
           stampAuthor(id);
           journal.recordRevision(id, "restore", false);
           return true;
@@ -224,6 +225,11 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
    */
   public boolean isTombstoned(String id) {
     return changeLog.head(ENTITY, id).map(ChangeLog.Entry::deleted).orElse(false);
+  }
+
+  /** The project room {@code id} is filed under while live ({@link ChangeLog#liveProject}). */
+  public Optional<String> liveProject(String id) {
+    return changeLog.liveProject(ENTITY, id);
   }
 
   /**
@@ -538,14 +544,23 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * Writes every synced field of {@code snapshot}. The creator and creation time are written
-     * once: an update keeps the row's, except that a node adopting main's revision takes main's.
+     * Writes every synced field of {@code snapshot}, at the revision's times ({@link
+     * Snapshots#timed}), the creation time it carries verbatim on every lane, so rooms made apart
+     * and merged settle on the one main holds; a revision from a box that predates the times names
+     * its creation time as a field, taken for a room this box does not hold yet and by a node
+     * adopting main's revision, never over a row main holds. The creator is written once: an update
+     * keeps the row's, except that a node adopting main's revision takes main's.
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var now = DateTimeUtils.now().toString();
-      var createdAt = Snapshots.text(snapshot, "created_at");
       var adopting = Actor.current().lane() == Actor.Lane.MAIN;
+      var legacy = adopting || findById(id).isEmpty();
+      var createdAt =
+          Snapshots.timeOr(
+              snapshot,
+              Snapshots.CREATED_AT,
+              legacy ? Snapshots.text(snapshot, "created_at") : null);
       db.execute(
           """
           INSERT INTO rooms (id, project, title, assignee, wake, roster, created_by,
@@ -564,10 +579,10 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
           Snapshots.text(snapshot, "roster"),
           creatorOf(id, snapshot),
           Strings.isBlank(createdAt) ? now : createdAt,
-          now,
+          Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, now),
           Snapshots.actor(snapshot),
           adopting ? 1 : 0,
-          adopting && Strings.isNotBlank(createdAt) ? 1 : 0);
+          Strings.isNotBlank(createdAt) ? 1 : 0);
     }
 
     /**
@@ -599,7 +614,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       if (author != null) {
         m.put(Snapshots.ACTOR, author);
       }
-      return m;
+      return Snapshots.timed(m, full);
     }
 
     @Override

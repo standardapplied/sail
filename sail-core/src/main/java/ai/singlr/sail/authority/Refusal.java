@@ -33,7 +33,9 @@ public record Refusal(Kind kind, String message, String fix) {
     /** The event is of a type no client, or no client on the actor's lane, may publish. */
     NOT_PUBLISHABLE,
     /** The write lies outside the projects the actor may see. */
-    OUT_OF_SCOPE
+    OUT_OF_SCOPE,
+    /** The write puts a row into a project this box does not hold. */
+    UNHELD_PROJECT
   }
 
   public Refusal {

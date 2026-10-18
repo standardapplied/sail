@@ -28,6 +28,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MainVersion;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -67,6 +68,7 @@ class ConflictsCommandTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj");
     new FdeStore(db).add("node", null, null, "member");
     conflicts = new SyncConflicts(db);
   }

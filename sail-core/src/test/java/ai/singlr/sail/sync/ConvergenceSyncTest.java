@@ -180,7 +180,7 @@ class ConvergenceSyncTest {
             .orElse(null);
       }
     },
-    PROJECT("project", "acme", "one", "two", "three") {
+    PROJECT("project", "zenith", "one", "two", "three") {
       @Override
       void make(SyncBox box, String as, String value) {
         change(box, as, value);
@@ -190,12 +190,13 @@ class ConvergenceSyncTest {
       void change(SyncBox box, String as, String value) {
         Acting.as(
             as,
-            () -> new ProjectStore(box.db).upsert("acme", "name: acme\nimage: " + value + "\n"));
+            () ->
+                new ProjectStore(box.db).upsert("zenith", "name: zenith\nimage: " + value + "\n"));
       }
 
       @Override
       void delete(SyncBox box, String as) {
-        Acting.as(as, () -> new ProjectStore(box.db).delete("acme"));
+        Acting.as(as, () -> new ProjectStore(box.db).delete("zenith"));
       }
 
       @Override
@@ -206,7 +207,7 @@ class ConvergenceSyncTest {
       @Override
       String value(SyncBox box) {
         return new ProjectStore(box.db)
-            .findByName("acme")
+            .findByName("zenith")
             .map(row -> YamlUtil.parseMap(row.definition()).get("image").toString())
             .orElse(null);
       }
@@ -801,15 +802,11 @@ class ConvergenceSyncTest {
   }
 
   @Test
-  void twoBoxesMintingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
+  void twoBoxesMakingTheSameLaterRevisionUnderOneAuthorConvergeAndStopOffering() {
     upsertProject(bob, "bob", "p", "name: p\n");
     SyncBox.quiesce(main, ada, bob);
     Acting.as("bob", () -> new ProjectStore(main.db).upsert("p", "name: p\nv: 2\n"));
     upsertProject(bob, "bob", "p", "name: p\nv: 2\n");
-    assertEquals(
-        new ChangeLog(main.db).head("project", "p").orElseThrow().rev(),
-        new ChangeLog(bob.db).head("project", "p").orElseThrow().rev(),
-        "the same rev minted on both");
 
     assertConverged();
 

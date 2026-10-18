@@ -27,6 +27,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -82,6 +83,7 @@ class HostCliIdentityTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     fdes = new FdeStore(db);
     specs = new SpecStore(db);
     configPath = tempDir.resolve("config.yaml");

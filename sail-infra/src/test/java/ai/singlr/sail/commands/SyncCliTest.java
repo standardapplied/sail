@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,11 +15,14 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.engine.DemoProject;
+import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.MaterializedFilesMigration;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.ScopedHeadsMigration;
@@ -65,6 +69,11 @@ class SyncCliTest {
   @Test
   void aScheduledRoundSpeaksForTheOperatorWhoStartedTheCommand() throws Exception {
     runIsolated("sudo-round");
+  }
+
+  @Test
+  void aNodeNeverSeedsTheDemoOnMigrateOrWhenAskedForIt() throws Exception {
+    runIsolated("node-demo");
   }
 
   private void runIsolated(String scenario) throws Exception {
@@ -125,6 +134,13 @@ class SyncCliTest {
       }
       if ("sudo-round".equals(args[0])) {
         verifyScheduledRoundWording();
+        return;
+      }
+      if ("node-demo".equals(args[0])) {
+        assertFalse(DemoSeeder.seedIfAbsent(db));
+        assertFalse(DemoSeeder.seedIfAbsent());
+        assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
+        assertNull(new ProjectStore(db).latestRev(DemoProject.NAME));
         return;
       }
       var health = new SyncHealth(db);

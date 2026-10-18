@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -81,10 +82,21 @@ public final class SyncBox implements AutoCloseable {
     return new SyncBox(id, Sqlite.open(file));
   }
 
+  /**
+   * The box {@code id}, in memory, holding no project yet: one the projects every other box starts
+   * with ({@link HeldProjects}) have not reached.
+   */
+  public static SyncBox holdingNoProject(String id) {
+    var box = new SyncBox(id);
+    box.db.execute("DELETE FROM projects");
+    return box;
+  }
+
   private SyncBox(String id, Sqlite db) {
     this.id = id;
     this.db = db;
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj", "acme");
     this.specs = new SpecStore(db);
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);

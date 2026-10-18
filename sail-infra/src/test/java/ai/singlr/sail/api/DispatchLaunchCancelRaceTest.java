@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -95,6 +96,7 @@ class DispatchLaunchCancelRaceTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("race.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     Acting.as(
         "me",

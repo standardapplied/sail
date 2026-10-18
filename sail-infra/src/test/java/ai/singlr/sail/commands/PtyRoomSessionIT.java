@@ -29,6 +29,7 @@ import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -77,6 +78,7 @@ class PtyRoomSessionIT extends AbstractIncusIT {
 
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, CONTAINER);
       var specStore = new SpecStore(db);
       var rooms = new RoomStore(db);
       Acting.system(() -> rooms.create(room("design-talk", "Design talk")));

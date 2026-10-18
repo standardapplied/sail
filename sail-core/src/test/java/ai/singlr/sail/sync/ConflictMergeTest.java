@@ -46,6 +46,20 @@ class ConflictMergeTest {
   }
 
   @Test
+  void metadataIsNeitherShownNorMerged() {
+    var base = map("title", "Auth", "_updated_at", "2026-01-01T00:00:00Z", "_actor", "ada");
+    var mine = map("title", "Mine", "_updated_at", "2026-01-02T00:00:00Z", "_actor", "ada");
+    var theirs = map("title", "Auth", "_updated_at", "2026-01-03T00:00:00Z", "_actor", "bob");
+
+    var diff = ConflictMerge.diff(base, mine, theirs, List.of());
+    var template = ConflictMerge.mergeTemplate(base, mine, theirs, List.of(), "c1");
+
+    assertEquals(List.of("title"), diff.stream().map(ConflictMerge.FieldChange::field).toList());
+    assertFalse(template.contains("_updated_at"), template);
+    assertFalse(template.contains("_actor"), template);
+  }
+
+  @Test
   void mergeTemplateAutoMergesDisjointEditsAndDefaultsClashesToMine() {
     var base = map("title", "Auth", "status", "pending", "body", "old");
     var mine = map("title", "Mine", "status", "pending", "body", "old");

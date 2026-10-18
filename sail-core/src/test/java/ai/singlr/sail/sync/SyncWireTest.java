@@ -76,10 +76,12 @@ class SyncWireTest {
               12),
           new SyncWire.Results(
               List.of(
-                  new SyncWire.Accepted("auth", "7-feed", null, null),
-                  new SyncWire.Accepted("mine", "8-feed", "ada", null),
-                  new SyncWire.Accepted("born", "9-feed", "ada", new Snapshots.Creator("carol")),
-                  new SyncWire.Accepted("none", "10-feed", "ada", new Snapshots.Creator(null)),
+                  new SyncWire.Accepted("auth", "7-feed", null, null, null),
+                  new SyncWire.Accepted("mine", "8-feed", "ada", null, null),
+                  new SyncWire.Accepted(
+                      "born", "9-feed", "ada", new Snapshots.Creator("carol"), null),
+                  new SyncWire.Accepted(
+                      "none", "10-feed", "ada", new Snapshots.Creator(null), null),
                   new SyncWire.Stale("b"),
                   new SyncWire.Refused("d", "blob not held"),
                   new SyncWire.Denied("e", "read-only", "5-main", snapshot(), true, null),
@@ -336,7 +338,7 @@ class SyncWireTest {
         page.entries());
     assertEquals(
         List.of(
-            new SyncWire.Accepted("a", "1-a", null, null),
+            new SyncWire.Accepted("a", "1-a", null, null, null),
             new SyncWire.Denied("b", "no", "2-b", null, true, null)),
         results.results());
   }

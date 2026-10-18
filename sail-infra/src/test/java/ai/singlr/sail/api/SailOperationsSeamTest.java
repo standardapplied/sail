@@ -974,7 +974,7 @@ class SailOperationsSeamTest {
   void aRoundAcrossTheTwoNodeHarnessReturnsTheAggregateAndProjectsThePulledFiles()
       throws Exception {
     try (var main = new SyncBox("main");
-        var node = new SyncBox("node");
+        var node = SyncBox.holdingNoProject("node");
         var operations = operations(node.db)) {
       Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       var content = "shared config".getBytes(StandardCharsets.UTF_8);
@@ -1124,7 +1124,7 @@ class SailOperationsSeamTest {
   @Test
   void aPartiallyFailedRoundStillAnnouncesTheMessagesItPulledExactlyOnce() throws Exception {
     try (var main = new SyncBox("main");
-        var node = new SyncBox("node");
+        var node = SyncBox.holdingNoProject("node");
         var operations = operations(node.db)) {
       Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       Acting.system(() -> new MessageStore(main.db).append("auth", "raj", "hello from main", null));
@@ -1485,7 +1485,12 @@ class SailOperationsSeamTest {
       assertTrue(operations.catalog().definitions().read("demo").isEmpty());
       var missing =
           assertThrows(IllegalStateException.class, () -> operations.catalog().demoDefinition());
-      assertTrue(missing.getMessage().contains("sail migrate"), "a purged demo is not resurrected");
+      assertEquals(
+          "The demo project isn't on this box. On main or a standalone box, 'sudo sail migrate'"
+              + " seeds it; a node gets it from main once an admin grants it there: sudo sail fde"
+              + " grant <handle> demo.",
+          missing.getMessage(),
+          "a purged demo is not resurrected");
       operations.useSyncScheduler(SyncScheduler.disabled());
     }
   }

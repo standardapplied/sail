@@ -27,6 +27,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -129,6 +130,7 @@ class RoomWakeLaunchTest {
     Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     messageStore = new MessageStore(db);
@@ -157,6 +159,7 @@ class RoomWakeLaunchTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("wake-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");

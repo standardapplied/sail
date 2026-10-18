@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.SpecStore;
@@ -18,17 +19,18 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Who may write a spec. Any writer creates one; a spec born in another room ({@code room_id} not
- * its own id) needs the right to post there ({@link PostingRule}), and a named assignee must pass
- * the claim rule into that room. A spec's id is reserved for its own room, so a create whose id
- * names a room someone else owns is refused: it would take that room over; so is one born in
- * another room, whoever asks: the room on its id would stop answering to it. Changing the assignee
- * of a live spec is decided by the claim rule alone: an admin reassigns, and anyone else may only
- * claim an unassigned spec for the FDE they act as — and, for a spec born in a room, only where
- * they may already post, since its owner gains a voice there. Any other revision, a tombstone or a
- * restore is its owner's ({@link Ownership#ownerOf}, read from {@code held}) or an admin's, and a
- * restore that changes the assignee must pass the claim rule too. {@code room_id} never changes
- * after create.
+ * Who may write a spec. Any writer creates one, in a project this box holds ({@link
+ * ProjectStore#refusesInto}), which is where a spec moves too; a spec born in another room ({@code
+ * room_id} not its own id) needs the right to post there ({@link PostingRule}), and a named
+ * assignee must pass the claim rule into that room. A spec's id is reserved for its own room, so a
+ * create whose id names a room someone else owns is refused: it would take that room over; so is
+ * one born in another room, whoever asks: the room on its id would stop answering to it. Changing
+ * the assignee of a live spec is decided by the claim rule alone: an admin reassigns, and anyone
+ * else may only claim an unassigned spec for the FDE they act as — and, for a spec born in a room,
+ * only where they may already post, since its owner gains a voice there. Any other revision, a
+ * tombstone or a restore is its owner's ({@link Ownership#ownerOf}, read from {@code held}) or an
+ * admin's, and a restore that changes the assignee must pass the claim rule too. {@code room_id}
+ * never changes after create.
  */
 public final class SpecAuthority implements WriteAuthority {
 
@@ -37,12 +39,14 @@ public final class SpecAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
   private final SpecStore specs;
+  private final ProjectStore projects;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public SpecAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
     this.specs = new SpecStore(db);
+    this.projects = new ProjectStore(db);
     this.attribution = new Attribution(db);
   }
 
@@ -52,6 +56,11 @@ public final class SpecAuthority implements WriteAuthority {
     var writer = writer(actor);
     if (writer.isPresent() || WriteAuthority.decided(actor)) {
       return writer;
+    }
+    var unheld =
+        projects.refusesInto(actor, specs.liveProject(id).orElse(null), projectOf(next), false);
+    if (unheld.isPresent()) {
+      return unheld;
     }
     var attributed = attribution.decide(actor, held, next, Snapshots.CREATOR, null);
     if (attributed.isPresent()) {
@@ -204,6 +213,10 @@ public final class SpecAuthority implements WriteAuthority {
   private static String creatorOf(Actor actor, Map<String, Object> next) {
     var creator = Snapshots.text(next, Snapshots.CREATOR);
     return Strings.isBlank(creator) ? actor.actingFde() : creator;
+  }
+
+  private static String projectOf(Map<String, Object> projection) {
+    return Snapshots.text(projection, "project");
   }
 
   private static String assigneeOf(Map<String, Object> projection) {

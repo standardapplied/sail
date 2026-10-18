@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -45,6 +46,7 @@ class SpecMessageOperationsTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("messages-api.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     db.execute(
         """
         INSERT INTO specs

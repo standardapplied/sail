@@ -36,6 +36,8 @@ class SpecStoreTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(
+        db, "acme", "api", "light-grid", "old", "other", "renamed", "test-project", "zenith");
     store = new SpecStore(db);
   }
 
@@ -657,6 +659,16 @@ class SpecStoreTest {
             .toList(),
         "a peer checkpointed before the rename pages exactly the moved specs");
     assertEquals("renamed", store.comparableSnapshot("a").get("project"));
+  }
+
+  @Test
+  void aReprojectIsStampedWhenItIsMade() {
+    store.create(spec("a", "old", "A", "pending"));
+    db.execute("UPDATE specs SET updated_at = '2020-01-01T00:00:00Z' WHERE id = 'a'");
+
+    store.reproject("old", "renamed");
+
+    assertNotEquals("2020-01-01T00:00:00Z", store.findById("a").orElseThrow().updatedAt());
   }
 
   @Test

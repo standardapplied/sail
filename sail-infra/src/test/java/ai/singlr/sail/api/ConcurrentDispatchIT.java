@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -112,6 +113,7 @@ class ConcurrentDispatchIT extends AbstractIncusIT {
             .formatted(CONTAINER));
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, CONTAINER);
       var specStore = new SpecStore(db);
       var reviewStore = new ReviewStore(db);
       var runStore = new RunStore(db);

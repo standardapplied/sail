@@ -19,6 +19,7 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.FileMaterializer;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -29,6 +30,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -54,6 +56,7 @@ import java.util.function.Supplier;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
+import picocli.CommandLine.Help.Ansi;
 
 class SyncCommandTest {
 
@@ -61,6 +64,7 @@ class SyncCommandTest {
   void gcUsesTheHostLaneAndReportsFreedContent() throws Exception {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var hash = new BlobStore(db).putText("orphan");
       var operations =
           OperationsFactory.create(
@@ -104,7 +108,9 @@ class SyncCommandTest {
     try (var db = Sqlite.open(home.resolve("main.db"));
         var node = Sqlite.open(home.resolve("node.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       new SchemaManager(node).migrate();
+      HeldProjects.hold(node, "acme");
       var files = new FileStore(db);
       var projectsDir = home.resolve("projects");
       ContentFixtures.put(files, "acme", "app.conf", "v0");
@@ -153,6 +159,7 @@ class SyncCommandTest {
   void syncStatusReadsThisBoxesStoredHealthInProcess(@TempDir Path home) throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var config = new SyncConfig("node", "sail@main", "node");
       var operations =
           OperationsFactory.create(
@@ -397,7 +404,7 @@ class SyncCommandTest {
   }
 
   @Test
-  void rendersRefusalsAndSettlementsInTextAndJson() {
+  void theRoundsNoticesPrintOnceAsTheyHappenAndTheJsonCarriesThem() {
     var round =
         new SyncReport(
             SyncEngine.Report.NONE,
@@ -423,12 +430,15 @@ class SyncCommandTest {
     var text = SyncCommand.render(round, false, OperatorCommand.PLAIN);
     var json = YamlUtil.parseMap(SyncCommand.render(round, true, OperatorCommand.PLAIN));
 
-    assertFalse(text.contains("Already in sync"), text);
-    assertTrue(
-        text.contains("spec born: main did not take this yet — main does not hold run 'r'"), text);
-    assertTrue(
-        text.contains(
-            "message m1: withdrawn; yours stays in this box's change log — room 'lab' is gone here"),
+    assertEquals(
+        String.join(
+            "\n",
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Synced with main: @|bold 0|@ pulled, @|bold 0|@ pushed, @|bold 0|@"
+                    + " merged."),
+            Ansi.AUTO.string(
+                "    @|faint spec:|@ 0 pulled, 0 pushed, 0 merged @|faint (0 page(s), 0"
+                    + " entries)|@")),
         text);
     assertEquals(
         List.of(Map.of("type", "spec", "id", "born", "reason", "main does not hold run 'r'")),
@@ -492,9 +502,16 @@ class SyncCommandTest {
                 List.of(SyncSession.TypeReport.failed("run", "run: main is away"))),
             false,
             OperatorCommand.PLAIN);
-    assertTrue(text.contains("2 conflict(s) need your decision"));
-    assertTrue(text.contains("sail conflicts"));
-    assertTrue(text.contains("run: main is away"), "a failed type is named");
+    assertEquals(
+        String.join(
+            "\n",
+            Ansi.AUTO.string(
+                "  @|green ✓|@ Synced with main: @|bold 0|@ pulled, @|bold 0|@ pushed, @|bold 0|@"
+                    + " merged."),
+            Banner.errorLine("run: run: main is away", Ansi.AUTO),
+            Banner.warnLine(
+                "2 conflict(s) need your decision. Run 'sail conflicts' to resolve.", Ansi.AUTO)),
+        text);
   }
 
   @Test
@@ -511,6 +528,7 @@ class SyncCommandTest {
   void applyFdesMirrorsValidEntriesAndReportsRejectedOnes(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("test.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var fdes = new FdeStore(db);
       var roster =
           List.<Map<String, Object>>of(
@@ -547,6 +565,7 @@ class SyncCommandTest {
   void pulledMessageEventsFireOnlyForNewlyAdoptedMessages(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("pull.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var specs = new SpecStore(db);
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");
@@ -587,6 +606,7 @@ class SyncCommandTest {
   void aPulledMessageWhoseSpecNeverLandedIsSkipped(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("orphan.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var specs = new SpecStore(db);
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");

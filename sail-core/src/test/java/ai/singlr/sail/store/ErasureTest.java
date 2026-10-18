@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.ActingAs;
@@ -37,6 +38,7 @@ class ErasureTest {
   void setUp() {
     db = Sqlite.openMemory();
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme", "alpha", "beta", "old", "proj");
     specs = new SpecStore(db);
     rooms = new RoomStore(db);
     messages = new MessageStore(db);
@@ -137,8 +139,8 @@ class ErasureTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> messages.append("lobby", "uday", "reply", first.id()));
-    assertThrows(ChangeLog.Pruned.class, () -> specs.create(row("fresh", "gone")));
-    assertThrows(ChangeLog.Pruned.class, () -> room("fresh-room", "gone"));
+    assertThrows(WriteRefused.class, () -> specs.create(row("fresh", "gone")));
+    assertThrows(WriteRefused.class, () -> room("fresh-room", "gone"));
     assertThrows(
         ChangeLog.Pruned.class,
         () -> ContentFixtures.put(new FileStore(db), "gone", "notes.md", "notes"));

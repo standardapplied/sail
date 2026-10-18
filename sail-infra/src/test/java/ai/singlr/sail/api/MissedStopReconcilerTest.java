@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -66,6 +67,7 @@ class MissedStopReconcilerTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("recon.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "test-project");
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
     sessionStore = new RunStore(db);

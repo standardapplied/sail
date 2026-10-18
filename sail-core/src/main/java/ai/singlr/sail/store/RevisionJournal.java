@@ -473,8 +473,10 @@ public final class RevisionJournal implements ConflictResolver {
    * offer is current, {@code authority} decides it for the bound actor before anything is written,
    * and a refusal is {@link PushOutcome.Denied} with main's present state; a read-only role's
    * content is never uploaded, so it is decided before the content an accepted revision needs is
-   * required. The check, the decision and the write share one transaction, so two nodes pushing the
-   * same row can never both win. Used by the sync engine on the main side.
+   * required. A row main already holds keeps its creation time whatever the offer carries — the
+   * answer carries it back ({@link Snapshots#withCreation}) — so every box converges on main's. The
+   * check, the decision and the write share one transaction, so two nodes pushing the same row can
+   * never both win. Used by the sync engine on the main side.
    */
   public PushOutcome commitRevision(
       String id, Map<String, Object> snapshot, String expectedRev, WriteAuthority authority) {
@@ -500,7 +502,7 @@ public final class RevisionJournal implements ConflictResolver {
             eraseRow(id);
             return new PushOutcome.Accepted(rev);
           }
-          schema.apply(id, snapshot);
+          schema.apply(id, schema.exists(id) ? Snapshots.keepingCreation(snapshot) : snapshot);
           return new PushOutcome.Accepted(
               recordLive(
                   id,
@@ -552,7 +554,11 @@ public final class RevisionJournal implements ConflictResolver {
         });
   }
 
-  /** Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it). */
+  /**
+   * Writes {@code state} as this box's own change of {@code id} ({@code null} deletes it), made now
+   * ({@link Snapshots#revisedHere}); a row this box holds keeps its creation time ({@link
+   * Snapshots#keepingCreation}), so a rebase or a resolve never moves it.
+   */
   private String write(String id, Map<String, Object> state, String origin) {
     if (Snapshots.isDeletion(state)) {
       var marks = marksOf(state);
@@ -563,7 +569,8 @@ public final class RevisionJournal implements ConflictResolver {
       eraseRow(id);
       return rev;
     }
-    schema.apply(id, state);
+    schema.apply(
+        id, Snapshots.revisedHere(schema.exists(id) ? Snapshots.keepingCreation(state) : state));
     return recordRevision(id, origin, false);
   }
 

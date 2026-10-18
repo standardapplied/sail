@@ -25,6 +25,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -98,6 +99,7 @@ class OneDecisionTest {
   void setUp() throws IOException {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var fdes = new FdeStore(db);
     fdes.add("root", null, null, "admin");
     var ada = fdes.add("ada", null, null, "member");

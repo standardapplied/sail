@@ -15,6 +15,7 @@ import ai.singlr.sail.config.Engagement;
 import ai.singlr.sail.config.Roster;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -153,6 +154,7 @@ class RoomWakeReactorTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     roomStore = new RoomStore(db);
     runStore = new RunStore(db);
@@ -842,6 +844,7 @@ class RoomWakeReactorTest {
     engage("chat", "claude-code", "full");
     var dead = Sqlite.open(other.resolve("dead.db"));
     new SchemaManager(dead).migrate();
+    HeldProjects.hold(dead, "acme");
     var brokenMessages = new MessageStore(dead);
     dead.close();
 

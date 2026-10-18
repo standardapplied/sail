@@ -9,6 +9,7 @@ import ai.singlr.sail.authority.ProjectAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
@@ -68,7 +69,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     var canonical = PersonalFields.redact(definition);
     db.transaction(
         () -> {
-          writeRow(name, canonical, author());
+          writeRow(name, canonical, author(), null, DateTimeUtils.now().toString());
           journal.recordRevision(name, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -107,7 +108,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
           }
           journal.recordTombstone(old, ChangeLog.Entry.LOCAL, BLOCKING);
           eraseRow(old);
-          writeRow(renamed, canonical, author());
+          writeRow(renamed, canonical, author(), null, DateTimeUtils.now().toString());
           journal.recordRevision(renamed, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -118,6 +119,51 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   public List<ProjectRow> list() {
     return db.query(SELECT + " ORDER BY name", ProjectStore::map);
+  }
+
+  /**
+   * Why {@code actor} may not put a row this box files under {@code heldProject} — null when its
+   * head is no live revision — into {@code nextProject}: a box takes a write only into a project
+   * its catalog holds within the scope main last named for it ({@link SyncScope}), so no round ever
+   * takes back work it accepted; a project the catalog holds beyond that scope — applied here, or
+   * kept while a run ends — leaves with the next round. A row staying in its project is never
+   * refused, whatever this box holds of it. Said as this box's own refusal, or, when {@code
+   * onMain}, as main's answer to a node: naming the projects {@code actor} may see of those granted
+   * and, on a node main scoped, the grant that unblocks it. Empty when it may.
+   */
+  public Optional<Refusal> refusesInto(
+      Actor actor, String heldProject, String nextProject, boolean onMain) {
+    if (Strings.isBlank(nextProject) || nextProject.equals(heldProject)) {
+      return Optional.empty();
+    }
+    var granted = new SyncScope(db).held();
+    if (findByName(nextProject).isPresent() && granted.admits(nextProject)) {
+      return Optional.empty();
+    }
+    var visible =
+        list().stream()
+            .map(ProjectRow::name)
+            .filter(actor.scope()::admits)
+            .filter(granted::admits)
+            .toList();
+    var scoped = !granted.unrestricted();
+    var handle = Strings.isBlank(actor.actingFde()) ? "<handle>" : actor.actingFde();
+    return Refusal.of(
+        Refusal.Kind.UNHELD_PROJECT,
+        "Project '"
+            + nextProject
+            + (onMain
+                ? "' isn't on main. Projects there: "
+                : "' isn't on this box. Projects here: ")
+            + (visible.isEmpty() ? "none" : String.join(", ", visible))
+            + ".",
+        scoped
+            ? "Ask an admin to grant it on main: sudo sail fde grant "
+                + handle
+                + " "
+                + nextProject
+                + "."
+            : null);
   }
 
   @Override
@@ -260,19 +306,27 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     return Actor.current().handle();
   }
 
-  private void writeRow(String name, String definition, String actor) {
-    var now = DateTimeUtils.now().toString();
+  /**
+   * Writes project {@code name} as {@code actor} at {@code updatedAt}. A new row is created at
+   * {@code createdAt}, or at {@code updatedAt} when it names none; a row already here keeps its
+   * creation time unless {@code createdAt} names one, as a revision from main does.
+   */
+  private void writeRow(
+      String name, String definition, String actor, String createdAt, String updatedAt) {
     db.execute(
         "INSERT INTO projects (name, definition, created_by, created_at, updated_by, updated_at)"
-            + " VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(name) DO UPDATE SET"
+            + " VALUES (?, ?, ?, COALESCE(?, ?), ?, ?) ON CONFLICT(name) DO UPDATE SET"
             + " definition = excluded.definition, updated_by = excluded.updated_by,"
-            + " updated_at = excluded.updated_at",
+            + " updated_at = excluded.updated_at,"
+            + " created_at = COALESCE(?, projects.created_at)",
         name,
         definition,
         actor,
-        now,
+        createdAt,
+        updatedAt,
         actor,
-        now);
+        updatedAt,
+        createdAt);
   }
 
   private static String definitionOf(Map<String, Object> snapshot) {
@@ -307,22 +361,36 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * Only the definition, the one work field: the author rides as the journal head's, so two boxes
-     * mint the same rev for the same definition.
+     * The definition, the one work field, and when the project was created and last revised; the
+     * author rides as the journal head's.
      */
     @Override
     public Map<String, Object> snapshotMap(String id) {
-      return findByName(id).map(row -> comparable(row.definition())).orElse(null);
+      return findByName(id)
+          .map(
+              row -> {
+                var map = comparable(row.definition());
+                map.put("created_at", row.createdAt());
+                map.put("updated_at", row.updatedAt());
+                return map;
+              })
+          .orElse(null);
     }
 
+    /** Writes the definition at the revision's times ({@link Snapshots#timed}). */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
-      writeRow(id, definitionOf(snapshot), Snapshots.actor(snapshot));
+      writeRow(
+          id,
+          definitionOf(snapshot),
+          Snapshots.actor(snapshot),
+          Snapshots.text(snapshot, Snapshots.CREATED_AT),
+          Snapshots.timeOr(snapshot, Snapshots.UPDATED_AT, DateTimeUtils.now().toString()));
     }
 
     @Override
     public Map<String, Object> comparable(Map<String, Object> full) {
-      return comparable(definitionOf(full));
+      return Snapshots.timed(comparable(definitionOf(full)), full);
     }
 
     @Override
@@ -336,7 +404,7 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
       return Boolean.TRUE.equals(snapshot.get(BLOCKS_RESURRECTION)) ? BLOCKING : Map.of();
     }
 
-    private static Map<String, Object> comparable(String definition) {
+    private static LinkedHashMap<String, Object> comparable(String definition) {
       var map = new LinkedHashMap<String, Object>();
       map.put("definition", definition);
       return map;

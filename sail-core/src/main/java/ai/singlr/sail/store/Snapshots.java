@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Ownership;
@@ -26,6 +27,19 @@ public final class Snapshots {
 
   /** Reserved metadata key carrying the creator of an entity through the sync protocol. */
   public static final String CREATOR = "_created_by";
+
+  /** Reserved metadata key carrying when an entity was created, on its creator's clock. */
+  public static final String CREATED_AT = "_created_at";
+
+  /** Reserved metadata key carrying when a revision was made, on its author's clock. */
+  public static final String UPDATED_AT = "_updated_at";
+
+  /**
+   * Reserved metadata key carrying when a spec entered {@code archived} or {@code cancelled}, on
+   * the clock of the revision that made the transition: a later revision of the same status is not
+   * that revision, so its own time cannot stand in. Absent in any other status.
+   */
+  public static final String STATUS_SINCE = "_status_since";
 
   private Snapshots() {}
 
@@ -50,7 +64,7 @@ public final class Snapshots {
 
   /** The string form of a present value, or null when the key is absent. */
   public static String text(Map<String, Object> map, String key) {
-    var value = map.get(key);
+    var value = map == null ? null : map.get(key);
     return value == null ? null : value.toString();
   }
 
@@ -69,6 +83,61 @@ public final class Snapshots {
     return map.get(key) instanceof List<?> list
         ? list.stream().map(String::valueOf).toList()
         : List.of();
+  }
+
+  /**
+   * {@code comparable} carrying when the entity {@code full} holds was created and last revised, as
+   * {@link #CREATED_AT} and {@link #UPDATED_AT}: metadata, so two boxes never conflict on a clock,
+   * yet every box applying the revision writes the author's times verbatim.
+   */
+  public static Map<String, Object> timed(
+      Map<String, Object> comparable, Map<String, Object> full) {
+    var created = full.get("created_at");
+    if (created != null) {
+      comparable.put(CREATED_AT, created);
+    }
+    var updated = full.get("updated_at");
+    if (updated != null) {
+      comparable.put(UPDATED_AT, updated);
+    }
+    return comparable;
+  }
+
+  /**
+   * The time {@code snapshot} names under {@code key}, or {@code now} when it names none: a
+   * revision from a box that predates carrying it.
+   */
+  public static String timeOr(Map<String, Object> snapshot, String key, String now) {
+    var time = text(snapshot, key);
+    return Strings.isBlank(time) ? now : time;
+  }
+
+  /**
+   * {@code state} as this box's own new revision of it, made now: a rebase, a resolve, a restore or
+   * a merge offered to main carries this box's clock, not the time of the revision it was built
+   * from, and every box applying it writes that one time. Null stays null.
+   */
+  public static Map<String, Object> revisedHere(Map<String, Object> state) {
+    if (state == null) {
+      return null;
+    }
+    var revised = new LinkedHashMap<>(state);
+    revised.put(UPDATED_AT, DateTimeUtils.now().toString());
+    return revised;
+  }
+
+  /**
+   * {@code snapshot} naming no creation time, so the row it is applied over keeps its own: main
+   * holds a row's creation time once, whatever a later offer of the row carries, and its answer
+   * ({@link #withCreation}) carries it back.
+   */
+  public static Map<String, Object> keepingCreation(Map<String, Object> snapshot) {
+    if (!snapshot.containsKey(CREATED_AT)) {
+      return snapshot;
+    }
+    var kept = new LinkedHashMap<>(snapshot);
+    kept.remove(CREATED_AT);
+    return kept;
   }
 
   /**
@@ -119,16 +188,23 @@ public final class Snapshots {
   public record Creator(String handle) {}
 
   /**
-   * {@code snapshot} naming {@code creator} as its {@link #CREATOR}: an offer main accepted, as
-   * main committed it, since main keeps the creator it holds whatever the offer named. The snapshot
-   * itself when main did not say.
+   * {@code snapshot} naming {@code creator} as its {@link #CREATOR} and {@code createdAt} as its
+   * {@link #CREATED_AT}: an offer main accepted, as main committed it, since main keeps the creator
+   * and the creation time it holds whatever the offer named. Either main did not say is left as the
+   * offer named it.
    */
-  public static Map<String, Object> withCreator(Map<String, Object> snapshot, Creator creator) {
-    if (snapshot == null || creator == null) {
+  public static Map<String, Object> withCreation(
+      Map<String, Object> snapshot, Creator creator, String createdAt) {
+    if (snapshot == null || (creator == null && createdAt == null)) {
       return snapshot;
     }
     var committed = new LinkedHashMap<>(snapshot);
-    committed.put(CREATOR, creator.handle());
+    if (creator != null) {
+      committed.put(CREATOR, creator.handle());
+    }
+    if (createdAt != null) {
+      committed.put(CREATED_AT, createdAt);
+    }
     return committed;
   }
 }

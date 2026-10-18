@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
@@ -54,6 +55,7 @@ class SpecCliSocketReachabilityIT extends AbstractIncusIT {
 
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, CONTAINER);
       var specStore = new SpecStore(db);
       Acting.as("it", () -> specStore.create(seededSpec()));
       var runStore = new RunStore(db);

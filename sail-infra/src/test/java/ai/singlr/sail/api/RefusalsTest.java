@@ -22,15 +22,16 @@ class RefusalsTest {
   @Test
   void eachKindMapsToTheCodeClientsSee() {
     assertEquals(
-        Map.of(
-            Refusal.Kind.READ_ONLY, ErrorCode.READ_ONLY_CREDENTIAL,
-            Refusal.Kind.NOT_OWNER, ErrorCode.FORBIDDEN_NOT_ASSIGNEE,
-            Refusal.Kind.ADMIN_ONLY, ErrorCode.FORBIDDEN_ADMIN_ONLY,
-            Refusal.Kind.NOT_AUTHOR, ErrorCode.FORBIDDEN_NOT_AUTHOR,
-            Refusal.Kind.FIXED, ErrorCode.INVALID_REQUEST,
-            Refusal.Kind.NOT_PRUNABLE, ErrorCode.SPEC_NOT_PRUNABLE,
-            Refusal.Kind.NOT_PUBLISHABLE, ErrorCode.FORBIDDEN,
-            Refusal.Kind.OUT_OF_SCOPE, ErrorCode.NOT_FOUND),
+        Map.ofEntries(
+            Map.entry(Refusal.Kind.READ_ONLY, ErrorCode.READ_ONLY_CREDENTIAL),
+            Map.entry(Refusal.Kind.NOT_OWNER, ErrorCode.FORBIDDEN_NOT_ASSIGNEE),
+            Map.entry(Refusal.Kind.ADMIN_ONLY, ErrorCode.FORBIDDEN_ADMIN_ONLY),
+            Map.entry(Refusal.Kind.NOT_AUTHOR, ErrorCode.FORBIDDEN_NOT_AUTHOR),
+            Map.entry(Refusal.Kind.FIXED, ErrorCode.INVALID_REQUEST),
+            Map.entry(Refusal.Kind.NOT_PRUNABLE, ErrorCode.SPEC_NOT_PRUNABLE),
+            Map.entry(Refusal.Kind.NOT_PUBLISHABLE, ErrorCode.FORBIDDEN),
+            Map.entry(Refusal.Kind.OUT_OF_SCOPE, ErrorCode.NOT_FOUND),
+            Map.entry(Refusal.Kind.UNHELD_PROJECT, ErrorCode.NOT_FOUND)),
         Arrays.stream(Refusal.Kind.values())
             .collect(Collectors.toMap(kind -> kind, Refusals::code)));
     assertEquals(403, ErrorCode.FORBIDDEN_NOT_AUTHOR.httpCode());

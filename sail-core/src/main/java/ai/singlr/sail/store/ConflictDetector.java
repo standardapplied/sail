@@ -52,6 +52,37 @@ public final class ConflictDetector {
   public static final String DELETED_FIELD = "<deleted>";
 
   /**
+   * Metadata telling of one work field, by the field it tells of: a merge takes it from the side
+   * whose value of that field it keeps ({@link #fieldMetadata}), so when an archive merges with an
+   * edit made elsewhere, the archive's own time rides with its status.
+   */
+  private static final Map<String, String> FIELD_METADATA =
+      Map.of(Snapshots.STATUS_SINCE, "status");
+
+  /**
+   * {@code merged} carrying, for each metadata key that tells of one work field, the side's whose
+   * value of that field it keeps: {@code mine}'s when it keeps mine, {@code theirs}' when it keeps
+   * theirs, none when it keeps neither. Both a merge a round makes and one an engineer edits settle
+   * an archive's time this way.
+   */
+  public static Map<String, Object> fieldMetadata(
+      Map<String, Object> merged, Map<String, Object> mine, Map<String, Object> theirs) {
+    FIELD_METADATA.forEach(
+        (key, field) -> {
+          var kept = merged.get(field);
+          var side =
+              Objects.equals(kept, mine.get(field))
+                  ? mine
+                  : Objects.equals(kept, theirs.get(field)) ? theirs : Map.<String, Object>of();
+          merged.remove(key);
+          if (side.containsKey(key)) {
+            merged.put(key, side.get(key));
+          }
+        });
+    return merged;
+  }
+
+  /**
    * A store's own merge of one field both sides changed differently — a document both edited in
    * disjoint parts, such as a review's findings — given the three values; empty when the two
    * changes cannot be reconciled and the field is a conflict after all.
@@ -184,7 +215,7 @@ public final class ConflictDetector {
             result.put(key, value);
           }
         });
-    return result;
+    return fieldMetadata(result, local, remote);
   }
 
   private static Object later(Object left, Object right) {
@@ -220,7 +251,8 @@ public final class ConflictDetector {
    * Keys carrying an FDE's work, excluding reserved metadata ({@code _}-prefixed, e.g. {@code
    * _actor} — who authored the revision). Metadata rides with a snapshot so it propagates, but it
    * never counts toward a conflict and never becomes a clashing field; a merge keeps the local
-   * box's metadata since the local box produced the merged result.
+   * box's metadata since the local box produced the merged result, save what tells of a field the
+   * merge took from the remote ({@link #FIELD_METADATA}).
    */
   @SafeVarargs
   private static LinkedHashSet<String> workKeys(Map<String, Object>... maps) {

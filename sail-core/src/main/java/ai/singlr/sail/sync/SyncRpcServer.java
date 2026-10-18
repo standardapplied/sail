@@ -776,7 +776,8 @@ public final class SyncRpcServer {
                     erasedInSession = true;
                   }
                   var erased = changeLog.erasure(type, offer.id()).orElseThrow();
-                  return new SyncWire.Accepted(offer.id(), erased.rev(), erased.actor(), null);
+                  return new SyncWire.Accepted(
+                      offer.id(), erased.rev(), erased.actor(), null, null);
                 }));
   }
 
@@ -823,7 +824,11 @@ public final class SyncRpcServer {
       case CommitOutcome.Accepted accepted -> {
         emitTransitions(type, offer.id(), before, main);
         yield new SyncWire.Accepted(
-            offer.id(), accepted.rev(), accepted.author(), accepted.creator());
+            offer.id(),
+            accepted.rev(),
+            accepted.author(),
+            accepted.creator(),
+            accepted.createdAt());
       }
       case CommitOutcome.Rejected _ -> new SyncWire.Stale(offer.id());
       case CommitOutcome.Refused refused -> new SyncWire.Refused(offer.id(), refused.reason());

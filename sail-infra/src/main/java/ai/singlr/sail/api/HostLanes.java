@@ -160,7 +160,9 @@ final class HostLanes {
           .orElseThrow(
               () ->
                   new IllegalStateException(
-                      "Demo project is missing from the catalog. Run 'sudo sail migrate'."));
+                      "The demo project isn't on this box. On main or a standalone box, 'sudo"
+                          + " sail migrate' seeds it; a node gets it from main once an admin"
+                          + " grants it there: sudo sail fde grant <handle> demo."));
     }
 
     @Override

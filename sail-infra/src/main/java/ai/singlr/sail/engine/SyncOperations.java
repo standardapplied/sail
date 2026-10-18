@@ -181,6 +181,7 @@ public final class SyncOperations {
       FileStore files,
       ProjectStore projects)
       throws Exception {
+    DemoSeeder.unseed(db);
     var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
     session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();

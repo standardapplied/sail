@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.ConnectEnvironment;
@@ -16,6 +17,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -84,6 +86,21 @@ class SailOperationsSyncTest {
             () -> operations.updateGlobalSpec("missing", update("pending")));
 
     assertInstanceOf(Result.Failure.class, result);
+    assertEquals(0, rounds.get());
+  }
+
+  @Test
+  void aSpecIntoAProjectThisBoxLacksIsRefusedAtTheDoorAndTriggersNothing() throws Exception {
+    var operations = operations(scheduler(), store -> {});
+
+    var result =
+        Acting.by(
+            Actor.cliOperator("uday"), () -> operations.createGlobalSpec(create("c-beta", "beta")));
+
+    var failure = assertInstanceOf(Result.Failure.class, result);
+    assertEquals(ErrorCode.NOT_FOUND, failure.errorCode());
+    assertEquals("Project 'beta' isn't on this box. Projects here: acme.", failure.errorMessage());
+    assertNull(failure.action());
     assertEquals(0, rounds.get());
   }
 
@@ -221,6 +238,7 @@ class SailOperationsSyncTest {
         """);
     var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     seed.accept(specStore);
     return TestControlPlane.standalone(
@@ -266,9 +284,13 @@ class SailOperationsSyncTest {
   }
 
   private static SpecCreateRequest create(String id) {
+    return create(id, "acme");
+  }
+
+  private static SpecCreateRequest create(String id, String project) {
     return new SpecCreateRequest(
         id,
-        "acme",
+        project,
         "Spec " + id,
         "pending",
         null,

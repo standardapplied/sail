@@ -209,7 +209,13 @@ public final class SyncEngine {
             yield Outcome.HELD;
           }
           yield local.mayPush(id)
-              ? offer(id, m.result(), captured, remoteRev, Outcome.MERGED, redetectsLeft)
+              ? offer(
+                  id,
+                  Snapshots.revisedHere(m.result()),
+                  captured,
+                  remoteRev,
+                  Outcome.MERGED,
+                  redetectsLeft)
               : take(id, localRev, remote, remoteRev, Outcome.PULLED, redetectsLeft);
         }
         case ConflictDetector.Conflict c -> {
@@ -416,7 +422,8 @@ public final class SyncEngine {
      */
     private Outcome settleAccepted(Pending offer, CommitOutcome.Accepted accepted) {
       var id = offer.id();
-      var taken = Snapshots.withCreator(offer.snapshot(), accepted.creator());
+      var taken =
+          Snapshots.withCreation(offer.snapshot(), accepted.creator(), accepted.createdAt());
       if (adopt(id, offer.offeredFrom().rev(), taken, accepted.rev(), accepted.author())) {
         return offer.onAccepted();
       }

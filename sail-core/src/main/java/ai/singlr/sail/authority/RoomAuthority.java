@@ -7,24 +7,30 @@ package ai.singlr.sail.authority;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
+import ai.singlr.sail.store.Snapshots;
 import ai.singlr.sail.store.Sqlite;
 import java.util.Map;
 import java.util.Optional;
 
 /**
- * Who may write a room. Any writer creates one; every later revision and its tombstone — roster,
- * wake, title and assignee alike — is its owner's ({@link RoomStore#ownerOf}) or an admin's. Owning
- * a spec born in a room gives a voice there ({@link PostingRule}), never its settings.
+ * Who may write a room. Any writer creates one, in a project this box holds ({@link
+ * ProjectStore#refusesInto}), which is where a room moves too; every later revision and its
+ * tombstone — roster, wake, title and assignee alike — is its owner's ({@link RoomStore#ownerOf})
+ * or an admin's. Owning a spec born in a room gives a voice there ({@link PostingRule}), never its
+ * settings.
  */
 public final class RoomAuthority implements WriteAuthority {
 
   private final RoomStore rooms;
+  private final ProjectStore projects;
   private final Attribution attribution;
 
   /** The rule, deciding on {@code db}'s copy. */
   public RoomAuthority(Sqlite db) {
     this.rooms = new RoomStore(db);
+    this.projects = new ProjectStore(db);
     this.attribution = new Attribution(db);
   }
 
@@ -36,6 +42,12 @@ public final class RoomAuthority implements WriteAuthority {
     }
     if (!actor.canWrite()) {
       return Refusal.readOnly(held == null ? "create rooms" : "change rooms");
+    }
+    var unheld =
+        projects.refusesInto(
+            actor, rooms.liveProject(id).orElse(null), Snapshots.text(next, "project"), false);
+    if (unheld.isPresent()) {
+      return unheld;
     }
     var attributed = attribution.decide(actor, held, next, "created_by", null);
     if (attributed.isPresent() || held == null) {

@@ -26,6 +26,7 @@ import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.EraseRequests;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -71,6 +72,9 @@ class ScopedSyncTest {
     main = new SyncBox(dir, "main");
     nia = new SyncBox(dir, "nia").syncsAs(scoped(ONLY_A));
     uma = new SyncBox(dir, "uma");
+    HeldProjects.hold(main.db, A, B);
+    HeldProjects.hold(nia.db, A);
+    HeldProjects.hold(uma.db, A, B);
   }
 
   @AfterEach
@@ -446,6 +450,7 @@ class ScopedSyncTest {
 
   @Test
   void aRowPushedIntoAnotherProjectIsDeniedNamingItsIdAndNothingIsWritten() throws Exception {
+    HeldProjects.hold(nia.db, B);
     seed(main, B, "uma");
     var before = count(main.db, "SELECT count(*) FROM change_log");
     var forged = snapshot(nia, () -> nia.create(spec("forged", B, "nia")), "spec", "forged");
@@ -480,17 +485,24 @@ class ScopedSyncTest {
                         new SyncWire.Push(
                             "project",
                             List.of(
-                                new MainReplica.Offer(B, definition, null),
+                                new MainReplica.Offer("gamma", definition, null),
+                                new MainReplica.Offer(
+                                    B, definition, new ProjectStore(main.db).latestRev(B)),
                                 new MainReplica.Offer(A, definition, null))))
                     .getLast())
             .results();
 
     assertEquals(
         new SyncWire.Denied(
-            B, "Project 'beta' is in no project this FDE is granted.", null, null, true),
+            "gamma", "Project 'gamma' is in no project this FDE is granted.", null, null, true),
         results.get(0));
-    assertInstanceOf(SyncWire.Accepted.class, results.get(1));
-    assertTrue(new ProjectStore(main.db).findByName(B).isEmpty());
+    assertEquals(
+        "Project 'beta' is in no project this FDE is granted.",
+        assertInstanceOf(SyncWire.Denied.class, results.get(1)).reason());
+    assertInstanceOf(SyncWire.Accepted.class, results.get(2));
+    assertTrue(new ProjectStore(main.db).findByName("gamma").isEmpty());
+    assertEquals(
+        "name: beta\n", new ProjectStore(main.db).findByName(B).orElseThrow().definition());
     assertTrue(new ProjectStore(main.db).findByName(A).isPresent());
   }
 
@@ -521,6 +533,23 @@ class ScopedSyncTest {
   }
 
   @Test
+  void aRevocationOfAProjectWhoseWorkMainHoldsSaysNothingWasUnpushed() {
+    seed(main, A, "nia");
+    seed(main, B, "uma");
+    SyncBox.quiesce(main, nia.syncsAs(scoped(ProjectScope.of(List.of(A, B)))));
+    var held = count(nia.db, "SELECT count(*) FROM change_heads WHERE project = 'alpha'");
+
+    var revoked = SyncBox.roundSettling(main, nia.syncsAs(scoped(ProjectScope.of(List.of(B)))));
+
+    assertEquals(
+        List.of(
+            "project alpha: dropped from this box with the "
+                + held
+                + " rows it held here — main no longer grants this box the project"),
+        revoked.settled().stream().map(Settlement.Settled::describe).toList());
+  }
+
+  @Test
   void aRevocationDropsTheProjectAtTheStartOfTheRoundUnpushedWorkIncluded() {
     seed(main, A, "nia");
     seed(main, B, "uma");
@@ -539,14 +568,14 @@ class ScopedSyncTest {
             new Settlement.Settled(
                 "project",
                 A,
-                new Settlement.How.Dropped((int) held),
+                new Settlement.How.Dropped((int) held, 1),
                 "main no longer grants this box the project")),
         revoked.settled());
     assertEquals(
         "project alpha: dropped from this box with the "
             + held
-            + " rows it held here, unpushed work included — main no longer grants this box the"
-            + " project",
+            + " rows it held here, unpushed work included (1 row never pushed) — main no longer"
+            + " grants this box the project",
         revoked.settled().getFirst().describe());
     for (var table :
         List.of(
@@ -874,6 +903,7 @@ class ScopedSyncTest {
 
   @Test
   void anErasedIdAndAMessageOutsideTheScopeAreDeniedBeforeAnythingIsReadOfThem() throws Exception {
+    HeldProjects.hold(nia.db, B);
     seed(main, B, "uma");
     archive(main, "beta-work");
     var message =
@@ -965,6 +995,7 @@ class ScopedSyncTest {
 
   @Test
   void aRowIsBornNamingOnlyWhatItsPusherMaySee() throws Exception {
+    HeldProjects.hold(nia.db, B);
     seed(main, A, "nia");
     seed(main, B, "uma");
     new RoomStore(main.db).create(room("beta-own", B, "nia"));

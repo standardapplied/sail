@@ -9,8 +9,10 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -68,7 +70,8 @@ public final class HandleChange {
    * the runs it never heard acknowledged main holds; when main cannot be asked, it is refused too.
    * Every sync round of the box is held off from the ask until the stamps are written ({@link
    * SyncOperations#holdRounds}), so none can offer a run main would then hold under the old handle.
-   * Returns the runs stamped for the new identity.
+   * A box that stops being a node forgets the scope main last named it ({@link SyncScope}): as main
+   * or standalone it holds every project. Returns the runs stamped for the new identity.
    */
   public static List<String> apply(
       Path dbPath,
@@ -80,7 +83,8 @@ public final class HandleChange {
       throws Exception {
     var renamed = !Objects.equals(before.handle(), after.handle());
     var promoted = after.isMain() && !before.isMain();
-    if (!(renamed || promoted) || !Files.exists(dbPath)) {
+    var leftNode = before.isNode() && !after.isNode();
+    if (!(renamed || promoted || leftNode) || !Files.exists(dbPath)) {
       write.run();
       return List.of();
     }
@@ -98,6 +102,9 @@ public final class HandleChange {
         }
       }
       write.run();
+      if (leftNode) {
+        new SyncScope(db).record(ProjectScope.all());
+      }
       return after.isMain()
           ? runs.stampUnstamped(after.handle())
           : NodeRound.stampUnheld(db, after.handle(), held);

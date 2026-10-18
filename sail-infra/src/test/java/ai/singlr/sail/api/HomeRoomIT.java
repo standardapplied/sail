@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -94,6 +95,7 @@ class HomeRoomIT extends AbstractIncusIT {
     var definition = SailYaml.fromMap(YamlUtil.parseMap(text));
     try (var db = Sqlite.open(stateDir.resolve("it.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, CONTAINER);
       new FdeStore(db).add(HANDLE, null, null, "member");
       var rooms = new RoomStore(db);
       var ops =

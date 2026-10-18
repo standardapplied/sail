@@ -22,6 +22,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewStore;
@@ -55,6 +56,7 @@ class ApiSpecCommandsTest {
   void setUp() throws Exception {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "other", "test");
     var tokenStore = new TokenStore(db);
     var fde = new FdeStore(db).add("test", "Test", "test@example.com", "admin");
     token = tokenStore.create("test", "admin", fde.id(), null).token();

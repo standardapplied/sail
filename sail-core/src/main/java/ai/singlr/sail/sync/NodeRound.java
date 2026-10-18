@@ -63,12 +63,13 @@ public final class NodeRound {
   /**
    * Brings this box in line with the scope main's welcome named, before anything is asked of main.
    * Every project the box holds anything of that the scope does not admit is dropped whole ({@link
-   * Erasure#dropLocal}), unpushed work included: main sends nothing of it again and would deny
-   * every offer of it, so the admin's revocation is how that work leaves this box. It is decided
-   * from what the box holds, never from what it was last told, so a drop a failed round or a run
-   * still under way here put off happens on the next round that finds it. A project newly in scope
-   * has its history below this box's checkpoints, so they are reset and main's heads walked again
-   * ({@link SyncState#reset}). The scope is then recorded as the one this box works within.
+   * Erasure#dropLocal}), unpushed work included, which its notice counts: main sends nothing of it
+   * again and would deny every offer of it, so the admin's revocation is how that work leaves this
+   * box. It is decided from what the box holds, never from what it was last told, so a drop a
+   * failed round or a run still under way here put off happens on the next round that finds it. A
+   * project newly in scope has its history below this box's checkpoints, so they are reset and
+   * main's heads walked again ({@link SyncState#reset}). The scope is then recorded as the one this
+   * box works within.
    */
   private static List<Settlement.Settled> rescope(SyncSession session, Sqlite db, String handle) {
     var scope = session.scope();
@@ -130,10 +131,11 @@ public final class NodeRound {
                       .listForProject(project).stream()
                           .filter(run -> run.liveOn(handle))
                           .findFirst();
-              return live.isPresent()
-                  ? new Settlement.How.Kept(live.get().id())
-                  : new Settlement.How.Dropped(
-                      new Erasure(db).dropLocal(project).entities().size());
+              if (live.isPresent()) {
+                return new Settlement.How.Kept(live.get().id());
+              }
+              var dropped = new Erasure(db).dropLocal(project);
+              return new Settlement.How.Dropped(dropped.entities().size(), dropped.unpushed());
             });
     return new Settlement.Settled(
         Erasure.PROJECT, project, how, "main no longer grants this box the project");

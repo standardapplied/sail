@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -68,6 +69,7 @@ class RoomPrincipalAccessTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("room.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     bus = new EventBus();
     specStore = new SpecStore(db);
     messageStore = new MessageStore(db);

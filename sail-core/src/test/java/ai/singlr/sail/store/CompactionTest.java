@@ -37,6 +37,7 @@ class CompactionTest {
   void setUp() {
     db = Sqlite.openMemory();
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj");
     specs = new SpecStore(db);
     changes = new ChangeLog(db);
   }

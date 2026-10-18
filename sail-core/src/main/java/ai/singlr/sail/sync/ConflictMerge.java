@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.ConflictDetector;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -150,12 +151,13 @@ public final class ConflictMerge {
     return map == null ? null : map.get(field);
   }
 
+  /** Every field of the sides, metadata left out: it is never shown, merged or chosen. */
   @SafeVarargs
   private static LinkedHashSet<String> allKeys(Map<String, Object>... maps) {
     var keys = new LinkedHashSet<String>();
     for (var map : maps) {
       if (map != null) {
-        keys.addAll(map.keySet());
+        map.keySet().stream().filter(key -> !ConflictDetector.isMetadata(key)).forEach(keys::add);
       }
     }
     return keys;

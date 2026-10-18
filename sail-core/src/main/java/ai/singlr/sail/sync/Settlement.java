@@ -48,8 +48,11 @@ public final class Settlement {
     /** Withdrawn, the work kept in the change log. */
     record Withdrawn() implements How {}
 
-    /** A project out of this box's scope, gone from it with the {@code rows} it held here. */
-    record Dropped(int rows) implements How {}
+    /**
+     * A project out of this box's scope, gone from it with the {@code rows} it held here, {@code
+     * unpushed} of them carrying work main never took.
+     */
+    record Dropped(int rows, int unpushed) implements How {}
 
     /** A project out of this box's scope, kept while {@code run} is still under way here. */
     record Kept(String run) implements How {
@@ -73,15 +76,21 @@ public final class Settlement {
         case Withdrawn ignored -> "withdrawn; yours stays in this box's change log";
         case Dropped dropped ->
             "dropped from this box with the "
-                + dropped.rows()
-                + (dropped.rows() == 1 ? " row" : " rows")
-                + " it held here, unpushed work included";
+                + rows(dropped.rows())
+                + " it held here"
+                + (dropped.unpushed() == 0
+                    ? ""
+                    : ", unpushed work included (" + rows(dropped.unpushed()) + " never pushed)");
         case Kept kept ->
             "kept this round, run '"
                 + kept.run()
                 + "' being still under way here; dropped on the first round after it ends";
         case Failed failed -> "could not be settled: " + failed.reason();
       };
+    }
+
+    private static String rows(int count) {
+      return count + (count == 1 ? " row" : " rows");
     }
   }
 

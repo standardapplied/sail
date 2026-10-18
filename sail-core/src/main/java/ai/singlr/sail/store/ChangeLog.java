@@ -398,6 +398,16 @@ public final class ChangeLog {
   }
 
   /**
+   * The project the head of {@code entityId} files it under while that head is a live revision —
+   * not a tombstone, an erasure or a withdrawal — so a restore reads as a birth into its project.
+   */
+  public Optional<String> liveProject(String entityType, String entityId) {
+    return head(entityType, entityId)
+        .filter(head -> head.kind() == Kind.REVISION && !head.withdrawn())
+        .flatMap(ignored -> headProject(entityType, entityId));
+  }
+
+  /**
    * The project a state of an entity belongs to, null when it names none: the {@code project} a
    * spec, room or run names, the one a file's id begins with — a file's synced state is its content
    * alone — a project's own id, the project of a review's spec and of a message's conversation — a

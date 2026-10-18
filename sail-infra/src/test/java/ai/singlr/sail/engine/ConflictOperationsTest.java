@@ -160,6 +160,33 @@ class ConflictOperationsTest {
   }
 
   @Test
+  void aMergeThatKeepsMyArchiveKeepsMyArchiveTime() throws IOException {
+    main.specs.create(SyncBox.spec("auth", "title", "pending"));
+    round();
+    node.specs.updateStatus("auth", SpecStatus.ARCHIVED);
+    var archived = archivedAt(node);
+    main.specs.updateStatus("auth", SpecStatus.IN_PROGRESS);
+    round();
+    assertEquals(
+        List.of("status"), node.conflicts.pendingFor("spec", "auth").orElseThrow().fields());
+
+    var template = ConflictMerge.parseTemplate(operations.mergeTemplate("spec", "auth"));
+    operations.resolve(
+        "spec", "auth", new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpToString(template)));
+    assertEquals(archived, archivedAt(node));
+    round();
+
+    assertEquals(SpecStatus.ARCHIVED, main.specs.findById("auth").orElseThrow().status());
+    assertEquals(archived, archivedAt(main));
+  }
+
+  private static String archivedAt(SyncBox box) {
+    return box.db
+        .queryOne("SELECT archived_at FROM specs WHERE id = 'auth'", row -> row.text(0))
+        .orElseThrow();
+  }
+
+  @Test
   void aBodyClashMergesThroughItsTemplateWhateverLineBreaksMainsBodyHas() throws IOException {
     main.specs.create(SyncBox.spec("auth", "title", "pending"));
     round();

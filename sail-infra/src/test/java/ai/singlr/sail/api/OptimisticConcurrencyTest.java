@@ -14,6 +14,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -42,6 +43,7 @@ class OptimisticConcurrencyTest {
   void setUp() throws Exception {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "manatee");
     var tokenStore = new TokenStore(db);
     token = tokenStore.create("test", "admin").token();
     specStore = new SpecStore(db);

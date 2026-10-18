@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -1503,6 +1504,7 @@ class StopOperationsTest {
         """);
     var db = Sqlite.open(tempDir.resolve("stop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     return new StopOperations(

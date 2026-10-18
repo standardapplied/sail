@@ -23,6 +23,7 @@ import ai.singlr.sail.ssh.SshGateway;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -80,6 +81,7 @@ class DisabledFdeTest {
   void setUp() throws IOException {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var mady = new FdeStore(db).add("mady", null, null, "admin");
     token = new TokenStore(db).create("mady", "admin", mady.id(), null).token();
     session = new AuthSessionStore(db).create(mady.id(), Duration.ofHours(1)).token();
