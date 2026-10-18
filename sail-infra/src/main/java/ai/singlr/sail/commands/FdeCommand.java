@@ -31,6 +31,7 @@ import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.TokenStore;
@@ -189,6 +190,23 @@ public final class FdeCommand implements Runnable {
         + fde.role()
         + (scoped ? ", scoped: grant projects with '" + operator.sail("fde grant") + "'" : "")
         + ")";
+  }
+
+  /**
+   * Puts main's own FDE {@code handle} on the roster in {@code db}: added as admin when absent, as
+   * the operator who set up the box administers it, and an FDE already there is left as it is.
+   * Returns the line that says which.
+   */
+  static String enrol(Path db, String handle, String name, String email, OperatorCommand operator) {
+    try (var sqlite = Sqlite.open(db)) {
+      new SchemaManager(sqlite).migrate();
+      var fdes = new FdeStore(sqlite);
+      return fdes.byHandle(handle)
+          .map(
+              fde ->
+                  "  @|faint FDE " + handle + " is already on the roster (" + fde.role() + ").|@")
+          .orElseGet(() -> added(fdes.add(handle, name, email, "admin"), false, operator));
+    }
   }
 
   static String trustedAfterApply(String projects, OperatorCommand operator) {

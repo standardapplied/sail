@@ -172,7 +172,7 @@ class HostSyncCommandTest {
   }
 
   private static String enrolled(Path dir, String handle) {
-    return HostSyncCommand.enrol(
+    return FdeCommand.enrol(
         dir.resolve("sail.db"), handle, "Ada L", "ada@example.com", OperatorCommand.PLAIN);
   }
 
