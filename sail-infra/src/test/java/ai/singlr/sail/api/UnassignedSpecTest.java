@@ -21,6 +21,7 @@ import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -76,6 +77,7 @@ class UnassignedSpecTest {
   void setUp() throws IOException {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specs = new SpecStore(db);
     operations =
         OperationsFactory.create(

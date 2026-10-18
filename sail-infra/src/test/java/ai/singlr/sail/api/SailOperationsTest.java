@@ -30,6 +30,7 @@ import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewRuns;
@@ -254,6 +255,7 @@ class SailOperationsTest {
   void fdesReturnsTheRosterSortedByHandle() throws Exception {
     var db = Sqlite.open(tempDir.resolve("roster-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var fdeStore = new FdeStore(db);
     fdeStore.add("bob", "Bob", "bob@x.dev", "member");
     fdeStore.add("ada", "Ada Lovelace", "ada@x.dev", "admin");
@@ -724,10 +726,12 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     try (var db = Sqlite.open(tempDir.resolve("specs-broken-runs.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var specStore = new SpecStore(db);
       seedAuthBillingSetup(specStore);
       var brokenDb = Sqlite.open(tempDir.resolve("runs-broken.db"));
       new SchemaManager(brokenDb).migrate();
+      HeldProjects.hold(brokenDb, "acme");
       var brokenRuns = new RunStore(brokenDb);
       brokenDb.close();
       var shell = shell().on("incus list ^acme$", RUNNING_JSON);
@@ -1697,6 +1701,7 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var operations =
         new SailOperations(
             shell().on("incus list ^acme$", RUNNING_JSON),
@@ -1723,6 +1728,7 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     seedSpec(specStore, "auth", "Add auth", "pending", List.of(), "Do auth");
     var operations =
@@ -1758,6 +1764,7 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var fdeStore = new FdeStore(db);
     fdeStore.add("uday", "Uday", "uday@example.dev", "admin");
     var boxStore = new BoxCredentialStore(db);
@@ -1837,6 +1844,7 @@ class SailOperationsTest {
     Files.writeString(yaml, branchYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);
     seedSpec(
         store, "auth", "Add auth", "done", List.of(), "Do auth", null, null, null, "sail/auth");
@@ -2015,6 +2023,7 @@ class SailOperationsTest {
     Files.writeString(yaml, guardrailsYaml());
     var db = Sqlite.open(tempDir.resolve("watcher-pid.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);
     seedAuthBillingSetup(store);
     var shell =
@@ -2653,6 +2662,7 @@ class SailOperationsTest {
   void specEventsServesTheScopedRecordOldestFirst() throws Exception {
     var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
     events.insert(eventRow("spec_dispatched", "auth", "{\"run_id\": \"r-1\"}"));
     events.insert(eventRow("agent_log_chunk", "auth", "{}"));
@@ -2679,6 +2689,7 @@ class SailOperationsTest {
   void specEventsSinceCursorIsExclusiveAndLimitBounds() throws Exception {
     var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
     events.insert(eventRow("spec_dispatched", "auth", "{}"));
     events.insert(eventRow("agent_session_started", "auth", "{}"));
@@ -2700,6 +2711,7 @@ class SailOperationsTest {
   void specEventsServesARowWhoseDataNoLongerParses() throws Exception {
     var db = Sqlite.open(tempDir.resolve("events-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var events = new EventStore(db);
     events.insert(eventRow("spec_dispatched", "auth", "{broken"));
     var operations = operations(baseYaml(), shell()).useEvents(events);
@@ -2812,6 +2824,7 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     var reviewStore = new ReviewStore(db);
     seedAuthBillingSetup(specStore);
@@ -3123,6 +3136,7 @@ class SailOperationsTest {
       throws IOException {
     var db = Sqlite.open(dir.resolve("events.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     return TestControlPlane.standalone(
         new SailOperations(
             shell(),
@@ -3230,6 +3244,7 @@ class SailOperationsTest {
     Files.writeString(yaml, yamlContent);
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     var reviewStore = new ReviewStore(db);
     var sessionStore = new RunStore(db);
@@ -3255,6 +3270,7 @@ class SailOperationsTest {
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     seedAuthBillingSetup(specStore);
     var projectStore = new ProjectStore(db);
@@ -3287,6 +3303,7 @@ class SailOperationsTest {
     Files.writeString(yaml, yamlContent);
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var store = new SpecStore(db);
     seed.accept(store);
     WatcherSpawner.ProcessSpawner fallback =

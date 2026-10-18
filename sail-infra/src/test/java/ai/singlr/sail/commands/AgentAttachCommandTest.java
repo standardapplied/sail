@@ -25,6 +25,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DispatchGate;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
@@ -237,6 +238,7 @@ class AgentAttachCommandTest {
   void aLiveMembersRunIsTakenOverNotRefused(@TempDir Path dir) {
     try (var db = Sqlite.open(dir.resolve("t.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var runs = new RunStore(db);
       var id = DateTimeUtils.newId().toString();
       Acting.system(
@@ -316,6 +318,7 @@ class AgentAttachCommandTest {
                 PtyRooms.NONE,
                 PtyEvents.NONE)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var runs = new RunStore(db);
       var refused =
           attachParkedBehindClaim(
@@ -438,6 +441,7 @@ class AgentAttachCommandTest {
   void knownRoomIsTheRunsConversationOnlyWhenThatRoomExistsHere(@TempDir Path dir) {
     try (var db = Sqlite.open(dir.resolve("t.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var rooms = new RoomStore(db);
       Acting.as(
           "it",
@@ -472,6 +476,7 @@ class AgentAttachCommandTest {
     var dbPath = dir.resolve("control-plane.db");
     try (var db = Sqlite.open(dbPath)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       Acting.system(() -> new ProjectStore(db).upsert(project, definition));
     }
     return dbPath;

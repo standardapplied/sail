@@ -17,6 +17,7 @@ import ai.singlr.sail.config.SlackNotifications;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.SlackPoster;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SlackThreadStore;
 import ai.singlr.sail.store.SpecStore;
@@ -46,6 +47,7 @@ class SlackReactorTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "light");
     threads = new SlackThreadStore(db);
     specStore = new SpecStore(db);
   }

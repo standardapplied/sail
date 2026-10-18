@@ -18,6 +18,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -57,6 +58,7 @@ class RoomsSurfaceTest {
     Files.writeString(yaml, "name: acme\n");
     db = Sqlite.open(tempDir.resolve("rooms.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     roomStore = new RoomStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");

@@ -24,6 +24,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -93,6 +94,7 @@ class EngagementLifecycleTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("engage-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     roomStore = new RoomStore(db);
     runStore = new RunStore(db);
@@ -546,6 +548,7 @@ class EngagementLifecycleTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("norooms-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");

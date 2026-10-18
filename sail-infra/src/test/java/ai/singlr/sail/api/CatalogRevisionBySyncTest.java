@@ -21,13 +21,13 @@ import org.junit.jupiter.api.io.TempDir;
 /** A revision that reaches a box by sync is what that box reads next, with nothing else run. */
 class CatalogRevisionBySyncTest {
 
-  private static final String ACME =
+  private static final String ZENITH =
       """
-      name: acme
+      name: zenith
       agent:
         type: claude-code
         notifications:
-          url: https://ntfy.sh/acme
+          url: https://ntfy.sh/zenith
           events: [spec_dispatched]
       """;
 
@@ -40,22 +40,23 @@ class CatalogRevisionBySyncTest {
       var authored = new ProjectStore(main.db);
       var reader = ProjectReader.ofCatalog(new ProjectStore(node.db));
       var notifications = new CatalogNotificationsResolver(reader);
-      assertTrue(reader.read("acme").isEmpty(), "the node holds no project yet");
+      assertTrue(reader.read("zenith").isEmpty(), "the node holds no project yet");
 
-      Acting.system(() -> authored.upsert("acme", ACME));
+      Acting.system(() -> authored.upsert("zenith", ZENITH));
       SyncBox.round(main, node);
-      assertEquals("https://ntfy.sh/acme", notifications.resolve("acme").url());
+      assertEquals("https://ntfy.sh/zenith", notifications.resolve("zenith").url());
 
-      Acting.system(() -> authored.upsert("acme", ACME.replace("ntfy.sh/acme", "ntfy.sh/moved")));
+      Acting.system(
+          () -> authored.upsert("zenith", ZENITH.replace("ntfy.sh/zenith", "ntfy.sh/moved")));
       SyncBox.round(main, node);
 
       assertEquals(
           "https://ntfy.sh/moved",
-          reader.require("acme", OperatorCommand.PLAIN).agent().notifications().url());
+          reader.require("zenith", OperatorCommand.PLAIN).agent().notifications().url());
       assertEquals(
           "https://ntfy.sh/moved",
-          ReviewWiring.definitions(reader).apply("acme").agent().notifications().url());
-      assertEquals("https://ntfy.sh/moved", notifications.resolve("acme").url());
+          ReviewWiring.definitions(reader).apply("zenith").agent().notifications().url());
+      assertEquals("https://ntfy.sh/moved", notifications.resolve("zenith").url());
     }
   }
 }

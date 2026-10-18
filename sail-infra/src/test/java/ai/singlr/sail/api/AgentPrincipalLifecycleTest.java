@@ -20,6 +20,7 @@ import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -85,6 +86,7 @@ class AgentPrincipalLifecycleTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("principal.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     bus = new EventBus();
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);
@@ -257,6 +259,7 @@ class AgentPrincipalLifecycleTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("admin-dispatch.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     bus = new EventBus();
     var specStore = new SpecStore(db);
     var runStore = new RunStore(db);

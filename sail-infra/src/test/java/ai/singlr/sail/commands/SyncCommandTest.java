@@ -29,6 +29,7 @@ import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -61,6 +62,7 @@ class SyncCommandTest {
   void gcUsesTheHostLaneAndReportsFreedContent() throws Exception {
     try (var db = Sqlite.openMemory()) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var hash = new BlobStore(db).putText("orphan");
       var operations =
           OperationsFactory.create(
@@ -104,7 +106,9 @@ class SyncCommandTest {
     try (var db = Sqlite.open(home.resolve("main.db"));
         var node = Sqlite.open(home.resolve("node.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       new SchemaManager(node).migrate();
+      HeldProjects.hold(node, "acme");
       var files = new FileStore(db);
       var projectsDir = home.resolve("projects");
       ContentFixtures.put(files, "acme", "app.conf", "v0");
@@ -153,6 +157,7 @@ class SyncCommandTest {
   void syncStatusReadsThisBoxesStoredHealthInProcess(@TempDir Path home) throws Exception {
     try (var db = Sqlite.open(home.resolve("sail.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var config = new SyncConfig("node", "sail@main", "node");
       var operations =
           OperationsFactory.create(
@@ -511,6 +516,7 @@ class SyncCommandTest {
   void applyFdesMirrorsValidEntriesAndReportsRejectedOnes(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("test.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var fdes = new FdeStore(db);
       var roster =
           List.<Map<String, Object>>of(
@@ -547,6 +553,7 @@ class SyncCommandTest {
   void pulledMessageEventsFireOnlyForNewlyAdoptedMessages(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("pull.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var specs = new SpecStore(db);
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");
@@ -587,6 +594,7 @@ class SyncCommandTest {
   void aPulledMessageWhoseSpecNeverLandedIsSkipped(@TempDir Path tempDir) {
     try (var db = Sqlite.open(tempDir.resolve("orphan.db"))) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme");
       var specs = new SpecStore(db);
       var messages = new MessageStore(db);
       seedSpec(specs, "auth");

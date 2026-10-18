@@ -23,6 +23,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -61,6 +62,7 @@ class GlobalSpecOperationsTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme", "beta", "manatee", "zenith");
     specStore = new SpecStore(db);
     reviewStore = new ReviewStore(db);
     ops = new GlobalSpecOperations(specStore, reviewStore, OperatorCommand.PLAIN);

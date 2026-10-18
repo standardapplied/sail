@@ -23,6 +23,7 @@ import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.Finding;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
@@ -81,6 +82,7 @@ class SyncServerCommandTest {
     }
     mainReplicaDb = SyncDatabase.converge(mainPath, "main");
     mainDb = mainReplicaDb.db();
+    HeldProjects.hold(mainDb, "proj");
     nodeDb = open("node");
     mainSpecs = new SpecStore(mainDb);
     nodeSpecs = new SpecStore(nodeDb);
@@ -102,6 +104,7 @@ class SyncServerCommandTest {
   private Sqlite open(String name) {
     var db = Sqlite.open(tempDir.resolve(name + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj");
     return db;
   }
 

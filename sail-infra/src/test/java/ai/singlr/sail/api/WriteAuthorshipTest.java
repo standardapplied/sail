@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewRuns;
 import ai.singlr.sail.store.RunStore;
@@ -76,6 +77,7 @@ class WriteAuthorshipTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specs = new SpecStore(db);
   }
 

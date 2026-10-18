@@ -26,6 +26,7 @@ import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -110,6 +111,7 @@ class AdhocDispatchTest {
     Files.writeString(yaml, yamlContent);
     db = Sqlite.open(tempDir.resolve("adhoc-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     specStore = new SpecStore(db);
     runStore = new RunStore(db);
     new FdeStore(db).add(HANDLE, null, null, "admin");
@@ -495,6 +497,7 @@ class AdhocDispatchTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("dry.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     runStore = new RunStore(db);
     var ops =
         new DispatchOperations(
@@ -630,6 +633,7 @@ class AdhocDispatchTest {
     Files.writeString(yaml, YAML);
     db = Sqlite.open(tempDir.resolve("path.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     runStore = new RunStore(db);
     var ops =
         new DispatchOperations(

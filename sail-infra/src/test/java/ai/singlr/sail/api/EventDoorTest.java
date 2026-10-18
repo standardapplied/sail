@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.DispatchGate;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -98,6 +99,7 @@ class EventDoorTest {
   void setUp() throws IOException {
     db = Sqlite.open(tempDir.resolve("sail.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var fdes = new FdeStore(db);
     var root = fdes.add("root", null, null, "admin");
     var ada = fdes.add("ada", null, null, "member");

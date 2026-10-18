@@ -13,6 +13,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -35,6 +36,7 @@ class PtyHostRoomsTest {
           path = dir.resolve("cp.db");
           try (var db = Sqlite.open(path)) {
             new SchemaManager(db).migrate();
+            HeldProjects.hold(db, "acme");
             var fdes = new FdeStore(db);
             fdes.add("ada", "Ada", null, "member");
             fdes.add("mallory", "Mallory", null, "member");

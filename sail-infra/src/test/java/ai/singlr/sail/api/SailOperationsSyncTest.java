@@ -16,6 +16,7 @@ import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -221,6 +222,7 @@ class SailOperationsSyncTest {
         """);
     var db = Sqlite.open(tempDir.resolve("sync-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     var specStore = new SpecStore(db);
     seed.accept(specStore);
     return TestControlPlane.standalone(

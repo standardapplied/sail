@@ -82,6 +82,16 @@ public final class SyncBox implements AutoCloseable {
     return new SyncBox(id, Sqlite.open(file));
   }
 
+  /**
+   * The box {@code id}, in memory, holding no project yet: one the projects every other box starts
+   * with ({@link HeldProjects}) have not reached.
+   */
+  public static SyncBox holdingNoProject(String id) {
+    var box = new SyncBox(id);
+    box.db.execute("DELETE FROM projects");
+    return box;
+  }
+
   private SyncBox(String id, Sqlite db) {
     this.id = id;
     this.db = db;

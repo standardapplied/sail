@@ -28,6 +28,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.FdeStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ReviewStore;
 import ai.singlr.sail.store.RoomStore;
@@ -87,6 +88,7 @@ class HomeRoomTest {
     Files.writeString(yaml, CLAUDE_ONLY);
     db = Sqlite.open(tempDir.resolve("home.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme", "other");
     specStore = new SpecStore(db);
     roomStore = new RoomStore(db);
     var fdes = new FdeStore(db);

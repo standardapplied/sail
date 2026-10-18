@@ -974,7 +974,7 @@ class SailOperationsSeamTest {
   void aRoundAcrossTheTwoNodeHarnessReturnsTheAggregateAndProjectsThePulledFiles()
       throws Exception {
     try (var main = new SyncBox("main");
-        var node = new SyncBox("node");
+        var node = SyncBox.holdingNoProject("node");
         var operations = operations(node.db)) {
       Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       var content = "shared config".getBytes(StandardCharsets.UTF_8);
@@ -1124,7 +1124,7 @@ class SailOperationsSeamTest {
   @Test
   void aPartiallyFailedRoundStillAnnouncesTheMessagesItPulledExactlyOnce() throws Exception {
     try (var main = new SyncBox("main");
-        var node = new SyncBox("node");
+        var node = SyncBox.holdingNoProject("node");
         var operations = operations(node.db)) {
       Acting.system(() -> main.specs.create(SyncBox.spec("auth", "main spec", "pending")));
       Acting.system(() -> new MessageStore(main.db).append("auth", "raj", "hello from main", null));
