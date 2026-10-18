@@ -108,6 +108,7 @@ class UnboundWriteTest {
 
   @Test
   void anEditOfAnExistingRowByNoOneLeavesItAsItWas() {
+    HeldProjects.hold(db, "acme");
     var specs = new SpecStore(db);
     Acting.as("uday", () -> specs.create(spec("auth")));
     var before = specs.findById("auth").orElseThrow();

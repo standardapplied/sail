@@ -95,15 +95,15 @@ public final class Decidability {
 
   /** What every type depends on: its project, and the run its {@code _actor} names. */
   private Standing others(String type, String id, Map<String, Object> snapshot) {
-    return project(type, snapshot).worse(actorRun(type, id, snapshot));
+    return project(type, id, snapshot).worse(actorRun(type, id, snapshot));
   }
 
-  private Standing project(String type, Map<String, Object> snapshot) {
+  private Standing project(String type, String id, Map<String, Object> snapshot) {
     var standing = Standing.HELD;
     for (var owner : Erasure.ownersOf(type)) {
       var project = Snapshots.text(snapshot, owner.column());
       if (Erasure.PROJECT.equals(owner.type()) && Strings.isNotBlank(project)) {
-        standing = standing.worse(holdings.project(project));
+        standing = standing.worse(holdings.project(type, id, project));
       }
     }
     return standing;

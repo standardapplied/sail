@@ -6,6 +6,7 @@
 package ai.singlr.sail.authority;
 
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.RoomStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -23,6 +24,7 @@ final class Board implements AutoCloseable {
 
   Board() {
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
     room("lobby", Actors.OWNER);
     room("den", Actors.OTHER);
     Acting.system(

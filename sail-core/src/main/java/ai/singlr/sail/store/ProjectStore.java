@@ -9,6 +9,7 @@ import ai.singlr.sail.authority.ProjectAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.PersonalFields;
 import ai.singlr.sail.identity.Actor;
 import java.util.LinkedHashMap;
@@ -118,6 +119,42 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
 
   public List<ProjectRow> list() {
     return db.query(SELECT + " ORDER BY name", ProjectStore::map);
+  }
+
+  /**
+   * Why {@code actor} may not put a row this box files under {@code heldProject} — null when it
+   * holds none — into {@code nextProject}: a box takes a write only into a project its catalog
+   * holds, so no round ever takes back work it accepted. A row staying in its project is never
+   * refused, whatever this box holds of it. Said as this box's own refusal, or, when {@code
+   * onMain}, as main's answer to a node: naming the projects {@code actor} may see, and the grant
+   * that unblocks a scoped FDE. Empty when it may.
+   */
+  public Optional<Refusal> refusesInto(
+      Actor actor, String heldProject, String nextProject, boolean onMain) {
+    if (Strings.isBlank(nextProject)
+        || nextProject.equals(heldProject)
+        || findByName(nextProject).isPresent()) {
+      return Optional.empty();
+    }
+    var visible = list().stream().map(ProjectRow::name).filter(actor.scope()::admits).toList();
+    var scoped = !actor.scope().unrestricted() || !new SyncScope(db).held().unrestricted();
+    var handle = Strings.isBlank(actor.actingFde()) ? "<handle>" : actor.actingFde();
+    return Refusal.of(
+        Refusal.Kind.UNHELD_PROJECT,
+        "Project '"
+            + nextProject
+            + (onMain
+                ? "' isn't on main. Projects there: "
+                : "' isn't on this box. Projects here: ")
+            + (visible.isEmpty() ? "none" : String.join(", ", visible))
+            + ".",
+        scoped
+            ? "Ask an admin to grant it on main: sudo sail fde grant "
+                + handle
+                + " "
+                + nextProject
+                + "."
+            : null);
   }
 
   @Override

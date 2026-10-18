@@ -180,7 +180,7 @@ class ConvergenceSyncTest {
             .orElse(null);
       }
     },
-    PROJECT("project", "acme", "one", "two", "three") {
+    PROJECT("project", "zenith", "one", "two", "three") {
       @Override
       void make(SyncBox box, String as, String value) {
         change(box, as, value);
@@ -190,12 +190,13 @@ class ConvergenceSyncTest {
       void change(SyncBox box, String as, String value) {
         Acting.as(
             as,
-            () -> new ProjectStore(box.db).upsert("acme", "name: acme\nimage: " + value + "\n"));
+            () ->
+                new ProjectStore(box.db).upsert("zenith", "name: zenith\nimage: " + value + "\n"));
       }
 
       @Override
       void delete(SyncBox box, String as) {
-        Acting.as(as, () -> new ProjectStore(box.db).delete("acme"));
+        Acting.as(as, () -> new ProjectStore(box.db).delete("zenith"));
       }
 
       @Override
@@ -206,7 +207,7 @@ class ConvergenceSyncTest {
       @Override
       String value(SyncBox box) {
         return new ProjectStore(box.db)
-            .findByName("acme")
+            .findByName("zenith")
             .map(row -> YamlUtil.parseMap(row.definition()).get("image").toString())
             .orElse(null);
       }

@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.sync.SyncedEntities;
 import java.util.Map;
 import java.util.Objects;
@@ -31,8 +33,12 @@ public sealed interface Holdings {
     return new OnNode(new Entries(db));
   }
 
-  /** The project an entity belongs to: gone once erased, held otherwise. */
-  Standing project(String project);
+  /**
+   * The project {@code id} of {@code type} belongs to: gone once erased; on main, gone too for a
+   * spec or room put into a project main does not hold ({@link ProjectStore#refusesInto}), which
+   * the node keeps and offers again; held otherwise.
+   */
+  Standing project(String type, String id, String project);
 
   /** The run {@code actor}, a run principal, names, which decides a revision it wrote. */
   Standing run(String run, String actor);
@@ -97,6 +103,14 @@ public sealed interface Holdings {
       return store(type).liveBase(id).isPresent() || head(type, id).isPresent();
     }
 
+    String headProject(String type, String id) {
+      return changeLog.headProject(type, id).orElse(null);
+    }
+
+    ProjectStore projects() {
+      return new ProjectStore(db);
+    }
+
     SyncedStore store(String type) {
       return SyncedEntities.require(type).store(db);
     }
@@ -151,10 +165,18 @@ public sealed interface Holdings {
     }
 
     @Override
-    public Standing project(String project) {
-      return entries.erased(Erasure.PROJECT, project)
-          ? new Standing.Gone(Reasons.projectPruned(project))
-          : Standing.HELD;
+    public Standing project(String type, String id, String project) {
+      if (entries.erased(Erasure.PROJECT, project)) {
+        return new Standing.Gone(Reasons.projectPruned(project));
+      }
+      if (!Erasure.SPEC.equals(type) && !Erasure.ROOM.equals(type)) {
+        return Standing.HELD;
+      }
+      return entries
+          .projects()
+          .refusesInto(Actor.current(), entries.headProject(type, id), project, true)
+          .<Standing>map(refused -> new Standing.Gone(Reasons.unheld(refused)))
+          .orElse(Standing.HELD);
     }
 
     @Override
@@ -247,10 +269,17 @@ public sealed interface Holdings {
       this.entries = entries;
     }
 
+    /**
+     * A project this box made that main has not taken yet is awaited: projects sync after specs and
+     * rooms, so main would not hold it when they arrive.
+     */
     @Override
-    public Standing project(String project) {
-      return entries.erased(Erasure.PROJECT, project)
-          ? new Standing.Gone(Reasons.projectPruned(project))
+    public Standing project(String type, String id, String project) {
+      if (entries.erased(Erasure.PROJECT, project)) {
+        return new Standing.Gone(Reasons.projectPruned(project));
+      }
+      return entries.store(Erasure.PROJECT).liveBase(project).filter(Strings::isBlank).isPresent()
+          ? new Standing.Pending(Reasons.projectPending(project))
           : Standing.HELD;
     }
 
@@ -373,6 +402,16 @@ public sealed interface Holdings {
 
     static String projectPruned(String project) {
       return "project '" + project + "' was pruned";
+    }
+
+    static String projectPending(String project) {
+      return "main does not hold project '"
+          + project
+          + "' yet; it syncs in its own page, so the next round settles this";
+    }
+
+    static String unheld(Refusal refused) {
+      return refused.fix() == null ? refused.message() : refused.message() + " " + refused.fix();
     }
 
     static String runPending(String run, String actor) {

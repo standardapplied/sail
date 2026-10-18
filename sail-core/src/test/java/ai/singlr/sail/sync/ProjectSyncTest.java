@@ -94,63 +94,63 @@ class ProjectSyncTest {
 
   @Test
   void aViewersPushOfAProjectIsDeniedAndMainKeepsItsDefinition() {
-    main.projects.upsert("acme", "A1");
+    main.projects.upsert("zenith", "A1");
     var viewer = Actor.sync("ada", Role.VIEWER);
-    var rev = main.replica.currentRev("acme");
-    var edit = new LinkedHashMap<>(main.replica.current("acme"));
+    var rev = main.replica.currentRev("zenith");
+    var edit = new LinkedHashMap<>(main.replica.current("zenith"));
     edit.put("definition", "A2");
 
-    var edited = Actor.call(viewer, () -> main.replica.commit("acme", edit, rev));
-    var deleted = Actor.call(viewer, () -> main.replica.commit("acme", null, rev));
+    var edited = Actor.call(viewer, () -> main.replica.commit("zenith", edit, rev));
+    var deleted = Actor.call(viewer, () -> main.replica.commit("zenith", null, rev));
 
     assertInstanceOf(CommitOutcome.Denied.class, edited);
     assertInstanceOf(CommitOutcome.Denied.class, deleted);
-    assertEquals("A1", definitionOn(main, "acme"));
-    assertEquals(rev, main.replica.currentRev("acme"));
+    assertEquals("A1", definitionOn(main, "zenith"));
+    assertEquals(rev, main.replica.currentRev("zenith"));
 
     assertConverged();
   }
 
   @Test
   void aProjectCreatedOnMainLandsOnEveryNode() {
-    main.projects.upsert("acme", "name: acme\nimage: ubuntu/24.04\n");
+    main.projects.upsert("zenith", "name: zenith\nimage: ubuntu/24.04\n");
 
     sync(node);
-    assertEquals("name: acme\nimage: ubuntu/24.04\n", definitionOn(node, "acme"));
+    assertEquals("name: zenith\nimage: ubuntu/24.04\n", definitionOn(node, "zenith"));
 
     sync(other);
-    assertEquals("name: acme\nimage: ubuntu/24.04\n", definitionOn(other, "acme"));
+    assertEquals("name: zenith\nimage: ubuntu/24.04\n", definitionOn(other, "zenith"));
 
     assertConverged();
   }
 
   @Test
   void aProjectCreatedOnANodePushesToMainAndOtherNodes() {
-    node.projects.upsert("acme", "from-node");
+    node.projects.upsert("zenith", "from-node");
 
     sync(node);
-    assertEquals("from-node", definitionOn(main, "acme"));
+    assertEquals("from-node", definitionOn(main, "zenith"));
 
     sync(other);
-    assertEquals("from-node", definitionOn(other, "acme"));
+    assertEquals("from-node", definitionOn(other, "zenith"));
 
     assertConverged();
   }
 
   @Test
   void editsToDifferentProjectsAutoConvergeWithoutConflict() {
-    node.projects.upsert("acme", "A1");
+    node.projects.upsert("zenith", "A1");
     sync(node);
     sync(other);
 
-    node.projects.upsert("acme", "A2");
+    node.projects.upsert("zenith", "A2");
     other.projects.upsert("beta", "B1");
 
     sync(node);
     sync(other);
     sync(node);
 
-    assertEquals("A2", definitionOn(node, "acme"));
+    assertEquals("A2", definitionOn(node, "zenith"));
     assertEquals("B1", definitionOn(node, "beta"));
     assertEquals("B1", definitionOn(other, "beta"));
     assertTrue(node.conflicts.pending().isEmpty());
@@ -161,52 +161,52 @@ class ProjectSyncTest {
 
   @Test
   void editsToTheSameProjectConflictAndLeaveTheLocalCopyUntouched() {
-    node.projects.upsert("acme", "v1");
+    node.projects.upsert("zenith", "v1");
     sync(node);
     sync(other);
 
-    node.projects.upsert("acme", "from-node");
-    other.projects.upsert("acme", "from-other");
+    node.projects.upsert("zenith", "from-node");
+    other.projects.upsert("zenith", "from-other");
 
     sync(node);
     var report = engine.reconcile(other.replica, main.replica);
 
     assertEquals(1, report.conflicts());
-    assertEquals("from-node", definitionOn(main, "acme"));
-    var pending = other.conflicts.pendingFor("project", "acme");
+    assertEquals("from-node", definitionOn(main, "zenith"));
+    var pending = other.conflicts.pendingFor("project", "zenith");
     assertEquals(List.of("definition"), pending.orElseThrow().fields());
-    assertEquals("from-other", definitionOn(other, "acme"), "local copy is left untouched");
+    assertEquals("from-other", definitionOn(other, "zenith"), "local copy is left untouched");
 
-    resolveTakingMains(other, "project", "acme");
+    resolveTakingMains(other, "project", "zenith");
 
     assertConverged();
   }
 
   @Test
   void aDeleteOnOneBoxPropagates() {
-    node.projects.upsert("acme", "x");
+    node.projects.upsert("zenith", "x");
     sync(node);
     sync(other);
 
-    assertTrue(node.projects.delete("acme"));
+    assertTrue(node.projects.delete("zenith"));
     sync(node);
-    assertTrue(main.projects.findByName("acme").isEmpty());
+    assertTrue(main.projects.findByName("zenith").isEmpty());
 
     sync(other);
-    assertTrue(other.projects.findByName("acme").isEmpty());
+    assertTrue(other.projects.findByName("zenith").isEmpty());
 
     assertConverged();
   }
 
   @Test
   void aStaleCommitOnTheProjectReplicaIsRejected() {
-    main.projects.upsert("acme", "AAA");
+    main.projects.upsert("zenith", "AAA");
     sync(node);
 
-    var outcome = node.replica.commit("acme", Map.of("definition", "BBB"), "9-stale");
+    var outcome = node.replica.commit("zenith", Map.of("definition", "BBB"), "9-stale");
 
     assertInstanceOf(CommitOutcome.Rejected.class, outcome);
-    assertEquals("AAA", definitionOn(node, "acme"));
+    assertEquals("AAA", definitionOn(node, "zenith"));
 
     assertConverged();
   }

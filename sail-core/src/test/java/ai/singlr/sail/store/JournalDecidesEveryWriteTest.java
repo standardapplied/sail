@@ -116,6 +116,7 @@ class JournalDecidesEveryWriteTest {
 
     Fixture() {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "acme", "acme3");
       specs = new SpecStore(db);
       rooms = new RoomStore(db);
       runs = new RunStore(db);
@@ -230,7 +231,7 @@ class JournalDecidesEveryWriteTest {
         owned("SpecStore.delete", f -> f.specs.delete("theirs")),
         owned("SpecStore.setContent", f -> f.specs.setContent("theirs", "body", "plan")),
         owned("SpecStore.restore", f -> f.specs.restore("gone", f.goneRev, OperatorCommand.PLAIN)),
-        owned("SpecStore.reproject", f -> f.specs.reproject("acme", "acme2")),
+        owned("SpecStore.reproject", f -> f.specs.reproject("acme", "acme3")),
         owned(
             "SpecStore.assignMigrationProject",
             f -> f.specs.assignMigrationProject("legacy", "acme")),

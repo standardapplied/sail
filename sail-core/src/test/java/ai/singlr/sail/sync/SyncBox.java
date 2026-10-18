@@ -20,6 +20,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.FileStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
@@ -85,6 +86,7 @@ public final class SyncBox implements AutoCloseable {
     this.id = id;
     this.db = db;
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "proj", "acme");
     this.specs = new SpecStore(db);
     this.conflicts = new SyncConflicts(db);
     this.syncState = new SyncState(db);

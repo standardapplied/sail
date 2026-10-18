@@ -47,6 +47,7 @@ class SyncSchemaConvergenceTest {
     var path = tempDir.resolve(name + ".db");
     try (var db = Sqlite.open(path)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "proj");
       markMigrationCompleted(db);
     }
     return path;
@@ -114,6 +115,7 @@ class SyncSchemaConvergenceTest {
     var mainPath = stagedAtFloor("main");
     try (var main = SyncDatabase.converge(mainPath, "main");
         var node = SyncDatabase.converge(currentDatabase("node"), "node")) {
+      HeldProjects.hold(main.db(), "proj");
       new SpecStore(node.db()).create(spec("auth", "Auth", "awaiting_merge"));
 
       var report = SyncBox.round(main.db(), node.db(), "spec");
@@ -165,6 +167,7 @@ class SyncSchemaConvergenceTest {
     var path = tempDir.resolve("aux-created.db");
     try (var db = Sqlite.open(path)) {
       new SchemaManager(db).migrate();
+      HeldProjects.hold(db, "proj");
     }
 
     try (var converged = SyncDatabase.converge(path, "aux-box")) {

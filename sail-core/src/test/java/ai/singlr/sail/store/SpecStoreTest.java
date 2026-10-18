@@ -36,6 +36,8 @@ class SpecStoreTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(
+        db, "acme", "api", "light-grid", "old", "other", "renamed", "test-project", "zenith");
     store = new SpecStore(db);
   }
 

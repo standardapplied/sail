@@ -30,6 +30,7 @@ class RoomsBackfillMigrationTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("main.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme");
   }
 
   @AfterEach
@@ -133,6 +134,7 @@ class RoomsBackfillMigrationTest {
   void twoBoxesBackfillIdenticalRevsSoTheFirstSyncIsANoop() {
     try (var node = Sqlite.open(tempDir.resolve("node.db"))) {
       new SchemaManager(node).migrate();
+      HeldProjects.hold(node, "acme");
       seedSpec(db, "auth", "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}");
       seedSpec(node, "auth", "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}");
 
@@ -170,6 +172,7 @@ class RoomsBackfillMigrationTest {
   void aRoomMainNeverMintedPushesUpOnFirstSyncInsteadOfBeingDeleted() {
     try (var node = Sqlite.open(tempDir.resolve("node.db"))) {
       new SchemaManager(node).migrate();
+      HeldProjects.hold(node, "acme");
       seedSpec(node, "node-only", null);
       backfill(node);
       backfill(db);
@@ -215,6 +218,7 @@ class RoomsBackfillMigrationTest {
   void divergedSpecsStillConvergeThroughTheOrdinarySyncPath() {
     try (var node = Sqlite.open(tempDir.resolve("node.db"))) {
       new SchemaManager(node).migrate();
+      HeldProjects.hold(node, "acme");
       seedSpec(db, "auth", "{\"agent\":\"claude-code\",\"mode\":\"full\",\"engaged_at\":\"t0\"}");
       seedSpec(node, "auth", null);
 

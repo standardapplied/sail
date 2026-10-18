@@ -36,6 +36,7 @@ class RoomStoreTest {
   void setUp() {
     db = Sqlite.open(tempDir.resolve("test.db"));
     new SchemaManager(db).migrate();
+    HeldProjects.hold(db, "acme", "beta");
     rooms = new RoomStore(db);
   }
 
