@@ -69,9 +69,15 @@ public final class DemoSeeder {
    * provisions a box before it joins — untouched since, once it syncs as a node: a node gets the
    * demo from main like any project, so the seed is nobody's work, and the node's round would
    * otherwise announce dropping it. A demo main took, anyone changed, or anything was put into
-   * stays, to be offered or dropped as work. Returns whether it let go.
+   * stays, to be offered or dropped as work. Returns whether it let go. Decided and dropped under
+   * one write lock, so a write into the demo either lands first and keeps it or waits until it is
+   * gone.
    */
   public static boolean unseed(Sqlite db) {
+    return db.transaction(() -> unseedWhileLocked(db));
+  }
+
+  private static boolean unseedWhileLocked(Sqlite db) {
     var history = new ChangeLog(db).history(ENTITY, DemoProject.NAME);
     var seed =
         history.size() == 1

@@ -19,6 +19,7 @@ import ai.singlr.sail.identity.Ownership;
 import ai.singlr.sail.identity.ProjectScope;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.EnumMap;
@@ -41,6 +42,7 @@ import java.util.function.Supplier;
 public final class SpecStore implements ConflictResolver, SyncedStore {
 
   private static final String ENTITY = "spec";
+  private static final String STATUS_SINCE = "status_since";
 
   private final Sqlite db;
   private final BlobStore blobs;
@@ -517,7 +519,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
               plan,
               now);
           setHashes(specId, body, plan);
-          stampAuthor(specId);
+          db.execute(
+              "UPDATE specs SET updated_at = ?, updated_by = ? WHERE id = ?",
+              now,
+              author(),
+              specId);
           recordRevision(specId, ChangeLog.Entry.LOCAL, false);
         });
   }
@@ -543,6 +549,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
             .orElseThrow(() -> new IllegalArgumentException(unrestorable(id, rev, operator)));
     var snapshot = new LinkedHashMap<>(YamlUtil.parseMap(entry.snapshot()));
     snapshot.remove("updated_at");
+    snapshot.remove(STATUS_SINCE);
     db.transaction(
         () -> {
           applySnapshot(id, snapshot);
@@ -746,11 +753,12 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   private Map<String, Object> snapshotMap(SpecRow spec) {
     var hashes =
         db.queryOne(
-                "SELECT body_hash, plan_hash FROM specs WHERE id = ?",
+                "SELECT body_hash, plan_hash, COALESCE(archived_at, cancelled_at) FROM specs"
+                    + " WHERE id = ?",
                 row -> {
                   requireMigrated(row.text(0), spec.id());
                   requireMigrated(row.text(1), spec.id());
-                  return List.of(row.text(0), row.text(1));
+                  return Arrays.asList(row.text(0), row.text(1), row.text(2));
                 },
                 spec.id())
             .orElseThrow();
@@ -774,6 +782,9 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     map.put("room_id", spec.roomIdOrIdentity());
     map.put("body_hash", hashes.get(0));
     map.put("plan_hash", hashes.get(1));
+    if (hashes.get(2) != null) {
+      map.put(STATUS_SINCE, hashes.get(2));
+    }
     return map;
   }
 
@@ -851,6 +862,23 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
         updatedAt);
     db.execute(
         "UPDATE specs SET body_hash = ?, plan_hash = ? WHERE id = ?", bodyHash, planHash, id);
+    applyStatusSince(id, spec.status(), Snapshots.text(snapshot, STATUS_SINCE));
+  }
+
+  /**
+   * Writes when the spec entered its status as {@code since}, the transition's own time a revision
+   * carries, over what the status trigger stamped from this revision's time. A revision that
+   * carries none — a restore, or one from a box that predates carrying it — leaves the trigger's.
+   */
+  private void applyStatusSince(String id, SpecStatus status, String since) {
+    if (Strings.isBlank(since)) {
+      return;
+    }
+    db.execute(
+        "UPDATE specs SET archived_at = ?, cancelled_at = ? WHERE id = ?",
+        status == SpecStatus.ARCHIVED ? since : null,
+        status == SpecStatus.CANCELLED ? since : null,
+        id);
   }
 
   private static String roomIdOf(Map<String, Object> s) {
@@ -920,6 +948,10 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
       m.put(Snapshots.ACTOR, author);
     }
     m.put(Snapshots.CREATOR, full.get("created_by"));
+    var since = full.get(STATUS_SINCE);
+    if (since != null) {
+      m.put(Snapshots.STATUS_SINCE, since);
+    }
     return Snapshots.timed(m, full);
   }
 
@@ -1088,6 +1120,7 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
     full.put("created_by", Snapshots.creator(snapshot));
     full.put("created_at", Snapshots.text(snapshot, Snapshots.CREATED_AT));
     full.put("updated_at", Snapshots.text(snapshot, Snapshots.UPDATED_AT));
+    full.put(STATUS_SINCE, Snapshots.text(snapshot, Snapshots.STATUS_SINCE));
     return full;
   }
 

@@ -40,7 +40,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
   private static final String ENTITY = "room";
 
   private static final Set<String> SYNC_FIELDS =
-      Set.of("project", "title", "assignee", "wake", "roster", "created_by", "created_at");
+      Set.of("project", "title", "assignee", "wake", "roster", "created_by");
 
   private final Sqlite db;
   private final ChangeLog changeLog;
@@ -538,14 +538,16 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
     }
 
     /**
-     * Writes every synced field of {@code snapshot}, at the revision's time ({@link
-     * Snapshots#UPDATED_AT}). The creator and creation time are written once: an update keeps the
-     * row's, except that a node adopting main's revision takes main's.
+     * Writes every synced field of {@code snapshot}, at the revision's times ({@link
+     * Snapshots#timed}); a revision from a box that predates them names its creation time as a
+     * field. The creator and creation time are written once: an update keeps the row's, except that
+     * a node adopting main's revision takes main's.
      */
     @Override
     public void apply(String id, Map<String, Object> snapshot) {
       var now = DateTimeUtils.now().toString();
-      var createdAt = Snapshots.text(snapshot, "created_at");
+      var createdAt =
+          Snapshots.timeOr(snapshot, Snapshots.CREATED_AT, Snapshots.text(snapshot, "created_at"));
       var adopting = Actor.current().lane() == Actor.Lane.MAIN;
       db.execute(
           """
@@ -600,11 +602,7 @@ public final class RoomStore implements ConflictResolver, SyncedStore {
       if (author != null) {
         m.put(Snapshots.ACTOR, author);
       }
-      var updated = full.get("updated_at");
-      if (updated != null) {
-        m.put(Snapshots.UPDATED_AT, updated);
-      }
-      return m;
+      return Snapshots.timed(m, full);
     }
 
     @Override

@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import ai.singlr.sail.config.SpecStatus;
@@ -93,6 +94,71 @@ class RecordTimesSyncTest {
     assertNotNull(archived);
     assertEquals(ada.specs.findById("e-acme").orElseThrow().updatedAt(), archived);
     assertSameEverywhere(box -> archivedAt(box, "e-acme"));
+  }
+
+  @Test
+  void anArchiveEditedBeforeItSyncsHoldsTheTimeOfTheArchiveEverywhere() {
+    ada.create(SyncBox.spec("e-acme", "Ada's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.as("ada", () -> ada.specs.updateStatus("e-acme", SpecStatus.ARCHIVED));
+    var archived = archivedAt(ada, "e-acme");
+    Acting.as("ada", () -> ada.specs.setContent("e-acme", "Kept for the record.", ""));
+    SyncBox.quiesce(main, ada, bob);
+
+    assertNotEquals(ada.specs.findById("e-acme").orElseThrow().updatedAt(), archived);
+    assertEquals(archived, archivedAt(main, "e-acme"));
+    assertSameEverywhere(box -> archivedAt(box, "e-acme"));
+  }
+
+  @Test
+  void concurrentArchivesSettleOnOneArchiveTime() {
+    main.create(SyncBox.spec("m-acme", "Main's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+
+    Acting.as("main", () -> main.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
+    Acting.as("ada", () -> ada.specs.updateStatus("m-acme", SpecStatus.ARCHIVED));
+    var mains = archivedAt(main, "m-acme");
+    var adas = archivedAt(ada, "m-acme");
+    SyncBox.quiesce(main, ada, bob);
+
+    assertNotEquals(mains, adas);
+    assertEquals(mains, archivedAt(ada, "m-acme"));
+    assertSameEverywhere(box -> archivedAt(box, "m-acme"));
+    assertSameEverywhere(box -> times(box, "m-acme"));
+  }
+
+  @Test
+  void aBodyEditHoldsTheTimeItWasMadeEverywhere() {
+    main.create(SyncBox.spec("m-acme", "Main's", "pending"));
+    SyncBox.quiesce(main, ada, bob);
+    var created = times(main, "m-acme");
+
+    Acting.as("main", () -> main.specs.setContent("m-acme", "A sharper body.", ""));
+    var edited = main.specs.getContent("m-acme").orElseThrow().updatedAt();
+    SyncBox.quiesce(main, ada, bob);
+
+    assertNotEquals(created.getLast(), edited);
+    assertEquals(List.of(created.getFirst(), edited), times(main, "m-acme"));
+    assertSameEverywhere(box -> times(box, "m-acme"));
+    assertSameEverywhere(box -> box.specs.getContent("m-acme").orElseThrow().updatedAt());
+  }
+
+  @Test
+  void oneRoomMadeAlikeOnMainAndANodeNeverConflictsOnItsTimes() {
+    var lounge =
+        new RoomStore.RoomRow("lounge", "acme", "Lounge", null, null, null, null, null, null, null);
+    Acting.as("ada", () -> new RoomStore(main.db).create(lounge));
+    Acting.as("ada", () -> new RoomStore(ada.db).create(lounge));
+
+    SyncBox.quiesce(main, ada, bob);
+
+    assertEquals(List.of(), ada.conflicts.pending());
+    assertSameEverywhere(
+        box -> {
+          var room = new RoomStore(box.db).findById("lounge").orElseThrow();
+          return List.of(room.createdAt(), room.updatedAt());
+        });
   }
 
   @Test

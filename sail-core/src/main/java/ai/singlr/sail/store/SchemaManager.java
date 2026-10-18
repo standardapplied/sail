@@ -186,9 +186,10 @@ public final class SchemaManager {
 
   /**
    * When a spec entered {@code archived} or {@code cancelled}: the time of the revision that made
-   * the transition ({@code updated_at}), which a box adopting it writes verbatim, so every box
-   * holds the same instant and retention ages on the author's. Supersedes {@link
-   * #STATUS_SINCE_ON_INSERT}, which stamped each box's own clock.
+   * the transition ({@code updated_at}), which the revision carries on ({@link
+   * Snapshots#STATUS_SINCE}) and a box adopting it writes verbatim, so every box holds the same
+   * instant and retention ages on the author's. Supersedes {@link #STATUS_SINCE_ON_INSERT}, which
+   * stamped each box's own clock.
    */
   static final String STATUS_SINCE_REVISION_ON_INSERT =
       """

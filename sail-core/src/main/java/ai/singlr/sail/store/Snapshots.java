@@ -33,6 +33,13 @@ public final class Snapshots {
   /** Reserved metadata key carrying when a revision was made, on its author's clock. */
   public static final String UPDATED_AT = "_updated_at";
 
+  /**
+   * Reserved metadata key carrying when a spec entered {@code archived} or {@code cancelled}, on
+   * the clock of the revision that made the transition: a later revision of the same status is not
+   * that revision, so its own time cannot stand in. Absent in any other status.
+   */
+  public static final String STATUS_SINCE = "_status_since";
+
   private Snapshots() {}
 
   /**
