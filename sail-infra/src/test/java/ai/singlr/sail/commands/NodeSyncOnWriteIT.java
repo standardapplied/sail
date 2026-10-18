@@ -14,11 +14,13 @@ import ai.singlr.sail.Main;
 import ai.singlr.sail.api.SailApiClient;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MigrationRunner;
+import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -96,8 +98,9 @@ class NodeSyncOnWriteIT {
   }
 
   /**
-   * Seeds main's database the way {@code sail join} would have: a member FDE and a live session
-   * token, which the SSH gateway hands to {@code _sync} so the node's pushes are authorized.
+   * Seeds main's database the way {@code sail join} would have: the project the node writes in, a
+   * member FDE and a live session token, which the SSH gateway hands to {@code _sync} so the node's
+   * pushes are authorized.
    */
   private static String seedMainWithMemberSession(Path mainDb) {
     try (var db = Sqlite.open(mainDb)) {
@@ -105,6 +108,8 @@ class NodeSyncOnWriteIT {
           db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
     }
     try (var converged = SyncDatabase.converge(mainDb, "mainbox")) {
+      Actor.run(
+          Actor.system(), () -> new ProjectStore(converged.db()).upsert("acme", "name: acme\n"));
       var fde = new FdeStore(converged.db()).add("mady", "Mady", "mady@example.dev", "member");
       return new AuthSessionStore(converged.db()).create(fde.id(), Duration.ofHours(1)).token();
     }
