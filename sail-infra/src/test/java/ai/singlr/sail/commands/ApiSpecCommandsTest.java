@@ -351,6 +351,29 @@ class ApiSpecCommandsTest {
   }
 
   @Test
+  void aJsonDeleteWithNoTerminalToConfirmOnIsRefusedAndDeletesNothing() {
+    run("create", "--id", "kept", "--title", "Kept");
+
+    var refused = answering("", false, "delete", "kept", "--json");
+
+    assertEquals(
+        new Ran(1, "", "  ✗ Not deleted: no terminal to confirm on. Re-run with --force.\n"),
+        refused);
+    assertTrue(run("show", "kept", "--json").contains("\"id\": \"kept\""));
+  }
+
+  @Test
+  void aForcedJsonDeleteWithNoTerminalDeletes() {
+    run("create", "--id", "doomed", "--title", "Doomed");
+
+    var deleted = answering("", false, "delete", "doomed", "--json", "--force");
+
+    assertEquals(0, deleted.code());
+    assertTrue(deleted.out().contains("\"deleted\": true"));
+    assertFalse(run("list", "--json").contains("doomed"));
+  }
+
+  @Test
   void aDeleteAnsweredWithAnEmptyLineOnATerminalIsCancelled() {
     run("create", "--id", "kept", "--title", "Kept");
 

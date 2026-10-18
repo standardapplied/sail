@@ -40,7 +40,6 @@ public final class ApiSpecDeleteCommand implements Runnable {
     NameValidator.requireValidSpecId(specId);
 
     if (!force
-        && !json
         && !ConsoleHelper.confirmDestructive("Delete spec '" + specId + "'?", "Not deleted")) {
       System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
       return;
