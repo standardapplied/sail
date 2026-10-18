@@ -11,12 +11,15 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -54,6 +57,67 @@ class DemoSeederTest {
 
     assertTrue(store.findByName(DemoProject.NAME).isEmpty());
     assertNull(store.latestRev(DemoProject.NAME), "nothing for its first round to drop");
+  }
+
+  @Test
+  void aSeedUntouchedSinceIsLetGoWhenTheBoxSyncsAsANode() {
+    DemoSeeder.seedIfAbsent(db, true);
+
+    assertTrue(DemoSeeder.unseed(db));
+
+    assertTrue(store.findByName(DemoProject.NAME).isEmpty());
+    assertNull(store.latestRev(DemoProject.NAME), "nothing left to offer or drop");
+    assertFalse(DemoSeeder.unseed(db));
+  }
+
+  @Test
+  void aDemoAnyoneChangedStaysAsWork() {
+    DemoSeeder.seedIfAbsent(db, true);
+    Acting.as("ada", () -> store.upsert(DemoProject.NAME, "name: demo\ndescription: mine\n"));
+
+    assertFalse(DemoSeeder.unseed(db));
+    assertEquals(
+        "name: demo\ndescription: mine\n",
+        store.findByName(DemoProject.NAME).orElseThrow().definition());
+  }
+
+  @Test
+  void aDemoHoldingASpecStaysAsWork() {
+    DemoSeeder.seedIfAbsent(db, true);
+    Acting.as(
+        "ada",
+        () ->
+            new SpecStore(db)
+                .create(
+                    new SpecStore.SpecRow(
+                        "tour",
+                        DemoProject.NAME,
+                        "Tour",
+                        SpecStatus.DRAFT,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0,
+                        "ada",
+                        "",
+                        "",
+                        "ada",
+                        List.of(),
+                        List.of())));
+
+    assertFalse(DemoSeeder.unseed(db));
+    assertTrue(store.findByName(DemoProject.NAME).isPresent());
+  }
+
+  @Test
+  void aDemoMainTookStays() {
+    DemoSeeder.seedIfAbsent(db, true);
+    db.execute("UPDATE projects SET base_rev = rev WHERE name = ?", DemoProject.NAME);
+
+    assertFalse(DemoSeeder.unseed(db));
+    assertTrue(store.findByName(DemoProject.NAME).isPresent());
   }
 
   @Test

@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -20,6 +22,8 @@ import ai.singlr.sail.store.Sqlite;
  * grants it, and one seeded there would be dropped by its first round.
  */
 public final class DemoSeeder {
+
+  private static final String ENTITY = "project";
 
   private DemoSeeder() {}
 
@@ -58,5 +62,33 @@ public final class DemoSeeder {
     }
     Actor.run(Actor.system(), () -> store.upsert(DemoProject.NAME, DemoProject.DEFINITION));
     return true;
+  }
+
+  /**
+   * Lets go of the demo this box seeded while it synced with nobody — {@code sudo sail init --main}
+   * provisions a box before it joins — untouched since, once it syncs as a node: a node gets the
+   * demo from main like any project, so the seed is nobody's work, and the node's round would
+   * otherwise announce dropping it. A demo main took, anyone changed, or anything was put into
+   * stays, to be offered or dropped as work. Returns whether it let go.
+   */
+  public static boolean unseed(Sqlite db) {
+    var history = new ChangeLog(db).history(ENTITY, DemoProject.NAME);
+    var seed =
+        history.size() == 1
+            && history.getFirst().kind() == ChangeLog.Kind.REVISION
+            && ChangeLog.Entry.LOCAL.equals(history.getFirst().origin())
+            && Actor.SYSTEM_HANDLE.equals(history.getFirst().actor())
+            && new ProjectStore(db).liveBase(DemoProject.NAME).filter(String::isBlank).isPresent()
+            && db.queryOne(
+                        "SELECT count(*) FROM change_heads WHERE project = ? AND entity_type <> ?",
+                        row -> row.integer(0),
+                        DemoProject.NAME,
+                        ENTITY)
+                    .orElseThrow()
+                == 0;
+    if (seed) {
+      new Erasure(db).dropLocal(DemoProject.NAME);
+    }
+    return seed;
   }
 }
