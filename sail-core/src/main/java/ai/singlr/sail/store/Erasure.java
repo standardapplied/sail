@@ -59,7 +59,6 @@ public final class Erasure {
     }
   }
 
-  /** What one erasure removed: the entities, per type, and the events that went with them. */
   /**
    * What a {@linkplain #dropLocal drop} let go: every entity, and how many of them carried a change
    * main had not taken yet.
@@ -70,6 +69,7 @@ public final class Erasure {
     }
   }
 
+  /** What one erasure removed: the entities, per type, and the events that went with them. */
   public record Result(List<Target> entities, int events) {
     public static final Result NONE = new Result(List.of(), 0);
 
