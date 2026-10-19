@@ -6,9 +6,7 @@
 package ai.singlr.sail.common;
 
 import java.security.SecureRandom;
-import java.time.Clock;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
@@ -94,15 +92,6 @@ public final class Ids {
       return (lastTimestamp + 1) << COUNTER_BITS;
     }
     return currentState + 1;
-  }
-
-  /**
-   * Returns the current UTC timestamp.
-   *
-   * @return the current time in UTC
-   */
-  public static OffsetDateTime now() {
-    return OffsetDateTime.now(Clock.systemUTC());
   }
 
   /**

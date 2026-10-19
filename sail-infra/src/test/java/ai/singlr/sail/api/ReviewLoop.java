@@ -38,8 +38,12 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.time.temporal.ChronoField;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -55,11 +59,13 @@ import java.util.regex.Pattern;
  * The review loop as the server runs it, over a {@link FakeContainer}: the real stores, the real
  * bus with the real {@link ReviewPipelineController} and {@link RunTracker} subscribed, and the
  * real launch path ({@link DispatchOperations}'s review lanes over {@link RunLauncher} and {@link
- * WatcherSpawner}). Only the container shell and the clock are fake. A run ends here the one way it
- * ends in production — the authoritative stop its watcher publishes: the real {@link RunWatch},
- * under the limits the launch handed it on its command line, reading the container as it does in
- * the field — and {@link #settle} returns once every subscriber has handled everything published,
- * so a test reads the loop's rows without sleeping or polling.
+ * WatcherSpawner}). Only the container shell and the clock are fake: {@link DateTimeUtils#clock} is
+ * a {@link FixedWidthClock} while a loop is open, so every instant the loop writes sorts as minted
+ * on a clock of any resolution. A run ends here the one way it ends in production — the
+ * authoritative stop its watcher publishes: the real {@link RunWatch}, under the limits the launch
+ * handed it on its command line, reading the container as it does in the field — and {@link
+ * #settle} returns once every subscriber has handled everything published, so a test reads the
+ * loop's rows without sleeping or polling.
  */
 final class ReviewLoop implements AutoCloseable {
 
@@ -137,6 +143,7 @@ final class ReviewLoop implements AutoCloseable {
       String yamlContent,
       Function<String, ReviewPipelineConfig> config,
       Function<String, String> reviewer) {
+    DateTimeUtils.clock = new FixedWidthClock();
     db = Sqlite.open(dir.resolve("loop-" + System.nanoTime() + ".db"));
     new SchemaManager(db).migrate();
     projects = new ProjectStore(db);
@@ -779,5 +786,33 @@ final class ReviewLoop implements AutoCloseable {
   public void close() {
     bus.close();
     db.close();
+    DateTimeUtils.clock = Clock.systemUTC();
+  }
+
+  /**
+   * The system clock to the microsecond, never on a whole millisecond: an instant's text drops
+   * trailing zeros, so {@code …51.123Z} sorts after {@code …51.123400Z} though it is earlier, and a
+   * microsecond clock lands on such a value one time in a thousand. Every instant this clock gives
+   * prints six fraction digits, so the stores' text order is time order, and two reads within a
+   * microsecond tie and order by id, as minted.
+   */
+  static final class FixedWidthClock extends Clock {
+    @Override
+    public Instant instant() {
+      var now = Instant.now();
+      var micros = now.getNano() / 1_000 * 1_000;
+      return now.with(
+          ChronoField.NANO_OF_SECOND, micros % 1_000_000 == 0 ? micros + 1_000 : micros);
+    }
+
+    @Override
+    public ZoneId getZone() {
+      return ZoneOffset.UTC;
+    }
+
+    @Override
+    public Clock withZone(ZoneId zone) {
+      return this;
+    }
   }
 }

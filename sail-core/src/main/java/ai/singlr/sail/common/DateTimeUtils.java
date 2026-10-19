@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.common;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
@@ -44,9 +45,16 @@ public final class DateTimeUtils {
     };
   }
 
+  /**
+   * The clock {@link #now()} reads. A test pins it: rows written together under a clock that ticks
+   * whole seconds tie on their instant and order by id, as minted, whatever the platform's clock
+   * resolution makes of an instant's text.
+   */
+  public static volatile Clock clock = Clock.systemUTC();
+
   /** UTC instant for "right now". An {@code Instant} is always UTC by definition. */
   public static Instant now() {
-    return Ids.now().toInstant();
+    return Instant.now(clock);
   }
 
   /** UUIDv7 identifier — time-ordered, monotonic. */
