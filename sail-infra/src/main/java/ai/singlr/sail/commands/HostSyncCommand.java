@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SshSyncChannel;
@@ -18,6 +19,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -45,6 +47,19 @@ public final class HostSyncCommand implements Runnable {
       description = "SSH target of the main devbox, e.g. sail@maindevbox — makes this box a node.")
   private String mainTarget;
 
+  @Option(
+      names = "--handle",
+      description =
+          "With --as-main: the FDE this box acts as (its sync handle), added to the roster as admin"
+              + " when absent.")
+  private String handle;
+
+  @Option(names = "--name", description = "With --handle: the FDE's display name when added.")
+  private String displayName;
+
+  @Option(names = "--email", description = "With --handle: the FDE's email when added.")
+  private String email;
+
   @Option(names = "--json", description = "Output in JSON format.")
   private boolean json;
 
@@ -55,6 +70,7 @@ public final class HostSyncCommand implements Runnable {
 
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
+    validateOwnFde(operator);
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
       throw HostInitCommand.notInitialized(operator);
@@ -74,37 +90,106 @@ public final class HostSyncCommand implements Runnable {
               + (asMain ? "--as-main" : "--main " + mainTarget));
     }
 
-    printRole(
+    var taken =
         takeRole(
             path,
             SailPaths.controlPlaneDb(),
             host,
             asMain,
             mainTarget,
+            handle == null ? null : new OwnFde(handle, displayName, email),
             HostInfo.hostname(),
             SshSyncChannel::open,
-            operator),
-        operator);
+            operator);
+    if (!json) {
+      taken.enrolled().ifPresent(line -> System.out.println(Ansi.AUTO.string(line)));
+    }
+    printRole(taken.sync(), operator);
   }
+
+  private void validateOwnFde(OperatorCommand operator) {
+    if (handle == null) {
+      if (displayName != null || email != null) {
+        throw new IllegalArgumentException(
+            "--name and --email describe the FDE --handle names. Pass --handle <handle> too.");
+      }
+      return;
+    }
+    if (!asMain) {
+      throw new IllegalArgumentException(
+          "--handle names main's own FDE, so it goes with --as-main. A node takes its handle"
+              + " when it joins: "
+              + operator.sail(
+                  "join " + (mainTarget == null ? "<main>" : mainTarget) + " --handle " + handle));
+    }
+    NameValidator.requireValidFdeHandle(handle);
+    if (displayName != null) {
+      NameValidator.requireValidDisplayName(displayName);
+    }
+    if (email != null) {
+      NameValidator.requireValidEmail(email);
+    }
+  }
+
+  /** Main's own FDE: the handle this box acts as, with the roster name and email it is added by. */
+  record OwnFde(String handle, String name, String email) {}
+
+  /** The role a box took, and the roster line when it took its own FDE with it. */
+  record Taken(SyncConfig sync, Optional<String> enrolled) {}
 
   /**
    * Gives the box whose config is {@code host} at {@code hostYamlPath} its chosen role ({@link
-   * #configure}) as a change of its identity ({@link HandleChange}) in its database {@code db}, so
-   * a box becoming main stamps its unstamped runs as its own. Returns the role it now has.
+   * #configure}) and, when {@code own} is not {@code null}, that sync handle ({@link #withHandle}),
+   * as one change of its identity ({@link HandleChange}) in its database {@code db}, so a box
+   * becoming main stamps its unstamped runs as its own; then puts that FDE on the roster ({@link
+   * FdeCommand#enrol}). Returns the role it now has and the roster line.
    */
-  static SyncConfig takeRole(
+  static Taken takeRole(
       Path hostYamlPath,
       Path db,
       HostYaml host,
       boolean asMain,
       String mainTarget,
+      OwnFde own,
       String hostname,
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
-    var updated = configure(host, asMain, mainTarget, hostname);
+    var handle = own == null ? null : own.handle();
+    var updated = withHandle(configure(host, asMain, mainTarget, hostname), handle, operator);
     HandleChange.write(hostYamlPath, db, host, updated, channels, operator);
-    return updated.sync();
+    var enrolled =
+        own == null
+            ? Optional.<String>empty()
+            : Optional.of(FdeCommand.enrol(db, handle, own.name(), own.email(), operator));
+    return new Taken(updated.sync(), enrolled);
+  }
+
+  /** {@code host} acting as {@code handle}, or as it is when {@code handle} is {@code null}. */
+  static HostYaml withHandle(HostYaml host, String handle, OperatorCommand operator) {
+    if (handle == null) {
+      return host;
+    }
+    requireHandle(host.sync().handle(), handle, operator);
+    return HostConfigSetCommand.applyChange(host, "sync-handle", handle);
+  }
+
+  /**
+   * Refuses to make {@code handle} the operator of a box already acting as {@code held}: its runs
+   * and its specs are that FDE's, so the handle changes only when asked for by name.
+   */
+  static void requireHandle(String held, String handle, OperatorCommand operator) {
+    if (held != null && !held.equals(handle)) {
+      throw new IllegalStateException(
+          "This box already acts as '"
+              + held
+              + "', not '"
+              + handle
+              + "'. Re-run with --handle "
+              + held
+              + ", or change its handle first: "
+              + operator.sail("host config set sync-handle " + handle));
+    }
   }
 
   /**

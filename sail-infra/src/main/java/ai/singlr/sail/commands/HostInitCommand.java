@@ -269,8 +269,8 @@ public final class HostInitCommand implements Runnable {
             ? "  @|green ✓|@ sail API service already installed — nothing to do here; '"
                 + operator.sail("upgrade")
                 + "' keeps it current."
-            : "  @|bold Next step:|@ sudo sail init --as-main, or sudo sail init --main <main>,"
-                + " installs sail-api and connects this box.");
+            : "  @|bold Next step:|@ sudo sail init --as-main --handle <you>, or sudo sail init"
+                + " --main <main>, installs sail-api and connects this box.");
   }
 
   private String detectAndSelectDisk(ShellExec shell) throws Exception {

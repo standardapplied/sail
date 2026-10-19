@@ -13,6 +13,7 @@ import java.io.InputStreamReader;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import picocli.CommandLine.Help.Ansi;
 
@@ -25,6 +26,12 @@ final class ConsoleHelper {
   private static BufferedReader stdinReader;
 
   static Supplier<Console> consoleSupplier = System::console;
+
+  /**
+   * Whether a terminal is attached. A {@link Console} cannot be made outside the JDK, so a test
+   * that answers a prompt on stdin stands a terminal in here.
+   */
+  static BooleanSupplier terminal = () -> consoleSupplier.get() != null;
 
   private ConsoleHelper() {}
 
@@ -91,6 +98,19 @@ final class ConsoleHelper {
     return line.strip().equalsIgnoreCase("y");
   }
 
+  /**
+   * Asks before an action that cannot be undone, defaulting to no. Nobody can answer without a
+   * terminal, so it refuses there rather than act on an answer nobody gave, naming {@code notDone}
+   * (e.g. "Not deleted") and {@code flag}, the one that skips the question.
+   */
+  static boolean confirmDestructive(String prompt, String notDone, String flag) {
+    if (!hasConsole()) {
+      throw new IllegalStateException(
+          notDone + ": no terminal to confirm on. Re-run with " + flag + ".");
+    }
+    return confirmNo(prompt);
+  }
+
   /** Returns {@code true} if the current process is running as root. */
   static boolean isRoot() {
     return SailPaths.isRoot();
@@ -98,7 +118,7 @@ final class ConsoleHelper {
 
   /** Returns {@code true} when a real console is attached (a TTY able to prompt interactively). */
   static boolean hasConsole() {
-    return consoleSupplier.get() != null;
+    return terminal.getAsBoolean();
   }
 
   /**

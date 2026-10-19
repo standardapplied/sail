@@ -36,8 +36,10 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RegisteredCredential;
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.ByteBuffer;
@@ -59,6 +61,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
+import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -87,6 +90,8 @@ class FdeCommandTest {
 
   private final PrintStream originalOut = System.out;
   private final PrintStream originalErr = System.err;
+  private final InputStream originalIn = System.in;
+  private final BooleanSupplier originalTerminal = ConsoleHelper.terminal;
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
   private final ByteArrayOutputStream err = new ByteArrayOutputStream();
   private final Keygen keygen = new Keygen();
@@ -110,6 +115,16 @@ class FdeCommandTest {
   void restoreStreams() {
     System.setOut(originalOut);
     System.setErr(originalErr);
+    System.setIn(originalIn);
+    ConsoleHelper.terminal = originalTerminal;
+    ConsoleHelper.resetStdin();
+  }
+
+  /** Puts {@code stdin} on standard input, with a terminal attached or not. */
+  private void answering(String stdin, boolean terminal) {
+    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
+    ConsoleHelper.resetStdin();
+    ConsoleHelper.terminal = () -> terminal;
   }
 
   private Path home() {
@@ -1493,6 +1508,42 @@ class FdeCommandTest {
         0L,
         inDb(db -> db.queryOne("SELECT count(*) FROM fde_pairings", row -> row.integer(0)))
             .orElseThrow());
+  }
+
+  @Test
+  void aRemovalWithNoTerminalToConfirmOnIsRefusedAndKeepsTheFdeAndItsKeys() {
+    assertEquals(0, fde("add", "bob", "--key", LAPTOP.line()), refusal);
+    answering("", false);
+
+    assertEquals(1, fde("rm", "bob"));
+
+    assertEquals("Not removed: no terminal to confirm on. Re-run with --force.", refusal);
+    assertEquals(List.of(), printed());
+    var bob = inDb(db -> new FdeStore(db).byHandle("bob")).orElseThrow();
+    assertEquals(1, inDb(db -> new FdeSshKeyStore(db).listForFde(bob.id())).size());
+  }
+
+  @Test
+  void aRemovalAnsweredWithAnEmptyLineOnATerminalIsCancelled() {
+    inDb(db -> new FdeStore(db).add("bob", null, null, "member"));
+    answering("\n", true);
+
+    assertEquals(0, fde("rm", "bob"), refusal);
+
+    assertEquals(
+        List.of("  Remove FDE 'bob' and revoke all its credentials? [y/N]   Cancelled."),
+        printed());
+    assertTrue(inDb(db -> new FdeStore(db).byHandle("bob")).isPresent());
+  }
+
+  @Test
+  void aRemovalAnsweredYesOnATerminalRemoves() {
+    inDb(db -> new FdeStore(db).add("bob", null, null, "member"));
+    answering("y\n", true);
+
+    assertEquals(0, fde("rm", "bob"), refusal);
+
+    assertTrue(inDb(db -> new FdeStore(db).byHandle("bob")).isEmpty());
   }
 
   @Test

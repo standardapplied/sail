@@ -814,7 +814,8 @@ on the host, where the API is reachable at `127.0.0.1:7070`.
 
 There is one convergent, idempotent, root-aware command per box, `sail init`:
 
-- `sudo sail init --as-main` makes this box the org's source of truth.
+- `sudo sail init --as-main --handle <you>` makes this box the org's source of truth, with you
+  as its operator.
 - `sudo sail init --main <target>` joins an existing main as a node.
 
 It requires root and figures out what is missing and does only that, decided by a pure,
@@ -822,7 +823,10 @@ unit-tested `InitPlan`: provision the host if needed, install and start `sail-ap
 system service (whoever invoked `sudo`; init never runs a step as another account), and take
 on identity. A `sudo` user who already runs `sail-api` as a user service is refused before
 anything is written, since a second control plane would contend for its port. On main that
-means publishing the SSH identity and declaring `--as-main`. On a node it means `join`, which
+means publishing the SSH identity and declaring `--as-main` with its operator's handle
+(`--handle`, else the one the box already acts as, else asked for; a box acting as another
+handle is refused before any step): `host sync --as-main --handle` writes the role and the
+sync handle in one identity change and adds that FDE as admin when the roster lacks it. On a node it means `join`, which
 first pins main's ed25519 host key into the invoking account's `known_hosts` (`MainHostKey`:
 `ssh-keyscan -H` on port 22, appended when absent, kept when equal, refused when it differs or
 cannot be read, all before the host config is written), then generates the box's sync key and

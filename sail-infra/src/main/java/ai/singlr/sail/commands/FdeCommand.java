@@ -31,6 +31,7 @@ import ai.singlr.sail.store.FdePairingStore;
 import ai.singlr.sail.store.FdeSshKeyStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
+import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
 import ai.singlr.sail.store.TokenStore;
@@ -189,6 +190,35 @@ public final class FdeCommand implements Runnable {
         + fde.role()
         + (scoped ? ", scoped: grant projects with '" + operator.sail("fde grant") + "'" : "")
         + ")";
+  }
+
+  /**
+   * Puts main's own FDE {@code handle} on the roster in {@code db}: added as admin when absent, as
+   * the operator who set up the box administers it, and an FDE already there is left as it is, told
+   * how to make it admin when it is not. Returns the line that says which.
+   */
+  static String enrol(Path db, String handle, String name, String email, OperatorCommand operator) {
+    try (var sqlite = Sqlite.open(db)) {
+      new SchemaManager(sqlite).migrate();
+      var fdes = new FdeStore(sqlite);
+      return sqlite.transaction(
+          () ->
+              fdes.byHandle(handle)
+                  .map(fde -> onRoster(fde, operator))
+                  .orElseGet(() -> added(fdes.add(handle, name, email, "admin"), false, operator)));
+    }
+  }
+
+  private static String onRoster(FdeStore.Fde fde, OperatorCommand operator) {
+    var standing = fde.active() ? fde.role() : fde.role() + ", " + fde.status();
+    var line = "  @|faint FDE " + fde.handle() + " is already on the roster (" + standing + ").|@";
+    if ("admin".equals(fde.role())) {
+      return line;
+    }
+    return line
+        + " Make it admin: @|bold "
+        + operator.sail("fde update " + fde.handle() + " --role admin")
+        + "|@";
   }
 
   static String trustedAfterApply(String projects, OperatorCommand operator) {
@@ -779,12 +809,11 @@ public final class FdeCommand implements Runnable {
     }
 
     private boolean confirmed() {
-      if (force) {
-        return true;
-      }
-      System.out.print("  Remove FDE '" + handle + "' and revoke all its credentials? [y/N] ");
-      var answer = System.console() != null ? System.console().readLine() : "y";
-      return answer != null && answer.strip().equalsIgnoreCase("y");
+      return force
+          || ConsoleHelper.confirmDestructive(
+              "Remove FDE '" + handle + "' and revoke all its credentials?",
+              "Not removed",
+              "--force");
     }
   }
 
