@@ -196,12 +196,12 @@ class InitCommandTest {
   }
 
   @Test
-  void aNodesRosterValuesAreMainsToTakeSoItsJoinIsNotRefusedForThem() {
+  void aNodesJoinAsksForItsOwnRosterValuesSoNoneIsPassedOrRefusedHere() {
     gitConfig.put("user.email", "dev");
 
     assertEquals(0, init("--main", "m", "--handle", "ada"));
 
-    assertEquals("JoinCommand m --handle ada --name Root Person --email dev", ran.getLast());
+    assertEquals("JoinCommand m --handle ada", ran.getLast());
   }
 
   @Test
@@ -269,7 +269,7 @@ class InitCommandTest {
 
     assertEquals(0, init("--main", "m", "--handle", "ada"));
 
-    assertEquals("JoinCommand m --handle ada --name Root Person --email root@box", ran.getLast());
+    assertEquals("JoinCommand m --handle ada", ran.getLast());
   }
 
   @Test
@@ -342,7 +342,7 @@ class InitCommandTest {
 
   @Test
   void reRunningAfterAFailedJoinResumesAndFinishes() {
-    failing = "JoinCommand maindevbox --name Root Person --email root@box";
+    failing = "JoinCommand maindevbox";
 
     assertEquals(1, init("--main", "maindevbox"));
     assertEquals("Setup stopped — the step above failed.", refusal);
@@ -351,11 +351,7 @@ class InitCommandTest {
 
     assertEquals(0, init("--main", "maindevbox"));
 
-    assertEquals(
-        List.of(
-            "HostServiceInstallCommand",
-            "JoinCommand maindevbox --name Root Person --email root@box"),
-        ran);
+    assertEquals(List.of("HostServiceInstallCommand", "JoinCommand maindevbox"), ran);
   }
 
   /** {@code git config --global} of one account: {@code --get} reads it, a key and value set it. */

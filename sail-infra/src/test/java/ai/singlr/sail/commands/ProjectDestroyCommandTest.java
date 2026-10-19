@@ -46,7 +46,7 @@ class ProjectDestroyCommandTest {
     var refused =
         assertThrows(
             IllegalStateException.class,
-            () -> ProjectDestroyCommand.confirmed(false, false, "acme", true));
+            () -> ProjectDestroyCommand.confirmed(false, false, false, "acme", true));
 
     assertEquals(
         "Not destroyed: no terminal to confirm on. Re-run with --yes.", refused.getMessage());
@@ -56,7 +56,7 @@ class ProjectDestroyCommandTest {
   void aDestroyAnsweredWithAnEmptyLineOnATerminalIsNotConfirmed() {
     answering("\n", true);
 
-    assertFalse(ProjectDestroyCommand.confirmed(false, false, "acme", false));
+    assertFalse(ProjectDestroyCommand.confirmed(false, false, false, "acme", false));
 
     assertEquals(
         "  Destroy project acme? This cannot be undone. [y/N] ",
@@ -64,11 +64,25 @@ class ProjectDestroyCommandTest {
   }
 
   @Test
+  void aJsonDestroyNeedsYesSinceNobodyAnswersAPromptThroughJson() {
+    answering("y\n", true);
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> ProjectDestroyCommand.confirmed(false, false, true, "acme", true));
+
+    assertEquals(
+        "--json requires --yes (nobody answers a prompt through JSON).", refused.getMessage());
+    assertEquals("", out.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
   void yesOrADryRunAsksNothing() {
     answering("", false);
 
-    assertTrue(ProjectDestroyCommand.confirmed(true, false, "acme", true));
-    assertTrue(ProjectDestroyCommand.confirmed(false, true, "acme", true));
+    assertTrue(ProjectDestroyCommand.confirmed(true, false, false, "acme", true));
+    assertTrue(ProjectDestroyCommand.confirmed(false, true, false, "acme", true));
     assertEquals("", out.toString(StandardCharsets.UTF_8));
   }
 

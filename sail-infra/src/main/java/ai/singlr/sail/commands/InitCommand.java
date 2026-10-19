@@ -145,17 +145,14 @@ public final class InitCommand implements Runnable {
     var fde = intent instanceof InitIntent.Main ? mainHandle(box, provisioned) : handle;
     var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
     var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
-    if (intent instanceof InitIntent.Main) {
-      requireValid(name, NameValidator::requireValidDisplayName, "--name");
-      requireValid(mail, NameValidator::requireValidEmail, "--email");
-    }
+    var roster = roster(intent, box.identity(), name, mail);
 
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
     if (provisioned) {
       System.out.println(Ansi.AUTO.string("  @|faint Host already provisioned — skipping.|@"));
     }
     for (var step : InitPlan.plan(intent, provisioned)) {
-      runStep(step, box.steps(), fde, name.value(), mail.value());
+      runStep(step, box.steps(), fde, roster.name(), roster.email());
     }
     name.adopt(box.identity());
     mail.adopt(box.identity());
@@ -195,10 +192,8 @@ public final class InitCommand implements Runnable {
    */
   private static GitChoice gitChoice(
       Box box, String placeholder, String flag, String label, String option) {
-    var held = box.identity().gitValue(placeholder);
-    if (held.isPresent()) {
-      return new GitChoice(
-          placeholder, Strings.isNotBlank(flag) ? flag.strip() : held.get(), false);
+    if (box.identity().gitValue(placeholder).isPresent()) {
+      return new GitChoice(placeholder, flag, false);
     }
     var chosen = Strings.isNotBlank(flag) ? flag : box.prompt().ask(label);
     if (Strings.isBlank(chosen)) {
@@ -213,9 +208,9 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * A git identity value init carries: {@code value} is what the operator's roster entry is given,
-   * and {@code unset} says the box's git identity has none, so init gives it this one; an identity
-   * the box already holds is never overwritten.
+   * A git identity value init carries: {@code value} is what a roster entry is given, and {@code
+   * unset} says the box's git identity has none, so init gives it this one; an identity the box
+   * already holds is never overwritten.
    */
   private record GitChoice(String placeholder, String value, boolean unset) {
     void adopt(LocalIdentity identity) throws Exception {
@@ -223,15 +218,40 @@ public final class InitCommand implements Runnable {
         identity.adoptGit(placeholder, value);
       }
     }
+
+    /** {@code value}, or what {@code identity} holds when none was given. */
+    String orHeld(LocalIdentity identity) {
+      return value != null ? value : identity.gitValue(placeholder).orElse(null);
+    }
+  }
+
+  /** What the operator's roster entry is given. */
+  private record Roster(String name, String email) {}
+
+  /**
+   * Main's roster entry takes the flags, else the git identity the box has, refused before any step
+   * when {@code host sync} would refuse them; a node's join asks for its own, as before, and main's
+   * admin takes them.
+   */
+  private static Roster roster(
+      InitIntent intent, LocalIdentity identity, GitChoice name, GitChoice mail) {
+    if (!(intent instanceof InitIntent.Main)) {
+      return new Roster(name.value(), mail.value());
+    }
+    var rosterName = name.orHeld(identity);
+    var rosterMail = mail.orHeld(identity);
+    requireValid(rosterName, NameValidator::requireValidDisplayName, "--name");
+    requireValid(rosterMail, NameValidator::requireValidEmail, "--email");
+    return new Roster(rosterName, rosterMail);
   }
 
   /**
    * Refuses, before any step, a roster value main's {@code host sync} would refuse ({@code rule}),
    * naming {@code option}; a node's value is main's to take when its admin adds the FDE.
    */
-  private static void requireValid(GitChoice choice, Consumer<String> rule, String option) {
+  private static void requireValid(String value, Consumer<String> rule, String option) {
     try {
-      rule.accept(choice.value());
+      rule.accept(value);
     } catch (IllegalArgumentException e) {
       throw new IllegalArgumentException(
           e.getMessage() + " Re-run with " + option + " \"...\".", e);

@@ -93,7 +93,7 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
     }
 
-    if ((containerPresent || purge) && !confirmed(yes, dryRun, name, purge)) {
+    if ((containerPresent || purge) && !confirmed(yes, dryRun, json, name, purge)) {
       System.out.println("  Aborted.");
       return;
     }
@@ -119,12 +119,17 @@ public final class ProjectDestroyCommand implements Runnable {
 
   /**
    * Whether to go on: asked, defaulting to no and refused where nobody can answer ({@link
-   * ConsoleHelper#confirmDestructive}), unless {@code --yes} or a dry run.
+   * ConsoleHelper#confirmDestructive}) or under {@code --json}, unless {@code --yes} or a dry run.
    */
-  static boolean confirmed(boolean yes, boolean dryRun, String name, boolean purge) {
-    return yes
-        || dryRun
-        || ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
+  static boolean confirmed(boolean yes, boolean dryRun, boolean json, String name, boolean purge) {
+    if (yes || dryRun) {
+      return true;
+    }
+    if (json) {
+      throw new IllegalArgumentException(
+          "--json requires --yes (nobody answers a prompt through JSON).");
+    }
+    return ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
   }
 
   static String confirmPrompt(String name, boolean purge) {
