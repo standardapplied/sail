@@ -296,10 +296,16 @@ class OperatorHintsTest {
   private static final Pattern OPERAND =
       Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?|\\d+");
 
-  /** The commands an argument expression renders, one for each way its conditions can go. */
+  /**
+   * The commands an argument expression renders, one for each way its conditions can go; a
+   * condition the splitter cannot read fails the test rather than pass as one word.
+   */
   private static List<String> renderedArgs(String expression) {
     var ternary = TERNARY.matcher(expression);
     if (!ternary.find()) {
+      if (OPERAND.matcher(expression).replaceAll("").contains("?")) {
+        throw new IllegalStateException("a condition this test cannot split: " + expression);
+      }
       return List.of(joined(expression));
     }
     var rendered = new ArrayList<String>();

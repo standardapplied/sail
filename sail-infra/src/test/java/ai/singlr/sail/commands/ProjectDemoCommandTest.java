@@ -80,6 +80,8 @@ class ProjectDemoCommandTest {
     var key = TestSshKeys.ed25519("own", "me@box");
     Files.writeString(dir.resolve("id_ed25519.pub"), "\n");
     Files.writeString(dir.resolve("id_rsa.pub"), "  " + key + "\n");
+    Files.writeString(
+        dir.resolve("id_ecdsa.pub"), TestSshKeys.ed25519("later", "later@box") + "\n");
 
     assertEquals(key, ProjectDemoCommand.detectSshPublicKey(dir));
   }
@@ -88,7 +90,8 @@ class ProjectDemoCommandTest {
   void aKeyFileThatHoldsNoKeyCountsAsNone(@TempDir Path dir) throws Exception {
     assertNull(ProjectDemoCommand.detectSshPublicKey(dir));
     Files.writeString(
-        dir.resolve("id_ed25519.pub"), "ssh-ed25519 AAAA one\nssh-ed25519 BBBB two\n");
+        dir.resolve("id_ed25519.pub"),
+        TestSshKeys.ed25519("a", "one") + "\n" + TestSshKeys.ed25519("b", "two") + "\n");
     assertNull(ProjectDemoCommand.detectSshPublicKey(dir));
     assertNull(ProjectDemoCommand.detectSshPublicKey(dir.resolve("absent")));
   }

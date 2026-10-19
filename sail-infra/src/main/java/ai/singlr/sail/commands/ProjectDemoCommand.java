@@ -375,8 +375,10 @@ public final class ProjectDemoCommand implements Runnable {
   static String detectSshPublicKey(Path sshDir) {
     for (var name : List.of("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub")) {
       try {
-        return SshPublicKey.parse(Files.readString(sshDir.resolve(name))).line();
-      } catch (IOException | IllegalArgumentException holdsNoKey) {
+        return SshPublicKey.parse(
+                new String(Files.readAllBytes(sshDir.resolve(name)), StandardCharsets.UTF_8))
+            .line();
+      } catch (IOException | IllegalArgumentException unusable) {
         continue;
       }
     }
