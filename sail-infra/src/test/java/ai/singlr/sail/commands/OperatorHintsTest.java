@@ -255,7 +255,7 @@ class OperatorHintsTest {
           var matcher = rendered.matcher(source);
           while (matcher.find()) {
             var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
-            for (var args : renderedArgs(call)) {
+            for (var args : rendered(file, call)) {
               if (!parses(args)) {
                 unknown.add(file.getFileName() + ": " + args);
               }
@@ -266,6 +266,14 @@ class OperatorHintsTest {
     }
 
     assertEquals(List.of(), unknown, "a rendered command is not one sail has");
+  }
+
+  private static List<String> rendered(Path file, String call) {
+    try {
+      return renderedArgs(call);
+    } catch (IllegalStateException unsplit) {
+      throw new IllegalStateException(file.getFileName() + ": " + unsplit.getMessage(), unsplit);
+    }
   }
 
   /** The index of the {@code )} closing the call whose arguments start at {@code from}. */

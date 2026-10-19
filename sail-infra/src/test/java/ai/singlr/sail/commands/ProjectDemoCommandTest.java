@@ -13,9 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -84,6 +86,18 @@ class ProjectDemoCommandTest {
         dir.resolve("id_ecdsa.pub"), TestSshKeys.ed25519("later", "later@box") + "\n");
 
     assertEquals(key, ProjectDemoCommand.detectSshPublicKey(dir));
+  }
+
+  @Test
+  void aKeyFileWhoseCommentIsNotUtf8StillHoldsItsKey(@TempDir Path dir) throws Exception {
+    var key = SshPublicKey.parse(TestSshKeys.ed25519("own", "me"));
+    var latin1 =
+        (key.type() + " " + key.blob() + " jos\u00e9@box\n").getBytes(StandardCharsets.ISO_8859_1);
+    Files.write(dir.resolve("id_ed25519.pub"), latin1);
+
+    var found = ProjectDemoCommand.detectSshPublicKey(dir);
+
+    assertTrue(found.startsWith(key.type() + " " + key.blob() + " jos"), found);
   }
 
   @Test
