@@ -434,6 +434,32 @@ class InitCommandTest {
   }
 
   @Test
+  void aMainsPaddedRosterFlagsAreStrippedAndABlankOneFallsBackToTheGitIdentity() {
+    assertEquals(
+        0,
+        init("--as-main", "--handle", "ada", "--name", " Ada L ", "--email", " ada@example.com "));
+    assertEquals(
+        "HostSyncCommand --as-main --handle ada --name Ada L --email ada@example.com",
+        ran.getLast());
+
+    assertEquals(0, init("--as-main", "--handle", "ada", "--name", ""));
+    assertEquals(
+        "HostSyncCommand --as-main --handle ada --name Root Person --email root@box",
+        ran.getLast());
+  }
+
+  @Test
+  void aNodeWithNoGitIdentityPassesWhatItAskedForToItsJoin() {
+    gitConfig.clear();
+    answers.put("Your full name", " A B ");
+    answers.put("Your email", "a@b");
+
+    assertEquals(0, init("--main", "m", "--handle", "ada"));
+
+    assertEquals("JoinCommand m --handle ada --name A B --email a@b", ran.getLast());
+  }
+
+  @Test
   void aBoxWithNoGitIdentityAsksForIt() {
     gitConfig.clear();
     answers.put("Your full name", " A B ");

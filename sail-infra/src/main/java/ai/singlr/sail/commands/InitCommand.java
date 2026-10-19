@@ -185,8 +185,8 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * The operator's {@code placeholder} value: {@code flag}, else what this box's git identity
-   * holds, else asked for. Asked before the first step, so a long setup waits on no question, and
+   * The operator's {@code placeholder} value: {@code flag}, or else asked for when this box's git
+   * identity holds none. Asked before the first step, so a long setup waits on no question, and
    * adopted after the last, once the box is provisioned. A box left with no value is refused before
    * any step: every project applied here by name would be refused for it.
    */
@@ -219,9 +219,11 @@ public final class InitCommand implements Runnable {
       }
     }
 
-    /** {@code value}, or what {@code identity} holds when none was given. */
+    /** {@code value}, stripped, or what {@code identity} holds when none was given. */
     String orHeld(LocalIdentity identity) {
-      return value != null ? value : identity.gitValue(placeholder).orElse(null);
+      return Strings.isNotBlank(value)
+          ? value.strip()
+          : identity.gitValue(placeholder).orElse(null);
     }
   }
 
@@ -230,8 +232,8 @@ public final class InitCommand implements Runnable {
 
   /**
    * Main's roster entry takes the flags, else the git identity the box has, refused before any step
-   * when {@code host sync} would refuse them; a node's join asks for its own, as before, and main's
-   * admin takes them.
+   * when {@code host sync} would refuse them; a node passes its join what was given or asked, as
+   * before.
    */
   private static Roster roster(
       InitIntent intent, LocalIdentity identity, GitChoice name, GitChoice mail) {
@@ -247,7 +249,7 @@ public final class InitCommand implements Runnable {
 
   /**
    * Refuses, before any step, a roster value main's {@code host sync} would refuse ({@code rule}),
-   * naming {@code option}; a node's value is main's to take when its admin adds the FDE.
+   * naming {@code option}.
    */
   private static void requireValid(String value, Consumer<String> rule, String option) {
     try {
