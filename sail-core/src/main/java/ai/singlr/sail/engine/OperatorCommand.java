@@ -42,7 +42,7 @@ public record OperatorCommand(boolean sudo) {
    * RuntimeMode#detect} from that account's home, as it would decide it were the caller to run
    * {@code sail} without {@code sudo}.
    */
-  static OperatorCommand of(
+  public static OperatorCommand of(
       boolean root, String sudoUser, Function<String, Path> homeOf, Path systemUnit) {
     if (!root || Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
       return PLAIN;

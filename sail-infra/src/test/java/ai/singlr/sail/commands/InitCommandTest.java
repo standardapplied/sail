@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -46,7 +47,7 @@ class InitCommandTest {
   private String refusal;
   private boolean root = true;
   private String sudoUser = "dev";
-  private OperatorCommand operator = OperatorCommand.PLAIN;
+  private Supplier<OperatorCommand> operator = () -> OperatorCommand.PLAIN;
   private Path hostConfig;
 
   @BeforeEach
@@ -105,17 +106,28 @@ class InitCommandTest {
     if (step.startsWith("HostInitCommand")) {
       writeHostConfig("storage_backend: dir\n");
     }
+    if (command instanceof HostServiceInstallCommand) {
+      writeFile(systemUnit(), "[Unit]\n");
+    }
     if (command instanceof HostSyncCommand) {
       writeHostConfig("storage_backend: dir\nsync:\n  role: main\n  handle: " + args[2] + "\n");
     }
   }
 
   private void writeHostConfig(String yaml) {
+    writeFile(hostConfig, yaml);
+  }
+
+  private void writeFile(Path file, String text) {
     try {
-      Files.writeString(hostConfig, yaml);
+      Files.writeString(file, text);
     } catch (Exception e) {
       throw new IllegalStateException(e);
     }
+  }
+
+  private Path systemUnit() {
+    return tempDir.resolve("sail-api.service");
   }
 
   private void installUserService(String user) throws Exception {
@@ -157,7 +169,7 @@ class InitCommandTest {
   @CsvSource({"false, sail", "true, sudo sail"})
   void mainsNextStepsTellAnotherBoxTheReadmesFormAndThisBoxItsCallersOwn(
       boolean sudo, String here) {
-    operator = new OperatorCommand(sudo);
+    operator = () -> new OperatorCommand(sudo);
     var printed = new ByteArrayOutputStream();
     var originalOut = System.out;
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
@@ -182,6 +194,27 @@ class InitCommandTest {
                     + here
                     + " fde add mady --role member --key \"…\" --main-host-key SHA256:…"
                     + nl),
+        printed.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aFreshSudoMainNamesTheCallersCommandAsTheServiceItInstalledDecidesIt() {
+    operator = () -> OperatorCommand.of(root, sudoUser, this::homeOf, systemUnit());
+    var printed = new ByteArrayOutputStream();
+    var originalOut = System.out;
+    System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      assertEquals(0, init("--as-main", "--handle", "ada"));
+    } finally {
+      System.setOut(originalOut);
+    }
+
+    assertTrue(
+        printed
+            .toString(StandardCharsets.UTF_8)
+            .endsWith(
+                "    sudo sail fde add mady --role member --key \"…\" --main-host-key SHA256:…"
+                    + System.lineSeparator()),
         printed.toString(StandardCharsets.UTF_8));
   }
 
@@ -579,7 +612,7 @@ class InitCommandTest {
                           this::homeOf,
                           identity,
                           answers::get,
-                          OperatorCommand.PLAIN,
+                          () -> OperatorCommand.PLAIN,
                           (command, args) -> InitCommand.runCommand(new Refusing()))));
       init.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
 

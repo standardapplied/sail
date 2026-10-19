@@ -92,8 +92,9 @@ public final class InitCommand implements Runnable {
   /**
    * What init reads from this box and how it runs a step: whether it runs as root, the account that
    * invoked {@code sudo}, the host config, where an account's home is, the git identity a project
-   * applied here takes on, how it asks the operator a question, how it names a command to type, and
-   * the granular command each step runs. A test scripts the steps and puts the homes under a
+   * applied here takes on, how it asks the operator a question, how it names a command to type as
+   * the box stands when it is asked (init's own steps install the system service that decides it),
+   * and the granular command each step runs. A test scripts the steps and puts the homes under a
    * temporary directory.
    */
   record Box(
@@ -103,19 +104,18 @@ public final class InitCommand implements Runnable {
       Function<String, Path> homeOf,
       LocalIdentity identity,
       Prompt prompt,
-      OperatorCommand operator,
+      Supplier<OperatorCommand> operator,
       Steps steps) {
 
     static Box here() {
-      var operator = OperatorCommand.here();
       return new Box(
           SailPaths.isRoot(),
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
-          LocalIdentity.detect(operator),
+          LocalIdentity.detect(OperatorCommand.here()),
           InitCommand::ask,
-          operator,
+          OperatorCommand::here,
           InitCommand::runCommand);
     }
   }
@@ -158,7 +158,7 @@ public final class InitCommand implements Runnable {
     name.adopt(box.identity());
     mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
-      printMainNextSteps(box.operator());
+      printMainNextSteps(box.operator().get());
     }
   }
 
@@ -181,7 +181,7 @@ public final class InitCommand implements Runnable {
     }
     var fde = chosen.strip();
     NameValidator.requireValidFdeHandle(fde);
-    HostSyncCommand.requireHandle(held, fde, box.operator());
+    HostSyncCommand.requireHandle(held, fde, box.operator().get());
     return fde;
   }
 
