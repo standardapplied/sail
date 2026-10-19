@@ -6,7 +6,6 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
-import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -70,19 +69,6 @@ public record ClientConfig(String host, String user) {
   /** Returns true if the client config file exists at {@code ~/.sail/config.yaml}. */
   public static boolean exists() {
     return Files.exists(SailPaths.clientConfigPath());
-  }
-
-  /** Loads the client config from {@code ~/.sail/config.yaml}. */
-  public static ClientConfig load() throws IOException {
-    var path = SailPaths.clientConfigPath();
-    if (!Files.exists(path)) {
-      throw new IOException(
-          "Client config not found: "
-              + path
-              + "\n  Create it with: "
-              + OperatorCommand.client("init <server-ip-or-ssh-alias>"));
-    }
-    return fromMap(YamlUtil.parseFile(path));
   }
 
   /** Loads the client config from a specific path (for testing). */

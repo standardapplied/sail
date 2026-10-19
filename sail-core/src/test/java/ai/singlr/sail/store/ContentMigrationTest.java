@@ -137,7 +137,8 @@ class ContentMigrationTest {
       legacy(db);
       var spec = assertThrows(IllegalStateException.class, () -> new SpecStore(db).getContent("a"));
       assertEquals(
-          "Spec a has no content hash: this database's content migration never finished.",
+          "Spec a has no content hash: this database's content migration never finished. Run 'sudo"
+              + " sail migrate'.",
           spec.getMessage());
       var file = assertThrows(RuntimeException.class, () -> new FileStore(db).find("proj", "file"));
       assertTrue(

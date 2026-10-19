@@ -104,18 +104,19 @@ public final class InitCommand implements Runnable {
       Function<String, Path> homeOf,
       LocalIdentity identity,
       Prompt prompt,
-      Supplier<OperatorCommand> operator,
+      OperatorCommand operator,
       Steps steps) {
 
     static Box here() {
+      var operator = OperatorCommand.here();
       return new Box(
           SailPaths.isRoot(),
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
-          LocalIdentity.detect(OperatorCommand.here()),
+          LocalIdentity.detect(operator),
           InitCommand::ask,
-          OperatorCommand::here,
+          operator,
           InitCommand::runCommand);
     }
   }
@@ -158,7 +159,7 @@ public final class InitCommand implements Runnable {
     name.adopt(box.identity());
     mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
-      printMainNextSteps(box.operator().get());
+      printMainNextSteps(box.operator());
     }
   }
 
@@ -181,7 +182,7 @@ public final class InitCommand implements Runnable {
     }
     var fde = chosen.strip();
     NameValidator.requireValidFdeHandle(fde);
-    HostSyncCommand.requireHandle(held, fde, box.operator().get());
+    HostSyncCommand.requireHandle(held, fde, box.operator());
     return fde;
   }
 
@@ -311,7 +312,7 @@ public final class InitCommand implements Runnable {
               + ": run sail as "
               + sudoUser
               + ", without sudo. To set the box up as root instead, first run '"
-              + OperatorCommand.PLAIN.sail("host service uninstall")
+              + OperatorCommand.UNPRIVILEGED.sail("host service uninstall")
               + "' as "
               + sudoUser
               + ".");

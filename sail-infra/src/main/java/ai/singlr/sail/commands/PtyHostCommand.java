@@ -35,7 +35,7 @@ public final class PtyHostCommand implements Callable<Integer> {
   @Override
   public Integer call() throws Exception {
     var handoff = PtySessionHost.Handoff.fromEnvironment(PtyHostCommand::shimCommand);
-    var operator = OperatorCommand.here();
+    var operator = OperatorCommand.unknownReader();
     var host =
         startHost(
             SailPaths.ptySocketPath(),

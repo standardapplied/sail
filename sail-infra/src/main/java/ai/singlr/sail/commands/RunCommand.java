@@ -509,9 +509,7 @@ public final class RunCommand implements Runnable {
         + spec.id()
         + ").\n\n"
         + description
-        + "\n\nWhen complete, run `spec update "
-        + spec.id()
-        + " --status done`. Then pick up the next pending spec and continue working.";
+        + "\n\nWhen complete, pick up the next pending spec and continue working.";
   }
 
   private void autoRollback(ShellExec shell, String snapshotLabel, int exitCode) {

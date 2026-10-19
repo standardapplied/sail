@@ -10,6 +10,7 @@ import ai.singlr.sail.authority.WriteRefused;
 import ai.singlr.sail.authority.WriterAuthority;
 import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
@@ -93,7 +94,9 @@ public final class FileStore implements ConflictResolver, SyncedStore {
                 + project
                 + "/"
                 + path
-                + " has no content hash: this database's content migration never finished.");
+                + " has no content hash: this database's content migration never finished. Run '"
+                + OperatorCommand.elsewhere("migrate")
+                + "'.");
       BlobStore.requireHash(contentHash);
       if (size < 0
           || mode < 0

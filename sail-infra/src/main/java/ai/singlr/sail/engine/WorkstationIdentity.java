@@ -29,7 +29,11 @@ public final class WorkstationIdentity {
     return operator.sail("host config set ssh-public-key");
   }
 
-  /** The registered workstation key, or empty when the box owner has not set one. */
+  /**
+   * The registered workstation key, or empty when the box owner has not set one. A key file that
+   * holds no readable key is refused rather than read as none: every container trusts this key, so
+   * a damaged file would silently take it out of all of them on the next apply.
+   */
   public static Optional<SshPublicKey> registered() {
     return registeredAt(SailPaths.workstationPublicKeyPath());
   }
@@ -40,8 +44,14 @@ public final class WorkstationIdentity {
     }
     try {
       return Optional.of(SshPublicKey.parse(Files.readString(path).strip()));
-    } catch (IOException | RuntimeException e) {
-      return Optional.empty();
+    } catch (IOException | IllegalArgumentException e) {
+      throw new IllegalStateException(
+          "This box's workstation key ("
+              + path
+              + ") is not an SSH public key: "
+              + e.getMessage()
+              + " Register the key you connect with again.",
+          e);
     }
   }
 
@@ -50,7 +60,7 @@ public final class WorkstationIdentity {
     return identityFileFor(registered());
   }
 
-  static String identityFileFor(Optional<SshPublicKey> key) {
+  public static String identityFileFor(Optional<SshPublicKey> key) {
     return "~/.ssh/" + key.map(SshPublicKey::defaultPrivateKeyName).orElse("id_ed25519");
   }
 }

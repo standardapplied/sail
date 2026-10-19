@@ -135,7 +135,7 @@ class UpgradeCommandTest {
             + " @|bold "
             + install
             + "|@",
-        UpgradeCommand.missingApiRemediation(true, mode, OperatorCommand.SUDO_UNREFUSED)
+        UpgradeCommand.missingApiRemediation(true, mode, OperatorCommand.UNPRIVILEGED)
             .orElseThrow());
   }
 

@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -60,6 +61,9 @@ public final class ProjectProvisioner {
   private final ProjectSkills skills;
   private final Optional<SshPublicKey> workstationKey;
   private final OperatorCommand operator;
+
+  private static final Pattern AUTHORIZED_KEYS_OPTIONS =
+      Pattern.compile("^" + ContainerAuthorizedKeys.OPTIONS + "\\s+");
   private ProjectPhase currentPhase;
 
   public ProjectProvisioner(
@@ -160,6 +164,16 @@ public final class ProjectProvisioner {
    * deleted container takes its record with it. Empty when the container has none: it was never
    * provisioned to the end by this release, or it does not exist.
    */
+  /**
+   * Whether {@code recorded}, what a container records it was provisioned from ({@link
+   * #provisionedInputs}), is what a run from {@code config} on a box holding {@code workstationKey}
+   * provisions from: when it is, the container needs no run.
+   */
+  public static boolean provisionedFrom(
+      Optional<String> recorded, SailYaml config, Optional<SshPublicKey> workstationKey) {
+    return recorded.equals(Optional.of(inputs(config, workstationKey)));
+  }
+
   public static Optional<String> provisionedInputs(ShellExec shell, String name)
       throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(List.of("incus", "config", "get", name, INPUTS_KEY));
@@ -436,7 +450,7 @@ public final class ProjectProvisioner {
    * The keys a container trusts: the box's workstation key, whatever the definition says, then the
    * definition's own, each key once.
    */
-  static List<String> trustedKeys(Optional<SshPublicKey> workstationKey, SailYaml config) {
+  private static List<String> trustedKeys(Optional<SshPublicKey> workstationKey, SailYaml config) {
     var trusted = new LinkedHashMap<String, String>();
     workstationKey.ifPresent(key -> trusted.put(key.fingerprint(), key.line()));
     var declared =
@@ -444,16 +458,29 @@ public final class ProjectProvisioner {
             ? config.ssh().authorizedKeys()
             : List.<String>of();
     for (var line : declared) {
+      if (Strings.isBlank(line)) {
+        throw new IllegalArgumentException("ssh.authorized_keys holds an empty entry.");
+      }
       trusted.putIfAbsent(identityOf(line), line);
     }
     return List.copyOf(trusted.values());
   }
 
+  /**
+   * What tells one {@code authorized_keys} line from another: its key's fingerprint, whatever its
+   * comment or options, or the line itself when it holds no key sail can read.
+   */
   private static String identityOf(String line) {
+    return fingerprintOf(line)
+        .or(() -> fingerprintOf(AUTHORIZED_KEYS_OPTIONS.matcher(line).replaceFirst("")))
+        .orElse(line);
+  }
+
+  private static Optional<String> fingerprintOf(String line) {
     try {
-      return SshPublicKey.parse(line).fingerprint();
+      return Optional.of(SshPublicKey.parse(line).fingerprint());
     } catch (IllegalArgumentException unparsed) {
-      return line;
+      return Optional.empty();
     }
   }
 

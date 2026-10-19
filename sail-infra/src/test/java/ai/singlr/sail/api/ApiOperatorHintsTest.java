@@ -15,8 +15,9 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every operations-layer message that names a {@code sail} command for its operator to type. The
- * CLI runs this layer in-process, so a {@code sudo} caller on a root box reads it as that caller.
+ * Every operations-layer message that names a {@code sail} command for its operator to type,
+ * rendered for the operator the layer is given: the caller's own when the CLI runs it in-process,
+ * and {@link OperatorCommand#unknownReader} when sail-api answers a client it cannot see.
  */
 class ApiOperatorHintsTest {
 

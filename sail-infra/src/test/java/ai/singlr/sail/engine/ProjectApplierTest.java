@@ -605,6 +605,40 @@ class ProjectApplierTest {
   }
 
   @Test
+  void aGitIdentityNotYetSetIsApplied() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("git config --global --get user.name", "")
+            .onFail("git config --global --get user.email", "");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
+    assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
+  }
+
+  @Test
+  void aChangedGitEmailAloneIsApplied() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("git config --global --get user.name", "John\n")
+            .onOk("git config --global --get user.email", "john@old.example\n");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John ", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
+    assertEquals("  [apply] Git config (name=John , email=john@acme.com)\n", out.toString());
+  }
+
+  @Test
   void aChangedGitNameIsAppliedOnceAndCountedAsAnAddition() throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -974,7 +1008,7 @@ class ProjectApplierTest {
         applier.checkUnsupportedChanges(
             minimalConfig("claude-code"),
             new ContainerManager.ResourceLimits("4", "12GB"),
-            OperatorCommand.SUDO_UNREFUSED);
+            OperatorCommand.SUDO);
 
     assertEquals(
         List.of(

@@ -70,7 +70,7 @@ public final class ClientInitCommand implements Runnable {
               + hostConfigPath
               + " exists).\n"
               + "  '"
-              + OperatorCommand.client("init")
+              + OperatorCommand.client("client <host>")
               + "' configures a client to reach a remote host; running it here would overwrite\n"
               + "  the host's server credentials. Run it on your laptop instead.");
     }

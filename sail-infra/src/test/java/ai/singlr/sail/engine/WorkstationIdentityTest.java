@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.ssh.SshPublicKey;
@@ -47,10 +48,27 @@ class WorkstationIdentityTest {
   }
 
   @Test
-  void registeredIsEmptyWhenMissingOrUnparseable(@TempDir Path dir) throws Exception {
+  void registeredIsEmptyWhenMissing(@TempDir Path dir) {
     assertTrue(WorkstationIdentity.registeredAt(dir.resolve("absent.pub")).isEmpty());
+  }
+
+  @Test
+  void aKeyFileThatHoldsNoKeyIsRefusedRatherThanReadAsNone(@TempDir Path dir) throws Exception {
     var garbage = dir.resolve("garbage.pub");
     Files.writeString(garbage, "not a key at all\n");
-    assertTrue(WorkstationIdentity.registeredAt(garbage).isEmpty());
+
+    var refused =
+        assertThrows(IllegalStateException.class, () -> WorkstationIdentity.registeredAt(garbage));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "This box's workstation key ("
+                    + garbage
+                    + ") is not an SSH public key: Unsupported"),
+        refused.getMessage());
+    assertTrue(refused.getMessage().endsWith(" Register the key you connect with again."));
+    assertEquals(Optional.empty(), WorkstationIdentity.registeredAt(dir.resolve("none.pub")));
   }
 }

@@ -27,7 +27,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Supplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -47,7 +46,7 @@ class InitCommandTest {
   private String refusal;
   private boolean root = true;
   private String sudoUser = "dev";
-  private Supplier<OperatorCommand> operator = () -> OperatorCommand.PLAIN;
+  private OperatorCommand operator = OperatorCommand.PLAIN;
   private Path hostConfig;
 
   @BeforeEach
@@ -169,7 +168,7 @@ class InitCommandTest {
   @CsvSource({"false, sail", "true, sudo sail"})
   void mainsNextStepsTellAnotherBoxTheReadmesFormAndThisBoxItsCallersOwn(
       boolean sudo, String here) {
-    operator = () -> sudo ? OperatorCommand.SUDO : OperatorCommand.PLAIN;
+    operator = sudo ? OperatorCommand.SUDO : OperatorCommand.PLAIN;
     var printed = new ByteArrayOutputStream();
     var originalOut = System.out;
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
@@ -198,8 +197,8 @@ class InitCommandTest {
   }
 
   @Test
-  void aFreshSudoMainNamesTheCallersCommandAsTheServiceItInstalledDecidesIt() {
-    operator = () -> OperatorCommand.of(root, sudoUser, this::homeOf, systemUnit());
+  void aFreshSudoMainNamesTheCallersCommandWithSudo() {
+    operator = OperatorCommand.of(root, sudoUser);
     var printed = new ByteArrayOutputStream();
     var originalOut = System.out;
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
@@ -612,7 +611,7 @@ class InitCommandTest {
                           this::homeOf,
                           identity,
                           answers::get,
-                          () -> OperatorCommand.PLAIN,
+                          OperatorCommand.PLAIN,
                           (command, args) -> InitCommand.runCommand(new Refusing()))));
       init.setExecutionExceptionHandler((failure, line, parsed) -> Main.report(failure, line));
 

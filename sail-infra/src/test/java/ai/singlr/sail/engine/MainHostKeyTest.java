@@ -115,8 +115,7 @@ class MainHostKeyTest {
     Files.createDirectories(knownHosts().getParent());
     Files.writeString(knownHosts(), hashed(MAIN) + "\n");
     var hostKey =
-        new MainHostKey(
-            new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts(), OperatorCommand.SUDO_UNREFUSED);
+        new MainHostKey(new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts(), OperatorCommand.SUDO);
 
     var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("sail@maindevbox"));
 

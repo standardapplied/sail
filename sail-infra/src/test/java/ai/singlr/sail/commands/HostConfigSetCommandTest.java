@@ -6,10 +6,12 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -17,6 +19,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -105,6 +108,23 @@ class HostConfigSetCommandTest {
 
     var output = capturedOut.toString();
     assertNotNull(cmd);
+  }
+
+  @Test
+  void aNonRootCallerIsToldTheCommandAsTypedWithNoValueAndNoNull() {
+    assumeFalse(SailPaths.isRoot());
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    assertNotEquals(0, cmd.execute("host", "config", "set", "ssh-public-key"));
+    assertNotEquals(0, cmd.execute("host", "config", "set", "server-ip", "10.0.0.7"));
+
+    var errOutput = capturedErr.toString();
+    assertTrue(
+        errOutput.contains("Run with: sudo sail host config set ssh-public-key\n"), errOutput);
+    assertTrue(
+        errOutput.contains("Run with: sudo sail host config set server-ip 10.0.0.7\n"), errOutput);
+    assertFalse(errOutput.contains("null"), errOutput);
   }
 
   @Test

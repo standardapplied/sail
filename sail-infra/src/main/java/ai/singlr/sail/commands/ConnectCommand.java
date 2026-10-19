@@ -138,10 +138,10 @@ public final class ConnectCommand implements Runnable {
   static String noWorkstationKey(String name, OperatorCommand operator) {
     return "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below assumes"
         + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you connect"
-        + " with, then run '"
-        + operator.sail("project apply " + name)
-        + "':\n    @|bold "
+        + " with, then apply the project to put it in the container:\n    @|bold "
         + WorkstationIdentity.setKeyHint(operator)
+        + "|@\n    @|bold "
+        + operator.sail("project apply " + name)
         + "|@";
   }
 

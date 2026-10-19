@@ -230,7 +230,9 @@ class StagePromptsMigrationTest {
   @Test
   void theMigrationIsRegisteredAndNeedsNothingOfTheBoxsFiles() {
     for (var registry :
-        List.of(DataMigrations.all(OperatorCommand.PLAIN), DataMigrations.databaseOnly())) {
+        List.of(
+            DataMigrations.all(OperatorCommand.PLAIN),
+            DataMigrations.databaseOnly(OperatorCommand.PLAIN))) {
       assertTrue(registry.stream().anyMatch(StagePromptsMigration.class::isInstance));
     }
   }

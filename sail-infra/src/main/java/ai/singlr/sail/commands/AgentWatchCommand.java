@@ -168,11 +168,11 @@ public final class AgentWatchCommand implements Runnable {
     }
     throw new IllegalStateException(
         "No agent session running. Launch one with: "
-            + operator.sail("agent start " + name + " --background --task '...'"));
+            + operator.sail("agent run " + name + " --background --task '...'"));
   }
 
   private void execute() throws Exception {
-    var operator = OperatorCommand.here();
+    var operator = OperatorCommand.unknownReader();
     name = CurrentProject.require(name, operator);
     NameValidator.requireValidProjectName(name);
     var guardrails = guardrails();

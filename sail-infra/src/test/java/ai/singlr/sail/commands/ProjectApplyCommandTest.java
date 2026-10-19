@@ -360,9 +360,11 @@ class ProjectApplyCommandTest {
     var interrupted = new ProvisionState("SSH_CONFIGURED", null, null, null, "inputs-x");
     var finished = new ProvisionState("COMPLETE", null, null, null, "inputs-x");
     var changedSinceInterrupted =
-        "The descriptor changed since the interrupted run: every step is checked again.";
+        "The descriptor or this box's workstation key changed since the interrupted run: every"
+            + " step is checked again.";
     var changedSinceFinished =
-        "The descriptor changed since the last provisioning run: every step is checked again.";
+        "The descriptor or this box's workstation key changed since the last provisioning run:"
+            + " every step is checked again.";
     var noRecord =
         "No record of the descriptor this container was provisioned from: every step is checked"
             + " again.";

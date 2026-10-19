@@ -34,13 +34,10 @@ public final class DataMigrations {
 
   /**
    * The migrations the sync lane applies: those that need nothing of this box's own files. What one
-   * reports is read by whichever box's operator ran the round, so it is worded {@link
-   * OperatorCommand#elsewhere}'s way.
+   * reports is worded for {@code operator}, the reader of the round.
    */
-  public static List<DataMigration> databaseOnly() {
-    return all(OperatorCommand.SUDO).stream()
-        .filter(migration -> !migration.readsBoxFiles())
-        .toList();
+  public static List<DataMigration> databaseOnly(OperatorCommand operator) {
+    return all(operator).stream().filter(migration -> !migration.readsBoxFiles()).toList();
   }
 
   /** Whether any of {@code migrations} has not yet been applied to {@code db}. */

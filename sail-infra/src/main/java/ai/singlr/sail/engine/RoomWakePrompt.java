@@ -174,7 +174,9 @@ public final class RoomWakePrompt {
         block your first attempt to stop. When you have answered, stop.
         """
         .formatted(
-            specId, OperatorCommand.elsewhere("spec dispatch " + specId + " --restart"), specId);
+            specId,
+            OperatorCommand.elsewhere("spec dispatch --spec " + specId + " --restart"),
+            specId);
   }
 
   private static String engagedReadOnlyDuty(String specId) {

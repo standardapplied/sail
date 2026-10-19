@@ -310,7 +310,8 @@ class RunCommandTest {
     assertTrue(task.contains("Add auth"));
     assertTrue(task.contains("(id: auth)"));
     assertTrue(task.contains("Implement the login flow."));
-    assertTrue(task.contains("`spec update auth --status done`"));
+    assertTrue(task.endsWith("When complete, pick up the next pending spec and continue working."));
+    assertFalse(task.contains("--status"), "sail manages a spec's status, never the agent");
   }
 
   @Test
@@ -346,7 +347,7 @@ class RunCommandTest {
     var task = RunCommand.specTask(spec, "   ");
 
     assertTrue(task.contains("Add auth"));
-    assertTrue(task.contains("`spec update auth --status done`"));
+    assertFalse(task.contains("--status"));
   }
 
   private static String launchNotes(String harness, boolean interactive) {

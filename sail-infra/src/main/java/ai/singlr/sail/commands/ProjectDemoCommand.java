@@ -123,7 +123,8 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     var yamlContent = loadDemoDefinition(out, ansi, operator);
-    var resolvedYaml = resolveAutoDetected(yamlContent, out, ansi);
+    var registered = WorkstationIdentity.registered();
+    var resolvedYaml = resolveAutoDetected(yamlContent, registered, out, ansi);
 
     var outputDir = Path.of(DEMO_PROJECT);
     var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
@@ -196,7 +197,7 @@ public final class ProjectDemoCommand implements Runnable {
             serverIp,
             serverUser,
             r.ipv4(),
-            "~/.ssh/id_ed25519",
+            WorkstationIdentity.identityFileFor(registered),
             operator,
             out,
             ansi);
@@ -236,10 +237,16 @@ public final class ProjectDemoCommand implements Runnable {
     return files.size();
   }
 
-  private String resolveAutoDetected(String yamlContent, PrintStream out, Ansi ansi) {
+  /**
+   * The demo definition with the box's git identity and SSH key filled in: the registered
+   * workstation key, which every container trusts, or else the caller's own key file.
+   */
+  private String resolveAutoDetected(
+      String yamlContent, Optional<SshPublicKey> registered, PrintStream out, Ansi ansi) {
     var gitName = detectGitConfig("user.name");
     var gitEmail = detectGitConfig("user.email");
-    var sshKey = detectSshPublicKey();
+    var sshKey =
+        registered.map(SshPublicKey::line).orElseGet(ProjectDemoCommand::detectSshPublicKey);
 
     if (!json) {
       out.println();

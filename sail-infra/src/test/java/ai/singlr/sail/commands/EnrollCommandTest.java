@@ -48,7 +48,8 @@ class EnrollCommandTest {
         assertThrows(
             IllegalStateException.class, () -> EnrollCommand.parseTicket("sail: unknown option"));
     assertTrue(error.getMessage().contains("sail: unknown option"));
-    assertTrue(error.getMessage().contains("sail host update"));
+    assertTrue(
+        error.getMessage().contains("upgrade it with: sudo sail upgrade"), error.getMessage());
   }
 
   @Test

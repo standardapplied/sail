@@ -156,7 +156,7 @@ public final class EnrollCommand implements Runnable {
     return "The box returned an unexpected enrollment ticket response:\n"
         + stdout.strip()
         + "\n  The box may be running an older sail — upgrade it with: "
-        + OperatorCommand.elsewhere("host update");
+        + OperatorCommand.elsewhere("upgrade");
   }
 
   private static ClientConfig requireThinClient() throws Exception {
@@ -168,7 +168,7 @@ public final class EnrollCommand implements Runnable {
               + "\n  On the box itself, mint a ticket with: "
               + OperatorCommand.elsewhere("fde enroll <handle>")
               + "\n  On your laptop, point the CLI at the box first: "
-              + OperatorCommand.client("init <host>"));
+              + OperatorCommand.client("client <host>"));
     }
     if (!client.config().gatewayEnabled()) {
       throw new IllegalStateException(

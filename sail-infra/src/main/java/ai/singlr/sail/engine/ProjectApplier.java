@@ -218,8 +218,7 @@ public final class ProjectApplier {
     if (git == null) {
       return ApplyResult.empty();
     }
-    if (git.name().equals(gitValue(name, "user.name"))
-        && git.email().equals(gitValue(name, "user.email"))) {
+    if (current(name, "user.name", git.name()) && current(name, "user.email", git.email())) {
       out.println("  [skip] Git config already current");
       return new ApplyResult(0, 0, 1, List.of());
     }
@@ -241,12 +240,13 @@ public final class ProjectApplier {
     return new ApplyResult(1, 0, 0, List.of());
   }
 
-  private String gitValue(String name, String key)
+  /** Whether {@code dev}'s git config holds {@code value} under {@code key}; unset reads as not. */
+  private boolean current(String name, String key, String value)
       throws IOException, InterruptedException, TimeoutException {
     var read =
         probes.exec(
             ContainerExec.asDevUser(name, List.of("git", "config", "--global", "--get", key)));
-    return read.ok() ? read.stdout().strip() : null;
+    return read.ok() && read.stdout().strip().equals(value.strip());
   }
 
   /**

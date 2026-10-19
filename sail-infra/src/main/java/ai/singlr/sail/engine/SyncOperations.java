@@ -123,7 +123,7 @@ public final class SyncOperations {
   }
 
   public void prepare() {
-    SyncDatabase.prepare(db, host);
+    SyncDatabase.prepare(db, host, operator);
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {

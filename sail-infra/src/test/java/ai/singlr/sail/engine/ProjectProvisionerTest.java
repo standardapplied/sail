@@ -24,6 +24,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1159,24 +1160,91 @@ class ProjectProvisionerTest {
     var config = minimalConfig();
     var pushes = new PushRecordingShell(provisionedSimpleShell());
     var shell = new ConfigRecordingShell(pushes);
-    shell.config.put(
-        "simple user.sail.inputs", ProjectProvisioner.inputs(config, Optional.empty()));
+    provisionedWith(shell, stateFile, config, Optional.empty(), new ArrayList<>());
+    assertEquals("", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     var steps = new ArrayList<String>();
 
-    new ProjectProvisioner(
-            shell,
-            new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
-            new RecordingListener(steps),
-            Optional.of(WORKSTATION_KEY),
-            OperatorCommand.PLAIN)
-        .provision(config, hostYaml(), null, null);
+    provisionedWith(shell, stateFile, config, Optional.of(WORKSTATION_KEY), steps);
 
     assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
     assertEquals(
         WORKSTATION_KEY.line() + "\n", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    var recorded = ProjectProvisioner.provisionedInputs(shell, "simple");
+    assertTrue(
+        ProjectProvisioner.provisionedFrom(recorded, config, Optional.of(WORKSTATION_KEY)),
+        "apply with the same key converges without a run");
+    assertFalse(
+        ProjectProvisioner.provisionedFrom(recorded, config, Optional.empty()),
+        "apply after the key is revoked runs again");
+  }
+
+  private void provisionedWith(
+      ShellExec shell,
+      Path stateFile,
+      SailYaml config,
+      Optional<SshPublicKey> workstationKey,
+      List<String> steps)
+      throws Exception {
+    new ProjectProvisioner(
+            shell,
+            new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
+            new RecordingListener(steps),
+            workstationKey,
+            OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), null, null);
+  }
+
+  @Test
+  void aContainerIsProvisionedFromItsRecordOnlyWithTheSameKey() {
+    var config = minimalConfig();
+    var withKey = Optional.of(ProjectProvisioner.inputs(config, Optional.of(WORKSTATION_KEY)));
+    var withoutKey = Optional.of(ProjectProvisioner.inputs(config, Optional.empty()));
+
+    assertTrue(ProjectProvisioner.provisionedFrom(withKey, config, Optional.of(WORKSTATION_KEY)));
+    assertTrue(ProjectProvisioner.provisionedFrom(withoutKey, config, Optional.empty()));
+    assertFalse(ProjectProvisioner.provisionedFrom(withKey, config, Optional.empty()));
+    assertFalse(
+        ProjectProvisioner.provisionedFrom(withoutKey, config, Optional.of(WORKSTATION_KEY)));
+    assertFalse(ProjectProvisioner.provisionedFrom(Optional.empty(), config, Optional.empty()));
+  }
+
+  @Test
+  void aDefinitionKeyWithOptionsIsTheSameKeyOnceAndAnotherKeyKeepsItsOptions() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+    var restricted =
+        "from=\"10.0.0.0/8\",no-pty "
+            + WORKSTATION_KEY.type()
+            + " "
+            + WORKSTATION_KEY.blob()
+            + " laptop";
+    var bob = "restrict " + TestSshKeys.ed25519("bob", "bob@laptop");
+    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of(restricted, bob, bob)));
+
+    new ProjectProvisioner(
+            shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), null, null);
+
     assertEquals(
-        Optional.of(ProjectProvisioner.inputs(config, Optional.of(WORKSTATION_KEY))),
-        ProjectProvisioner.provisionedInputs(shell, "simple"));
+        WORKSTATION_KEY.line() + "\n" + bob + "\n",
+        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void anEmptyAuthorizedKeysEntryIsRefused() {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+    var config =
+        minimalConfigWith(
+            new SailYaml.Ssh(null, Arrays.asList("ssh-ed25519 AAAA alice@laptop", null, " ")));
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
+
+    var refused =
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> provisioner.provision(config, hostYaml(), null, null));
+
+    assertEquals("ssh.authorized_keys holds an empty entry.", refused.getMessage());
+    assertFalse(shell.pushed.containsKey("simple/home/dev/.ssh/authorized_keys"));
   }
 
   @Test

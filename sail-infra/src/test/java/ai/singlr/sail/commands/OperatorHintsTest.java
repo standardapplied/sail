@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
@@ -92,8 +93,9 @@ class OperatorHintsTest {
                 + " sync'.",
             "  ⚠ No workstation key is registered on this box; the snippet below assumes"
                 + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you"
-                + " connect with, then run 'sudo sail project apply gamma':\n"
-                + "    sudo sail host config set ssh-public-key",
+                + " connect with, then apply the project to put it in the container:\n"
+                + "    sudo sail host config set ssh-public-key\n"
+                + "    sudo sail project apply gamma",
             "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R main' and re-run"
                 + " 'sudo sail init --main sail@main'; otherwise something between this box and"
                 + " main is answering for it."),
@@ -128,8 +130,9 @@ class OperatorHintsTest {
             "Name it with 'sail host config set sync-handle <you>', then run 'sail sync'.",
             "  ⚠ No workstation key is registered on this box; the snippet below assumes"
                 + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you"
-                + " connect with, then run 'sail project apply gamma':\n"
-                + "    sail host config set ssh-public-key",
+                + " connect with, then apply the project to put it in the container:\n"
+                + "    sail host config set ssh-public-key\n"
+                + "    sail project apply gamma",
             "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail"
                 + " init --main sail@main'; otherwise something between this box and main is"
                 + " answering for it."),
@@ -162,7 +165,7 @@ class OperatorHintsTest {
 
   @Test
   void aFreshBoxsSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
-    var freshSudoCaller = OperatorCommand.SUDO_UNREFUSED;
+    var freshSudoCaller = OperatorCommand.SUDO;
 
     assertEquals(
         "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
@@ -199,17 +202,84 @@ class OperatorHintsTest {
     assertEquals(List.of(), unlisted, "a command refuses non-root callers but is not ROOT_ONLY");
   }
 
+  /**
+   * Walks the command tree collecting every verb whose class, a nested one read from its own
+   * declaration on, refuses a non-root caller in any of the words sail uses for it.
+   */
   private static void rootGuarded(CommandLine command, String path, List<String> unlisted) {
     for (var sub : command.getSubcommands().entrySet()) {
       var verb = (path + " " + sub.getKey()).strip();
-      var type = sub.getValue().getCommandSpec().userObject().getClass().getName();
-      var source = Path.of("src", "main", "java", type.replace('.', '/') + ".java");
+      var type = sub.getValue().getCommandSpec().userObject().getClass();
+      var source =
+          Path.of("src", "main", "java", type.getNestHost().getName().replace('.', '/') + ".java");
       if (Files.exists(source)
-          && read(source).contains("Root privileges required")
+          && refusesNonRoot(read(source), type.getSimpleName())
           && !OperatorCommand.ROOT_ONLY.contains(verb)) {
         unlisted.add(verb);
       }
       rootGuarded(sub.getValue(), verb, unlisted);
+    }
+  }
+
+  private static boolean refusesNonRoot(String source, String simpleName) {
+    var start = source.indexOf("class " + simpleName + " ");
+    var nested = source.indexOf("\n  @Command(", start);
+    return REFUSES_NON_ROOT
+        .matcher(source.substring(start, nested < 0 ? source.length() : nested))
+        .find();
+  }
+
+  private static final Pattern REFUSES_NON_ROOT =
+      Pattern.compile("Root privileges required|requires root|must run as root");
+
+  /**
+   * Every command rendered through the seam is one sail has, as far as its first literal spells it:
+   * a verb that does not exist or a positional a command does not take is a hint nobody can run. A
+   * placeholder stands for a value; a command cut short of a required parameter passes, since the
+   * rest of it is built from values.
+   */
+  @Test
+  void everyRenderedCommandIsOneSailHas() throws Exception {
+    var rendered = Pattern.compile("\\.(?:sail|root|elsewhere|client)\\(\\s*\"([^\"]*)\"");
+    var unknown = new ArrayList<String>();
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main"))) {
+      try (var sources = Files.walk(root)) {
+        for (var file :
+            sources.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
+          var matcher = rendered.matcher(read(file));
+          while (matcher.find()) {
+            var args = matcher.group(1);
+            if (!parses(args)) {
+              unknown.add(file.getFileName() + ": " + args);
+            }
+          }
+        }
+      }
+    }
+
+    assertEquals(List.of(), unknown, "a rendered command is not one sail has");
+  }
+
+  private static boolean parses(String args) {
+    var words =
+        Arrays.stream(
+                args.replaceAll("\"?<[^>]*>\"?|'[^']*'", "x")
+                    .replaceAll("\\|\\S*", "")
+                    .strip()
+                    .split("\\s+"))
+            .filter(word -> !word.isEmpty() && !word.endsWith("..."))
+            .toArray(String[]::new);
+    try {
+      new CommandLine(new Sail()).parseArgs(words);
+      return true;
+    } catch (CommandLine.MissingParameterException cutShort) {
+      return true;
+    } catch (CommandLine.ParameterException unknown) {
+      return false;
     }
   }
 
@@ -234,7 +304,7 @@ class OperatorHintsTest {
 
   @Test
   void theOperatorIsResolvedOnceAtEachCommandsDoorAndNowhereBelow() throws Exception {
-    var seam = "OperatorCommand.here()";
+    var seam = Pattern.compile("OperatorCommand(?:\\.here\\(\\)|::here)");
     var below = new ArrayList<String>();
     var twice = new ArrayList<String>();
     for (var root :
@@ -244,7 +314,7 @@ class OperatorHintsTest {
             Path.of("src", "main"))) {
       try (var sources = Files.walk(root)) {
         for (var file : sources.filter(Files::isRegularFile).toList()) {
-          var calls = read(file).split(Pattern.quote(seam), -1).length - 1;
+          var calls = (int) seam.matcher(read(file)).results().count();
           if (calls == 0) {
             continue;
           }

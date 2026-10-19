@@ -1204,7 +1204,11 @@ public final class SpecStore implements ConflictResolver, SyncedStore {
   private static void requireMigrated(String hash, String id) {
     if (hash == null)
       throw new IllegalStateException(
-          "Spec " + id + " has no content hash: this database's content migration never finished.");
+          "Spec "
+              + id
+              + " has no content hash: this database's content migration never finished. Run '"
+              + OperatorCommand.elsewhere("migrate")
+              + "'.");
   }
 
   public List<SpecRow> readySpecs() {

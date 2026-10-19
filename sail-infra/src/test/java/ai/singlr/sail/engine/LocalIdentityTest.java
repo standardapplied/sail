@@ -57,7 +57,7 @@ class LocalIdentityTest {
     var error =
         assertThrows(
             IllegalStateException.class, () -> identity(Map.of()).valueFor("SSH_PUBLIC_KEY"));
-    assertTrue(error.getMessage().contains("sail host config set ssh-public-key"));
+    assertTrue(error.getMessage().contains(" is not an SSH public key: "), error.getMessage());
   }
 
   @Test

@@ -42,7 +42,7 @@ public final class SyncDatabase implements AutoCloseable {
   public static SyncDatabase converge(Path dbPath, String box) {
     var db = Sqlite.open(dbPath);
     try {
-      prepare(db, box);
+      prepare(db, box, OperatorCommand.SUDO);
       return new SyncDatabase(db);
     } catch (RuntimeException e) {
       db.close();
@@ -50,10 +50,15 @@ public final class SyncDatabase implements AutoCloseable {
     }
   }
 
-  public static void prepare(Sqlite db, String box) {
+  /**
+   * Converges {@code db}'s schema and data; what a migration reports is worded for {@code
+   * operator}, the reader of the round: {@link OperatorCommand#SUDO} when that reader is another
+   * box's, whom this box cannot know.
+   */
+  public static void prepare(Sqlite db, String box, OperatorCommand operator) {
     try {
       new SchemaManager(db).migrate();
-      var migrations = DataMigrations.databaseOnly();
+      var migrations = DataMigrations.databaseOnly(operator);
       if (DataMigrations.anyPending(db, migrations)) {
         MigrationRunner.applyAll(db, migrations, DataMigration.Prompter.NON_INTERACTIVE);
       }
@@ -66,7 +71,7 @@ public final class SyncDatabase implements AutoCloseable {
               + "': "
               + e.getMessage()
               + ". Run '"
-              + OperatorCommand.elsewhere("upgrade")
+              + operator.sail("upgrade")
               + "' on '"
               + box
               + "', then sync again.",

@@ -236,9 +236,12 @@ class SyncSchemaConvergenceTest {
       }
       assertTrue(
           DataMigrations.anyPending(converged.db(), DataMigrations.all(OperatorCommand.PLAIN)));
-      assertTrue(!DataMigrations.anyPending(converged.db(), DataMigrations.databaseOnly()));
       assertTrue(
-          DataMigrations.databaseOnly().stream().noneMatch(DataMigration::readsBoxFiles)
+          !DataMigrations.anyPending(
+              converged.db(), DataMigrations.databaseOnly(OperatorCommand.PLAIN)));
+      assertTrue(
+          DataMigrations.databaseOnly(OperatorCommand.PLAIN).stream()
+                  .noneMatch(DataMigration::readsBoxFiles)
               && DataMigrations.all(OperatorCommand.PLAIN).stream()
                   .anyMatch(DataMigration::readsBoxFiles));
     }

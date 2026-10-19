@@ -211,7 +211,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var workstationKey = WorkstationIdentity.registered();
     var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
-    if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config, workstationKey)))) {
+    if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
           config,
           sailYamlPath,
@@ -306,8 +306,7 @@ public final class ProjectApplyCommand implements Runnable {
         if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
           var recorded = ProjectProvisioner.provisionedInputs(observer, project);
-          if (!recorded.equals(
-              Optional.of(ProjectProvisioner.inputs(targetPlan.config(), workstationKey)))) {
+          if (!ProjectProvisioner.provisionedFrom(recorded, targetPlan.config(), workstationKey)) {
             provision(
                 targetPlan.config(),
                 sailYamlPath,
@@ -604,15 +603,18 @@ public final class ProjectApplyCommand implements Runnable {
 
   /**
    * Why an existing container is provisioned again from its first step: the interrupted run's
-   * progress ({@code superseded}) was recorded for another descriptor, the container was last
-   * provisioned from another descriptor ({@code recorded}), or the container records none at all.
+   * progress ({@code superseded}) was recorded for other inputs, the container was last provisioned
+   * from other inputs ({@code recorded}), or the container records none at all. The inputs are the
+   * descriptor and this box's workstation key ({@link ProjectProvisioner#inputs}).
    */
   static String recheckLine(ProvisionState superseded, boolean recorded) {
     if (superseded != null && !ProjectPhase.COMPLETE.name().equals(superseded.completedPhase())) {
-      return "The descriptor changed since the interrupted run: every step is checked again.";
+      return "The descriptor or this box's workstation key changed since the interrupted run: every"
+          + " step is checked again.";
     }
     if (recorded) {
-      return "The descriptor changed since the last provisioning run: every step is checked again.";
+      return "The descriptor or this box's workstation key changed since the last provisioning run:"
+          + " every step is checked again.";
     }
     return "No record of the descriptor this container was provisioned from: every step is checked"
         + " again.";

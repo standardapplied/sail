@@ -111,7 +111,10 @@ public final class HostConfigSetCommand implements Runnable {
     if (!dryRun && !ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
           "Root privileges required. Run with: "
-              + OperatorCommand.SUDO.sail("host config set " + key + " " + value));
+              + OperatorCommand.SUDO.sail(
+                  "host config set "
+                      + key
+                      + (value == null ? "" : " " + Strings.shellWord(value))));
     }
 
     if ("ssh-public-key".equals(key)) {

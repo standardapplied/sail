@@ -30,7 +30,7 @@ public record HostAccess(Sqlite db, RoleRule roles, OperatorCommand operator) {
       if (Strings.isBlank(boxHandle)) {
         throw new IOException(
             "This box has no FDE identity. Set one with '"
-                + operator.sail("host config set sync-handle")
+                + operator.sail("host config set sync-handle <handle>")
                 + "' or connect through the gateway.");
       }
       return new PtyIdentity(boxHandle, roleOf(boxHandle) == Role.ADMIN);
