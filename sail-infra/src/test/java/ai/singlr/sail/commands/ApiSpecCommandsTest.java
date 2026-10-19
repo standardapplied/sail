@@ -351,13 +351,13 @@ class ApiSpecCommandsTest {
   }
 
   @Test
-  void aJsonDeleteWithNoTerminalToConfirmOnIsRefusedAndDeletesNothing() {
+  void aJsonDeleteNeedsForceSinceNobodyAnswersAPromptThroughJson() {
     run("create", "--id", "kept", "--title", "Kept");
 
-    var refused = answering("", false, "delete", "kept", "--json");
+    var refused = answering("y\n", true, "delete", "kept", "--json");
 
     assertEquals(
-        new Ran(1, "", "  ✗ Not deleted: no terminal to confirm on. Re-run with --force.\n"),
+        new Ran(1, "", "  ✗ --json requires --force (nobody answers a prompt through JSON).\n"),
         refused);
     assertTrue(run("show", "kept", "--json").contains("\"id\": \"kept\""));
   }
@@ -515,6 +515,15 @@ class ApiSpecCommandsTest {
 
     assertEquals(new Ran(0, "  ✓ Content updated for: drafted\n", ""), set);
     assertEquals("# Drafted body\n", run("content", "drafted"));
+  }
+
+  @Test
+  void aSetWithNoFileToSetFromIsRefused() {
+    run("create", "--id", "drafted", "--title", "Drafted");
+
+    assertEquals(
+        new Ran(1, "", "  ✗ --set needs --body-file and/or --plan-file.\n"),
+        execute("content", "drafted", "--set"));
   }
 
   @Test

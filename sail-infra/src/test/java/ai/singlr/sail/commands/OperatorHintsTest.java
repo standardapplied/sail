@@ -126,8 +126,8 @@ class OperatorHintsTest {
   void aStandaloneHostInitNamesTheSetupItIsAStepOf() {
     assertEquals(
         Optional.of(
-            "  @|bold Next step:|@ sudo sail init --as-main, or sudo sail init --main <main>,"
-                + " installs sail-api and connects this box."),
+            "  @|bold Next step:|@ sudo sail init --as-main --handle <you>, or sudo sail init"
+                + " --main <main>, installs sail-api and connects this box."),
         HostInitCommand.nextStep(true, false, PLAIN));
   }
 
@@ -189,8 +189,8 @@ class OperatorHintsTest {
         """
         else
           info "Get started:"
-          info "  sudo sail init --as-main        # make this box the org's main"
-          info "  sudo sail init --main <main>    # or join an existing main"
+          info "  sudo sail init --as-main --handle <you>   # make this box the org's main"
+          info "  sudo sail init --main <main>              # or join an existing main"
         fi
         """,
         linux);

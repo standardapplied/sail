@@ -145,7 +145,7 @@ class InitCommandTest {
             "HostInitCommand --yes",
             "HostServiceInstallCommand",
             "HostSshIdentityCommand",
-            "HostSyncCommand --as-main --handle ada"),
+            "HostSyncCommand --as-main --handle ada --name Root Person --email root@box"),
         ran);
   }
 
@@ -178,7 +178,45 @@ class InitCommandTest {
 
     assertEquals(0, init("--as-main"));
 
-    assertEquals("HostSyncCommand --as-main --handle ada", ran.getLast());
+    assertEquals(
+        "HostSyncCommand --as-main --handle ada --name Root Person --email root@box",
+        ran.getLast());
+  }
+
+  @Test
+  void aMainsOperatorIsAddedWithTheNameAndEmailTheBoxCommitsAs() {
+    gitConfig.put("user.name", "Ada L");
+    gitConfig.put("user.email", "ada@example.com");
+
+    assertEquals(0, init("--as-main", "--handle", "ada"));
+
+    assertEquals(
+        "HostSyncCommand --as-main --handle ada --name Ada L --email ada@example.com",
+        ran.getLast());
+  }
+
+  @Test
+  void anInvalidRosterEmailIsRefusedBeforeAnyStep() {
+    assertEquals(1, init("--as-main", "--handle", "ada", "--email", "ada"));
+
+    assertEquals(
+        "Invalid email: 'ada'. Must be one address, like ada@example.com. Re-run with --email"
+            + " \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
+  }
+
+  @Test
+  void aGitNameTheRosterCannotTakeIsRefusedBeforeAnyStepNamingTheFlag() {
+    gitConfig.put("user.name", "Ada\tL");
+
+    assertEquals(1, init("--main", "m", "--handle", "ada"));
+
+    assertEquals(
+        "Invalid name: must be 1 to 128 characters on one line, with no control characters."
+            + " Re-run with --name \"...\".",
+        refusal);
+    assertEquals(List.of(), ran);
   }
 
   @Test
@@ -222,7 +260,7 @@ class InitCommandTest {
 
     assertEquals(0, init("--main", "m", "--handle", "ada"));
 
-    assertEquals("JoinCommand m --handle ada", ran.getLast());
+    assertEquals("JoinCommand m --handle ada --name Root Person --email root@box", ran.getLast());
   }
 
   @Test
@@ -289,13 +327,13 @@ class InitCommandTest {
         List.of(
             "HostServiceInstallCommand",
             "HostSshIdentityCommand",
-            "HostSyncCommand --as-main --handle ada"),
+            "HostSyncCommand --as-main --handle ada --name Root Person --email root@box"),
         ran);
   }
 
   @Test
   void reRunningAfterAFailedJoinResumesAndFinishes() {
-    failing = "JoinCommand maindevbox";
+    failing = "JoinCommand maindevbox --name Root Person --email root@box";
 
     assertEquals(1, init("--main", "maindevbox"));
     assertEquals("Setup stopped — the step above failed.", refusal);
@@ -304,7 +342,11 @@ class InitCommandTest {
 
     assertEquals(0, init("--main", "maindevbox"));
 
-    assertEquals(List.of("HostServiceInstallCommand", "JoinCommand maindevbox"), ran);
+    assertEquals(
+        List.of(
+            "HostServiceInstallCommand",
+            "JoinCommand maindevbox --name Root Person --email root@box"),
+        ran);
   }
 
   /** {@code git config --global} of one account: {@code --get} reads it, a key and value set it. */

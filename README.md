@@ -54,10 +54,11 @@ sudo sail init --as-main --handle ada --name "Ada Lovelace" --email ada@example.
 ```
 
 `--handle` makes you main's operator: the FDE dispatch picks this box's specs for, added to the
-roster as admin with `--name` and `--email`. It is asked for when left out; a re-run keeps the
-handle the box already has and refuses another. `--name` and `--email` also become the box's git
-identity when it has none (they are asked for when left out, and init stops before any step
-without them), so the projects it applies commit as you. An identity the box already has is kept.
+roster as admin with `--name` and `--email`, or with the git identity the box already has. It is
+asked for when left out; a re-run keeps the handle the box already has and refuses another.
+`--name` and `--email` also become the box's git identity when it has none (they are asked for
+when left out, and init stops before any step without them), so the projects it applies commit as
+you. An identity the box already has is kept.
 
 Authorize each engineer with the line their `sudo sail init --main` printed. It carries the
 fingerprint of main's host key that their box pinned, and main refuses the line when that is not

@@ -96,7 +96,8 @@ public final class ProjectDestroyCommand implements Runnable {
     if ((containerPresent || purge)
         && !yes
         && !dryRun
-        && !ConsoleHelper.confirm(confirmPrompt(name, purge))) {
+        && !ConsoleHelper.confirmDestructive(
+            confirmPrompt(name, purge), "Not destroyed", "--yes")) {
       System.out.println("  Aborted.");
       return;
     }

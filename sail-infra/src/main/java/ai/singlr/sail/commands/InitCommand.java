@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine;
@@ -144,6 +145,8 @@ public final class InitCommand implements Runnable {
     var fde = intent instanceof InitIntent.Main ? mainHandle(box, provisioned) : handle;
     var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
     var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
+    requireValid(name, NameValidator::requireValidDisplayName, "--name");
+    requireValid(mail, NameValidator::requireValidEmail, "--email");
 
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
     if (provisioned) {
@@ -183,15 +186,17 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * The operator's {@code placeholder} value: {@code flag}, or else asked for when this box's git
-   * identity holds none. Asked before the first step, so a long setup waits on no question, and
+   * The operator's {@code placeholder} value: {@code flag}, else what this box's git identity
+   * holds, else asked for. Asked before the first step, so a long setup waits on no question, and
    * adopted after the last, once the box is provisioned. A box left with no value is refused before
    * any step: every project applied here by name would be refused for it.
    */
   private static GitChoice gitChoice(
       Box box, String placeholder, String flag, String label, String option) {
-    if (box.identity().gitValue(placeholder).isPresent()) {
-      return new GitChoice(placeholder, flag, false);
+    var held = box.identity().gitValue(placeholder);
+    if (held.isPresent()) {
+      return new GitChoice(
+          placeholder, Strings.isNotBlank(flag) ? flag.strip() : held.get(), false);
     }
     var chosen = Strings.isNotBlank(flag) ? flag : box.prompt().ask(label);
     if (Strings.isBlank(chosen)) {
@@ -206,9 +211,9 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * A git identity value init carries: {@code value} is what a node's roster entry is given, and
-   * {@code unset} says the box's git identity has none, so init gives it this one; an identity the
-   * box already holds is never overwritten.
+   * A git identity value init carries: {@code value} is what the operator's roster entry is given,
+   * and {@code unset} says the box's git identity has none, so init gives it this one; an identity
+   * the box already holds is never overwritten.
    */
   private record GitChoice(String placeholder, String value, boolean unset) {
     void adopt(LocalIdentity identity) throws Exception {
@@ -218,8 +223,18 @@ public final class InitCommand implements Runnable {
     }
   }
 
+  /** Refuses a roster value {@code rule} rejects before any step, naming {@code option}. */
+  private static void requireValid(GitChoice choice, Consumer<String> rule, String option) {
+    try {
+      rule.accept(choice.value());
+    } catch (IllegalArgumentException e) {
+      throw new IllegalArgumentException(
+          e.getMessage() + " Re-run with " + option + " \"...\".", e);
+    }
+  }
+
   private static String ask(String label) {
-    if (System.console() == null) {
+    if (!ConsoleHelper.hasConsole()) {
       return null;
     }
     System.out.print(Ansi.AUTO.string("  " + label + "? "));

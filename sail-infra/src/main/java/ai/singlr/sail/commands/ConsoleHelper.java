@@ -101,12 +101,12 @@ final class ConsoleHelper {
   /**
    * Asks before an action that cannot be undone, defaulting to no. Nobody can answer without a
    * terminal, so it refuses there rather than act on an answer nobody gave, naming {@code notDone}
-   * (e.g. "Not deleted") and the flag that skips the question.
+   * (e.g. "Not deleted") and {@code flag}, the one that skips the question.
    */
-  static boolean confirmDestructive(String prompt, String notDone) {
+  static boolean confirmDestructive(String prompt, String notDone, String flag) {
     if (!hasConsole()) {
       throw new IllegalStateException(
-          notDone + ": no terminal to confirm on. Re-run with --force.");
+          notDone + ": no terminal to confirm on. Re-run with " + flag + ".");
     }
     return confirmNo(prompt);
   }

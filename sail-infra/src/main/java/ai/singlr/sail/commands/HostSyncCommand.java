@@ -19,6 +19,7 @@ import ai.singlr.sail.engine.SyncOperations;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -89,25 +90,21 @@ public final class HostSyncCommand implements Runnable {
               + (asMain ? "--as-main" : "--main " + mainTarget));
     }
 
-    var db = SailPaths.controlPlaneDb();
-    var role =
+    var taken =
         takeRole(
             path,
-            db,
+            SailPaths.controlPlaneDb(),
             host,
             asMain,
             mainTarget,
-            handle,
+            handle == null ? null : new OwnFde(handle, displayName, email),
             HostInfo.hostname(),
             SshSyncChannel::open,
             operator);
-    if (handle != null) {
-      var enrolled = FdeCommand.enrol(db, handle, displayName, email, operator);
-      if (!json) {
-        System.out.println(Ansi.AUTO.string(enrolled));
-      }
+    if (!json) {
+      taken.enrolled().ifPresent(line -> System.out.println(Ansi.AUTO.string(line)));
     }
-    printRole(role, operator);
+    printRole(taken.sync(), operator);
   }
 
   private void validateOwnFde(OperatorCommand operator) {
@@ -122,7 +119,7 @@ public final class HostSyncCommand implements Runnable {
       throw new IllegalArgumentException(
           "--handle names main's own FDE, so it goes with --as-main. A node takes its handle"
               + " when it joins: "
-              + operator.sail("join <main> --handle " + handle));
+              + operator.sail("join " + mainTarget + " --handle " + handle));
     }
     NameValidator.requireValidFdeHandle(handle);
     if (displayName != null) {
@@ -133,26 +130,38 @@ public final class HostSyncCommand implements Runnable {
     }
   }
 
+  /** Main's own FDE: the handle this box acts as, with the roster name and email it is added by. */
+  record OwnFde(String handle, String name, String email) {}
+
+  /** The role a box took, and the roster line when it took its own FDE with it. */
+  record Taken(SyncConfig sync, Optional<String> enrolled) {}
+
   /**
    * Gives the box whose config is {@code host} at {@code hostYamlPath} its chosen role ({@link
-   * #configure}) and, when {@code handle} is not {@code null}, that sync handle ({@link
-   * #withHandle}), as one change of its identity ({@link HandleChange}) in its database {@code db},
-   * so a box becoming main stamps its unstamped runs as its own. Returns the role it now has.
+   * #configure}) and, when {@code own} is not {@code null}, that sync handle ({@link #withHandle}),
+   * as one change of its identity ({@link HandleChange}) in its database {@code db}, so a box
+   * becoming main stamps its unstamped runs as its own; then puts that FDE on the roster ({@link
+   * FdeCommand#enrol}). Returns the role it now has.
    */
-  static SyncConfig takeRole(
+  static Taken takeRole(
       Path hostYamlPath,
       Path db,
       HostYaml host,
       boolean asMain,
       String mainTarget,
-      String handle,
+      OwnFde own,
       String hostname,
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
+    var handle = own == null ? null : own.handle();
     var updated = withHandle(configure(host, asMain, mainTarget, hostname), handle, operator);
     HandleChange.write(hostYamlPath, db, host, updated, channels, operator);
-    return updated.sync();
+    var enrolled =
+        own == null
+            ? Optional.<String>empty()
+            : Optional.of(FdeCommand.enrol(db, handle, own.name(), own.email(), operator));
+    return new Taken(updated.sync(), enrolled);
   }
 
   /** {@code host} acting as {@code handle}, or as it is when {@code handle} is {@code null}. */

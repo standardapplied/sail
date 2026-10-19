@@ -54,10 +54,14 @@ public final class ApiSpecContentCommand implements Runnable {
 
   private void execute() throws Exception {
     NameValidator.requireValidSpecId(specId);
+    var setting = bodyFile != null || planFile != null;
+    if (set && !setting) {
+      throw new IllegalArgumentException("--set needs --body-file and/or --plan-file.");
+    }
     var config = connection.resolve();
 
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
-      if (set || bodyFile != null || planFile != null) {
+      if (setting) {
         var body = new LinkedHashMap<String, Object>();
         if (bodyFile != null) body.put("body", Files.readString(bodyFile));
         if (planFile != null) body.put("plan", Files.readString(planFile));
