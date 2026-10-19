@@ -41,7 +41,7 @@ class WorkstationIdentityTest {
     var path = dir.resolve("workstation_key.pub");
     Files.writeString(path, ED25519 + "\n");
 
-    var key = WorkstationIdentity.registeredAt(path);
+    var key = WorkstationIdentity.registeredAt(path, OperatorCommand.PLAIN);
 
     assertTrue(key.isPresent());
     assertEquals("ssh-ed25519", key.orElseThrow().type());
@@ -49,7 +49,9 @@ class WorkstationIdentityTest {
 
   @Test
   void registeredIsEmptyWhenMissing(@TempDir Path dir) {
-    assertTrue(WorkstationIdentity.registeredAt(dir.resolve("absent.pub")).isEmpty());
+    assertTrue(
+        WorkstationIdentity.registeredAt(dir.resolve("absent.pub"), OperatorCommand.PLAIN)
+            .isEmpty());
   }
 
   @Test
@@ -58,7 +60,9 @@ class WorkstationIdentityTest {
     Files.writeString(garbage, "not a key at all\n");
 
     var refused =
-        assertThrows(IllegalStateException.class, () -> WorkstationIdentity.registeredAt(garbage));
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkstationIdentity.registeredAt(garbage, OperatorCommand.SUDO));
 
     assertTrue(
         refused
@@ -68,7 +72,14 @@ class WorkstationIdentityTest {
                     + garbage
                     + ") is not an SSH public key: Unsupported"),
         refused.getMessage());
-    assertTrue(refused.getMessage().endsWith(" Register the key you connect with again."));
-    assertEquals(Optional.empty(), WorkstationIdentity.registeredAt(dir.resolve("none.pub")));
+    assertTrue(
+        refused
+            .getMessage()
+            .endsWith(
+                " Register the key you connect with: sudo sail host config set ssh-public-key"),
+        refused.getMessage());
+    assertEquals(
+        Optional.empty(),
+        WorkstationIdentity.registeredAt(dir.resolve("none.pub"), OperatorCommand.SUDO));
   }
 }

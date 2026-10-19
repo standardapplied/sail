@@ -34,30 +34,38 @@ public final class WorkstationIdentity {
    * holds no readable key is refused rather than read as none: every container trusts this key, so
    * a damaged file would silently take it out of all of them on the next apply.
    */
-  public static Optional<SshPublicKey> registered() {
-    return registeredAt(SailPaths.workstationPublicKeyPath());
+  public static Optional<SshPublicKey> registered(OperatorCommand operator) {
+    return registeredAt(SailPaths.workstationPublicKeyPath(), operator);
   }
 
-  public static Optional<SshPublicKey> registeredAt(Path path) {
+  public static Optional<SshPublicKey> registeredAt(Path path, OperatorCommand operator) {
     if (!Files.isRegularFile(path)) {
       return Optional.empty();
     }
+    String line;
     try {
-      return Optional.of(SshPublicKey.parse(Files.readString(path).strip()));
-    } catch (IOException | IllegalArgumentException e) {
+      line = Files.readString(path).strip();
+    } catch (IOException e) {
+      throw new IllegalStateException(
+          "This box's workstation key (" + path + ") could not be read: " + e.getMessage(), e);
+    }
+    try {
+      return Optional.of(SshPublicKey.parse(line));
+    } catch (IllegalArgumentException e) {
       throw new IllegalStateException(
           "This box's workstation key ("
               + path
               + ") is not an SSH public key: "
               + e.getMessage()
-              + " Register the key you connect with again.",
+              + " Register the key you connect with: "
+              + setKeyHint(operator),
           e);
     }
   }
 
   /** The Mac-side {@code IdentityFile} a connect snippet should reference for this box's owner. */
-  public static String identityFile() {
-    return identityFileFor(registered());
+  public static String identityFile(OperatorCommand operator) {
+    return identityFileFor(registered(operator));
   }
 
   public static String identityFileFor(Optional<SshPublicKey> key) {

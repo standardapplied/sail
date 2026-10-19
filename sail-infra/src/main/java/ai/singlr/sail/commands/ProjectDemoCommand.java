@@ -67,9 +67,10 @@ public final class ProjectDemoCommand implements Runnable {
    * Runs {@code provisioning} with the workstation key read under {@link PairingTrust}, held until
    * the key is installed, so a revocation scans the containers only after the key is in this one.
    */
-  static void provisionTrusting(Path database, Provisioning provisioning) throws Exception {
+  static void provisionTrusting(Path database, OperatorCommand operator, Provisioning provisioning)
+      throws Exception {
     try (var held = PairingTrust.hold(database)) {
-      provisioning.provision(WorkstationIdentity.registered());
+      provisioning.provision(WorkstationIdentity.registered(operator));
     }
   }
 
@@ -123,8 +124,8 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     var yamlContent = loadDemoDefinition(out, ansi, operator);
-    var registered = WorkstationIdentity.registered();
-    var resolvedYaml = resolveAutoDetected(yamlContent, registered, out, ansi);
+    var registered = WorkstationIdentity.registered(operator);
+    var resolvedYaml = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi);
 
     var outputDir = Path.of(DEMO_PROJECT);
     var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
@@ -168,6 +169,7 @@ public final class ProjectDemoCommand implements Runnable {
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
     provisionTrusting(
         SailPaths.controlPlaneDb(),
+        operator,
         workstationKey ->
             new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
                 .provision(
@@ -238,15 +240,15 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   /**
-   * The demo definition with the box's git identity and SSH key filled in: the registered
-   * workstation key, which every container trusts, or else the caller's own key file.
+   * The demo definition with the box's git identity and the caller's own SSH key filled in. The
+   * registered workstation key is never written into it: every container trusts that key as the box
+   * holds it when provisioned, so a revoked key is never put back by a later apply.
    */
   private String resolveAutoDetected(
-      String yamlContent, Optional<SshPublicKey> registered, PrintStream out, Ansi ansi) {
+      String yamlContent, boolean workstationKeyRegistered, PrintStream out, Ansi ansi) {
     var gitName = detectGitConfig("user.name");
     var gitEmail = detectGitConfig("user.email");
-    var sshKey =
-        registered.map(SshPublicKey::line).orElseGet(ProjectDemoCommand::detectSshPublicKey);
+    var sshKey = detectSshPublicKey();
 
     if (!json) {
       out.println();
@@ -260,7 +262,7 @@ public final class ProjectDemoCommand implements Runnable {
       out.println(
           ansi.string(
               "    SSH key:   "
-                  + (sshKey != null
+                  + (sshKey != null || workstationKeyRegistered
                       ? "@|green found|@"
                       : "@|yellow not found \u2014 remote access won't work|@")));
       out.println();

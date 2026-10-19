@@ -7,7 +7,6 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.api.ProjectSkills;
 import ai.singlr.sail.common.DateTimeUtils;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -50,6 +49,14 @@ public final class ProjectProvisioner {
       "https://archive.apache.org/dist/maven/maven-3/";
 
   private static final String INPUTS_KEY = "user.sail.inputs";
+
+  /**
+   * An {@code authorized_keys} options field before a key, as {@link ContainerAuthorizedKeys} reads
+   * it.
+   */
+  private static final Pattern AUTHORIZED_KEYS_OPTIONS =
+      Pattern.compile("^" + ContainerAuthorizedKeys.OPTIONS + "\\s+");
+
   private static final String RESTART_PENDING_KEY = "user.sail.restart_pending";
 
   static final List<String> BASELINE_PACKAGES =
@@ -62,8 +69,6 @@ public final class ProjectProvisioner {
   private final Optional<SshPublicKey> workstationKey;
   private final OperatorCommand operator;
 
-  private static final Pattern AUTHORIZED_KEYS_OPTIONS =
-      Pattern.compile("^" + ContainerAuthorizedKeys.OPTIONS + "\\s+");
   private ProjectPhase currentPhase;
 
   public ProjectProvisioner(
@@ -159,12 +164,6 @@ public final class ProjectProvisioner {
   }
 
   /**
-   * The inputs the container {@code name} was last provisioned from, read from the Incus instance
-   * itself so that every identity on the host, root or operator, reads the same record and a
-   * deleted container takes its record with it. Empty when the container has none: it was never
-   * provisioned to the end by this release, or it does not exist.
-   */
-  /**
    * Whether {@code recorded}, what a container records it was provisioned from ({@link
    * #provisionedInputs}), is what a run from {@code config} on a box holding {@code workstationKey}
    * provisions from: when it is, the container needs no run.
@@ -174,6 +173,12 @@ public final class ProjectProvisioner {
     return recorded.equals(Optional.of(inputs(config, workstationKey)));
   }
 
+  /**
+   * The inputs the container {@code name} was last provisioned from, read from the Incus instance
+   * itself so that every identity on the host, root or operator, reads the same record and a
+   * deleted container takes its record with it. Empty when the container has none: it was never
+   * provisioned to the end by this release, or it does not exist.
+   */
   public static Optional<String> provisionedInputs(ShellExec shell, String name)
       throws IOException, InterruptedException, TimeoutException {
     var result = shell.exec(List.of("incus", "config", "get", name, INPUTS_KEY));
@@ -458,9 +463,6 @@ public final class ProjectProvisioner {
             ? config.ssh().authorizedKeys()
             : List.<String>of();
     for (var line : declared) {
-      if (Strings.isBlank(line)) {
-        throw new IllegalArgumentException("ssh.authorized_keys holds an empty entry.");
-      }
       trusted.putIfAbsent(identityOf(line), line);
     }
     return List.copyOf(trusted.values());

@@ -63,7 +63,7 @@ public final class RoomWakePrompt {
             + opening
             + conversationBlock
             + specBlock
-            + duty(spec.id(), engagement);
+            + duty(spec.id(), spec.project(), engagement);
     return new Built(prompt, conversation.fullyRendered());
   }
 
@@ -144,14 +144,14 @@ public final class RoomWakePrompt {
         .formatted(roomId, roomId);
   }
 
-  private static String duty(String specId, Engagement engagement) {
+  private static String duty(String specId, String project, Engagement engagement) {
     if (engagement == null) {
-      return wakeDuty(specId);
+      return wakeDuty(specId, project);
     }
     return engagement.full() ? engagedFullDuty(specId) : engagedReadOnlyDuty(specId);
   }
 
-  private static String wakeDuty(String specId) {
+  private static String wakeDuty(String specId, String project) {
     return """
         ## Room Duty
 
@@ -175,7 +175,8 @@ public final class RoomWakePrompt {
         """
         .formatted(
             specId,
-            OperatorCommand.elsewhere("spec dispatch --spec " + specId + " --restart"),
+            OperatorCommand.elsewhere(
+                "spec dispatch --project " + project + " --spec " + specId + " --restart"),
             specId);
   }
 

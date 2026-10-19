@@ -24,7 +24,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -1227,24 +1226,6 @@ class ProjectProvisionerTest {
     assertEquals(
         WORKSTATION_KEY.line() + "\n" + bob + "\n",
         shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
-  }
-
-  @Test
-  void anEmptyAuthorizedKeysEntryIsRefused() {
-    var shell = new PushRecordingShell(minimalSuccessShell());
-    var config =
-        minimalConfigWith(
-            new SailYaml.Ssh(null, Arrays.asList("ssh-ed25519 AAAA alice@laptop", null, " ")));
-    var provisioner =
-        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
-
-    var refused =
-        assertThrows(
-            IllegalArgumentException.class,
-            () -> provisioner.provision(config, hostYaml(), null, null));
-
-    assertEquals("ssh.authorized_keys holds an empty entry.", refused.getMessage());
-    assertFalse(shell.pushed.containsKey("simple/home/dev/.ssh/authorized_keys"));
   }
 
   @Test

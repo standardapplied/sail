@@ -65,8 +65,8 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
 
   /**
    * The reader of a process that cannot see who reads it, such as sail-api or a watcher: as root it
-   * answers the README's form, since a {@code sudo} caller's own plain {@code sail} is refused on a
-   * box whose control plane is root's; as another account it answers that account.
+   * answers the README's form, the one a {@code sudo} caller types; as another account it answers
+   * that account.
    */
   public static OperatorCommand unknownReader() {
     return unknownReader(SailPaths.isRoot());

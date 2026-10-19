@@ -209,7 +209,7 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
-    var workstationKey = WorkstationIdentity.registered();
+    var workstationKey = WorkstationIdentity.registered(operator);
     var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
     if (!ProjectProvisioner.provisionedFrom(recorded, config, workstationKey)) {
       provision(
@@ -273,7 +273,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
-    var workstationKey = WorkstationIdentity.registered();
+    var workstationKey = WorkstationIdentity.registered(operator);
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
@@ -731,7 +731,7 @@ public final class ProjectApplyCommand implements Runnable {
           serverIp,
           System.getProperty("user.name"),
           r.ipv4(),
-          WorkstationIdentity.identityFile(),
+          WorkstationIdentity.identityFile(operator),
           operator,
           System.out,
           Ansi.AUTO);

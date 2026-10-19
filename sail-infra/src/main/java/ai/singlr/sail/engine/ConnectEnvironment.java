@@ -18,8 +18,8 @@ import java.nio.file.Path;
 public record ConnectEnvironment(String serverIp, String serverUser, boolean workstationKeySet) {
 
   /** Detects the live environment from {@code host.yaml} and the registered workstation key. */
-  public static ConnectEnvironment detect() {
-    return detect(SailPaths.hostConfigPath(), WorkstationIdentity.registered().isPresent());
+  public static ConnectEnvironment detect(OperatorCommand operator) {
+    return detect(SailPaths.hostConfigPath(), WorkstationIdentity.registered(operator).isPresent());
   }
 
   static ConnectEnvironment detect(Path hostYaml, boolean workstationKeySet) {

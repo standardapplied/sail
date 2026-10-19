@@ -1171,6 +1171,17 @@ class FdeCommandTest {
   }
 
   @Test
+  void aWorkstationKeyFileThatHoldsNoKeyIsReplacedByAPairingWithoutAsking() throws Exception {
+    Files.createDirectories(workstationKey().getParent());
+    Files.writeString(workstationKey(), "not a key\n");
+
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"), refusal);
+
+    assertEquals(
+        "ssh-ed25519", SshPublicKey.parse(Files.readString(workstationKey()).strip()).type());
+  }
+
+  @Test
   void aWorkstationKeyFileThatHoldsNoKeyIsLeftAlone() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     Files.writeString(workstationKey(), "not a key\n");

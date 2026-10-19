@@ -88,7 +88,7 @@ public final class ConnectCommand implements Runnable {
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
     var containerUser = resolveContainerUser(name, operator);
 
-    var identityFile = WorkstationIdentity.identityFile();
+    var identityFile = WorkstationIdentity.identityFile(operator);
 
     if (json) {
       System.out.println(
@@ -100,11 +100,11 @@ public final class ConnectCommand implements Runnable {
                   containerIp,
                   containerUser,
                   identityFile,
-                  WorkstationIdentity.registered().isPresent())));
+                  WorkstationIdentity.registered(operator).isPresent())));
       return;
     }
 
-    if (WorkstationIdentity.registered().isEmpty()) {
+    if (WorkstationIdentity.registered(operator).isEmpty()) {
       System.out.println(Ansi.AUTO.string(noWorkstationKey(name, operator)));
     }
     System.out.println(

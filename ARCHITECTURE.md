@@ -787,11 +787,13 @@ clone a project's source repos into its container at provision time, not to move
   help (not after `--`, where they belong to the command). The `sail` gateway account reads
   `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
   own box. For such an account, `sudo` resolves a project's personal placeholders from that account's
-  home (`SailPaths.identityHome`), even beside root's system unit, so its plain and `sudo`
-  applies record the same descriptor. Every `sail` command a box prints for its operator to
-  type is rendered by `OperatorCommand`, which asks `RuntimeMode.detect` of the `sudo` caller's
-  own home: a caller whose plain `sail` would be Refused reads it with `sudo`, and root logged
-  in directly, or an account on its own box, reads it plain. The operator is resolved once per
+  home (`SailPaths.identityHome`), even beside root's system unit. Every `sail` command a box
+  prints for its operator to type is rendered by `OperatorCommand`: a `sudo` caller reads it
+  with `sudo`, since root's sail acts on root's state and the caller's own plain `sail` never
+  reaches it; root logged in directly reads it plain; a non-root process reads its own plain
+  `sail`, and `sudo` for a verb only root runs. A process that cannot see who reads it
+  (sail-api, the pty host, an agent watcher) renders with `OperatorCommand.unknownReader()`,
+  the README's form as root. The operator is resolved once per
   command, at the command's door (`OperatorCommand.here()` in the command class), and passed
   down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
   operator as a parameter, so its `sudo` wording is a plain unit assertion

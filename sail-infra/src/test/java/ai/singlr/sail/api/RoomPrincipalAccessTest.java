@@ -106,7 +106,7 @@ class RoomPrincipalAccessTest {
                 new ReviewStore(db),
                 runStore,
                 null,
-                ConnectEnvironment::detect,
+                () -> ConnectEnvironment.detect(OperatorCommand.PLAIN),
                 SyncScheduler.disabled(),
                 new FdeStore(db),
                 SessionYield.NONE,

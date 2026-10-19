@@ -179,7 +179,7 @@ public final class LocalIdentity {
   }
 
   private String sshPublicKey() {
-    return WorkstationIdentity.registeredAt(sshPublicKeyPath)
+    return WorkstationIdentity.registeredAt(sshPublicKeyPath, operator)
         .map(SshPublicKey::line)
         .orElseThrow(() -> new IllegalStateException(missingKeyMessage()));
   }

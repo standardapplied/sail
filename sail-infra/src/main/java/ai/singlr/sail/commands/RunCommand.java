@@ -499,7 +499,8 @@ public final class RunCommand implements Runnable {
 
   /**
    * Builds the agent task prompt for a pending spec: its title and id, the body (falling back to
-   * the title when empty), and the instruction to mark it done and pick up the next one.
+   * the title when empty), and the instruction to stop when done: a run is one spec's, and sail
+   * decides what runs next.
    */
   static String specTask(Spec spec, String body) {
     var description = !body.isBlank() ? body : spec.title();
@@ -509,7 +510,7 @@ public final class RunCommand implements Runnable {
         + spec.id()
         + ").\n\n"
         + description
-        + "\n\nWhen complete, pick up the next pending spec and continue working.";
+        + "\n\nWhen complete, stop.";
   }
 
   private void autoRollback(ShellExec shell, String snapshotLabel, int exitCode) {

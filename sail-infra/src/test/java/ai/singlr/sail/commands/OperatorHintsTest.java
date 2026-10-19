@@ -164,19 +164,19 @@ class OperatorHintsTest {
   }
 
   @Test
-  void aFreshBoxsSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
-    var freshSudoCaller = OperatorCommand.SUDO;
+  void aSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
+    var sudoCaller = OperatorCommand.SUDO;
 
     assertEquals(
         "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
             + " installs sail-api and connects this box.",
-        Ansi.OFF.string(HostInitCommand.nextStep(true, false, freshSudoCaller).orElseThrow()));
+        Ansi.OFF.string(HostInitCommand.nextStep(true, false, sudoCaller).orElseThrow()));
     assertEquals(
         "Server not initialized. Run 'sudo sail host init' first.",
-        HostInitCommand.notInitialized(freshSudoCaller).getMessage());
+        HostInitCommand.notInitialized(sudoCaller).getMessage());
     assertEquals(
         "The sail user is not provisioned. Run 'sudo sail host ssh-identity' first.",
-        HostKeysCommand.Sync.notProvisioned(freshSudoCaller));
+        HostKeysCommand.Sync.notProvisioned(sudoCaller));
     assertEquals(
         "The sail user is not provisioned. Run 'sail host ssh-identity' first.",
         HostKeysCommand.Sync.notProvisioned(PLAIN));
@@ -233,14 +233,15 @@ class OperatorHintsTest {
       Pattern.compile("Root privileges required|requires root|must run as root");
 
   /**
-   * Every command rendered through the seam is one sail has, as far as its first literal spells it:
-   * a verb that does not exist or a positional a command does not take is a hint nobody can run. A
-   * placeholder stands for a value; a command cut short of a required parameter passes, since the
-   * rest of it is built from values.
+   * Every command rendered through the seam is one sail has: a verb that does not exist or a
+   * positional a command does not take is a hint nobody can run. The whole argument is read, its
+   * literals joined and every value it is built from standing as {@code x}; a placeholder stands
+   * for a value too, a command cut short of a required parameter passes, and so does a value
+   * standing where a subcommand goes.
    */
   @Test
   void everyRenderedCommandIsOneSailHas() throws Exception {
-    var rendered = Pattern.compile("\\.(?:sail|root|elsewhere|client)\\(\\s*\"([^\"]*)\"");
+    var rendered = Pattern.compile("\\.(?:sail|root|elsewhere|client)\\(\\s*(?=\")");
     var unknown = new ArrayList<String>();
     for (var root :
         List.of(
@@ -250,9 +251,11 @@ class OperatorHintsTest {
       try (var sources = Files.walk(root)) {
         for (var file :
             sources.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
-          var matcher = rendered.matcher(read(file));
+          var source = read(file);
+          var matcher = rendered.matcher(source);
           while (matcher.find()) {
-            var args = matcher.group(1);
+            var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
+            var args = renderedArgs(call);
             if (!parses(args)) {
               unknown.add(file.getFileName() + ": " + args);
             }
@@ -262,6 +265,45 @@ class OperatorHintsTest {
     }
 
     assertEquals(List.of(), unknown, "a rendered command is not one sail has");
+  }
+
+  /** The index of the {@code )} closing the call whose arguments start at {@code from}. */
+  private static int closingParen(String source, int from) {
+    var depth = 1;
+    for (var i = from; i < source.length(); i++) {
+      var c = source.charAt(i);
+      if (c == '"') {
+        for (i++; source.charAt(i) != '"'; i++) {
+          if (source.charAt(i) == '\\') {
+            i++;
+          }
+        }
+      } else if (c == '(') {
+        depth++;
+      } else if (c == ')' && --depth == 0) {
+        return i;
+      }
+    }
+    throw new IllegalStateException("unclosed call at " + from);
+  }
+
+  private static final Pattern TERNARY =
+      Pattern.compile("\\([^()?]*\\?\\s*(.*?)\\s*:\\s*[^()]*\\)");
+  private static final Pattern OPERAND =
+      Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?");
+
+  /** The command an argument expression renders: its literals joined, every other operand x. */
+  private static String renderedArgs(String expression) {
+    var chosen = expression;
+    for (var m = TERNARY.matcher(chosen); m.find(); m = TERNARY.matcher(chosen)) {
+      chosen = chosen.substring(0, m.start()) + m.group(1) + chosen.substring(m.end());
+    }
+    var rendered = new StringBuilder();
+    var operands = OPERAND.matcher(chosen);
+    while (operands.find()) {
+      rendered.append(operands.group(1) != null ? operands.group(1) : "x");
+    }
+    return rendered.toString();
   }
 
   private static boolean parses(String args) {
@@ -278,6 +320,9 @@ class OperatorHintsTest {
       return true;
     } catch (CommandLine.MissingParameterException cutShort) {
       return true;
+    } catch (CommandLine.UnmatchedArgumentException unmatched) {
+      return unmatched.getUnmatched().equals(List.of("x"))
+          && !unmatched.getCommandLine().getSubcommands().isEmpty();
     } catch (CommandLine.ParameterException unknown) {
       return false;
     }
@@ -304,7 +349,9 @@ class OperatorHintsTest {
 
   @Test
   void theOperatorIsResolvedOnceAtEachCommandsDoorAndNowhereBelow() throws Exception {
-    var seam = Pattern.compile("OperatorCommand(?:\\.here\\(\\)|::here)");
+    var seam =
+        Pattern.compile(
+            "OperatorCommand(?:\\.here\\(\\)|::here|\\.unknownReader\\(\\)|::unknownReader)");
     var below = new ArrayList<String>();
     var twice = new ArrayList<String>();
     for (var root :

@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -79,7 +80,8 @@ class ProjectDemoCommandTest {
     var demo =
         new FutureTask<Void>(
             () -> {
-              ProjectDemoCommand.provisionTrusting(database, key -> provisioned.countDown());
+              ProjectDemoCommand.provisionTrusting(
+                  database, OperatorCommand.PLAIN, key -> provisioned.countDown());
               return null;
             });
 

@@ -7,9 +7,7 @@ package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class OperatorCommandTest {
@@ -95,12 +93,10 @@ class OperatorCommandTest {
   }
 
   @Test
-  void thisProcessReadsOneOfTheThreeReaders() {
-    var readers =
-        List.of(OperatorCommand.PLAIN, OperatorCommand.SUDO, OperatorCommand.UNPRIVILEGED);
-
-    assertTrue(readers.contains(OperatorCommand.here()));
-    assertTrue(readers.contains(OperatorCommand.unknownReader()));
-    assertEquals(SailPaths.isRoot(), OperatorCommand.unknownReader().sudo());
+  void thisProcessReadsItsOwnAccountAndItsPrivilege() {
+    assertEquals(
+        OperatorCommand.of(SailPaths.isRoot(), System.getenv("SUDO_USER")), OperatorCommand.here());
+    assertEquals(
+        OperatorCommand.unknownReader(SailPaths.isRoot()), OperatorCommand.unknownReader());
   }
 }

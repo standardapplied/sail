@@ -907,7 +907,7 @@ public final class FdeCommand implements Runnable {
         var pinned = hostKey.type() + " " + hostKey.blob();
         var replaced =
             replacedWorkstationKey(
-                box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())));
+                box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())), operator);
         var key = mintKey(box.shell());
         var fde = box.node() ? existing.orElseThrow() : rosterRow(fdes, existing);
         if (existing.isEmpty()) {
@@ -1009,13 +1009,14 @@ public final class FdeCommand implements Runnable {
     /**
      * The registered workstation key this pairing takes over from someone else, if any. The key of
      * the FDE's own earlier pairing is replaced without asking; another's only with {@code
-     * --as-workstation-key}, since containers trust one key and its owner would lose them.
+     * --as-workstation-key}, since containers trust one key and its owner would lose them. A file
+     * that holds no key is nobody's, so it is replaced without asking too.
      */
     private Optional<SshPublicKey> replacedWorkstationKey(
-        Box box, Optional<FdePairingStore.Pairing> pairing) {
+        Box box, Optional<FdePairingStore.Pairing> pairing, OperatorCommand operator) {
       var own = pairing.map(held -> SshPublicKey.parse(held.publicKey()).fingerprint());
       var replaced =
-          WorkstationIdentity.registeredAt(box.workstationKey())
+          heldKey(box.workstationKey(), operator)
               .filter(key -> !own.equals(Optional.of(key.fingerprint())));
       if (replaced.isPresent() && !asWorkstationKey) {
         throw new IllegalStateException(
@@ -1026,6 +1027,17 @@ public final class FdeCommand implements Runnable {
                 + "'s.");
       }
       return replaced;
+    }
+
+    /**
+     * The key the workstation key file holds, or none when it holds nothing a pairing would keep.
+     */
+    private static Optional<SshPublicKey> heldKey(Path file, OperatorCommand operator) {
+      try {
+        return WorkstationIdentity.registeredAt(file, operator);
+      } catch (IllegalStateException holdsNoKey) {
+        return Optional.empty();
+      }
     }
 
     private static String describe(SshPublicKey key) {

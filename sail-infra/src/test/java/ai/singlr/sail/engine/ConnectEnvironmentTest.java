@@ -49,6 +49,8 @@ class ConnectEnvironmentTest {
 
   @Test
   void detectReflectsTheCurrentProcessUser() {
-    assertEquals(System.getProperty("user.name"), ConnectEnvironment.detect().serverUser());
+    assertEquals(
+        System.getProperty("user.name"),
+        ConnectEnvironment.detect(OperatorCommand.PLAIN).serverUser());
   }
 }
