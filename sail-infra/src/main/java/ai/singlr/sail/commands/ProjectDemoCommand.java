@@ -299,15 +299,20 @@ public final class ProjectDemoCommand implements Runnable {
               + "\n    git config --global user.email you@example.com");
     }
 
+    return resolvedDefinition(yamlContent, gitName, gitEmail, sshKey);
+  }
+
+  /**
+   * The definition with the identity filled in. With no key of the caller's own the key entry goes:
+   * step 6 trusts the registered workstation key whatever the definition says, and a key written
+   * into the definition would be put back by an apply after it was revoked.
+   */
+  static String resolvedDefinition(
+      String yamlContent, String gitName, String gitEmail, String sshKey) {
     var resolved = yamlContent.replace("${GIT_NAME}", gitName).replace("${GIT_EMAIL}", gitEmail);
-
-    if (sshKey != null) {
-      resolved = resolved.replace("${SSH_PUBLIC_KEY}", sshKey);
-    } else {
-      resolved = resolved.replaceAll("\\s*- \\$\\{SSH_PUBLIC_KEY}", "");
-    }
-
-    return resolved;
+    return sshKey != null
+        ? resolved.replace("${SSH_PUBLIC_KEY}", sshKey)
+        : resolved.replaceAll("\\s*- \\$\\{SSH_PUBLIC_KEY}", "");
   }
 
   String detectGitConfig(String key) {

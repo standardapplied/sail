@@ -563,33 +563,7 @@ public record SailYaml(
       if (user != null) {
         NameValidator.requireValidSshUser(user);
       }
-      return new Ssh(user, authorizedKeys(map.get("authorized_keys")));
-    }
-
-    /** The keys as listed, each a non-blank single line, stripped; anything else is refused. */
-    private static List<String> authorizedKeys(Object entries) {
-      if (entries == null) {
-        return null;
-      }
-      if (!(entries instanceof List<?> list)) {
-        throw new IllegalArgumentException("ssh.authorized_keys must be a list of keys.");
-      }
-      var keys = new ArrayList<String>();
-      for (var entry : list) {
-        if (entry == null || entry instanceof String blank && blank.isBlank()) {
-          throw new IllegalArgumentException("ssh.authorized_keys holds an empty entry.");
-        }
-        if (!(entry instanceof String line)) {
-          throw new IllegalArgumentException(
-              "ssh.authorized_keys holds an entry that is not a key: " + entry);
-        }
-        if (line.strip().lines().count() > 1) {
-          throw new IllegalArgumentException(
-              "ssh.authorized_keys holds a key of more than one line.");
-        }
-        keys.add(line.strip());
-      }
-      return List.copyOf(keys);
+      return new Ssh(user, (List<String>) map.get("authorized_keys"));
     }
 
     public Map<String, Object> toMap() {

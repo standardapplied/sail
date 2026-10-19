@@ -47,7 +47,12 @@ public final class WorkstationIdentity {
       line = Files.readString(path).strip();
     } catch (IOException e) {
       throw new IllegalStateException(
-          "This box's workstation key (" + path + ") could not be read: " + e.getMessage(), e);
+          "This box's workstation key ("
+              + path
+              + ") could not be read ("
+              + e.getClass().getSimpleName()
+              + "). Check that the account sail runs as can read it.",
+          e);
     }
     try {
       return Optional.of(SshPublicKey.parse(line));

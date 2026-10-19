@@ -463,7 +463,8 @@ public final class ProjectProvisioner {
             ? config.ssh().authorizedKeys()
             : List.<String>of();
     for (var line : declared) {
-      trusted.putIfAbsent(identityOf(line), line);
+      var key = line.strip();
+      trusted.putIfAbsent(identityOf(key), key);
     }
     return List.copyOf(trusted.values());
   }

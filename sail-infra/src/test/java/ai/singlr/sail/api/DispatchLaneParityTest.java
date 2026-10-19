@@ -206,7 +206,7 @@ class DispatchLaneParityTest {
               new ReviewStore(api.db()),
               api.runStore(),
               null,
-              () -> ConnectEnvironment.detect(OperatorCommand.PLAIN),
+              ConnectEnvironment.detector(OperatorCommand.PLAIN),
               SyncScheduler.disabled(),
               new FdeStore(api.db()),
               SessionYield.NONE,

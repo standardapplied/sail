@@ -49,6 +49,23 @@ class ProjectDemoCommandTest {
   }
 
   @Test
+  void theDefinitionTakesTheCallersOwnKeyAndNeverTheRegisteredOne() {
+    var template =
+        "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\nssh:\n  authorized_keys:\n"
+            + "    - ${SSH_PUBLIC_KEY}\n";
+
+    assertEquals(
+        "git:\n  name: Ada\n  email: ada@x.io\nssh:\n  authorized_keys:\n"
+            + "    - ssh-ed25519 AAAA ada@box\n",
+        ProjectDemoCommand.resolvedDefinition(
+            template, "Ada", "ada@x.io", "ssh-ed25519 AAAA ada@box"));
+    assertEquals(
+        "git:\n  name: Ada\n  email: ada@x.io\nssh:\n  authorized_keys:\n",
+        ProjectDemoCommand.resolvedDefinition(template, "Ada", "ada@x.io", null),
+        "with no key of the caller's own, the entry goes and step 6 installs the registered key");
+  }
+
+  @Test
   void demoProjectNameIsDemo() {
     assertEquals("demo", ProjectDemoCommand.DEMO_PROJECT);
   }

@@ -233,11 +233,11 @@ class OperatorHintsTest {
       Pattern.compile("Root privileges required|requires root|must run as root");
 
   /**
-   * Every command rendered through the seam is one sail has: a verb that does not exist or a
-   * positional a command does not take is a hint nobody can run. The whole argument is read, its
-   * literals joined and every value it is built from standing as {@code x}; a placeholder stands
-   * for a value too, a command cut short of a required parameter passes, and so does a value
-   * standing where a subcommand goes.
+   * Every command rendered through the seam is one sail has: a verb that does not exist, or a word
+   * a command does not take, is a hint nobody can run. The whole argument is read, its literals
+   * joined and every value it is built from standing as {@code x}, each way a condition in it can
+   * go; a placeholder stands for a value too, and a command cut short of a required parameter
+   * passes when every word before the cut is taken.
    */
   @Test
   void everyRenderedCommandIsOneSailHas() throws Exception {
@@ -255,9 +255,10 @@ class OperatorHintsTest {
           var matcher = rendered.matcher(source);
           while (matcher.find()) {
             var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
-            var args = renderedArgs(call);
-            if (!parses(args)) {
-              unknown.add(file.getFileName() + ": " + args);
+            for (var args : renderedArgs(call)) {
+              if (!parses(args)) {
+                unknown.add(file.getFileName() + ": " + args);
+              }
             }
           }
         }
@@ -278,6 +279,8 @@ class OperatorHintsTest {
             i++;
           }
         }
+      } else if (c == '\'') {
+        i += source.charAt(i + 1) == '\\' ? 3 : 2;
       } else if (c == '(') {
         depth++;
       } else if (c == ')' && --depth == 0) {
@@ -288,18 +291,31 @@ class OperatorHintsTest {
   }
 
   private static final Pattern TERNARY =
-      Pattern.compile("\\([^()?]*\\?\\s*(.*?)\\s*:\\s*[^()]*\\)");
+      Pattern.compile("\\([^()?]*\\?\\s*(.*?)\\s*:\\s*([^()]*)\\)");
   private static final Pattern OPERAND =
-      Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?");
+      Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?|\\d+");
 
-  /** The command an argument expression renders: its literals joined, every other operand x. */
-  private static String renderedArgs(String expression) {
-    var chosen = expression;
-    for (var m = TERNARY.matcher(chosen); m.find(); m = TERNARY.matcher(chosen)) {
-      chosen = chosen.substring(0, m.start()) + m.group(1) + chosen.substring(m.end());
+  /** The commands an argument expression renders, one for each way its conditions can go. */
+  private static List<String> renderedArgs(String expression) {
+    var ternary = TERNARY.matcher(expression);
+    if (!ternary.find()) {
+      return List.of(joined(expression));
     }
+    var rendered = new ArrayList<String>();
+    for (var branch : List.of(ternary.group(1), ternary.group(2))) {
+      rendered.addAll(
+          renderedArgs(
+              expression.substring(0, ternary.start())
+                  + branch
+                  + expression.substring(ternary.end())));
+    }
+    return rendered;
+  }
+
+  /** An expression's literals joined, every other operand standing as x. */
+  private static String joined(String expression) {
     var rendered = new StringBuilder();
-    var operands = OPERAND.matcher(chosen);
+    var operands = OPERAND.matcher(expression);
     while (operands.find()) {
       rendered.append(operands.group(1) != null ? operands.group(1) : "x");
     }
@@ -315,14 +331,21 @@ class OperatorHintsTest {
                     .split("\\s+"))
             .filter(word -> !word.isEmpty() && !word.endsWith("..."))
             .toArray(String[]::new);
+    var sail = new CommandLine(new Sail()).setUnmatchedArgumentsAllowed(true);
     try {
-      new CommandLine(new Sail()).parseArgs(words);
+      for (var parsed = sail.parseArgs(words); parsed != null; parsed = parsed.subcommand()) {
+        if (!parsed.unmatched().isEmpty()) {
+          return false;
+        }
+      }
       return true;
     } catch (CommandLine.MissingParameterException cutShort) {
+      for (var line = cutShort.getCommandLine(); line != null; line = line.getParent()) {
+        if (!line.getUnmatchedArguments().isEmpty()) {
+          return false;
+        }
+      }
       return true;
-    } catch (CommandLine.UnmatchedArgumentException unmatched) {
-      return unmatched.getUnmatched().equals(List.of("x"))
-          && !unmatched.getCommandLine().getSubcommands().isEmpty();
     } catch (CommandLine.ParameterException unknown) {
       return false;
     }

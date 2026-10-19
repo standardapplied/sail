@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -146,6 +147,43 @@ class ProjectDefinitionsTest {
     assertEquals("Mady M", config.git().name());
     assertEquals("mady@example.com", config.git().email());
     assertEquals(workstationKey, config.ssh().authorizedKeys().getFirst());
+  }
+
+  @Test
+  void resolveForProvisioningRefusesAnAuthorizedKeysEntryThatIsNotOneKeyLine() {
+    var identity =
+        new LocalIdentity(
+            gitConfig("M", "m@x.io"), dir.resolve("missing.pub"), OperatorCommand.SUDO);
+    var faults =
+        Map.of(
+            "    -\n", "holds an entry that is not a key line",
+            "    - ' '\n", "holds an entry that is not a key line",
+            "    - 7\n", "holds an entry that is not a key line",
+            "    - |\n      ssh-ed25519 AAAA\n      more\n", "holds a key of more than one line");
+
+    for (var fault : faults.entrySet()) {
+      var text = "name: acme\nssh:\n  authorized_keys:\n" + fault.getKey();
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  ProjectDefinitions.resolveForProvisioning(text, identity, OperatorCommand.SUDO));
+      assertEquals(
+          "ssh.authorized_keys in acme's descriptor "
+              + fault.getValue()
+              + ". Fix it with 'sudo sail project edit acme', then apply again.",
+          refused.getMessage(),
+          fault.getKey());
+    }
+    assertEquals(
+        List.of("  ssh-ed25519 AAAA alice  "),
+        ProjectDefinitions.resolveForProvisioning(
+                "name: acme\nssh:\n  authorized_keys:\n    - '  ssh-ed25519 AAAA alice  '\n",
+                identity,
+                OperatorCommand.SUDO)
+            .ssh()
+            .authorizedKeys(),
+        "a padded key line is read as the row holds it; step 6 writes it stripped");
   }
 
   @Test

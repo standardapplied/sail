@@ -126,6 +126,7 @@ public final class ProjectDefinitions {
       String definitionText, UnaryOperator<String> values, OperatorCommand operator) {
     var config = SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
     requireDevUser(config, operator);
+    requireKeyLines(config, operator);
     return config;
   }
 
@@ -154,6 +155,37 @@ public final class ProjectDefinitions {
               + operator.sail("project apply " + name)
               + "'.");
     }
+  }
+
+  /**
+   * Refuses a descriptor whose {@code ssh.authorized_keys} holds what step 6 cannot write as one
+   * key line: nothing, or more than one line. Refused here, as {@link #requireDevUser} is, so sync,
+   * connect and listing still read such a row.
+   */
+  private static void requireKeyLines(SailYaml config, OperatorCommand operator) {
+    if (config.ssh() == null || config.ssh().authorizedKeys() == null) {
+      return;
+    }
+    for (Object entry : config.ssh().authorizedKeys()) {
+      if (!(entry instanceof String line) || line.isBlank()) {
+        throw notAKeyLine(config.name(), "holds an entry that is not a key line", operator);
+      }
+      if (line.strip().lines().count() > 1) {
+        throw notAKeyLine(config.name(), "holds a key of more than one line", operator);
+      }
+    }
+  }
+
+  private static IllegalArgumentException notAKeyLine(
+      String name, String fault, OperatorCommand operator) {
+    return new IllegalArgumentException(
+        "ssh.authorized_keys in "
+            + name
+            + "'s descriptor "
+            + fault
+            + ". Fix it with '"
+            + operator.sail("project edit " + name)
+            + "', then apply again.");
   }
 
   /**

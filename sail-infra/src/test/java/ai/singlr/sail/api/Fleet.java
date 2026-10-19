@@ -328,7 +328,7 @@ public final class Fleet implements AutoCloseable {
                   reviews,
                   runs,
                   projects,
-                  () -> ConnectEnvironment.detect(OperatorCommand.PLAIN),
+                  ConnectEnvironment.detector(OperatorCommand.PLAIN),
                   SyncScheduler.disabled(),
                   fdes,
                   SessionYield.NONE,

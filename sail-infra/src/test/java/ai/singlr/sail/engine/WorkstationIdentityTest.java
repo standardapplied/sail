@@ -8,10 +8,12 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -45,6 +47,29 @@ class WorkstationIdentityTest {
 
     assertTrue(key.isPresent());
     assertEquals("ssh-ed25519", key.orElseThrow().type());
+  }
+
+  @Test
+  void aKeyFileThatCannotBeReadIsRefusedNamingWhy(@TempDir Path dir) throws Exception {
+    assumeFalse(SailPaths.isRoot());
+    var unreadable = dir.resolve("unreadable.pub");
+    Files.writeString(unreadable, ED25519 + "\n");
+    Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("---------"));
+    try {
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () -> WorkstationIdentity.registeredAt(unreadable, OperatorCommand.PLAIN));
+
+      assertEquals(
+          "This box's workstation key ("
+              + unreadable
+              + ") could not be read (AccessDeniedException). Check that the account sail runs as"
+              + " can read it.",
+          refused.getMessage());
+    } finally {
+      Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("rw-------"));
+    }
   }
 
   @Test

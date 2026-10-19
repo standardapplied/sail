@@ -168,7 +168,7 @@ final class LiveRoom implements AutoCloseable {
             reviews,
             runs,
             new ProjectStore(db),
-            () -> ConnectEnvironment.detect(OperatorCommand.PLAIN),
+            ConnectEnvironment.detector(OperatorCommand.PLAIN),
             SyncScheduler.disabled(),
             new FdeStore(db),
             new Terminals(),

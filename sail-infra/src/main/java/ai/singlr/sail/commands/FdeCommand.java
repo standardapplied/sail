@@ -160,12 +160,12 @@ public final class FdeCommand implements Runnable {
    * Refuses to touch a pairing from the SSH gateway: its key line is in the operator's login, which
    * only the operator's own account writes.
    */
-  private static void requireOperator(Box box, String command) {
+  private static void requireOperator(Box box, String rendered) {
     if (box.gateway()) {
       throw new IllegalStateException(
           "A pairing is a login of this box's operator, and an SSH-key session runs as the"
               + " gateway's account. Run '"
-              + OperatorCommand.elsewhere("fde " + command)
+              + rendered
               + "' on the host, as the account sail-api runs as.");
     }
   }
@@ -790,7 +790,7 @@ public final class FdeCommand implements Runnable {
                           () -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
               var pairing = new FdePairingStore(db).find(fde.id());
               if (pairing.isPresent()) {
-                requireOperator(box, "rm " + handle);
+                requireOperator(box, OperatorCommand.elsewhere("fde rm " + handle));
               }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
               fdeStore.requireRemovable(fde, operator);
@@ -888,7 +888,7 @@ public final class FdeCommand implements Runnable {
         throw new IllegalStateException(
             rosterEditOnNodeMessage("Changing an FDE's name, email or role"));
       }
-      requireOperator(box, "pair " + handle);
+      requireOperator(box, OperatorCommand.elsewhere("fde pair " + handle));
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
       try (var held = PairingTrust.hold(box.database());
           var db = Sqlite.open(box.database())) {
@@ -1030,13 +1030,17 @@ public final class FdeCommand implements Runnable {
     }
 
     /**
-     * The key the workstation key file holds, or none when it holds nothing a pairing would keep.
+     * The key the workstation key file holds, or none when it holds nothing a pairing would keep; a
+     * file that cannot be read may hold one, so that stays refused.
      */
     private static Optional<SshPublicKey> heldKey(Path file, OperatorCommand operator) {
       try {
         return WorkstationIdentity.registeredAt(file, operator);
-      } catch (IllegalStateException holdsNoKey) {
-        return Optional.empty();
+      } catch (IllegalStateException refused) {
+        if (refused.getCause() instanceof IllegalArgumentException) {
+          return Optional.empty();
+        }
+        throw refused;
       }
     }
 
@@ -1114,7 +1118,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
-            requireOperator(box, "unpair " + handle);
+            requireOperator(box, OperatorCommand.elsewhere("fde unpair " + handle));
             try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               System.out.println(

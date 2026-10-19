@@ -341,37 +341,6 @@ class SailYamlTest {
   }
 
   @Test
-  void sshAuthorizedKeysAreNonBlankSingleLinesStripped() throws Exception {
-    var config =
-        SailYaml.fromMap(
-            YamlUtil.parseMap(
-                "name: a\nssh:\n  authorized_keys:\n    - '  ssh-ed25519 AAAA alice  '\n"));
-
-    assertEquals(List.of("ssh-ed25519 AAAA alice"), config.ssh().authorizedKeys());
-    assertEquals(
-        "ssh.authorized_keys holds an empty entry.",
-        sshRefusal("name: a\nssh:\n  authorized_keys:\n    -\n"));
-    assertEquals(
-        "ssh.authorized_keys holds an empty entry.",
-        sshRefusal("name: a\nssh:\n  authorized_keys:\n    - ' '\n"));
-    assertEquals(
-        "ssh.authorized_keys holds an entry that is not a key: 7",
-        sshRefusal("name: a\nssh:\n  authorized_keys:\n    - 7\n"));
-    assertEquals(
-        "ssh.authorized_keys holds a key of more than one line.",
-        sshRefusal(
-            "name: a\nssh:\n  authorized_keys:\n    - |\n      ssh-ed25519 AAAA\n      more\n"));
-    assertEquals(
-        "ssh.authorized_keys must be a list of keys.",
-        sshRefusal("name: a\nssh:\n  authorized_keys: ssh-ed25519 AAAA alice\n"));
-  }
-
-  private static String sshRefusal(String yaml) throws Exception {
-    var map = YamlUtil.parseMap(yaml);
-    return assertThrows(IllegalArgumentException.class, () -> SailYaml.fromMap(map)).getMessage();
-  }
-
-  @Test
   void sshFromMapRejectsInvalidUser() {
     var ex =
         assertThrows(
