@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -53,7 +54,7 @@ class ProjectImporterTest {
     writeProject("acme", "name: acme\n");
     writeProject("beta", "name: beta\n");
 
-    var report = new ProjectImporter(projectsDir, store).importAll();
+    var report = new ProjectImporter(projectsDir, store, ProjectScope.all()).importAll();
 
     assertEquals(2, report.imported());
     assertEquals("name: acme\n", store.findByName("acme").orElseThrow().definition());
@@ -63,10 +64,10 @@ class ProjectImporterTest {
   @Test
   void leavesAlreadyCataloguedProjectsUntouched() throws IOException {
     writeProject("acme", "name: acme\nv: 1\n");
-    new ProjectImporter(projectsDir, store).importAll();
+    new ProjectImporter(projectsDir, store, ProjectScope.all()).importAll();
 
     writeProject("acme", "name: acme\nv: 2\n");
-    var report = new ProjectImporter(projectsDir, store).importAll();
+    var report = new ProjectImporter(projectsDir, store, ProjectScope.all()).importAll();
 
     assertEquals(0, report.imported(), "a catalogued project is not re-imported on later runs");
     assertEquals(1, report.skipped());
@@ -82,7 +83,7 @@ class ProjectImporterTest {
     Files.createDirectories(projectsDir.resolve("empty"));
     writeProject("acme", "name: acme\n");
 
-    var report = new ProjectImporter(projectsDir, store).importAll();
+    var report = new ProjectImporter(projectsDir, store, ProjectScope.all()).importAll();
 
     assertEquals(1, report.imported());
     assertTrue(store.findByName("empty").isEmpty());
@@ -90,7 +91,8 @@ class ProjectImporterTest {
 
   @Test
   void emptyWhenProjectsDirIsAbsent() {
-    var report = new ProjectImporter(tempDir.resolve("nonexistent"), store).importAll();
+    var report =
+        new ProjectImporter(tempDir.resolve("nonexistent"), store, ProjectScope.all()).importAll();
 
     assertEquals(0, report.imported());
     assertEquals(0, report.skipped());

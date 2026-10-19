@@ -18,8 +18,19 @@ public final class PipedSyncChannel {
 
   private PipedSyncChannel() {}
 
+  /** One session of a main, served over {@code in} and {@code out}. */
+  @FunctionalInterface
+  public interface Main {
+    void serve(InputStream in, OutputStream out) throws Exception;
+  }
+
   /** A channel to {@code server}, served on a virtual thread; closing it fails if main failed. */
   public static SyncOperations.Channel to(SyncRpcServer server) throws IOException {
+    return to((Main) server::serve);
+  }
+
+  /** A channel to {@code main}, served on a virtual thread; closing it fails if main failed. */
+  public static SyncOperations.Channel to(Main main) throws IOException {
     var toServer = new PipedOutputStream();
     var serverIn = new PipedInputStream(toServer);
     var serverOut = new PipedOutputStream();
@@ -31,7 +42,7 @@ public final class PipedSyncChannel {
                 () -> {
                   try (serverIn;
                       serverOut) {
-                    server.serve(serverIn, serverOut);
+                    main.serve(serverIn, serverOut);
                   } catch (Throwable e) {
                     error.set(e);
                   }

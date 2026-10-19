@@ -36,6 +36,7 @@ import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -303,7 +304,9 @@ public final class MigrateCommand implements Runnable {
 
   /** Imports catalog writes missed by current best-effort project creation. */
   private static void importProjects(Sqlite db, boolean jsonOutput) {
-    var report = new ProjectImporter(SailPaths.projectsDir(), new ProjectStore(db)).importAll();
+    var report =
+        new ProjectImporter(SailPaths.projectsDir(), new ProjectStore(db), new SyncScope(db).held())
+            .importAll();
     if (!jsonOutput && report.imported() > 0) {
       System.out.println(
           Ansi.AUTO.string("  @|green ✓|@ project catalog: " + report.imported() + " imported"));
@@ -333,7 +336,9 @@ public final class MigrateCommand implements Runnable {
    * Idempotent; quiet when nothing changed.
    */
   private static void importFiles(Sqlite db, boolean jsonOutput) {
-    var report = new FileImporter(SailPaths.projectsDir(), new FileStore(db)).importAll();
+    var report =
+        new FileImporter(SailPaths.projectsDir(), new FileStore(db), new SyncScope(db).held())
+            .importAll();
     if (!jsonOutput && report.imported() > 0) {
       System.out.println(
           Ansi.AUTO.string("  @|green ✓|@ project files: " + report.imported() + " imported"));
