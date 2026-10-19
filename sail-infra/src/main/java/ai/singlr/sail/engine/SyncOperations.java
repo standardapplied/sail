@@ -14,6 +14,7 @@ import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MaterializedFiles;
@@ -21,6 +22,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.StoreReplica;
@@ -200,7 +202,8 @@ public final class SyncOperations {
     settled.forEach(settlement -> notice(settlement.describe()));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
     try {
-      reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+      reportRejectedFdes(
+          applyFdes(new FdeStore(db), session.fetchFdes(), new SyncScope(db).held(), handle));
     } catch (RuntimeException e) {
       failures.add(transportFailure("fde", e));
     }
@@ -498,10 +501,26 @@ public final class SyncOperations {
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
    * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
-   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}).
+   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}), unless main scoped this
+   * box to {@code scope}: then it is removed with its credentials, as is anyone main lists to this
+   * box no more, so the box keeps no name or email outside its projects. This box's own FDE, {@code
+   * own}, is never removed.
    */
-  public static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
-    fdes.disableUnlisted(roster.stream().map(entry -> str(entry, "handle")).toList());
+  public static List<String> applyFdes(
+      FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
+    var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
+    if (scope.unrestricted()) {
+      fdes.disableUnlisted(listed);
+    } else {
+      var removed = fdes.removeUnlisted(listed, own);
+      if (removed > 0) {
+        System.err.println(
+            Ansi.AUTO.string(
+                "  @|faint roster: removed "
+                    + removed
+                    + " FDE(s) main no longer lists to this box|@"));
+      }
+    }
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {

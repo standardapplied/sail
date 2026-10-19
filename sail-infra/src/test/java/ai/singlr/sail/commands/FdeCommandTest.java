@@ -1761,16 +1761,16 @@ class FdeCommandTest {
     assertEquals(0, fde("revoke", "nia", "alpha"));
     assertEquals(
         List.of(
-            "  ✓ Revoked alpha from nia. Its box drops the project, unpushed work included, on its"
-                + " next sync."),
+            "  ✓ Revoked alpha from nia. Its box drops the project with its container and unpushed"
+                + " work on its next sync."),
         printed());
     assertEquals(0, fde("revoke", "nia", "alpha"));
     assertEquals(List.of("  nia does not hold alpha; nothing to do."), printed());
     assertEquals(0, fde("revoke", "nia", "beta", "--dry-run"));
     assertEquals(
         List.of(
-            "  ✓ Would revoke beta from nia. Its box drops the project, unpushed work included,"
-                + " on its next sync."),
+            "  ✓ Would revoke beta from nia. Its box drops the project with its container and"
+                + " unpushed work on its next sync."),
         printed());
     assertEquals(ProjectScope.of(List.of("beta")), inDb(db -> new FdeStore(db).scopeOf("nia")));
   }
@@ -1791,8 +1791,8 @@ class FdeCommandTest {
     assertEquals("Unknown FDE 'nobody'.", refusal);
     assertEquals(1, fde("grant", "uma", "alpha"));
     assertEquals(
-        "FDE 'uma' sees every project, so there is nothing to grant or revoke. Only an FDE added"
-            + " with 'sail fde add <handle> --scoped' is granted projects.",
+        "FDE 'uma' sees every project, so there is nothing to grant or revoke. Scope it first"
+            + " with 'sail fde update uma --scoped'.",
         refusal);
     assertEquals(1, fde("add", "root", "--role", "admin", "--scoped"));
     assertEquals(
@@ -1831,6 +1831,239 @@ class FdeCommandTest {
     assertEquals(1, fde("revoke", "nia", "alpha"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Revoking a project"), refusal);
     assertTrue(inDb(db -> new FdeStore(db).list()).isEmpty());
+  }
+
+  private void catalog(String... projects) {
+    inDb(
+        db -> {
+          Acting.system(
+              () -> {
+                for (var project : projects) {
+                  new ProjectStore(db).upsert(project, "name: " + project + "\n");
+                }
+              });
+          return null;
+        });
+  }
+
+  /** Every credential that authenticates as {@code handle}, by table and id. */
+  private List<String> credentialsOf(String handle) {
+    return inDb(
+        db ->
+            db.query(
+                """
+                SELECT 'fde ' || id FROM fdes WHERE handle = ?1
+                UNION ALL SELECT 'token ' || t.token_hash FROM api_tokens t
+                  JOIN fdes f ON f.id = t.fde_id WHERE f.handle = ?1
+                UNION ALL SELECT 'session ' || s.token_hash FROM sessions s
+                  JOIN fdes f ON f.id = s.fde_id WHERE f.handle = ?1
+                UNION ALL SELECT 'passkey ' || w.label FROM webauthn_credentials w
+                  JOIN fdes f ON f.id = w.fde_id WHERE f.handle = ?1
+                UNION ALL SELECT 'key ' || k.fingerprint FROM fde_ssh_keys k
+                  JOIN fdes f ON f.id = k.fde_id WHERE f.handle = ?1""",
+                row -> row.text(0),
+                handle));
+  }
+
+  private String scopeColumnOf(String handle) {
+    return inDb(
+        db ->
+            db.queryOne("SELECT scope FROM fdes WHERE handle = ?", row -> row.text(0), handle)
+                .orElseThrow());
+  }
+
+  private List<String> grantRows() {
+    return inDb(
+        db ->
+            db.query(
+                "SELECT f.handle || ' ' || g.project FROM project_grants g JOIN fdes f"
+                    + " ON f.id = g.fde_id ORDER BY 1",
+                row -> row.text(0)));
+  }
+
+  @Test
+  void anUnscopedMemberIsNarrowedInPlaceKeepingItsIdAndEveryCredential() {
+    catalog("acme", "beta", "demo");
+    assertEquals(0, fde("add", "client", "--key", LAPTOP.line()));
+    inDb(
+        db -> {
+          var id = new FdeStore(db).byHandle("client").orElseThrow().id();
+          new TokenStore(db).create("mast-client", "member", id, null);
+          new AuthSessionStore(db).create(id, Duration.ofHours(1));
+          new WebauthnCredentialStore(db)
+              .save(
+                  new RegisteredCredential(
+                      new byte[] {7}, new byte[] {1}, -7, 0, null, false, false),
+                  id,
+                  "laptop");
+          return null;
+        });
+    var credentials = credentialsOf("client");
+    assertEquals(5, credentials.size(), credentials.toString());
+
+    assertEquals(0, fde("update", "client", "--scoped", "--grant", "acme"));
+
+    assertEquals(
+        List.of(
+            "  ✓ Scoped client to acme. Its box drops beta, demo with their containers and"
+                + " unpushed work on its next sync."),
+        printed());
+    assertEquals(ProjectScope.of(List.of("acme")), inDb(db -> new FdeStore(db).scopeOf("client")));
+    assertEquals(credentials, credentialsOf("client"));
+
+    assertEquals(0, fde("update", "client", "--scoped", "--grant", "acme"));
+    assertEquals(List.of("  client is already scoped to acme; nothing to do."), printed());
+    assertEquals(List.of("client acme"), grantRows());
+  }
+
+  @Test
+  void aNarrowingNamingAProjectOutsideTheCatalogWritesNothing() {
+    catalog("acme");
+    assertEquals(0, fde("add", "client"));
+
+    assertEquals(1, fde("update", "client", "--scoped", "--grant", "acme,nope"));
+
+    assertEquals("Unknown project 'nope'. List the catalog with 'sail project list'.", refusal);
+    assertEquals("all", scopeColumnOf("client"));
+    assertEquals(List.of(), grantRows());
+  }
+
+  @Test
+  void neitherThisBoxsOwnFdeNorAnAdminIsEverNarrowed() {
+    catalog("acme");
+    for (var member : List.of("uday", "bob")) {
+      assertEquals(0, fde("add", member));
+    }
+    assertEquals(0, fde("add", "ada", "--role", "admin"));
+    handle = "uday";
+
+    assertEquals(1, fde("update", "uday", "--scoped", "--grant", "acme"));
+    assertEquals(
+        "FDE 'uday' is this box's own and acts as an admin here, so it cannot be scoped. Scope a"
+            + " member or a viewer.",
+        refusal);
+    var scopedAdmin =
+        "cannot be both scoped and an admin: an admin edits the roster, and so could grant"
+            + " itself any project. Scope a member or a viewer.";
+    assertEquals(1, fde("update", "ada", "--scoped"));
+    assertEquals("FDE 'ada' " + scopedAdmin, refusal);
+    assertEquals(1, fde("update", "bob", "--scoped", "--role", "admin"));
+    assertEquals("FDE 'bob' " + scopedAdmin, refusal);
+
+    for (var each : List.of("uday", "ada", "bob")) {
+      assertEquals("all", scopeColumnOf(each));
+    }
+    assertEquals("member", inDb(db -> new FdeStore(db).byHandle("bob").orElseThrow().role()));
+    assertEquals(List.of(), grantRows());
+  }
+
+  @Test
+  void aDryRunNarrowingSaysWhatTheRealOneDoesAndLeavesTheDatabase() {
+    catalog("acme", "beta");
+    assertEquals(0, fde("add", "client"));
+    var heads =
+        inDb(
+            db ->
+                db.query(
+                    "SELECT entity_id, project FROM change_heads",
+                    row -> row.text(0) + " " + row.text(1)));
+
+    assertEquals(0, fde("update", "client", "--scoped", "--grant", "acme", "--dry-run", "--json"));
+
+    assertEquals(
+        List.of(
+            "{\"handle\": \"client\", \"scope\": \"granted\", \"projects\": [\"acme\"],"
+                + " \"changed\": true, \"dry_run\": true}"),
+        printed());
+    assertEquals("all", scopeColumnOf("client"));
+    assertEquals(List.of(), grantRows());
+    assertEquals(
+        heads,
+        inDb(
+            db ->
+                db.query(
+                    "SELECT entity_id, project FROM change_heads",
+                    row -> row.text(0) + " " + row.text(1))));
+
+    assertEquals(0, fde("update", "client", "--scoped", "--grant", "acme", "--json"));
+    assertEquals(
+        List.of(
+            "{\"handle\": \"client\", \"scope\": \"granted\", \"projects\": [\"acme\"],"
+                + " \"changed\": true, \"dry_run\": false}"),
+        printed());
+    assertEquals(0, fde("update", "client", "--scoped", "--dry-run"));
+    assertEquals(List.of("  client is already scoped to acme; nothing to do."), printed());
+  }
+
+  @Test
+  void aWideningForgetsTheGrantsSoALaterNarrowingGrantsOnlyWhatItNames() {
+    catalog("acme", "beta");
+    assertEquals(0, fde("add", "client", "--scoped"));
+    assertEquals(0, fde("grant", "client", "acme"));
+
+    assertEquals(0, fde("update", "client", "--unscoped", "--dry-run"));
+    assertEquals(
+        List.of(
+            "  ✓ client would see every project again. Its box holds them after its next sync;"
+                + " provision a container with 'sudo sail project apply <name>'."),
+        printed());
+    assertEquals(List.of("client acme"), grantRows());
+
+    assertEquals(0, fde("update", "client", "--unscoped"));
+    assertEquals(
+        List.of(
+            "  ✓ client sees every project again. Its box holds them after its next sync;"
+                + " provision a container with 'sudo sail project apply <name>'."),
+        printed());
+    assertEquals("all", scopeColumnOf("client"));
+    assertEquals(List.of(), grantRows());
+    assertEquals(0, fde("update", "client", "--unscoped", "--json"));
+    assertEquals(
+        List.of(
+            "{\"handle\": \"client\", \"scope\": \"all\", \"projects\": [], \"changed\":"
+                + " false, \"dry_run\": false}"),
+        printed());
+
+    assertEquals(0, fde("update", "client", "--scoped"));
+    assertEquals(
+        List.of(
+            "  ✓ Scoped client to no project yet: grant with 'sail fde grant client <project>'."
+                + " Its box drops acme, beta with their containers and unpushed work on its next"
+                + " sync."),
+        printed());
+    assertEquals(ProjectScope.none(), inDb(db -> new FdeStore(db).scopeOf("client")));
+
+    assertEquals(0, fde("update", "client", "--unscoped", "--role", "admin", "--name", "Cli"));
+    assertEquals(
+        List.of(
+            "  ✓ Updated client (admin)",
+            "  ✓ client sees every project again. Its box holds them after its next sync;"
+                + " provision a container with 'sudo sail project apply <name>'."),
+        printed());
+    assertEquals(0, fde("update", "client", "--role", "member", "--scoped", "--grant", "beta"));
+    assertEquals(
+        List.of(
+            "  ✓ Updated client (member)",
+            "  ✓ Scoped client to beta. Its box drops acme with their containers and unpushed"
+                + " work on its next sync."),
+        printed());
+  }
+
+  @Test
+  void aScopeChangeIsMainsAndItsFlagsAreRefusedBeforeAnythingIsRead() {
+    assertEquals(1, fde("update", "client", "--grant", "acme"));
+    assertEquals(
+        "--grant names a project an FDE keeps as it is narrowed; pass it with --scoped, or grant"
+            + " a scoped FDE a project with 'fde grant'.",
+        refusal);
+    assertEquals(1, fde("update", "client", "--scoped", "--unscoped"));
+    assertEquals("--scoped narrows an FDE and --unscoped widens it; pass one of them.", refusal);
+    assertEquals(1, fde("update", "ghost", "--unscoped"));
+    assertEquals("Unknown FDE 'ghost'.", refusal);
+
+    main = "sail@main";
+    assertEquals(1, fde("update", "client", "--scoped"));
+    assertEquals(FdeCommand.rosterEditOnNodeMessage("Updating an FDE"), refusal);
   }
 
   @Test
@@ -2221,7 +2454,9 @@ class FdeCommandTest {
     assertEquals("Ada", updated.displayName());
     assertEquals("ada@example.com", updated.email());
     assertEquals(1, fde("update", "ada"));
-    assertEquals("Nothing to update. Pass --name, --email, and/or --role.", refusal);
+    assertEquals(
+        "Nothing to update. Pass --name, --email, --role, --scoped (with --grant) or --unscoped.",
+        refusal);
     assertEquals(1, fde("update", "ghost", "--role", "admin"));
     assertEquals("Unknown FDE 'ghost'.", refusal);
   }

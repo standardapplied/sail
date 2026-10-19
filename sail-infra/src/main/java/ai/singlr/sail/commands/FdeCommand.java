@@ -22,6 +22,7 @@ import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.SshIdentityProvisioner;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.ChangeLog;
@@ -42,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -517,7 +519,9 @@ public final class FdeCommand implements Runnable {
 
   @Command(
       name = "update",
-      description = "Update an FDE's display name, email, or role.",
+      description =
+          "Update an FDE's display name, email or role, or change its scope: --scoped narrows it"
+              + " to the projects it is granted, --unscoped lets it see every project again.",
       mixinStandardHelpOptions = true)
   static final class Update implements Runnable {
 
@@ -533,30 +537,196 @@ public final class FdeCommand implements Runnable {
     @Option(names = "--role", description = "New role: admin, member, or viewer.")
     private String role;
 
+    @Option(
+        names = "--scoped",
+        description =
+            "Scope the FDE to the projects it is granted. Its box drops every other project, with"
+                + " its container and unpushed work, on its next sync.")
+    private boolean scoped;
+
+    @Option(
+        names = "--grant",
+        split = ",",
+        paramLabel = "PROJECT",
+        description = "With --scoped: a project the FDE keeps. Repeatable.")
+    private List<String> grants = List.of();
+
+    @Option(
+        names = "--unscoped",
+        description =
+            "Let the FDE see every project again; its grants are forgotten. Its box holds every"
+                + " project after its next sync.")
+    private boolean unscoped;
+
+    @Option(names = "--dry-run", description = "Say what would change without changing it.")
+    private boolean dryRun;
+
+    @Option(names = "--json", description = "Output in JSON format.")
+    private boolean json;
+
     @ParentCommand private FdeCommand command;
 
     @Override
     public void run() {
       CliCommand.run(
           () -> {
+            requireOneScopeChange();
+            var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Updating an FDE");
-            if (displayName == null && email == null && role == null) {
+            if (displayName == null && email == null && role == null && !scoped && !unscoped) {
               throw new IllegalArgumentException(
-                  "Nothing to update. Pass --name, --email, and/or --role.");
+                  "Nothing to update. Pass --name, --email, --role, --scoped (with --grant) or"
+                      + " --unscoped.");
+            }
+            NameValidator.requireValidFdeHandle(handle);
+            if (scoped) {
+              requireNotThisBoxsOwn(box, handle);
+              grants.forEach(NameValidator::requireValidProjectName);
             }
             try (var db = Sqlite.open(box.database())) {
-              var updated =
-                  new FdeStore(db)
-                      .update(handle, displayName, email, role)
-                      .orElseThrow(
-                          () -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
-              System.out.println(
-                  Ansi.AUTO.string(
-                      "  @|green ✓|@ Updated " + updated.handle() + " (" + updated.role() + ")"));
+              Supplier<Updated> work = () -> update(db, operator);
+              var updated = dryRun ? db.rehearse(work) : db.transaction(work);
+              System.out.println(updated.describe(handle, dryRun, json, operator));
             }
           });
     }
+
+    private void requireOneScopeChange() {
+      if (scoped && unscoped) {
+        throw new IllegalArgumentException(
+            "--scoped narrows an FDE and --unscoped widens it; pass one of them.");
+      }
+      if (!grants.isEmpty() && !scoped) {
+        throw new IllegalArgumentException(
+            "--grant names a project an FDE keeps as it is narrowed; pass it with --scoped, or"
+                + " grant a scoped FDE a project with 'fde grant'.");
+      }
+    }
+
+    /**
+     * Widens before the role is set, so an FDE widened and made an admin is never a scoped admin,
+     * and narrows after, so an admin demoted and narrowed in one call is never one either.
+     */
+    private Updated update(Sqlite db, OperatorCommand operator) {
+      var fdes = new FdeStore(db);
+      if (fdes.byHandle(handle).isEmpty()) {
+        throw new IllegalArgumentException("Unknown FDE '" + handle + "'.");
+      }
+      var before = fdes.scopeOf(handle);
+      if (unscoped && !before.unrestricted()) {
+        fdes.unrestrict(handle);
+      }
+      var fde =
+          displayName == null && email == null && role == null
+              ? null
+              : fdes.update(handle, displayName, email, role).orElseThrow();
+      if (scoped) {
+        narrow(db, fdes, before, operator);
+      }
+      var after = fdes.scopeOf(handle);
+      var catalog = new ProjectStore(db).list().stream().map(ProjectStore.ProjectRow::name);
+      return new Updated(
+          fde, before, after, catalog.filter(project -> !after.admits(project)).toList());
+    }
+
+    private void narrow(Sqlite db, FdeStore fdes, ProjectScope before, OperatorCommand operator) {
+      var projects = new ProjectStore(db);
+      for (var project : grants) {
+        if (projects.findByName(project).isEmpty()) {
+          throw new IllegalArgumentException(unknownProject(project, operator));
+        }
+      }
+      if (!before.unrestricted() && before.projects().containsAll(grants)) {
+        return;
+      }
+      if (!grants.isEmpty()) {
+        new ChangeLog(db).backfillProjects();
+      }
+      fdes.restrict(handle);
+      grants.forEach(project -> fdes.grant(handle, project, operator));
+    }
+  }
+
+  /**
+   * What an update did: the FDE as it now reads when a field was asked of it, and its scope before
+   * and after, with the catalog's projects the scope after no longer admits.
+   */
+  record Updated(FdeStore.Fde fde, ProjectScope before, ProjectScope after, List<String> dropped) {
+
+    boolean scopeChanged() {
+      return !before.equals(after);
+    }
+
+    String describe(String handle, boolean dryRun, boolean json, OperatorCommand operator) {
+      if (json) {
+        var map = new LinkedHashMap<String, Object>();
+        map.put("handle", handle);
+        map.put("scope", after.unrestricted() ? "all" : "granted");
+        map.put("projects", List.copyOf(after.projects()));
+        map.put("changed", fde != null || scopeChanged());
+        map.put("dry_run", dryRun);
+        return YamlUtil.dumpJson(map);
+      }
+      var lines = new ArrayList<String>();
+      if (fde != null) {
+        lines.add(
+            "  @|green ✓|@ "
+                + (dryRun ? "Would update " : "Updated ")
+                + fde.handle()
+                + " ("
+                + fde.role()
+                + ")");
+      }
+      if (scopeChanged()) {
+        lines.add("  @|green ✓|@ " + scopeLine(handle, dryRun, operator));
+      } else if (fde == null) {
+        lines.add(
+            "  @|faint "
+                + handle
+                + (after.unrestricted()
+                    ? " already sees every project"
+                    : " is already scoped to " + named(after))
+                + "; nothing to do.|@");
+      }
+      return Ansi.AUTO.string(String.join("\n", lines));
+    }
+
+    private String scopeLine(String handle, boolean dryRun, OperatorCommand operator) {
+      if (after.unrestricted()) {
+        return handle
+            + (dryRun ? " would see" : " sees")
+            + " every project again. Its box holds them after its next sync; provision a"
+            + " container with '"
+            + OperatorCommand.elsewhere("project apply <name>")
+            + "'.";
+      }
+      var to =
+          after.projects().isEmpty()
+              ? "no project yet: grant with '"
+                  + operator.sail("fde grant " + handle + " <project>")
+                  + "'"
+              : named(after);
+      var drops =
+          dropped.isEmpty()
+              ? " Its box drops no project."
+              : " Its box drops "
+                  + String.join(", ", dropped)
+                  + " with their containers and unpushed work on its next sync.";
+      return (dryRun ? "Would scope " : "Scoped ") + handle + " to " + to + "." + drops;
+    }
+
+    private static String named(ProjectScope scope) {
+      return scope.projects().isEmpty() ? "no project" : String.join(", ", scope.projects());
+    }
+  }
+
+  private static String unknownProject(String project, OperatorCommand operator) {
+    return "Unknown project '"
+        + project
+        + "'. List the catalog with '"
+        + operator.sail("project list")
+        + "'.";
   }
 
   @Command(
@@ -597,7 +767,8 @@ public final class FdeCommand implements Runnable {
   @Command(
       name = "revoke",
       description =
-          "Take a project back from a scoped FDE: its box drops the project on its next sync.",
+          "Take a project back from a scoped FDE: its box drops the project, with its container"
+              + " and unpushed work, on its next sync.",
       mixinStandardHelpOptions = true)
   static final class Revoke implements Runnable {
 
@@ -649,12 +820,7 @@ public final class FdeCommand implements Runnable {
     NameValidator.requireValidProjectName(project);
     var fdes = new FdeStore(db);
     if (grant && new ProjectStore(db).findByName(project).isEmpty()) {
-      throw new IllegalArgumentException(
-          "Unknown project '"
-              + project
-              + "'. List the catalog with '"
-              + operator.sail("project list")
-              + "'.");
+      throw new IllegalArgumentException(unknownProject(project, operator));
     }
     var changed = fdes.grantsOf(handle, operator).admits(project) != grant;
     if (changed && !dryRun) {
@@ -693,7 +859,8 @@ public final class FdeCommand implements Runnable {
             + handle
             + (grant
                 ? ". Its box holds the project after its next sync."
-                : ". Its box drops the project, unpushed work included, on its next sync."));
+                : ". Its box drops the project with its container and unpushed work on its next"
+                    + " sync."));
   }
 
   @Command(
