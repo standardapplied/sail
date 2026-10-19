@@ -35,12 +35,19 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.InstantSource;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
 
 class AgentLogStreamerTest {
+
+  private static final StreamRecheck NEVER_ENDS =
+      new StreamRecheck(Optional::empty, InstantSource.system());
 
   private static RunStore.RunRow runOn(String node) {
     return run(node, "/home/dev/.sail/runs/r1/agent.log");
@@ -380,7 +387,7 @@ class AgentLogStreamerTest {
                   new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
           var out = new ByteArrayOutputStream();
 
-          AgentLogStreamer.pump(process, reader, out, 0);
+          AgentLogStreamer.pump(process, reader, out, 0, NEVER_ENDS);
 
           var body = out.toString(StandardCharsets.UTF_8);
           assertTrue(body.contains("first"), body);
@@ -402,7 +409,7 @@ class AgentLogStreamerTest {
         };
     var out = new ByteArrayOutputStream();
 
-    AgentLogStreamer.pump(process, arrivedLate, out, 0);
+    AgentLogStreamer.pump(process, arrivedLate, out, 0, NEVER_ENDS);
 
     assertEquals(
         "id: 1\ndata: first\n\nid: 2\ndata: second\n\n", out.toString(StandardCharsets.UTF_8));
@@ -419,10 +426,89 @@ class AgentLogStreamerTest {
               new BufferedReader(
                   new InputStreamReader(process.getInputStream(), StandardCharsets.UTF_8));
 
-          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0);
+          AgentLogStreamer.pump(process, reader, new ByteArrayOutputStream(), 0, NEVER_ENDS);
 
           assertFalse(process.isAlive());
         });
+  }
+
+  @Test
+  void aStreamEndsAtTheFirstCheckAfterItsCallerLosesTheRunsProject() throws Exception {
+    var scope = new AtomicReference<>(ProjectScope.of(List.of("acme")));
+    var clock = new ManualClock(Instant.parse("2026-10-19T10:00:00Z"), Duration.ofMinutes(1));
+    var asked = new AtomicInteger();
+    var streamer =
+        new AgentLogStreamer(
+            exchange -> {
+              asked.incrementAndGet();
+              exchange.setAttribute(ApiAuth.SCOPE, scope.get());
+            },
+            id -> Optional.of(runOn("node-a")),
+            id -> Optional.of(specOf(id, "raj")),
+            () -> "node-a",
+            clock);
+    var exchange = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
+    exchange.setAttribute(ApiAuth.SCOPE, scope.get());
+    var process = new ProcessBuilder("sh", "-c", "true").start();
+    process.waitFor();
+    var lines = List.of("first", "second", "third").iterator();
+    var revokedAfterTheFirst =
+        new BufferedReader(new StringReader("")) {
+          @Override
+          public String readLine() {
+            if (!lines.hasNext()) {
+              return null;
+            }
+            var line = lines.next();
+            if ("second".equals(line)) {
+              scope.set(ProjectScope.none());
+              clock.advance(Duration.ofSeconds(1));
+            }
+            return line;
+          }
+        };
+    var out = new ByteArrayOutputStream();
+
+    AgentLogStreamer.pump(
+        process, revokedAfterTheFirst, out, 0, streamer.recheckOf(exchange, "r1"));
+
+    assertEquals(
+        "id: 1\ndata: first\n\nevent: error\ndata: {\"code\": \"run_not_found\", \"message\":"
+            + " \"No run 'r1'.\"}\n\n",
+        out.toString(StandardCharsets.UTF_8));
+    assertEquals(1, asked.get(), "asked once, a second after it opened");
+  }
+
+  @Test
+  void aStreamEndsWhenItsCallerNoLongerAuthenticates() throws Exception {
+    var clock = new ManualClock(Instant.parse("2026-10-19T10:00:00Z"), Duration.ofMinutes(1));
+    var streamer =
+        new AgentLogStreamer(
+            exchange -> {
+              throw new ApiException(
+                  ErrorCode.INVALID_BEARER_TOKEN,
+                  "Bearer token's FDE 'raj' is disabled.",
+                  "Ask an admin to re-enable 'raj'.");
+            },
+            id -> Optional.of(runOn("node-a")),
+            id -> Optional.of(specOf(id, "raj")),
+            () -> "node-a",
+            clock);
+    var exchange = new CapturingExchange("/v1/runs/r1/stream").as("raj", "member");
+    var process = new ProcessBuilder("sh", "-c", "true").start();
+    process.waitFor();
+    var recheck = streamer.recheckOf(exchange, "r1");
+    clock.advance(Duration.ofSeconds(1));
+    var out = new ByteArrayOutputStream();
+
+    AgentLogStreamer.pump(
+        process, new BufferedReader(new StringReader("first\n")), out, 0, recheck);
+
+    assertEquals(
+        "event: error\ndata: {\"code\": \"invalid_bearer_token\", \"message\": \"Bearer"
+            + " token's FDE 'raj' is disabled.\", \"action\": \"Ask an admin to re-enable"
+            + " 'raj'.\"}\n\n",
+        out.toString(StandardCharsets.UTF_8));
   }
 
   private static final class CapturingExchange extends HttpExchange {

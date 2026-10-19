@@ -22,6 +22,7 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.InstantSource;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -60,6 +61,7 @@ public final class AgentLogStreamer implements HttpHandler {
   private final Function<String, Optional<RunStore.RunRow>> runLookup;
   private final Function<String, Optional<SpecStore.SpecRow>> specLookup;
   private final Supplier<String> localHandle;
+  private final InstantSource clock;
   private final LongAdder activeStreams = new LongAdder();
 
   public AgentLogStreamer(ApiAuth auth) {
@@ -71,10 +73,36 @@ public final class AgentLogStreamer implements HttpHandler {
       Function<String, Optional<RunStore.RunRow>> runLookup,
       Function<String, Optional<SpecStore.SpecRow>> specLookup,
       Supplier<String> localHandle) {
+    this(auth, runLookup, specLookup, localHandle, InstantSource.system());
+  }
+
+  /** As above, timing heartbeats and re-checks by {@code clock}. */
+  AgentLogStreamer(
+      ApiAuth auth,
+      Function<String, Optional<RunStore.RunRow>> runLookup,
+      Function<String, Optional<SpecStore.SpecRow>> specLookup,
+      Supplier<String> localHandle,
+      InstantSource clock) {
     this.auth = auth;
     this.runLookup = runLookup;
     this.specLookup = specLookup;
     this.localHandle = localHandle;
+    this.clock = clock;
+  }
+
+  /** Whether the caller may read a run's log. */
+  private sealed interface Admission {}
+
+  /** It may: the run is {@code run}. */
+  private record Admitted(RunStore.RunRow run) implements Admission {}
+
+  /** It may not, and the response that says why. */
+  private record Refused(int status, String code, String message, String extra)
+      implements Admission {
+
+    ApiError error() {
+      return new ApiError(code, message, null);
+    }
   }
 
   private static Optional<RunStore.RunRow> lookupFromDb(String runId) {
@@ -112,33 +140,12 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 400, "invalid_request", "Missing run id", null);
         return;
       }
-      var actor = ApiRouter.actorOf(exchange);
-      var run = Scoped.row(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
-      if (run == null) {
-        sendError(exchange, 404, "run_not_found", "No run '" + runId + "'.", null);
+      var admission = admit(exchange, runId);
+      if (admission instanceof Refused refused) {
+        sendError(exchange, refused.status(), refused.code(), refused.message(), refused.extra());
         return;
       }
-      if (SailOperations.isForeign(run, localHandle.get())) {
-        sendForeign(exchange, run);
-        return;
-      }
-      var refusal =
-          RunAuthority.access(
-              actor,
-              run.id(),
-              StopOperations.specIdOf(run),
-              RunAuthority.owners(
-                  run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
-      if (refusal.isPresent()) {
-        var refused = refusal.get();
-        var code = Refusals.code(refused.kind());
-        var fix =
-            Strings.isBlank(refused.fix())
-                ? null
-                : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
-        sendError(exchange, code.httpCode(), code.code(), refused.message(), fix);
-        return;
-      }
+      var run = ((Admitted) admission).run();
       if (Strings.isBlank(run.logPath())) {
         sendError(exchange, 404, "run_not_found", "This run has no log file.", null);
         return;
@@ -151,13 +158,64 @@ public final class AgentLogStreamer implements HttpHandler {
         sendError(exchange, 400, "invalid_request", e.getMessage(), null);
         return;
       }
-      streamLog(exchange, run.project(), tailCommand, since);
+      streamLog(exchange, run.project(), tailCommand, since, recheckOf(exchange, runId));
     } finally {
       exchange.close();
     }
   }
 
-  private void streamLog(HttpExchange exchange, String project, String[] tailCommand, int since)
+  /**
+   * The run {@code runId} when the authenticated caller may read its log, else why not: a run its
+   * scope does not admit does not exist for it, a run of another box is that box's to stream, and
+   * the run-owner rule ({@link RunAuthority#access}) decides the rest.
+   */
+  private Admission admit(HttpExchange exchange, String runId) {
+    var actor = ApiRouter.actorOf(exchange);
+    var run = Scoped.row(actor, runLookup.apply(runId), RunStore.RunRow::project).orElse(null);
+    if (run == null) {
+      return new Refused(404, "run_not_found", "No run '" + runId + "'.", null);
+    }
+    if (SailOperations.isForeign(run, localHandle.get())) {
+      return foreign(run);
+    }
+    var refusal =
+        RunAuthority.access(
+            actor,
+            run.id(),
+            StopOperations.specIdOf(run),
+            RunAuthority.owners(
+                run, spec -> StopOperations.ownerSeen(actor, specLookup.apply(spec))));
+    if (refusal.isPresent()) {
+      var refused = refusal.get();
+      var code = Refusals.code(refused.kind());
+      var fix =
+          Strings.isBlank(refused.fix())
+              ? null
+              : ", \"fix\": \"" + jsonEscape(refused.fix()) + "\"";
+      return new Refused(code.httpCode(), code.code(), refused.message(), fix);
+    }
+    return new Admitted(run);
+  }
+
+  /** What asks again whether {@code exchange}'s caller may still read {@code runId}'s log. */
+  StreamRecheck recheckOf(HttpExchange exchange, String runId) {
+    return new StreamRecheck(() -> refusal(exchange, runId), clock);
+  }
+
+  /** Why the stream of {@code runId} may no longer go on, asked as it was opened. */
+  private Optional<ApiError> refusal(HttpExchange exchange, String runId) {
+    try {
+      auth.require(exchange);
+    } catch (ApiException e) {
+      return Optional.of(e.error());
+    }
+    return admit(exchange, runId) instanceof Refused refused
+        ? Optional.of(refused.error())
+        : Optional.empty();
+  }
+
+  private void streamLog(
+      HttpExchange exchange, String project, String[] tailCommand, int since, StreamRecheck recheck)
       throws IOException {
     Process tailProcess;
     try {
@@ -180,7 +238,7 @@ public final class AgentLogStreamer implements HttpHandler {
             new BufferedReader(
                 new InputStreamReader(tailProcess.getInputStream(), StandardCharsets.UTF_8))) {
       writeComment(out, "streaming " + project);
-      pump(tailProcess, reader, out, since);
+      pump(tailProcess, reader, out, since, recheck);
     } catch (IOException e) {
       // Client disconnected — expected during streaming
     } catch (InterruptedException e) {
@@ -197,29 +255,42 @@ public final class AgentLogStreamer implements HttpHandler {
    * (bad project) or whose agent has stopped exits, and without this the loop would heartbeat onto
    * a dead pipe forever, holding the connection open and never closing the stream. A process seen
    * gone is read to the end of its pipe first, so what it wrote between a {@code ready()} that saw
-   * nothing and its exit is still relayed.
+   * nothing and its exit is still relayed. Before each line and each heartbeat the caller is asked
+   * again whether it may still read the run ({@code recheck}); once it may not, the stream ends
+   * with an {@code error} event saying why.
    */
-  static void pump(Process tailProcess, BufferedReader reader, OutputStream out, int since)
+  static void pump(
+      Process tailProcess,
+      BufferedReader reader,
+      OutputStream out,
+      int since,
+      StreamRecheck recheck)
       throws IOException, InterruptedException {
     var lineNumber = since > 0 ? since : 1;
     var lastHeartbeat = System.nanoTime();
-    while (true) {
-      if (reader.ready() || !tailProcess.isAlive()) {
-        var line = reader.readLine();
-        if (line == null) {
-          break;
-        }
-        writeSseData(out, lineNumber, line);
-        lineNumber++;
-        lastHeartbeat = System.nanoTime();
-      } else {
-        if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
-          out.write(HEARTBEAT);
-          out.flush();
+    try {
+      while (true) {
+        if (reader.ready() || !tailProcess.isAlive()) {
+          var line = reader.readLine();
+          if (line == null) {
+            break;
+          }
+          recheck.recheck();
+          writeSseData(out, lineNumber, line);
+          lineNumber++;
           lastHeartbeat = System.nanoTime();
+        } else {
+          if (System.nanoTime() - lastHeartbeat > HEARTBEAT_INTERVAL_NANOS) {
+            recheck.recheck();
+            out.write(HEARTBEAT);
+            out.flush();
+            lastHeartbeat = System.nanoTime();
+          }
+          Thread.sleep(100);
         }
-        Thread.sleep(100);
       }
+    } catch (StreamRecheck.Ended ended) {
+      StreamRecheck.writeEnded(out, ended);
     }
   }
 
@@ -295,7 +366,7 @@ public final class AgentLogStreamer implements HttpHandler {
     out.flush();
   }
 
-  private void sendForeign(HttpExchange exchange, RunStore.RunRow run) throws IOException {
+  private static Refused foreign(RunStore.RunRow run) {
     var node = Strings.isBlank(run.node()) ? "an unknown node" : run.node();
     var extra =
         ", \"node\": \""
@@ -305,8 +376,7 @@ public final class AgentLogStreamer implements HttpHandler {
             + "\", \"project\": \""
             + jsonEscape(Objects.toString(run.project(), ""))
             + "\"";
-    sendError(
-        exchange,
+    return new Refused(
         409,
         "run_on_other_node",
         "Run " + run.id() + " executed on " + node + "; its logs live there, not on this box.",
