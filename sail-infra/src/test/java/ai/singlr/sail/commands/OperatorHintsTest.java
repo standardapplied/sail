@@ -292,7 +292,7 @@ class OperatorHintsTest {
 
   private static final Pattern TERNARY =
       Pattern.compile(
-          "\\([^()?]*\\?\\s*([^()]*(?:\\([^()]*\\)[^()]*)*?)\\s*:\\s*([^()]*(?:\\([^()]*\\)[^()]*)*)\\)");
+          "\\((?:[^()?]|\\([^()]*\\))*\\?\\s*([^()]*(?:\\([^()]*\\)[^()]*)*?)\\s*:\\s*([^()]*(?:\\([^()]*\\)[^()]*)*)\\)");
   private static final Pattern OPERAND =
       Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?|\\d+");
 

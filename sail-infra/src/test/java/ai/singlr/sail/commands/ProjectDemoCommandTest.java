@@ -5,15 +5,15 @@
 
 package ai.singlr.sail.commands;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.ssh.TestSshKeys;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
@@ -76,21 +76,21 @@ class ProjectDemoCommandTest {
   }
 
   @Test
-  void detectSshPublicKeyReturnsNullWhenNoKeys(@TempDir Path tempDir) {
-    var result = ProjectDemoCommand.detectSshPublicKey();
+  void theCallersOwnKeyIsTheFirstUsualFileThatHoldsOne(@TempDir Path dir) throws Exception {
+    var key = TestSshKeys.ed25519("own", "me@box");
+    Files.writeString(dir.resolve("id_ed25519.pub"), "\n");
+    Files.writeString(dir.resolve("id_rsa.pub"), "  " + key + "\n");
 
-    assertDoesNotThrow(() -> ProjectDemoCommand.detectSshPublicKey());
+    assertEquals(key, ProjectDemoCommand.detectSshPublicKey(dir));
   }
 
   @Test
-  void detectSshPublicKeyFindsEd25519(@TempDir Path tempDir) throws Exception {
-    var sshDir = Path.of(System.getProperty("user.home"), ".ssh");
-    var keyFile = sshDir.resolve("id_ed25519.pub");
-    if (Files.exists(keyFile)) {
-      var key = ProjectDemoCommand.detectSshPublicKey();
-      assertNotNull(key);
-      assertTrue(key.startsWith("ssh-"));
-    }
+  void aKeyFileThatHoldsNoKeyCountsAsNone(@TempDir Path dir) throws Exception {
+    assertNull(ProjectDemoCommand.detectSshPublicKey(dir));
+    Files.writeString(
+        dir.resolve("id_ed25519.pub"), "ssh-ed25519 AAAA one\nssh-ed25519 BBBB two\n");
+    assertNull(ProjectDemoCommand.detectSshPublicKey(dir));
+    assertNull(ProjectDemoCommand.detectSshPublicKey(dir.resolve("absent")));
   }
 
   @Test

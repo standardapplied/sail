@@ -365,15 +365,19 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   static String detectSshPublicKey() {
-    var sshDir = SailPaths.invokingHome().resolve(".ssh");
+    return detectSshPublicKey(SailPaths.invokingHome().resolve(".ssh"));
+  }
 
+  /**
+   * The caller's own public key: the first of the usual files in {@code sshDir} that holds one. A
+   * file that holds no key, or cannot be read, counts as none.
+   */
+  static String detectSshPublicKey(Path sshDir) {
     for (var name : List.of("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub")) {
-      var keyFile = sshDir.resolve(name);
-      if (Files.exists(keyFile)) {
-        try {
-          return Files.readString(keyFile).strip();
-        } catch (IOException ignored) {
-        }
+      try {
+        return SshPublicKey.parse(Files.readString(sshDir.resolve(name))).line();
+      } catch (IOException | IllegalArgumentException holdsNoKey) {
+        continue;
       }
     }
     return null;

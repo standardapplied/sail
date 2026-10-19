@@ -73,6 +73,23 @@ class WorkstationIdentityTest {
   }
 
   @Test
+  void aKeyFileThatIsNotTextIsRefusedAsNoKeyNotAsUnreadable(@TempDir Path dir) throws Exception {
+    var binary = dir.resolve("binary.pub");
+    Files.write(binary, new byte[] {(byte) 0xff, (byte) 0xfe, 'x'});
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkstationIdentity.registeredAt(binary, OperatorCommand.PLAIN));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("This box's workstation key (" + binary + ") is not an SSH public key: "),
+        refused.getMessage());
+  }
+
+  @Test
   void registeredIsEmptyWhenMissing(@TempDir Path dir) {
     assertTrue(
         WorkstationIdentity.registeredAt(dir.resolve("absent.pub"), OperatorCommand.PLAIN)
