@@ -208,7 +208,7 @@ public final class InitCommand implements Runnable {
   }
 
   /**
-   * A git identity value init carries: {@code value} is what a roster entry is given, and {@code
+   * A git identity value init carries: {@code value} is what a node's join is given, and {@code
    * unset} says the box's git identity has none, so init gives it this one; an identity the box
    * already holds is never overwritten.
    */
