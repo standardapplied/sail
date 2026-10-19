@@ -76,11 +76,10 @@ public final class RateLimitGate {
    * router's problem shape — the same status, media type, and JSON error body — without the
    * delegate ever seeing the request.
    *
-   * <p>Charging is by address only, never by credential: {@code HttpExchange} attributes are stored
-   * on the {@code HttpContext}, so a {@code token.name} set by {@link ApiAuth#require} on one
-   * request stays readable by every later request to that context. Trusting it here would key an
-   * unauthenticated caller to whoever last authenticated — letting them skip their own budget and
-   * drain that user's instead.
+   * <p>Charging is by address only, never by credential: this runs before {@link ApiAuth#require},
+   * so no credential the request carries has been checked yet. Keying on one would let an
+   * unauthenticated caller name another user's credential — skipping their own budget and draining
+   * that user's instead.
    */
   public HttpHandler wrap(HttpHandler delegate) {
     Objects.requireNonNull(delegate, "delegate");

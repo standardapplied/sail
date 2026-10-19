@@ -7,6 +7,7 @@ package ai.singlr.sail.api;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
@@ -15,6 +16,7 @@ import ai.singlr.sail.store.AuthSessionStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -31,6 +33,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -58,7 +62,9 @@ class OpenStreamRecheckTest {
   private HttpServer server;
   private ManualClock clock;
   private final AtomicInteger checks = new AtomicInteger();
-  private InputStream body;
+  private final List<InputStream> bodies = new CopyOnWriteArrayList<>();
+  private final CountDownLatch clientChecked = new CountDownLatch(1);
+  private volatile CountDownLatch holdClient;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -76,16 +82,32 @@ class OpenStreamRecheckTest {
         exchange -> {
           checks.incrementAndGet();
           sessions.require(exchange);
+          holdIfClient(exchange);
         };
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-    server.createContext("/v1/events/stream", new SseHandler(bus, counted, 4, clock));
+    PrivateAttributes.context(server, "/v1/events/stream", new SseHandler(bus, counted, 4, clock));
     server.setExecutor(Executors.newVirtualThreadPerTaskExecutor());
     server.start();
   }
 
+  /** Holds {@code client}'s check, once asked to, between its authentication and its read. */
+  private void holdIfClient(HttpExchange exchange) {
+    var hold = holdClient;
+    if (hold == null || !"client".equals(exchange.getAttribute("token.fde"))) {
+      return;
+    }
+    holdClient = null;
+    clientChecked.countDown();
+    try {
+      hold.await(10, TimeUnit.SECONDS);
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
   @AfterEach
   void tearDown() throws IOException {
-    if (body != null) {
+    for (var body : bodies) {
       body.close();
     }
     server.stop(0);
@@ -98,7 +120,11 @@ class OpenStreamRecheckTest {
    * {@code error} event prefixed {@code error }, and {@link #END} when the server closes it.
    */
   private BlockingQueue<String> open() throws Exception {
-    var token = new AuthSessionStore(db).create(client.id(), Duration.ofHours(1)).token();
+    return open(client);
+  }
+
+  private BlockingQueue<String> open(FdeStore.Fde caller) throws Exception {
+    var token = new AuthSessionStore(db).create(caller.id(), Duration.ofHours(1)).token();
     var request =
         HttpRequest.newBuilder(
                 URI.create(
@@ -109,7 +135,8 @@ class OpenStreamRecheckTest {
     var response =
         HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.ofInputStream());
     assertEquals(200, response.statusCode());
-    body = response.body();
+    var body = response.body();
+    bodies.add(body);
     var frames = new LinkedBlockingQueue<String>();
     var subscribed = new LinkedBlockingQueue<Boolean>();
     var reader = new BufferedReader(new InputStreamReader(body, StandardCharsets.UTF_8));
@@ -203,6 +230,23 @@ class OpenStreamRecheckTest {
     publish("acme");
     assertEquals("acme", next(frames));
     assertEquals(2, checks.get());
+  }
+
+  @Test
+  void anAdminAuthenticatingDuringAScopedStreamsCheckLeavesThatStreamItsOwnScope()
+      throws Exception {
+    var frames = open();
+    var hold = new CountDownLatch(1);
+    holdClient = hold;
+    clock.advance(Duration.ofSeconds(1));
+    publish("beta");
+    assertTrue(clientChecked.await(10, TimeUnit.SECONDS), "the client's stream never re-checked");
+
+    open(fdes.byHandle("mady").orElseThrow());
+    hold.countDown();
+    publish("acme");
+
+    assertEquals("acme", next(frames), "beta was never granted to client");
   }
 
   @Test
