@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -44,7 +45,7 @@ public final class WorkstationIdentity {
     }
     String line;
     try {
-      line = Files.readString(path).strip();
+      line = new String(Files.readAllBytes(path), StandardCharsets.UTF_8).strip();
     } catch (IOException e) {
       throw new IllegalStateException(
           "This box's workstation key ("

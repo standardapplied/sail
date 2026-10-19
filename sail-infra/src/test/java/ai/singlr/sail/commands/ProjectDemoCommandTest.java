@@ -18,6 +18,7 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
@@ -49,20 +50,24 @@ class ProjectDemoCommandTest {
   }
 
   @Test
-  void theDefinitionTakesTheCallersOwnKeyAndNeverTheRegisteredOne() {
-    var template =
-        "git:\n  name: ${GIT_NAME}\n  email: ${GIT_EMAIL}\nssh:\n  authorized_keys:\n"
-            + "    - ${SSH_PUBLIC_KEY}\n";
+  void theDefinitionIsResolvedInTheTreeWithTheCallersOwnKeyOrNone() {
+    var redacted =
+        "name: demo\ngit:\n  name: '${GIT_NAME}'\n  email: '${GIT_EMAIL}'\nssh:\n"
+            + "  user: dev\n  authorized_keys:\n    - '${SSH_PUBLIC_KEY}'\n";
 
-    assertEquals(
-        "git:\n  name: Ada\n  email: ada@x.io\nssh:\n  authorized_keys:\n"
-            + "    - ssh-ed25519 AAAA ada@box\n",
+    var withKey =
         ProjectDemoCommand.resolvedDefinition(
-            template, "Ada", "ada@x.io", "ssh-ed25519 AAAA ada@box"));
+            redacted, "Dan O'Neil", "dan@x.io", "ssh-ed25519 AAAA dan@box", OperatorCommand.PLAIN);
+    var withoutKey =
+        ProjectDemoCommand.resolvedDefinition(
+            redacted, "Dan O'Neil", "dan@x.io", null, OperatorCommand.PLAIN);
+
+    assertEquals("Dan O'Neil", withKey.git().name());
+    assertEquals(List.of("ssh-ed25519 AAAA dan@box"), withKey.ssh().authorizedKeys());
     assertEquals(
-        "git:\n  name: Ada\n  email: ada@x.io\nssh:\n  authorized_keys:\n",
-        ProjectDemoCommand.resolvedDefinition(template, "Ada", "ada@x.io", null),
-        "with no key of the caller's own, the entry goes and step 6 installs the registered key");
+        List.of(),
+        withoutKey.ssh().authorizedKeys(),
+        "with no key of the caller's own the entry goes; step 6 trusts the registered key");
   }
 
   @Test

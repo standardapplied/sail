@@ -24,7 +24,7 @@ public record ConnectEnvironment(String serverIp, String serverUser, boolean wor
   }
 
   /** Detects the live environment from {@code host.yaml} and the registered workstation key. */
-  public static ConnectEnvironment detect(OperatorCommand operator) {
+  private static ConnectEnvironment detect(OperatorCommand operator) {
     return detect(SailPaths.hostConfigPath(), WorkstationIdentity.registered(operator).isPresent());
   }
 

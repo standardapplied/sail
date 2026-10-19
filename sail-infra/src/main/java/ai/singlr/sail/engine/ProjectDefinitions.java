@@ -126,7 +126,7 @@ public final class ProjectDefinitions {
       String definitionText, UnaryOperator<String> values, OperatorCommand operator) {
     var config = SailYaml.fromMap(PlaceholderResolver.resolve(definitionText, values));
     requireDevUser(config, operator);
-    requireKeyLines(config, operator);
+    requireKeyLines(config);
     return config;
   }
 
@@ -159,33 +159,33 @@ public final class ProjectDefinitions {
 
   /**
    * Refuses a descriptor whose {@code ssh.authorized_keys} holds what step 6 cannot write as one
-   * key line: nothing, or more than one line. Refused here, as {@link #requireDevUser} is, so sync,
-   * connect and listing still read such a row.
+   * key line: nothing, text that is not one line, or something that is not text. Only a descriptor
+   * read from a file can hold one (a catalog row keeps {@code ${SSH_PUBLIC_KEY}} alone), so the fix
+   * is in that file.
    */
-  private static void requireKeyLines(SailYaml config, OperatorCommand operator) {
+  private static void requireKeyLines(SailYaml config) {
     if (config.ssh() == null || config.ssh().authorizedKeys() == null) {
       return;
     }
     for (Object entry : config.ssh().authorizedKeys()) {
-      if (!(entry instanceof String line) || line.isBlank()) {
-        throw notAKeyLine(config.name(), "holds an entry that is not a key line", operator);
+      if (entry == null || entry instanceof String blank && blank.isBlank()) {
+        throw notAKeyLine("holds an empty entry");
+      }
+      if (!(entry instanceof String line)) {
+        throw notAKeyLine("holds an entry that is not text: " + entry);
       }
       if (line.strip().lines().count() > 1) {
-        throw notAKeyLine(config.name(), "holds a key of more than one line", operator);
+        throw notAKeyLine("holds a key of more than one line");
       }
     }
   }
 
-  private static IllegalArgumentException notAKeyLine(
-      String name, String fault, OperatorCommand operator) {
+  private static IllegalArgumentException notAKeyLine(String fault) {
     return new IllegalArgumentException(
-        "ssh.authorized_keys in "
-            + name
-            + "'s descriptor "
+        "ssh.authorized_keys "
             + fault
-            + ". Fix it with '"
-            + operator.sail("project edit " + name)
-            + "', then apply again.");
+            + ". Write each key on a line of its own in the descriptor you applied, then apply"
+            + " again.");
   }
 
   /**

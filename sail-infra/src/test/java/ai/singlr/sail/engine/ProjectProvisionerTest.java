@@ -1194,6 +1194,18 @@ class ProjectProvisionerTest {
   }
 
   @Test
+  void aPaddedDefinitionKeyIsWrittenStripped() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+    var alice = TestSshKeys.ed25519("alice", "alice@laptop");
+    var config = minimalConfigWith(new SailYaml.Ssh(null, List.of("  " + alice + "  ")));
+
+    new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), null, null);
+
+    assertEquals(alice + "\n", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
   void aContainerIsProvisionedFromItsRecordOnlyWithTheSameKey() {
     var config = minimalConfig();
     var withKey = Optional.of(ProjectProvisioner.inputs(config, Optional.of(WORKSTATION_KEY)));

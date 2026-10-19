@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
@@ -1179,6 +1180,25 @@ class FdeCommandTest {
 
     assertEquals(
         "ssh-ed25519", SshPublicKey.parse(Files.readString(workstationKey()).strip()).type());
+  }
+
+  @Test
+  void aWorkstationKeyFileThatCannotBeReadRefusesAPairingSinceItMayHoldAKey() throws Exception {
+    assumeFalse(SailPaths.isRoot());
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("---------"));
+    try {
+      assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    } finally {
+      Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("rw-------"));
+    }
+
+    assertEquals(
+        "This box's workstation key ("
+            + workstationKey()
+            + ") could not be read (AccessDeniedException). Check that the account sail runs as can"
+            + " read it.",
+        refusal);
   }
 
   @Test

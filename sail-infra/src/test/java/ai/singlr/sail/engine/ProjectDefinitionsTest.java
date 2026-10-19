@@ -155,13 +155,15 @@ class ProjectDefinitionsTest {
         new LocalIdentity(
             gitConfig("M", "m@x.io"), dir.resolve("missing.pub"), OperatorCommand.SUDO);
     var faults =
-        Map.of(
-            "    -\n", "holds an entry that is not a key line",
-            "    - ' '\n", "holds an entry that is not a key line",
-            "    - 7\n", "holds an entry that is not a key line",
-            "    - |\n      ssh-ed25519 AAAA\n      more\n", "holds a key of more than one line");
+        List.of(
+            Map.entry("    -\n", "holds an empty entry"),
+            Map.entry("    - ' '\n", "holds an empty entry"),
+            Map.entry("    - 7\n", "holds an entry that is not text: 7"),
+            Map.entry(
+                "    - |\n      ssh-ed25519 AAAA\n      more\n",
+                "holds a key of more than one line"));
 
-    for (var fault : faults.entrySet()) {
+    for (var fault : faults) {
       var text = "name: acme\nssh:\n  authorized_keys:\n" + fault.getKey();
       var refused =
           assertThrows(
@@ -169,9 +171,10 @@ class ProjectDefinitionsTest {
               () ->
                   ProjectDefinitions.resolveForProvisioning(text, identity, OperatorCommand.SUDO));
       assertEquals(
-          "ssh.authorized_keys in acme's descriptor "
+          "ssh.authorized_keys "
               + fault.getValue()
-              + ". Fix it with 'sudo sail project edit acme', then apply again.",
+              + ". Write each key on a line of its own in the descriptor you applied, then apply"
+              + " again.",
           refused.getMessage(),
           fault.getKey());
     }
@@ -183,7 +186,7 @@ class ProjectDefinitionsTest {
                 OperatorCommand.SUDO)
             .ssh()
             .authorizedKeys(),
-        "a padded key line is read as the row holds it; step 6 writes it stripped");
+        "a padded key line is read as the file holds it; step 6 writes it stripped");
   }
 
   @Test

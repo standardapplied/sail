@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -19,6 +20,7 @@ import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -35,6 +37,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -125,12 +128,12 @@ public final class ProjectDemoCommand implements Runnable {
 
     var yamlContent = loadDemoDefinition(out, ansi, operator);
     var registered = WorkstationIdentity.registered(operator);
-    var resolvedYaml = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi);
+    var config = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi, operator);
 
     var outputDir = Path.of(DEMO_PROJECT);
     var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     Files.createDirectories(outputDir);
-    Files.writeString(sailYamlPath, resolvedYaml);
+    Files.writeString(sailYamlPath, YamlUtil.dumpToString(config.toMap()));
     if (!json) {
       out.println(ansi.string("  @|green \u2713|@ " + sailYamlPath + " written"));
     }
@@ -153,7 +156,6 @@ public final class ProjectDemoCommand implements Runnable {
       return;
     }
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(resolvedYaml));
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
     var shell = new ShellExecutor(false);
 
@@ -244,8 +246,12 @@ public final class ProjectDemoCommand implements Runnable {
    * registered workstation key is never written into it: every container trusts that key as the box
    * holds it when provisioned, so a revoked key is never put back by a later apply.
    */
-  private String resolveAutoDetected(
-      String yamlContent, boolean workstationKeyRegistered, PrintStream out, Ansi ansi) {
+  private SailYaml resolveAutoDetected(
+      String yamlContent,
+      boolean workstationKeyRegistered,
+      PrintStream out,
+      Ansi ansi,
+      OperatorCommand operator) {
     var gitName = detectGitConfig("user.name");
     var gitEmail = detectGitConfig("user.email");
     var sshKey = detectSshPublicKey();
@@ -299,20 +305,45 @@ public final class ProjectDemoCommand implements Runnable {
               + "\n    git config --global user.email you@example.com");
     }
 
-    return resolvedDefinition(yamlContent, gitName, gitEmail, sshKey);
+    return resolvedDefinition(yamlContent, gitName, gitEmail, sshKey, operator);
   }
 
   /**
-   * The definition with the identity filled in. With no key of the caller's own the key entry goes:
-   * step 6 trusts the registered workstation key whatever the definition says, and a key written
-   * into the definition would be put back by an apply after it was revoked.
+   * The definition with the identity filled in, resolved as every descriptor is ({@link
+   * ProjectDefinitions#resolveForProvisioning}): in the parsed tree, so a quoted placeholder and an
+   * apostrophe in a name are fine, and under the same checks. With no key of the caller's own the
+   * key entry goes: step 6 trusts the registered workstation key whatever the definition says, and
+   * a key written into the definition would be put back by an apply after it was revoked.
    */
-  static String resolvedDefinition(
-      String yamlContent, String gitName, String gitEmail, String sshKey) {
-    var resolved = yamlContent.replace("${GIT_NAME}", gitName).replace("${GIT_EMAIL}", gitEmail);
-    return sshKey != null
-        ? resolved.replace("${SSH_PUBLIC_KEY}", sshKey)
-        : resolved.replaceAll("\\s*- \\$\\{SSH_PUBLIC_KEY}", "");
+  static SailYaml resolvedDefinition(
+      String yamlContent,
+      String gitName,
+      String gitEmail,
+      String sshKey,
+      OperatorCommand operator) {
+    var text = sshKey == null ? withoutKeyEntry(yamlContent) : yamlContent;
+    return ProjectDefinitions.resolveForProvisioning(
+        text,
+        field ->
+            switch (field) {
+              case PlaceholderResolver.GIT_NAME -> gitName;
+              case PlaceholderResolver.GIT_EMAIL -> gitEmail;
+              case PlaceholderResolver.SSH_PUBLIC_KEY -> sshKey;
+              default -> null;
+            },
+        operator);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static String withoutKeyEntry(String yamlContent) {
+    var map = YamlUtil.parseMap(yamlContent);
+    if (map.get("ssh") instanceof Map<?, ?> ssh
+        && ssh.get("authorized_keys") instanceof List<?> keys) {
+      var token = PlaceholderResolver.token(PlaceholderResolver.SSH_PUBLIC_KEY);
+      ((Map<String, Object>) ssh)
+          .put("authorized_keys", keys.stream().filter(key -> !token.equals(key)).toList());
+    }
+    return YamlUtil.dumpToString(map);
   }
 
   String detectGitConfig(String key) {
