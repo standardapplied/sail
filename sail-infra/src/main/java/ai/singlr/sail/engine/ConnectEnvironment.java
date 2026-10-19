@@ -8,6 +8,7 @@ package ai.singlr.sail.engine;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import java.nio.file.Path;
+import java.util.function.Supplier;
 
 /**
  * The node-side half of an SSH connect target: the jump host's IP and login user (from {@code
@@ -16,6 +17,11 @@ import java.nio.file.Path;
  * without a server restart.
  */
 public record ConnectEnvironment(String serverIp, String serverUser, boolean workstationKeySet) {
+
+  /** Reads the live environment each time it is asked, for {@code operator}'s remedies. */
+  public static Supplier<ConnectEnvironment> detector(OperatorCommand operator) {
+    return () -> detect(operator);
+  }
 
   /** Detects the live environment from {@code host.yaml} and the registered workstation key. */
   public static ConnectEnvironment detect(OperatorCommand operator) {
