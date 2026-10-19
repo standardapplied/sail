@@ -543,7 +543,7 @@ public final class MigrateCommand implements Runnable {
 
   private static boolean sailManaged(String name, IncusDeviceManager devices) {
     try {
-      return ProjectApplyCommand.sailManaged(name, devices);
+      return devices.sailManaged(name);
     } catch (Exception e) {
       return false;
     }

@@ -23,12 +23,10 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.FileMutexTest;
-import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProvisionState;
 import ai.singlr.sail.engine.SailPaths;
-import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import java.io.ByteArrayOutputStream;
@@ -590,26 +588,6 @@ class ProjectApplyCommandTest {
   }
 
   @Test
-  void allOnlyTargetsSailManagedContainers() throws Exception {
-    var probe =
-        new ScriptedShellExecutor()
-            .onOk("incus config device get legacy sail-api-sock source", "/run/sail/api");
-    var devices = new IncusDeviceManager(probe);
-
-    assertTrue(
-        ProjectApplyCommand.sailManaged("legacy", devices),
-        "the API-socket device is the instance-level provenance Sail itself attached");
-    assertFalse(
-        ProjectApplyCommand.sailManaged("web", devices),
-        "a catalog row is name-level intent, never instance provenance: a stale entry left by"
-            + " destroy-without-purge must not hand a foreign container with a colliding name"
-            + " the API mount and box credential");
-    assertFalse(
-        ProjectApplyCommand.sailManaged("foreign", devices),
-        "an unrelated Incus instance must never receive the API mount and box credential");
-  }
-
-  @Test
   void aCatalogRowWithoutTheDeviceGetsAVisibleWarningNotASilentSkip() {
     var warning = ProjectApplyCommand.unmanagedSkipWarning("web", true, OperatorCommand.PLAIN);
     assertTrue(warning.contains("web"));
@@ -620,15 +598,6 @@ class ProjectApplyCommandTest {
         null,
         ProjectApplyCommand.unmanagedSkipWarning("stranger", false, OperatorCommand.PLAIN),
         "a foreign container with no catalog row is not Sail's to narrate");
-  }
-
-  @Test
-  void anInvalidInstanceNameIsForeignBeforeAnyProbeRuns() throws Exception {
-    var probe = new ScriptedShellExecutor();
-    var devices = new IncusDeviceManager(probe);
-
-    assertFalse(ProjectApplyCommand.sailManaged("Not_A_Project", devices));
-    assertTrue(probe.invocations().isEmpty(), "an invalid name must never reach incus");
   }
 
   @Test
