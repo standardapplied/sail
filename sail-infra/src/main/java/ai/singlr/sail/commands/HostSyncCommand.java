@@ -73,7 +73,7 @@ public final class HostSyncCommand implements Runnable {
     validateOwnFde(operator);
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
-      throw HostInitCommand.notInitialized();
+      throw HostInitCommand.notInitialized(operator);
     }
     var host = HostYaml.fromMap(YamlUtil.parseFile(path));
 

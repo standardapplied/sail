@@ -169,7 +169,7 @@ class InitCommandTest {
   @CsvSource({"false, sail", "true, sudo sail"})
   void mainsNextStepsTellAnotherBoxTheReadmesFormAndThisBoxItsCallersOwn(
       boolean sudo, String here) {
-    operator = () -> new OperatorCommand(sudo);
+    operator = () -> sudo ? OperatorCommand.SUDO : OperatorCommand.PLAIN;
     var printed = new ByteArrayOutputStream();
     var originalOut = System.out;
     System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));

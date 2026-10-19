@@ -7,26 +7,55 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.common.Strings;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.function.Function;
 
 /**
  * How this process tells the person reading it to run sail on this box: with {@code sudo} when that
  * person came through {@code sudo} from an account whose own plain {@code sail} is {@link
- * RuntimeMode.Refused}, as on a box {@code sudo sail init} set up, and plain otherwise. Every
- * {@code sail} command sail prints is rendered here, so a hint runs as printed for the account that
- * reads it: {@link #sail} for the caller on this box, {@link #elsewhere} for an operator this box
- * cannot know, and {@link #client} for a thin client.
+ * RuntimeMode.Refused}, as on a box {@code sudo sail init} set up, and plain otherwise; a verb only
+ * root runs carries {@code sudo} for everyone but root logged in directly. Every {@code sail}
+ * command sail prints is rendered here, so a hint runs as printed for the account that reads it:
+ * {@link #sail} for the caller on this box, {@link #elsewhere} for an operator this box cannot
+ * know, and {@link #client} for a thin client.
  */
-public record OperatorCommand(boolean sudo) {
+public record OperatorCommand(boolean sudo, boolean rootLogin) {
 
-  /** A reader whose plain {@code sail} runs: root logged in directly, or a box's own account. */
-  public static final OperatorCommand PLAIN = new OperatorCommand(false);
+  /**
+   * The verbs that refuse a caller who is not root, so every reader but root logged in directly
+   * types them with {@code sudo}, whatever this box has installed so far.
+   */
+  public static final List<String> ROOT_ONLY =
+      List.of(
+          "init",
+          "host init",
+          "host ssh-identity",
+          "host status",
+          "host update",
+          "host config set",
+          "host sync",
+          "project apply",
+          "project destroy",
+          "project rename",
+          "project demo");
+
+  /** Root logged in directly: every command runs as typed. */
+  public static final OperatorCommand PLAIN = new OperatorCommand(false, true);
 
   /**
    * A reader who types {@code sudo}: a non-root caller refused a command that needs root, or a
    * reader this box cannot know, told the README's form (see {@link #elsewhere}).
    */
-  public static final OperatorCommand SUDO = new OperatorCommand(true);
+  public static final OperatorCommand SUDO = new OperatorCommand(true, false);
+
+  /** An account whose own plain {@code sail} runs, and that types {@code sudo} only for root's. */
+  public static final OperatorCommand UNPRIVILEGED = new OperatorCommand(false, false);
+
+  public OperatorCommand {
+    if (sudo && rootLogin) {
+      throw new IllegalArgumentException("Root logged in directly never types sudo.");
+    }
+  }
 
   /** The reader of this process: the {@code sudo} caller when root acts for one, else itself. */
   public static OperatorCommand here() {
@@ -44,33 +73,34 @@ public record OperatorCommand(boolean sudo) {
    */
   public static OperatorCommand of(
       boolean root, String sudoUser, Function<String, Path> homeOf, Path systemUnit) {
-    if (!root || Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
+    if (!root) {
+      return UNPRIVILEGED;
+    }
+    if (Strings.isBlank(sudoUser) || "root".equals(sudoUser)) {
       return PLAIN;
     }
     var sailDir = homeOf.apply(sudoUser).resolve(".sail");
     var callersOwn =
         RuntimeMode.detect(
             sailDir.resolve("host.yaml"), sailDir.resolve("config.yaml"), systemUnit, false, null);
-    return new OperatorCommand(callersOwn instanceof RuntimeMode.Refused);
+    return callersOwn instanceof RuntimeMode.Refused ? SUDO : UNPRIVILEGED;
   }
 
   /**
-   * The reader of a command that runs only as root, such as {@code sail init} or {@code sail host
-   * init}: plain for root logged in directly, {@code sudo} for everyone else, whatever this box has
-   * installed so far.
+   * {@code sail <args>} as the reader types it, with {@code sudo} for a {@link #ROOT_ONLY} verb.
    */
-  public static OperatorCommand forRootHere() {
-    return forRoot(SailPaths.isRoot(), System.getenv("SUDO_USER"));
-  }
-
-  /** Pure of the process: see {@link #forRootHere}. */
-  public static OperatorCommand forRoot(boolean root, String sudoUser) {
-    return root && (Strings.isBlank(sudoUser) || "root".equals(sudoUser)) ? PLAIN : SUDO;
-  }
-
-  /** {@code sail <args>} as the reader types it. */
   public String sail(String args) {
-    return typed("sail " + args);
+    return ROOT_ONLY.stream().anyMatch(verb -> args.equals(verb) || args.startsWith(verb + " "))
+        ? root(args)
+        : typed("sail " + args);
+  }
+
+  /**
+   * {@code sail <args>} run as root, as the reader types it: a command whose privilege the caller
+   * decides, such as {@code host service install} for a system service.
+   */
+  public String root(String args) {
+    return (rootLogin ? "" : "sudo ") + "sail " + args;
   }
 
   /**

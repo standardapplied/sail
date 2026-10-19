@@ -437,14 +437,15 @@ public final class UpgradeCommand implements Runnable {
    * that installs it. An unprovisioned box (a thin client) legitimately has no service, so there is
    * nothing to say.
    */
-  static Optional<String> missingApiRemediation(boolean provisioned, OperatorCommand operator) {
+  static Optional<String> missingApiRemediation(
+      boolean provisioned, SystemdServiceInstaller.Mode mode, OperatorCommand operator) {
     if (!provisioned) {
       return Optional.empty();
     }
     return Optional.of(
         "  @|yellow Install it so you can dispatch agents and see the board here:|@"
             + " @|bold "
-            + operator.sail("host service install")
+            + mode.installCommand(operator)
             + "|@");
   }
 
@@ -487,7 +488,7 @@ public final class UpgradeCommand implements Runnable {
                       ? "sail-api is not installed on this provisioned box"
                       : "sail-api not installed; nothing to restart",
                   Ansi.AUTO));
-          missingApiRemediation(provisioned, operator)
+          missingApiRemediation(provisioned, bootstrap.mode(), operator)
               .ifPresent(line -> System.out.println(Ansi.AUTO.string(line)));
         }
         return RestartStatus.NOT_INSTALLED;

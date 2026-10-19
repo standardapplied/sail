@@ -617,8 +617,9 @@ class FdeCommandTest {
             "",
             printedCode(),
             "",
-            "  Containers of acme, web trust this key only after their next 'sail project"
-                + " apply'."),
+            "  Containers of acme, web trust this key only after their next '"
+                + OperatorCommand.here().sail("project apply")
+                + "'."),
         printed());
   }
 
@@ -680,7 +681,9 @@ class FdeCommandTest {
     assertEquals(
         "A connect code logs in as root@34.1.2.3, which sees every project here, so it is minted"
             + " only for this box's own FDE, and this box names none. If it is ada, name it with"
-            + " 'sail host config set sync-handle ada' and pair again.",
+            + " '"
+            + OperatorCommand.here().sail("host config set sync-handle ada")
+            + "' and pair again.",
         refusal);
     assertNothingWritten("ada");
   }
@@ -991,8 +994,9 @@ class FdeCommandTest {
             + " acme, web, docs, stray no longer trust it.",
         printed().getFirst());
     assertEquals(
-        "  Containers of acme, docs, web trust this key only after their next 'sail project"
-            + " apply'.",
+        "  Containers of acme, docs, web trust this key only after their next '"
+            + OperatorCommand.here().sail("project apply")
+            + "'.",
         printed().getLast());
     assertEquals(renewed.line() + "\n", Files.readString(workstationKey()));
     assertEquals(List.of(renewed.blob()), loginsOf("ada"));
@@ -2128,7 +2132,7 @@ class FdeCommandTest {
 
   @Test
   void everyCommandAnFdeVerbNamesIsWordedForTheOperator() {
-    var sudo = new OperatorCommand(true);
+    var sudo = OperatorCommand.SUDO;
     var ada = new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", "2026");
     String unknownProject;
     try (var db = Sqlite.openMemory()) {
@@ -2333,14 +2337,19 @@ class FdeCommandTest {
   void aKeyChangeByANonRootCallerIsToldToSyncWithSudoEvenWherePlainSailRuns() {
     assertEquals(
         "  @|faint Run 'sudo sail host keys sync' to apply.|@",
-        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.PLAIN));
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.UNPRIVILEGED));
   }
 
   @Test
-  void anUnprovisionedHostIsToldTheCallersOwnCommand() {
+  void anUnprovisionedHostIsToldItsRootOnlyRemedyPlainOnlyByRootLoggedInDirectly() {
     assertEquals(
         "  @|faint SSH-key login is not provisioned on this host. Run 'sail host ssh-identity' to"
             + " enable it.|@",
         FdeCommand.keysOutcome(new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.PLAIN));
+    assertEquals(
+        "  @|faint SSH-key login is not provisioned on this host. Run 'sudo sail host"
+            + " ssh-identity' to enable it.|@",
+        FdeCommand.keysOutcome(
+            new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.UNPRIVILEGED));
   }
 }

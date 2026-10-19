@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
  */
 class ApiOperatorHintsTest {
 
-  private static final OperatorCommand SUDO = new OperatorCommand(true);
+  private static final OperatorCommand SUDO = OperatorCommand.SUDO;
   private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
 
   private static Spec spec(String assignee) {

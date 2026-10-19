@@ -50,7 +50,14 @@ public final class SystemdServiceInstaller {
     /** Per-user systemd ({@code systemctl --user}); unit symlinked into the user's home. */
     USER,
     /** System-wide systemd ({@code systemctl}); unit lives under {@code /etc/systemd/system}. */
-    SYSTEM
+    SYSTEM;
+
+    /** The command that installs a service of this scope, as {@code operator} types it. */
+    public String installCommand(OperatorCommand operator) {
+      return this == SYSTEM
+          ? operator.root("host service install")
+          : operator.sail("host service install");
+    }
   }
 
   private final ShellExec shell;

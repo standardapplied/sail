@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SyncConfig;
@@ -35,7 +36,7 @@ import picocli.CommandLine.Help.Ansi;
  */
 class OperatorHintsTest {
 
-  private static final OperatorCommand SUDO = new OperatorCommand(true);
+  private static final OperatorCommand SUDO = OperatorCommand.SUDO;
   private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
 
   private static List<String> hints(OperatorCommand operator) {
@@ -160,8 +161,8 @@ class OperatorHintsTest {
   }
 
   @Test
-  void aFreshBoxsSudoCallerIsToldHostInitsRootOnlyStepsWithSudo() {
-    var freshSudoCaller = OperatorCommand.forRoot(true, "dev");
+  void aFreshBoxsSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
+    var freshSudoCaller = OperatorCommand.UNPRIVILEGED;
 
     assertEquals(
         "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
@@ -171,8 +172,23 @@ class OperatorHintsTest {
         "Server not initialized. Run 'sudo sail host init' first.",
         HostInitCommand.notInitialized(freshSudoCaller).getMessage());
     assertEquals(
-        HostInitCommand.notInitialized(OperatorCommand.forRootHere()).getMessage(),
-        HostInitCommand.notInitialized().getMessage());
+        "The sail user is not provisioned. Run 'sudo sail host ssh-identity' first.",
+        HostKeysCommand.Sync.notProvisioned(freshSudoCaller));
+    assertEquals(
+        "The sail user is not provisioned. Run 'sail host ssh-identity' first.",
+        HostKeysCommand.Sync.notProvisioned(PLAIN));
+  }
+
+  @Test
+  void everyRootOnlyVerbIsASailCommand() {
+    var sail = new CommandLine(new Sail());
+    for (var verb : OperatorCommand.ROOT_ONLY) {
+      var command = sail;
+      for (var word : verb.split(" ")) {
+        command = command.getSubcommands().get(word);
+        assertNotNull(command, verb);
+      }
+    }
   }
 
   @Test

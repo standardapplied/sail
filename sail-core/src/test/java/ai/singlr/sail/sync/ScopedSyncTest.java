@@ -1139,7 +1139,7 @@ class ScopedSyncTest {
     assertEquals(
         "spec beta-work: main denied this change — Spec 'beta-work' already exists. Yours is in"
             + " its history: sudo sail spec history beta-work.",
-        denial.describe(new OperatorCommand(true)));
+        denial.describe(OperatorCommand.SUDO));
     assertTrue(nia.specs.findById("beta-work").isEmpty());
     assertEquals(mains, new ChangeLog(main.db).head("spec", "beta-work").orElseThrow());
     assertEquals("the beta spec", main.specs.findById("beta-work").orElseThrow().title());

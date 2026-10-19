@@ -38,6 +38,7 @@ public final class HostStatusCommand implements Runnable {
   }
 
   private void execute() throws Exception {
+    var operator = OperatorCommand.here();
     if (!ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
           "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host status"));
@@ -45,7 +46,7 @@ public final class HostStatusCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized();
+      throw HostInitCommand.notInitialized(operator);
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

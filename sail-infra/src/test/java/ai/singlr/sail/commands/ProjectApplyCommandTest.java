@@ -312,7 +312,8 @@ class ProjectApplyCommandTest {
 
       assertEquals(1, apply.get());
       assertEquals(
-          Banner.errorLine(otherUserRefusal(project, "bob"), Ansi.AUTO) + System.lineSeparator(),
+          Banner.errorLine(otherUserRefusal(project, "bob", OperatorCommand.here()), Ansi.AUTO)
+              + System.lineSeparator(),
           errors.toString(StandardCharsets.UTF_8));
       assertFalse(Files.exists(SailPaths.projectDir(project)), "nothing is recorded for it");
     } finally {
@@ -332,7 +333,7 @@ class ProjectApplyCommandTest {
                     "name: alpha\nssh:\n  user: bob\n",
                     OperatorCommand.PLAIN));
 
-    assertEquals(otherUserRefusal("alpha", "bob"), thrown.getMessage());
+    assertEquals(otherUserRefusal("alpha", "bob", OperatorCommand.PLAIN), thrown.getMessage());
   }
 
   @Test
@@ -374,7 +375,7 @@ class ProjectApplyCommandTest {
     assertEquals(noRecord, ProjectApplyCommand.recheckLine(finished, false));
   }
 
-  private static String otherUserRefusal(String project, String user) {
+  private static String otherUserRefusal(String project, String user, OperatorCommand operator) {
     return "ssh.user is '"
         + user
         + "', but sail runs every agent, shell and hook as 'dev' (uid 1000, /home/dev). Remove"
@@ -384,10 +385,10 @@ class ProjectApplyCommandTest {
         + project
         + "', then apply again. A container already created as '"
         + user
-        + "' must be recreated: 'sail project destroy "
-        + project
-        + "', then 'sail project apply "
-        + project
+        + "' must be recreated: '"
+        + operator.sail("project destroy " + project)
+        + "', then '"
+        + operator.sail("project apply " + project)
         + "'.";
   }
 

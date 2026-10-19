@@ -73,7 +73,7 @@ class CompactionTest {
 
     new BlobStore(db).gc(BlobStore.Compaction.ALL, false);
 
-    var sudo = new OperatorCommand(true);
+    var sudo = OperatorCommand.SUDO;
     assertEquals(
         "Revision '"
             + first

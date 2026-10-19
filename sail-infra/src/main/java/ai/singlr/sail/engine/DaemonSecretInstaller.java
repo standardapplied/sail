@@ -161,7 +161,7 @@ public final class DaemonSecretInstaller {
               + restart.stderr().strip()
               + ". The secret file and drop-in are in place. If the daemon is not installed yet,"
               + " run '"
-              + operator.sail("host service install")
+              + mode.installCommand(operator)
               + "'; if it runs as a system service, rerun this command with sudo.");
     }
   }

@@ -203,7 +203,7 @@ class SyncCliTest {
     var original = System.out;
     try (var capture = new PrintStream(output, true, StandardCharsets.UTF_8)) {
       System.setOut(capture);
-      NodeSync.syncOnce(new OperatorCommand(true));
+      NodeSync.syncOnce(OperatorCommand.SUDO);
     } finally {
       System.setOut(original);
     }
