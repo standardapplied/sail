@@ -111,6 +111,41 @@ class MainHostKeyTest {
   }
 
   @Test
+  void aFreshBoxsSudoCallerRemovesRootsPinWithSudo() throws Exception {
+    Files.createDirectories(knownHosts().getParent());
+    Files.writeString(knownHosts(), hashed(MAIN) + "\n");
+    var hostKey =
+        new MainHostKey(
+            new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts(), OperatorCommand.SUDO_UNREFUSED);
+
+    var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("sail@maindevbox"));
+
+    assertEquals(
+        "maindevbox's SSH host key is "
+            + IMPOSTOR.fingerprint()
+            + ", but this box pinned "
+            + MAIN.fingerprint()
+            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
+            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
+            + " box and main is answering for it.",
+        refused.getMessage());
+  }
+
+  @Test
+  void anAccountsOwnPinIsRemovedWithoutSudo() {
+    assertEquals(
+        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sudo sail"
+            + " init --main sail@main'; otherwise something between this box and main is answering"
+            + " for it.",
+        MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.UNPRIVILEGED));
+    assertEquals(
+        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail init"
+            + " --main sail@main'; otherwise something between this box and main is answering for"
+            + " it.",
+        MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.PLAIN));
+  }
+
+  @Test
   void aTargetsHostDropsItsUserAndPort() {
     assertEquals("host", MainHostKey.hostOf("sail@host"));
     assertEquals("10.0.0.1", MainHostKey.hostOf(" sail@10.0.0.1:2222 "));

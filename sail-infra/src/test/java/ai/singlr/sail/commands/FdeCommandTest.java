@@ -2337,7 +2337,7 @@ class FdeCommandTest {
   void aKeyChangeByANonRootCallerIsToldToSyncWithSudoEvenWherePlainSailRuns() {
     assertEquals(
         "  @|faint Run 'sudo sail host keys sync' to apply.|@",
-        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.UNPRIVILEGED));
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.SUDO_UNREFUSED));
   }
 
   @Test
@@ -2350,6 +2350,6 @@ class FdeCommandTest {
         "  @|faint SSH-key login is not provisioned on this host. Run 'sudo sail host"
             + " ssh-identity' to enable it.|@",
         FdeCommand.keysOutcome(
-            new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.UNPRIVILEGED));
+            new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.SUDO_UNREFUSED));
   }
 }

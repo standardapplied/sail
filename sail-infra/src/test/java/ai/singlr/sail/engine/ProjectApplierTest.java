@@ -959,8 +959,28 @@ class ProjectApplierTest {
         applier.checkUnsupportedChanges(
             config, new ContainerManager.ResourceLimits("4", "12GB"), OperatorCommand.PLAIN);
 
-    assertFalse(warnings.isEmpty());
-    assertTrue(warnings.getFirst().contains("project resources set"));
+    assertEquals(
+        List.of(
+            "CPU and memory changes are not applied by 'sail project apply'. Use 'sail project"
+                + " resources set test ...' instead."),
+        warnings);
+  }
+
+  @Test
+  void aFreshBoxsSudoCallerIsToldToResizeWithSudo() {
+    var applier = applier(new ScriptedShellExecutor());
+
+    var warnings =
+        applier.checkUnsupportedChanges(
+            minimalConfig("claude-code"),
+            new ContainerManager.ResourceLimits("4", "12GB"),
+            OperatorCommand.SUDO_UNREFUSED);
+
+    assertEquals(
+        List.of(
+            "CPU and memory changes are not applied by 'sudo sail project apply'. Use 'sudo sail"
+                + " project resources set test ...' instead."),
+        warnings);
   }
 
   @Test

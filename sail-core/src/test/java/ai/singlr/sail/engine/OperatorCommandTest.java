@@ -65,14 +65,15 @@ class OperatorCommandTest {
     own("dev", "host.yaml", "storage_backend: dir\n");
 
     assertEquals(
-        OperatorCommand.UNPRIVILEGED, OperatorCommand.of(true, "dev", this::homeOf, systemUnit()));
+        OperatorCommand.SUDO_UNREFUSED,
+        OperatorCommand.of(true, "dev", this::homeOf, systemUnit()));
   }
 
   @Test
   void aSudoCallerOfARootOnlyCommandTypesSudoBeforeTheBoxInstalledAnything() {
     var freshBox = OperatorCommand.of(true, "dev", this::homeOf, tempDir.resolve("no-unit"));
 
-    assertEquals(OperatorCommand.UNPRIVILEGED, freshBox);
+    assertEquals(OperatorCommand.SUDO_UNREFUSED, freshBox);
     assertEquals("sail sync", freshBox.sail("sync"));
     for (var verb : OperatorCommand.ROOT_ONLY) {
       assertEquals("sudo sail " + verb + " x", freshBox.sail(verb + " x"));
@@ -92,14 +93,30 @@ class OperatorCommandTest {
     assertEquals(
         "sudo sail host service install", OperatorCommand.SUDO.root("host service install"));
     assertEquals("sudo sail host ssh-identity", OperatorCommand.SUDO.sail("host ssh-identity"));
+    assertEquals(
+        "sudo sail project resources set gamma",
+        OperatorCommand.UNPRIVILEGED.sail("project resources set gamma"));
+  }
+
+  @Test
+  void aReaderWhoReachedThisProcessThroughSudoTouchesItsFilesWithSudo() {
+    var removal = "ssh-keygen -R main";
+
+    assertEquals("sudo ssh-keygen -R main", OperatorCommand.SUDO.asThisProcess(removal));
+    assertEquals("sudo ssh-keygen -R main", OperatorCommand.SUDO_UNREFUSED.asThisProcess(removal));
+    assertEquals("ssh-keygen -R main", OperatorCommand.PLAIN.asThisProcess(removal));
+    assertEquals("ssh-keygen -R main", OperatorCommand.UNPRIVILEGED.asThisProcess(removal));
   }
 
   @Test
   void rootLoggedInDirectlyNeverTypesSudo() {
-    var refusal =
-        assertThrows(IllegalArgumentException.class, () -> new OperatorCommand(true, true));
+    var typesSudo =
+        assertThrows(IllegalArgumentException.class, () -> new OperatorCommand(true, true, false));
+    var cameThroughSudo =
+        assertThrows(IllegalArgumentException.class, () -> new OperatorCommand(false, true, true));
 
-    assertEquals("Root logged in directly never types sudo.", refusal.getMessage());
+    assertEquals("Root logged in directly never types sudo.", typesSudo.getMessage());
+    assertEquals("Root logged in directly never types sudo.", cameThroughSudo.getMessage());
   }
 
   @Test

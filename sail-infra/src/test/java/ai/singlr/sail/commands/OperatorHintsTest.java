@@ -162,7 +162,7 @@ class OperatorHintsTest {
 
   @Test
   void aFreshBoxsSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
-    var freshSudoCaller = OperatorCommand.UNPRIVILEGED;
+    var freshSudoCaller = OperatorCommand.SUDO_UNREFUSED;
 
     assertEquals(
         "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
@@ -188,6 +188,28 @@ class OperatorHintsTest {
         command = command.getSubcommands().get(word);
         assertNotNull(command, verb);
       }
+    }
+  }
+
+  @Test
+  void everyCommandThatRefusesANonRootCallerIsARootOnlyVerb() {
+    var unlisted = new ArrayList<String>();
+    rootGuarded(new CommandLine(new Sail()), "", unlisted);
+
+    assertEquals(List.of(), unlisted, "a command refuses non-root callers but is not ROOT_ONLY");
+  }
+
+  private static void rootGuarded(CommandLine command, String path, List<String> unlisted) {
+    for (var sub : command.getSubcommands().entrySet()) {
+      var verb = (path + " " + sub.getKey()).strip();
+      var type = sub.getValue().getCommandSpec().userObject().getClass().getName();
+      var source = Path.of("src", "main", "java", type.replace('.', '/') + ".java");
+      if (Files.exists(source)
+          && read(source).contains("Root privileges required")
+          && !OperatorCommand.ROOT_ONLY.contains(verb)) {
+        unlisted.add(verb);
+      }
+      rootGuarded(sub.getValue(), verb, unlisted);
     }
   }
 

@@ -19,7 +19,7 @@ import java.util.function.Function;
  * {@link #sail} for the caller on this box, {@link #elsewhere} for an operator this box cannot
  * know, and {@link #client} for a thin client.
  */
-public record OperatorCommand(boolean sudo, boolean rootLogin) {
+public record OperatorCommand(boolean sudo, boolean rootLogin, boolean throughSudo) {
 
   /**
    * The verbs that refuse a caller who is not root, so every reader but root logged in directly
@@ -37,22 +37,30 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
           "project apply",
           "project destroy",
           "project rename",
+          "project resources set",
           "project demo");
 
   /** Root logged in directly: every command runs as typed. */
-  public static final OperatorCommand PLAIN = new OperatorCommand(false, true);
+  public static final OperatorCommand PLAIN = new OperatorCommand(false, true, false);
 
   /**
    * A reader who types {@code sudo}: a non-root caller refused a command that needs root, or a
    * reader this box cannot know, told the README's form (see {@link #elsewhere}).
    */
-  public static final OperatorCommand SUDO = new OperatorCommand(true, false);
+  public static final OperatorCommand SUDO = new OperatorCommand(true, false, true);
 
-  /** An account whose own plain {@code sail} runs, and that types {@code sudo} only for root's. */
-  public static final OperatorCommand UNPRIVILEGED = new OperatorCommand(false, false);
+  /** A non-root process: its account's own plain {@code sail} runs, and only root's take sudo. */
+  public static final OperatorCommand UNPRIVILEGED = new OperatorCommand(false, false, false);
+
+  /**
+   * Root acting for a {@code sudo} caller whose own plain {@code sail} runs, as on a box with no
+   * system service yet: its {@code sail} commands are plain, but root's, and this process's own
+   * files, take {@code sudo}.
+   */
+  public static final OperatorCommand SUDO_UNREFUSED = new OperatorCommand(false, false, true);
 
   public OperatorCommand {
-    if (sudo && rootLogin) {
+    if (rootLogin && (sudo || throughSudo)) {
       throw new IllegalArgumentException("Root logged in directly never types sudo.");
     }
   }
@@ -83,7 +91,7 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
     var callersOwn =
         RuntimeMode.detect(
             sailDir.resolve("host.yaml"), sailDir.resolve("config.yaml"), systemUnit, false, null);
-    return callersOwn instanceof RuntimeMode.Refused ? SUDO : UNPRIVILEGED;
+    return callersOwn instanceof RuntimeMode.Refused ? SUDO : SUDO_UNREFUSED;
   }
 
   /**
@@ -92,7 +100,7 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
   public String sail(String args) {
     return ROOT_ONLY.stream().anyMatch(verb -> args.equals(verb) || args.startsWith(verb + " "))
         ? root(args)
-        : typed("sail " + args);
+        : (sudo ? "sudo " : "") + "sail " + args;
   }
 
   /**
@@ -104,10 +112,12 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
   }
 
   /**
-   * {@code command}, a root command on this box such as {@code ssh-keygen}, as the reader types it.
+   * {@code command} on this process's own files, such as {@code ssh-keygen -R} on its {@code
+   * known_hosts}, as the reader types it: with {@code sudo} when the reader reached this process
+   * through it.
    */
-  public String typed(String command) {
-    return (sudo ? "sudo " : "") + command;
+  public String asThisProcess(String command) {
+    return (throughSudo ? "sudo " : "") + command;
   }
 
   /**

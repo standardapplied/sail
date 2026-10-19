@@ -54,7 +54,7 @@ public final class MainHostKey {
    */
   public static String rebuiltRecovery(String target, OperatorCommand operator) {
     return "If main was rebuilt, remove the old key with '"
-        + operator.typed("ssh-keygen -R " + hostOf(target))
+        + operator.asThisProcess("ssh-keygen -R " + hostOf(target))
         + "' and re-run '"
         + operator.sail("init --main " + target)
         + "'; otherwise something between this box and main is answering for it.";
