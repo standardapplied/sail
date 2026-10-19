@@ -160,8 +160,8 @@ class NativeFleetIT {
               .output()
               .contains(
                   "hello: Sync channel closed before main replied. ssh said: Host key verification"
-                      + " failed. If main was rebuilt, remove the old key with 'sudo ssh-keygen -R"
-                      + " localhost' and re-run 'sudo sail init --main sail@localhost'; otherwise"
+                      + " failed. If main was rebuilt, remove the old key with 'ssh-keygen -R"
+                      + " localhost' and re-run 'sail init --main sail@localhost'; otherwise"
                       + " something between this box and main is answering for it."),
           refused::output);
 

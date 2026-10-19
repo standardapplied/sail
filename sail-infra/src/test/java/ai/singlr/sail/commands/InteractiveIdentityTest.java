@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.engine.LocalIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -38,13 +39,13 @@ class InteractiveIdentityTest {
 
   private LocalIdentity box(String name, String email) {
     var shell = new ScriptedShellExecutor().onOk("user.name", name).onOk("user.email", email);
-    return new LocalIdentity(shell, tempDir.resolve("absent.pub"));
+    return new LocalIdentity(shell, tempDir.resolve("absent.pub"), OperatorCommand.PLAIN);
   }
 
   private LocalIdentity boxWithKey(String key) throws Exception {
     var path = tempDir.resolve("sail.pub");
     Files.writeString(path, key);
-    return new LocalIdentity(new ScriptedShellExecutor(), path);
+    return new LocalIdentity(new ScriptedShellExecutor(), path, OperatorCommand.PLAIN);
   }
 
   private static void stdin(String input) {

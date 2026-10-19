@@ -156,7 +156,7 @@ class SyncSchemaConvergenceTest {
 
     assertTrue(failure.getMessage().contains("schema v100"));
     assertTrue(failure.getMessage().contains("0.14"));
-    assertTrue(failure.getMessage().contains("sail migrate"));
+    assertTrue(failure.getMessage().contains("let it migrate this database"));
     try (var db = Sqlite.open(path)) {
       assertEquals(100, new SchemaManager(db).currentVersion());
     }
@@ -236,9 +236,12 @@ class SyncSchemaConvergenceTest {
       }
       assertTrue(
           DataMigrations.anyPending(converged.db(), DataMigrations.all(OperatorCommand.PLAIN)));
-      assertTrue(!DataMigrations.anyPending(converged.db(), DataMigrations.databaseOnly()));
       assertTrue(
-          DataMigrations.databaseOnly().stream().noneMatch(DataMigration::readsBoxFiles)
+          !DataMigrations.anyPending(
+              converged.db(), DataMigrations.databaseOnly(OperatorCommand.PLAIN)));
+      assertTrue(
+          DataMigrations.databaseOnly(OperatorCommand.PLAIN).stream()
+                  .noneMatch(DataMigration::readsBoxFiles)
               && DataMigrations.all(OperatorCommand.PLAIN).stream()
                   .anyMatch(DataMigration::readsBoxFiles));
     }

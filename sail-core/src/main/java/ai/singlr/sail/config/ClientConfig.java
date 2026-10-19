@@ -71,18 +71,6 @@ public record ClientConfig(String host, String user) {
     return Files.exists(SailPaths.clientConfigPath());
   }
 
-  /** Loads the client config from {@code ~/.sail/config.yaml}. */
-  public static ClientConfig load() throws IOException {
-    var path = SailPaths.clientConfigPath();
-    if (!Files.exists(path)) {
-      throw new IOException(
-          "Client config not found: "
-              + path
-              + "\n  Create it with: sail init <server-ip-or-ssh-alias>");
-    }
-    return fromMap(YamlUtil.parseFile(path));
-  }
-
   /** Loads the client config from a specific path (for testing). */
   public static ClientConfig load(Path path) throws IOException {
     return fromMap(YamlUtil.parseFile(path));

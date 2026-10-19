@@ -30,10 +30,14 @@ public final class LocalIdentity {
   private final Path sshPublicKeyPath;
   private final Path home;
   private final boolean sudo;
+  private final OperatorCommand operator;
 
-  /** This process's git identity and the workstation key at {@code sshPublicKeyPath}. */
-  public LocalIdentity(ShellExec shell, Path sshPublicKeyPath) {
-    this(shell, sshPublicKeyPath, null, false);
+  /**
+   * This process's git identity and the workstation key at {@code sshPublicKeyPath}, its failures
+   * worded for {@code operator}.
+   */
+  public LocalIdentity(ShellExec shell, Path sshPublicKeyPath, OperatorCommand operator) {
+    this(shell, sshPublicKeyPath, null, false, operator);
   }
 
   /**
@@ -41,32 +45,40 @@ public final class LocalIdentity {
    * sudo} when that account is root acting for a {@code sudo} caller, who sets root's git config
    * with {@code sudo}.
    */
-  LocalIdentity(ShellExec shell, Path sshPublicKeyPath, Path home, boolean sudo) {
+  LocalIdentity(
+      ShellExec shell, Path sshPublicKeyPath, Path home, boolean sudo, OperatorCommand operator) {
     this.shell = shell;
     this.sshPublicKeyPath = sshPublicKeyPath;
     this.home = home;
     this.sudo = sudo;
+    this.operator = operator;
   }
 
   /**
    * This box's identity: the git config and workstation public key of the account that owns it
    * ({@link SailPaths#identityHome()}).
    */
-  public static LocalIdentity detect() {
+  public static LocalIdentity detect(OperatorCommand operator) {
     return detect(
         new ShellExecutor(false),
         SailPaths.isRoot(),
         SailPaths.identityHome(),
-        SailPaths.invokingHome());
+        SailPaths.invokingHome(),
+        operator);
   }
 
   /**
    * The identity at {@code home}, read for the person whose home is {@code invokingHome}: root's
    * own, when root reads it for a {@code sudo} caller, is set with {@code sudo}.
    */
-  static LocalIdentity detect(ShellExec shell, boolean root, Path home, Path invokingHome) {
+  static LocalIdentity detect(
+      ShellExec shell, boolean root, Path home, Path invokingHome, OperatorCommand operator) {
     return new LocalIdentity(
-        shell, SailPaths.workstationPublicKeyPath(home), home, root && !home.equals(invokingHome));
+        shell,
+        SailPaths.workstationPublicKeyPath(home),
+        home,
+        root && !home.equals(invokingHome),
+        operator);
   }
 
   /**
@@ -167,7 +179,7 @@ public final class LocalIdentity {
   }
 
   private String sshPublicKey() {
-    return WorkstationIdentity.registeredAt(sshPublicKeyPath)
+    return WorkstationIdentity.registeredAt(sshPublicKeyPath, operator)
         .map(SshPublicKey::line)
         .orElseThrow(() -> new IllegalStateException(missingKeyMessage()));
   }
@@ -178,7 +190,7 @@ public final class LocalIdentity {
         you to connect from your laptop.
           Register it (auto-detected from this box's authorized_keys, or pass the key):
             %s"""
-        .formatted(sshPublicKeyPath, WorkstationIdentity.SET_KEY_HINT);
+        .formatted(sshPublicKeyPath, WorkstationIdentity.setKeyHint(operator));
   }
 
   private String run(List<String> command) {

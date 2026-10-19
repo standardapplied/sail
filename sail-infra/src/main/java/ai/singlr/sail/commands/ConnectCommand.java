@@ -88,7 +88,8 @@ public final class ConnectCommand implements Runnable {
         Objects.requireNonNullElse(serverUser, System.getProperty("user.name"));
     var containerUser = resolveContainerUser(name, operator);
 
-    var identityFile = WorkstationIdentity.identityFile();
+    var registered = WorkstationIdentity.registered(operator);
+    var identityFile = WorkstationIdentity.identityFileFor(registered);
 
     if (json) {
       System.out.println(
@@ -100,17 +101,12 @@ public final class ConnectCommand implements Runnable {
                   containerIp,
                   containerUser,
                   identityFile,
-                  WorkstationIdentity.registered().isPresent())));
+                  registered.isPresent())));
       return;
     }
 
-    if (WorkstationIdentity.registered().isEmpty()) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below"
-                  + " assumes ~/.ssh/id_ed25519. If the container rejects your key, register the"
-                  + " one you connect with, then re-create the project:"));
-      System.out.println(Ansi.AUTO.string("    @|bold " + WorkstationIdentity.SET_KEY_HINT + "|@"));
+    if (registered.isEmpty()) {
+      System.out.println(Ansi.AUTO.string(noWorkstationKey(name, operator)));
     }
     System.out.println(
         connectSnippet(
@@ -136,10 +132,26 @@ public final class ConnectCommand implements Runnable {
     }
   }
 
+  /**
+   * Connect's warning on a box with no workstation key: the next apply puts the key it registers
+   * into the container.
+   */
+  static String noWorkstationKey(String name, OperatorCommand operator) {
+    return "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below assumes"
+        + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you connect"
+        + " with, then apply the project to put it in the container:\n    @|bold "
+        + WorkstationIdentity.setKeyHint(operator)
+        + "|@\n    @|bold "
+        + operator.sail("project apply " + name)
+        + "|@";
+  }
+
   /** Connect's refusal on a box with no server IP, naming both ways to give it one. */
   static String serverIpUnset(String name, OperatorCommand operator) {
     return "Server IP not configured. Fix with one of:\n"
-        + "  - sudo sail host config set server-ip <your-server-ip>\n"
+        + "  - "
+        + operator.sail("host config set server-ip <your-server-ip>")
+        + "\n"
         + "  - Or pass: "
         + operator.sail("project connect " + name + " --server-ip <your-server-ip>");
   }

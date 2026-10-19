@@ -190,7 +190,7 @@ class OneDecisionTest {
         http("PUT", "/v1/specs/theirs", session, "{\"title\":\"x\"}"), NOT_ADAS_SPEC);
     var cli =
         Actor.call(
-            CliOperator.of(ADAS_NODE, new FdeStore(db)),
+            CliOperator.of(ADAS_NODE, new FdeStore(db), OperatorCommand.PLAIN),
             () -> operations.updateGlobalSpec("theirs", retitle()));
     var failure = assertInstanceOf(Result.Failure.class, cli, "the host CLI");
     assertEquals(ErrorCode.FORBIDDEN_NOT_ASSIGNEE, failure.errorCode());
@@ -245,7 +245,7 @@ class OneDecisionTest {
         http("POST", "/v1/rooms/den/messages", session, "{\"body\":\"hi\"}"), NOT_ADAS_ROOM);
     var cli =
         Actor.call(
-            CliOperator.of(ADAS_NODE, new FdeStore(db)),
+            CliOperator.of(ADAS_NODE, new FdeStore(db), OperatorCommand.PLAIN),
             () ->
                 operations.postRoomMessage(
                     "den", new SpecMessageRequest("hi", null, false), "ada"));

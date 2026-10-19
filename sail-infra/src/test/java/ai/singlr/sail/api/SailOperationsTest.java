@@ -55,6 +55,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -334,6 +335,28 @@ class SailOperationsTest {
             shell().on("incus list ^acme$", RUNNING_NO_IP_JSON), store -> {}, environment());
 
     assertError(ErrorCode.CONTAINER_IP_UNAVAILABLE, operations.connect("acme"));
+  }
+
+  @Test
+  void connectRefusesADamagedWorkstationKeyFileWithItsOwnSentence() throws Exception {
+    var operations =
+        operationsWith(
+            shell().on("incus list ^acme$", RUNNING_JSON),
+            store -> {},
+            () -> {
+              throw new IllegalStateException(
+                  "This box's workstation key (/root/.sail/workstation_key.pub) is not an SSH"
+                      + " public key: Unsupported SSH key type 'not'. Register the key you connect"
+                      + " with: sudo sail host config set ssh-public-key");
+            });
+
+    var result = operations.connect("acme");
+
+    assertError(ErrorCode.PRECONDITION_FAILED, result);
+    assertTrue(
+        fullError(result).contains("workstation_key.pub) is not an SSH public key"),
+        fullError(result));
+    assertTrue(fullError(result).contains("sudo sail host config set ssh-public-key"));
   }
 
   @Test
@@ -3266,6 +3289,14 @@ class SailOperationsTest {
   private SailOperations operationsWith(
       FakeShell shell, Consumer<ProjectStore> seedProjects, ConnectEnvironment environment)
       throws Exception {
+    return operationsWith(shell, seedProjects, () -> environment);
+  }
+
+  private SailOperations operationsWith(
+      FakeShell shell,
+      Consumer<ProjectStore> seedProjects,
+      Supplier<ConnectEnvironment> environment)
+      throws Exception {
     var yaml = tempDir.resolve("sail-" + System.nanoTime() + ".yaml");
     Files.writeString(yaml, baseYaml());
     var db = Sqlite.open(tempDir.resolve("specs-" + System.nanoTime() + ".db"));
@@ -3285,7 +3316,7 @@ class SailOperationsTest {
         null,
         null,
         projectStore,
-        () -> environment,
+        environment,
         OperatorCommand.PLAIN);
   }
 

@@ -13,6 +13,7 @@ import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.HostInfo;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -123,16 +124,18 @@ public final class SyncServerCommand implements Callable<Integer> {
     var principal = principal(db, token, new RoleRule(box, new FdeStore(db)));
     if (principal.isEmpty()) {
       System.err.println(
-          "sail _sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
+          "sync: this session's FDE is disabled on main. Ask an admin to re-enable it.");
       return 1;
     }
     try {
       new ShippedFollowUps(db).catchUp();
     } catch (RuntimeException e) {
       System.err.println(
-          "sail _sync: main could not fix the findings of its shipped follow-ups ("
+          "sync: main could not fix the findings of its shipped follow-ups ("
               + e.getMessage()
-              + "); run sail sync again.");
+              + "); run "
+              + OperatorCommand.elsewhere("sync")
+              + " again.");
       return 1;
     }
     SyncRpcServer.over(

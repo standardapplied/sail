@@ -37,11 +37,12 @@ final class ProjectMutations {
    * journal will refuse that write, refuses up front, never after cloning, starting or editing.
    * Null for a dry run or an explicit {@code -f} file, neither of which touches the catalog.
    */
-  static Actor catalogOperator(String name, Path explicitFile, boolean dryRun) {
+  static Actor catalogOperator(
+      String name, Path explicitFile, boolean dryRun, OperatorCommand reader) {
     if (dryRun || explicitFile != null) {
       return null;
     }
-    var operator = CliOperator.current();
+    var operator = CliOperator.current(reader);
     ProjectCatalog.requireRecordable(name, operator);
     return operator;
   }

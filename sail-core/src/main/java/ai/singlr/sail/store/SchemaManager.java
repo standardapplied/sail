@@ -1167,8 +1167,8 @@ public final class SchemaManager {
               + ", below the v1 schema floor (schema v"
               + FLOOR_VERSION
               + "), and this release does not carry pre-floor migrations."
-              + " Install sail 0.14.x, run 'sail migrate', then upgrade to this release and"
-              + " retry.");
+              + " Install sail 0.14.x, let it migrate this database, then upgrade to this release"
+              + " and retry.");
     }
     if (current < V1_VERSION) {
       onRampFrom(current);

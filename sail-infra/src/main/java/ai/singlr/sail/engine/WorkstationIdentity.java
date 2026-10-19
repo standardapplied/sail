@@ -7,6 +7,7 @@ package ai.singlr.sail.engine;
 
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Optional;
@@ -19,35 +20,61 @@ import java.util.Optional;
  */
 public final class WorkstationIdentity {
 
-  /**
-   * The one command that registers a box's workstation key — shared so the guidance can't drift.
-   */
-  public static final String SET_KEY_HINT = "sudo sail host config set ssh-public-key";
-
   private WorkstationIdentity() {}
 
-  /** The registered workstation key, or empty when the box owner has not set one. */
-  public static Optional<SshPublicKey> registered() {
-    return registeredAt(SailPaths.workstationPublicKeyPath());
+  /**
+   * The one command that registers a box's workstation key, as {@code operator} types it — shared
+   * so the guidance can't drift.
+   */
+  public static String setKeyHint(OperatorCommand operator) {
+    return operator.sail("host config set ssh-public-key");
   }
 
-  public static Optional<SshPublicKey> registeredAt(Path path) {
+  /**
+   * The registered workstation key, or empty when the box owner has not set one. A key file that
+   * holds no readable key is refused rather than read as none: every container trusts this key, so
+   * a damaged file would silently take it out of all of them on the next apply.
+   */
+  public static Optional<SshPublicKey> registered(OperatorCommand operator) {
+    return registeredAt(SailPaths.workstationPublicKeyPath(), operator);
+  }
+
+  public static Optional<SshPublicKey> registeredAt(Path path, OperatorCommand operator) {
     if (!Files.isRegularFile(path)) {
       return Optional.empty();
     }
+    String line;
     try {
-      return Optional.of(SshPublicKey.parse(Files.readString(path).strip()));
-    } catch (IOException | RuntimeException e) {
-      return Optional.empty();
+      line = new String(Files.readAllBytes(path), StandardCharsets.UTF_8).strip();
+    } catch (IOException e) {
+      throw new IllegalStateException(
+          "This box's workstation key ("
+              + path
+              + ") could not be read ("
+              + e.getClass().getSimpleName()
+              + "). Check that the account sail runs as can read it.",
+          e);
+    }
+    try {
+      return Optional.of(SshPublicKey.parse(line));
+    } catch (IllegalArgumentException e) {
+      throw new IllegalStateException(
+          "This box's workstation key ("
+              + path
+              + ") is not an SSH public key: "
+              + e.getMessage()
+              + " Register the key you connect with: "
+              + setKeyHint(operator),
+          e);
     }
   }
 
   /** The Mac-side {@code IdentityFile} a connect snippet should reference for this box's owner. */
-  public static String identityFile() {
-    return identityFileFor(registered());
+  public static String identityFile(OperatorCommand operator) {
+    return identityFileFor(registered(operator));
   }
 
-  static String identityFileFor(Optional<SshPublicKey> key) {
+  public static String identityFileFor(Optional<SshPublicKey> key) {
     return "~/.ssh/" + key.map(SshPublicKey::defaultPrivateKeyName).orElse("id_ed25519");
   }
 }

@@ -58,16 +58,14 @@ public final class HostInitCommand implements Runnable {
 
   @Option(
       names = "--server-ip",
-      description =
-          "Server's public IP address (for SSH config generation in 'sail project connect').")
+      description = "Server's public IP address, for the SSH config that project connect prints.")
   private String serverIp;
 
   @Option(
       names = "--ssh-public-key",
       description =
           "Your workstation SSH public key, authorized into this box's project containers so you"
-              + " can connect from your laptop. Set it later with 'sail host config set"
-              + " ssh-public-key'.")
+              + " can connect from your laptop. Set it later with host config set ssh-public-key.")
   private String sshPublicKey;
 
   @Option(names = "--yes", description = "Skip confirmation prompts (for non-interactive use).")
@@ -119,7 +117,8 @@ public final class HostInitCommand implements Runnable {
     }
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException("Root privileges required. Run with: sudo sail host init");
+      throw new IllegalStateException(
+          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host init"));
     }
 
     if (Strings.isNotBlank(sshPublicKey) && !dryRun) {
@@ -184,7 +183,8 @@ public final class HostInitCommand implements Runnable {
         System.out.println(
             Ansi.AUTO.string(
                 "  @|yellow Server IP:|@ could not auto-detect."
-                    + " Pass --server-ip or run: sudo sail host config set server-ip <ip>"));
+                    + " Pass --server-ip or run: "
+                    + operator.sail("host config set server-ip <ip>")));
       }
     } else if (!json) {
       System.out.println(Ansi.AUTO.string("  @|bold Server IP:|@ " + resolvedServerIp));
@@ -269,8 +269,11 @@ public final class HostInitCommand implements Runnable {
             ? "  @|green ✓|@ sail API service already installed — nothing to do here; '"
                 + operator.sail("upgrade")
                 + "' keeps it current."
-            : "  @|bold Next step:|@ sudo sail init --as-main --handle <you>, or sudo sail init"
-                + " --main <main>, installs sail-api and connects this box.");
+            : "  @|bold Next step:|@ "
+                + operator.sail("init --as-main --handle <you>")
+                + ", or "
+                + operator.sail("init --main <main>")
+                + ", installs sail-api and connects this box.");
   }
 
   private String detectAndSelectDisk(ShellExec shell) throws Exception {

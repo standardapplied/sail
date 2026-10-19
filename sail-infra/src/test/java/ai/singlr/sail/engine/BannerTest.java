@@ -481,7 +481,7 @@ class BannerTest {
             \u2192 Connect: sudo sail project connect acme-health
             \u2192 Shell:   sudo sail project shell acme-health
         """,
-        created(new OperatorCommand(true)));
+        created(OperatorCommand.SUDO));
     assertEquals(
         """
           \u2713 Project acme-health created.
@@ -502,7 +502,7 @@ class BannerTest {
         "dev",
         "10.1.1.5",
         "~/.ssh/id_ed25519",
-        new OperatorCommand(true),
+        OperatorCommand.SUDO,
         new PrintStream(out),
         Ansi.OFF);
 
@@ -1068,7 +1068,7 @@ class BannerTest {
 
   @Test
   void everyCommandABannerNamesIsWordedForTheOperator() {
-    for (var operator : List.of(OperatorCommand.PLAIN, new OperatorCommand(true))) {
+    for (var operator : List.of(OperatorCommand.PLAIN, OperatorCommand.SUDO)) {
       var sail = operator.sail("");
       var overcommit = new ByteArrayOutputStream();
       Banner.printOvercommitWarning(

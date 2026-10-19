@@ -1201,7 +1201,7 @@ class SailOperationsSeamTest {
                               new ChangeLog(main.db)::headsAfter,
                               SyncWire.UPGRADE_FLOOR)
                           .content(main.db, FileLimits.defaults())),
-              new OperatorCommand(true)));
+              OperatorCommand.SUDO));
       operations.schema().prepareSync();
       assertThrows(Exception.class, () -> operations.sync(new SyncRequest(null)));
       Acting.system(() -> node.specs.update(SyncBox.spec("auth", "Viewer edit", "pending")));

@@ -6,11 +6,14 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -40,17 +43,85 @@ class WorkstationIdentityTest {
     var path = dir.resolve("workstation_key.pub");
     Files.writeString(path, ED25519 + "\n");
 
-    var key = WorkstationIdentity.registeredAt(path);
+    var key = WorkstationIdentity.registeredAt(path, OperatorCommand.PLAIN);
 
     assertTrue(key.isPresent());
     assertEquals("ssh-ed25519", key.orElseThrow().type());
   }
 
   @Test
-  void registeredIsEmptyWhenMissingOrUnparseable(@TempDir Path dir) throws Exception {
-    assertTrue(WorkstationIdentity.registeredAt(dir.resolve("absent.pub")).isEmpty());
+  void aKeyFileThatCannotBeReadIsRefusedNamingWhy(@TempDir Path dir) throws Exception {
+    assumeFalse(SailPaths.isRoot());
+    var unreadable = dir.resolve("unreadable.pub");
+    Files.writeString(unreadable, ED25519 + "\n");
+    Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("---------"));
+    try {
+      var refused =
+          assertThrows(
+              IllegalStateException.class,
+              () -> WorkstationIdentity.registeredAt(unreadable, OperatorCommand.PLAIN));
+
+      assertEquals(
+          "This box's workstation key ("
+              + unreadable
+              + ") could not be read (AccessDeniedException). Check that the account sail runs as"
+              + " can read it.",
+          refused.getMessage());
+    } finally {
+      Files.setPosixFilePermissions(unreadable, PosixFilePermissions.fromString("rw-------"));
+    }
+  }
+
+  @Test
+  void aKeyFileThatIsNotTextIsRefusedAsNoKeyNotAsUnreadable(@TempDir Path dir) throws Exception {
+    var binary = dir.resolve("binary.pub");
+    Files.write(binary, new byte[] {(byte) 0xff, (byte) 0xfe, 'x'});
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkstationIdentity.registeredAt(binary, OperatorCommand.PLAIN));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith("This box's workstation key (" + binary + ") is not an SSH public key: "),
+        refused.getMessage());
+  }
+
+  @Test
+  void registeredIsEmptyWhenMissing(@TempDir Path dir) {
+    assertTrue(
+        WorkstationIdentity.registeredAt(dir.resolve("absent.pub"), OperatorCommand.PLAIN)
+            .isEmpty());
+  }
+
+  @Test
+  void aKeyFileThatHoldsNoKeyIsRefusedRatherThanReadAsNone(@TempDir Path dir) throws Exception {
     var garbage = dir.resolve("garbage.pub");
     Files.writeString(garbage, "not a key at all\n");
-    assertTrue(WorkstationIdentity.registeredAt(garbage).isEmpty());
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () -> WorkstationIdentity.registeredAt(garbage, OperatorCommand.SUDO));
+
+    assertTrue(
+        refused
+            .getMessage()
+            .startsWith(
+                "This box's workstation key ("
+                    + garbage
+                    + ") is not an SSH public key: Unsupported"),
+        refused.getMessage());
+    assertTrue(
+        refused
+            .getMessage()
+            .endsWith(
+                " Register the key you connect with: sudo sail host config set ssh-public-key"),
+        refused.getMessage());
+    assertEquals(
+        Optional.empty(),
+        WorkstationIdentity.registeredAt(dir.resolve("none.pub"), OperatorCommand.SUDO));
   }
 }

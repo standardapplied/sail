@@ -87,11 +87,12 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
     if (!dryRun && !rootChecker.getAsBoolean()) {
       throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail project resources set " + name);
+          "Root privileges required. Run with: "
+              + OperatorCommand.SUDO.sail("project resources set " + name));
     }
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun, operator);
     var descriptorPath = explicit != null ? explicit : ProjectDefinitions.canonicalPath(name);
     var config =
         SailYaml.fromMap(

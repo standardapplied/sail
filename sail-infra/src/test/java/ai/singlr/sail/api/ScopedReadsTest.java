@@ -300,7 +300,7 @@ class ScopedReadsTest {
                       "sam-laptop", "member", fdes.add("sam", "Sam", "sam@x", "member").id(), null)
                   .token();
           fdes.restrict("sam");
-          fdes.grant("sam", "alpha");
+          fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
           alphaReview = arrive("alpha", A_RUN, A_FILE, "main", "sam", 1);
         });
     var specs = new SpecStore(db);
@@ -414,7 +414,7 @@ class ScopedReadsTest {
 
     assertEquals(
         """
-        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sail fde grant <handle> <project>.", "field_errors": []}}""",
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.", "field_errors": []}}""",
         send(
             sam,
             "POST",
@@ -463,7 +463,7 @@ class ScopedReadsTest {
         "a message in bravo's room is announced as one nobody holds");
     assertEquals(
         """
-        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sail fde grant <handle> <project>.", "field_errors": []}}""",
+        404 {"schema_version": 1, "error": {"code": "not_found", "message": "Project 'bravo' was not found.", "action": "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.", "field_errors": []}}""",
         send(
             sam,
             "POST",
@@ -899,7 +899,7 @@ class ScopedReadsTest {
     assertEquals(200, held.status());
     assertEquals(true, held.body().toString().contains("Talk in the alpha spec"), "" + held.body());
 
-    Acting.system(() -> new FdeStore(db).revoke("sam", "alpha"));
+    Acting.system(() -> new FdeStore(db).revoke("sam", "alpha", OperatorCommand.PLAIN));
 
     var gone =
         "404 {schema_version=1, error={code=run_not_found, message=Run '"
@@ -924,7 +924,7 @@ class ScopedReadsTest {
     assertEquals(Set.of(), runs.deliveredMessageIds(run));
     assertEquals(null, runs.findById(run).orElseThrow().sessionId());
 
-    Acting.system(() -> new FdeStore(db).grant("sam", "alpha"));
+    Acting.system(() -> new FdeStore(db).grant("sam", "alpha", OperatorCommand.PLAIN));
     assertEquals(held.body(), local.handle(inbox).body(), "granted again, it is delivered again");
   }
 
@@ -1405,7 +1405,7 @@ class ScopedReadsTest {
     var fdes = new FdeStore(db);
     fdes.add("bea", "Bea", "bea@x", "member");
     fdes.restrict("bea");
-    fdes.grant("bea", "bravo");
+    fdes.grant("bea", "bravo", OperatorCommand.PLAIN);
     recent.onEvent(SyncTransitionEvents.health("main@unplaced", false, "unreachable", "x", "main"));
     new EventStore(db)
         .insert(

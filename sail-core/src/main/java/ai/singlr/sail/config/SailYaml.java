@@ -7,6 +7,7 @@ package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.NameValidator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -35,18 +36,23 @@ public record SailYaml(
       Map.of(
           "agent_context",
           "agent_context is no longer read: sail writes no context file. Put what it said in the"
-              + " repo's AGENTS.md, and a rule in a project skill (sail project skills add).",
+              + " repo's AGENTS.md, and a rule in a project skill ("
+              + OperatorCommand.elsewhere("project skills add")
+              + ").",
           "agent.methodology",
           "agent.methodology is no longer read: sail's work prompt tells the agent to run the"
               + " project's verification. Put the commands in the repo's AGENTS.md.",
           "agent.build_skill",
           "agent.build_skill is no longer read: sail's work prompt says how a build runs. Put what"
-              + " the skill said in the repo's AGENTS.md, or keep it as a project skill (sail"
-              + " project skills add) the agent invokes when relevant.",
+              + " the skill said in the repo's AGENTS.md, or keep it as a project skill ("
+              + OperatorCommand.elsewhere("project skills add")
+              + ") the agent invokes when relevant.",
           "agent.review_pipeline.fix_skill",
           "agent.review_pipeline.fix_skill is no longer read: a fix run reads the build's work"
               + " prompt. Put what the skill said in the repo's AGENTS.md, or keep it as a project"
-              + " skill (sail project skills add).");
+              + " skill ("
+              + OperatorCommand.elsewhere("project skills add")
+              + ").");
 
   /** Refuses a definition that still sets {@code key}, one of {@link #DELETED_KEYS}. */
   static void refuseDeleted(Map<String, Object> map, String key, String descriptor) {

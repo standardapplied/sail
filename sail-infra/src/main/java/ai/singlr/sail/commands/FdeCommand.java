@@ -160,12 +160,12 @@ public final class FdeCommand implements Runnable {
    * Refuses to touch a pairing from the SSH gateway: its key line is in the operator's login, which
    * only the operator's own account writes.
    */
-  private static void requireOperator(Box box, String command) {
+  private static void requireOperator(Box box, String rendered) {
     if (box.gateway()) {
       throw new IllegalStateException(
           "A pairing is a login of this box's operator, and an SSH-key session runs as the"
-              + " gateway's account. Run 'sail fde "
-              + command
+              + " gateway's account. Run '"
+              + rendered
               + "' on the host, as the account sail-api runs as.");
     }
   }
@@ -299,7 +299,7 @@ public final class FdeCommand implements Runnable {
    * Refuses a connect code for anyone but this box's own FDE. A code logs in as the operator, who
    * sees every project, container and secret here; another FDE holds a code for its own box.
    */
-  private static void requireOwnFde(Box box, String handle, String host) {
+  private static void requireOwnFde(Box box, String handle, String host, OperatorCommand operator) {
     var login = "A connect code logs in as " + box.operator() + "@" + host;
     if (box.handle() == null) {
       throw new IllegalStateException(
@@ -307,8 +307,8 @@ public final class FdeCommand implements Runnable {
               + ", which sees every project here, so it is minted only for this box's own FDE,"
               + " and this box names none. If it is "
               + handle
-              + ", name it with 'sudo sail host config set sync-handle "
-              + handle
+              + ", name it with '"
+              + operator.sail("host config set sync-handle " + handle)
               + "' and pair again.");
     }
     if (!handle.equals(box.handle())) {
@@ -316,11 +316,12 @@ public final class FdeCommand implements Runnable {
           login
               + ", which sees every project here. Pair "
               + handle
-              + " on its own box instead: set it up with 'sudo sail init --main "
-              + Objects.requireNonNullElse(box.main(), host)
-              + "', then run 'sudo sail fde pair "
-              + handle
-              + " --host <its address>' there.");
+              + " on its own box instead: set it up with '"
+              + OperatorCommand.elsewhere(
+                  "init --main " + Objects.requireNonNullElse(box.main(), host))
+              + "', then run '"
+              + OperatorCommand.elsewhere("fde pair " + handle + " --host <its address>")
+              + "' there.");
     }
   }
 
@@ -342,7 +343,8 @@ public final class FdeCommand implements Runnable {
         + "  Run this on main; the change replicates to every node automatically.";
   }
 
-  private static void registerKey(Sqlite db, FdeStore.Fde fde, String publicKey) throws Exception {
+  private static void registerKey(
+      Sqlite db, FdeStore.Fde fde, String publicKey, OperatorCommand operator) throws Exception {
     var key = SshPublicKey.parse(publicKey);
     try {
       new FdeSshKeyStore(db).add(fde.id(), key);
@@ -353,22 +355,27 @@ public final class FdeCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string(
             "  @|green ✓|@ Registered key for " + fde.handle() + ": " + key.fingerprint()));
-    applyKeys(db);
+    applyKeys(db, operator);
   }
 
-  private static void applyKeys(Sqlite db) throws Exception {
-    switch (new AuthorizedKeysSync().sync(db)) {
-      case AuthorizedKeysSync.Synced synced ->
-          System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
+  private static void applyKeys(Sqlite db, OperatorCommand operator) throws Exception {
+    System.out.println(Ansi.AUTO.string(keysOutcome(new AuthorizedKeysSync().sync(db), operator)));
+  }
+
+  /**
+   * The line {@code outcome} prints. Only a non-root caller is told to sync, so its remedy carries
+   * {@code sudo} whatever this box's plain {@code sail} would do.
+   */
+  static String keysOutcome(AuthorizedKeysSync.Outcome outcome, OperatorCommand operator) {
+    return switch (outcome) {
+      case AuthorizedKeysSync.Synced synced -> "  @|green ✓|@ " + synced.describe();
       case AuthorizedKeysSync.NeedsRoot _ ->
-          System.out.println(
-              Ansi.AUTO.string("  @|faint Run 'sudo sail host keys sync' to apply.|@"));
+          "  @|faint Run '" + OperatorCommand.SUDO.sail("host keys sync") + "' to apply.|@";
       case AuthorizedKeysSync.NotProvisioned _ ->
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|faint SSH-key login is not provisioned on this host. Run 'sudo sail host"
-                      + " ssh-identity' to enable it.|@"));
-    }
+          "  @|faint SSH-key login is not provisioned on this host. Run '"
+              + operator.sail("host ssh-identity")
+              + "' to enable it.|@";
+    };
   }
 
   /** This box's SSH host key, which a connect code pins and a joining node pinned. */
@@ -410,8 +417,8 @@ public final class FdeCommand implements Runnable {
     @Option(
         names = "--scoped",
         description =
-            "Scope the FDE to the projects it is granted (sail fde grant); it sees nothing until"
-                + " one is.")
+            "Scope the FDE to the projects it is granted (fde grant); it sees nothing until one"
+                + " is.")
     private boolean scoped;
 
     @Option(
@@ -452,7 +459,7 @@ public final class FdeCommand implements Runnable {
                             + fde.handle()
                             + ": "
                             + key.fingerprint()));
-                applyKeys(db);
+                applyKeys(db, operator);
               }
             }
           });
@@ -482,8 +489,9 @@ public final class FdeCommand implements Runnable {
                 + " for this box, but this box's host key is "
                 + own
                 + ": something between that node and this box answered for it. Do not add this"
-                + " key; ask the engineer to re-run 'sudo sail init --main <this box>' on a network"
-                + " path you trust.");
+                + " key; ask the engineer to re-run '"
+                + OperatorCommand.elsewhere("init --main <this box>")
+                + "' on a network path you trust.");
       }
     }
 
@@ -648,13 +656,13 @@ public final class FdeCommand implements Runnable {
               + operator.sail("project list")
               + "'.");
     }
-    var changed = fdes.grantsOf(handle).admits(project) != grant;
+    var changed = fdes.grantsOf(handle, operator).admits(project) != grant;
     if (changed && !dryRun) {
       if (grant) {
         new ChangeLog(db).backfillProjects();
-        fdes.grant(handle, project);
+        fdes.grant(handle, project, operator);
       } else {
-        fdes.revoke(handle, project);
+        fdes.revoke(handle, project, operator);
       }
     }
     var projects = List.copyOf(fdes.scopeOf(handle).projects());
@@ -709,9 +717,8 @@ public final class FdeCommand implements Runnable {
           () -> {
             if (command.box.get().node()) {
               throw new IllegalStateException(
-                  "Main records the box each FDE syncs from, and a node records none. Run 'sail"
-                      + " fde release-box "
-                      + handle
+                  "Main records the box each FDE syncs from, and a node records none. Run '"
+                      + OperatorCommand.elsewhere("fde release-box " + handle)
                       + "' on main.");
             }
             try (var db = Sqlite.open(command.database())) {
@@ -766,6 +773,7 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
+            var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Removing an FDE");
             if (!confirmed()) {
@@ -782,15 +790,15 @@ public final class FdeCommand implements Runnable {
                           () -> new IllegalArgumentException("Unknown FDE '" + handle + "'."));
               var pairing = new FdePairingStore(db).find(fde.id());
               if (pairing.isPresent()) {
-                requireOperator(box, "rm " + handle);
+                requireOperator(box, OperatorCommand.elsewhere("fde rm " + handle));
               }
               var hadSshKeys = !new FdeSshKeyStore(db).listForFde(fde.id()).isEmpty();
-              fdeStore.requireRemovable(fde);
+              fdeStore.requireRemovable(fde, operator);
               var revoked =
                   box.gateway()
                       ? Optional.<String>empty()
                       : PairingRevocation.revoke(box, db, fde.handle(), pairing);
-              fdeStore.remove(fde.id());
+              fdeStore.remove(fde.id(), operator);
               System.out.println(Ansi.AUTO.string("  @|green ✓|@ FDE removed: " + fde.handle()));
               System.out.println(
                   Ansi.AUTO.string(
@@ -802,7 +810,7 @@ public final class FdeCommand implements Runnable {
                           Ansi.AUTO.string(
                               "  @|green ✓|@ Its Mast pairing is revoked: " + removed)));
               if (hadSshKeys) {
-                applyKeys(db);
+                applyKeys(db, operator);
               }
             }
           });
@@ -822,8 +830,8 @@ public final class FdeCommand implements Runnable {
       description =
           "Mint the connect code this box's own FDE pastes into Mast. The code logs in as the"
               + " account sail-api runs as, which sees every project here, so it is minted for no"
-              + " other FDE: onboard another on its own box ('sudo sail init --main <main>') and"
-              + " pair it there. Run it as the account sail-api runs as.",
+              + " other FDE: onboard another on its own box (init --main <main>) and pair it"
+              + " there. Run it as the account sail-api runs as.",
       mixinStandardHelpOptions = true)
   static final class Pair implements Runnable {
 
@@ -875,12 +883,12 @@ public final class FdeCommand implements Runnable {
       var operator = operator();
       var box = command.box.get();
       validate();
-      requireOwnFde(box, handle, host);
+      requireOwnFde(box, handle, host, operator);
       if (box.node() && (displayName != null || email != null || role != null)) {
         throw new IllegalStateException(
             rosterEditOnNodeMessage("Changing an FDE's name, email or role"));
       }
-      requireOperator(box, "pair " + handle);
+      requireOperator(box, OperatorCommand.elsewhere("fde pair " + handle));
       var ttl = ServerTokenCommand.Create.resolveTtl(noExpiry, ttlDays, PAIRING_TTL);
       try (var held = PairingTrust.hold(box.database());
           var db = Sqlite.open(box.database())) {
@@ -890,15 +898,16 @@ public final class FdeCommand implements Runnable {
           throw new IllegalStateException(
               "This node holds no roster row for '"
                   + handle
-                  + "' yet, and main's roster names the FDEs here. Run 'sudo sail sync', then pair"
-                  + " again.");
+                  + "' yet, and main's roster names the FDEs here. Run '"
+                  + operator.sail("sync")
+                  + "', then pair again.");
         }
         var address = address(box, existing, operator);
         var hostKey = hostKey(box.hostKey());
         var pinned = hostKey.type() + " " + hostKey.blob();
         var replaced =
             replacedWorkstationKey(
-                box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())));
+                box, existing.flatMap(fde -> new FdePairingStore(db).find(fde.id())), operator);
         var key = mintKey(box.shell());
         var fde = box.node() ? existing.orElseThrow() : rosterRow(fdes, existing);
         if (existing.isEmpty()) {
@@ -987,9 +996,11 @@ public final class FdeCommand implements Runnable {
                 + handle
                 + "', and a connect code names one. "
                 + (box.node()
-                    ? "Set it on main with 'sudo sail fde update "
-                        + handle
-                        + " --email <email>', run 'sudo sail sync' here, then pair again."
+                    ? "Set it on main with '"
+                        + OperatorCommand.elsewhere("fde update " + handle + " --email <email>")
+                        + "', run '"
+                        + operator.sail("sync")
+                        + "' here, then pair again."
                     : "Pass --email <email>."));
       }
       return address;
@@ -998,13 +1009,14 @@ public final class FdeCommand implements Runnable {
     /**
      * The registered workstation key this pairing takes over from someone else, if any. The key of
      * the FDE's own earlier pairing is replaced without asking; another's only with {@code
-     * --as-workstation-key}, since containers trust one key and its owner would lose them.
+     * --as-workstation-key}, since containers trust one key and its owner would lose them. A file
+     * that holds no key is nobody's, so it is replaced without asking too.
      */
     private Optional<SshPublicKey> replacedWorkstationKey(
-        Box box, Optional<FdePairingStore.Pairing> pairing) {
+        Box box, Optional<FdePairingStore.Pairing> pairing, OperatorCommand operator) {
       var own = pairing.map(held -> SshPublicKey.parse(held.publicKey()).fingerprint());
       var replaced =
-          WorkstationIdentity.registeredAt(box.workstationKey())
+          heldKey(box.workstationKey(), operator)
               .filter(key -> !own.equals(Optional.of(key.fingerprint())));
       if (replaced.isPresent() && !asWorkstationKey) {
         throw new IllegalStateException(
@@ -1015,6 +1027,21 @@ public final class FdeCommand implements Runnable {
                 + "'s.");
       }
       return replaced;
+    }
+
+    /**
+     * The key the workstation key file holds, or none when it holds nothing a pairing would keep; a
+     * file that cannot be read may hold one, so that stays refused.
+     */
+    private static Optional<SshPublicKey> heldKey(Path file, OperatorCommand operator) {
+      try {
+        return WorkstationIdentity.registeredAt(file, operator);
+      } catch (IllegalStateException refused) {
+        if (refused.getCause() instanceof IllegalArgumentException) {
+          return Optional.empty();
+        }
+        throw refused;
+      }
     }
 
     private static String describe(SshPublicKey key) {
@@ -1091,7 +1118,7 @@ public final class FdeCommand implements Runnable {
           () -> {
             NameValidator.requireValidFdeHandle(handle);
             var box = command.box.get();
-            requireOperator(box, "unpair " + handle);
+            requireOperator(box, OperatorCommand.elsewhere("fde unpair " + handle));
             try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
               System.out.println(
@@ -1247,7 +1274,7 @@ public final class FdeCommand implements Runnable {
                         .byHandle(handle)
                         .orElseThrow(
                             () -> new IllegalArgumentException(unknownFde(handle, operator)));
-                registerKey(db, fde, publicKey);
+                registerKey(db, fde, publicKey, operator);
               }
             });
       }
@@ -1318,7 +1345,7 @@ public final class FdeCommand implements Runnable {
                 if (keyStore.remove(fingerprint.get())) {
                   System.out.println(
                       Ansi.AUTO.string("  @|green ✓|@ Removed key " + fingerprint.get()));
-                  applyKeys(db);
+                  applyKeys(db, operator);
                 } else {
                   System.out.println(
                       Ansi.AUTO.string(
@@ -1469,8 +1496,7 @@ public final class FdeCommand implements Runnable {
       @Option(
           names = "--credential",
           required = true,
-          description =
-              "Credential id or an unambiguous prefix; see 'sail fde passkey list <handle>'.")
+          description = "Credential id or an unambiguous prefix; see fde passkey list <handle>.")
       private String credential;
 
       @Option(

@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.sync.SyncBox;
 import java.nio.file.Path;
@@ -27,7 +28,7 @@ class ContentMigrationTest {
     try (var db = Sqlite.openMemory()) {
       legacy(db);
       var revision = new SpecStore(db).latestRev("a");
-      var migration = new ContentMigration();
+      var migration = new ContentMigration(OperatorCommand.PLAIN);
       var report = migration.apply(db, null, prompter());
       assertTrue(report.applied() >= 2);
       assertEquals(revision, new SpecStore(db).latestRev("a"));
@@ -84,7 +85,8 @@ class ContentMigrationTest {
       first.execute(
           "CREATE TRIGGER interrupt_migration BEFORE UPDATE OF body_hash ON specs WHEN NEW.id = 'z' BEGIN SELECT RAISE(ABORT, 'interrupted'); END");
       assertThrows(
-          RuntimeException.class, () -> new ContentMigration().apply(first, null, prompter()));
+          RuntimeException.class,
+          () -> new ContentMigration(OperatorCommand.PLAIN).apply(first, null, prompter()));
       assertTrue(
           first
               .queryOne("SELECT body_hash FROM specs WHERE id = 'a'", r -> !r.isNull(0))
@@ -94,7 +96,7 @@ class ContentMigrationTest {
               .queryOne("SELECT body_hash FROM specs WHERE id = 'z'", r -> r.isNull(0))
               .orElseThrow());
       first.execute("DROP TRIGGER interrupt_migration");
-      new ContentMigration().apply(second, null, prompter());
+      new ContentMigration(OperatorCommand.PLAIN).apply(second, null, prompter());
       assertEquals("body", new SpecStore(second).getContent("a").orElseThrow().body());
       assertEquals("", new SpecStore(second).getContent("z").orElseThrow().body());
     }
@@ -108,13 +110,17 @@ class ContentMigrationTest {
           "INSERT INTO project_files (id, project, path, content, updated_at) VALUES ('proj/raced', 'proj', 'raced', 'AAECAw==', 'now')");
 
       var refused =
-          assertThrows(IllegalStateException.class, () -> ContentMigration.dropLegacyContent(db));
+          assertThrows(
+              IllegalStateException.class,
+              () -> ContentMigration.dropLegacyContent(db, OperatorCommand.SUDO));
 
-      assertTrue(refused.getMessage().contains("sail migrate"), refused.getMessage());
+      assertEquals(
+          "3 shared file(s) still carry no content hash; run 'sudo sail migrate' again",
+          refused.getMessage());
       assertTrue(hasContentColumn(db), "an irreversible drop waits for the stragglers");
-      new ContentMigration().apply(db, null, prompter());
+      new ContentMigration(OperatorCommand.PLAIN).apply(db, null, prompter());
       assertFalse(hasContentColumn(db));
-      ContentMigration.dropLegacyContent(db);
+      ContentMigration.dropLegacyContent(db, OperatorCommand.PLAIN);
     }
   }
 
@@ -130,9 +136,17 @@ class ContentMigrationTest {
     try (var db = Sqlite.openMemory()) {
       legacy(db);
       var spec = assertThrows(IllegalStateException.class, () -> new SpecStore(db).getContent("a"));
-      assertTrue(spec.getMessage().contains("sail migrate"));
+      assertEquals(
+          "Spec a has no content hash: this database's content migration never finished. Run 'sudo"
+              + " sail migrate'.",
+          spec.getMessage());
       var file = assertThrows(RuntimeException.class, () -> new FileStore(db).find("proj", "file"));
-      assertTrue(file.getMessage().contains("sail migrate"));
+      assertTrue(
+          file.getMessage()
+              .contains(
+                  "File proj/file has no content hash: this database's content migration never"
+                      + " finished."),
+          file.getMessage());
     }
   }
 
@@ -202,7 +216,9 @@ class ContentMigrationTest {
       assertEquals(
           "body".repeat(8192) + 1999,
           new SpecStore(observer).getContent("entity-1999").orElseThrow().body());
-      assertEquals(0, new ContentMigration().apply(observer, null, prompter()).applied());
+      assertEquals(
+          0,
+          new ContentMigration(OperatorCommand.PLAIN).apply(observer, null, prompter()).applied());
     } finally {
       first.destroyForcibly();
       if (second != null) second.destroyForcibly();

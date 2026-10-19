@@ -263,7 +263,9 @@ class AgentWatchCommandTest {
             IllegalStateException.class,
             () -> watching().watchable(never, stops::add, OperatorCommand.PLAIN));
 
-    assertTrue(refused.getMessage().contains("No agent session running"), refused.getMessage());
+    assertEquals(
+        "No agent session running. Launch one with: sail agent run acme --background --task '...'",
+        refused.getMessage());
     assertTrue(stops.isEmpty());
   }
 

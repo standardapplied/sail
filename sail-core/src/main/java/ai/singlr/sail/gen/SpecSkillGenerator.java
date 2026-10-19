@@ -231,7 +231,7 @@ public final class SpecSkillGenerator {
         ### Status Lifecycle
         `pending` → `in_progress` → `review` → `awaiting_merge` → `done`
         - **pending**: ready to be picked up
-        - **in_progress**: an agent is actively working on it (set by `sail spec dispatch`)
+        - **in_progress**: an agent is actively working on it (set when sail dispatches it)
         - **review**: PR created, waiting for human review (set by `sail`)
         - **awaiting_merge**: review passed; the PR waits for a human to merge it on the forge
           (set by `sail`)
@@ -262,7 +262,7 @@ public final class SpecSkillGenerator {
         visually indicate which pending specs are blocked.
 
         ### Where specs live
-        Specs are rows in the Sail database, replicated across devboxes by `sail sync`. There is no
+        Specs are rows in the Sail database, replicated across devboxes by sail's sync. There is no
         `specs/` directory to edit — always go through `spec`.
         """;
   }

@@ -10,10 +10,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
@@ -616,8 +618,9 @@ class FdeCommandTest {
             "",
             printedCode(),
             "",
-            "  Containers of acme, web trust this key only after their next 'sail project"
-                + " apply'."),
+            "  Containers of acme, web trust this key only after their next '"
+                + OperatorCommand.here().sail("project apply")
+                + "'."),
         printed());
   }
 
@@ -643,7 +646,7 @@ class FdeCommandTest {
           var fdes = new FdeStore(db);
           fdes.add("client", null, "client@x.com", "member");
           fdes.restrict("client");
-          fdes.grant("client", "acme");
+          fdes.grant("client", "acme", OperatorCommand.PLAIN);
           return fdes.add("eng", null, "eng@x.com", "member");
         });
     var roster = inDb(db -> new FdeStore(db).list());
@@ -679,7 +682,9 @@ class FdeCommandTest {
     assertEquals(
         "A connect code logs in as root@34.1.2.3, which sees every project here, so it is minted"
             + " only for this box's own FDE, and this box names none. If it is ada, name it with"
-            + " 'sudo sail host config set sync-handle ada' and pair again.",
+            + " '"
+            + OperatorCommand.here().sail("host config set sync-handle ada")
+            + "' and pair again.",
         refusal);
     assertNothingWritten("ada");
   }
@@ -735,7 +740,7 @@ class FdeCommandTest {
     assertEquals(1, fde("pair", "client", "--host", "c.acme.dev"));
     assertEquals(
         "This node holds no roster row for 'client' yet, and main's roster names the FDEs here."
-            + " Run 'sudo sail sync', then pair again.",
+            + " Run 'sail sync', then pair again.",
         refusal);
     assertNothingWritten("client");
 
@@ -743,7 +748,7 @@ class FdeCommandTest {
     assertEquals(1, fde("pair", "client", "--host", "c.acme.dev"));
     assertEquals(
         "This box holds no email for 'client', and a connect code names one. Set it on main with"
-            + " 'sudo sail fde update client --email <email>', run 'sudo sail sync' here, then pair"
+            + " 'sudo sail fde update client --email <email>', run 'sail sync' here, then pair"
             + " again.",
         refusal);
 
@@ -990,8 +995,9 @@ class FdeCommandTest {
             + " acme, web, docs, stray no longer trust it.",
         printed().getFirst());
     assertEquals(
-        "  Containers of acme, docs, web trust this key only after their next 'sail project"
-            + " apply'.",
+        "  Containers of acme, docs, web trust this key only after their next '"
+            + OperatorCommand.here().sail("project apply")
+            + "'.",
         printed().getLast());
     assertEquals(renewed.line() + "\n", Files.readString(workstationKey()));
     assertEquals(List.of(renewed.blob()), loginsOf("ada"));
@@ -1166,6 +1172,36 @@ class FdeCommandTest {
   }
 
   @Test
+  void aWorkstationKeyFileThatHoldsNoKeyIsReplacedByAPairingWithoutAsking() throws Exception {
+    Files.createDirectories(workstationKey().getParent());
+    Files.writeString(workstationKey(), "not a key\n");
+
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"), refusal);
+
+    assertEquals(
+        "ssh-ed25519", SshPublicKey.parse(Files.readString(workstationKey()).strip()).type());
+  }
+
+  @Test
+  void aWorkstationKeyFileThatCannotBeReadRefusesAPairingSinceItMayHoldAKey() throws Exception {
+    assumeFalse(SailPaths.isRoot());
+    assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("---------"));
+    try {
+      assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
+    } finally {
+      Files.setPosixFilePermissions(workstationKey(), PosixFilePermissions.fromString("rw-------"));
+    }
+
+    assertEquals(
+        "This box's workstation key ("
+            + workstationKey()
+            + ") could not be read (AccessDeniedException). Check that the account sail runs as can"
+            + " read it.",
+        refusal);
+  }
+
+  @Test
   void aWorkstationKeyFileThatHoldsNoKeyIsLeftAlone() throws Exception {
     assertEquals(0, fde("pair", "ada", "--host", "34.1.2.3", "--email", "ada@x.com"));
     Files.writeString(workstationKey(), "not a key\n");
@@ -1201,7 +1237,7 @@ class FdeCommandTest {
 
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
 
@@ -1221,7 +1257,7 @@ class FdeCommandTest {
     handle = "nobody";
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
 
@@ -1240,14 +1276,14 @@ class FdeCommandTest {
 
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
 
     assertEquals(
         List.of(
             "  ✓ Revoked uday's connect code: a code logs in as root and is minted only for this"
-                + " box's own FDE. This box names none: if it is uday, name it with 'sudo sail"
+                + " box's own FDE. This box names none: if it is uday, name it with 'sail"
                 + " host config set sync-handle uday' and pair again."),
         printed());
     assertEquals(List.of(), loginsOf("uday"));
@@ -1260,7 +1296,8 @@ class FdeCommandTest {
     var convergence =
         new MigrateCommand.Convergence(
             (db, json) -> {},
-            (db, json) -> MigrateCommand.revokeOtherFdesPairings(db, this::box, json));
+            (db, json) ->
+                MigrateCommand.revokeOtherFdesPairings(db, this::box, json, OperatorCommand.PLAIN));
     assertFalse(
         DataMigrations.all(OperatorCommand.PLAIN).stream()
             .anyMatch(migration -> migration.name().equals(OwnBoxPairings.NAME)),
@@ -1297,7 +1334,7 @@ class FdeCommandTest {
     err.reset();
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
     Files.setPosixFilePermissions(ssh, PosixFilePermissions.fromString("rwx------"));
@@ -1307,13 +1344,13 @@ class FdeCommandTest {
             + " client's key line from root's authorized_keys (AccessDeniedException), so nothing"
             + " of client was removed and its pairing still works. Check that "
             + ssh
-            + " is writable by root, then run the command again. Run 'sudo sail migrate' again.\n",
+            + " is writable by root, then run the command again. Run 'sail migrate' again.\n",
         err.toString(StandardCharsets.UTF_8));
     assertEquals("client", handleOf(tokens[0]));
 
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, true);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, true, OperatorCommand.PLAIN);
           return null;
         });
 
@@ -1330,7 +1367,7 @@ class FdeCommandTest {
 
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
 
@@ -1338,7 +1375,7 @@ class FdeCommandTest {
         "  ⚠ Connect codes of FDEs other than this box's own are not all revoked: Could not take"
             + " the pairing lock ("
             + lock
-            + ": Is a directory). Run 'sudo sail migrate' again.\n",
+            + ": Is a directory). Run 'sail migrate' again.\n",
         err.toString(StandardCharsets.UTF_8));
     assertEquals("client", handleOf(tokens[0]));
   }
@@ -1366,7 +1403,7 @@ class FdeCommandTest {
 
     inDb(
         db -> {
-          MigrateCommand.revokeOtherFdesPairings(db, this::box, false);
+          MigrateCommand.revokeOtherFdesPairings(db, this::box, false, OperatorCommand.PLAIN);
           return null;
         });
 
@@ -1380,7 +1417,7 @@ class FdeCommandTest {
             + " client's key from this box's containers (Failed to push file to"
             + " /home/dev/.ssh/authorized_keys: Error: I/O error\n). Its login is revoked, and its"
             + " token and record are kept until the key is gone: check that 'incus list' answers,"
-            + " then run the command again. Run 'sudo sail migrate' again.\n",
+            + " then run the command again. Run 'sail migrate' again.\n",
         err.toString(StandardCharsets.UTF_8));
     assertNull(handleOf(ada));
     assertEquals("client", handleOf(tokens[0]));
@@ -1813,17 +1850,17 @@ class FdeCommandTest {
     assertEquals(1, fde("pair", "ada", "--host", "34.1.2.3"));
     assertEquals(
         "A pairing is a login of this box's operator, and an SSH-key session runs as the gateway's"
-            + " account. Run 'sail fde pair ada' on the host, as the account sail-api runs as.",
+            + " account. Run 'sudo sail fde pair ada' on the host, as the account sail-api runs as.",
         refusal);
     assertEquals(1, fde("unpair", "ada"));
     assertEquals(
         "A pairing is a login of this box's operator, and an SSH-key session runs as the gateway's"
-            + " account. Run 'sail fde unpair ada' on the host, as the account sail-api runs as.",
+            + " account. Run 'sudo sail fde unpair ada' on the host, as the account sail-api runs as.",
         refusal);
     assertEquals(1, fde("rm", "ada", "--force"));
     assertEquals(
         "A pairing is a login of this box's operator, and an SSH-key session runs as the gateway's"
-            + " account. Run 'sail fde rm ada' on the host, as the account sail-api runs as.",
+            + " account. Run 'sudo sail fde rm ada' on the host, as the account sail-api runs as.",
         refusal);
 
     assertEquals(line, Files.readString(authorizedKeys()), "the gateway's file takes no login");
@@ -2126,7 +2163,7 @@ class FdeCommandTest {
 
   @Test
   void everyCommandAnFdeVerbNamesIsWordedForTheOperator() {
-    var sudo = new OperatorCommand(true);
+    var sudo = OperatorCommand.SUDO;
     var ada = new FdeStore.Fde("7", "ada", "Ada", "ada@example.com", "member", "active", "2026");
     String unknownProject;
     try (var db = Sqlite.openMemory()) {
@@ -2325,5 +2362,25 @@ class FdeCommandTest {
         message.contains(Passkeys.encodeId("alpha-one".getBytes(StandardCharsets.UTF_8))),
         "candidates list full ids so one is always copy-pasteable");
     assertTrue(message.contains(Passkeys.encodeId("alpha-two".getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void aKeyChangeByANonRootCallerIsToldToSyncWithSudo() {
+    assertEquals(
+        "  @|faint Run 'sudo sail host keys sync' to apply.|@",
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.UNPRIVILEGED));
+  }
+
+  @Test
+  void anUnprovisionedHostIsToldItsRootOnlyRemedyPlainOnlyByRootLoggedInDirectly() {
+    assertEquals(
+        "  @|faint SSH-key login is not provisioned on this host. Run 'sail host ssh-identity' to"
+            + " enable it.|@",
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.PLAIN));
+    assertEquals(
+        "  @|faint SSH-key login is not provisioned on this host. Run 'sudo sail host"
+            + " ssh-identity' to enable it.|@",
+        FdeCommand.keysOutcome(
+            new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.UNPRIVILEGED));
   }
 }

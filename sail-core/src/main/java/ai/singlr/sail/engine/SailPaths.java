@@ -168,9 +168,8 @@ public final class SailPaths {
 
   /**
    * The home a project's personal placeholders resolve from: the {@code sudo} user's when root acts
-   * for an account that owns a box in its own home, so its plain and sudo applies resolve alike
-   * even beside root's system unit, and this account's otherwise, root's included for an operator
-   * who owns no box of their own.
+   * for an account that owns a box in its own home, and this account's otherwise, root's included
+   * for an operator who owns no box of their own.
    */
   public static Path identityHome() {
     return identityHome(

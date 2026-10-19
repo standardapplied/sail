@@ -160,9 +160,11 @@ final class HostLanes {
           .orElseThrow(
               () ->
                   new IllegalStateException(
-                      "The demo project isn't on this box. On main or a standalone box, 'sudo"
-                          + " sail migrate' seeds it; a node gets it from main once an admin"
-                          + " grants it there: sudo sail fde grant <handle> demo."));
+                      "The demo project isn't on this box. On main or a standalone box, '"
+                          + OperatorCommand.elsewhere("migrate")
+                          + "' seeds it; a node gets it from main once an admin grants it there: "
+                          + OperatorCommand.elsewhere("fde grant <handle> demo")
+                          + "."));
     }
 
     @Override

@@ -6,10 +6,14 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 
+import ai.singlr.sail.Sail;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerStateGuard;
+import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -19,10 +23,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 /**
@@ -31,7 +37,7 @@ import picocli.CommandLine.Help.Ansi;
  */
 class OperatorHintsTest {
 
-  private static final OperatorCommand SUDO = new OperatorCommand(true);
+  private static final OperatorCommand SUDO = OperatorCommand.SUDO;
   private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
 
   private static List<String> hints(OperatorCommand operator) {
@@ -49,7 +55,10 @@ class OperatorHintsTest {
         ProjectApplyCommand.descriptorNotFound(Path.of("/srv/gamma/sail.yaml"), operator),
         HostInitCommand.notInitialized(operator).getMessage(),
         ContainerStateGuard.notCreated("gamma", operator),
-        launched.toString(StandardCharsets.UTF_8));
+        launched.toString(StandardCharsets.UTF_8),
+        CliOperator.unplaced(null, operator).failure().action(),
+        Ansi.OFF.string(ConnectCommand.noWorkstationKey("gamma", operator)),
+        MainHostKey.rebuiltRecovery("sail@main", operator));
   }
 
   @Test
@@ -79,7 +88,17 @@ class OperatorHintsTest {
             "Project 'gamma' does not exist. Run 'sudo sail project apply <name>' first.",
             "  ✓ Agent launched in background\n"
                 + "    Log:     sudo sail agent log gamma --follow\n"
-                + "    Stop:    sudo sail agent stop gamma\n"),
+                + "    Stop:    sudo sail agent stop gamma\n",
+            "Name it with 'sudo sail host config set sync-handle <you>', then run 'sudo sail"
+                + " sync'.",
+            "  ⚠ No workstation key is registered on this box; the snippet below assumes"
+                + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you"
+                + " connect with, then apply the project to put it in the container:\n"
+                + "    sudo sail host config set ssh-public-key\n"
+                + "    sudo sail project apply gamma",
+            "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R main' and re-run"
+                + " 'sudo sail init --main sail@main'; otherwise something between this box and"
+                + " main is answering for it."),
         hints(SUDO));
   }
 
@@ -93,11 +112,10 @@ class OperatorHintsTest {
             "  ✓ SSH-key login enabled. Register engineers with 'sail fde add <handle> --key"
                 + " \"<pubkey>\"'.",
             "    → Connect: sail project connect gamma\n    → Shell:   sail project shell gamma\n",
-            "    Server IP not configured. Run: sudo sail host config set server-ip"
-                + " <your-server-ip>\n"
+            "    Server IP not configured. Run: sail host config set server-ip <your-server-ip>\n"
                 + "    Then: sail project connect gamma for SSH config snippet.",
             "Server IP not configured. Fix with one of:\n"
-                + "  - sudo sail host config set server-ip <your-server-ip>\n"
+                + "  - sail host config set server-ip <your-server-ip>\n"
                 + "  - Or pass: sail project connect gamma --server-ip <your-server-ip>",
             "  ✓ sail API service already installed — nothing to do here; 'sail upgrade' keeps it"
                 + " current.",
@@ -108,7 +126,16 @@ class OperatorHintsTest {
             "Project 'gamma' does not exist. Run 'sail project apply <name>' first.",
             "  ✓ Agent launched in background\n"
                 + "    Log:     sail agent log gamma --follow\n"
-                + "    Stop:    sail agent stop gamma\n"),
+                + "    Stop:    sail agent stop gamma\n",
+            "Name it with 'sail host config set sync-handle <you>', then run 'sail sync'.",
+            "  ⚠ No workstation key is registered on this box; the snippet below assumes"
+                + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you"
+                + " connect with, then apply the project to put it in the container:\n"
+                + "    sail host config set ssh-public-key\n"
+                + "    sail project apply gamma",
+            "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail"
+                + " init --main sail@main'; otherwise something between this box and main is"
+                + " answering for it."),
         hints(PLAIN));
   }
 
@@ -128,7 +155,226 @@ class OperatorHintsTest {
         Optional.of(
             "  @|bold Next step:|@ sudo sail init --as-main --handle <you>, or sudo sail init"
                 + " --main <main>, installs sail-api and connects this box."),
+        HostInitCommand.nextStep(true, false, SUDO));
+    assertEquals(
+        Optional.of(
+            "  @|bold Next step:|@ sail init --as-main --handle <you>, or sail init --main"
+                + " <main>, installs sail-api and connects this box."),
         HostInitCommand.nextStep(true, false, PLAIN));
+  }
+
+  @Test
+  void aSudoCallerIsToldEveryRootOnlyRemedyWithSudo() {
+    var sudoCaller = OperatorCommand.SUDO;
+
+    assertEquals(
+        "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
+            + " installs sail-api and connects this box.",
+        Ansi.OFF.string(HostInitCommand.nextStep(true, false, sudoCaller).orElseThrow()));
+    assertEquals(
+        "Server not initialized. Run 'sudo sail host init' first.",
+        HostInitCommand.notInitialized(sudoCaller).getMessage());
+    assertEquals(
+        "The sail user is not provisioned. Run 'sudo sail host ssh-identity' first.",
+        HostKeysCommand.Sync.notProvisioned(sudoCaller));
+    assertEquals(
+        "The sail user is not provisioned. Run 'sail host ssh-identity' first.",
+        HostKeysCommand.Sync.notProvisioned(PLAIN));
+  }
+
+  @Test
+  void everyRootOnlyVerbIsASailCommand() {
+    var sail = new CommandLine(new Sail());
+    for (var verb : OperatorCommand.ROOT_ONLY) {
+      var command = sail;
+      for (var word : verb.split(" ")) {
+        command = command.getSubcommands().get(word);
+        assertNotNull(command, verb);
+      }
+    }
+  }
+
+  @Test
+  void everyCommandThatRefusesANonRootCallerIsARootOnlyVerb() {
+    var unlisted = new ArrayList<String>();
+    rootGuarded(new CommandLine(new Sail()), "", unlisted);
+
+    assertEquals(List.of(), unlisted, "a command refuses non-root callers but is not ROOT_ONLY");
+  }
+
+  /**
+   * Walks the command tree collecting every verb whose class, a nested one read from its own
+   * declaration on, refuses a non-root caller in any of the words sail uses for it.
+   */
+  private static void rootGuarded(CommandLine command, String path, List<String> unlisted) {
+    for (var sub : command.getSubcommands().entrySet()) {
+      var verb = (path + " " + sub.getKey()).strip();
+      var type = sub.getValue().getCommandSpec().userObject().getClass();
+      var source =
+          Path.of("src", "main", "java", type.getNestHost().getName().replace('.', '/') + ".java");
+      if (Files.exists(source)
+          && refusesNonRoot(read(source), type.getSimpleName())
+          && !OperatorCommand.ROOT_ONLY.contains(verb)) {
+        unlisted.add(verb);
+      }
+      rootGuarded(sub.getValue(), verb, unlisted);
+    }
+  }
+
+  private static boolean refusesNonRoot(String source, String simpleName) {
+    var start = source.indexOf("class " + simpleName + " ");
+    var nested = source.indexOf("\n  @Command(", start);
+    return REFUSES_NON_ROOT
+        .matcher(source.substring(start, nested < 0 ? source.length() : nested))
+        .find();
+  }
+
+  private static final Pattern REFUSES_NON_ROOT =
+      Pattern.compile("Root privileges required|requires root|must run as root");
+
+  /**
+   * Every command rendered through the seam is one sail has: a verb that does not exist, or a word
+   * a command does not take, is a hint nobody can run. The whole argument is read, its literals
+   * joined and every value it is built from standing as {@code x}, each way a condition in it can
+   * go; a placeholder stands for a value too, and a command cut short of a required parameter
+   * passes when every word before the cut is taken.
+   */
+  @Test
+  void everyRenderedCommandIsOneSailHas() throws Exception {
+    var rendered = Pattern.compile("\\.(?:sail|root|elsewhere|client)\\(\\s*(?=\")");
+    var unknown = new ArrayList<String>();
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main"))) {
+      try (var sources = Files.walk(root)) {
+        for (var file :
+            sources.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
+          var source = read(file);
+          var matcher = rendered.matcher(source);
+          while (matcher.find()) {
+            var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
+            for (var args : rendered(file, call)) {
+              if (!parses(args)) {
+                unknown.add(file.getFileName() + ": " + args);
+              }
+            }
+          }
+        }
+      }
+    }
+
+    assertEquals(List.of(), unknown, "a rendered command is not one sail has");
+  }
+
+  private static List<String> rendered(Path file, String call) {
+    try {
+      return renderedArgs(call);
+    } catch (IllegalStateException unsplit) {
+      throw new IllegalStateException(file.getFileName() + ": " + unsplit.getMessage(), unsplit);
+    }
+  }
+
+  /** The index of the {@code )} closing the call whose arguments start at {@code from}. */
+  private static int closingParen(String source, int from) {
+    var depth = 1;
+    for (var i = from; i < source.length(); i++) {
+      var c = source.charAt(i);
+      if (c == '"') {
+        for (i++; source.charAt(i) != '"'; i++) {
+          if (source.charAt(i) == '\\') {
+            i++;
+          }
+        }
+      } else if (c == '\'') {
+        i += source.charAt(i + 1) == '\\' ? 3 : 2;
+      } else if (c == '(') {
+        depth++;
+      } else if (c == ')' && --depth == 0) {
+        return i;
+      }
+    }
+    throw new IllegalStateException("unclosed call at " + from);
+  }
+
+  private static final Pattern TERNARY =
+      Pattern.compile(
+          "\\((?:[^()?]|\\([^()]*\\))*\\?\\s*([^()]*(?:\\([^()]*\\)[^()]*)*?)\\s*:\\s*([^()]*(?:\\([^()]*\\)[^()]*)*)\\)");
+  private static final Pattern OPERAND =
+      Pattern.compile("\"((?:[^\"\\\\]|\\\\.)*)\"|[A-Za-z_][\\w.]*(?:\\([^()]*\\))?|\\d+");
+
+  /**
+   * The commands an argument expression renders, one for each way its conditions can go; a
+   * condition the splitter cannot read fails the test rather than pass as one word.
+   */
+  private static List<String> renderedArgs(String expression) {
+    var ternary = TERNARY.matcher(expression);
+    if (!ternary.find()) {
+      if (OPERAND.matcher(expression).replaceAll("").contains("?")) {
+        throw new IllegalStateException("a condition this test cannot split: " + expression);
+      }
+      return List.of(joined(expression));
+    }
+    var rendered = new ArrayList<String>();
+    for (var branch : List.of(ternary.group(1), ternary.group(2))) {
+      rendered.addAll(
+          renderedArgs(
+              expression.substring(0, ternary.start())
+                  + branch
+                  + expression.substring(ternary.end())));
+    }
+    return rendered;
+  }
+
+  /** An expression's literals joined, every other operand standing as x. */
+  private static String joined(String expression) {
+    var rendered = new StringBuilder();
+    var operands = OPERAND.matcher(expression);
+    while (operands.find()) {
+      rendered.append(operands.group(1) != null ? operands.group(1) : "x");
+    }
+    return rendered.toString();
+  }
+
+  private static boolean parses(String args) {
+    var words =
+        Arrays.stream(
+                args.replaceAll("\"?<[^>]*>\"?|'[^']*'", "x")
+                    .replaceAll("\\|\\S*", "")
+                    .strip()
+                    .split("\\s+"))
+            .filter(word -> !word.isEmpty() && !word.endsWith("..."))
+            .toArray(String[]::new);
+    var sail = new CommandLine(new Sail()).setUnmatchedArgumentsAllowed(true);
+    try {
+      for (var parsed = sail.parseArgs(words); parsed != null; parsed = parsed.subcommand()) {
+        if (!parsed.unmatched().isEmpty()) {
+          return false;
+        }
+      }
+      return true;
+    } catch (CommandLine.MissingParameterException cutShort) {
+      for (var line = cutShort.getCommandLine(); line != null; line = line.getParent()) {
+        if (!line.getUnmatchedArguments().isEmpty()) {
+          return false;
+        }
+      }
+      return true;
+    } catch (CommandLine.ParameterException unknown) {
+      return false;
+    }
+  }
+
+  @Test
+  void anotherBoxsOperatorIsToldTheReadmesFormAndAThinClientPlainSail() {
+    assertEquals(
+        "sudo sail fde add ada --role member --email \"ada@example.com\" --key \"ssh-ed25519"
+            + " AAAA\" --main-host-key SHA256:abc",
+        JoinCommand.authorizeLine(
+            "ada", null, "ada@example.com", "ssh-ed25519 AAAA", "SHA256:abc"));
+    assertEquals("sudo sail spec prune", OperatorCommand.elsewhere("spec prune"));
+    assertEquals("sail login", OperatorCommand.client("login"));
   }
 
   @Test
@@ -141,13 +387,19 @@ class OperatorHintsTest {
 
   @Test
   void theOperatorIsResolvedOnceAtEachCommandsDoorAndNowhereBelow() throws Exception {
-    var seam = "OperatorCommand.here()";
+    var seam =
+        Pattern.compile(
+            "OperatorCommand(?:\\.here\\(\\)|::here|\\.unknownReader\\(\\)|::unknownReader)");
     var below = new ArrayList<String>();
     var twice = new ArrayList<String>();
-    for (var root : List.of(Path.of("..", "sail-core", "src", "main"), Path.of("src", "main"))) {
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main"))) {
       try (var sources = Files.walk(root)) {
         for (var file : sources.filter(Files::isRegularFile).toList()) {
-          var calls = read(file).split(Pattern.quote(seam), -1).length - 1;
+          var calls = (int) seam.matcher(read(file)).results().count();
           if (calls == 0) {
             continue;
           }
@@ -165,6 +417,34 @@ class OperatorHintsTest {
     assertEquals(List.of(), twice, "a command asks who its operator is more than once");
   }
 
+  @Test
+  void noLiteralSpellsASailCommandOutsideTheSeam() throws Exception {
+    var verbs = String.join("|", new CommandLine(new Sail()).getSubcommands().keySet());
+    var command = Pattern.compile("\\bsudo sail\\b|\\bsail (" + verbs + ")\\b(?!-)");
+    var spelled = new ArrayList<String>();
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main"))) {
+      try (var sources = Files.walk(root)) {
+        for (var file :
+            sources.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
+          if (file.endsWith(Path.of("engine", "OperatorCommand.java"))) {
+            continue;
+          }
+          for (var literal : JavaLiterals.of(read(file))) {
+            if (command.matcher(literal).find()) {
+              spelled.add(file.getFileName() + ": " + literal);
+            }
+          }
+        }
+      }
+    }
+
+    assertEquals(List.of(), spelled, "a literal spells a sail command beside OperatorCommand");
+  }
+
   private static boolean atADoor(Path file) {
     var name = file.getFileName().toString();
     var inCommands = file.getParent().endsWith(Path.of("ai", "singlr", "sail", "commands"));
@@ -178,6 +458,31 @@ class OperatorHintsTest {
     } catch (IOException e) {
       throw new UncheckedIOException(e);
     }
+  }
+
+  @Test
+  void theReadmesQuickStartTypesEverySailCommandWithSudo() throws Exception {
+    var readme = Files.readString(Path.of("..", "README.md"));
+    var start = readme.indexOf("## Quick start");
+    var quickStart = readme.substring(start, readme.indexOf("\n## ", start));
+    var verbs = String.join("|", new CommandLine(new Sail()).getSubcommands().keySet());
+    var command = Pattern.compile("(?<!sudo )\\bsail (" + verbs + ")\\b(?!-)");
+    var code = Pattern.compile("```.*?```|`[^`]+`", Pattern.DOTALL);
+    var unsudoed = new ArrayList<String>();
+    for (var paragraph : quickStart.split("\n\n")) {
+      if (paragraph.contains("thin client")) {
+        continue;
+      }
+      var spans = code.matcher(paragraph);
+      while (spans.find()) {
+        var span = spans.group().replace('\n', ' ');
+        if (command.matcher(span).find()) {
+          unsudoed.add(span);
+        }
+      }
+    }
+
+    assertEquals(List.of(), unsudoed, "a system box's README command without sudo");
   }
 
   @Test

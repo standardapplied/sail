@@ -20,6 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -131,7 +132,8 @@ class ProjectDefinitionsTest {
     var workstationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK mady@box";
     var keyPath = dir.resolve("workstation_key.pub");
     Files.writeString(keyPath, workstationKey + "\n");
-    var identity = new LocalIdentity(gitConfig("Mady M", "mady@example.com"), keyPath);
+    var identity =
+        new LocalIdentity(gitConfig("Mady M", "mady@example.com"), keyPath, OperatorCommand.PLAIN);
 
     var config =
         ProjectDefinitions.resolveForProvisioning(
@@ -148,11 +150,52 @@ class ProjectDefinitionsTest {
   }
 
   @Test
+  void resolveForProvisioningRefusesAnAuthorizedKeysEntryThatIsNotOneKeyLine() {
+    var identity =
+        new LocalIdentity(
+            gitConfig("M", "m@x.io"), dir.resolve("missing.pub"), OperatorCommand.SUDO);
+    var faults =
+        List.of(
+            Map.entry("    -\n", "holds an empty entry"),
+            Map.entry("    - ' '\n", "holds an empty entry"),
+            Map.entry("    - 7\n", "holds an entry that is not text: 7"),
+            Map.entry(
+                "    - |\n      ssh-ed25519 AAAA\n      more\n",
+                "holds a key of more than one line"));
+
+    for (var fault : faults) {
+      var text = "name: acme\nssh:\n  authorized_keys:\n" + fault.getKey();
+      var refused =
+          assertThrows(
+              IllegalArgumentException.class,
+              () ->
+                  ProjectDefinitions.resolveForProvisioning(text, identity, OperatorCommand.SUDO));
+      assertEquals(
+          "ssh.authorized_keys "
+              + fault.getValue()
+              + ". Write each key on a line of its own in the descriptor you applied, then apply"
+              + " again.",
+          refused.getMessage(),
+          fault.getKey());
+    }
+    assertEquals(
+        List.of("  ssh-ed25519 AAAA alice  "),
+        ProjectDefinitions.resolveForProvisioning(
+                "name: acme\nssh:\n  authorized_keys:\n    - '  ssh-ed25519 AAAA alice  '\n",
+                identity,
+                OperatorCommand.SUDO)
+            .ssh()
+            .authorizedKeys(),
+        "a padded key line is read as the file holds it; step 6 writes it stripped");
+  }
+
+  @Test
   void resolveForProvisioningKeepsAnApostropheInTheBoxsGitNameOutOfTheYaml() {
     var redacted =
         PersonalFields.redact("name: acme\ngit:\n  name: Mady O'Neil\n  email: m@x.io\n");
     var identity =
-        new LocalIdentity(gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"));
+        new LocalIdentity(
+            gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"), OperatorCommand.PLAIN);
 
     var config =
         ProjectDefinitions.resolveForProvisioning(redacted, identity, OperatorCommand.PLAIN);
@@ -179,7 +222,8 @@ class ProjectDefinitionsTest {
 
   @Test
   void resolveForProvisioningNeedsNoIdentityWhenThereAreNoPlaceholders() {
-    var noIdentity = new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"));
+    var noIdentity =
+        new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"), OperatorCommand.PLAIN);
     var config =
         ProjectDefinitions.resolveForProvisioning(
             "name: acme\nresources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n",

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -73,6 +74,7 @@ public final class PagedSyncSession implements SyncSession {
   private final OutputStream out;
   private final String mainId;
   private final int frame;
+  private final OperatorCommand operator;
   private final SyncEngine engine = new SyncEngine();
   private Map<String, Long> tips;
   private Map<String, Asked> asked;
@@ -107,16 +109,18 @@ public final class PagedSyncSession implements SyncSession {
     return this;
   }
 
-  PagedSyncSession(InputStream in, OutputStream out, String mainId, int frame) {
+  PagedSyncSession(
+      InputStream in, OutputStream out, String mainId, int frame, OperatorCommand operator) {
     this.in = Objects.requireNonNull(in, "in");
     this.out = Objects.requireNonNull(out, "out");
     this.mainId = Objects.requireNonNull(mainId, "mainId");
     this.frame = frame;
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /** This session with pushes and need requests cut at {@code frame} bytes; a test seam. */
   PagedSyncSession frame(int frame) {
-    var copy = new PagedSyncSession(in, out, mainId, frame);
+    var copy = new PagedSyncSession(in, out, mainId, frame, operator);
     copy.tips = tips;
     copy.blobs = blobs;
     copy.erasure = erasure;
@@ -139,7 +143,8 @@ public final class PagedSyncSession implements SyncSession {
       SyncWire.Hello hello,
       SyncWire.Welcome welcome,
       Consumer<String> notice,
-      Consumer<SyncSession.Denial> onDenial) {
+      Consumer<SyncSession.Denial> onDenial,
+      OperatorCommand operator) {
     if (welcome.protocol() != SyncWire.PROTOCOL) {
       throw new SyncTransportException(
           "refused",
@@ -165,7 +170,7 @@ public final class PagedSyncSession implements SyncSession {
               + welcome.version()
               + "; upgrade main first, then nodes.");
     }
-    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME);
+    var session = new PagedSyncSession(in, out, welcome.mainId(), SyncWire.MAX_FRAME, operator);
     session.notice = notice;
     session.onDenial = onDenial;
     session.handle = welcome.handle();
@@ -207,7 +212,9 @@ public final class PagedSyncSession implements SyncSession {
       System.err.println(
           "  [sync] "
               + type
-              + ": could not collect content; 'sail sync gc' frees it: "
+              + ": could not collect content; '"
+              + operator.sail("sync gc")
+              + "' frees it: "
               + e.getMessage());
       return 0;
     }
@@ -226,7 +233,11 @@ public final class PagedSyncSession implements SyncSession {
     if (broken != null) {
       throw new SyncTransportException(
           "unreachable",
-          "channel unusable after an earlier failure (" + broken + "); run sail sync again",
+          "channel unusable after an earlier failure ("
+              + broken
+              + "); run "
+              + operator.sail("sync")
+              + " again",
           null);
     }
     return exchange.get();

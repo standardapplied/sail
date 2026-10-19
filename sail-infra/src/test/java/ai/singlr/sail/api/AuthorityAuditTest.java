@@ -271,7 +271,7 @@ class AuthorityAuditTest {
       merged.put("title", "merged");
       merged.put("assignee", "carol");
       var resolution = new Resolution(Resolution.Strategy.MERGE, YamlUtil.dumpToString(merged));
-      var operator = CliOperator.of(ADAS_NODE, new FdeStore(node.db));
+      var operator = CliOperator.of(ADAS_NODE, new FdeStore(node.db), OperatorCommand.PLAIN);
 
       var refused =
           assertThrows(

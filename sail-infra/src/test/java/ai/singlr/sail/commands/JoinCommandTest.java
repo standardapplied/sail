@@ -92,7 +92,7 @@ class JoinCommandTest {
   }
 
   private MainHostKey pin() {
-    return new MainHostKey(new Keyscan(), knownHosts());
+    return new MainHostKey(new Keyscan(), knownHosts(), OperatorCommand.SUDO);
   }
 
   private static String hashed(SshPublicKey key) {
@@ -489,11 +489,11 @@ class JoinCommandTest {
   }
 
   private static String human(JoinCommand.Plan plan) {
-    return JoinCommand.render(plan, false, new OperatorCommand(true));
+    return JoinCommand.render(plan, false, OperatorCommand.SUDO);
   }
 
   private static String json(JoinCommand.Plan plan) {
-    return JoinCommand.render(plan, true, new OperatorCommand(true));
+    return JoinCommand.render(plan, true, OperatorCommand.SUDO);
   }
 
   @Test

@@ -47,7 +47,7 @@ class ContainerStateGuardTest {
 
   @Test
   void aSudoCallerIsToldToStartOrCreateTheProjectWithSudo() {
-    var sudo = new OperatorCommand(true);
+    var sudo = OperatorCommand.SUDO;
 
     assertEquals(
         "Project 'demo' is stopped. Start it with: sudo sail project start demo",

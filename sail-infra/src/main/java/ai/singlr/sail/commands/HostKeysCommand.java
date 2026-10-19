@@ -66,12 +66,16 @@ public final class HostKeysCommand implements Runnable {
                         "Writing the sail user's authorized_keys requires root. Run it on the host"
                             + " as root, or preview with --dry-run.");
                 case AuthorizedKeysSync.NotProvisioned _ ->
-                    throw new IllegalStateException(
-                        "The sail user is not provisioned. Run 'sudo sail host ssh-identity'"
-                            + " first.");
+                    throw new IllegalStateException(notProvisioned(operator));
               }
             }
           });
+    }
+
+    static String notProvisioned(OperatorCommand operator) {
+      return "The sail user is not provisioned. Run '"
+          + operator.sail("host ssh-identity")
+          + "' first.";
     }
   }
 }

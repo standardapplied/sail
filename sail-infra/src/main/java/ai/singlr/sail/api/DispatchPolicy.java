@@ -41,7 +41,7 @@ public final class DispatchPolicy {
       return agentLaneForbidden("dispatch specs");
     }
     if (Strings.isBlank(localHandle)) {
-      return nodeHandleUnset();
+      return nodeHandleUnset(operator);
     }
     if (!localHandle.equals(spec.assignee())) {
       return runsOnOtherNode(spec, localHandle, operator);
@@ -81,12 +81,15 @@ public final class DispatchPolicy {
   }
 
   /** The rule-1 refusal: this box carries no sync-handle, so no spec has an execution node here. */
-  public static DispatchDecision.Refused nodeHandleUnset() {
+  public static DispatchDecision.Refused nodeHandleUnset(OperatorCommand operator) {
     return new DispatchDecision.Refused(
         ErrorCode.NODE_HANDLE_UNSET,
         "This node has no sync-handle, so it cannot be any spec's execution node.",
-        "Set it once: sudo sail host config set sync-handle <handle> (a node gets it from"
-            + " 'sudo sail join').");
+        "Set it once: "
+            + operator.sail("host config set sync-handle <handle>")
+            + " (a node gets it from '"
+            + operator.sail("join")
+            + "').");
   }
 
   static DispatchDecision.Refused runsOnOtherNode(

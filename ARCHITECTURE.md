@@ -787,15 +787,23 @@ clone a project's source repos into its container at provision time, not to move
   help (not after `--`, where they belong to the command). The `sail` gateway account reads
   `/var/lib/sail/host.yaml` and is Host; an account with its own `~/.sail/host.yaml` keeps its
   own box. For such an account, `sudo` resolves a project's personal placeholders from that account's
-  home (`SailPaths.identityHome`), even beside root's system unit, so its plain and `sudo`
-  applies record the same descriptor. Every `sail` command a box prints for its operator to
-  type is rendered by `OperatorCommand`, which asks `RuntimeMode.detect` of the `sudo` caller's
-  own home: a caller whose plain `sail` would be Refused reads it with `sudo`, and root logged
-  in directly, or an account on its own box, reads it plain. The operator is resolved once per
+  home (`SailPaths.identityHome`), even beside root's system unit. Every `sail` command a box
+  prints for its operator to type is rendered by `OperatorCommand`: a `sudo` caller reads it
+  with `sudo`, since root's sail acts on root's state and the caller's own plain `sail` never
+  reaches it; root logged in directly reads it plain; a non-root process reads its own plain
+  `sail`, and `sudo` for a verb only root runs. A process that cannot see who reads it
+  (sail-api, the pty host, an agent watcher) renders with `OperatorCommand.unknownReader()`,
+  the README's form as root. The operator is resolved once per
   command, at the command's door (`OperatorCommand.here()` in the command class), and passed
   down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
   operator as a parameter, so its `sudo` wording is a plain unit assertion
-  (`OperatorHintsTest` scans the sources for the seam).
+  (`OperatorHintsTest` scans the sources for the seam). A command is rendered three ways:
+  `sail(args)` for the caller on this box, `elsewhere(args)` for a reader this box cannot know
+  (another box's operator, the reader of a journal refusal or an API answer), always `sudo sail
+  …` as the README writes it, and `client(args)` for a thin client, always plain. A refusal only
+  a non-root caller reads ("Root privileges required…") renders through `OperatorCommand.SUDO`.
+  No literal in `src/main` spells a `sail` command: `OperatorHintsTest` scans every string
+  literal for `sudo sail` and for `sail <verb>` outside `OperatorCommand`.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
@@ -2274,7 +2282,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers; the command names the projects the catalog holds, whose containers trust it only
-  after their next `project apply`. A box trusts one workstation key: a pairing replaces the
+  after their next `project apply`. Step 6 writes the workstation key whatever the definition
+  says, first, then the definition's own keys, each key once (`ProjectProvisioner.trustedKeys`),
+  and its fingerprint is an input of the run's digest (`ProjectProvisioner.inputs`), so
+  registering, replacing or revoking it makes the next apply of every project revisit step 6
+  (`ProjectProvisionerTest`). A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
   fingerprint and comment, unless `--as-workstation-key` is passed. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host

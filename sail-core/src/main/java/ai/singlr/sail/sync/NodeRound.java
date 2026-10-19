@@ -6,6 +6,7 @@
 package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
@@ -47,8 +48,9 @@ public final class NodeRound {
    * brought in line with the scope main named ({@link #rescope}). Returns what was settled and what
    * was dropped, for the round's notices.
    */
-  public static List<Settlement.Settled> begin(SyncSession session, Sqlite db, String handle) {
-    requireAgreed(session.handle(), handle);
+  public static List<Settlement.Settled> begin(
+      SyncSession session, Sqlite db, String handle, OperatorCommand operator) {
+    requireAgreed(session.handle(), handle, operator);
     var settled = new ArrayList<>(rescope(session, db, handle));
     stampUnheld(db, handle, acknowledgeHeld(session, db));
     var runs = new RunStore(db);
@@ -222,7 +224,8 @@ public final class NodeRound {
    * Fails naming both handles and the fix unless {@code configured} is the handle main
    * authenticated the session as, when main said.
    */
-  static void requireAgreed(Optional<String> authenticated, String configured) {
+  static void requireAgreed(
+      Optional<String> authenticated, String configured, OperatorCommand operator) {
     if (authenticated.isEmpty()
         || (Strings.isNotBlank(configured) && configured.equals(authenticated.get()))) {
       return;
@@ -242,7 +245,7 @@ public final class NodeRound {
             + ", so this round offers and adopts nothing. Set the sync handle to the one main knows"
             + (Strings.isBlank(main)
                 ? ""
-                : " ('sudo sail host config set sync-handle " + main + "')")
+                : " ('" + operator.sail("host config set sync-handle " + main) + "')")
             + ", or have an admin tie this box's sync key to "
             + (Strings.isBlank(configured) ? "its FDE" : "FDE '" + configured + "'")
             + " on main.",

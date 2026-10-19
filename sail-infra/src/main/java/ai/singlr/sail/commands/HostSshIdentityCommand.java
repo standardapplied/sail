@@ -118,7 +118,9 @@ public final class HostSshIdentityCommand implements Runnable {
         case AuthorizedKeysSync.NotProvisioned _ ->
             throw new IllegalStateException(
                 "The sail user's .ssh directory is missing even though provisioning succeeded;"
-                    + " inspect /home/sail and re-run 'sudo sail host ssh-identity'.");
+                    + " inspect /home/sail and re-run '"
+                    + operator.sail("host ssh-identity")
+                    + "'.");
       }
     }
   }

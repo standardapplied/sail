@@ -100,7 +100,7 @@ class MaterializedFilesMigrationTest {
     copy("acme", "edited.txt", "mine");
 
     beforeUpgrade();
-    var run = migrate(new OperatorCommand(true)).getFirst();
+    var run = migrate(OperatorCommand.SUDO).getFirst();
 
     assertEquals(
         List.of(

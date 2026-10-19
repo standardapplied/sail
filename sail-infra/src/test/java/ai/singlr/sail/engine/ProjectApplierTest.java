@@ -585,6 +585,82 @@ class ProjectApplierTest {
   }
 
   @Test
+  void aGitIdentityAlreadyCurrentIsSkippedAndSetsNothing() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("git config --global --get user.name", "John\n")
+            .onOk("git config --global --get user.email", "john@acme.com\n");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(0, 0, 1, List.of()), result);
+    assertEquals("  [skip] Git config already current\n", out.toString());
+    assertFalse(
+        shell.invocations().stream()
+            .anyMatch(c -> c.endsWith("git config --global user.name John")));
+  }
+
+  @Test
+  void aGitIdentityNotYetSetIsApplied() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("git config --global --get user.name", "")
+            .onFail("git config --global --get user.email", "");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
+    assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
+  }
+
+  @Test
+  void aChangedGitEmailAloneIsApplied() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("git config --global --get user.name", "John\n")
+            .onOk("git config --global --get user.email", "john@old.example\n");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John ", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
+    assertEquals("  [apply] Git config (name=John , email=john@acme.com)\n", out.toString());
+  }
+
+  @Test
+  void aChangedGitNameIsAppliedOnceAndCountedAsAnAddition() throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("git config --global --get user.name", "Jon\n")
+            .onOk("git config --global --get user.email", "john@acme.com\n");
+    var out = new ByteArrayOutputStream();
+    var applier = new ProjectApplier(shell, new PrintStream(out));
+
+    var result =
+        applier.applyGitConfig(
+            CONTAINER, new SailYaml.Git("John", "john@acme.com", "token", null), "dev");
+
+    assertEquals(new ProjectApplier.ApplyResult(1, 0, 0, List.of()), result);
+    assertEquals("  [apply] Git config (name=John, email=john@acme.com)\n", out.toString());
+    assertEquals(
+        1,
+        shell.invocations().stream()
+            .filter(c -> c.endsWith("git config --global user.name John"))
+            .count());
+  }
+
+  @Test
   void applyGitConfigReturnsEmptyWhenNull() throws Exception {
     var shell = new ScriptedShellExecutor();
     var applier = applier(shell);
@@ -917,8 +993,28 @@ class ProjectApplierTest {
         applier.checkUnsupportedChanges(
             config, new ContainerManager.ResourceLimits("4", "12GB"), OperatorCommand.PLAIN);
 
-    assertFalse(warnings.isEmpty());
-    assertTrue(warnings.getFirst().contains("project resources set"));
+    assertEquals(
+        List.of(
+            "CPU and memory changes are not applied by 'sail project apply'. Use 'sail project"
+                + " resources set test ...' instead."),
+        warnings);
+  }
+
+  @Test
+  void aFreshBoxsSudoCallerIsToldToResizeWithSudo() {
+    var applier = applier(new ScriptedShellExecutor());
+
+    var warnings =
+        applier.checkUnsupportedChanges(
+            minimalConfig("claude-code"),
+            new ContainerManager.ResourceLimits("4", "12GB"),
+            OperatorCommand.SUDO);
+
+    assertEquals(
+        List.of(
+            "CPU and memory changes are not applied by 'sudo sail project apply'. Use 'sudo sail"
+                + " project resources set test ...' instead."),
+        warnings);
   }
 
   @Test

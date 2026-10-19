@@ -76,8 +76,10 @@ class ProjectMutationsTest {
 
   @Test
   void onlyACatalogWriteNeedsTheOperator() {
-    assertNull(ProjectMutations.catalogOperator("acme", dir.resolve("custom.yaml"), false));
-    assertNull(ProjectMutations.catalogOperator("acme", null, true));
+    assertNull(
+        ProjectMutations.catalogOperator(
+            "acme", dir.resolve("custom.yaml"), false, OperatorCommand.PLAIN));
+    assertNull(ProjectMutations.catalogOperator("acme", null, true, OperatorCommand.PLAIN));
   }
 
   @Test

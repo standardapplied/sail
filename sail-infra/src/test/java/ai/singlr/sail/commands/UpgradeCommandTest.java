@@ -13,9 +13,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.SailBinary;
 import ai.singlr.sail.engine.SemVer;
+import ai.singlr.sail.engine.SystemdServiceInstaller;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +31,8 @@ import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import picocli.CommandLine;
 
 class UpgradeCommandTest {
@@ -109,13 +113,48 @@ class UpgradeCommandTest {
 
   @Test
   void aProvisionedBoxWithoutSailApiIsToldHowToInstallIt() {
-    var remediation = UpgradeCommand.missingApiRemediation(true).orElseThrow();
-    assertTrue(remediation.contains("sudo sail host service install"));
+    var remediation =
+        UpgradeCommand.missingApiRemediation(
+                true, SystemdServiceInstaller.Mode.SYSTEM, OperatorCommand.SUDO)
+            .orElseThrow();
+    assertEquals(
+        "  @|yellow Install it so you can dispatch agents and see the board here:|@"
+            + " @|bold sudo sail host service install|@",
+        remediation);
+  }
+
+  @ParameterizedTest
+  @CsvSource({
+    "SYSTEM, sudo sail host service install",
+    "USER, sail host service install",
+  })
+  void aSudoCallerOnAFreshBoxInstallsTheServiceInTheScopeThatIsMissing(
+      SystemdServiceInstaller.Mode mode, String install) {
+    assertEquals(
+        "  @|yellow Install it so you can dispatch agents and see the board here:|@"
+            + " @|bold "
+            + install
+            + "|@",
+        UpgradeCommand.missingApiRemediation(true, mode, OperatorCommand.UNPRIVILEGED)
+            .orElseThrow());
+  }
+
+  @Test
+  void rootLoggedInDirectlyInstallsTheMissingSystemServicePlain() {
+    assertEquals(
+        "  @|yellow Install it so you can dispatch agents and see the board here:|@"
+            + " @|bold sail host service install|@",
+        UpgradeCommand.missingApiRemediation(
+                true, SystemdServiceInstaller.Mode.SYSTEM, OperatorCommand.PLAIN)
+            .orElseThrow());
   }
 
   @Test
   void anUnprovisionedBoxGetsNoSailApiNag() {
-    assertTrue(UpgradeCommand.missingApiRemediation(false).isEmpty());
+    assertTrue(
+        UpgradeCommand.missingApiRemediation(
+                false, SystemdServiceInstaller.Mode.SYSTEM, OperatorCommand.PLAIN)
+            .isEmpty());
   }
 
   @Test

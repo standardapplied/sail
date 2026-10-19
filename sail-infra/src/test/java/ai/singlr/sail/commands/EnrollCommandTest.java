@@ -48,7 +48,8 @@ class EnrollCommandTest {
         assertThrows(
             IllegalStateException.class, () -> EnrollCommand.parseTicket("sail: unknown option"));
     assertTrue(error.getMessage().contains("sail: unknown option"));
-    assertTrue(error.getMessage().contains("sail host update"));
+    assertTrue(
+        error.getMessage().contains("upgrade it with: sudo sail upgrade"), error.getMessage());
   }
 
   @Test
@@ -64,10 +65,12 @@ class EnrollCommandTest {
     var failure =
         EnrollCommand.mintFailure(
             "sail@devbox", new ShellExec.Result(255, "", "Permission denied (publickey).\n"));
-    assertTrue(failure.contains("sail@devbox"));
-    assertTrue(failure.contains("ssh exit 255"));
-    assertTrue(failure.contains("Permission denied (publickey)."));
-    assertTrue(failure.contains("sail fde add"));
+    assertEquals(
+        "Could not mint an enrollment ticket via sail@devbox (ssh exit 255).\n"
+            + "  ssh said: Permission denied (publickey).\n"
+            + "  Not registered yet? An admin runs: sudo sail fde add <handle> --key \"<your"
+            + " pubkey>\"",
+        failure);
   }
 
   @Test

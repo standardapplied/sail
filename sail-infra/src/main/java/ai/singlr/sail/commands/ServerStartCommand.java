@@ -140,7 +140,7 @@ public final class ServerStartCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var operator = OperatorCommand.here();
+    var operator = OperatorCommand.unknownReader();
     BindPolicy.requireBindable(host, allowRemote);
     var dbPath = SailPaths.controlPlaneDb();
     SailPaths.ensureDataDir(dbPath.getParent());

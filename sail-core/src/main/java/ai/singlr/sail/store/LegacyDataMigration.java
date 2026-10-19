@@ -8,6 +8,7 @@ package ai.singlr.sail.store;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.function.Supplier;
@@ -23,13 +24,15 @@ public final class LegacyDataMigration implements DataMigration {
   public static final String NAME = "legacy-data-floor-0.14.0";
 
   private final Supplier<String> nodeHandle;
+  private final OperatorCommand operator;
 
-  public LegacyDataMigration() {
-    this(NodeIdentity::handle);
+  public LegacyDataMigration(OperatorCommand operator) {
+    this(NodeIdentity::handle, operator);
   }
 
-  LegacyDataMigration(Supplier<String> nodeHandle) {
+  LegacyDataMigration(Supplier<String> nodeHandle, OperatorCommand operator) {
     this.nodeHandle = nodeHandle;
+    this.operator = operator;
   }
 
   @Override
@@ -67,8 +70,11 @@ public final class LegacyDataMigration implements DataMigration {
               + ids.size()
               + " legacy run(s) without this box's FDE handle: "
               + String.join(", ", ids)
-              + ". Set it with 'sail host config set sync-handle <handle>', then rerun"
-              + " 'sail migrate'.");
+              + ". Set it with '"
+              + operator.sail("host config set sync-handle <handle>")
+              + "', then rerun '"
+              + operator.sail("migrate")
+              + "'.");
     }
     for (var id : ids) {
       db.transaction(

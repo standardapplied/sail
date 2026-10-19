@@ -123,7 +123,7 @@ echo
 
 if [ "$OS" = "Darwin" ]; then
   info "Get started:"
-  info "  sail init <server>  # connect to your host (IP or SSH alias)"
+  info "  sail client <host>  # point the CLI at your box (IP or SSH alias)"
   info "  sail spec list <project>"
 else
   info "Get started:"

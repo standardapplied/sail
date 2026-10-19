@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.UncheckedIOException;
@@ -35,7 +36,8 @@ class SyncSessionTest {
         out,
         HELLO,
         notices::add,
-        ignored -> {});
+        ignored -> {},
+        OperatorCommand.PLAIN);
   }
 
   @Test
@@ -158,7 +160,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
             notices::add,
-            ignored -> {})) {
+            ignored -> {},
+            OperatorCommand.PLAIN)) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertEquals(1, notices.size());
@@ -177,7 +180,8 @@ class SyncSessionTest {
             new ai.singlr.sail.sync.ByteStreams.Output(),
             SyncWire.Hello.of("0.44.2", "node"),
             notices::add,
-            ignored -> {})) {
+            ignored -> {},
+            OperatorCommand.PLAIN)) {
       assertInstanceOf(PagedSyncSession.class, session);
     }
     assertTrue(notices.isEmpty());
@@ -202,7 +206,8 @@ class SyncSessionTest {
                 brokenWriter(),
                 HELLO,
                 n -> {},
-                ignored -> {}));
+                ignored -> {},
+                OperatorCommand.PLAIN));
   }
 
   @Test
@@ -274,7 +279,11 @@ class SyncSessionTest {
             () -> {
               try (var session =
                   new PagedSyncSession(
-                      new ai.singlr.sail.sync.ByteStreams.Input(""), brokenWriter(), "main", 64)) {
+                      new ai.singlr.sail.sync.ByteStreams.Input(""),
+                      brokenWriter(),
+                      "main",
+                      64,
+                      OperatorCommand.PLAIN)) {
                 throw original;
               }
             });

@@ -94,7 +94,9 @@ public final class LaunchAdmission {
             + localHandle
             + "' is not an active member of this box's roster, so its assigned specs cannot be"
             + " trusted.",
-        "Run 'sudo sail sync' to pull the roster from main, or get authorized there first.");
+        "Run '"
+            + operator.sail("sync")
+            + "' to pull the roster from main, or get authorized there first.");
   }
 
   /**

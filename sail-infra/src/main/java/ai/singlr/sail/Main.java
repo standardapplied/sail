@@ -10,8 +10,11 @@ import ai.singlr.sail.api.Refusals;
 import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.AutoUpgrader;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RemoteCommandRunner;
 import ai.singlr.sail.engine.RuntimeMode;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 import picocli.CommandLine;
 
 public final class Main {
@@ -56,14 +59,11 @@ public final class Main {
 
   /** What an account that does not own this box is told, with its command to paste back. */
   static String refusal(String user, String[] args) {
-    var command = new StringBuilder("sudo sail");
-    for (var arg : args) {
-      command.append(' ').append(Strings.shellWord(arg));
-    }
+    var words = Arrays.stream(args).map(Strings::shellWord).collect(Collectors.joining(" "));
     return "sail-api on this box runs as root, so "
         + user
         + "'s sail would see none of its specs, projects or FDEs. Run it with sudo: "
-        + command;
+        + OperatorCommand.SUDO.sail(words).strip();
   }
 
   /**

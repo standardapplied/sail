@@ -40,7 +40,8 @@ public final class HostStatusCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     if (!ConsoleHelper.isRoot()) {
-      throw new IllegalStateException("Root privileges required. Run with: sudo sail host status");
+      throw new IllegalStateException(
+          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host status"));
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();

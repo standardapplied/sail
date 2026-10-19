@@ -92,8 +92,9 @@ public final class InitCommand implements Runnable {
   /**
    * What init reads from this box and how it runs a step: whether it runs as root, the account that
    * invoked {@code sudo}, the host config, where an account's home is, the git identity a project
-   * applied here takes on, how it asks the operator a question, how it names a command to type, and
-   * the granular command each step runs. A test scripts the steps and puts the homes under a
+   * applied here takes on, how it asks the operator a question, how it names a command to type as
+   * the box stands when it is asked (init's own steps install the system service that decides it),
+   * and the granular command each step runs. A test scripts the steps and puts the homes under a
    * temporary directory.
    */
   record Box(
@@ -107,14 +108,15 @@ public final class InitCommand implements Runnable {
       Steps steps) {
 
     static Box here() {
+      var operator = OperatorCommand.here();
       return new Box(
           SailPaths.isRoot(),
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
-          LocalIdentity.detect(),
+          LocalIdentity.detect(operator),
           InitCommand::ask,
-          OperatorCommand.here(),
+          operator,
           InitCommand::runCommand);
     }
   }
@@ -157,7 +159,7 @@ public final class InitCommand implements Runnable {
     name.adopt(box.identity());
     mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
-      printMainNextSteps();
+      printMainNextSteps(box.operator());
     }
   }
 
@@ -281,8 +283,8 @@ public final class InitCommand implements Runnable {
   private void requireRoot(boolean root) {
     if (!root) {
       throw new IllegalStateException(
-          "Root privileges required. Re-run with: sudo sail init "
-              + (asMain ? "--as-main" : "--main " + main));
+          "Root privileges required. Re-run with: "
+              + OperatorCommand.SUDO.sail("init " + (asMain ? "--as-main" : "--main " + main)));
     }
   }
 
@@ -309,8 +311,9 @@ public final class InitCommand implements Runnable {
               + sudoUser
               + ": run sail as "
               + sudoUser
-              + ", without sudo. To set the box up as root instead, first run 'sail host service"
-              + " uninstall' as "
+              + ", without sudo. To set the box up as root instead, first run '"
+              + OperatorCommand.UNPRIVILEGED.sail("host service uninstall")
+              + "' as "
               + sudoUser
               + ".");
     }
@@ -334,18 +337,20 @@ public final class InitCommand implements Runnable {
     return args.toArray(String[]::new);
   }
 
-  private void printMainNextSteps() {
+  private static void printMainNextSteps(OperatorCommand operator) {
     var out = System.out;
     out.println();
     out.println(
         Ansi.AUTO.string("  @|bold,green ✓|@ This box is the org's @|bold main|@ and ready."));
     out.println(
-        "  Add each engineer once they send you the line their 'sudo sail init --main' printed,"
-            + " e.g.:");
+        "  Add each engineer once they send you the line their '"
+            + OperatorCommand.elsewhere("init --main")
+            + "' printed, e.g.:");
     out.println(
         Ansi.AUTO.string(
-            "    @|cyan sudo sail fde add mady --role member --key \"…\" --main-host-key"
-                + " SHA256:…|@"));
+            "    @|cyan "
+                + operator.sail("fde add mady --role member --key \"…\" --main-host-key SHA256:…")
+                + "|@"));
   }
 
   /**

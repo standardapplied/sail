@@ -63,7 +63,7 @@ public final class RoomWakePrompt {
             + opening
             + conversationBlock
             + specBlock
-            + duty(spec.id(), engagement);
+            + duty(spec.id(), spec.project(), engagement);
     return new Built(prompt, conversation.fullyRendered());
   }
 
@@ -144,14 +144,14 @@ public final class RoomWakePrompt {
         .formatted(roomId, roomId);
   }
 
-  private static String duty(String specId, Engagement engagement) {
+  private static String duty(String specId, String project, Engagement engagement) {
     if (engagement == null) {
-      return wakeDuty(specId);
+      return wakeDuty(specId, project);
     }
     return engagement.full() ? engagedFullDuty(specId) : engagedReadOnlyDuty(specId);
   }
 
-  private static String wakeDuty(String specId) {
+  private static String wakeDuty(String specId, String project) {
     return """
         ## Room Duty
 
@@ -163,7 +163,7 @@ public final class RoomWakePrompt {
         and `cd` — use the Read and Grep tools for files (git commands are denied too;
         read what you need through the tools). Do not fight a denial; work within the
         lane. If the conversation asks for code changes, answer that dispatch is the lane
-        that changes code — describe what a re-dispatch (`sail spec dispatch %s --restart`)
+        that changes code — describe what a re-dispatch (`%s`)
         or a follow-up spec should do instead of doing it here. If the
         conversation asks something you cannot answer or decide alone, post it back with
         `spec comment %s --body <text> --question` — the flag pages the engineer on the
@@ -173,7 +173,11 @@ public final class RoomWakePrompt {
         into your context automatically after a tool call finishes, and unread messages
         block your first attempt to stop. When you have answered, stop.
         """
-        .formatted(specId, specId, specId);
+        .formatted(
+            specId,
+            OperatorCommand.elsewhere(
+                "spec dispatch --project " + project + " --spec " + specId + " --restart"),
+            specId);
   }
 
   private static String engagedReadOnlyDuty(String specId) {

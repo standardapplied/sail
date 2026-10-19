@@ -190,7 +190,7 @@ public final class UpgradeCommand implements Runnable {
               + dataDir
               + ", not the provisioned "
               + SailPaths.systemDataDir()
-              + ": sail upgrade replaces this box's binary and restarts its services, so it never"
+              + ": an upgrade replaces this box's binary and restarts its services, so it never"
               + " runs against a copy. To rehearse a release's migrations on a copy, run"
               + " 'SAIL_DATA_DIR="
               + dataDir
@@ -412,7 +412,7 @@ public final class UpgradeCommand implements Runnable {
     RestartStatus restartStatus;
     if (provisioned.getAsBoolean()) {
       migrateDatabase(binaryPath, operator);
-      restartStatus = restartSailApi(steps);
+      restartStatus = restartSailApi(steps, operator);
     } else {
       restartStatus = RestartStatus.SKIPPED_CLIENT;
       if (!json) {
@@ -437,13 +437,16 @@ public final class UpgradeCommand implements Runnable {
    * that installs it. An unprovisioned box (a thin client) legitimately has no service, so there is
    * nothing to say.
    */
-  static Optional<String> missingApiRemediation(boolean provisioned) {
+  static Optional<String> missingApiRemediation(
+      boolean provisioned, SystemdServiceInstaller.Mode mode, OperatorCommand operator) {
     if (!provisioned) {
       return Optional.empty();
     }
     return Optional.of(
         "  @|yellow Install it so you can dispatch agents and see the board here:|@"
-            + " @|bold sudo sail host service install|@");
+            + " @|bold "
+            + mode.installCommand(operator)
+            + "|@");
   }
 
   /**
@@ -452,7 +455,7 @@ public final class UpgradeCommand implements Runnable {
    * immediately. Returns a short status string for the JSON payload. Failures are logged but never
    * fatal \u2014 the binary install already succeeded.
    */
-  private RestartStatus restartSailApi(Steps steps) {
+  private RestartStatus restartSailApi(Steps steps, OperatorCommand operator) {
     var stepNum = steps.restart();
     var totalSteps = steps.total();
     if (dryRun) {
@@ -485,7 +488,7 @@ public final class UpgradeCommand implements Runnable {
                       ? "sail-api is not installed on this provisioned box"
                       : "sail-api not installed; nothing to restart",
                   Ansi.AUTO));
-          missingApiRemediation(provisioned)
+          missingApiRemediation(provisioned, bootstrap.mode(), operator)
               .ifPresent(line -> System.out.println(Ansi.AUTO.string(line)));
         }
         return RestartStatus.NOT_INSTALLED;
@@ -751,7 +754,7 @@ public final class UpgradeCommand implements Runnable {
     var process = new ProcessBuilder(args).inheritIO().start();
     var exitCode = process.waitFor();
     if (exitCode != 0) {
-      throw new IllegalStateException("sudo sail upgrade failed (exit code " + exitCode + ")");
+      throw new IllegalStateException("The upgrade under sudo failed (exit code " + exitCode + ")");
     }
   }
 }

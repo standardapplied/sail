@@ -29,27 +29,34 @@ public final class MainHostKey {
 
   private final ShellExec shell;
   private final Path knownHosts;
+  private final OperatorCommand operator;
 
-  public MainHostKey(ShellExec shell, Path knownHosts) {
+  public MainHostKey(ShellExec shell, Path knownHosts, OperatorCommand operator) {
     this.shell = shell;
     this.knownHosts = knownHosts;
+    this.operator = operator;
   }
 
-  /** This account's {@code ~/.ssh/known_hosts}: root's under sudo, the file its sail-api reads. */
-  public static MainHostKey here() {
+  /**
+   * This account's {@code ~/.ssh/known_hosts}: root's under sudo, the file its sail-api reads. A
+   * refusal is worded for {@code operator}.
+   */
+  public static MainHostKey here(OperatorCommand operator) {
     return new MainHostKey(
-        new ShellExecutor(false), Path.of(System.getProperty("user.home"), ".ssh", "known_hosts"));
+        new ShellExecutor(false),
+        Path.of(System.getProperty("user.home"), ".ssh", "known_hosts"),
+        operator);
   }
 
   /**
    * How a node recovers from main's host key no longer being the one it pinned for {@code target}:
    * drop the old pin, then join again, which pins the new one.
    */
-  public static String rebuiltRecovery(String target) {
-    return "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R "
-        + hostOf(target)
-        + "' and re-run 'sudo sail init --main "
-        + target
+  public static String rebuiltRecovery(String target, OperatorCommand operator) {
+    return "If main was rebuilt, remove the old key with '"
+        + operator.asThisProcess("ssh-keygen -R " + hostOf(target))
+        + "' and re-run '"
+        + operator.sail("init --main " + target)
         + "'; otherwise something between this box and main is answering for it.";
   }
 
@@ -75,7 +82,7 @@ public final class MainHostKey {
             .map(String::strip)
             .filter(scanned -> keyOf(scanned).isPresent())
             .findFirst()
-            .orElseThrow(() -> unread(host, target, scan.stderr()));
+            .orElseThrow(() -> unread(host, target, scan.stderr(), operator));
     var key = keyOf(line).orElseThrow();
     var entries = entries(host);
     if (entries.stream()
@@ -88,8 +95,8 @@ public final class MainHostKey {
               + " is revoked in "
               + knownHosts
               + ", so ssh would refuse it at every sync. Give main a new host key, or remove the"
-              + " revocation if it was a mistake, then re-run sudo sail init --main "
-              + target
+              + " revocation if it was a mistake, then re-run "
+              + operator.sail("init --main " + target)
               + ".");
     }
     var pinned =
@@ -110,7 +117,7 @@ public final class MainHostKey {
               + ", but this box pinned "
               + pinned.getFirst().fingerprint()
               + ". "
-              + rebuiltRecovery(target));
+              + rebuiltRecovery(target, operator));
     }
     return key.fingerprint();
   }
@@ -169,7 +176,8 @@ public final class MainHostKey {
     }
   }
 
-  private static IllegalStateException unread(String host, String target, String stderr) {
+  private static IllegalStateException unread(
+      String host, String target, String stderr, OperatorCommand operator) {
     var reason =
         stderr
             .lines()
@@ -182,8 +190,8 @@ public final class MainHostKey {
             + host
             + "'s SSH host key on port 22: "
             + reason
-            + ". Check the address and firewall, then re-run sudo sail init --main "
-            + target
+            + ". Check the address and firewall, then re-run "
+            + operator.sail("init --main " + target)
             + ".");
   }
 }

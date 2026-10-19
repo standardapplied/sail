@@ -42,7 +42,8 @@ class MainHostKeyTest {
   void anUnpinnedMainIsAppendedHashedInAPrivateFile() throws Exception {
     var keyscan = new Keyscan(hashed(MAIN), "# maindevbox:22 SSH-2.0-OpenSSH_9.6\n", 0);
 
-    var fingerprint = new MainHostKey(keyscan, knownHosts()).pin("maindevbox");
+    var fingerprint =
+        new MainHostKey(keyscan, knownHosts(), OperatorCommand.SUDO).pin("maindevbox");
 
     assertEquals(MAIN.fingerprint(), fingerprint);
     assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
@@ -59,7 +60,7 @@ class MainHostKeyTest {
     Files.writeString(knownHosts(), "github.com ssh-rsa AAAA");
     var keyscan = new Keyscan(hashed(MAIN), "", 0);
 
-    new MainHostKey(keyscan, knownHosts()).pin("maindevbox");
+    new MainHostKey(keyscan, knownHosts(), OperatorCommand.SUDO).pin("maindevbox");
 
     assertEquals("github.com ssh-rsa AAAA\n" + hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }
@@ -71,7 +72,8 @@ class MainHostKeyTest {
     Files.writeString(knownHosts(), pinned);
 
     var fingerprint =
-        new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+        new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts(), OperatorCommand.SUDO)
+            .pin("maindevbox");
 
     assertEquals(MAIN.fingerprint(), fingerprint);
     assertEquals(pinned, Files.readString(knownHosts()));
@@ -82,7 +84,8 @@ class MainHostKeyTest {
     Files.createDirectories(knownHosts().getParent());
     var pinned = hashed(MAIN) + "\n";
     Files.writeString(knownHosts(), pinned);
-    var hostKey = new MainHostKey(new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts());
+    var hostKey =
+        new MainHostKey(new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts(), OperatorCommand.SUDO);
 
     var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("sail@maindevbox"));
 
@@ -104,7 +107,41 @@ class MainHostKeyTest {
         "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R 10.128.0.7' and re-run"
             + " 'sudo sail init --main sail@10.128.0.7:2222'; otherwise something between this box"
             + " and main is answering for it.",
-        MainHostKey.rebuiltRecovery("sail@10.128.0.7:2222"));
+        MainHostKey.rebuiltRecovery("sail@10.128.0.7:2222", OperatorCommand.SUDO));
+  }
+
+  @Test
+  void aFreshBoxsSudoCallerRemovesRootsPinWithSudo() throws Exception {
+    Files.createDirectories(knownHosts().getParent());
+    Files.writeString(knownHosts(), hashed(MAIN) + "\n");
+    var hostKey =
+        new MainHostKey(new Keyscan(hashed(IMPOSTOR), "", 0), knownHosts(), OperatorCommand.SUDO);
+
+    var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("sail@maindevbox"));
+
+    assertEquals(
+        "maindevbox's SSH host key is "
+            + IMPOSTOR.fingerprint()
+            + ", but this box pinned "
+            + MAIN.fingerprint()
+            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
+            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
+            + " box and main is answering for it.",
+        refused.getMessage());
+  }
+
+  @Test
+  void anAccountsOwnPinIsRemovedWithoutSudo() {
+    assertEquals(
+        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sudo sail"
+            + " init --main sail@main'; otherwise something between this box and main is answering"
+            + " for it.",
+        MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.UNPRIVILEGED));
+    assertEquals(
+        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail init"
+            + " --main sail@main'; otherwise something between this box and main is answering for"
+            + " it.",
+        MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.PLAIN));
   }
 
   @Test
@@ -119,7 +156,8 @@ class MainHostKeyTest {
     var hostKey =
         new MainHostKey(
             new Keyscan("", "getaddrinfo maindevbox: Name or service not known\n", 1),
-            knownHosts());
+            knownHosts(),
+            OperatorCommand.SUDO);
 
     var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("maindevbox"));
 
@@ -135,7 +173,9 @@ class MainHostKeyTest {
   void aSilentKeyscanIsRefusedSayingNoKeyCameBack() {
     var hostKey =
         new MainHostKey(
-            new Keyscan("not a key line\n", "# maindevbox:22 banner\n", 1), knownHosts());
+            new Keyscan("not a key line\n", "# maindevbox:22 banner\n", 1),
+            knownHosts(),
+            OperatorCommand.SUDO);
 
     var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("maindevbox"));
 
@@ -150,7 +190,8 @@ class MainHostKeyTest {
     Files.createDirectories(knownHosts().getParent());
     Files.writeString(knownHosts(), "maindevbox ssh-rsa AAAA\n");
 
-    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts(), OperatorCommand.SUDO)
+        .pin("maindevbox");
 
     assertEquals("maindevbox ssh-rsa AAAA\n" + hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }
@@ -160,7 +201,8 @@ class MainHostKeyTest {
     Files.createDirectories(knownHosts().getParent());
     var revoked = "@revoked maindevbox " + MAIN.type() + " " + MAIN.blob() + "\n";
     Files.writeString(knownHosts(), revoked);
-    var hostKey = new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts());
+    var hostKey =
+        new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts(), OperatorCommand.SUDO);
 
     var refused = assertThrows(IllegalStateException.class, () -> hostKey.pin("maindevbox"));
 
@@ -181,7 +223,8 @@ class MainHostKeyTest {
     var revoked = "@revoked maindevbox " + IMPOSTOR.type() + " " + IMPOSTOR.blob() + "\n";
     Files.writeString(knownHosts(), revoked);
 
-    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts(), OperatorCommand.SUDO)
+        .pin("maindevbox");
 
     assertEquals(revoked + hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }
@@ -192,7 +235,8 @@ class MainHostKeyTest {
     var authority = "@cert-authority maindevbox " + IMPOSTOR.type() + " " + IMPOSTOR.blob() + "\n";
     Files.writeString(knownHosts(), authority);
 
-    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts()).pin("maindevbox");
+    new MainHostKey(new Keyscan(hashed(MAIN), "", 0), knownHosts(), OperatorCommand.SUDO)
+        .pin("maindevbox");
 
     assertEquals(authority + hashed(MAIN) + "\n", Files.readString(knownHosts()));
   }

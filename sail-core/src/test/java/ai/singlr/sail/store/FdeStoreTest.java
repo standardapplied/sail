@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Path;
 import org.junit.jupiter.api.AfterEach;
@@ -47,7 +48,7 @@ class FdeStoreTest {
 
     new FdePairingStore(db).put(fde.id(), "ssh-ed25519 AAAA sail-mast:ghost", "ghost-token");
 
-    store.remove(fde.id());
+    store.remove(fde.id(), OperatorCommand.PLAIN);
 
     assertTrue(store.byHandle("ghost").isEmpty());
     assertEquals(0L, count("api_tokens", fde.id()));
@@ -62,7 +63,7 @@ class FdeStoreTest {
     var boxes = new FdeBoxes(db);
     boxes.claim("ghost", "old-box");
 
-    store.remove(fde.id());
+    store.remove(fde.id(), OperatorCommand.PLAIN);
     store.add("ghost", null, null, "member");
 
     assertTrue(boxes.boxOf("ghost").isEmpty(), "a new FDE under the handle is tied to no box");
@@ -74,7 +75,7 @@ class FdeStoreTest {
     var keeper = store.add("keeper", null, null, "member");
     new TokenStore(db).create("keeper-token", "member", keeper.id(), null);
 
-    store.remove(ghost.id());
+    store.remove(ghost.id(), OperatorCommand.PLAIN);
 
     assertTrue(store.byHandle("keeper").isPresent());
     assertEquals(1L, count("api_tokens", keeper.id()));
@@ -84,7 +85,9 @@ class FdeStoreTest {
   void removeRefusesTheLastActiveAdmin() {
     var lone = store.add("lone", null, null, "admin");
 
-    var thrown = assertThrows(IllegalStateException.class, () -> store.remove(lone.id()));
+    var thrown =
+        assertThrows(
+            IllegalStateException.class, () -> store.remove(lone.id(), OperatorCommand.PLAIN));
 
     assertTrue(thrown.getMessage().contains("last active admin"));
     assertTrue(store.byHandle("lone").isPresent());
@@ -95,7 +98,7 @@ class FdeStoreTest {
     var first = store.add("first", null, null, "admin");
     store.add("second", null, null, "admin");
 
-    store.remove(first.id());
+    store.remove(first.id(), OperatorCommand.PLAIN);
 
     assertTrue(store.byHandle("first").isEmpty());
     assertEquals(1L, store.activeAdminCount());
@@ -106,7 +109,7 @@ class FdeStoreTest {
     var retired = store.add("retired", null, null, "admin");
     db.execute("UPDATE fdes SET status = 'disabled' WHERE id = ?", retired.id());
 
-    store.remove(retired.id());
+    store.remove(retired.id(), OperatorCommand.PLAIN);
 
     assertTrue(store.byHandle("retired").isEmpty());
   }
@@ -115,14 +118,15 @@ class FdeStoreTest {
   void removeAllowsTheLastMemberEvenWhenNoAdminsExist() {
     var member = store.add("solo", null, null, "member");
 
-    store.remove(member.id());
+    store.remove(member.id(), OperatorCommand.PLAIN);
 
     assertTrue(store.byHandle("solo").isEmpty());
   }
 
   @Test
   void removeThrowsForUnknownId() {
-    assertThrows(IllegalArgumentException.class, () -> store.remove("fde_missing"));
+    assertThrows(
+        IllegalArgumentException.class, () -> store.remove("fde_missing", OperatorCommand.PLAIN));
   }
 
   @Test

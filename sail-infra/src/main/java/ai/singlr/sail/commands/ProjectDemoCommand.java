@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.api.OperationsFactory;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.PlaceholderResolver;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
@@ -18,6 +19,8 @@ import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PairingTrust;
+import ai.singlr.sail.engine.ProjectDefinitions;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -25,6 +28,8 @@ import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -32,6 +37,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -53,6 +60,23 @@ public final class ProjectDemoCommand implements Runnable {
   @Option(names = "--git-token", description = "Access token for cloning private repos over HTTPS.")
   private String gitToken;
 
+  /** A provisioning that installs {@code workstationKey} in the container it creates. */
+  @FunctionalInterface
+  interface Provisioning {
+    void provision(Optional<SshPublicKey> workstationKey) throws Exception;
+  }
+
+  /**
+   * Runs {@code provisioning} with the workstation key read under {@link PairingTrust}, held until
+   * the key is installed, so a revocation scans the containers only after the key is in this one.
+   */
+  static void provisionTrusting(Path database, OperatorCommand operator, Provisioning provisioning)
+      throws Exception {
+    try (var held = PairingTrust.hold(database)) {
+      provisioning.provision(WorkstationIdentity.registered(operator));
+    }
+  }
+
   @Override
   public void run() {
     CliCommand.run(this::execute);
@@ -64,7 +88,8 @@ public final class ProjectDemoCommand implements Runnable {
     var out = System.out;
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException("Root privileges required. Run with: sudo sail project demo");
+      throw new IllegalStateException(
+          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("project demo"));
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();
@@ -79,18 +104,18 @@ public final class ProjectDemoCommand implements Runnable {
       if (state instanceof ContainerState.Running) {
         throw new IllegalStateException(
             "Demo project is already running."
-                + "\n  Get a shell:    sudo sail project shell "
-                + DEMO_PROJECT
-                + "\n  Destroy first:  sudo sail project destroy "
-                + DEMO_PROJECT);
+                + "\n  Get a shell:    "
+                + operator.sail("project shell " + DEMO_PROJECT)
+                + "\n  Destroy first:  "
+                + operator.sail("project destroy " + DEMO_PROJECT));
       }
       if (state instanceof ContainerState.Stopped) {
         throw new IllegalStateException(
             "Demo project exists but is stopped."
-                + "\n  Start it:       sudo sail project start "
-                + DEMO_PROJECT
-                + "\n  Destroy first:  sudo sail project destroy "
-                + DEMO_PROJECT);
+                + "\n  Start it:       "
+                + operator.sail("project start " + DEMO_PROJECT)
+                + "\n  Destroy first:  "
+                + operator.sail("project destroy " + DEMO_PROJECT));
       }
     }
 
@@ -102,12 +127,13 @@ public final class ProjectDemoCommand implements Runnable {
     }
 
     var yamlContent = loadDemoDefinition(out, ansi, operator);
-    var resolvedYaml = resolveAutoDetected(yamlContent, out, ansi);
+    var registered = WorkstationIdentity.registered(operator);
+    var config = resolveAutoDetected(yamlContent, registered.isPresent(), out, ansi, operator);
 
     var outputDir = Path.of(DEMO_PROJECT);
     var sailYamlPath = outputDir.resolve(SailPaths.PROJECT_DESCRIPTOR);
     Files.createDirectories(outputDir);
-    Files.writeString(sailYamlPath, resolvedYaml);
+    Files.writeString(sailYamlPath, YamlUtil.dumpToString(config.toMap()));
     if (!json) {
       out.println(ansi.string("  @|green \u2713|@ " + sailYamlPath + " written"));
     }
@@ -130,7 +156,6 @@ public final class ProjectDemoCommand implements Runnable {
       return;
     }
 
-    var config = SailYaml.fromMap(YamlUtil.parseMap(resolvedYaml));
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
     var shell = new ShellExecutor(false);
 
@@ -144,8 +169,13 @@ public final class ProjectDemoCommand implements Runnable {
     tracker.reset();
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new ProjectProvisioner(shell, tracker, listener, operator);
-    provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath);
+    provisionTrusting(
+        SailPaths.controlPlaneDb(),
+        operator,
+        workstationKey ->
+            new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
+                .provision(
+                    config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath));
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();
@@ -171,7 +201,7 @@ public final class ProjectDemoCommand implements Runnable {
             serverIp,
             serverUser,
             r.ipv4(),
-            "~/.ssh/id_ed25519",
+            WorkstationIdentity.identityFileFor(registered),
             operator,
             out,
             ansi);
@@ -211,7 +241,17 @@ public final class ProjectDemoCommand implements Runnable {
     return files.size();
   }
 
-  private String resolveAutoDetected(String yamlContent, PrintStream out, Ansi ansi) {
+  /**
+   * The demo definition with the box's git identity and the caller's own SSH key filled in. The
+   * registered workstation key is never written into it: every container trusts that key as the box
+   * holds it when provisioned, so a revoked key is never put back by a later apply.
+   */
+  private SailYaml resolveAutoDetected(
+      String yamlContent,
+      boolean workstationKeyRegistered,
+      PrintStream out,
+      Ansi ansi,
+      OperatorCommand operator) {
     var gitName = detectGitConfig("user.name");
     var gitEmail = detectGitConfig("user.email");
     var sshKey = detectSshPublicKey();
@@ -228,7 +268,7 @@ public final class ProjectDemoCommand implements Runnable {
       out.println(
           ansi.string(
               "    SSH key:   "
-                  + (sshKey != null
+                  + (sshKey != null || workstationKeyRegistered
                       ? "@|green found|@"
                       : "@|yellow not found \u2014 remote access won't work|@")));
       out.println();
@@ -265,15 +305,45 @@ public final class ProjectDemoCommand implements Runnable {
               + "\n    git config --global user.email you@example.com");
     }
 
-    var resolved = yamlContent.replace("${GIT_NAME}", gitName).replace("${GIT_EMAIL}", gitEmail);
+    return resolvedDefinition(yamlContent, gitName, gitEmail, sshKey, operator);
+  }
 
-    if (sshKey != null) {
-      resolved = resolved.replace("${SSH_PUBLIC_KEY}", sshKey);
-    } else {
-      resolved = resolved.replaceAll("\\s*- \\$\\{SSH_PUBLIC_KEY}", "");
+  /**
+   * The definition with the identity filled in, resolved as every descriptor is ({@link
+   * ProjectDefinitions#resolveForProvisioning}): in the parsed tree, so a quoted placeholder and an
+   * apostrophe in a name are fine, and under the same checks. With no key of the caller's own the
+   * key entry goes: step 6 trusts the registered workstation key whatever the definition says, and
+   * a key written into the definition would be put back by an apply after it was revoked.
+   */
+  static SailYaml resolvedDefinition(
+      String yamlContent,
+      String gitName,
+      String gitEmail,
+      String sshKey,
+      OperatorCommand operator) {
+    var text = sshKey == null ? withoutKeyEntry(yamlContent) : yamlContent;
+    return ProjectDefinitions.resolveForProvisioning(
+        text,
+        field ->
+            switch (field) {
+              case PlaceholderResolver.GIT_NAME -> gitName;
+              case PlaceholderResolver.GIT_EMAIL -> gitEmail;
+              case PlaceholderResolver.SSH_PUBLIC_KEY -> sshKey;
+              default -> null;
+            },
+        operator);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static String withoutKeyEntry(String yamlContent) {
+    var map = YamlUtil.parseMap(yamlContent);
+    if (map.get("ssh") instanceof Map<?, ?> ssh
+        && ssh.get("authorized_keys") instanceof List<?> keys) {
+      var token = PlaceholderResolver.token(PlaceholderResolver.SSH_PUBLIC_KEY);
+      ((Map<String, Object>) ssh)
+          .put("authorized_keys", keys.stream().filter(key -> !token.equals(key)).toList());
     }
-
-    return resolved;
+    return YamlUtil.dumpToString(map);
   }
 
   String detectGitConfig(String key) {
@@ -295,15 +365,21 @@ public final class ProjectDemoCommand implements Runnable {
   }
 
   static String detectSshPublicKey() {
-    var sshDir = SailPaths.invokingHome().resolve(".ssh");
+    return detectSshPublicKey(SailPaths.invokingHome().resolve(".ssh"));
+  }
 
+  /**
+   * The caller's own public key: the first of the usual files in {@code sshDir} that holds one. A
+   * file that holds no key, or cannot be read, counts as none.
+   */
+  static String detectSshPublicKey(Path sshDir) {
     for (var name : List.of("id_ed25519.pub", "id_rsa.pub", "id_ecdsa.pub")) {
-      var keyFile = sshDir.resolve(name);
-      if (Files.exists(keyFile)) {
-        try {
-          return Files.readString(keyFile).strip();
-        } catch (IOException ignored) {
-        }
+      try {
+        return SshPublicKey.parse(
+                new String(Files.readAllBytes(sshDir.resolve(name)), StandardCharsets.UTF_8))
+            .line();
+      } catch (IOException | IllegalArgumentException unusable) {
+        continue;
       }
     }
     return null;

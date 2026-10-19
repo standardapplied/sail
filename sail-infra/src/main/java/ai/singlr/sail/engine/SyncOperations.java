@@ -123,7 +123,7 @@ public final class SyncOperations {
   }
 
   public void prepare() {
-    SyncDatabase.prepare(db, host);
+    SyncDatabase.prepare(db, host, operator);
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
@@ -182,7 +182,7 @@ public final class SyncOperations {
       ProjectStore projects)
       throws Exception {
     DemoSeeder.unseed(db);
-    var settled = new ArrayList<>(NodeRound.begin(session, db, handle));
+    var settled = new ArrayList<>(NodeRound.begin(session, db, handle, operator));
     session.keep(NodeRound.kept(settled));
     var types = new ArrayList<SyncSession.TypeReport>();
     var failures = new ArrayList<SyncTransportException>();
@@ -248,9 +248,10 @@ public final class SyncOperations {
             SyncSession.open(
                 channel.reader(),
                 channel.writer(),
-                hello(config),
+                hello(config, operator),
                 SyncOperations::notice,
-                denial -> notice(denial.describe(operator)))) {
+                denial -> notice(denial.describe(operator)),
+                operator)) {
       return session.handle().filter(handle::equals).isPresent();
     } catch (Exception notWelcomed) {
       notice(Objects.toString(notWelcomed.getMessage(), notWelcomed.getClass().getSimpleName()));
@@ -267,9 +268,10 @@ public final class SyncOperations {
       return SyncSession.open(
           channel.reader(),
           channel.writer(),
-          hello(config),
+          hello(config, operator),
           SyncOperations::notice,
           denial -> notice(denial.describe(operator)),
+          operator,
           db);
     } catch (SyncTransportException e) {
       if (!"unreachable".equals(e.kind())) {
@@ -279,26 +281,29 @@ public final class SyncOperations {
       if (Strings.isBlank(said)) {
         throw e;
       }
-      throw new SyncTransportException("unreachable", explained(e.getMessage(), said, target), e);
+      throw new SyncTransportException(
+          "unreachable", explained(e.getMessage(), said, target, operator), e);
     }
   }
 
   /** A closed channel's failure with the transport's last word, and its remedy when it has one. */
-  static String explained(String failure, String said, String target) {
+  static String explained(String failure, String said, String target, OperatorCommand operator) {
     var message = failure + " ssh said: " + said;
     return HOST_KEY_FAILED.equals(said)
-        ? message + " " + MainHostKey.rebuiltRecovery(target)
+        ? message + " " + MainHostKey.rebuiltRecovery(target, operator)
         : message;
   }
 
-  private static SyncWire.Hello hello(SyncConfig config) {
-    return SyncWire.Hello.of(SailVersion.version(), requireBoxId(config));
+  private static SyncWire.Hello hello(SyncConfig config, OperatorCommand operator) {
+    return SyncWire.Hello.of(SailVersion.version(), requireBoxId(config, operator));
   }
 
-  private static String requireBoxId(SyncConfig config) {
+  private static String requireBoxId(SyncConfig config, OperatorCommand operator) {
     if (Strings.isBlank(config.boxId())) {
       throw new IllegalStateException(
-          "This box has no sync box id. Run 'sudo sail migrate' to assign one, then sync again.");
+          "This box has no sync box id. Run '"
+              + operator.sail("migrate")
+              + "' to assign one, then sync again.");
     }
     return config.boxId();
   }
@@ -443,7 +448,9 @@ public final class SyncOperations {
                   + created.size()
                   + " new project(s) synced from main: "
                   + String.join(", ", created)
-                  + ". Provision with 'sudo sail project apply <name>'.|@"));
+                  + ". Provision with '"
+                  + operator.sail("project apply <name>")
+                  + "'.|@"));
     }
     return created;
   }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.authority;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -53,7 +54,7 @@ public final class EraseAuthority {
       return Refusal.of(
           Refusal.Kind.ADMIN_ONLY,
           "Pruning by policy or a whole project is admin-only.",
-          "Name the specs you own by id: sail spec prune <id...>.");
+          "Name the specs you own by id: " + OperatorCommand.elsewhere("spec prune <id...>") + ".");
     }
     return Optional.empty();
   }
@@ -151,7 +152,9 @@ public final class EraseAuthority {
               + "' is "
               + spec.status().wire()
               + ": only archived, cancelled or deleted specs are pruned.",
-          "Archive it first: sail spec update " + spec.id() + " --status archived.");
+          "Archive it first: "
+              + OperatorCommand.elsewhere("spec update " + spec.id() + " --status archived")
+              + ".");
     }
     if (!actor.scope().unrestricted()
         && erasure.closure(List.of(new Erasure.Target(Erasure.SPEC, spec.id()))).stream()
@@ -185,6 +188,6 @@ public final class EraseAuthority {
     return Refusal.of(
         Refusal.Kind.NOT_PRUNABLE,
         "Run '" + unfinished.getFirst() + "' has not finished; a prune never erases work going on.",
-        "Stop it first: sail agent stop, then prune.");
+        "Stop it first: " + OperatorCommand.elsewhere("agent stop") + ", then prune.");
   }
 }

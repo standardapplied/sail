@@ -64,7 +64,7 @@ final class NodeSync {
    */
   static void syncOnce(OperatorCommand operator) throws Exception {
     if (new SyncCommand().call(operator) != 0) {
-      throw new IllegalStateException("sail sync round failed; see the log above");
+      throw new IllegalStateException("The sync round failed; see the log above.");
     }
   }
 

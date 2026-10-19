@@ -6,79 +6,97 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 
 class OperatorCommandTest {
 
-  @TempDir Path tempDir;
-
-  private Path systemUnit() throws Exception {
-    var unit = tempDir.resolve("sail-api.service");
-    Files.writeString(unit, "[Unit]\n");
-    return unit;
-  }
-
-  private Path homeOf(String user) {
-    return tempDir.resolve("home").resolve(user);
-  }
-
-  private void own(String user, String file, String content) throws Exception {
-    var path = homeOf(user).resolve(".sail").resolve(file);
-    Files.createDirectories(path.getParent());
-    Files.writeString(path, content);
-  }
-
   @Test
-  void aSudoCallerOnARootBoxTypesSudo() throws Exception {
-    var operator = OperatorCommand.of(true, "dev", this::homeOf, systemUnit());
+  void aSudoCallerTypesSudoWhateverTheBoxHasInstalled() {
+    var operator = OperatorCommand.of(true, "dev");
 
-    assertEquals(new OperatorCommand(true), operator);
+    assertEquals(OperatorCommand.SUDO, operator);
     assertEquals("sudo sail project connect web", operator.sail("project connect web"));
+    assertEquals("sudo sail sync", operator.sail("sync"));
   }
 
   @Test
-  void rootLoggedInDirectlyTypesPlainSail() throws Exception {
-    var unit = systemUnit();
-
-    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, null, this::homeOf, unit));
-    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, " ", this::homeOf, unit));
-    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, "root", this::homeOf, unit));
+  void rootLoggedInDirectlyTypesPlainSail() {
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, null));
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, " "));
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, "root"));
     assertEquals("sail upgrade", OperatorCommand.PLAIN.sail("upgrade"));
   }
 
   @Test
-  void anAccountRunningItsOwnSailTypesPlainSail() throws Exception {
-    assertEquals(
-        OperatorCommand.PLAIN, OperatorCommand.of(false, "dev", this::homeOf, systemUnit()));
+  void anAccountRunningItsOwnSailTypesPlainSailAndSudoOnlyForRoots() {
+    var operator = OperatorCommand.of(false, "dev");
+
+    assertEquals(OperatorCommand.UNPRIVILEGED, operator);
+    assertEquals("sail project connect web", operator.sail("project connect web"));
+    assertEquals("sudo sail project apply web", operator.sail("project apply web"));
   }
 
   @Test
-  void aSudoCallerWhoOwnsABoxInItsHomeTypesPlainSail() throws Exception {
-    own("dev", "host.yaml", "storage_backend: dir\n");
+  void aNonRootProcessTypesARootOnlyVerbWithSudoAndNothingElse() {
+    var own = OperatorCommand.UNPRIVILEGED;
 
-    assertEquals(
-        OperatorCommand.PLAIN, OperatorCommand.of(true, "dev", this::homeOf, systemUnit()));
+    for (var verb : OperatorCommand.ROOT_ONLY) {
+      assertEquals("sudo sail " + verb + " x", own.sail(verb + " x"));
+      assertEquals("sudo sail " + verb, own.sail(verb));
+    }
+    assertEquals("sail initialize", own.sail("initialize"));
+    assertEquals("sail hosts init", own.sail("hosts init"));
+    assertEquals("sail host keys", own.sail("host keys"));
   }
 
   @Test
-  void aSudoCallerOnABoxWithNoSystemUnitTypesPlainSail() {
+  void onlyRootLoggedInDirectlyTypesARootOnlyCommandPlain() {
+    assertEquals("sail host ssh-identity", OperatorCommand.PLAIN.sail("host ssh-identity"));
+    assertEquals("sail host service install", OperatorCommand.PLAIN.root("host service install"));
     assertEquals(
-        OperatorCommand.PLAIN,
-        OperatorCommand.of(true, "dev", this::homeOf, tempDir.resolve("no-unit")));
+        "sudo sail host service install",
+        OperatorCommand.UNPRIVILEGED.root("host service install"));
+    assertEquals(
+        "sudo sail host service install", OperatorCommand.SUDO.root("host service install"));
+    assertEquals("sudo sail host ssh-identity", OperatorCommand.SUDO.sail("host ssh-identity"));
+    assertEquals(
+        "sudo sail project resources set gamma",
+        OperatorCommand.UNPRIVILEGED.sail("project resources set gamma"));
   }
 
   @Test
-  void thisProcessReadsItsOwnAccount() {
-    var expected =
-        SailPaths.isRoot() && System.getenv("SUDO_USER") != null
-            ? OperatorCommand.of(
-                true, System.getenv("SUDO_USER"), SailPaths::accountHome, SailPaths.SYSTEM_UNIT)
-            : OperatorCommand.PLAIN;
+  void aReaderWhoReachedThisProcessThroughSudoTouchesItsFilesWithSudo() {
+    var removal = "ssh-keygen -R main";
 
-    assertEquals(expected, OperatorCommand.here());
+    assertEquals("sudo ssh-keygen -R main", OperatorCommand.SUDO.asThisProcess(removal));
+    assertEquals("ssh-keygen -R main", OperatorCommand.PLAIN.asThisProcess(removal));
+    assertEquals("ssh-keygen -R main", OperatorCommand.UNPRIVILEGED.asThisProcess(removal));
+  }
+
+  @Test
+  void aProcessThatCannotSeeItsReaderAnswersTheReadmesFormAsRoot() {
+    assertEquals(OperatorCommand.SUDO, OperatorCommand.unknownReader(true));
+    assertEquals(OperatorCommand.UNPRIVILEGED, OperatorCommand.unknownReader(false));
+    assertEquals(
+        OperatorCommand.elsewhere("spec update auth"),
+        OperatorCommand.unknownReader(true).sail("spec update auth"));
+  }
+
+  @Test
+  void rootLoggedInDirectlyNeverTypesSudo() {
+    var typesSudo =
+        assertThrows(IllegalArgumentException.class, () -> new OperatorCommand(true, true));
+
+    assertEquals("Root logged in directly never types sudo.", typesSudo.getMessage());
+  }
+
+  @Test
+  void thisProcessReadsItsOwnAccountAndItsPrivilege() {
+    assertEquals(
+        OperatorCommand.of(SailPaths.isRoot(), System.getenv("SUDO_USER")), OperatorCommand.here());
+    assertEquals(
+        OperatorCommand.unknownReader(SailPaths.isRoot()), OperatorCommand.unknownReader());
   }
 }

@@ -178,7 +178,7 @@ class RunCommandTest {
     return new CommandLine(
         new RunCommand(
             operator -> OperationsFactory.open(dbPath, operator),
-            new LocalIdentity(noGit, dbPath.resolveSibling("none.pub")),
+            operator -> new LocalIdentity(noGit, dbPath.resolveSibling("none.pub"), operator),
             dryRun -> shell,
             terminal));
   }
@@ -305,12 +305,13 @@ class RunCommandTest {
             null,
             null);
 
-    var task = RunCommand.specTask("acme", spec, "Implement the login flow.");
+    var task = RunCommand.specTask(spec, "Implement the login flow.");
 
     assertTrue(task.contains("Add auth"));
     assertTrue(task.contains("(id: auth)"));
     assertTrue(task.contains("Implement the login flow."));
-    assertTrue(task.contains("sail spec status acme auth done"));
+    assertTrue(task.endsWith("\n\nWhen complete, stop."), task);
+    assertFalse(task.contains("--status"), "sail manages a spec's status, never the agent");
   }
 
   @Test
@@ -343,10 +344,10 @@ class RunCommandTest {
             null,
             null);
 
-    var task = RunCommand.specTask("acme", spec, "   ");
+    var task = RunCommand.specTask(spec, "   ");
 
     assertTrue(task.contains("Add auth"));
-    assertTrue(task.contains("sail spec status acme auth done"));
+    assertTrue(task.endsWith("\n\nWhen complete, stop."), task);
   }
 
   private static String launchNotes(String harness, boolean interactive) {

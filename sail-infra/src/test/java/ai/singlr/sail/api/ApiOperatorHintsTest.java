@@ -15,12 +15,13 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 
 /**
- * Every operations-layer message that names a {@code sail} command for its operator to type. The
- * CLI runs this layer in-process, so a {@code sudo} caller on a root box reads it as that caller.
+ * Every operations-layer message that names a {@code sail} command for its operator to type,
+ * rendered for the operator the layer is given: the caller's own when the CLI runs it in-process,
+ * and {@link OperatorCommand#unknownReader} when sail-api answers a client it cannot see.
  */
 class ApiOperatorHintsTest {
 
-  private static final OperatorCommand SUDO = new OperatorCommand(true);
+  private static final OperatorCommand SUDO = OperatorCommand.SUDO;
   private static final OperatorCommand PLAIN = OperatorCommand.PLAIN;
 
   private static Spec spec(String assignee) {
@@ -72,7 +73,7 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
+            "If its descriptor is on this box, import it with 'sail migrate'. To create the"
                 + " project, run 'sail project apply -f <file>'.",
             "Claim it first: sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sail spec update auth --assignee ada",

@@ -137,7 +137,7 @@ public final class SailOperations implements HostOperations {
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    return CliOperator.of(syncOperations.configuration(), fdeStore);
+    return CliOperator.of(syncOperations.configuration(), fdeStore, operator);
   }
 
   @Override
@@ -463,7 +463,7 @@ public final class SailOperations implements HostOperations {
         reviewStore,
         runStore,
         projectStore,
-        ConnectEnvironment::detect,
+        ConnectEnvironment.detector(operator),
         syncScheduler,
         fdeStore,
         sessionYield,
@@ -579,7 +579,7 @@ public final class SailOperations implements HostOperations {
         reviewStore,
         runStore,
         null,
-        ConnectEnvironment::detect,
+        ConnectEnvironment.detector(operator),
         SyncScheduler.disabled(),
         null,
         SessionYield.NONE,
@@ -1525,12 +1525,17 @@ public final class SailOperations implements HostOperations {
           "Project '" + project + "' is running but has no IP address yet.",
           "Wait a moment and retry.");
     }
-    var environment = connectEnvironment.get();
+    ConnectEnvironment environment;
+    try {
+      environment = connectEnvironment.get();
+    } catch (IllegalStateException damagedKey) {
+      throw new ApiException(ErrorCode.PRECONDITION_FAILED, damagedKey.getMessage());
+    }
     if (Strings.isBlank(environment.serverIp())) {
       throw new ApiException(
           ErrorCode.SERVER_IP_NOT_CONFIGURED,
           "Server IP is not configured on this node.",
-          "Run: sudo sail host config set server-ip <your-server-ip>");
+          "Run: " + operator.sail("host config set server-ip <your-server-ip>"));
     }
     return new ConnectResponse(
         project,

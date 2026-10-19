@@ -86,8 +86,9 @@ public final class HostSyncCommand implements Runnable {
     }
     if (!ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail host sync "
-              + (asMain ? "--as-main" : "--main " + mainTarget));
+          "Root privileges required. Run with: "
+              + OperatorCommand.SUDO.sail(
+                  "host sync " + (asMain ? "--as-main" : "--main " + mainTarget)));
     }
 
     var taken =

@@ -9,6 +9,7 @@ import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -206,7 +207,9 @@ public final class SyncRpcServer {
       blobs.gc(BlobStore.Compaction.NONE, true);
     } catch (RuntimeException e) {
       System.err.println(
-          "  [sync] could not collect content a denial or erasure left; 'sail sync gc' frees it: "
+          "  [sync] could not collect content a denial or erasure left; '"
+              + OperatorCommand.elsewhere("sync gc")
+              + "' frees it: "
               + rootMessage(e));
     }
   }
@@ -487,7 +490,7 @@ public final class SyncRpcServer {
   }
 
   private String upgradeRemedy() {
-    return "upgrade to " + version + ": sail upgrade";
+    return "upgrade to " + version + ": " + OperatorCommand.elsewhere("upgrade");
   }
 
   private static SyncWire.Refuse helloRequired() {
@@ -580,8 +583,8 @@ public final class SyncRpcServer {
                     + "', not this box '"
                     + box
                     + "': one box syncs as each FDE. After retiring the old box, an admin runs"
-                    + " 'sail fde release-box "
-                    + handle
+                    + " '"
+                    + OperatorCommand.elsewhere("fde release-box " + handle)
                     + "' on main, and the next box to sync as it is recorded.");
   }
 

@@ -58,7 +58,7 @@ public final class ProjectRemoveServiceCommand implements Runnable {
     var out = System.out;
 
     var explicit = ProjectDefinitions.explicitFile(file);
-    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun);
+    var actor = ProjectMutations.catalogOperator(name, explicit, dryRun, operator);
     var config =
         SailYaml.fromMap(
             YamlUtil.parseMap(ProjectMutations.currentDefinition(name, explicit, operator)));

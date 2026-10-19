@@ -6,10 +6,12 @@
 package ai.singlr.sail.commands;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 import ai.singlr.sail.Sail;
 import ai.singlr.sail.common.DateTimeUtils;
@@ -17,6 +19,7 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncOperations;
@@ -105,6 +108,23 @@ class HostConfigSetCommandTest {
 
     var output = capturedOut.toString();
     assertNotNull(cmd);
+  }
+
+  @Test
+  void aNonRootCallerIsToldTheCommandAsTypedWithNoValueAndNoNull() {
+    assumeFalse(SailPaths.isRoot());
+    var cmd = new CommandLine(new Sail());
+    cmd.setErr(new PrintWriter(new StringWriter()));
+
+    assertNotEquals(0, cmd.execute("host", "config", "set", "ssh-public-key"));
+    assertNotEquals(0, cmd.execute("host", "config", "set", "server-ip", "10.0.0.7"));
+
+    var errOutput = capturedErr.toString();
+    assertTrue(
+        errOutput.contains("Run with: sudo sail host config set ssh-public-key\n"), errOutput);
+    assertTrue(
+        errOutput.contains("Run with: sudo sail host config set server-ip 10.0.0.7\n"), errOutput);
+    assertFalse(errOutput.contains("null"), errOutput);
   }
 
   @Test
@@ -412,7 +432,8 @@ class HostConfigSetCommandTest {
   void resolveWorkstationKeyPrefersAnExplicitValueOverDetection() {
     assertEquals(
         KEY_A,
-        HostConfigSetCommand.resolveWorkstationKey(KEY_A, List.of(SshPublicKey.parse(KEY_B)))
+        HostConfigSetCommand.resolveWorkstationKey(
+                KEY_A, List.of(SshPublicKey.parse(KEY_B)), OperatorCommand.PLAIN)
             .line());
   }
 
@@ -420,7 +441,8 @@ class HostConfigSetCommandTest {
   void resolveWorkstationKeyAutoPicksTheSoleDetectedKey() {
     assertEquals(
         KEY_A,
-        HostConfigSetCommand.resolveWorkstationKey(null, List.of(SshPublicKey.parse(KEY_A)))
+        HostConfigSetCommand.resolveWorkstationKey(
+                null, List.of(SshPublicKey.parse(KEY_A)), OperatorCommand.PLAIN)
             .line());
   }
 
@@ -429,7 +451,8 @@ class HostConfigSetCommandTest {
     var error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> HostConfigSetCommand.resolveWorkstationKey(null, List.of()));
+            () ->
+                HostConfigSetCommand.resolveWorkstationKey(null, List.of(), OperatorCommand.PLAIN));
     assertTrue(error.getMessage().contains("public key"));
   }
 
@@ -440,7 +463,9 @@ class HostConfigSetCommandTest {
             IllegalArgumentException.class,
             () ->
                 HostConfigSetCommand.resolveWorkstationKey(
-                    null, List.of(SshPublicKey.parse(KEY_A), SshPublicKey.parse(KEY_B))));
+                    null,
+                    List.of(SshPublicKey.parse(KEY_A), SshPublicKey.parse(KEY_B)),
+                    OperatorCommand.PLAIN));
     assertTrue(error.getMessage().toLowerCase().contains("multiple"));
   }
 
@@ -448,7 +473,9 @@ class HostConfigSetCommandTest {
   void resolveWorkstationKeyRejectsAMalformedExplicitValue() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> HostConfigSetCommand.resolveWorkstationKey("not a real key", List.of()));
+        () ->
+            HostConfigSetCommand.resolveWorkstationKey(
+                "not a real key", List.of(), OperatorCommand.PLAIN));
   }
 
   @Test
@@ -556,7 +583,7 @@ class HostConfigSetCommandTest {
     injectFields(cmd, "tokenFile", source);
     injectFields(cmd, "json", true);
 
-    cmd.applySlackToken();
+    cmd.applySlackToken(OperatorCommand.PLAIN);
 
     var output = capturedOut.toString();
     assertTrue(output.contains("updated"));
@@ -587,7 +614,7 @@ class HostConfigSetCommandTest {
       var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
       var cmd = slackTokenCommand(shell, tmp.resolve("home"));
 
-      cmd.applySlackToken();
+      cmd.applySlackToken(OperatorCommand.PLAIN);
 
       var output = capturedOut.toString();
       assertTrue(output.contains("xoxb-"), "must warn about the unexpected token prefix");
@@ -611,7 +638,9 @@ class HostConfigSetCommandTest {
       ConsoleHelper.resetStdin();
       var cmd = slackTokenCommand(new ScriptedShellExecutor(), tmp.resolve("home"));
 
-      var ex = assertThrows(IllegalArgumentException.class, cmd::applySlackToken);
+      var ex =
+          assertThrows(
+              IllegalArgumentException.class, () -> cmd.applySlackToken(OperatorCommand.PLAIN));
       assertTrue(ex.getMessage().contains("--token-file"));
     } finally {
       System.setIn(originalIn);
@@ -625,7 +654,9 @@ class HostConfigSetCommandTest {
     var cmd = slackTokenCommand(new ScriptedShellExecutor(), tmp.resolve("home"));
     injectFields(cmd, "tokenFile", tmp.resolve("absent"));
 
-    var ex = assertThrows(IllegalArgumentException.class, cmd::applySlackToken);
+    var ex =
+        assertThrows(
+            IllegalArgumentException.class, () -> cmd.applySlackToken(OperatorCommand.PLAIN));
     assertTrue(ex.getMessage().contains("not found"));
   }
 

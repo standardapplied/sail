@@ -105,7 +105,7 @@ public final class RunCommand implements Runnable {
   @Mixin private IgnoredFileOption file;
 
   private final Function<OperatorCommand, HostOperations> operations;
-  private final LocalIdentity identity;
+  private final Function<OperatorCommand, LocalIdentity> identity;
   private final Function<Boolean, ShellExec> shells;
   private final DispatchOperations.AgentLauncher terminal;
   private SailEventPublisher eventPublisher;
@@ -113,7 +113,7 @@ public final class RunCommand implements Runnable {
   public RunCommand() {
     this(
         OperationsFactory::open,
-        LocalIdentity.detect(),
+        LocalIdentity::detect,
         ShellExecutor::new,
         DispatchOperations.terminalLauncher());
   }
@@ -125,7 +125,7 @@ public final class RunCommand implements Runnable {
    */
   RunCommand(
       Function<OperatorCommand, HostOperations> operations,
-      LocalIdentity identity,
+      Function<OperatorCommand, LocalIdentity> identity,
       Function<Boolean, ShellExec> shells,
       DispatchOperations.AgentLauncher terminal) {
     this.operations = operations;
@@ -152,7 +152,7 @@ public final class RunCommand implements Runnable {
     try (var operations = this.operations.apply(operator)) {
       config =
           ProjectDefinitions.definitionWithBoxIdentity(
-              operations.catalog(), name, identity, operator);
+              operations.catalog(), name, identity.apply(operator), operator);
     }
 
     var shell = shells.apply(dryRun);
@@ -180,7 +180,7 @@ public final class RunCommand implements Runnable {
                   .specContent(nextSpec.id())
                   .map(SpecStore.SpecContent::body)
                   .orElse("");
-          task = specTask(name, nextSpec, specBody);
+          task = specTask(nextSpec, specBody);
           if (!json) {
             System.out.println(Ansi.AUTO.string("  @|bold Spec:|@ " + nextSpec.id()));
             System.out.println(Ansi.AUTO.string("  @|faint " + nextSpec.title() + "|@"));
@@ -499,9 +499,10 @@ public final class RunCommand implements Runnable {
 
   /**
    * Builds the agent task prompt for a pending spec: its title and id, the body (falling back to
-   * the title when empty), and the instruction to mark it done and pick up the next one.
+   * the title when empty), and the instruction to stop when done: a run is one spec's, and sail
+   * decides what runs next.
    */
-  static String specTask(String project, Spec spec, String body) {
+  static String specTask(Spec spec, String body) {
     var description = !body.isBlank() ? body : spec.title();
     return "Your current spec: \""
         + spec.title()
@@ -509,11 +510,7 @@ public final class RunCommand implements Runnable {
         + spec.id()
         + ").\n\n"
         + description
-        + "\n\nWhen complete, run `sail spec status "
-        + project
-        + " "
-        + spec.id()
-        + " done`. Then pick up the next pending spec and continue working.";
+        + "\n\nWhen complete, stop.";
   }
 
   private void autoRollback(ShellExec shell, String snapshotLabel, int exitCode) {

@@ -122,7 +122,7 @@ public final class OperationsFactory {
             new ReviewStore(db),
             new RunStore(db),
             projectStore,
-            ConnectEnvironment::detect,
+            ConnectEnvironment.detector(operator),
             scheduler,
             new FdeStore(db),
             sessionYield,

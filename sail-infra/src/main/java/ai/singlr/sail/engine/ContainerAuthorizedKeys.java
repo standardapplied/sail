@@ -30,7 +30,7 @@ public final class ContainerAuthorizedKeys {
       Pattern.compile("^[^:]+:[^:]*:(\\d+):(\\d+):[^:]*:(/home/[^/:.][^/:]*)/?:[^:]*$");
 
   /** An {@code authorized_keys} options field: unquoted characters, escapes and quoted strings. */
-  private static final String OPTIONS = "(?:[^\\s\"\\\\]|\\\\.|\"(?:[^\"\\\\]|\\\\.)*\")+";
+  static final String OPTIONS = "(?:[^\\s\"\\\\]|\\\\.|\"(?:[^\"\\\\]|\\\\.)*\")+";
 
   private final ShellExec shell;
 

@@ -190,7 +190,7 @@ class ReviewNarrationTest {
         "The definition of project 'acme' in the catalog could not be read: while parsing a flow"
             + " sequence in reader, line 1, column 8: agent: [unterminated expected ',' or ']', but"
             + " got <stream end> in reader, line 2, column 1:; fix the project's definition with"
-            + " `sail project edit`, then re-dispatch with --restart",
+            + " `sudo sail project edit`, then re-dispatch with --restart",
         reason,
         "all of what the parser said, where and what, as one line: the lines that only point"
             + " under a snippet say nothing and are left out");

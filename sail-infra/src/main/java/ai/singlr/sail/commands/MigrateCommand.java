@@ -100,7 +100,7 @@ public final class MigrateCommand implements Runnable {
             dbPath,
             SailPaths.binaryPath(),
             SailPaths.findInstalledBinary()),
-        ON_THIS_BOX,
+        onThisBox(operator),
         operator);
   }
 
@@ -166,8 +166,10 @@ public final class MigrateCommand implements Runnable {
    */
   record Convergence(BiConsumer<Sqlite, Boolean> imports, BiConsumer<Sqlite, Boolean> host) {}
 
-  private static final Convergence ON_THIS_BOX =
-      new Convergence(MigrateCommand::importAll, MigrateCommand::convergeHost);
+  private static Convergence onThisBox(OperatorCommand operator) {
+    return new Convergence(
+        MigrateCommand::importAll, (db, jsonOutput) -> convergeHost(db, jsonOutput, operator));
+  }
 
   static List<DataMigrator.Run> runMigrations(
       Path dbPath,
@@ -205,13 +207,13 @@ public final class MigrateCommand implements Runnable {
     seedDemo(db, jsonOutput);
   }
 
-  private static void convergeHost(Sqlite db, boolean jsonOutput) {
-    relocateHostConfig(jsonOutput);
-    assignBoxId(jsonOutput);
-    syncAuthorizedKeys(db, jsonOutput);
-    revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput);
+  private static void convergeHost(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
+    relocateHostConfig(jsonOutput, operator);
+    assignBoxId(jsonOutput, operator);
+    syncAuthorizedKeys(db, jsonOutput, operator);
+    revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
     ensureSshdKeepalive(jsonOutput);
-    convergeContainers(jsonOutput);
+    convergeContainers(jsonOutput, operator);
     ensurePtyHostService(jsonOutput);
   }
 
@@ -357,7 +359,7 @@ public final class MigrateCommand implements Runnable {
    * No-op unless this host is provisioned (shared dir exists), the process is root, a legacy file
    * exists, and the shared copy does not.
    */
-  private static void relocateHostConfig(boolean jsonOutput) {
+  private static void relocateHostConfig(boolean jsonOutput, OperatorCommand operator) {
     var legacy = SailPaths.sailDir().resolve("host.yaml");
     var shared = Path.of(SshIdentityProvisioner.DEFAULT_DATA_DIR).resolve("host.yaml");
     if (!SailPaths.isRoot()
@@ -383,7 +385,9 @@ public final class MigrateCommand implements Runnable {
       System.err.println(
           "  host.yaml relocation failed: "
               + e.getMessage()
-              + ". Converge manually with 'sudo sail host ssh-identity'.");
+              + ". Converge manually with '"
+              + operator.sail("host ssh-identity")
+              + "'.");
     }
   }
 
@@ -394,7 +398,7 @@ public final class MigrateCommand implements Runnable {
    * upgrade-convergence rationale as {@link #relocateHostConfig}; quiet when {@code host.yaml} is
    * not writable, since an unprivileged upgrade resolves the same value at runtime.
    */
-  private static void assignBoxId(boolean jsonOutput) {
+  private static void assignBoxId(boolean jsonOutput, OperatorCommand operator) {
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
       return;
@@ -414,7 +418,9 @@ public final class MigrateCommand implements Runnable {
       System.err.println(
           "  sync box id not persisted: "
               + e.getMessage()
-              + ". Run 'sudo sail migrate' to write it; sync uses the hostname until then.");
+              + ". Run '"
+              + operator.sail("migrate")
+              + "' to write it; sync uses the hostname until then.");
     }
   }
 
@@ -479,7 +485,7 @@ public final class MigrateCommand implements Runnable {
    * bind-mount source must exist here, or the re-pointed mounts would strand on a missing directory
    * until the server start materializes it.
    */
-  private static void convergeContainers(boolean jsonOutput) {
+  private static void convergeContainers(boolean jsonOutput, OperatorCommand operator) {
     if (!SailPaths.isRoot()) {
       return;
     }
@@ -514,8 +520,8 @@ public final class MigrateCommand implements Runnable {
                 + name
                 + " not converged: "
                 + e.getMessage()
-                + ". Converge with 'sudo sail project apply "
-                + name
+                + ". Converge with '"
+                + operator.sail("project apply " + name)
                 + "'.");
       }
     }
@@ -550,7 +556,7 @@ public final class MigrateCommand implements Runnable {
    * guaranteed to run new-binary code on every upgrade path. Quiet when there is nothing to do
    * (unprovisioned host, non-root) and never fatal.
    */
-  private static void syncAuthorizedKeys(Sqlite db, boolean jsonOutput) {
+  private static void syncAuthorizedKeys(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
     try {
       if (new AuthorizedKeysSync().sync(db) instanceof AuthorizedKeysSync.Synced synced
           && !jsonOutput) {
@@ -560,7 +566,9 @@ public final class MigrateCommand implements Runnable {
       System.err.println(
           "  authorized_keys sync failed: "
               + e.getMessage()
-              + ". Converge manually with 'sudo sail host keys sync'.");
+              + ". Converge manually with '"
+              + operator.sail("host keys sync")
+              + "'.");
     }
   }
 
@@ -568,13 +576,14 @@ public final class MigrateCommand implements Runnable {
    * Runs {@link OwnBoxPairings} once, saying each pairing it revoked as it is revoked. A revocation
    * that fails is said and left unrecorded, so the next {@code migrate} finishes it.
    */
-  static void revokeOtherFdesPairings(Sqlite db, Supplier<FdeCommand.Box> box, boolean jsonOutput) {
+  static void revokeOtherFdesPairings(
+      Sqlite db, Supplier<FdeCommand.Box> box, boolean jsonOutput, OperatorCommand operator) {
     Consumer<String> said =
         jsonOutput
             ? note -> {}
             : note -> System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + note));
     try {
-      new DataMigrator(db, List.of(new OwnBoxPairings(box, said)))
+      new DataMigrator(db, List.of(new OwnBoxPairings(box, said, operator)))
           .run(ProjectRegistry.loadFromDisk(), DataMigration.Prompter.NON_INTERACTIVE);
     } catch (RuntimeException failure) {
       System.err.println(
@@ -582,7 +591,9 @@ public final class MigrateCommand implements Runnable {
               "  @|yellow ⚠|@ Connect codes of FDEs other than this box's own are not all"
                   + " revoked: "
                   + failure.getMessage()
-                  + " Run 'sudo sail migrate' again."));
+                  + " Run '"
+                  + operator.sail("migrate")
+                  + "' again."));
     }
   }
 

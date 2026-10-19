@@ -72,10 +72,10 @@ class ScopedSyncServerTest {
       fdes.add(scoped, scoped, scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
-    fdes.grant("nia", "alpha");
-    fdes.grant("sam", "alpha");
-    fdes.grant("sam", "beta");
-    fdes.grant("zed", "beta");
+    fdes.grant("nia", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("sam", "beta", OperatorCommand.PLAIN);
+    fdes.grant("zed", "beta", OperatorCommand.PLAIN);
     Acting.system(
         () -> {
           var specs = new SpecStore(mainDb);
@@ -179,6 +179,7 @@ class ScopedSyncServerTest {
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, "node-box"),
             notice -> {},
             ignored -> {},
+            OperatorCommand.PLAIN,
             nodeDb)) {
       var replicas = SyncedEntities.replicas(nodeDb, "node-box", "nia");
       for (var entity : SyncedEntities.all()) {

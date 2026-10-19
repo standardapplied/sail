@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.ClientConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.RuntimeMode;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
@@ -81,7 +82,10 @@ public final class EnrollCommand implements Runnable {
       callback.awaitToken(Duration.ofSeconds(timeoutSeconds), tunnel::ensureAlive);
       System.out.println(
           Ansi.AUTO.string(
-              "  @|green ✓|@ Passkey enrolled for " + ticket.fde() + ". Sign in with: sail login"));
+              "  @|green ✓|@ Passkey enrolled for "
+                  + ticket.fde()
+                  + ". Sign in with: "
+                  + OperatorCommand.client("login")));
     }
   }
 
@@ -144,21 +148,27 @@ public final class EnrollCommand implements Runnable {
         + result.exitCode()
         + ")."
         + (stderr.isEmpty() ? "" : "\n  ssh said: " + stderr)
-        + "\n  Not registered yet? An admin runs: sudo sail fde add <handle> --key \"<your pubkey>\"";
+        + "\n  Not registered yet? An admin runs: "
+        + OperatorCommand.elsewhere("fde add <handle> --key \"<your pubkey>\"");
   }
 
   private static String unexpectedTicket(String stdout) {
     return "The box returned an unexpected enrollment ticket response:\n"
         + stdout.strip()
-        + "\n  The box may be running an older sail — upgrade it with: sail host update";
+        + "\n  The box may be running an older sail — upgrade it with: "
+        + OperatorCommand.elsewhere("upgrade");
   }
 
   private static ClientConfig requireThinClient() throws Exception {
     if (!(RuntimeMode.detect() instanceof RuntimeMode.Client client)) {
       throw new IllegalStateException(
-          "'sail enroll' is the thin-client flow, and this box is not configured as one."
-              + "\n  On the box itself, mint a ticket with: sail fde enroll <handle>"
-              + "\n  On your laptop, point the CLI at the box first: sail init <host>");
+          "'"
+              + OperatorCommand.client("enroll")
+              + "' is the thin-client flow, and this box is not configured as one."
+              + "\n  On the box itself, mint a ticket with: "
+              + OperatorCommand.elsewhere("fde enroll <handle>")
+              + "\n  On your laptop, point the CLI at the box first: "
+              + OperatorCommand.client("client <host>"));
     }
     if (!client.config().gatewayEnabled()) {
       throw new IllegalStateException(
