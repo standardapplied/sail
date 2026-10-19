@@ -11,11 +11,16 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.PairingTrust;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine;
 
@@ -63,5 +68,27 @@ class ProjectDemoCommandTest {
       assertNotNull(key);
       assertTrue(key.startsWith("ssh-"));
     }
+  }
+
+  @Test
+  @Timeout(60)
+  void theDemoReadsTheWorkstationKeyOnlyWhileNoPairingIsMadeOrRevoked(@TempDir Path dir)
+      throws Exception {
+    var database = dir.resolve("sail.db");
+    var provisioned = new CountDownLatch(1);
+    var demo =
+        new FutureTask<Void>(
+            () -> {
+              ProjectDemoCommand.provisionTrusting(database, key -> provisioned.countDown());
+              return null;
+            });
+
+    try (var pairing = PairingTrust.hold(database)) {
+      FileMutexTest.awaitParked(Thread.ofPlatform().start(demo));
+      assertEquals(1, provisioned.getCount(), "the demo waits before it reads the key");
+    }
+
+    demo.get();
+    assertEquals(0, provisioned.getCount());
   }
 }

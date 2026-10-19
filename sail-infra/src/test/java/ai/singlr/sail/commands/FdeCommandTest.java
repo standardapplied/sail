@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.auth.EnrollmentTickets;
 import ai.singlr.sail.auth.Passkeys;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
@@ -2326,5 +2327,20 @@ class FdeCommandTest {
         message.contains(Passkeys.encodeId("alpha-one".getBytes(StandardCharsets.UTF_8))),
         "candidates list full ids so one is always copy-pasteable");
     assertTrue(message.contains(Passkeys.encodeId("alpha-two".getBytes(StandardCharsets.UTF_8))));
+  }
+
+  @Test
+  void aKeyChangeByANonRootCallerIsToldToSyncWithSudoEvenWherePlainSailRuns() {
+    assertEquals(
+        "  @|faint Run 'sudo sail host keys sync' to apply.|@",
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NeedsRoot(), OperatorCommand.PLAIN));
+  }
+
+  @Test
+  void anUnprovisionedHostIsToldTheCallersOwnCommand() {
+    assertEquals(
+        "  @|faint SSH-key login is not provisioned on this host. Run 'sail host ssh-identity' to"
+            + " enable it.|@",
+        FdeCommand.keysOutcome(new AuthorizedKeysSync.NotProvisioned(), OperatorCommand.PLAIN));
   }
 }

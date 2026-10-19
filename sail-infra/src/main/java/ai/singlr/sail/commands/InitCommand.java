@@ -158,7 +158,7 @@ public final class InitCommand implements Runnable {
     name.adopt(box.identity());
     mail.adopt(box.identity());
     if (intent instanceof InitIntent.Main) {
-      printMainNextSteps();
+      printMainNextSteps(box.operator());
     }
   }
 
@@ -336,7 +336,7 @@ public final class InitCommand implements Runnable {
     return args.toArray(String[]::new);
   }
 
-  private void printMainNextSteps() {
+  private static void printMainNextSteps(OperatorCommand operator) {
     var out = System.out;
     out.println();
     out.println(
@@ -348,8 +348,7 @@ public final class InitCommand implements Runnable {
     out.println(
         Ansi.AUTO.string(
             "    @|cyan "
-                + OperatorCommand.elsewhere(
-                    "fde add mady --role member --key \"…\" --main-host-key SHA256:…")
+                + operator.sail("fde add mady --role member --key \"…\" --main-host-key SHA256:…")
                 + "|@"));
   }
 

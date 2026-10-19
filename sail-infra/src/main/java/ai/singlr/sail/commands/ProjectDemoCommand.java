@@ -18,6 +18,7 @@ import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.GitCredentials;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.engine.ProjectPhase;
 import ai.singlr.sail.engine.ProjectProvisioner;
 import ai.singlr.sail.engine.ProvisionListener;
@@ -26,6 +27,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
 import ai.singlr.sail.engine.WorkstationIdentity;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +35,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -53,6 +56,22 @@ public final class ProjectDemoCommand implements Runnable {
 
   @Option(names = "--git-token", description = "Access token for cloning private repos over HTTPS.")
   private String gitToken;
+
+  /** A provisioning that installs {@code workstationKey} in the container it creates. */
+  @FunctionalInterface
+  interface Provisioning {
+    void provision(Optional<SshPublicKey> workstationKey) throws Exception;
+  }
+
+  /**
+   * Runs {@code provisioning} with the workstation key read under {@link PairingTrust}, held until
+   * the key is installed, so a revocation scans the containers only after the key is in this one.
+   */
+  static void provisionTrusting(Path database, Provisioning provisioning) throws Exception {
+    try (var held = PairingTrust.hold(database)) {
+      provisioning.provision(WorkstationIdentity.registered());
+    }
+  }
 
   @Override
   public void run() {
@@ -146,10 +165,12 @@ public final class ProjectDemoCommand implements Runnable {
     tracker.reset();
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner =
-        new ProjectProvisioner(
-            shell, tracker, listener, WorkstationIdentity.registered(), operator);
-    provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath);
+    provisionTrusting(
+        SailPaths.controlPlaneDb(),
+        workstationKey ->
+            new ProjectProvisioner(shell, tracker, listener, workstationKey, operator)
+                .provision(
+                    config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath));
 
     if (json) {
       var map = new LinkedHashMap<String, Object>();

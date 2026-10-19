@@ -359,20 +359,23 @@ public final class FdeCommand implements Runnable {
   }
 
   private static void applyKeys(Sqlite db, OperatorCommand operator) throws Exception {
-    switch (new AuthorizedKeysSync().sync(db)) {
-      case AuthorizedKeysSync.Synced synced ->
-          System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + synced.describe()));
+    System.out.println(Ansi.AUTO.string(keysOutcome(new AuthorizedKeysSync().sync(db), operator)));
+  }
+
+  /**
+   * The line {@code outcome} prints. Only a non-root caller is told to sync, so its remedy carries
+   * {@code sudo} whatever this box's plain {@code sail} would do.
+   */
+  static String keysOutcome(AuthorizedKeysSync.Outcome outcome, OperatorCommand operator) {
+    return switch (outcome) {
+      case AuthorizedKeysSync.Synced synced -> "  @|green ✓|@ " + synced.describe();
       case AuthorizedKeysSync.NeedsRoot _ ->
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|faint Run '" + operator.sail("host keys sync") + "' to apply.|@"));
+          "  @|faint Run '" + OperatorCommand.SUDO.sail("host keys sync") + "' to apply.|@";
       case AuthorizedKeysSync.NotProvisioned _ ->
-          System.out.println(
-              Ansi.AUTO.string(
-                  "  @|faint SSH-key login is not provisioned on this host. Run '"
-                      + operator.sail("host ssh-identity")
-                      + "' to enable it.|@"));
-    }
+          "  @|faint SSH-key login is not provisioned on this host. Run '"
+              + operator.sail("host ssh-identity")
+              + "' to enable it.|@";
+    };
   }
 
   /** This box's SSH host key, which a connect code pins and a joining node pinned. */

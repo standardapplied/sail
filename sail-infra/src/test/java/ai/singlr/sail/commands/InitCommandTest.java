@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Main;
 import ai.singlr.sail.engine.LocalIdentity;
@@ -29,6 +30,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Model.CommandSpec;
@@ -43,6 +46,7 @@ class InitCommandTest {
   private String refusal;
   private boolean root = true;
   private String sudoUser = "dev";
+  private OperatorCommand operator = OperatorCommand.PLAIN;
   private Path hostConfig;
 
   @BeforeEach
@@ -70,7 +74,7 @@ class InitCommandTest {
                         this::homeOf,
                         identity,
                         answers::get,
-                        OperatorCommand.PLAIN,
+                        operator,
                         this::runStep)));
     command.setExecutionExceptionHandler(
         (failure, line, parsed) -> {
@@ -147,6 +151,38 @@ class InitCommandTest {
             "HostSshIdentityCommand",
             "HostSyncCommand --as-main --handle ada --name Root Person --email root@box"),
         ran);
+  }
+
+  @ParameterizedTest
+  @CsvSource({"false, sail", "true, sudo sail"})
+  void mainsNextStepsTellAnotherBoxTheReadmesFormAndThisBoxItsCallersOwn(
+      boolean sudo, String here) {
+    operator = new OperatorCommand(sudo);
+    var printed = new ByteArrayOutputStream();
+    var originalOut = System.out;
+    System.setOut(new PrintStream(printed, true, StandardCharsets.UTF_8));
+    try {
+      assertEquals(0, init("--as-main", "--handle", "ada"));
+    } finally {
+      System.setOut(originalOut);
+    }
+
+    var nl = System.lineSeparator();
+    assertTrue(
+        printed
+            .toString(StandardCharsets.UTF_8)
+            .endsWith(
+                nl
+                    + "  ✓ This box is the org's main and ready."
+                    + nl
+                    + "  Add each engineer once they send you the line their 'sudo sail init"
+                    + " --main' printed, e.g.:"
+                    + nl
+                    + "    "
+                    + here
+                    + " fde add mady --role member --key \"…\" --main-host-key SHA256:…"
+                    + nl),
+        printed.toString(StandardCharsets.UTF_8));
   }
 
   @Test
