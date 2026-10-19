@@ -145,8 +145,10 @@ public final class InitCommand implements Runnable {
     var fde = intent instanceof InitIntent.Main ? mainHandle(box, provisioned) : handle;
     var name = gitChoice(box, PlaceholderResolver.GIT_NAME, fullName, "Your full name", "--name");
     var mail = gitChoice(box, PlaceholderResolver.GIT_EMAIL, email, "Your email", "--email");
-    requireValid(name, NameValidator::requireValidDisplayName, "--name");
-    requireValid(mail, NameValidator::requireValidEmail, "--email");
+    if (intent instanceof InitIntent.Main) {
+      requireValid(name, NameValidator::requireValidDisplayName, "--name");
+      requireValid(mail, NameValidator::requireValidEmail, "--email");
+    }
 
     System.out.println(Ansi.AUTO.string("  @|bold Setting up this box...|@"));
     if (provisioned) {
@@ -223,7 +225,10 @@ public final class InitCommand implements Runnable {
     }
   }
 
-  /** Refuses a roster value {@code rule} rejects before any step, naming {@code option}. */
+  /**
+   * Refuses, before any step, a roster value main's {@code host sync} would refuse ({@code rule}),
+   * naming {@code option}; a node's value is main's to take when its admin adds the FDE.
+   */
   private static void requireValid(GitChoice choice, Consumer<String> rule, String option) {
     try {
       rule.accept(choice.value());

@@ -119,7 +119,8 @@ public final class HostSyncCommand implements Runnable {
       throw new IllegalArgumentException(
           "--handle names main's own FDE, so it goes with --as-main. A node takes its handle"
               + " when it joins: "
-              + operator.sail("join " + mainTarget + " --handle " + handle));
+              + operator.sail(
+                  "join " + (mainTarget == null ? "<main>" : mainTarget) + " --handle " + handle));
     }
     NameValidator.requireValidFdeHandle(handle);
     if (displayName != null) {
@@ -141,7 +142,7 @@ public final class HostSyncCommand implements Runnable {
    * #configure}) and, when {@code own} is not {@code null}, that sync handle ({@link #withHandle}),
    * as one change of its identity ({@link HandleChange}) in its database {@code db}, so a box
    * becoming main stamps its unstamped runs as its own; then puts that FDE on the roster ({@link
-   * FdeCommand#enrol}). Returns the role it now has.
+   * FdeCommand#enrol}). Returns the role it now has and the roster line.
    */
   static Taken takeRole(
       Path hostYamlPath,

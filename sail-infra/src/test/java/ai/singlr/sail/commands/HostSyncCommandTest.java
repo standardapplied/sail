@@ -290,6 +290,8 @@ class HostSyncCommandTest {
                   + " when it joins: "),
           nodeRefusal);
       assertTrue(nodeRefusal.endsWith("sail join sail@m --handle ada"), nodeRefusal);
+      var roleless = refusalOf("--handle", "ada");
+      assertTrue(roleless.endsWith("sail join <main> --handle ada"), roleless);
       assertEquals(
           "--name and --email describe the FDE --handle names. Pass --handle <handle> too.",
           refusalOf("--as-main", "--email", "ada@example.com"));

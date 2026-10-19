@@ -93,11 +93,7 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
     }
 
-    if ((containerPresent || purge)
-        && !yes
-        && !dryRun
-        && !ConsoleHelper.confirmDestructive(
-            confirmPrompt(name, purge), "Not destroyed", "--yes")) {
+    if ((containerPresent || purge) && !confirmed(yes, dryRun, name, purge)) {
       System.out.println("  Aborted.");
       return;
     }
@@ -119,6 +115,16 @@ public final class ProjectDestroyCommand implements Runnable {
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);
+  }
+
+  /**
+   * Whether to go on: asked, defaulting to no and refused where nobody can answer ({@link
+   * ConsoleHelper#confirmDestructive}), unless {@code --yes} or a dry run.
+   */
+  static boolean confirmed(boolean yes, boolean dryRun, String name, boolean purge) {
+    return yes
+        || dryRun
+        || ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
   }
 
   static String confirmPrompt(String name, boolean purge) {

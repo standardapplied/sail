@@ -196,6 +196,15 @@ class InitCommandTest {
   }
 
   @Test
+  void aNodesRosterValuesAreMainsToTakeSoItsJoinIsNotRefusedForThem() {
+    gitConfig.put("user.email", "dev");
+
+    assertEquals(0, init("--main", "m", "--handle", "ada"));
+
+    assertEquals("JoinCommand m --handle ada --name Root Person --email dev", ran.getLast());
+  }
+
+  @Test
   void anInvalidRosterEmailIsRefusedBeforeAnyStep() {
     assertEquals(1, init("--as-main", "--handle", "ada", "--email", "ada"));
 
@@ -207,10 +216,10 @@ class InitCommandTest {
   }
 
   @Test
-  void aGitNameTheRosterCannotTakeIsRefusedBeforeAnyStepNamingTheFlag() {
+  void aGitNameMainCannotTakeIsRefusedBeforeAnyStepNamingTheFlag() {
     gitConfig.put("user.name", "Ada\tL");
 
-    assertEquals(1, init("--main", "m", "--handle", "ada"));
+    assertEquals(1, init("--as-main", "--handle", "ada"));
 
     assertEquals(
         "Invalid name: must be 1 to 128 characters on one line, with no control characters."
