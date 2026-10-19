@@ -652,7 +652,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(operator);
+      throw HostInitCommand.notInitialized();
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

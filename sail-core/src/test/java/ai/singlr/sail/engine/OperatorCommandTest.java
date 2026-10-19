@@ -72,6 +72,32 @@ class OperatorCommandTest {
   }
 
   @Test
+  void aSudoCallerOfARootOnlyCommandTypesSudoBeforeTheBoxInstalledAnything() {
+    var freshBox = tempDir.resolve("no-unit");
+
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.of(true, "dev", this::homeOf, freshBox));
+    assertEquals(OperatorCommand.SUDO, OperatorCommand.forRoot(true, "dev"));
+    assertEquals(
+        "sudo sail init --as-main", OperatorCommand.forRoot(true, "dev").sail("init --as-main"));
+  }
+
+  @Test
+  void onlyRootLoggedInDirectlyTypesARootOnlyCommandPlain() {
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.forRoot(true, null));
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.forRoot(true, " "));
+    assertEquals(OperatorCommand.PLAIN, OperatorCommand.forRoot(true, "root"));
+    assertEquals(OperatorCommand.SUDO, OperatorCommand.forRoot(false, null));
+    assertEquals(OperatorCommand.SUDO, OperatorCommand.forRoot(false, "dev"));
+  }
+
+  @Test
+  void thisProcessReadsItsOwnAccountForARootOnlyCommand() {
+    assertEquals(
+        OperatorCommand.forRoot(SailPaths.isRoot(), System.getenv("SUDO_USER")),
+        OperatorCommand.forRootHere());
+  }
+
+  @Test
   void thisProcessReadsItsOwnAccount() {
     var expected =
         SailPaths.isRoot() && System.getenv("SUDO_USER") != null

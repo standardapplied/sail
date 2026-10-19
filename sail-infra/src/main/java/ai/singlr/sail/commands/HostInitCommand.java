@@ -101,7 +101,7 @@ public final class HostInitCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var operator = OperatorCommand.here();
+    var operator = OperatorCommand.forRootHere();
     if (!VALID_BACKENDS.contains(storage)) {
       throw new IllegalArgumentException(
           "Invalid storage backend: '" + storage + "'. Must be 'dir' or 'zfs'.");
@@ -249,7 +249,14 @@ public final class HostInitCommand implements Runnable {
             });
   }
 
-  /** The refusal of a command that needs this box provisioned, on a box that is not. */
+  /**
+   * The refusal of a command that needs this box provisioned, on a box that is not: host init runs
+   * only as root, whatever this box has installed so far.
+   */
+  static IllegalStateException notInitialized() {
+    return notInitialized(OperatorCommand.forRootHere());
+  }
+
   static IllegalStateException notInitialized(OperatorCommand operator) {
     return new IllegalStateException(
         "Server not initialized. Run '" + operator.sail("host init") + "' first.");

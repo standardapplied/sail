@@ -126,7 +126,7 @@ public final class HostConfigSetCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(operator);
+      throw HostInitCommand.notInitialized();
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

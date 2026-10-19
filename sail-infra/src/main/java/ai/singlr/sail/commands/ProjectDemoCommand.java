@@ -90,7 +90,7 @@ public final class ProjectDemoCommand implements Runnable {
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!dryRun && !Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(operator);
+      throw HostInitCommand.notInitialized();
     }
 
     if (!dryRun) {

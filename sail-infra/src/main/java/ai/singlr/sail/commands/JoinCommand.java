@@ -127,7 +127,7 @@ public final class JoinCommand implements Runnable {
       OperatorCommand operator)
       throws Exception {
     if (!Files.exists(hostConfig)) {
-      throw HostInitCommand.notInitialized(operator);
+      throw HostInitCommand.notInitialized();
     }
     HostConfigSetCommand.validate("sync-main", target);
     requireWritable(hostConfig, target);

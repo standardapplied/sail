@@ -39,10 +39,9 @@ public final class HostUpdateCommand implements Runnable {
   }
 
   private void execute() throws Exception {
-    var operator = OperatorCommand.here();
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
-      throw HostInitCommand.notInitialized(operator);
+      throw HostInitCommand.notInitialized();
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 

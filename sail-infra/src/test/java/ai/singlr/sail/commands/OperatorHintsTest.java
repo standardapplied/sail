@@ -160,6 +160,22 @@ class OperatorHintsTest {
   }
 
   @Test
+  void aFreshBoxsSudoCallerIsToldHostInitsRootOnlyStepsWithSudo() {
+    var freshSudoCaller = OperatorCommand.forRoot(true, "dev");
+
+    assertEquals(
+        "  Next step: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>,"
+            + " installs sail-api and connects this box.",
+        Ansi.OFF.string(HostInitCommand.nextStep(true, false, freshSudoCaller).orElseThrow()));
+    assertEquals(
+        "Server not initialized. Run 'sudo sail host init' first.",
+        HostInitCommand.notInitialized(freshSudoCaller).getMessage());
+    assertEquals(
+        HostInitCommand.notInitialized(OperatorCommand.forRootHere()).getMessage(),
+        HostInitCommand.notInitialized().getMessage());
+  }
+
+  @Test
   void anotherBoxsOperatorIsToldTheReadmesFormAndAThinClientPlainSail() {
     assertEquals(
         "sudo sail fde add ada --role member --email \"ada@example.com\" --key \"ssh-ed25519"

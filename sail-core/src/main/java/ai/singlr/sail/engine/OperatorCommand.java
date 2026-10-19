@@ -54,6 +54,20 @@ public record OperatorCommand(boolean sudo) {
     return new OperatorCommand(callersOwn instanceof RuntimeMode.Refused);
   }
 
+  /**
+   * The reader of a command that runs only as root, such as {@code sail init} or {@code sail host
+   * init}: plain for root logged in directly, {@code sudo} for everyone else, whatever this box has
+   * installed so far.
+   */
+  public static OperatorCommand forRootHere() {
+    return forRoot(SailPaths.isRoot(), System.getenv("SUDO_USER"));
+  }
+
+  /** Pure of the process: see {@link #forRootHere}. */
+  public static OperatorCommand forRoot(boolean root, String sudoUser) {
+    return root && (Strings.isBlank(sudoUser) || "root".equals(sudoUser)) ? PLAIN : SUDO;
+  }
+
   /** {@code sail <args>} as the reader types it. */
   public String sail(String args) {
     return typed("sail " + args);
