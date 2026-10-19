@@ -23,6 +23,9 @@ import org.junit.jupiter.api.Timeout;
 @Timeout(value = 15, unit = TimeUnit.MINUTES)
 class NativeFleetIT {
 
+  private static final String BETA_ON_DISK =
+      "test -e /root/.sail/projects/beta && echo present || echo gone";
+
   private static final int BODY_BYTES = 48_000;
   private static final int CUT_AFTER_BYTES = 3_000_000;
 
@@ -409,6 +412,72 @@ class NativeFleetIT {
           "",
           released.query("SELECT id FROM specs ORDER BY id").strip(),
           "a node of the last release drops the project main revoked, as one of this build does");
+    }
+  }
+
+  @Test
+  void aScopeChangedAfterCreationLeavesEachBoxHoldingExactlyWhatItAdmits() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.catalog("alpha", "beta");
+      var nia = fleet.node("nia", fleet.candidate(), "--scoped");
+      var uma = fleet.node("uma", fleet.candidate());
+      var eng = fleet.node("eng", fleet.candidate());
+      main.sailOk("fde", "grant", "nia", "alpha");
+      main.sailOk("fde", "grant", "nia", "beta");
+      main.serving(
+          () -> {
+            main.createSpecs("a", 1, BODY_BYTES, "alpha");
+            main.createSpecs("b", 1, BODY_BYTES, "beta");
+          });
+      for (var node : List.of(nia, uma, eng)) {
+        node.sailOk("sync");
+      }
+      fleet.assertScopedTo(nia, "alpha", "beta");
+      fleet.assertConverged(uma, eng);
+      var engKeys =
+          "SELECT count(*) FROM fde_ssh_keys k JOIN fdes f ON f.id = k.fde_id"
+              + " WHERE f.handle = 'eng'";
+      assertEquals("1", main.query(engKeys).strip());
+
+      main.sailOk("fde", "update", "eng", "--scoped", "--grant", "alpha");
+      var narrowed = eng.sail("sync");
+
+      assertEquals(0, narrowed.exit(), narrowed::output);
+      assertTrue(
+          narrowed.output().contains("project beta: dropped from this box with the"),
+          narrowed::output);
+      fleet.assertScopedTo(eng, "alpha");
+      assertEquals("1", main.query(engKeys).strip(), "eng keeps the key it syncs with");
+      assertEquals("gone", eng.shOk(BETA_ON_DISK).strip());
+      uma.sailOk("sync");
+      fleet.assertConverged(uma);
+
+      fleet.offline(nia, () -> nia.createSpecs("nia-a", 1, BODY_BYTES, "alpha"));
+      main.sailOk("fde", "revoke", "nia", "beta");
+      nia.sailOk("sync");
+
+      fleet.assertScopedTo(nia, "alpha");
+      assertEquals("1", main.query("SELECT count(*) FROM specs WHERE id = 'nia-a-1'").strip());
+      assertEquals("gone", nia.shOk(BETA_ON_DISK).strip());
+      assertEquals(
+          "eng|\nnia|nia@example.dev\nuday|\numa|",
+          nia.query("SELECT handle, email FROM fdes ORDER BY handle").strip(),
+          "a scoped node holds the roster main lists to it, and nothing it no longer does");
+      assertEquals("0", nia.query("SELECT count(*) FROM fdes WHERE status = 'disabled'").strip());
+      uma.sailOk("sync");
+      fleet.assertConverged(uma);
+
+      main.sailOk("fde", "update", "nia", "--unscoped");
+      nia.sailOk("sync");
+      uma.sailOk("sync");
+
+      fleet.assertConverged(nia, uma);
+      fleet.assertHeadsAgree(uma);
+      assertEquals(
+          "eng|eng@example.dev\nnia|nia@example.dev\nuday|uday@example.dev\numa|uma@example.dev",
+          nia.query("SELECT handle, email FROM fdes ORDER BY handle").strip(),
+          "a widened node holds the whole roster again");
     }
   }
 

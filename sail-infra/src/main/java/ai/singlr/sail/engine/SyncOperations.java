@@ -472,7 +472,7 @@ public final class SyncOperations {
     try {
       for (var name : directoriesUnder(projectsDir)) {
         if (leaving.test(name)) {
-          teardown.tearDown(name, false);
+          takeOff(teardown, name, false);
         }
       }
       List<ContainerManager.ContainerInfo> containers;
@@ -497,12 +497,13 @@ public final class SyncOperations {
           continue;
         }
         if (devices.sailManaged(name)) {
-          teardown.tearDown(name, true);
-          notice(
-              "project "
-                  + name
-                  + ": its container deleted, workspace and uncommitted work included — main no"
-                  + " longer grants this box the project");
+          if (takeOff(teardown, name, true)) {
+            notice(
+                "project "
+                    + name
+                    + ": its container deleted, workspace and uncommitted work included — main"
+                    + " no longer grants this box the project");
+          }
         } else if (dropped.contains(name)) {
           notice(
               "project "
@@ -513,13 +514,35 @@ public final class SyncOperations {
                   + " project's work");
         }
       }
-    } catch (IOException | UncheckedIOException | TimeoutException e) {
+    } catch (IOException | TimeoutException e) {
       System.err.println(
           Banner.errorLine(
-              "Could not take a project main no longer grants off this box: " + e.getMessage(),
+              "Could not list what this box holds of projects main no longer grants it: "
+                  + e.getMessage(),
               Ansi.AUTO));
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * Tears {@code name} down, saying so when it cannot: the next round finds it still held on disk
+   * or in Incus and tries again. Returns whether it went.
+   */
+  private static boolean takeOff(ProjectTeardown teardown, String name, boolean container)
+      throws InterruptedException {
+    try {
+      teardown.tearDown(name, container);
+      return true;
+    } catch (IOException | UncheckedIOException | TimeoutException e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not take project "
+                  + name
+                  + " off this box (the next sync tries again): "
+                  + e.getMessage(),
+              Ansi.AUTO));
+      return false;
     }
   }
 

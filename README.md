@@ -105,6 +105,12 @@ A client, or any other engineer, gets a box of their own: set it up with
 <project>`), and pair on that box. A node pairs its own FDE as main's roster has it, so the
 roster options (`--name`, `--email`, `--role`) are main's.
 
+A scope changes in place on main: `sudo sail fde update <handle> --scoped --grant <project>`
+narrows an FDE that joined unscoped, keeping its keys, tokens and sessions, and `--unscoped`
+lets it see every project again. On its next sync its box holds what the new scope admits and
+nothing else: a project it no longer holds leaves with its container, its directory and any
+unpushed work, and so does the name and email of every FDE outside its projects.
+
 Each project the box applies opens with a conversation already waiting: `sudo sail project
 apply` leaves the box's FDE a home room, `<project>--<handle>`, with the project's agent in it
 (`agent.member` in the definition picks another installed agent, model or mode).

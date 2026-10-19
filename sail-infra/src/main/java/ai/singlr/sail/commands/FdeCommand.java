@@ -570,8 +570,8 @@ public final class FdeCommand implements Runnable {
     public void run() {
       CliCommand.run(
           () -> {
-            requireOneScopeChange();
             var operator = operator();
+            requireOneScopeChange(operator);
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Updating an FDE");
             if (displayName == null && email == null && role == null && !scoped && !unscoped) {
@@ -592,7 +592,7 @@ public final class FdeCommand implements Runnable {
           });
     }
 
-    private void requireOneScopeChange() {
+    private void requireOneScopeChange(OperatorCommand operator) {
       if (scoped && unscoped) {
         throw new IllegalArgumentException(
             "--scoped narrows an FDE and --unscoped widens it; pass one of them.");
@@ -600,7 +600,9 @@ public final class FdeCommand implements Runnable {
       if (!grants.isEmpty() && !scoped) {
         throw new IllegalArgumentException(
             "--grant names a project an FDE keeps as it is narrowed; pass it with --scoped, or"
-                + " grant a scoped FDE a project with 'fde grant'.");
+                + " grant a scoped FDE a project with '"
+                + operator.sail("fde grant " + handle + " " + grants.getFirst())
+                + "'.");
       }
     }
 

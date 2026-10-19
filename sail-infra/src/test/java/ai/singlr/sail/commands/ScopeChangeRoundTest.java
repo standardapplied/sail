@@ -43,9 +43,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -261,6 +263,34 @@ class ScopeChangeRoundTest {
   }
 
   @Test
+  void aContainerIncusWillNotDeleteIsSaidAndTakenByTheNextRoundWhileTheRestGoesNow()
+      throws Exception {
+    round();
+    incus.sail("beta");
+    incus.sail("gamma");
+    incus.busy.add("beta");
+    narrowTo("acme");
+
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: dropped from this box with the 3 rows it held here" + WHY,
+            "  roster: removed 1 FDE(s) main no longer lists to this box",
+            "  ✗ Could not take project beta off this box (the next sync tries again): Failed to"
+                + " delete container 'beta': Error: instance is busy",
+            "  ⚠ project gamma: its container deleted, workspace and uncommitted work included"
+                + WHY),
+        round());
+    assertEquals(List.of("beta"), incus.names());
+
+    assertEquals(
+        List.of(
+            "  ⚠ project beta: its container deleted, workspace and uncommitted work included"
+                + WHY),
+        round());
+    assertEquals(List.of(), incus.names());
+  }
+
+  @Test
   void aProjectKeptForALiveRunKeepsItsContainerAndDirectoryUntilTheRoundAfterTheRunEnds()
       throws Exception {
     round();
@@ -429,6 +459,7 @@ class ScopeChangeRoundTest {
   private static final class Incus implements ShellExec {
     private final Map<String, Boolean> containers = new LinkedHashMap<>();
     final List<String> invocations = new ArrayList<>();
+    final Set<String> busy = new HashSet<>();
     boolean reachable = true;
 
     void sail(String name) {
@@ -468,6 +499,9 @@ class ScopeChangeRoundTest {
       if (command.size() == 4
           && joined.startsWith("incus delete ")
           && joined.endsWith(" --force")) {
+        if (busy.remove(command.get(2))) {
+          return new Result(1, "", "Error: instance is busy");
+        }
         return containers.remove(command.get(2)) == null
             ? new Result(1, "", "Error: Instance not found")
             : new Result(0, "", "");

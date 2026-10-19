@@ -2054,7 +2054,7 @@ class FdeCommandTest {
     assertEquals(1, fde("update", "client", "--grant", "acme"));
     assertEquals(
         "--grant names a project an FDE keeps as it is narrowed; pass it with --scoped, or grant"
-            + " a scoped FDE a project with 'fde grant'.",
+            + " a scoped FDE a project with 'sail fde grant client acme'.",
         refusal);
     assertEquals(1, fde("update", "client", "--scoped", "--unscoped"));
     assertEquals("--scoped narrows an FDE and --unscoped widens it; pass one of them.", refusal);
