@@ -158,7 +158,7 @@ class ConnectCommandTest {
         ConnectCommand.serverIpUnset("acme", new OperatorCommand(true)));
     assertEquals(
         "Server IP not configured. Fix with one of:\n"
-            + "  - sudo sail host config set server-ip <your-server-ip>\n"
+            + "  - sail host config set server-ip <your-server-ip>\n"
             + "  - Or pass: sail project connect acme --server-ip <your-server-ip>",
         ConnectCommand.serverIpUnset("acme", OperatorCommand.PLAIN));
   }

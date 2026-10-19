@@ -12,6 +12,7 @@ import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.harness.Harness;
 import ai.singlr.sail.harness.Harnesses;
+import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.webauthn.Hashes;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -57,6 +58,7 @@ public final class ProjectProvisioner {
   private final ProvisionTracker<ProjectPhase> tracker;
   private final ProvisionListener listener;
   private final ProjectSkills skills;
+  private final Optional<SshPublicKey> workstationKey;
   private final OperatorCommand operator;
   private ProjectPhase currentPhase;
 
@@ -64,13 +66,15 @@ public final class ProjectProvisioner {
       ShellExec shell,
       ProvisionTracker<ProjectPhase> tracker,
       ProvisionListener listener,
+      Optional<SshPublicKey> workstationKey,
       OperatorCommand operator) {
-    this(shell, tracker, listener, ProjectSkills.none(), operator);
+    this(shell, tracker, listener, ProjectSkills.none(), workstationKey, operator);
   }
 
   /**
    * @param skills where the project's skills are read from, installed for every harness the project
    *     installs; {@link ProjectSkills#none()} installs sail's own alone
+   * @param workstationKey the box's registered workstation key, which every container trusts
    * @param operator how the person reading a warning's retry command types sail
    */
   public ProjectProvisioner(
@@ -78,11 +82,13 @@ public final class ProjectProvisioner {
       ProvisionTracker<ProjectPhase> tracker,
       ProvisionListener listener,
       ProjectSkills skills,
+      Optional<SshPublicKey> workstationKey,
       OperatorCommand operator) {
     this.shell = shell;
     this.tracker = tracker;
     this.listener = Objects.requireNonNullElse(listener, ProvisionListener.NOOP);
     this.skills = Objects.requireNonNull(skills, "skills");
+    this.workstationKey = Objects.requireNonNull(workstationKey, "workstationKey");
     this.operator = Objects.requireNonNull(operator, "operator");
   }
 
@@ -97,7 +103,7 @@ public final class ProjectProvisioner {
   public void provision(
       SailYaml config, HostYaml host, Map<String, String> gitTokens, Path sailYamlPath)
       throws Exception {
-    var inputs = inputs(config);
+    var inputs = inputs(config, workstationKey);
     if (!inputs.equals(tracker.currentState().inputs())) {
       tracker.load(inputs);
     }
@@ -136,12 +142,16 @@ public final class ProjectProvisioner {
   }
 
   /**
-   * The digest of the resolved descriptor a run provisions from: the {@link ProvisionTracker} keeps
-   * progress only for the inputs it was recorded for, so an edited descriptor is provisioned again.
+   * The digest of what a run provisions from, the resolved descriptor and the box's workstation
+   * key: the {@link ProvisionTracker} keeps progress only for the inputs it was recorded for, so an
+   * edited descriptor, or a workstation key registered, replaced or revoked, is provisioned again.
+   * With no key the digest is the descriptor's alone, as it was before the key was an input.
    */
-  public static String inputs(SailYaml config) {
-    var descriptor = YamlUtil.dumpToString(config.toMap());
-    return HexFormat.of().formatHex(Hashes.sha256(descriptor.getBytes(StandardCharsets.UTF_8)));
+  public static String inputs(SailYaml config, Optional<SshPublicKey> workstationKey) {
+    var provisioned =
+        YamlUtil.dumpToString(config.toMap())
+            + workstationKey.map(key -> "workstation_key: " + key.fingerprint() + "\n").orElse("");
+    return HexFormat.of().formatHex(Hashes.sha256(provisioned.getBytes(StandardCharsets.UTF_8)));
   }
 
   /**
@@ -408,10 +418,7 @@ public final class ProjectProvisioner {
     }
     pushFileToContainer(name, "/etc/sudoers.d/" + user, user + " ALL=(ALL) NOPASSWD:ALL\n", "0440");
 
-    var keys = authorizedKeys(config);
-    if (userCheck.ok() || !keys.isEmpty()) {
-      writeAuthorizedKeys(name, user, keys);
-    }
+    writeAuthorizedKeys(name, user, trustedKeys(workstationKey, config));
 
     var sshResult = execInContainer(name, List.of("systemctl", "enable", "--now", "ssh"));
     if (!sshResult.ok()) {
@@ -425,15 +432,34 @@ public final class ProjectProvisioner {
     stepDone(6, "Created user " + user + " (uid 1000)");
   }
 
-  private static List<String> authorizedKeys(SailYaml config) {
-    return config.ssh() != null && config.ssh().authorizedKeys() != null
-        ? config.ssh().authorizedKeys()
-        : List.of();
+  /**
+   * The keys a container trusts: the box's workstation key, whatever the definition says, then the
+   * definition's own, each key once.
+   */
+  static List<String> trustedKeys(Optional<SshPublicKey> workstationKey, SailYaml config) {
+    var trusted = new LinkedHashMap<String, String>();
+    workstationKey.ifPresent(key -> trusted.put(key.fingerprint(), key.line()));
+    var declared =
+        config.ssh() != null && config.ssh().authorizedKeys() != null
+            ? config.ssh().authorizedKeys()
+            : List.<String>of();
+    for (var line : declared) {
+      trusted.putIfAbsent(identityOf(line), line);
+    }
+    return List.copyOf(trusted.values());
+  }
+
+  private static String identityOf(String line) {
+    try {
+      return SshPublicKey.parse(line).fingerprint();
+    } catch (IllegalArgumentException unparsed) {
+      return line;
+    }
   }
 
   /**
-   * Writes exactly the descriptor's keys, so a key removed from the descriptor loses its access on
-   * the next provisioning run; a user created by this run has no file to empty.
+   * Writes exactly the keys the container trusts, so a key removed from the descriptor, or a
+   * workstation key revoked, loses its access on the next provisioning run.
    */
   private void writeAuthorizedKeys(String name, String user, List<String> keys)
       throws IOException, InterruptedException, TimeoutException {
@@ -475,10 +501,10 @@ public final class ProjectProvisioner {
               + ", but sail runs every agent, shell and hook as uid 1000. The image '"
               + image
               + "' has another user at uid 1000; use an image without one (ubuntu/24.04 has only"
-              + " 'ubuntu', which sail removes), then run 'sudo sail project destroy "
-              + name
-              + "' and 'sudo sail project apply "
-              + name
+              + " 'ubuntu', which sail removes), then run '"
+              + operator.sail("project destroy " + name)
+              + "' and '"
+              + operator.sail("project apply " + name)
               + "'.");
     }
   }
@@ -1251,7 +1277,9 @@ public final class ProjectProvisioner {
             .formatted(name, DateTimeUtils.now());
     pushFileToContainer(name, "/etc/sail/project.yaml", yaml);
     var recorded =
-        shell.exec(List.of("incus", "config", "set", name, INPUTS_KEY + "=" + inputs(config)));
+        shell.exec(
+            List.of(
+                "incus", "config", "set", name, INPUTS_KEY + "=" + inputs(config, workstationKey)));
     if (!recorded.ok()) {
       throw new IOException("Failed to record the provisioned descriptor: " + recorded.stderr());
     }

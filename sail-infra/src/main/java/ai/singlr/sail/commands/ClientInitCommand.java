@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.config.ClientConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,7 +24,7 @@ import picocli.CommandLine.Parameters;
  */
 @Command(
     name = "client",
-    description = "Connect this thin client to a remote sail host.",
+    description = "Connect this thin client to a remote sail box.",
     mixinStandardHelpOptions = true)
 public final class ClientInitCommand implements Runnable {
 
@@ -50,7 +51,9 @@ public final class ClientInitCommand implements Runnable {
                 + ClientConfig.GATEWAY_USER
                 + "' gateway user"));
     System.out.println();
-    System.out.println(Ansi.AUTO.string("  Test with: @|bold sail spec list --all-projects|@"));
+    System.out.println(
+        Ansi.AUTO.string(
+            "  Test with: @|bold " + OperatorCommand.client("spec list --all-projects") + "|@"));
   }
 
   /**
@@ -66,8 +69,9 @@ public final class ClientInitCommand implements Runnable {
           "This machine is a Sail host ("
               + hostConfigPath
               + " exists).\n"
-              + "  'sail init' configures a client to reach a remote host; running it here would"
-              + " overwrite\n"
+              + "  '"
+              + OperatorCommand.client("init")
+              + "' configures a client to reach a remote host; running it here would overwrite\n"
               + "  the host's server credentials. Run it on your laptop instead.");
     }
     Files.createDirectories(configPath.getParent());

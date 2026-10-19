@@ -7,6 +7,7 @@ package ai.singlr.sail.commands;
 
 import ai.singlr.sail.commands.FdeCommand.Box;
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PairingTrust;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.FdePairingStore;
@@ -32,10 +33,12 @@ final class OwnBoxPairings implements DataMigration {
 
   private final Supplier<Box> box;
   private final Consumer<String> said;
+  private final OperatorCommand operator;
 
-  OwnBoxPairings(Supplier<Box> box, Consumer<String> said) {
+  OwnBoxPairings(Supplier<Box> box, Consumer<String> said, OperatorCommand operator) {
     this.box = box;
     this.said = said;
+    this.operator = operator;
   }
 
   @Override
@@ -56,7 +59,7 @@ final class OwnBoxPairings implements DataMigration {
       for (var handle : new FdePairingStore(db).handles()) {
         if (!handle.equals(here.handle())) {
           PairingRevocation.revoke(here, db, handle);
-          var note = revoked(here, handle);
+          var note = revoked(here, handle, operator);
           said.accept(note);
           notes.add(note);
         }
@@ -72,7 +75,7 @@ final class OwnBoxPairings implements DataMigration {
    * The notice of {@code handle}'s revoked code. A box that names no FDE of its own revokes every
    * pairing, its operator's too, so it names how that operator pairs again.
    */
-  private static String revoked(Box here, String handle) {
+  private static String revoked(Box here, String handle, OperatorCommand operator) {
     var note =
         "Revoked "
             + handle
@@ -85,8 +88,8 @@ final class OwnBoxPairings implements DataMigration {
     return note
         + " This box names none: if it is "
         + handle
-        + ", name it with 'sudo sail host config set sync-handle "
-        + handle
+        + ", name it with '"
+        + operator.sail("host config set sync-handle " + handle)
         + "' and pair again.";
   }
 }

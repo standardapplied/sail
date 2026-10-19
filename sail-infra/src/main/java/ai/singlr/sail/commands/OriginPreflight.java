@@ -6,6 +6,7 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -65,8 +66,8 @@ final class OriginPreflight {
                 origins:
                   - http://localhost:7070
 
-          Then restart the control plane there: sudo sail host service restart"""
-        .formatted(lead, SshTunnel.ORIGIN, box);
+          Then restart the control plane there: %s"""
+        .formatted(lead, SshTunnel.ORIGIN, box, OperatorCommand.elsewhere("host service restart"));
   }
 
   private static Map<String, Object> loginStartBody() throws IOException, InterruptedException {

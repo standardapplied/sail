@@ -21,8 +21,8 @@ public final class DataMigrations {
   /** Every migration, in order; what one reports to {@code operator} is worded for them. */
   public static List<DataMigration> all(OperatorCommand operator) {
     return List.of(
-        new ContentMigration(),
-        new LegacyDataMigration(),
+        new ContentMigration(operator),
+        new LegacyDataMigration(operator),
         new ReviewFindingsMigration(),
         new RoomsBackfillMigration(),
         new OrphanErasure(),
@@ -33,11 +33,12 @@ public final class DataMigrations {
   }
 
   /**
-   * The migrations the sync lane applies: those that need nothing of this box's own files, so none
-   * that speaks to its operator.
+   * The migrations the sync lane applies: those that need nothing of this box's own files. What one
+   * reports is read by whichever box's operator ran the round, so it is worded {@link
+   * OperatorCommand#elsewhere}'s way.
    */
   public static List<DataMigration> databaseOnly() {
-    return all(OperatorCommand.PLAIN).stream()
+    return all(OperatorCommand.SUDO).stream()
         .filter(migration -> !migration.readsBoxFiles())
         .toList();
   }

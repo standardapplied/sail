@@ -63,7 +63,7 @@ public final class ProjectEditCommand implements Runnable {
   private void execute() throws Exception {
     var operator = OperatorCommand.here();
     NameValidator.requireValidProjectName(name);
-    var actor = CliOperator.current();
+    var actor = CliOperator.current(operator);
     ProjectCatalog.requireRecordable(name, actor);
     var current =
         ProjectDefinitions.definition(name, null)
@@ -100,7 +100,7 @@ public final class ProjectEditCommand implements Runnable {
         Ansi.AUTO.string(
             "  @|green ✓|@ Updated '"
                 + name
-                + "'. It replicates to other boxes on the next @|bold sail sync|@."));
+                + "'. It replicates to other boxes on the next sync."));
   }
 
   /**

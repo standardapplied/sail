@@ -137,7 +137,7 @@ public final class SailOperations implements HostOperations {
 
   /** The operator of this box's root CLI, as {@link CliOperator} resolves it. */
   private Actor cliOperator() {
-    return CliOperator.of(syncOperations.configuration(), fdeStore);
+    return CliOperator.of(syncOperations.configuration(), fdeStore, operator);
   }
 
   @Override
@@ -1530,7 +1530,7 @@ public final class SailOperations implements HostOperations {
       throw new ApiException(
           ErrorCode.SERVER_IP_NOT_CONFIGURED,
           "Server IP is not configured on this node.",
-          "Run: sudo sail host config set server-ip <your-server-ip>");
+          "Run: " + operator.sail("host config set server-ip <your-server-ip>"));
     }
     return new ConnectResponse(
         project,

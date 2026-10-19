@@ -252,7 +252,9 @@ final class SpecPruner {
       throw new ApiException(
           ErrorCode.AGENT_LANE_FORBIDDEN,
           "An agent cannot prune: erasing is irreversible and belongs to the FDE.",
-          "Ask the FDE who owns the work to run 'sail spec prune'.");
+          "Ask the FDE who owns the work to run '"
+              + OperatorCommand.elsewhere("spec prune")
+              + "'.");
     }
     Refusals.enforce(authority.request(actor, request.ids().isEmpty()));
   }

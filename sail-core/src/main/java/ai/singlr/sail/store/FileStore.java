@@ -89,7 +89,11 @@ public final class FileStore implements ConflictResolver, SyncedStore {
     public FileRow {
       if (contentHash == null)
         throw new IllegalStateException(
-            "File " + project + "/" + path + " content migration is incomplete; run sail migrate");
+            "File "
+                + project
+                + "/"
+                + path
+                + " has no content hash: this database's content migration never finished.");
       BlobStore.requireHash(contentHash);
       if (size < 0
           || mode < 0

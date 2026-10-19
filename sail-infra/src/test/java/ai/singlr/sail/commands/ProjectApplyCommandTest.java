@@ -384,9 +384,9 @@ class ProjectApplyCommandTest {
         + project
         + "', then apply again. A container already created as '"
         + user
-        + "' must be recreated: 'sudo sail project destroy "
+        + "' must be recreated: 'sail project destroy "
         + project
-        + "', then 'sudo sail project apply "
+        + "', then 'sail project apply "
         + project
         + "'.";
   }
@@ -441,7 +441,9 @@ class ProjectApplyCommandTest {
     var missingSource = Path.of("/definitely/not/there/sail.yaml");
 
     assertDoesNotThrow(
-        () -> ProjectApplyCommand.persistCanonicalBundle("web", missingSource, true),
+        () ->
+            ProjectApplyCommand.persistCanonicalBundle(
+                "web", missingSource, true, OperatorCommand.PLAIN),
         "a source that cannot even be read is never touched under dry-run");
   }
 

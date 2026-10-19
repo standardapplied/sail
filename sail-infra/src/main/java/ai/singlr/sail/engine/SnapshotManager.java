@@ -137,8 +137,8 @@ public final class SnapshotManager {
               + " minutes trying to "
               + description
               + ". On the dir storage backend, snapshots are full filesystem copies and can be"
-              + " slow for large workspaces. Consider the zfs backend (sail host init --storage"
-              + " zfs --disk /dev/sdX) for instant snapshots, or pass a larger timeout.");
+              + " slow for large workspaces. Consider the zfs backend, chosen when the host is"
+              + " initialized, for instant snapshots, or pass a larger timeout.");
     }
   }
 

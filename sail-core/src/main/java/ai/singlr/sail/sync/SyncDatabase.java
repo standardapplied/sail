@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.MigrationRunner;
@@ -64,7 +65,9 @@ public final class SyncDatabase implements AutoCloseable {
               + box
               + "': "
               + e.getMessage()
-              + ". Run 'sail upgrade' on '"
+              + ". Run '"
+              + OperatorCommand.elsewhere("upgrade")
+              + "' on '"
               + box
               + "', then sync again.",
           e);

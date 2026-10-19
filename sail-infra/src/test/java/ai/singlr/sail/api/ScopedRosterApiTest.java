@@ -55,9 +55,9 @@ class ScopedRosterApiTest {
       fdes.add(scoped, scoped, scoped + "@x.dev", "member");
       fdes.restrict(scoped);
     }
-    fdes.grant("nia", "alpha");
-    fdes.grant("sam", "alpha");
-    fdes.grant("zed", "beta");
+    fdes.grant("nia", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("sam", "alpha", OperatorCommand.PLAIN);
+    fdes.grant("zed", "beta", OperatorCommand.PLAIN);
     var operations =
         new SailOperations(
             new ScriptedShellExecutor(),

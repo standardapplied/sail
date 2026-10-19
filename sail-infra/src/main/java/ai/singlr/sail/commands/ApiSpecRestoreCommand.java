@@ -25,7 +25,7 @@ public final class ApiSpecRestoreCommand implements Runnable {
   @Parameters(index = "0", description = "Spec ID.")
   private String specId;
 
-  @Parameters(index = "1", description = "Revision to restore (from 'sail spec history').")
+  @Parameters(index = "1", description = "Revision to restore (from spec history).")
   private String rev;
 
   @Mixin private SyncOptions syncOptions;

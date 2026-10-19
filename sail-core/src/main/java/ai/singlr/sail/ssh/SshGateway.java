@@ -6,6 +6,7 @@
 package ai.singlr.sail.ssh;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -168,12 +169,13 @@ public final class SshGateway {
       List<String> tokens, String fdeHandle, String subcommand) {
     if (isPasskeyCommand(tokens)) {
       return "Managing another FDE's passkeys requires the admin role. You may manage your"
-          + " own: sail fde passkey list "
-          + fdeHandle;
+          + " own: "
+          + OperatorCommand.client("fde passkey list " + fdeHandle);
     }
     if (isEnrollCommand(tokens)) {
       return "Minting an enrollment ticket for another FDE requires the admin role."
-          + " Enroll yourself with: sail enroll";
+          + " Enroll yourself with: "
+          + OperatorCommand.client("enroll");
     }
     return "'" + subcommand + "' requires the admin role.";
   }

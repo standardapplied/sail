@@ -16,6 +16,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -32,7 +33,7 @@ class LocalIdentityTest {
   }
 
   private LocalIdentity identity(Map<String, String> gitConfig) {
-    return new LocalIdentity(stubGit(gitConfig), keyPath);
+    return new LocalIdentity(stubGit(gitConfig), keyPath, OperatorCommand.PLAIN);
   }
 
   @Test
@@ -81,7 +82,9 @@ class LocalIdentityTest {
     assertEquals(
         "This box has no git user.email set, so a project here can't take on your identity.\n"
             + "  Set it once and re-run: sudo git config --global user.email \"...\"",
-        missing(LocalIdentity.detect(noGit, true, dir.resolve("root"), dir.resolve("dev"))));
+        missing(
+            LocalIdentity.detect(
+                noGit, true, dir.resolve("root"), dir.resolve("dev"), OperatorCommand.PLAIN)));
   }
 
   @Test
@@ -92,13 +95,20 @@ class LocalIdentityTest {
             + "  Set it once and re-run: git config --global user.email \"...\"";
 
     assertEquals(
-        plain, missing(LocalIdentity.detect(noGit, true, dir.resolve("dev"), dir.resolve("dev"))));
+        plain,
+        missing(
+            LocalIdentity.detect(
+                noGit, true, dir.resolve("dev"), dir.resolve("dev"), OperatorCommand.PLAIN)));
     assertEquals(
         plain,
-        missing(LocalIdentity.detect(noGit, true, dir.resolve("root"), dir.resolve("root"))));
+        missing(
+            LocalIdentity.detect(
+                noGit, true, dir.resolve("root"), dir.resolve("root"), OperatorCommand.PLAIN)));
     assertEquals(
         plain,
-        missing(LocalIdentity.detect(noGit, false, dir.resolve("dev"), dir.resolve("mady"))));
+        missing(
+            LocalIdentity.detect(
+                noGit, false, dir.resolve("dev"), dir.resolve("mady"), OperatorCommand.PLAIN)));
   }
 
   @Test
@@ -106,7 +116,12 @@ class LocalIdentityTest {
     var home = dir.resolve("root");
     var commands = new ArrayList<List<String>>();
     var identity =
-        new LocalIdentity(stubGit(Map.of(), commands), home.resolve("key.pub"), home, true);
+        new LocalIdentity(
+            stubGit(Map.of(), commands),
+            home.resolve("key.pub"),
+            home,
+            true,
+            OperatorCommand.PLAIN);
 
     identity.adoptGit("GIT_NAME", "A B");
 
@@ -120,7 +135,8 @@ class LocalIdentityTest {
     var identity =
         new LocalIdentity(
             new ScriptedShellExecutor().onFail("git config", "error: could not lock config file"),
-            keyPath);
+            keyPath,
+            OperatorCommand.PLAIN);
 
     var error =
         assertThrows(IllegalStateException.class, () -> identity.adoptGit("GIT_EMAIL", "a@b"));
@@ -138,7 +154,8 @@ class LocalIdentityTest {
         new LocalIdentity(
             new ScriptedShellExecutor()
                 .onThrow("git config", new IOException("Cannot run program \"git\"")),
-            keyPath);
+            keyPath,
+            OperatorCommand.PLAIN);
 
     var error =
         assertThrows(IllegalStateException.class, () -> identity.adoptGit("GIT_NAME", "A B"));
@@ -192,7 +209,9 @@ class LocalIdentityTest {
     var commands = new ArrayList<List<String>>();
     var shell = stubGit(Map.of("user.name", "Mady M"), commands);
 
-    var identity = new LocalIdentity(shell, home.resolve(".sail/workstation_key.pub"), home, false);
+    var identity =
+        new LocalIdentity(
+            shell, home.resolve(".sail/workstation_key.pub"), home, false, OperatorCommand.PLAIN);
 
     assertEquals("Mady M", identity.valueFor("GIT_NAME"));
     assertEquals(VALID_KEY, identity.valueFor("SSH_PUBLIC_KEY"));
@@ -233,12 +252,16 @@ class LocalIdentityTest {
                 + "ssh:\n  user: dev\n  authorized_keys:\n    - ${SSH_PUBLIC_KEY}\n",
             home(home, git),
             OperatorCommand.PLAIN);
-    return ProjectProvisioner.inputs(config);
+    return ProjectProvisioner.inputs(config, Optional.empty());
   }
 
   private static LocalIdentity home(Path home, Map<String, String> git) {
     return new LocalIdentity(
-        stubGit(git, new ArrayList<>()), home.resolve(".sail/workstation_key.pub"), home, false);
+        stubGit(git, new ArrayList<>()),
+        home.resolve(".sail/workstation_key.pub"),
+        home,
+        false,
+        OperatorCommand.PLAIN);
   }
 
   private static ShellExec stubGit(Map<String, String> config, List<List<String>> commands) {

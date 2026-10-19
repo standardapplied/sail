@@ -45,7 +45,7 @@ class ScopeRuleTest {
   private static final ProjectScope ONLY_A = ProjectScope.of(List.of("alpha"));
   private static final Actor NIA = new Actor("nia", Role.MEMBER, Actor.Lane.API).withScope(ONLY_A);
   private static final String GRANT =
-      "Ask an admin on main for the project: sail fde grant <handle> <project>.";
+      "Ask an admin on main for the project: sudo sail fde grant <handle> <project>.";
 
   private Sqlite db;
   private SpecStore specs;

@@ -145,7 +145,7 @@ class EraseAuthorityTest {
             new Refusal(
                 Kind.NOT_PRUNABLE,
                 "Run '" + going + "' has not finished; a prune never erases work going on.",
-                "Stop it first: sail agent stop, then prune.")),
+                "Stop it first: sudo sail agent stop, then prune.")),
         rule.idle(plan));
     assertEquals(
         Optional.empty(),
@@ -224,7 +224,7 @@ class EraseAuthorityTest {
         new Refusal(
             Kind.NOT_PRUNABLE,
             "Spec 'auth' is in_progress: only archived, cancelled or deleted specs are pruned.",
-            "Archive it first: sail spec update auth --status archived."),
+            "Archive it first: sudo sail spec update auth --status archived."),
         rule.spec(ADMIN, spec(SpecStatus.IN_PROGRESS, OWNER, OWNER, true)).orElseThrow());
     assertEquals(
         new Refusal(
@@ -236,7 +236,7 @@ class EraseAuthorityTest {
         new Refusal(
             Kind.ADMIN_ONLY,
             "Pruning by policy or a whole project is admin-only.",
-            "Name the specs you own by id: sail spec prune <id...>."),
+            "Name the specs you own by id: sudo sail spec prune <id...>."),
         rule.request(OWNER_API, true).orElseThrow());
     assertEquals(
         "Spec 'auth' is assigned to 'ada', not you.",

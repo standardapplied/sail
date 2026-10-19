@@ -257,7 +257,7 @@ class SyncRpcServerTest {
     new SyncRpcServer(new FakeMain(), true).serve(new ByteStreams.Input(fetch + "\n"), out);
     var line = out.toString().strip();
     var refusal = assertInstanceOf(SyncWire.Refuse.class, SyncWire.decodeResponse(line));
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
   }
 
   @Test
@@ -269,7 +269,7 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.43.3", "0.34.0", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
   }
 
   @Test
@@ -281,7 +281,7 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.1", "0.46.0", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
   }
 
   @Test
@@ -310,7 +310,7 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.2", "0.46.2", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
   }
 
   @Test
@@ -323,7 +323,7 @@ class SyncRpcServerTest {
                     new SyncRpcServer(new FakeMain(), true),
                     new SyncWire.Hello(4, "0.46.3", "0.46.3", "b"))
                 .getFirst());
-    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sail upgrade", refusal.reason());
+    assertEquals("upgrade to " + SyncWire.UPGRADE_FLOOR + ": sudo sail upgrade", refusal.reason());
   }
 
   @Test

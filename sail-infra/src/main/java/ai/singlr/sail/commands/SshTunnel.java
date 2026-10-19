@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -167,7 +168,8 @@ public final class SshTunnel implements AutoCloseable {
             + "s."
             + "\n  Is the control plane running on "
             + host
-            + "? Install it there with: sudo sail host service install"
+            + "? Install it there with: "
+            + OperatorCommand.elsewhere("host service install")
             + sshDiagnostics());
   }
 

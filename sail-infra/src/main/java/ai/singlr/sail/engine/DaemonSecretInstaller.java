@@ -49,6 +49,7 @@ public final class DaemonSecretInstaller {
   private final SystemdServiceInstaller.Mode mode;
   private final Path secretDir;
   private final Path dropInDir;
+  private final OperatorCommand operator;
 
   /**
    * @param shell the shell executor (real or scripted for tests)
@@ -56,8 +57,10 @@ public final class DaemonSecretInstaller {
    *     SystemdServiceInstaller.Mode#SYSTEM} puts it under {@code /etc/systemd/system}, {@link
    *     SystemdServiceInstaller.Mode#USER} under {@code ~/.config/systemd/user}
    * @param userHome the daemon user's home directory; secrets live in its {@code .sail}
+   * @param operator the reader of a failure, told how to install the daemon
    */
-  public DaemonSecretInstaller(ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome) {
+  public DaemonSecretInstaller(
+      ShellExec shell, SystemdServiceInstaller.Mode mode, Path userHome, OperatorCommand operator) {
     this(
         shell,
         mode,
@@ -66,15 +69,21 @@ public final class DaemonSecretInstaller {
             ? Path.of("/etc/systemd/system", SystemdServiceInstaller.UNIT_NAME + ".d")
             : userHome
                 .resolve(".config/systemd/user")
-                .resolve(SystemdServiceInstaller.UNIT_NAME + ".d"));
+                .resolve(SystemdServiceInstaller.UNIT_NAME + ".d"),
+        operator);
   }
 
   DaemonSecretInstaller(
-      ShellExec shell, SystemdServiceInstaller.Mode mode, Path secretDir, Path dropInDir) {
+      ShellExec shell,
+      SystemdServiceInstaller.Mode mode,
+      Path secretDir,
+      Path dropInDir,
+      OperatorCommand operator) {
     this.shell = Objects.requireNonNull(shell, "shell");
     this.mode = Objects.requireNonNull(mode, "mode");
     this.secretDir = Objects.requireNonNull(secretDir, "secretDir");
     this.dropInDir = Objects.requireNonNull(dropInDir, "dropInDir");
+    this.operator = Objects.requireNonNull(operator, "operator");
   }
 
   /** Where the secret value is stored: {@code <secretDir>/<name>}, mode {@code 0600}. */
@@ -151,8 +160,9 @@ public final class DaemonSecretInstaller {
               + ": "
               + restart.stderr().strip()
               + ". The secret file and drop-in are in place. If the daemon is not installed yet,"
-              + " run 'sail host service install'; if it runs as a system service, rerun this"
-              + " command with sudo.");
+              + " run '"
+              + operator.sail("host service install")
+              + "'; if it runs as a system service, rerun this command with sudo.");
     }
   }
 }

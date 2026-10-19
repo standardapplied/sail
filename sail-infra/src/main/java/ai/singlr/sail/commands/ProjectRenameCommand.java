@@ -64,7 +64,8 @@ public final class ProjectRenameCommand implements Runnable {
     }
     if (!dryRun && !ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail project rename " + name + " " + newName);
+          "Root privileges required. Run with: "
+              + OperatorCommand.SUDO.sail("project rename " + name + " " + newName));
     }
 
     try (var operations = OperationsFactory.open(operator)) {
@@ -114,7 +115,7 @@ public final class ProjectRenameCommand implements Runnable {
     System.out.println("[dry-run]   re-key catalog, specs, and shared files to " + newName);
     System.out.println(
         "[dry-run]   move " + SailPaths.projectDir(name) + " -> " + SailPaths.projectDir(newName));
-    System.out.println("[dry-run]   local only: not propagated to other boxes via sail sync");
+    System.out.println("[dry-run]   local only: not propagated to other boxes by sync");
   }
 
   private void emit(ProjectRenamer.Result result, OperatorCommand operator) {
@@ -153,7 +154,6 @@ public final class ProjectRenameCommand implements Runnable {
     System.out.println(
         Ansi.AUTO.string(
             "  @|yellow ⚠ This rename is local to this box.|@ Other boxes won't see it through"
-                + " @|bold sail sync|@ — rename it there too (or re-sync) once your FDEs are on"
-                + " board."));
+                + " sync — rename it there too (or re-sync) once your FDEs are on board."));
   }
 }

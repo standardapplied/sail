@@ -69,7 +69,8 @@ public final class ProjectDestroyCommand implements Runnable {
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail project destroy " + name);
+          "Root privileges required. Run with: "
+              + OperatorCommand.SUDO.sail("project destroy " + name));
     }
 
     var shell = new ShellExecutor(dryRun);

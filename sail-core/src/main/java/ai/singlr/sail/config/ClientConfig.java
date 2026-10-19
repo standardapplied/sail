@@ -6,6 +6,7 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -78,7 +79,8 @@ public record ClientConfig(String host, String user) {
       throw new IOException(
           "Client config not found: "
               + path
-              + "\n  Create it with: sail init <server-ip-or-ssh-alias>");
+              + "\n  Create it with: "
+              + OperatorCommand.client("init <server-ip-or-ssh-alias>"));
     }
     return fromMap(YamlUtil.parseFile(path));
   }

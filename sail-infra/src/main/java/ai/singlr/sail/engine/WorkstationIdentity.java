@@ -19,12 +19,15 @@ import java.util.Optional;
  */
 public final class WorkstationIdentity {
 
-  /**
-   * The one command that registers a box's workstation key — shared so the guidance can't drift.
-   */
-  public static final String SET_KEY_HINT = "sudo sail host config set ssh-public-key";
-
   private WorkstationIdentity() {}
+
+  /**
+   * The one command that registers a box's workstation key, as {@code operator} types it — shared
+   * so the guidance can't drift.
+   */
+  public static String setKeyHint(OperatorCommand operator) {
+    return operator.sail("host config set ssh-public-key");
+  }
 
   /** The registered workstation key, or empty when the box owner has not set one. */
   public static Optional<SshPublicKey> registered() {

@@ -33,7 +33,7 @@ class SyncDiagnosticTest {
       var config = new SyncConfig("node", "sail@main", "mady", "box-1");
       var operations =
           new SyncOperations(
-              db, "node", home, () -> config, target -> closed(sshSaid), OperatorCommand.PLAIN);
+              db, "node", home, () -> config, target -> closed(sshSaid), OperatorCommand.SUDO);
       return assertThrows(
               SyncTransportException.class, () -> operations.sync(new SyncRequest(null)))
           .getMessage();

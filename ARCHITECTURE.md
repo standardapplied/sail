@@ -795,7 +795,13 @@ clone a project's source repos into its container at provision time, not to move
   command, at the command's door (`OperatorCommand.here()` in the command class), and passed
   down: every message builder below it, in `engine`, `api`, `Banner` and `sail-core`, takes the
   operator as a parameter, so its `sudo` wording is a plain unit assertion
-  (`OperatorHintsTest` scans the sources for the seam).
+  (`OperatorHintsTest` scans the sources for the seam). A command is rendered three ways:
+  `sail(args)` for the caller on this box, `elsewhere(args)` for a reader this box cannot know
+  (another box's operator, the reader of a journal refusal or an API answer), always `sudo sail
+  …` as the README writes it, and `client(args)` for a thin client, always plain. A refusal only
+  a non-root caller reads ("Root privileges required…") renders through `OperatorCommand.SUDO`.
+  No literal in `src/main` spells a `sail` command: `OperatorHintsTest` scans every string
+  literal for `sudo sail` and for `sail <verb>` outside `OperatorCommand`.
 - **Client mode.** Only `~/.sail/config.yaml` exists. Commands are forwarded to a box over
   SSH by `RemoteCommandRunner`, in lanes:
   - Local commands (`--version`, `upgrade`, `init`, `client`, `login`) run on the client.
@@ -2274,7 +2280,11 @@ operator's login and home are the JVM's `user.name` and `user.home`.
 - **C4. Containers trust the paired key.** The pairing's public key becomes the box's
   workstation key (above), so every project provisioned or applied afterwards lets it into its
   containers; the command names the projects the catalog holds, whose containers trust it only
-  after their next `project apply`. A box trusts one workstation key: a pairing replaces the
+  after their next `project apply`. Step 6 writes the workstation key whatever the definition
+  says, first, then the definition's own keys, each key once (`ProjectProvisioner.trustedKeys`),
+  and its fingerprint is an input of the run's digest (`ProjectProvisioner.inputs`), so
+  registering, replacing or revoking it makes the next apply of every project revisit step 6
+  (`ProjectProvisionerTest`). A box trusts one workstation key: a pairing replaces the
   key of the same FDE's earlier pairing, and refuses to replace any other, naming its
   fingerprint and comment, unless `--as-workstation-key` is passed. Revoking the pairing takes
   its key back out of the workstation key and the containers (C3); a key set by `sail host

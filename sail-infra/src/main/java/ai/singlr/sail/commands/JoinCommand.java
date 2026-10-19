@@ -98,7 +98,7 @@ public final class JoinCommand implements Runnable {
             resolvedName,
             resolvedEmail,
             SshSyncChannel::open,
-            MainHostKey.here(),
+            MainHostKey.here(operator),
             operator);
     System.out.println(render(plan, json, operator));
   }
@@ -150,7 +150,10 @@ public final class JoinCommand implements Runnable {
     var probe = Files.exists(hostConfig) ? hostConfig : hostConfig.getParent();
     if (probe != null && !Files.isWritable(probe)) {
       throw new IllegalStateException(
-          "Writing " + hostConfig + " needs root. Re-run: sudo sail join " + target);
+          "Writing "
+              + hostConfig
+              + " needs root. Re-run: "
+              + OperatorCommand.SUDO.sail("join " + target));
     }
   }
 
@@ -310,7 +313,7 @@ public final class JoinCommand implements Runnable {
    */
   static String authorizeLine(
       String handle, String name, String email, String publicKey, String mainHostKey) {
-    var line = new StringBuilder("sudo sail fde add " + handle + " --role member");
+    var line = new StringBuilder(OperatorCommand.elsewhere("fde add " + handle + " --role member"));
     if (Strings.isNotBlank(name)) {
       line.append(" --name \"").append(name).append('"');
     }

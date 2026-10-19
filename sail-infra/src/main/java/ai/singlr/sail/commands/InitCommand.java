@@ -107,14 +107,15 @@ public final class InitCommand implements Runnable {
       Steps steps) {
 
     static Box here() {
+      var operator = OperatorCommand.here();
       return new Box(
           SailPaths.isRoot(),
           System.getenv("SUDO_USER"),
           SailPaths.hostConfigPath(),
           SailPaths::accountHome,
-          LocalIdentity.detect(),
+          LocalIdentity.detect(operator),
           InitCommand::ask,
-          OperatorCommand.here(),
+          operator,
           InitCommand::runCommand);
     }
   }
@@ -281,8 +282,8 @@ public final class InitCommand implements Runnable {
   private void requireRoot(boolean root) {
     if (!root) {
       throw new IllegalStateException(
-          "Root privileges required. Re-run with: sudo sail init "
-              + (asMain ? "--as-main" : "--main " + main));
+          "Root privileges required. Re-run with: "
+              + OperatorCommand.SUDO.sail("init " + (asMain ? "--as-main" : "--main " + main)));
     }
   }
 
@@ -309,8 +310,9 @@ public final class InitCommand implements Runnable {
               + sudoUser
               + ": run sail as "
               + sudoUser
-              + ", without sudo. To set the box up as root instead, first run 'sail host service"
-              + " uninstall' as "
+              + ", without sudo. To set the box up as root instead, first run '"
+              + OperatorCommand.PLAIN.sail("host service uninstall")
+              + "' as "
               + sudoUser
               + ".");
     }
@@ -340,12 +342,15 @@ public final class InitCommand implements Runnable {
     out.println(
         Ansi.AUTO.string("  @|bold,green ✓|@ This box is the org's @|bold main|@ and ready."));
     out.println(
-        "  Add each engineer once they send you the line their 'sudo sail init --main' printed,"
-            + " e.g.:");
+        "  Add each engineer once they send you the line their '"
+            + OperatorCommand.elsewhere("init --main")
+            + "' printed, e.g.:");
     out.println(
         Ansi.AUTO.string(
-            "    @|cyan sudo sail fde add mady --role member --key \"…\" --main-host-key"
-                + " SHA256:…|@"));
+            "    @|cyan "
+                + OperatorCommand.elsewhere(
+                    "fde add mady --role member --key \"…\" --main-host-key SHA256:…")
+                + "|@"));
   }
 
   /**

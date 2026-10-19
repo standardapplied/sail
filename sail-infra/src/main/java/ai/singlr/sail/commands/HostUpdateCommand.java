@@ -47,7 +47,8 @@ public final class HostUpdateCommand implements Runnable {
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException("Root privileges required. Run with: sudo sail host update");
+      throw new IllegalStateException(
+          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("host update"));
     }
 
     if (!json) {

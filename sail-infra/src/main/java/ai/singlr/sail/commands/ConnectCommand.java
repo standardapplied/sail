@@ -105,12 +105,7 @@ public final class ConnectCommand implements Runnable {
     }
 
     if (WorkstationIdentity.registered().isEmpty()) {
-      System.out.println(
-          Ansi.AUTO.string(
-              "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below"
-                  + " assumes ~/.ssh/id_ed25519. If the container rejects your key, register the"
-                  + " one you connect with, then re-create the project:"));
-      System.out.println(Ansi.AUTO.string("    @|bold " + WorkstationIdentity.SET_KEY_HINT + "|@"));
+      System.out.println(Ansi.AUTO.string(noWorkstationKey(name, operator)));
     }
     System.out.println(
         connectSnippet(
@@ -136,10 +131,26 @@ public final class ConnectCommand implements Runnable {
     }
   }
 
+  /**
+   * Connect's warning on a box with no workstation key: the next apply puts the key it registers
+   * into the container.
+   */
+  static String noWorkstationKey(String name, OperatorCommand operator) {
+    return "  @|yellow ⚠|@ No workstation key is registered on this box; the snippet below assumes"
+        + " ~/.ssh/id_ed25519. If the container rejects your key, register the one you connect"
+        + " with, then run '"
+        + operator.sail("project apply " + name)
+        + "':\n    @|bold "
+        + WorkstationIdentity.setKeyHint(operator)
+        + "|@";
+  }
+
   /** Connect's refusal on a box with no server IP, naming both ways to give it one. */
   static String serverIpUnset(String name, OperatorCommand operator) {
     return "Server IP not configured. Fix with one of:\n"
-        + "  - sudo sail host config set server-ip <your-server-ip>\n"
+        + "  - "
+        + operator.sail("host config set server-ip <your-server-ip>")
+        + "\n"
         + "  - Or pass: "
         + operator.sail("project connect " + name + " --server-ip <your-server-ip>");
   }

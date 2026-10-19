@@ -101,7 +101,7 @@ public final class HostConfigSetCommand implements Runnable {
     }
 
     if ("slack-token".equals(key)) {
-      applySlackToken();
+      applySlackToken(operator);
       return;
     }
     if (tokenFile != null) {
@@ -110,11 +110,12 @@ public final class HostConfigSetCommand implements Runnable {
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
       throw new IllegalStateException(
-          "Root privileges required. Run with: sudo sail host config set " + key + " " + value);
+          "Root privileges required. Run with: "
+              + OperatorCommand.SUDO.sail("host config set " + key + " " + value));
     }
 
     if ("ssh-public-key".equals(key)) {
-      applyWorkstationKey();
+      applyWorkstationKey(operator);
       return;
     }
 
@@ -175,7 +176,7 @@ public final class HostConfigSetCommand implements Runnable {
    * cannot leak into shell history or the process list. Package-private so the full flow is
    * unit-tested with an injected shell, home, and mode instead of root and a live systemd.
    */
-  void applySlackToken() throws Exception {
+  void applySlackToken(OperatorCommand operator) throws Exception {
     if (Strings.isNotBlank(value)) {
       throw new IllegalArgumentException(
           "Never pass the token as an argument — it would land in shell history and the process"
@@ -184,7 +185,7 @@ public final class HostConfigSetCommand implements Runnable {
     }
     var secret = DaemonSecretInstaller.SLACK_TOKEN;
     var mode = resolvedServiceMode();
-    var installer = new DaemonSecretInstaller(resolvedShell(), mode, resolvedUserHome());
+    var installer = new DaemonSecretInstaller(resolvedShell(), mode, resolvedUserHome(), operator);
 
     if (dryRun) {
       var systemctl = mode == SystemdServiceInstaller.Mode.USER ? "systemctl --user" : "systemctl";
@@ -288,9 +289,10 @@ public final class HostConfigSetCommand implements Runnable {
         : SystemdServiceInstaller.Mode.USER;
   }
 
-  private void applyWorkstationKey() throws IOException {
+  private void applyWorkstationKey(OperatorCommand operator) throws IOException {
     var dest = SailPaths.workstationPublicKeyPath();
-    var chosen = resolveWorkstationKey(value, detectWorkstationKeys(authorizedKeysPath()));
+    var chosen =
+        resolveWorkstationKey(value, detectWorkstationKeys(authorizedKeysPath()), operator);
     if (dryRun) {
       System.out.println(
           "[dry-run] Would set ssh-public-key (" + chosen.fingerprint() + ") in " + dest);
@@ -314,7 +316,8 @@ public final class HostConfigSetCommand implements Runnable {
    * authorized to SSH into this box (their laptop key). Fails loud when none or several are found
    * so the owner is never guessed for.
    */
-  static SshPublicKey resolveWorkstationKey(String explicitValue, List<SshPublicKey> detected) {
+  static SshPublicKey resolveWorkstationKey(
+      String explicitValue, List<SshPublicKey> detected, OperatorCommand operator) {
     if (Strings.isNotBlank(explicitValue)) {
       return SshPublicKey.parse(explicitValue);
     }
@@ -324,7 +327,8 @@ public final class HostConfigSetCommand implements Runnable {
     if (detected.isEmpty()) {
       throw new IllegalArgumentException(
           "No workstation public key found in your authorized_keys. Pass the one you connect"
-              + " with:\n  sudo sail host config set ssh-public-key \"<your public key>\"");
+              + " with:\n  "
+              + operator.sail("host config set ssh-public-key \"<your public key>\""));
     }
     var options =
         detected.stream()

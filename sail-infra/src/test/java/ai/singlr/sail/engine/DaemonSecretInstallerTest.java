@@ -49,7 +49,10 @@ class DaemonSecretInstallerTest {
   void systemModeDropInLivesUnderEtcSystemd(@TempDir Path home) {
     var installer =
         new DaemonSecretInstaller(
-            new ScriptedShellExecutor(), SystemdServiceInstaller.Mode.SYSTEM, home);
+            new ScriptedShellExecutor(),
+            SystemdServiceInstaller.Mode.SYSTEM,
+            home,
+            OperatorCommand.PLAIN);
 
     assertEquals(home.resolve(".sail/slack-token"), installer.secretFilePath(SECRET));
     assertEquals(
@@ -138,7 +141,8 @@ class DaemonSecretInstallerTest {
             shell,
             SystemdServiceInstaller.Mode.SYSTEM,
             tmp.resolve(".sail"),
-            tmp.resolve("sail-api.service.d"));
+            tmp.resolve("sail-api.service.d"),
+            OperatorCommand.PLAIN);
 
     installer.install(SECRET, "xoxb-token-1");
 
@@ -180,6 +184,7 @@ class DaemonSecretInstallerTest {
   }
 
   private static DaemonSecretInstaller userInstaller(Path home, ShellExec shell) {
-    return new DaemonSecretInstaller(shell, SystemdServiceInstaller.Mode.USER, home);
+    return new DaemonSecretInstaller(
+        shell, SystemdServiceInstaller.Mode.USER, home, OperatorCommand.PLAIN);
   }
 }

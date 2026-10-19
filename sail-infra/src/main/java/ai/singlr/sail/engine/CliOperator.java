@@ -30,33 +30,42 @@ public final class CliOperator {
 
   private CliOperator() {}
 
-  /** The operator this box's configuration and roster name; a null roster is none kept yet. */
-  public static Actor of(SyncConfig config, FdeStore roster) {
+  /**
+   * The operator this box's configuration and roster name; a null roster is none kept yet. A
+   * refusal is worded for {@code reader}.
+   */
+  public static Actor of(SyncConfig config, FdeStore roster, OperatorCommand reader) {
     var roles = new RoleRule(() -> config, roster);
     var handle = roles.boxFde().orElse(null);
     return roles
         .roleOfUnbound(Role.ADMIN)
         .map(role -> new Actor(handle, role, Actor.Lane.CLI))
-        .orElseThrow(() -> unplaced(handle));
+        .orElseThrow(() -> unplaced(handle, reader));
   }
 
   /**
    * The refusal for whatever acts for this box's FDE, {@code handle}, when the box cannot place it:
    * a node whose roster does not know that FDE yet or has disabled it, or a node that names none.
    */
-  public static ApiException unplaced(String handle) {
+  public static ApiException unplaced(String handle, OperatorCommand reader) {
     if (Strings.isBlank(handle)) {
       return new ApiException(
           ErrorCode.CONFLICT,
           "This box syncs with main but names no FDE of its own, so it cannot tell what you may do.",
-          "Name it with 'sudo sail host config set sync-handle <you>', then run 'sudo sail sync'.");
+          "Name it with '"
+              + reader.sail("host config set sync-handle <you>")
+              + "', then run '"
+              + reader.sail("sync")
+              + "'.");
     }
     return new ApiException(
         ErrorCode.CONFLICT,
         "This box does not know its FDE's role ('"
             + handle
             + "'), so it cannot tell what you may do.",
-        "Run 'sudo sail sync' first. If it still refuses, ask an admin whether '"
+        "Run '"
+            + reader.sail("sync")
+            + "' first. If it still refuses, ask an admin whether '"
             + handle
             + "' is disabled.");
   }
@@ -71,16 +80,16 @@ public final class CliOperator {
   }
 
   /** The operator of this box, read from its host configuration and control-plane roster. */
-  public static Actor current() {
-    return current(NodeIdentity.config(), SailPaths.controlPlaneDb());
+  public static Actor current(OperatorCommand reader) {
+    return current(NodeIdentity.config(), SailPaths.controlPlaneDb(), reader);
   }
 
-  static Actor current(SyncConfig config, Path controlPlane) {
+  static Actor current(SyncConfig config, Path controlPlane, OperatorCommand reader) {
     if (!Files.exists(controlPlane)) {
-      return of(config, null);
+      return of(config, null, reader);
     }
     try (var db = Sqlite.open(controlPlane)) {
-      return of(config, new FdeStore(db));
+      return of(config, new FdeStore(db), reader);
     }
   }
 }

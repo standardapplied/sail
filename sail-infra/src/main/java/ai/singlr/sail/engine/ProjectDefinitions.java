@@ -109,7 +109,7 @@ public final class ProjectDefinitions {
    * identity-free definition becomes a container that commits as the engineer and trusts their key.
    */
   public static SailYaml resolveForProvisioning(String definitionText, OperatorCommand operator) {
-    return resolveForProvisioning(definitionText, LocalIdentity.detect(), operator);
+    return resolveForProvisioning(definitionText, LocalIdentity.detect(operator), operator);
   }
 
   static SailYaml resolveForProvisioning(
@@ -148,10 +148,10 @@ public final class ProjectDefinitions {
               + operator.sail("project edit " + name)
               + "', then apply again. A container already created as '"
               + user
-              + "' must be recreated: 'sudo sail project destroy "
-              + name
-              + "', then 'sudo sail project apply "
-              + name
+              + "' must be recreated: '"
+              + operator.sail("project destroy " + name)
+              + "', then '"
+              + operator.sail("project apply " + name)
               + "'.");
     }
   }

@@ -15,15 +15,21 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.ssh.SshPublicKey;
+import ai.singlr.sail.ssh.TestSshKeys;
+import ai.singlr.sail.webauthn.Hashes;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -48,6 +54,9 @@ class ProjectProvisionerTest {
         new SailYaml.Agent("claude-code", true, "sail/", true, null, Map.of(), null, null),
         new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA... alice@laptop")));
   }
+
+  private static final SshPublicKey WORKSTATION_KEY =
+      SshPublicKey.parse(TestSshKeys.ed25519("workstation", "uday@laptop"));
 
   private static SailYaml minimalConfig() {
     return new SailYaml(
@@ -252,7 +261,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -267,7 +280,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            new ShellExecutor(true), tracker, new RecordingListener(steps), OperatorCommand.PLAIN);
+            new ShellExecutor(true),
+            tracker,
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -279,7 +296,8 @@ class ProjectProvisionerTest {
   @Test
   void nullListenerDoesNotThrow() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     assertDoesNotThrow(() -> provisioner.provision(fullConfig(), hostYaml(), null, null));
   }
@@ -289,7 +307,8 @@ class ProjectProvisionerTest {
     var shell = allSuccessShell();
     var stateFile = tempDir.resolve("provision-state.yaml");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -298,7 +317,7 @@ class ProjectProvisionerTest {
             .invocations()
             .contains(
                 "incus config set acme-health user.sail.inputs="
-                    + ProjectProvisioner.inputs(fullConfig())));
+                    + ProjectProvisioner.inputs(fullConfig(), Optional.empty())));
     assertTrue(tracker.isComplete());
     assertFalse(Files.exists(stateFile));
   }
@@ -309,11 +328,12 @@ class ProjectProvisionerTest {
         allSuccessShell()
             .onFail(
                 "incus config set acme-health user.sail.inputs="
-                    + ProjectProvisioner.inputs(fullConfig()),
+                    + ProjectProvisioner.inputs(fullConfig(), Optional.empty()),
                 "denied");
     var stateFile = tempDir.resolve("provision-state.yaml");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var thrown =
         assertThrows(
@@ -340,16 +360,20 @@ class ProjectProvisionerTest {
   void aDryRunResetOfStaleProgressPreviewsEveryStepAndKeepsTheFile() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
     var before = Files.readString(stateFile);
     var tracker = dryRunTracker();
-    tracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    tracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     tracker.reset();
 
     var steps = new ArrayList<String>();
     new ProjectProvisioner(
-            new ShellExecutor(true), tracker, new RecordingListener(steps), OperatorCommand.PLAIN)
+            new ShellExecutor(true),
+            tracker,
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN)
         .provision(minimalConfig(), hostYaml(), null, null);
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
@@ -361,14 +385,15 @@ class ProjectProvisionerTest {
   void resumeFromNetworkReadySkipsFirstThreeSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.RESOURCE_LIMITS_SET);
 
     var shell = allSuccessShell();
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     var provisioner =
-        new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN);
+        new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -383,7 +408,7 @@ class ProjectProvisionerTest {
   void resumeFromPackagesSkipsFirstFiveSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.PACKAGES_INSTALLED);
 
     var shell =
@@ -401,7 +426,8 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     var provisioner =
-        new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN);
+        new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -415,7 +441,7 @@ class ProjectProvisionerTest {
   void resumeFromSshConfiguredRunsNewSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
 
     var shell =
@@ -430,7 +456,8 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     var provisioner =
-        new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN);
+        new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -444,14 +471,15 @@ class ProjectProvisionerTest {
   void resumeFromCompleteSkipsAllSteps() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(fullConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(fullConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.COMPLETE);
 
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
     var provisioner =
-        new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN);
+        new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -463,14 +491,15 @@ class ProjectProvisionerTest {
   void anInterruptedRunForAnotherDescriptorRestartsFromStepOne() throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.SSH_CONFIGURED);
     var edited = minimalConfigWith(new SailYaml.Ssh("dev", null));
 
     var shell = minimalSuccessShell();
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN)
+    new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
         .provision(edited, hostYaml(), null, null);
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
@@ -480,7 +509,8 @@ class ProjectProvisionerTest {
         shell
             .invocations()
             .contains(
-                "incus config set simple user.sail.inputs=" + ProjectProvisioner.inputs(edited)));
+                "incus config set simple user.sail.inputs="
+                    + ProjectProvisioner.inputs(edited, Optional.empty())));
   }
 
   @Test
@@ -498,7 +528,8 @@ class ProjectProvisionerTest {
     var shell = minimalSuccessShell();
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN)
+    new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
         .provision(minimalConfig(), hostYaml(), null, null);
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
@@ -510,14 +541,15 @@ class ProjectProvisionerTest {
       throws Exception {
     var stateFile = tempDir.resolve("provision-state.yaml");
     var setupTracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    setupTracker.load(ProjectProvisioner.inputs(minimalConfig()));
+    setupTracker.load(ProjectProvisioner.inputs(minimalConfig(), Optional.empty()));
     setupTracker.advance(ProjectPhase.MAVEN_INSTALLED);
     var withJdk = minimalConfigWith(new SailYaml.Runtimes(25, null, null));
 
     var shell = provisionedSimpleShell().onFail("dpkg -s temurin-25-jdk", "not installed");
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN)
+    new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
         .provision(withJdk, hostYaml(), null, null);
 
     var cmds = shell.invocations();
@@ -536,7 +568,8 @@ class ProjectProvisionerTest {
     var shell = provisionedSimpleShell().onFail("node --version", "not found");
     var steps = new ArrayList<String>();
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    new ProjectProvisioner(shell, tracker, new RecordingListener(steps), OperatorCommand.PLAIN)
+    new ProjectProvisioner(
+            shell, tracker, new RecordingListener(steps), Optional.empty(), OperatorCommand.PLAIN)
         .provision(withNode, hostYaml(), null, null);
 
     var cmds = shell.invocations();
@@ -545,7 +578,8 @@ class ProjectProvisionerTest {
     assertTrue(steps.contains("done:10/20:Node.js 22"), steps.toString());
     assertTrue(
         cmds.contains(
-            "incus config set simple user.sail.inputs=" + ProjectProvisioner.inputs(withNode)));
+            "incus config set simple user.sail.inputs="
+                + ProjectProvisioner.inputs(withNode, Optional.empty())));
     assertFalse(Files.exists(stateFile));
   }
 
@@ -574,7 +608,8 @@ class ProjectProvisionerTest {
                 .onFail("node --version", "not found")
                 .onFail("apt-get install -y -qq nodejs", "E: Unable to locate package"));
     var shell = new ConfigRecordingShell(pushes);
-    shell.config.put("simple user.sail.inputs", ProjectProvisioner.inputs(finished));
+    shell.config.put(
+        "simple user.sail.inputs", ProjectProvisioner.inputs(finished, Optional.empty()));
 
     assertThrows(
         IOException.class,
@@ -583,6 +618,7 @@ class ProjectProvisionerTest {
                     shell,
                     new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
                     null,
+                    Optional.empty(),
                     OperatorCommand.PLAIN)
                 .provision(edited, hostYaml(), null, null));
 
@@ -596,13 +632,14 @@ class ProjectProvisionerTest {
             shell,
             new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
             new RecordingListener(steps),
+            Optional.empty(),
             OperatorCommand.PLAIN)
         .provision(finished, hostYaml(), null, null);
 
     assertEquals("step:1/20:Launching container simple...", steps.getFirst());
     assertEquals("", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
     assertEquals(
-        Optional.of(ProjectProvisioner.inputs(finished)),
+        Optional.of(ProjectProvisioner.inputs(finished, Optional.empty())),
         ProjectProvisioner.provisionedInputs(shell, "simple"));
   }
 
@@ -617,7 +654,8 @@ class ProjectProvisionerTest {
         assertThrows(
             IOException.class,
             () ->
-                new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN)
+                new ProjectProvisioner(
+                        shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN)
                     .provision(minimalConfig(), hostYaml(), null, null));
 
     assertEquals(
@@ -642,6 +680,7 @@ class ProjectProvisionerTest {
                         shell,
                         new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
                         null,
+                        Optional.empty(),
                         OperatorCommand.PLAIN)
                     .provision(minimalConfig(), hostYaml(), null, null));
 
@@ -656,6 +695,7 @@ class ProjectProvisionerTest {
             shell,
             new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
             new RecordingListener(steps),
+            Optional.empty(),
             OperatorCommand.PLAIN)
         .provision(minimalConfig(), hostYaml(), null, null);
 
@@ -682,6 +722,7 @@ class ProjectProvisionerTest {
                         shell,
                         new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
                         null,
+                        Optional.empty(),
                         OperatorCommand.PLAIN)
                     .provision(minimalConfig(), hostYaml(), null, null));
 
@@ -728,7 +769,8 @@ class ProjectProvisionerTest {
             .onFail("incus launch", "permission denied");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -745,7 +787,8 @@ class ProjectProvisionerTest {
   void installsSailMachineryOnlyAfterTheUserHomeExists() throws Exception {
     var shell = allSuccessShell();
     var provisioner =
-        new ProjectProvisioner(shell, tracker(), ProvisionListener.NOOP, OperatorCommand.PLAIN);
+        new ProjectProvisioner(
+            shell, tracker(), ProvisionListener.NOOP, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -786,7 +829,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -813,7 +860,8 @@ class ProjectProvisionerTest {
             null,
             new SailYaml.Ssh("dev", List.of("ssh-ed25519 AAAA...")));
 
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
     provisioner.provision(customConfig, hostYaml(), null, null);
 
     var cmds = shell.invocations();
@@ -825,7 +873,8 @@ class ProjectProvisionerTest {
   @Test
   void nullProjectImageFallsBackToHostImage() throws Exception {
     var shell = minimalSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -838,7 +887,8 @@ class ProjectProvisionerTest {
   @Test
   void diskQuotaSetCorrectly() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -850,7 +900,8 @@ class ProjectProvisionerTest {
   @Test
   void resourceLimitsSetCorrectly() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -869,7 +920,8 @@ class ProjectProvisionerTest {
             .onFail("incus config device override", "no such device");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -888,7 +940,8 @@ class ProjectProvisionerTest {
             .onFail("limits.cpu=", "limits not supported");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -906,7 +959,8 @@ class ProjectProvisionerTest {
             .onFail("ip -4 addr show", "");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -926,7 +980,8 @@ class ProjectProvisionerTest {
             .onFail("apt-get install", "E: Unable to locate package");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -938,7 +993,8 @@ class ProjectProvisionerTest {
   @Test
   void installPackagesIncludesBaselineAndUserPackages() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -958,7 +1014,8 @@ class ProjectProvisionerTest {
   @Test
   void sshConfigCreatesUserAndKeys() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1001,7 +1058,8 @@ class ProjectProvisionerTest {
             .onFail("useradd", "useradd: permission denied");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -1016,7 +1074,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -1028,7 +1090,93 @@ class ProjectProvisionerTest {
     assertTrue(cmds.contains("incus exec simple -- loginctl enable-linger dev"));
     assertTrue(cmds.stream().anyMatch(c -> c.contains("crontab -u dev /tmp/sail-crontab")));
     assertEquals("dev ALL=(ALL) NOPASSWD:ALL\n", shell.pushed.get("simple/etc/sudoers.d/dev"));
-    assertFalse(shell.pushed.containsKey("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals("", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void aDescriptorWithoutAnSshBlockTrustsTheBoxsWorkstationKey() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+
+    new ProjectProvisioner(
+            shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
+        .provision(minimalConfig(), hostYaml(), null, null);
+
+    assertEquals(
+        WORKSTATION_KEY.line() + "\n", shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void theWorkstationKeyComesFirstAndOnceBesideTheDefinitionsKeys() throws Exception {
+    var shell = new PushRecordingShell(minimalSuccessShell());
+    var alice = TestSshKeys.ed25519("alice", "alice@laptop");
+    var config =
+        minimalConfigWith(
+            new SailYaml.Ssh(
+                null,
+                List.of(
+                    alice,
+                    WORKSTATION_KEY.type() + " " + WORKSTATION_KEY.blob() + " resolved@box")));
+
+    new ProjectProvisioner(
+            shell, tracker(), null, Optional.of(WORKSTATION_KEY), OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), null, null);
+
+    assertEquals(
+        WORKSTATION_KEY.line() + "\n" + alice + "\n",
+        shell.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+  }
+
+  @Test
+  void theWorkstationKeyIsAnInputSoRegisteringOrRevokingItProvisionsAgain() {
+    var config = minimalConfig();
+    var none = ProjectProvisioner.inputs(config, Optional.empty());
+    var registered = ProjectProvisioner.inputs(config, Optional.of(WORKSTATION_KEY));
+    var replaced =
+        ProjectProvisioner.inputs(
+            config, Optional.of(SshPublicKey.parse(TestSshKeys.ed25519("other", "other@laptop"))));
+
+    assertEquals(
+        HexFormat.of()
+            .formatHex(
+                Hashes.sha256(
+                    YamlUtil.dumpToString(config.toMap()).getBytes(StandardCharsets.UTF_8))),
+        none,
+        "a box with no key keeps the digest its containers recorded");
+    assertEquals(3, Set.of(none, registered, replaced).size());
+    assertEquals(
+        registered,
+        ProjectProvisioner.inputs(
+            config,
+            Optional.of(
+                SshPublicKey.parse(
+                    WORKSTATION_KEY.type() + " " + WORKSTATION_KEY.blob() + " renamed"))),
+        "a key is its fingerprint, whatever its comment");
+  }
+
+  @Test
+  void aWorkstationKeyRegisteredAfterTheContainerExistsReachesItOnTheNextRun() throws Exception {
+    var stateFile = tempDir.resolve("provision-state.yaml");
+    var config = minimalConfig();
+    var pushes = new PushRecordingShell(provisionedSimpleShell());
+    var shell = new ConfigRecordingShell(pushes);
+    shell.config.put(
+        "simple user.sail.inputs", ProjectProvisioner.inputs(config, Optional.empty()));
+    var steps = new ArrayList<String>();
+
+    new ProjectProvisioner(
+            shell,
+            new ProvisionTracker<>(ProjectPhase.class, stateFile, false),
+            new RecordingListener(steps),
+            Optional.of(WORKSTATION_KEY),
+            OperatorCommand.PLAIN)
+        .provision(config, hostYaml(), null, null);
+
+    assertTrue(steps.contains("done:6/20:Created user dev (uid 1000)"), steps.toString());
+    assertEquals(
+        WORKSTATION_KEY.line() + "\n", pushes.pushed.get("simple/home/dev/.ssh/authorized_keys"));
+    assertEquals(
+        Optional.of(ProjectProvisioner.inputs(config, Optional.of(WORKSTATION_KEY))),
+        ProjectProvisioner.provisionedInputs(shell, "simple"));
   }
 
   @Test
@@ -1037,7 +1185,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(
         minimalConfigWith(new SailYaml.Ssh(null, List.of("ssh-ed25519 AAAA alice@laptop"))),
@@ -1062,7 +1214,8 @@ class ProjectProvisionerTest {
             .onOk("id dev", "uid=1001(dev)")
             .onOk("id -u dev", "1001\n");
     var tracker = new ProvisionTracker<>(ProjectPhase.class, stateFile, false);
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var failure =
         assertThrows(
@@ -1072,8 +1225,8 @@ class ProjectProvisionerTest {
     var expected =
         "User 'dev' in simple has uid 1001, but sail runs every agent, shell and hook as uid 1000."
             + " The image 'ubuntu/24.04' has another user at uid 1000; use an image without one"
-            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sudo sail project"
-            + " destroy simple' and 'sudo sail project apply simple'.";
+            + " (ubuntu/24.04 has only 'ubuntu', which sail removes), then run 'sail project"
+            + " destroy simple' and 'sail project apply simple'.";
     assertEquals(expected, failure.getMessage());
     var persisted = YamlUtil.parseFile(stateFile);
     assertEquals("PACKAGES_INSTALLED", persisted.get("completed_phase"));
@@ -1089,7 +1242,8 @@ class ProjectProvisionerTest {
             .onFail("incus info simple", "not found")
             .onFail("id dev", "no such user")
             .onFail("id -u dev", "id: 'dev': no such user");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     var failure =
         assertThrows(
@@ -1105,7 +1259,8 @@ class ProjectProvisionerTest {
     var shell =
         new PushRecordingShell(
             minimalSuccessShell().onOk("id dev", "uid=1000(dev)").onOk("id -u dev", "1000"));
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfigWith(new SailYaml.Ssh("dev", null)), hostYaml(), null, null);
 
@@ -1132,7 +1287,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1142,7 +1301,7 @@ class ProjectProvisionerTest {
   }
 
   @Test
-  void sshWithEmptyKeysSkipsAuthorizedKeysSetup() throws Exception {
+  void aNewUserWithAnEmptyKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithEmptyKeys =
         new SailYaml(
             "acme-health",
@@ -1157,7 +1316,7 @@ class ProjectProvisionerTest {
             null,
             null,
             new SailYaml.Ssh("dev", List.of()));
-    var shell =
+    var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
             .onOk("incus launch")
@@ -1168,19 +1327,19 @@ class ProjectProvisionerTest {
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
             .onFail("crontab -l", "no crontab");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var shell = new PushRecordingShell(script);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithEmptyKeys, hostYaml(), null, null);
 
-    var cmds = shell.invocations();
+    var cmds = script.invocations();
     assertTrue(cmds.stream().anyMatch(c -> c.contains("useradd")));
-    assertFalse(
-        cmds.stream().anyMatch(c -> c.contains("authorized_keys")),
-        "Should skip authorized_keys when key list is empty");
+    assertEquals("", shell.pushed.get("acme-health/home/dev/.ssh/authorized_keys"));
   }
 
   @Test
-  void sshWithNullKeysSkipsAuthorizedKeysSetup() throws Exception {
+  void aNewUserWithNoKeyListGetsAnEmptyAuthorizedKeys() throws Exception {
     var configWithNullKeys =
         new SailYaml(
             "acme-health",
@@ -1195,7 +1354,7 @@ class ProjectProvisionerTest {
             null,
             null,
             new SailYaml.Ssh("dev", null));
-    var shell =
+    var script =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onFail("incus info acme-health", "not found")
             .onOk("incus launch")
@@ -1206,20 +1365,20 @@ class ProjectProvisionerTest {
             .onFail("which podman", "")
             .onFail("test -f /etc/profile.d/testcontainers.sh", "")
             .onFail("crontab -l", "no crontab");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var shell = new PushRecordingShell(script);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithNullKeys, hostYaml(), null, null);
 
-    var cmds = shell.invocations();
-    assertFalse(
-        cmds.stream().anyMatch(c -> c.contains("authorized_keys")),
-        "Should skip authorized_keys when key list is null");
+    assertEquals("", shell.pushed.get("acme-health/home/dev/.ssh/authorized_keys"));
   }
 
   @Test
   void podmanInstalledAndSocketEnabled() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1265,7 +1424,8 @@ class ProjectProvisionerTest {
             .onFail("node --version", "not found")
             .onFail("podman container inspect", "no such container")
             .onFail("crontab -l", "no crontab");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1296,7 +1456,8 @@ class ProjectProvisionerTest {
             .onFail("node --version", "not found")
             .onFail("podman container inspect", "no such container")
             .onFail("crontab -l", "no crontab");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1324,7 +1485,8 @@ class ProjectProvisionerTest {
             .onFail("apt-get install -y -qq podman", "E: Unable to locate package podman");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -1336,7 +1498,8 @@ class ProjectProvisionerTest {
   @Test
   void testcontainersEnvConfigured() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1371,7 +1534,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1382,7 +1549,8 @@ class ProjectProvisionerTest {
   @Test
   void jdkInstalledViaAdoptium() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1407,7 +1575,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -1435,7 +1607,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1460,7 +1636,8 @@ class ProjectProvisionerTest {
             .onFail("apt-get install -y -qq temurin-25-jdk", "E: Unable to locate package");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -1472,7 +1649,8 @@ class ProjectProvisionerTest {
   @Test
   void nodeInstalledViaNodeSource() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1491,7 +1669,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -1518,7 +1700,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -1544,7 +1730,8 @@ class ProjectProvisionerTest {
             .onFail("apt-get install -y -qq nodejs", "E: Unable to locate package");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -1590,7 +1777,8 @@ class ProjectProvisionerTest {
   @Test
   void gitConfiguredWithTokenSetsCredentials() throws Exception {
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithGit("token"), hostYaml(), Map.of("*", "ghp_test123"), null);
 
@@ -1624,7 +1812,8 @@ class ProjectProvisionerTest {
   @Test
   void gitConfiguredWithSshNeverLogsGhIn() throws Exception {
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithGit("ssh"), hostYaml(), Map.of("*", "ghp_test123"), null);
 
@@ -1634,7 +1823,8 @@ class ProjectProvisionerTest {
   @Test
   void aFailedGhLoginFailsTheGitStepNamingTheHost() throws Exception {
     var shell = shellThroughStep10().onFail("gh auth login", "The token in GH_TOKEN is invalid.");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     var failed =
         assertThrows(
@@ -1649,7 +1839,7 @@ class ProjectProvisionerTest {
     assertEquals(
         ProjectPhase.GIT_CONFIGURED,
         tracker()
-            .load(ProjectProvisioner.inputs(configWithGit("token")))
+            .load(ProjectProvisioner.inputs(configWithGit("token"), Optional.empty()))
             .resumePoint()
             .orElseThrow());
   }
@@ -1657,7 +1847,8 @@ class ProjectProvisionerTest {
   @Test
   void gitConfiguredWithSshSkipsCredentialStore() throws Exception {
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithGit("ssh"), hostYaml(), null, null);
 
@@ -1684,7 +1875,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -1698,7 +1893,8 @@ class ProjectProvisionerTest {
   @Test
   void gitKnownHostsScansDefaultHosts() throws Exception {
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithGit("token"), hostYaml(), null, null);
 
@@ -1718,7 +1914,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithGit("token"), hostYaml(), null, null);
 
@@ -1748,7 +1948,8 @@ class ProjectProvisionerTest {
     Files.writeString(pubFile, "ssh-ed25519 AAAA... test@host");
 
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     var config = configWithGitSshKey(keyFile.toString());
     provisioner.provision(config, hostYaml(), null, null);
@@ -1778,7 +1979,8 @@ class ProjectProvisionerTest {
   @Test
   void gitSshKeyMissingThrowsClearError() {
     var shell = shellThroughStep10();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     var config = configWithGitSshKey("/nonexistent/path/id_ed25519");
     var ex =
@@ -1823,7 +2025,8 @@ class ProjectProvisionerTest {
   @Test
   void mavenInstalledFromApacheCdn() throws Exception {
     var shell = shellThroughStep10().onFail("/opt/maven/bin/mvn --version", "No such file");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, null);
 
@@ -1849,7 +2052,8 @@ class ProjectProvisionerTest {
             .onFail("/opt/maven/bin/mvn --version", "No such file")
             .onceOnFail("dlcdn.apache.org/maven/maven-3/3.9.12", "curl: (22) 404 Not Found")
             .onOk("archive.apache.org/dist/maven/maven-3/3.9.12");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithMaven("3.9.12"), hostYaml(), null, null);
 
@@ -1879,7 +2083,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -1895,7 +2103,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithMaven("3.9.9"), hostYaml(), null, null);
 
@@ -1916,7 +2128,8 @@ class ProjectProvisionerTest {
             .onFail("dlcdn.apache.org/maven/maven-3/99.0.0", "curl: (22) 404 Not Found")
             .onFail("archive.apache.org/dist/maven/maven-3/99.0.0", "curl: (22) 404 Not Found");
     var tracker = tracker();
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -1957,7 +2170,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
 
@@ -1989,7 +2206,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -2010,7 +2231,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
 
@@ -2027,7 +2252,8 @@ class ProjectProvisionerTest {
   void repoWithBranchUsesBranchFlag() throws Exception {
     var repos = List.of(new SailYaml.Repo("https://github.com/acme/app.git", "acme", "develop"));
     var shell = shellThroughStep10().onFail("test -d /home/dev/workspace/acme", "");
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(configWithRepos(repos), hostYaml(), null, null);
 
@@ -2048,7 +2274,8 @@ class ProjectProvisionerTest {
                 "git -C /home/dev/workspace/acme remote get-url origin",
                 "https://github.com/acme/legacy.git\n");
     var tracker = tracker();
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var refused =
         assertThrows(
@@ -2072,7 +2299,8 @@ class ProjectProvisionerTest {
             .onFail("test -d /home/dev/workspace/acme", "")
             .onFail("git clone", "fatal: repository not found");
     var tracker = tracker();
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -2088,7 +2316,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2106,7 +2338,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
@@ -2129,7 +2365,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
@@ -2174,7 +2414,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
@@ -2202,7 +2446,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
@@ -2223,7 +2471,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, sailYaml);
 
@@ -2235,7 +2487,8 @@ class ProjectProvisionerTest {
   @Test
   void servicesProvisionedViaPodmanRun() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2256,7 +2509,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -2284,7 +2541,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2314,7 +2575,8 @@ class ProjectProvisionerTest {
             .onFail("podman run", "Error: image not found");
     var tracker = tracker();
 
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -2360,7 +2622,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(config, hostYaml(), null, null);
 
@@ -2374,7 +2640,8 @@ class ProjectProvisionerTest {
   @Test
   void pruneCronConfigured() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2407,7 +2674,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2421,7 +2692,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2436,7 +2711,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(minimalConfig(), hostYaml(), null, null);
 
@@ -2483,7 +2762,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithInstall, hostYaml(), null, null);
 
@@ -2533,7 +2816,8 @@ class ProjectProvisionerTest {
             .onFail("which claude", "")
             .onFail("claude.ai/install.sh", "Connection refused");
     var tracker = tracker();
-    var provisioner = new ProjectProvisioner(shell, tracker, null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker, null, Optional.empty(), OperatorCommand.PLAIN);
 
     var ex =
         assertThrows(
@@ -2585,7 +2869,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(configWithMultiple, hostYaml(), null, null);
 
@@ -2603,7 +2891,8 @@ class ProjectProvisionerTest {
   @Test
   void writeProjectStateUsesFilePush() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2619,7 +2908,8 @@ class ProjectProvisionerTest {
   @Test
   void devUserCommandsUseCorrectIncusFlags() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2638,7 +2928,8 @@ class ProjectProvisionerTest {
   @Test
   void rootCommandsUseStandardExecPrefix() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2651,7 +2942,8 @@ class ProjectProvisionerTest {
   @Test
   void commandOrderingIsCorrect() throws Exception {
     var shell = allSuccessShell();
-    var provisioner = new ProjectProvisioner(shell, tracker(), null, OperatorCommand.PLAIN);
+    var provisioner =
+        new ProjectProvisioner(shell, tracker(), null, Optional.empty(), OperatorCommand.PLAIN);
 
     provisioner.provision(fullConfig(), hostYaml(), null, null);
 
@@ -2720,7 +3012,11 @@ class ProjectProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner =
         new ProjectProvisioner(
-            shell, tracker(), new RecordingListener(steps), OperatorCommand.PLAIN);
+            shell,
+            tracker(),
+            new RecordingListener(steps),
+            Optional.empty(),
+            OperatorCommand.PLAIN);
 
     provisioner.provision(config, hostYaml(), null, null);
 

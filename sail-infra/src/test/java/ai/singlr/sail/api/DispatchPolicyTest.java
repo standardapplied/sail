@@ -61,7 +61,7 @@ class DispatchPolicyTest {
 
   @Test
   void nodeHandleUnsetHelperCarriesTheCode() {
-    var refused = DispatchPolicy.nodeHandleUnset();
+    var refused = DispatchPolicy.nodeHandleUnset(OperatorCommand.PLAIN);
     assertEquals(ErrorCode.NODE_HANDLE_UNSET, refused.code());
     assertTrue(refused.message().contains("execution node"), refused.message());
   }

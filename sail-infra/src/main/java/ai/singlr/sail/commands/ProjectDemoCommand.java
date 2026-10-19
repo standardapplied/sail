@@ -25,6 +25,7 @@ import ai.singlr.sail.engine.ProvisionTracker;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkspaceFiles;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
@@ -64,7 +65,8 @@ public final class ProjectDemoCommand implements Runnable {
     var out = System.out;
 
     if (!dryRun && !ConsoleHelper.isRoot()) {
-      throw new IllegalStateException("Root privileges required. Run with: sudo sail project demo");
+      throw new IllegalStateException(
+          "Root privileges required. Run with: " + OperatorCommand.SUDO.sail("project demo"));
     }
 
     var hostYamlPath = SailPaths.hostConfigPath();
@@ -79,18 +81,18 @@ public final class ProjectDemoCommand implements Runnable {
       if (state instanceof ContainerState.Running) {
         throw new IllegalStateException(
             "Demo project is already running."
-                + "\n  Get a shell:    sudo sail project shell "
-                + DEMO_PROJECT
-                + "\n  Destroy first:  sudo sail project destroy "
-                + DEMO_PROJECT);
+                + "\n  Get a shell:    "
+                + operator.sail("project shell " + DEMO_PROJECT)
+                + "\n  Destroy first:  "
+                + operator.sail("project destroy " + DEMO_PROJECT));
       }
       if (state instanceof ContainerState.Stopped) {
         throw new IllegalStateException(
             "Demo project exists but is stopped."
-                + "\n  Start it:       sudo sail project start "
-                + DEMO_PROJECT
-                + "\n  Destroy first:  sudo sail project destroy "
-                + DEMO_PROJECT);
+                + "\n  Start it:       "
+                + operator.sail("project start " + DEMO_PROJECT)
+                + "\n  Destroy first:  "
+                + operator.sail("project destroy " + DEMO_PROJECT));
       }
     }
 
@@ -144,7 +146,9 @@ public final class ProjectDemoCommand implements Runnable {
     tracker.reset();
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
-    var provisioner = new ProjectProvisioner(shell, tracker, listener, operator);
+    var provisioner =
+        new ProjectProvisioner(
+            shell, tracker, listener, WorkstationIdentity.registered(), operator);
     provisioner.provision(config, hostYaml, GitCredentials.singleTokenMap(gitToken), sailYamlPath);
 
     if (json) {

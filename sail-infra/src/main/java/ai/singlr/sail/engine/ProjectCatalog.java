@@ -107,8 +107,8 @@ public final class ProjectCatalog {
           "Project '"
               + name
               + "' is outside the projects main grants this box, so main would take nothing of it."
-              + " Ask an admin to grant it on main: sudo sail fde grant <handle> "
-              + name
+              + " Ask an admin to grant it on main: "
+              + OperatorCommand.elsewhere("fde grant <handle> " + name)
               + ".");
     }
   }

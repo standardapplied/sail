@@ -121,7 +121,7 @@ public final class BuildDispatch {
           ErrorCode.INVALID_MODE, "Dispatch mode must be background or foreground.");
     }
     if (Strings.isBlank(localHandle)) {
-      throw refusal(DispatchPolicy.nodeHandleUnset());
+      throw refusal(DispatchPolicy.nodeHandleUnset(operator));
     }
     admission.requireTrustedRoster(localHandle);
     if (loaded.config().agent() == null) {

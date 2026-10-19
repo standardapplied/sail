@@ -6,6 +6,7 @@ package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -24,6 +25,12 @@ import java.util.Objects;
  */
 public final class ContentMigration implements DataMigration {
   public static final String NAME = "content-addressed-blobs-v1";
+
+  private final OperatorCommand operator;
+
+  public ContentMigration(OperatorCommand operator) {
+    this.operator = operator;
+  }
 
   @Override
   public String name() {
@@ -55,7 +62,7 @@ public final class ContentMigration implements DataMigration {
         if (changed) count++;
       }
     }
-    dropLegacyContent(db);
+    dropLegacyContent(db, operator);
     return new Report(
         count,
         0,
@@ -69,7 +76,7 @@ public final class ContentMigration implements DataMigration {
    * that cannot be redone, so a row the loop did not see — written by a process this one raced —
    * stops it, and the next run finishes the job.
    */
-  static void dropLegacyContent(Sqlite db) {
+  static void dropLegacyContent(Sqlite db, OperatorCommand operator) {
     db.transaction(
         () -> {
           if (!hasContentColumn(db)) return null;
@@ -80,7 +87,10 @@ public final class ContentMigration implements DataMigration {
                   .orElseThrow();
           if (unhashed > 0) {
             throw new IllegalStateException(
-                unhashed + " shared file(s) still carry no content hash; run 'sail migrate' again");
+                unhashed
+                    + " shared file(s) still carry no content hash; run '"
+                    + operator.sail("migrate")
+                    + "' again");
           }
           db.execute("ALTER TABLE project_files DROP COLUMN content");
           return null;

@@ -72,7 +72,7 @@ class ApiOperatorHintsTest {
     assertEquals(
         List.of(
             "Start it with sail project start gamma.",
-            "If its descriptor is on this box, import it with 'sudo sail migrate'. To create the"
+            "If its descriptor is on this box, import it with 'sail migrate'. To create the"
                 + " project, run 'sail project apply -f <file>'.",
             "Claim it first: sail spec update auth --assignee ada",
             "Reassign it to dispatch here: sail spec update auth --assignee ada",

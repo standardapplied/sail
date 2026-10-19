@@ -33,8 +33,9 @@ public interface ProjectReader {
     return new ApiException(
         ErrorCode.PROJECT_DESCRIPTOR_NOT_FOUND,
         "Project '" + project + "' is not in the catalog.",
-        "If its descriptor is on this box, import it with 'sudo sail migrate'. To"
-            + " create the project, run '"
+        "If its descriptor is on this box, import it with '"
+            + operator.sail("migrate")
+            + "'. To create the project, run '"
             + operator.sail("project apply -f <file>")
             + "'.");
   }

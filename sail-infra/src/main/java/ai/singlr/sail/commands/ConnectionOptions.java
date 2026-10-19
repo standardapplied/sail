@@ -29,7 +29,7 @@ public final class ConnectionOptions {
       names = "--token",
       description =
           "API token. Insecure — visible in the process list and shell history; prefer SAIL_TOKEN,"
-              + " --token-file, or 'sail login'.")
+              + " --token-file, or login.")
   private String token;
 
   @Option(

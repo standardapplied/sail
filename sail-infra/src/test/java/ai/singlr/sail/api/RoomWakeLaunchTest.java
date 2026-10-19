@@ -503,7 +503,8 @@ class RoomWakeLaunchTest {
                 "uday-box",
                 SyncWire.MAX_FRAME,
                 out -> out)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), db, HANDLE));
+      Actor.run(
+          Actor.main(), () -> NodeRound.begin(link.session(), db, HANDLE, OperatorCommand.PLAIN));
       var replicas = SyncedEntities.replicas(db, "uday-box", HANDLE);
       for (var entity : SyncedEntities.all()) {
         var report = link.reconcile(entity.type(), replicas.get(entity.type()));

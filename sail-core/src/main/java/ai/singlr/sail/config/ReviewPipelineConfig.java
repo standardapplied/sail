@@ -6,6 +6,7 @@
 package ai.singlr.sail.config;
 
 import ai.singlr.sail.common.Strings;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PromptConversation;
 import ai.singlr.sail.store.Finding;
 import java.util.LinkedHashMap;
@@ -39,8 +40,9 @@ public record ReviewPipelineConfig(
       Map.of(
           "skill",
           "is no longer read: a stage judges under its brief. Put what the skill said in the"
-              + " stage's brief (%s), or keep it as a project skill (sail project skills add) the"
-              + " brief tells the stage to run.",
+              + " stage's brief (%s), or keep it as a project skill ("
+              + OperatorCommand.elsewhere("project skills add")
+              + ") the brief tells the stage to run.",
           "categories",
           "is no longer read: what a stage focuses on is its brief. Say it in %s.");
 

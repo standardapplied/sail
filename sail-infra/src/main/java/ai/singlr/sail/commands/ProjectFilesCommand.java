@@ -85,7 +85,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(
@@ -321,7 +321,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Option(names = "--json", description = "Output as JSON.")
@@ -373,7 +373,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(index = "0", description = "Relative path of the file.")
@@ -413,7 +413,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(index = "0", description = "Relative path of the file.")
@@ -459,7 +459,7 @@ public final class ProjectFilesCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Option(names = "--all", description = "Pull every project that has shared files.")

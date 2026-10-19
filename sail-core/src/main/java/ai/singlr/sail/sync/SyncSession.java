@@ -258,8 +258,9 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       SyncWire.Hello hello,
       Consumer<String> notice,
       Consumer<Denial> denied,
+      OperatorCommand operator,
       Sqlite db) {
-    return ((PagedSyncSession) open(in, out, hello, notice, denied)).content(db);
+    return ((PagedSyncSession) open(in, out, hello, notice, denied, operator)).content(db);
   }
 
   static SyncSession open(
@@ -267,15 +268,17 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       OutputStream out,
       SyncWire.Hello hello,
       Consumer<String> notice,
-      Consumer<Denial> denied) {
+      Consumer<Denial> denied,
+      OperatorCommand operator) {
     var context = SyncWire.context(hello);
     var line = Rpc.exchange(in, out, SyncWire.encode(hello), context);
     if (SyncWire.predatesOps(line)) {
       throw new SyncTransportException(
           "refused",
           context
-              + ": main is on a sync protocol this node cannot speak: upgrade main ('sail upgrade'"
-              + " on main), then sync again",
+              + ": main is on a sync protocol this node cannot speak: upgrade main ('"
+              + OperatorCommand.elsewhere("upgrade")
+              + "' on main), then sync again",
           null);
     }
     SyncWire.Response response;
@@ -287,7 +290,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
     }
     return switch (response) {
       case SyncWire.Welcome welcome ->
-          PagedSyncSession.open(in, out, hello, welcome, notice, denied);
+          PagedSyncSession.open(in, out, hello, welcome, notice, denied, operator);
       case SyncWire.Refuse refuse ->
           throw new SyncTransportException("refused", context + ": " + refuse.reason(), null);
       case SyncWire.Failed failed ->

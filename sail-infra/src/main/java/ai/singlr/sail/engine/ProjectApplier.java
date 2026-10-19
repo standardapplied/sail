@@ -212,11 +212,16 @@ public final class ProjectApplier {
     return new ApplyResult(added, 0, skipped, List.of());
   }
 
-  /** Re-applies git config (always idempotent). */
+  /** Sets {@code dev}'s git identity to the definition's, unless both values already match. */
   public ApplyResult applyGitConfig(String name, SailYaml.Git git, String sshUser)
       throws IOException, InterruptedException, TimeoutException {
     if (git == null) {
       return ApplyResult.empty();
+    }
+    if (git.name().equals(gitValue(name, "user.name"))
+        && git.email().equals(gitValue(name, "user.email"))) {
+      out.println("  [skip] Git config already current");
+      return new ApplyResult(0, 0, 1, List.of());
     }
     out.println("  [apply] Git config (name=" + git.name() + ", email=" + git.email() + ")");
     var nameResult =
@@ -234,6 +239,14 @@ public final class ProjectApplier {
       throw new IOException("Failed to set git user.email: " + emailResult.stderr());
     }
     return new ApplyResult(1, 0, 0, List.of());
+  }
+
+  private String gitValue(String name, String key)
+      throws IOException, InterruptedException, TimeoutException {
+    var read =
+        probes.exec(
+            ContainerExec.asDevUser(name, List.of("git", "config", "--global", "--get", key)));
+    return read.ok() ? read.stdout().strip() : null;
   }
 
   /**
@@ -438,7 +451,9 @@ public final class ProjectApplier {
             || !normalizedSize(config.resources().memory())
                 .equals(normalizedSize(liveLimits.memory())))) {
       warnings.add(
-          "CPU and memory changes are not applied by 'sail project apply'. Use '"
+          "CPU and memory changes are not applied by '"
+              + operator.sail("project apply")
+              + "'. Use '"
               + operator.sail("project resources set " + config.name() + " ...")
               + "' instead.");
     }

@@ -17,6 +17,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
@@ -83,7 +84,9 @@ class LivenessAuditTest {
   private SyncSession.TypeReport only(SyncBox box, Actor as, String type) throws IOException {
     var replicas = SyncedEntities.replicas(box.db, box.id, box.id);
     try (var link = SyncBox.connect(main.server(as), box)) {
-      Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), box.db, box.id));
+      Actor.run(
+          Actor.main(),
+          () -> NodeRound.begin(link.session(), box.db, box.id, OperatorCommand.PLAIN));
       return link.reconcile(type, replicas.get(type));
     }
   }

@@ -131,7 +131,8 @@ class ProjectDefinitionsTest {
     var workstationKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILDpT0mMcK mady@box";
     var keyPath = dir.resolve("workstation_key.pub");
     Files.writeString(keyPath, workstationKey + "\n");
-    var identity = new LocalIdentity(gitConfig("Mady M", "mady@example.com"), keyPath);
+    var identity =
+        new LocalIdentity(gitConfig("Mady M", "mady@example.com"), keyPath, OperatorCommand.PLAIN);
 
     var config =
         ProjectDefinitions.resolveForProvisioning(
@@ -152,7 +153,8 @@ class ProjectDefinitionsTest {
     var redacted =
         PersonalFields.redact("name: acme\ngit:\n  name: Mady O'Neil\n  email: m@x.io\n");
     var identity =
-        new LocalIdentity(gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"));
+        new LocalIdentity(
+            gitConfig("Mady O'Neil", "m@x.io"), dir.resolve("missing.pub"), OperatorCommand.PLAIN);
 
     var config =
         ProjectDefinitions.resolveForProvisioning(redacted, identity, OperatorCommand.PLAIN);
@@ -179,7 +181,8 @@ class ProjectDefinitionsTest {
 
   @Test
   void resolveForProvisioningNeedsNoIdentityWhenThereAreNoPlaceholders() {
-    var noIdentity = new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"));
+    var noIdentity =
+        new LocalIdentity(gitConfig("", ""), dir.resolve("missing.pub"), OperatorCommand.PLAIN);
     var config =
         ProjectDefinitions.resolveForProvisioning(
             "name: acme\nresources:\n  cpu: 2\n  memory: 8GB\n  disk: 50GB\n",

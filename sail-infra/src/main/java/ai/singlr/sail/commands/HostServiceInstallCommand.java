@@ -70,7 +70,9 @@ public final class HostServiceInstallCommand implements Runnable {
     }
     System.out.println(
         Ansi.AUTO.string(
-            "    @|bold ExecStart:|@ sail server start --host "
+            "    @|bold ExecStart:|@ "
+                + SailPaths.INSTALLED_BINARY
+                + " server start --host "
                 + host
                 + " --port "
                 + port

@@ -55,7 +55,7 @@ class InitCommandTest {
   private final Map<String, String> gitConfig = new HashMap<>();
   private final Map<String, String> answers = new HashMap<>();
   private final LocalIdentity identity =
-      new LocalIdentity(new GitConfig(), Path.of("no-workstation-key.pub"));
+      new LocalIdentity(new GitConfig(), Path.of("no-workstation-key.pub"), OperatorCommand.PLAIN);
 
   private int init(String... args) {
     refusal = null;

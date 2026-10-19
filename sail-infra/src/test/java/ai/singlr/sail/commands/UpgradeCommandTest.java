@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.SailVersion;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PlatformDetector;
 import ai.singlr.sail.engine.SailBinary;
 import ai.singlr.sail.engine.SemVer;
@@ -109,13 +110,17 @@ class UpgradeCommandTest {
 
   @Test
   void aProvisionedBoxWithoutSailApiIsToldHowToInstallIt() {
-    var remediation = UpgradeCommand.missingApiRemediation(true).orElseThrow();
-    assertTrue(remediation.contains("sudo sail host service install"));
+    var remediation =
+        UpgradeCommand.missingApiRemediation(true, OperatorCommand.SUDO).orElseThrow();
+    assertEquals(
+        "  @|yellow Install it so you can dispatch agents and see the board here:|@"
+            + " @|bold sudo sail host service install|@",
+        remediation);
   }
 
   @Test
   void anUnprovisionedBoxGetsNoSailApiNag() {
-    assertTrue(UpgradeCommand.missingApiRemediation(false).isEmpty());
+    assertTrue(UpgradeCommand.missingApiRemediation(false, OperatorCommand.PLAIN).isEmpty());
   }
 
   @Test

@@ -120,7 +120,8 @@ public final class MaterializedFilesMigration implements DataMigration {
               + id
               + ": could not read "
               + copy
-              + "; restore access and rerun sail migrate",
+              + "; restore access and rerun "
+              + operator.sail("migrate"),
           e);
     }
     var row = files.find(project, path).orElse(null);

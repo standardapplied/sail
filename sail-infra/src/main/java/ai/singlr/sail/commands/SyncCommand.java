@@ -156,7 +156,7 @@ public final class SyncCommand implements Callable<Integer> {
       names = "--main",
       description =
           "SSH target of the main devbox, e.g. sail@maindevbox. Defaults to the configured main"
-              + " (sail host sync --main <target>).")
+              + ", which host sync --main <target> sets.")
   private String main;
 
   @Option(

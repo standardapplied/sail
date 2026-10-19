@@ -163,7 +163,10 @@ public final class SyncBox implements AutoCloseable {
       var settled =
           new ArrayList<>(
               Actor.call(
-                  Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle())));
+                  Actor.main(),
+                  () ->
+                      NodeRound.begin(
+                          link.session(), node.db, node.handle(), OperatorCommand.PLAIN)));
       link.session().keep(NodeRound.kept(settled));
       var replicas = node.replicas();
       var types =
@@ -603,7 +606,9 @@ public final class SyncBox implements AutoCloseable {
       UnaryOperator<OutputStream> nodeOut)
       throws IOException {
     var link = connect(main.server(node.session()), node, SyncWire.MAX_FRAME, serverOut, nodeOut);
-    Actor.run(Actor.main(), () -> NodeRound.begin(link.session(), node.db, node.handle()));
+    Actor.run(
+        Actor.main(),
+        () -> NodeRound.begin(link.session(), node.db, node.handle(), OperatorCommand.PLAIN));
     assertThrows(RuntimeException.class, () -> link.reconcile(type, node.replicas().get(type)));
     try {
       link.close();
@@ -782,6 +787,7 @@ public final class SyncBox implements AutoCloseable {
             SyncWire.Hello.of(SyncWire.UPGRADE_FLOOR, box),
             notices::add,
             denial -> notices.add(denial.describe(OperatorCommand.PLAIN)),
+            OperatorCommand.PLAIN,
             db);
     return new Link(session, log, notices, thread);
   }

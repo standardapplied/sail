@@ -156,9 +156,7 @@ public final class AgentAttachCommand implements Runnable {
     }
     if (Stty.saved().isEmpty()) {
       throw new IllegalStateException(
-          "sail agent attach needs an interactive terminal to open session '"
-              + plan.session()
-              + "'.");
+          "Attaching needs an interactive terminal to open session '" + plan.session() + "'.");
     }
     announceResume(run, harness, sessionId, plan);
     requireRunning(operator);

@@ -84,11 +84,11 @@ sail there with `sudo`; another account's plain `sail` is refused and names the 
 run instead.
 
 Hand a person their box in Mast with one string. On the box, as the account `sail-api` runs as
-(with `sudo` where that is root), for the box's own FDE (its sync handle):
+(root, through `sudo`, on a box `sudo sail init` set up), for the box's own FDE (its sync handle):
 
 ```bash
-sail fde pair ada --host 34.1.2.3 --email ada@example.com   # prints a connect code, once
-sail fde unpair ada                                         # revokes it
+sudo sail fde pair ada --host 34.1.2.3 --email ada@example.com   # prints a connect code, once
+sudo sail fde unpair ada                                         # revokes it
 ```
 
 The code is everything Mast needs: where the box is and its host key, a login key made for this
@@ -101,12 +101,12 @@ already has one refuses unless `--as-workstation-key` says to replace it. Unpair
 back out of the login, the workstation key and every container.
 
 A client, or any other engineer, gets a box of their own: set it up with
-`sudo sail init --main <main>`, grant it its projects on main (`sail fde grant <handle>
+`sudo sail init --main <main>`, grant it its projects on main (`sudo sail fde grant <handle>
 <project>`), and pair on that box. A node pairs its own FDE as main's roster has it, so the
 roster options (`--name`, `--email`, `--role`) are main's.
 
-Each project the box applies opens with a conversation already waiting: `sail project apply`
-leaves the box's FDE a home room, `<project>--<handle>`, with the project's agent in it
+Each project the box applies opens with a conversation already waiting: `sudo sail project
+apply` leaves the box's FDE a home room, `<project>--<handle>`, with the project's agent in it
 (`agent.member` in the definition picks another installed agent, model or mode).
 
 On a Mac or other thin client, `sail client <host>` points the local CLI at a box. Commands are

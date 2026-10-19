@@ -108,9 +108,22 @@ class SshGatewayTest {
     for (var command :
         List.of("sail fde passkey list ada", "sail fde passkey rm ada --credential abc123")) {
       var rejected = assertInstanceOf(SshGateway.Rejected.class, authorize(command, "uday"));
-      assertTrue(rejected.reason().contains("admin role"));
-      assertTrue(rejected.reason().contains("sail fde passkey list uday"));
+      assertEquals(
+          "Managing another FDE's passkeys requires the admin role. You may manage your own:"
+              + " sail fde passkey list uday",
+          rejected.reason());
     }
+  }
+
+  @Test
+  void aMemberMintingAnotherFdesTicketIsToldTheThinClientsOwnEnrollment() {
+    fdes.add("ada", null, null, "member");
+    var rejected =
+        assertInstanceOf(SshGateway.Rejected.class, authorize("sail fde enroll ada", "uday"));
+    assertEquals(
+        "Minting an enrollment ticket for another FDE requires the admin role. Enroll yourself"
+            + " with: sail enroll",
+        rejected.reason());
   }
 
   @Test

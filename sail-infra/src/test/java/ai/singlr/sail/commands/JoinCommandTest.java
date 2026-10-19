@@ -92,7 +92,7 @@ class JoinCommandTest {
   }
 
   private MainHostKey pin() {
-    return new MainHostKey(new Keyscan(), knownHosts());
+    return new MainHostKey(new Keyscan(), knownHosts(), OperatorCommand.SUDO);
   }
 
   private static String hashed(SshPublicKey key) {

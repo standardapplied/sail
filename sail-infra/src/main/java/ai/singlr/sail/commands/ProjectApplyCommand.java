@@ -38,6 +38,7 @@ import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.ssh.SshPublicKey;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.io.PrintStream;
@@ -175,7 +176,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var identity =
         new InteractiveIdentity(
-            LocalIdentity.detect(),
+            LocalIdentity.detect(operator),
             InteractiveIdentity.canPrompt(yes, json, dryRun, ConsoleHelper.hasConsole()));
     SailYaml config =
         ProjectDefinitions.resolveForProvisioning(definition.text(), identity, operator);
@@ -208,10 +209,17 @@ public final class ProjectApplyCommand implements Runnable {
       mgr.waitUntilReady(config.name());
     }
 
+    var workstationKey = WorkstationIdentity.registered();
     var recorded = ProjectProvisioner.provisionedInputs(observer, config.name());
-    if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config)))) {
+    if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(config, workstationKey)))) {
       provision(
-          config, sailYamlPath, shell, action == Action.CREATED, recorded.isPresent(), operator);
+          config,
+          sailYamlPath,
+          shell,
+          action == Action.CREATED,
+          recorded.isPresent(),
+          workstationKey,
+          operator);
       action = Action.CREATED;
     }
 
@@ -265,6 +273,7 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println();
     }
 
+    var workstationKey = WorkstationIdentity.registered();
     var rows = new ArrayList<LinkedHashMap<String, Object>>();
     var applied = 0;
     var failed = 0;
@@ -297,9 +306,16 @@ public final class ProjectApplyCommand implements Runnable {
         if (targetPlan.config() != null) {
           var sailYamlPath = materializeUnlessDryRun(project, definition.get(), dryRun);
           var recorded = ProjectProvisioner.provisionedInputs(observer, project);
-          if (!recorded.equals(Optional.of(ProjectProvisioner.inputs(targetPlan.config())))) {
+          if (!recorded.equals(
+              Optional.of(ProjectProvisioner.inputs(targetPlan.config(), workstationKey)))) {
             provision(
-                targetPlan.config(), sailYamlPath, shell, false, recorded.isPresent(), operator);
+                targetPlan.config(),
+                sailYamlPath,
+                shell,
+                false,
+                recorded.isPresent(),
+                workstationKey,
+                operator);
             action = Action.CREATED;
           }
           outcome = converge(observer, shell, targetPlan.config(), sailYamlPath, operator);
@@ -498,7 +514,8 @@ public final class ProjectApplyCommand implements Runnable {
       homeRoom =
           dryRun
               ? null
-              : ensureHomeRoom(operations, config, HostSync.handle(), CliOperator::current);
+              : ensureHomeRoom(
+                  operations, config, HostSync.handle(), () -> CliOperator.current(operator));
     }
 
     var added = results.stream().mapToInt(ProjectApplier.ApplyResult::added).sum();
@@ -607,8 +624,8 @@ public final class ProjectApplyCommand implements Runnable {
       throw new IllegalStateException(
           "Root privileges required to provision '"
               + name
-              + "'. Run with: sudo sail project apply "
-              + name);
+              + "'. Run with: "
+              + OperatorCommand.SUDO.sail("project apply " + name));
     }
   }
 
@@ -626,11 +643,12 @@ public final class ProjectApplyCommand implements Runnable {
       ShellExecutor shell,
       boolean fresh,
       boolean recorded,
+      Optional<SshPublicKey> workstationKey,
       OperatorCommand operator)
       throws Exception {
     requireRootToProvision(config.name(), dryRun, ConsoleHelper.isRoot());
     ProjectCatalog.requireUnpruned(config.name());
-    persistCanonicalBundle(config.name(), sailYamlPath, dryRun);
+    persistCanonicalBundle(config.name(), sailYamlPath, dryRun, operator);
 
     var hostYamlPath = SailPaths.hostConfigPath();
     if (!Files.exists(hostYamlPath)) {
@@ -640,7 +658,7 @@ public final class ProjectApplyCommand implements Runnable {
 
     var tracker =
         new ProvisionTracker<>(ProjectPhase.class, SailPaths.provisionState(config.name()), dryRun)
-            .load(ProjectProvisioner.inputs(config));
+            .load(ProjectProvisioner.inputs(config, workstationKey));
     if (fresh && (tracker.hasIncompleteRun() || tracker.isComplete()) && !json) {
       System.out.println(
           Ansi.AUTO.string(
@@ -680,7 +698,12 @@ public final class ProjectApplyCommand implements Runnable {
     try (var operations = OperationsFactory.open(operator)) {
       var provisioner =
           new ProjectProvisioner(
-              shell, tracker, listener, new ProjectSkills(operations::projectFiles), operator);
+              shell,
+              tracker,
+              listener,
+              new ProjectSkills(operations::projectFiles),
+              workstationKey,
+              operator);
       provisioner.provision(config, hostYaml, gitTokens, sailYamlPath);
     }
 
@@ -722,8 +745,9 @@ public final class ProjectApplyCommand implements Runnable {
 
   /** What apply prints for a box with no server IP: the command that sets it, then connect's. */
   static String serverIpUnsetLines(String project, OperatorCommand operator) {
-    return "    @|yellow Server IP not configured.|@ Run: sudo sail host config set server-ip"
-        + " <your-server-ip>\n    Then: "
+    return "    @|yellow Server IP not configured.|@ Run: "
+        + operator.sail("host config set server-ip <your-server-ip>")
+        + "\n    Then: "
         + operator.sail("project connect " + project)
         + " for SSH config snippet.";
   }
@@ -864,13 +888,13 @@ public final class ProjectApplyCommand implements Runnable {
    * deleting the canonical files directory, so running it under dry-run would destroy locally
    * authored project files.
    */
-  static void persistCanonicalBundle(String name, Path sailYamlPath, boolean dryRun)
-      throws Exception {
+  static void persistCanonicalBundle(
+      String name, Path sailYamlPath, boolean dryRun, OperatorCommand operator) throws Exception {
     if (dryRun) {
       return;
     }
-    var operator = CliOperator.current();
-    ProjectDefinitions.persist(name, null, Files.readString(sailYamlPath), operator);
+    var actor = CliOperator.current(operator);
+    ProjectDefinitions.persist(name, null, Files.readString(sailYamlPath), actor);
     syncFilesDirectory(
         sailYamlPath.toAbsolutePath().getParent().resolve("files"),
         SailPaths.projectDir(name).resolve("files"));

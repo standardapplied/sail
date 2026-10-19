@@ -129,7 +129,7 @@ public final class ProjectSkillsCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Option(names = "--json", description = "Output as JSON.")
@@ -172,7 +172,7 @@ public final class ProjectSkillsCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(index = "0", description = "Local folder holding a SKILL.md and any other files.")
@@ -297,7 +297,7 @@ public final class ProjectSkillsCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(index = "0", description = "The skill's name.")
@@ -362,7 +362,7 @@ public final class ProjectSkillsCommand implements Runnable {
 
     @Option(
         names = {"-p", "--project"},
-        description = "Project (default: the current project from 'sail project switch').")
+        description = "Project (default: the current project, set by project switch).")
     private String project;
 
     @Parameters(index = "0", description = "The skill's name.")
