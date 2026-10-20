@@ -5,11 +5,16 @@
 
 package ai.singlr.sail.config;
 
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.SailPaths;
+import java.io.IOException;
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.function.Function;
 
 /**
  * Model for {@code /etc/sail/host.yaml} — server-side state written by {@code sail host init} and
@@ -130,6 +135,24 @@ public record HostYaml(
    */
   public static boolean exists() {
     return Files.exists(SailPaths.hostConfigPath());
+  }
+
+  /**
+   * Rewrites the host config at {@code path} to what {@code change} makes of it, reading and
+   * writing under the round lock of the box's database {@code database} ({@link
+   * FileMutex#holdRounds}), which every write of the box's identity holds: a change computed from a
+   * copy read before the lock would put back an identity replaced since. Writes nothing when {@code
+   * change} returns empty; returns what it wrote.
+   */
+  public static Optional<HostYaml> rewrite(
+      Path path, Path database, Function<HostYaml, Optional<HostYaml>> change) throws IOException {
+    try (var rounds = FileMutex.holdRounds(database)) {
+      var changed = change.apply(fromMap(YamlUtil.parseFile(path)));
+      if (changed.isPresent()) {
+        YamlUtil.dumpToFile(changed.get().toMap(), path);
+      }
+      return changed;
+    }
   }
 
   public boolean isDir() {

@@ -6,7 +6,9 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -28,6 +30,15 @@ import org.junit.jupiter.api.io.TempDir;
  * file lock (so a separate process is excluded, not just a thread), and files lock independently.
  */
 public class FileMutexTest {
+
+  @Test
+  void aDatabaseNotYetCreatedHasNoRoundsToHoldOff(@TempDir Path dir) throws Exception {
+    var database = dir.resolve("data").resolve("sail.db");
+
+    assertNull(FileMutex.holdRounds(database));
+    assertNull(FileMutex.holdRounds(null));
+    assertFalse(Files.exists(database.getParent()), "nothing is created for a missing database");
+  }
 
   @Test
   void aSecondAcquireOfTheSameFileWaitsForTheFirstRelease(@TempDir Path dir) throws Exception {

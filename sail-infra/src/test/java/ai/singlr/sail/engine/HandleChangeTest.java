@@ -487,6 +487,17 @@ class HandleChangeTest {
   }
 
   @Test
+  void aNodeRenamedStaysANodeAndKeepsTheScopeMainNamedIt() throws Exception {
+    var granted = ProjectScope.of(List.of("acme"));
+    new SyncScope(db).record(granted);
+
+    apply(node("ada"), node("uday"));
+
+    assertEquals(granted, new SyncScope(db).held());
+    assertTrue(written.get());
+  }
+
+  @Test
   void aRoundStartedWhileTheHandleChangesWaitsForItAndOffersTheRunUnderTheNewHandle()
       throws Exception {
     var unheld = run("ada", "p");

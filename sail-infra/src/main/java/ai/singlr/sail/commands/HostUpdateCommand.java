@@ -15,6 +15,7 @@ import java.nio.file.Files;
 import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Optional;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Option;
@@ -83,8 +84,11 @@ public final class HostUpdateCommand implements Runnable {
 
     var previousVersion = hostYaml.incusVersion();
     if (!newVersion.equals(previousVersion) && !shell.isDryRun()) {
-      var updated = hostYaml.withIncusVersion(newVersion);
-      YamlUtil.dumpToFile(updated.toMap(), hostYamlPath);
+      var installed = newVersion;
+      HostYaml.rewrite(
+          hostYamlPath,
+          SailPaths.controlPlaneDb(),
+          current -> Optional.of(current.withIncusVersion(installed)));
     }
 
     if (json) {

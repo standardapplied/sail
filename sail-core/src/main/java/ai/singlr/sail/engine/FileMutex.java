@@ -22,13 +22,13 @@ import java.util.concurrent.locks.ReentrantLock;
  * An exclusive {@link java.nio.channels.FileLock} on one file, so the API server and the CLI —
  * separate processes on the same host — serialize on the kernel's word: a dispatch claim and a
  * resume-session open on {@code <locks>/<project>.lock}, a sync round and a handle change on the
- * box's round lock ({@link SyncOperations#holdRounds}). A file lock is per JVM, not per thread, so
- * an in-process mutex per lock file fronts it: two threads taking the same file queue on the mutex
- * instead of tripping over an overlapping lock. A lock file it creates is readable and writable by
- * its group, as the database beside it is, so whichever of the API server and a root CLI makes it
- * first, the other — sharing the data directory's group — can still take it. Released by closing:
- * closing the channel drops the file lock even when the close itself reports an error, so the
- * release path swallows that error rather than leaking the mutex.
+ * box's round lock ({@link #holdRounds}). A file lock is per JVM, not per thread, so an in-process
+ * mutex per lock file fronts it: two threads taking the same file queue on the mutex instead of
+ * tripping over an overlapping lock. A lock file it creates is readable and writable by its group,
+ * as the database beside it is, so whichever of the API server and a root CLI makes it first, the
+ * other — sharing the data directory's group — can still take it. Released by closing: closing the
+ * channel drops the file lock even when the close itself reports an error, so the release path
+ * swallows that error rather than leaking the mutex.
  */
 public final class FileMutex implements AutoCloseable {
 
@@ -65,6 +65,22 @@ public final class FileMutex implements AutoCloseable {
       inProcess.unlock();
       throw e;
     }
+  }
+
+  /**
+   * Holds off every other sync round of the box whose database is {@code database}, and every other
+   * write of its identity, until closed. Each round runs under it, from reading the box's identity
+   * to its last answer; a handle change holds it from asking main which runs it took until they are
+   * re-stamped, so no run can be offered, or its answer lost, between the two; and every other
+   * writer of {@code host.yaml} holds it from reading the file to writing it back, so none puts
+   * back an identity another replaced meanwhile. It is a lock file beside the database, so a round
+   * in the API server and a command in the CLI exclude each other. Null for an in-memory database
+   * ({@code null}) or one not created yet: neither has a round to exclude.
+   */
+  public static FileMutex holdRounds(Path database) throws IOException {
+    return database == null || !Files.exists(database)
+        ? null
+        : acquire(database.resolveSibling(database.getFileName() + ".rounds.lock"));
   }
 
   private static FileChannel open(Path file) throws IOException {

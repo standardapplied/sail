@@ -11,12 +11,59 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.FileMutexTest;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.Optional;
+import java.util.concurrent.FutureTask;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 class HostYamlTest {
+
+  private static final String NODE =
+      """
+      incus_version: "6.8"
+      sync:
+        role: node
+        main: sail@main
+        handle: node
+      """;
+
+  @Test
+  void aRewriteWaitsOutAnIdentityWriteAndKeepsWhatItWrote(@TempDir Path dir) throws Exception {
+    var database = Files.createFile(dir.resolve("sail.db"));
+    var path = Files.writeString(dir.resolve("host.yaml"), NODE);
+    var rewrite =
+        new FutureTask<>(
+            () ->
+                HostYaml.rewrite(
+                    path, database, host -> Optional.of(host.withIncusVersion("6.9"))));
+
+    try (var identityWrite = FileMutex.holdRounds(database)) {
+      Files.writeString(path, "");
+      FileMutexTest.awaitParked(Thread.ofPlatform().start(rewrite));
+      Files.writeString(path, NODE);
+    }
+    rewrite.get();
+
+    var written = HostYaml.fromMap(YamlUtil.parseFile(path));
+    assertEquals("6.9", written.incusVersion());
+    assertEquals("node", written.sync().role());
+    assertEquals("sail@main", written.sync().main());
+  }
+
+  @Test
+  void aRewriteThatChangesNothingWritesNothing(@TempDir Path dir) throws Exception {
+    var path = Files.writeString(dir.resolve("host.yaml"), NODE);
+
+    assertTrue(HostYaml.rewrite(path, dir.resolve("sail.db"), host -> Optional.empty()).isEmpty());
+    assertEquals(NODE, Files.readString(path));
+  }
 
   @ParameterizedTest
   @ValueSource(longs = {10485760, 2147483648L})

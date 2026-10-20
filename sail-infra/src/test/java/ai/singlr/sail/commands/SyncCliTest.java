@@ -15,21 +15,37 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.DemoSeeder;
+import ai.singlr.sail.engine.HandleChange;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ContentMigration;
+import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MaterializedFilesMigration;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.ScopedHeadsMigration;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncHealth;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -38,6 +54,9 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,16 +95,68 @@ class SyncCliTest {
     runIsolated("node-demo");
   }
 
+  @Test
+  void mainForgetsTheScopeItHeardAsANodeOnMigrate() throws Exception {
+    runIsolated("scope-migrate-main", MAIN);
+  }
+
+  @Test
+  void aNodeKeepsTheScopeMainNamedItOnMigrate() throws Exception {
+    runIsolated("scope-migrate-node");
+  }
+
+  @Test
+  void aStartDuringANodesIdentityWriteKeepsItsScope() throws Exception {
+    runIsolated("scope-mid-write");
+  }
+
+  @Test
+  void aPromotionThatDiedBeforeItsScopeClearIsRepairedOnTheNextStart() throws Exception {
+    runIsolated("scope-start-main", MAIN);
+  }
+
+  @Test
+  void aStandaloneBoxForgetsAnyScopeOnMigrate() throws Exception {
+    runIsolated("scope-migrate-standalone", "storage_backend: dir\n");
+  }
+
+  @Test
+  void aStandaloneBoxForgetsAnyScopeOnTheNextStart() throws Exception {
+    runIsolated("scope-start-standalone", "storage_backend: dir\n");
+  }
+
+  @Test
+  void aStartWhileHostYamlIsBeingMovedKeepsANodesScope() throws Exception {
+    runIsolated("scope-start-gone");
+  }
+
+  @Test
+  void aStartThatFindsHostYamlTruncatedKeepsANodesScope() throws Exception {
+    runIsolated("scope-start-torn");
+  }
+
+  private static final String NODE =
+      """
+      sync:
+        role: node
+        main: sail@main
+        handle: node
+      """;
+
+  private static final String MAIN =
+      """
+      sync:
+        role: main
+        handle: ada
+      """;
+
   private void runIsolated(String scenario) throws Exception {
+    runIsolated(scenario, NODE);
+  }
+
+  private void runIsolated(String scenario, String hostYaml) throws Exception {
     var data = Files.createDirectories(home.resolve(".sail"));
-    Files.writeString(
-        data.resolve("host.yaml"),
-        """
-        sync:
-          role: node
-          main: sail@main
-          handle: node
-        """);
+    Files.writeString(data.resolve("host.yaml"), hostYaml);
     var bin = Files.createDirectories(home.resolve("bin"));
     var ssh = bin.resolve("ssh");
     Files.writeString(ssh, "#!/bin/sh\nread -r request\nexit 255\n");
@@ -130,6 +201,14 @@ class SyncCliTest {
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
         verifyPreHealthUpgrade(args[0], db, operations);
+        return;
+      }
+      if ("scope-mid-write".equals(args[0])) {
+        verifyScopeDuringIdentityWrite(db);
+        return;
+      }
+      if (args[0].startsWith("scope-")) {
+        verifyScopeOffNode(args[0], db);
         return;
       }
       if ("sudo-round".equals(args[0])) {
@@ -195,6 +274,107 @@ class SyncCliTest {
         }
       }
     }
+  }
+
+  /**
+   * A box main scoped as a node holds the projects {@code acme} and {@code beta} and was granted
+   * only {@code acme}; {@code sail migrate} or the start of sail-api, which converge the database
+   * the same way, then leave a node that scope and give any other box every project. A node whose
+   * {@code host.yaml} is gone or empty at that moment — being moved into {@code /var/lib/sail}, or
+   * truncated by a writer that holds no lock — is left its scope too: nothing whole said it is not
+   * a node.
+   */
+  private static void verifyScopeOffNode(String scenario, Sqlite db) throws IOException {
+    HeldProjects.hold(db, "acme", "beta");
+    var granted = ProjectScope.of(List.of("acme"));
+    new SyncScope(db).record(granted);
+    switch (scenario) {
+      case "scope-start-gone" -> Files.delete(SailPaths.hostConfigPath());
+      case "scope-start-torn" -> Files.writeString(SailPaths.hostConfigPath(), "");
+      default -> {}
+    }
+
+    if (scenario.startsWith("scope-migrate-")) {
+      MigrateCommand.runMigrations(true, true, OperatorCommand.PLAIN);
+    } else {
+      MigrationRunner.applyAll(
+          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+    }
+
+    var projects = new ProjectStore(db);
+    var push = projects.refusesInto(Actor.sync("nia", Role.MEMBER), null, "beta", true);
+    if (scenario.endsWith("-main") || scenario.endsWith("-standalone")) {
+      assertEquals(ProjectScope.all(), new SyncScope(db).held());
+      assertEquals(Optional.empty(), push);
+      Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
+      assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
+      return;
+    }
+    assertEquals(granted, new SyncScope(db).held());
+    assertTrue(push.isPresent());
+  }
+
+  /**
+   * A node rewrites its identity, unchanged, while sail-api starts: {@code host.yaml} is empty
+   * between the truncation and the write, and a start that read it as a standalone box's would
+   * forget the scope main granted it. The start runs to its end on the empty file and leaves the
+   * scope: nothing whole said the box is not a node.
+   */
+  private static void verifyScopeDuringIdentityWrite(Sqlite db) throws Exception {
+    var granted = ProjectScope.of(List.of("acme"));
+    new SyncScope(db).record(granted);
+    var hostYaml = SailPaths.hostConfigPath();
+    var node = HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync();
+    var truncated = new CountDownLatch(1);
+    var resume = new CountDownLatch(1);
+    var rewrite =
+        new FutureTask<>(
+            () ->
+                HandleChange.apply(
+                    SailPaths.controlPlaneDb(),
+                    node,
+                    node,
+                    target -> {
+                      throw new IOException("main is not asked on an unchanged identity");
+                    },
+                    OperatorCommand.PLAIN,
+                    () -> {
+                      var whole = Files.readString(hostYaml);
+                      Files.writeString(hostYaml, "");
+                      truncated.countDown();
+                      resume.await();
+                      Files.writeString(hostYaml, whole);
+                    }));
+    Thread.ofPlatform().start(rewrite);
+    assertTrue(truncated.await(10, TimeUnit.SECONDS), "the rewrite never truncated host.yaml");
+    MigrationRunner.applyAll(
+        db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+    assertEquals(granted, new SyncScope(db).held(), "the empty file decided nothing");
+    resume.countDown();
+    rewrite.get();
+
+    assertEquals(node, NodeIdentity.config());
+    assertEquals(granted, new SyncScope(db).held());
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "the " + id + " spec",
+        SpecStatus.PENDING,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        "ada",
+        "",
+        "",
+        "ada",
+        List.of(),
+        List.of());
   }
 
   private static void verifyScheduledRoundWording() throws Exception {

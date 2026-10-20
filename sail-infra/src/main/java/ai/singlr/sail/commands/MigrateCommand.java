@@ -8,13 +8,13 @@ package ai.singlr.sail.commands;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.ProjectRegistry;
-import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AuthorizedKeysSync;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerSailSetup;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -209,8 +209,8 @@ public final class MigrateCommand implements Runnable {
   }
 
   private static void convergeHost(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
-    relocateHostConfig(jsonOutput, operator);
-    assignBoxId(jsonOutput, operator);
+    relocateHostConfig(db, jsonOutput, operator);
+    assignBoxId(db, jsonOutput, operator);
     syncAuthorizedKeys(db, jsonOutput, operator);
     revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
     ensureSshdKeepalive(jsonOutput);
@@ -364,7 +364,7 @@ public final class MigrateCommand implements Runnable {
    * No-op unless this host is provisioned (shared dir exists), the process is root, a legacy file
    * exists, and the shared copy does not.
    */
-  private static void relocateHostConfig(boolean jsonOutput, OperatorCommand operator) {
+  private static void relocateHostConfig(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
     var legacy = SailPaths.sailDir().resolve("host.yaml");
     var shared = Path.of(SshIdentityProvisioner.DEFAULT_DATA_DIR).resolve("host.yaml");
     if (!SailPaths.isRoot()
@@ -373,7 +373,7 @@ public final class MigrateCommand implements Runnable {
         || !Files.exists(legacy)) {
       return;
     }
-    try {
+    try (var rounds = FileMutex.holdRounds(db.path())) {
       Files.move(legacy, shared);
       var view = Files.getFileAttributeView(shared, PosixFileAttributeView.class);
       view.setGroup(
@@ -403,18 +403,17 @@ public final class MigrateCommand implements Runnable {
    * upgrade-convergence rationale as {@link #relocateHostConfig}; quiet when {@code host.yaml} is
    * not writable, since an unprivileged upgrade resolves the same value at runtime.
    */
-  private static void assignBoxId(boolean jsonOutput, OperatorCommand operator) {
+  private static void assignBoxId(Sqlite db, boolean jsonOutput, OperatorCommand operator) {
     var path = SailPaths.hostConfigPath();
     if (!Files.exists(path)) {
       return;
     }
     try {
-      var host = HostYaml.fromMap(YamlUtil.parseFile(path));
-      var assigned = assignBoxId(host, HostInfo.hostname());
+      var assigned =
+          HostYaml.rewrite(path, db.path(), host -> assignBoxId(host, HostInfo.hostname()));
       if (assigned.isEmpty()) {
         return;
       }
-      YamlUtil.dumpToFile(assigned.get().toMap(), path);
       if (!jsonOutput) {
         System.out.println(
             Ansi.AUTO.string("  @|green ✓|@ sync box id set to " + assigned.get().sync().boxId()));

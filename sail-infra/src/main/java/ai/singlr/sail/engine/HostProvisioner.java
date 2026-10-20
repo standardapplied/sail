@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
@@ -21,7 +22,13 @@ import java.util.concurrent.TimeoutException;
  * Incus, creates the base profile, caches the container image, and writes {@code
  * /etc/sail/host.yaml}.
  *
- * <p>Every step is idempotent — safe to run again on an already-provisioned host.
+ * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
+ * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
+ * passkeys, limits and retention. A box that lost its sync identity would turn standalone and
+ * orphan every checkpoint its peers hold for its box id. It reads what it keeps once up front, to
+ * refuse an unreadable file before any step, and again just before writing, under the box's round
+ * lock ({@link FileMutex#holdRounds}) every write of the identity holds: a {@code host sync},
+ * {@code join} or handle change that finished while the packages installed is kept, not undone.
  */
 public final class HostProvisioner {
 
@@ -47,6 +54,7 @@ public final class HostProvisioner {
    * @param bridge the network bridge name (e.g. {@code incusbr0})
    * @param serverIp the server's public IP address (for SSH config generation), may be null
    * @param hostYamlPath where to write host.yaml (usually {@code /etc/sail/host.yaml})
+   * @param dbPath the box's database, whose round lock the final write holds
    * @return the written HostYaml
    */
   public HostYaml provision(
@@ -55,9 +63,11 @@ public final class HostProvisioner {
       String pool,
       String bridge,
       String serverIp,
-      Path hostYamlPath)
+      Path hostYamlPath,
+      Path dbPath)
       throws IOException, InterruptedException, TimeoutException {
     var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
+    configured(hostYamlPath);
 
     updatePackages();
     installIncus();
@@ -68,20 +78,45 @@ public final class HostProvisioner {
     cacheImage();
     configureFirewall(bridge);
 
-    var hostYaml =
-        new HostYaml(
-            storageBackend,
-            pool,
-            disk,
-            bridge,
-            HostYaml.DEFAULT_PROFILE,
-            HostYaml.DEFAULT_IMAGE,
-            incusVersion,
-            serverIp,
-            DateTimeUtils.now().toString());
+    try (var rounds = holdRounds(dbPath)) {
+      var kept = configured(hostYamlPath);
+      var hostYaml =
+          new HostYaml(
+              storageBackend,
+              pool,
+              disk,
+              bridge,
+              HostYaml.DEFAULT_PROFILE,
+              HostYaml.DEFAULT_IMAGE,
+              incusVersion,
+              serverIp,
+              DateTimeUtils.now().toString(),
+              kept.webauthn(),
+              kept.sync(),
+              kept.limits(),
+              kept.retention());
+      writeHostYaml(hostYaml, hostYamlPath);
+      return hostYaml;
+    }
+  }
 
-    writeHostYaml(hostYaml, hostYamlPath);
-    return hostYaml;
+  private FileMutex holdRounds(Path dbPath) throws IOException {
+    return shell.isDryRun() ? null : FileMutex.holdRounds(dbPath);
+  }
+
+  private static HostYaml configured(Path hostYamlPath) {
+    try {
+      return HostYaml.fromMap(
+          Files.exists(hostYamlPath) ? YamlUtil.parseFile(hostYamlPath) : Map.of());
+    } catch (IOException | RuntimeException e) {
+      throw new IllegalStateException(
+          "Cannot read "
+              + hostYamlPath
+              + " to keep this box's sync identity and settings: "
+              + e.getMessage()
+              + ". Fix the file, or move it aside to provision this box as new, then rerun.",
+          e);
+    }
   }
 
   private void updatePackages() throws IOException, InterruptedException, TimeoutException {
