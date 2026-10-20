@@ -266,7 +266,7 @@ public final class SailPaths {
    * mount never strands.
    */
   public static Path apiSocketPath() {
-    return dataDir().resolve("run").resolve("api.sock");
+    return apiSocketHostDir().resolve("api.sock");
   }
 
   /** The pty session host's unix socket — in-container, owned by the dev user. */
@@ -300,7 +300,12 @@ public final class SailPaths {
    * strands any file-level bind mount on the old inode.
    */
   public static Path apiSocketHostDir() {
-    return apiSocketPath().getParent();
+    return apiSocketHostDir(dataDir());
+  }
+
+  /** {@link #apiSocketHostDir()} of the control plane whose data directory is {@code dataDir}. */
+  public static Path apiSocketHostDir(Path dataDir) {
+    return dataDir.resolve("run");
   }
 
   /** Container-side directory corresponding to {@link #apiSocketHostDir()}. */

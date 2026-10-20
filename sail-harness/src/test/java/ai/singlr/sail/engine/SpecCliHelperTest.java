@@ -148,7 +148,42 @@ class SpecCliHelperTest {
     }
   }
 
+  @Test
+  void anInteractiveSessionOnABoxWithNoHandleIsToldHowToGiveItOne() throws Exception {
+    var home = Files.createTempDirectory("spec-shim");
+    try {
+      var socket = home.resolve("api.sock");
+      writeExecutable(
+          home.resolve("spec"),
+          SpecCliHelper.scriptContent()
+              .replace(SailPaths.apiSocketContainerPath().toString(), socket.toString()));
+      try (var bound = bind(socket)) {
+        var refused = shim(home, home, Map.of(), "board");
+
+        assertEquals(1, refused.exit());
+        assertEquals(
+            "spec: no credential: SAIL_RUN_CREDENTIAL is unset and "
+                + home.resolve("box.credential")
+                + " is unreadable: this box has no sync handle. Give it one on the host: sudo sail"
+                + " host config set sync-handle <handle>\n",
+            refused.output());
+      }
+    } finally {
+      try (var walk = Files.walk(home)) {
+        walk.sorted(java.util.Comparator.reverseOrder()).forEach(path -> path.toFile().delete());
+      }
+    }
+  }
+
+  private record Shim(int exit, String output) {}
+
   private static void runShim(Path home, Path bin, Map<String, String> extra, String... args)
+      throws Exception {
+    var ran = shim(home, bin, extra, args);
+    assertEquals(0, ran.exit(), ran.output());
+  }
+
+  private static Shim shim(Path home, Path bin, Map<String, String> extra, String... args)
       throws Exception {
     var argv =
         new java.util.ArrayList<>(List.of("/usr/bin/env", "bash", home.resolve("spec").toString()));
@@ -163,7 +198,7 @@ class SpecCliHelperTest {
     var process = pb.start();
     var output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
     assertTrue(process.waitFor(30, TimeUnit.SECONDS), "the shim must finish");
-    assertEquals(0, process.exitValue(), output);
+    return new Shim(process.exitValue(), output);
   }
 
   private static java.io.Closeable bind(Path socket) throws IOException {

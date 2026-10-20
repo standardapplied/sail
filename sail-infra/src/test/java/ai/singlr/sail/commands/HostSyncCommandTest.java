@@ -16,9 +16,12 @@ import ai.singlr.sail.common.DateTimeUtils;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
@@ -189,6 +192,24 @@ class HostSyncCommandTest {
     assertEquals(
         "  ✓ This box is main.\n  FDE: ada",
         HostSyncCommand.roleLines(role, OperatorCommand.PLAIN, Ansi.OFF));
+  }
+
+  @Test
+  void aMainTakingItsOperatorWhileSailApiServesHoldsTheBoxCredentialOfThatHandle(@TempDir Path dir)
+      throws Exception {
+    YamlUtil.dumpToFile(BASE.toMap(), dir.resolve("host.yaml"));
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      new SchemaManager(db).migrate();
+    }
+
+    asMainOperatedBy(dir, "ada");
+
+    var credential =
+        Files.readString(SailPaths.apiSocketHostDir(dir).resolve(BoxCredentialFile.FILE_NAME))
+            .strip();
+    try (var db = Sqlite.open(dir.resolve("sail.db"))) {
+      assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(credential));
+    }
   }
 
   @Test

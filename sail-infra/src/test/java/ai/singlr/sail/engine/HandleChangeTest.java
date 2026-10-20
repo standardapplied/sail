@@ -16,21 +16,26 @@ import ai.singlr.sail.api.RunTracker;
 import ai.singlr.sail.api.SyncRequest;
 import ai.singlr.sail.api.SyncScheduler;
 import ai.singlr.sail.common.DateTimeUtils;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.SyncBox;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -42,7 +47,8 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * A change of this box's sync identity, as {@code sail host config set sync-handle}, {@code sail
  * join} and {@code sail host sync --as-main} make it: refused while a run main holds under the old
- * handle would be stranded, and once written, every run main has not taken is stamped as the box's.
+ * handle would be stranded, and once written, every run main has not taken is stamped as the box's
+ * and the box holds the credential of its new handle.
  */
 class HandleChangeTest {
 
@@ -110,6 +116,82 @@ class HandleChangeTest {
 
   private void finish(String id) {
     Acting.system(() -> runs.complete(id, "completed", 0));
+  }
+
+  private HostYaml host(SyncConfig sync) {
+    return HostYaml.fromMap(Map.of("storage_backend", "dir")).withSync(sync);
+  }
+
+  private void write(SyncConfig before, SyncConfig after) throws Exception {
+    HandleChange.write(
+        dir.resolve("host.yaml"),
+        dbPath,
+        host(before),
+        host(after),
+        UNREACHABLE,
+        OperatorCommand.PLAIN);
+  }
+
+  private String boxCredential() throws IOException {
+    return Files.readString(SailPaths.apiSocketHostDir(dir).resolve(BoxCredentialFile.FILE_NAME))
+        .strip();
+  }
+
+  @Test
+  void aBoxThatTakesAHandleWhileSailApiServesHoldsItsCredentialAtOnce() throws Exception {
+    write(STANDALONE, node("ada"));
+
+    assertEquals(
+        "ada", HostYaml.fromMap(YamlUtil.parseFile(dir.resolve("host.yaml"))).sync().handle());
+    assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
+  }
+
+  @Test
+  void aHandleChangeRevokesTheOldHandlesCredentialAndIssuesTheNewOnes() throws Exception {
+    write(STANDALONE, main("ada"));
+    var ada = boxCredential();
+
+    write(main("ada"), main("grace"));
+
+    var store = new BoxCredentialStore(db);
+    assertEquals(Optional.of("grace"), store.resolve(boxCredential()));
+    assertEquals(Optional.empty(), store.resolve(ada));
+  }
+
+  @Test
+  void rewritingTheSameHandleKeepsTheCredentialAndHealsAMissingOne() throws Exception {
+    write(STANDALONE, main("ada"));
+    var ada = boxCredential();
+
+    write(main("ada"), main("ada"));
+    assertEquals(ada, boxCredential());
+
+    Files.delete(SailPaths.apiSocketHostDir(dir).resolve(BoxCredentialFile.FILE_NAME));
+    write(main("ada"), main("ada"));
+    assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
+  }
+
+  @Test
+  void aBoxWithNoHandleHoldsNoCredential() throws Exception {
+    write(STANDALONE, new SyncConfig(SyncConfig.ROLE_MAIN, null, null, "box"));
+
+    assertFalse(Files.exists(SailPaths.apiSocketHostDir(dir)));
+  }
+
+  @Test
+  void aBoxWithNoDatabaseLeavesItsCredentialToSailApisFirstStart() throws Exception {
+    var absent = dir.resolve("fresh").resolve("sail.db");
+
+    HandleChange.write(
+        dir.resolve("host.yaml"),
+        absent,
+        host(STANDALONE),
+        host(main("ada")),
+        UNREACHABLE,
+        OperatorCommand.PLAIN);
+
+    assertFalse(Files.exists(absent), "no database is made for sail-api to find half-built");
+    assertFalse(Files.exists(SailPaths.apiSocketHostDir(absent.getParent())));
   }
 
   @Test

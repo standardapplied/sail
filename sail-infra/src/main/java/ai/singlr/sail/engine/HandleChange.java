@@ -10,10 +10,12 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -28,7 +30,9 @@ import java.util.stream.Collectors;
  * identity is written every run main has not taken is stamped as the box's ({@link
  * NodeRound#stampUnheld}); a box that becomes main stamps each run it made that carries no node
  * ({@link RunStore#stampUnstamped}). Called where the box's identity is written: {@code sail host
- * config set}, {@code sail join} and {@code sail host sync}.
+ * config set}, {@code sail join} and {@code sail host sync}, so it is also where the box takes the
+ * ambient credential of its handle ({@link BoxCredentialFile}): sail-api reads the credential from
+ * the database on every request, so a box that takes a handle while it serves needs no restart.
  */
 public final class HandleChange {
 
@@ -42,8 +46,9 @@ public final class HandleChange {
 
   /**
    * Writes {@code updated} over {@code current} at {@code hostYamlPath} as a change of this box's
-   * identity in its database at {@code dbPath} ({@link #apply}). Returns the runs stamped for the
-   * new identity.
+   * identity in its database at {@code dbPath} ({@link #apply}), then issues the box credential of
+   * its handle next to the API socket, replacing one another handle held. Returns the runs stamped
+   * for the new identity.
    */
   public static List<String> write(
       Path hostYamlPath,
@@ -53,13 +58,30 @@ public final class HandleChange {
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
-    return apply(
-        dbPath,
-        current.sync(),
-        updated.sync(),
-        channels,
-        operator,
-        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+    var stamped =
+        apply(
+            dbPath,
+            current.sync(),
+            updated.sync(),
+            channels,
+            operator,
+            () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+    issueBoxCredential(dbPath, updated.sync().handle());
+    return stamped;
+  }
+
+  /**
+   * A box with no database yet has no sail-api to read a credential: its first start issues it
+   * ({@code sail server start}).
+   */
+  private static void issueBoxCredential(Path dbPath, String handle) throws IOException {
+    if (Strings.isBlank(handle) || !Files.exists(dbPath)) {
+      return;
+    }
+    try (var db = Sqlite.open(dbPath)) {
+      BoxCredentialFile.ensure(
+          new BoxCredentialStore(db), handle, SailPaths.apiSocketHostDir(dbPath.getParent()));
+    }
   }
 
   /**
