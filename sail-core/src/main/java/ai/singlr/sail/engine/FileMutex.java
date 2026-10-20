@@ -74,11 +74,11 @@ public final class FileMutex implements AutoCloseable {
    * re-stamped, so no run can be offered, or its answer lost, between the two; and a migration or
    * {@code host init} holds it from reading the identity to the write that follows, so none acts on
    * an identity half written. It is a lock file beside the database, so a round in the API server
-   * and a command in the CLI exclude each other. Null for an in-memory database ({@code null}),
-   * which has no other process to exclude.
+   * and a command in the CLI exclude each other. Null for an in-memory database ({@code null}) or
+   * one not created yet: neither has a round or a migration to exclude.
    */
   public static FileMutex holdRounds(Path database) throws IOException {
-    return database == null
+    return database == null || !Files.exists(database)
         ? null
         : acquire(database.resolveSibling(database.getFileName() + ".rounds.lock"));
   }

@@ -101,7 +101,7 @@ public final class HostProvisioner {
   }
 
   private FileMutex holdRounds(Path dbPath) throws IOException {
-    return shell.isDryRun() || !Files.exists(dbPath) ? null : FileMutex.holdRounds(dbPath);
+    return shell.isDryRun() ? null : FileMutex.holdRounds(dbPath);
   }
 
   private static HostYaml configured(Path hostYamlPath) {
