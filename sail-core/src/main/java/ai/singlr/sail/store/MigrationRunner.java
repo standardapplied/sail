@@ -6,8 +6,10 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.identity.ProjectScope;
+import java.io.IOException;
 import java.util.List;
 
 /**
@@ -22,7 +24,9 @@ import java.util.List;
  * <p>Once the schema is current, a box that is not a node forgets the scope main last named it
  * ({@link SyncScope}): a box promoted before a role change cleared it, or whose role change died
  * between writing {@code host.yaml} and clearing it, would otherwise keep refusing its own writes
- * and its nodes' pushes into every project outside that scope.
+ * and its nodes' pushes into every project outside that scope. It reads the role and forgets the
+ * scope under the box's round lock ({@link FileMutex#holdRounds}), the lock every write of the
+ * identity holds, so it never reads a {@code host.yaml} half written by one.
  */
 public final class MigrationRunner {
 
@@ -35,12 +39,24 @@ public final class MigrationRunner {
     var before = schema.currentVersion();
     schema.migrate();
     var after = schema.currentVersion();
-    if (NodeIdentity.authoritative()) {
-      new SyncScope(db).record(ProjectScope.all());
-    }
+    forgetNodeScope(db);
     var projects = ProjectRegistry.loadFromDisk();
     var runs = new DataMigrator(db, dataMigrations).run(projects, prompter);
     return new Result(before, after, runs);
+  }
+
+  private static void forgetNodeScope(Sqlite db) {
+    try (var rounds = FileMutex.holdRounds(db.path())) {
+      if (NodeIdentity.authoritative()) {
+        new SyncScope(db).record(ProjectScope.all());
+      }
+    } catch (IOException e) {
+      throw new IllegalStateException(
+          "Cannot lock this box's sync rounds to check its project scope: "
+              + e.getMessage()
+              + ". Resolve the lock-file error beside the database, then rerun.",
+          e);
+    }
   }
 
   /**

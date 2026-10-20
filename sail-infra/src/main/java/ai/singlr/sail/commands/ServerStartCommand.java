@@ -41,6 +41,7 @@ import ai.singlr.sail.engine.BindPolicy;
 import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.BoxIdentity;
 import ai.singlr.sail.engine.ContainerSetupSweep;
+import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.GracefulShutdown;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.HostToken;
@@ -48,7 +49,6 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -202,7 +202,7 @@ public final class ServerStartCommand implements Runnable {
     var messageStore = new MessageStore(db);
     var projectStore = new ProjectStore(db);
     var boxCredentialStore = new BoxCredentialStore(db);
-    try (var rounds = SyncOperations.holdRounds(db)) {
+    try (var rounds = FileMutex.holdRounds(db.path())) {
       provisionBoxCredential(boxCredentialStore, operator);
     }
     var operations =

@@ -15,9 +15,14 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SpecStatus;
+import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.DemoSeeder;
+import ai.singlr.sail.engine.FileMutexTest;
+import ai.singlr.sail.engine.HandleChange;
+import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Acting;
@@ -41,6 +46,7 @@ import ai.singlr.sail.store.SyncHealth;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -50,6 +56,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -96,6 +104,11 @@ class SyncCliTest {
   @Test
   void aNodeKeepsTheScopeMainNamedItOnMigrate() throws Exception {
     runIsolated("scope-migrate-node");
+  }
+
+  @Test
+  void aStartDuringANodesIdentityWriteKeepsItsScope() throws Exception {
+    runIsolated("scope-mid-write");
   }
 
   @Test
@@ -174,6 +187,10 @@ class SyncCliTest {
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
         verifyPreHealthUpgrade(args[0], db, operations);
+        return;
+      }
+      if ("scope-mid-write".equals(args[0])) {
+        verifyScopeDuringIdentityWrite(db);
         return;
       }
       if (args[0].startsWith("scope-")) {
@@ -273,6 +290,54 @@ class SyncCliTest {
     assertEquals(Optional.empty(), push);
     Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
     assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
+  }
+
+  /**
+   * A node rewrites its identity, unchanged, while sail-api starts: {@code host.yaml} is empty
+   * between the truncation and the write, and a start that read it then would take the node for a
+   * standalone box and forget the scope main granted it. The start waits for the write instead.
+   */
+  private static void verifyScopeDuringIdentityWrite(Sqlite db) throws Exception {
+    var granted = ProjectScope.of(List.of("acme"));
+    new SyncScope(db).record(granted);
+    var hostYaml = SailPaths.hostConfigPath();
+    var node = HostYaml.fromMap(YamlUtil.parseFile(hostYaml)).sync();
+    var truncated = new CountDownLatch(1);
+    var resume = new CountDownLatch(1);
+    var rewrite =
+        new FutureTask<>(
+            () ->
+                HandleChange.apply(
+                    SailPaths.controlPlaneDb(),
+                    node,
+                    node,
+                    target -> {
+                      throw new IOException("main is not asked on an unchanged identity");
+                    },
+                    OperatorCommand.PLAIN,
+                    () -> {
+                      var whole = Files.readString(hostYaml);
+                      Files.writeString(hostYaml, "");
+                      truncated.countDown();
+                      resume.await();
+                      Files.writeString(hostYaml, whole);
+                    }));
+    Thread.ofPlatform().start(rewrite);
+    assertTrue(truncated.await(10, TimeUnit.SECONDS), "the rewrite never truncated host.yaml");
+    var start =
+        new FutureTask<>(
+            () ->
+                MigrationRunner.applyAll(
+                    db,
+                    DataMigrations.all(OperatorCommand.PLAIN),
+                    DataMigration.Prompter.NON_INTERACTIVE));
+    FileMutexTest.awaitParked(Thread.ofPlatform().start(start));
+    resume.countDown();
+    rewrite.get();
+    start.get();
+
+    assertEquals(node, NodeIdentity.config());
+    assertEquals(granted, new SyncScope(db).held());
   }
 
   private static SpecStore.SpecRow spec(String id, String project) {

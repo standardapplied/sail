@@ -150,7 +150,7 @@ public final class SyncOperations {
   }
 
   public synchronized SyncReport sync(SyncRequest request) throws Exception {
-    try (var rounds = holdRounds(db)) {
+    try (var rounds = FileMutex.holdRounds(db.path())) {
       var config = configuration.get();
       var target = resolveMain(request.main(), config, operator);
       if (target.target() == null) {
@@ -159,21 +159,6 @@ public final class SyncOperations {
       var round = Actor.call(Actor.main(), () -> reconcileSession(target.target(), config));
       return new SyncReport(round.report(), null, round.types(), round.settled());
     }
-  }
-
-  /**
-   * Holds off every other sync round of the box whose database is {@code db} until closed. Each
-   * round runs under it, from reading the box's identity to its last answer, and a handle change
-   * holds it from asking main which runs it took until they are re-stamped ({@link HandleChange}),
-   * so no run can be offered, or its answer lost, between the two. It is a lock file beside the
-   * database, so a round in the API server and a handle change in the CLI exclude each other; an
-   * in-memory database has no other process to exclude.
-   */
-  public static AutoCloseable holdRounds(Sqlite db) throws IOException {
-    var path = db.path();
-    return path == null
-        ? () -> {}
-        : FileMutex.acquire(path.resolveSibling(path.getFileName() + ".rounds.lock"));
   }
 
   private record Round(

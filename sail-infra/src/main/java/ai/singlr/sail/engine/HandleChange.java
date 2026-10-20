@@ -109,11 +109,11 @@ public final class HandleChange {
    * box executed is live — naming each and the fix. A node first asks its main, over {@code
    * channels}, which of the runs it never heard acknowledged main holds; when main cannot be asked,
    * it is refused too. Every sync round of the box, and every other write of its identity, is held
-   * off from the ask until the credential is issued ({@link SyncOperations#holdRounds}), so none
-   * can offer a run main would then hold under the old handle, and two overlapping writes cannot
-   * leave the credential naming a handle other than the one written last: the write that waits is
-   * refused when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it
-   * cannot put the old one back. A box that stops being a node forgets the scope main last named it
+   * off from the ask until the credential is issued ({@link FileMutex#holdRounds}), so none can
+   * offer a run main would then hold under the old handle, and two overlapping writes cannot leave
+   * the credential naming a handle other than the one written last: the write that waits is refused
+   * when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it cannot
+   * put the old one back. A box that stops being a node forgets the scope main last named it
    * ({@link SyncScope}): as main or standalone it holds every project, and a change that died
    * before forgetting it is repaired at the next {@code sail migrate} or start ({@link
    * MigrationRunner}). A box with no database yet has no sail-api to read a credential: its first
@@ -132,7 +132,7 @@ public final class HandleChange {
       return List.of();
     }
     try (var db = Sqlite.open(dbPath);
-        var rounds = SyncOperations.holdRounds(db)) {
+        var rounds = FileMutex.holdRounds(db.path())) {
       write.requireCurrent();
       var stamped = change(db, before, after, channels, operator, write);
       issueBoxCredential(db, dbPath.getParent(), after.handle());

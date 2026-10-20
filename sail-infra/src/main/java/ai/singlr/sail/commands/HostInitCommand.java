@@ -217,7 +217,13 @@ public final class HostInitCommand implements Runnable {
     var provisioner = new HostProvisioner(shell, listener);
     var hostYaml =
         provisioner.provision(
-            storage, selectedDisk, pool, HostYaml.DEFAULT_BRIDGE, resolvedServerIp, hostYamlPath);
+            storage,
+            selectedDisk,
+            pool,
+            HostYaml.DEFAULT_BRIDGE,
+            resolvedServerIp,
+            hostYamlPath,
+            SailPaths.controlPlaneDb());
 
     if (json) {
       System.out.println(YamlUtil.dumpJson(hostYaml.toMap()));

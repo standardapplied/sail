@@ -20,6 +20,8 @@ import ai.singlr.sail.config.RetentionConfig;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.store.SchemaManager;
+import ai.singlr.sail.store.Sqlite;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,7 +44,13 @@ class HostProvisionerTest {
 
     var hostYaml =
         provisioner.provision(
-            "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+            "zfs",
+            "/dev/sdb",
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
 
     assertEquals("zfs", hostYaml.storageBackend());
     assertEquals("devpool", hostYaml.pool());
@@ -72,7 +80,13 @@ class HostProvisionerTest {
     var provisioner = new HostProvisioner(shell, listener);
 
     provisioner.provision(
-        "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+        "zfs",
+        "/dev/sdb",
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertEquals("up to date", doneDetails.get(0));
     assertEquals("already installed", doneDetails.get(1));
@@ -89,7 +103,8 @@ class HostProvisionerTest {
     var provisioner = new HostProvisioner(shell, null);
     var hostYamlPath = tempDir.resolve("host.yaml");
 
-    provisioner.provision("zfs", "/dev/sdb", "devpool", "incusbr0", null, hostYamlPath);
+    provisioner.provision(
+        "zfs", "/dev/sdb", "devpool", "incusbr0", null, hostYamlPath, tempDir.resolve("sail.db"));
 
     assertFalse(Files.exists(hostYamlPath), "Dry-run should not write host.yaml");
   }
@@ -102,7 +117,13 @@ class HostProvisionerTest {
     assertDoesNotThrow(
         () ->
             provisioner.provision(
-                "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                "zfs",
+                "/dev/sdb",
+                "devpool",
+                "incusbr0",
+                null,
+                tempDir.resolve("h.yaml"),
+                tempDir.resolve("sail.db")));
   }
 
   @Test
@@ -112,7 +133,13 @@ class HostProvisionerTest {
 
     var result =
         provisioner.provision(
-            "zfs", "/dev/nvme1n1", "mypool", "br0", null, tempDir.resolve("h.yaml"));
+            "zfs",
+            "/dev/nvme1n1",
+            "mypool",
+            "br0",
+            null,
+            tempDir.resolve("h.yaml"),
+            tempDir.resolve("sail.db"));
 
     assertEquals("zfs", result.storageBackend());
     assertEquals("mypool", result.pool());
@@ -149,7 +176,13 @@ class HostProvisionerTest {
 
     var result =
         provisioner.provision(
-            "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+            "zfs",
+            "/dev/sdb",
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
 
     assertEquals("devpool", result.pool());
     assertEquals("6.3", result.incusVersion());
@@ -174,7 +207,8 @@ class HostProvisionerTest {
     var provisioner = new HostProvisioner(shell, null);
     var hostYamlPath = tempDir.resolve("etc/sail/host.yaml");
 
-    provisioner.provision("zfs", "/dev/sdb", "devpool", "incusbr0", null, hostYamlPath);
+    provisioner.provision(
+        "zfs", "/dev/sdb", "devpool", "incusbr0", null, hostYamlPath, tempDir.resolve("sail.db"));
 
     assertTrue(Files.exists(hostYamlPath), "host.yaml should be written");
     var content = Files.readString(hostYamlPath);
@@ -204,7 +238,13 @@ class HostProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                    "zfs",
+                    "/dev/sdb",
+                    "devpool",
+                    "incusbr0",
+                    null,
+                    tempDir.resolve("h.yaml"),
+                    tempDir.resolve("sail.db")));
     assertTrue(ex.getMessage().contains("Failed to create ZFS pool"));
   }
 
@@ -224,7 +264,13 @@ class HostProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                    "zfs",
+                    "/dev/sdb",
+                    "devpool",
+                    "incusbr0",
+                    null,
+                    tempDir.resolve("h.yaml"),
+                    tempDir.resolve("sail.db")));
     assertTrue(ex.getMessage().contains("Incus init failed"));
   }
 
@@ -240,7 +286,13 @@ class HostProvisionerTest {
     assertDoesNotThrow(
         () ->
             provisioner.provision(
-                "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                "zfs",
+                "/dev/sdb",
+                "devpool",
+                "incusbr0",
+                null,
+                tempDir.resolve("h.yaml"),
+                tempDir.resolve("sail.db")));
   }
 
   @Test
@@ -258,7 +310,13 @@ class HostProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                    "zfs",
+                    "/dev/sdb",
+                    "devpool",
+                    "incusbr0",
+                    null,
+                    tempDir.resolve("h.yaml"),
+                    tempDir.resolve("sail.db")));
     assertTrue(ex.getMessage().contains("Failed to cache image"));
   }
 
@@ -271,7 +329,13 @@ class HostProvisionerTest {
     var provisioner = new HostProvisioner(shell, null);
     var result =
         provisioner.provision(
-            "zfs", "/dev/sdb", "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+            "zfs",
+            "/dev/sdb",
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
 
     assertEquals("unknown", result.incusVersion());
   }
@@ -283,7 +347,14 @@ class HostProvisionerTest {
     var listener = new RecordingListener(steps);
     var provisioner = new HostProvisioner(shell, listener);
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:3/8:not needed (dir backend)")),
@@ -303,7 +374,14 @@ class HostProvisionerTest {
 
     var provisioner = new HostProvisioner(shell, new RecordingListener(new ArrayList<>()));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     var cmds = shell.invocations();
     assertTrue(
@@ -321,7 +399,14 @@ class HostProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("done:5/8:devpool (already exists)")),
@@ -343,7 +428,13 @@ class HostProvisionerTest {
             IOException.class,
             () ->
                 provisioner.provision(
-                    "dir", null, "devpool", "incusbr0", null, tempDir.resolve("h.yaml")));
+                    "dir",
+                    null,
+                    "devpool",
+                    "incusbr0",
+                    null,
+                    tempDir.resolve("h.yaml"),
+                    tempDir.resolve("sail.db")));
     assertTrue(ex.getMessage().contains("Failed to create dir storage pool"));
   }
 
@@ -354,7 +445,13 @@ class HostProvisionerTest {
 
     var result =
         provisioner.provision(
-            "dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+            "dir",
+            null,
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
 
     assertEquals("dir", result.storageBackend());
     assertEquals("devpool", result.pool());
@@ -368,7 +465,14 @@ class HostProvisionerTest {
     var listener = new RecordingListener(steps);
     var provisioner = new HostProvisioner(shell, listener);
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertEquals(15, steps.size());
   }
@@ -385,7 +489,14 @@ class HostProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:8/8:bridge rules added")));
 
@@ -411,7 +522,13 @@ class HostProvisionerTest {
     assertDoesNotThrow(
         () ->
             provisioner.provision(
-                "dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml")),
+                "dir",
+                null,
+                "devpool",
+                "incusbr0",
+                null,
+                tempDir.resolve("host.yaml"),
+                tempDir.resolve("sail.db")),
         "a host without ufw must skip the firewall step, not abort init");
     assertTrue(
         steps.stream().anyMatch(s -> s.contains("skipped:8/8:UFW not installed")),
@@ -428,7 +545,14 @@ class HostProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("skipped:8/8:UFW not active")));
   }
@@ -445,7 +569,14 @@ class HostProvisionerTest {
     var steps = new ArrayList<String>();
     var provisioner = new HostProvisioner(shell, new RecordingListener(steps));
 
-    provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
+    provisioner.provision(
+        "dir",
+        null,
+        "devpool",
+        "incusbr0",
+        null,
+        tempDir.resolve("host.yaml"),
+        tempDir.resolve("sail.db"));
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:8/8:some rules failed")));
   }
@@ -530,7 +661,14 @@ class HostProvisionerTest {
             IllegalStateException.class,
             () ->
                 new HostProvisioner(shell, new RecordingListener(steps))
-                    .provision("dir", null, "devpool", "incusbr0", null, path));
+                    .provision(
+                        "dir",
+                        null,
+                        "devpool",
+                        "incusbr0",
+                        null,
+                        path,
+                        path.resolveSibling("sail.db")));
 
     assertEquals(
         "Cannot read "
@@ -543,13 +681,61 @@ class HostProvisionerTest {
     assertEquals("limits:\n  file_max: -1\n", Files.readString(path));
   }
 
+  @Test
+  void aPromotionThatFinishesWhileProvisioningIsKept() throws Exception {
+    var path = tempDir.resolve("host.yaml");
+    var dbPath = tempDir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+    }
+    var node =
+        HostYaml.fromMap(Map.of("storage_backend", "dir"))
+            .withSync(new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box-7"));
+    var main = node.withSync(new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "box-7"));
+    YamlUtil.dumpToFile(node.toMap(), path);
+    var promote =
+        new ProvisionListener() {
+          @Override
+          public void onStep(int step, int total, String description) {
+            if (step == 1) {
+              try {
+                HandleChange.write(
+                    path,
+                    dbPath,
+                    node,
+                    main,
+                    target -> {
+                      throw new IOException("main is not asked on a promotion");
+                    },
+                    OperatorCommand.PLAIN);
+              } catch (Exception e) {
+                throw new IllegalStateException(e);
+              }
+            }
+          }
+
+          @Override
+          public void onStepDone(int step, int total, String detail) {}
+        };
+
+    var after = reProvision(path, promote);
+
+    assertEquals(main.sync(), after.sync());
+    assertEquals(main.sync(), HostYaml.fromMap(YamlUtil.parseFile(path)).sync());
+  }
+
   private static HostYaml reProvision(Path path) throws Exception {
+    return reProvision(path, null);
+  }
+
+  private static HostYaml reProvision(Path path, ProvisionListener listener) throws Exception {
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
             .onOk("incus version", "6.3")
             .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
-    return new HostProvisioner(shell, null)
-        .provision("dir", null, "devpool", "incusbr0", "192.0.2.4", path);
+    return new HostProvisioner(shell, listener)
+        .provision(
+            "dir", null, "devpool", "incusbr0", "192.0.2.4", path, path.resolveSibling("sail.db"));
   }
 
   private static int indexOfContaining(List<String> list, String substring) {
