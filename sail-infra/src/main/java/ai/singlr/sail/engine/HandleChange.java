@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncScope;
@@ -113,9 +114,10 @@ public final class HandleChange {
    * leave the credential naming a handle other than the one written last: the write that waits is
    * refused when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it
    * cannot put the old one back. A box that stops being a node forgets the scope main last named it
-   * ({@link SyncScope}): as main or standalone it holds every project. A box with no database yet
-   * has no sail-api to read a credential: its first start issues it ({@code sail server start}).
-   * Returns the runs stamped for the new identity.
+   * ({@link SyncScope}): as main or standalone it holds every project, and a change that died
+   * before forgetting it is repaired at the next {@code sail migrate} or start ({@link
+   * MigrationRunner}). A box with no database yet has no sail-api to read a credential: its first
+   * start issues it ({@code sail server start}). Returns the runs stamped for the new identity.
    */
   public static List<String> apply(
       Path dbPath,

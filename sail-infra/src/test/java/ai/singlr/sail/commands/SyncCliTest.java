@@ -15,19 +15,30 @@ import ai.singlr.sail.Sail;
 import ai.singlr.sail.api.Event;
 import ai.singlr.sail.api.HostOperations;
 import ai.singlr.sail.api.OperationsFactory;
+import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.identity.Acting;
+import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ContentMigration;
+import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrations;
 import ai.singlr.sail.store.EventStore;
+import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MaterializedFilesMigration;
+import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.ReviewFindingsMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.ScopedHeadsMigration;
+import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncHealth;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.SyncEngine;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
@@ -38,6 +49,7 @@ import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,16 +88,48 @@ class SyncCliTest {
     runIsolated("node-demo");
   }
 
+  @Test
+  void mainForgetsTheScopeItHeardAsANodeOnMigrate() throws Exception {
+    runIsolated("scope-migrate-main", MAIN);
+  }
+
+  @Test
+  void aNodeKeepsTheScopeMainNamedItOnMigrate() throws Exception {
+    runIsolated("scope-migrate-node");
+  }
+
+  @Test
+  void aPromotionThatDiedBeforeItsScopeClearIsRepairedOnTheNextStart() throws Exception {
+    runIsolated("scope-start-main", MAIN);
+  }
+
+  @Test
+  void aStandaloneBoxForgetsAnyScopeOnTheNextStart() throws Exception {
+    runIsolated("scope-start-standalone", "{}\n");
+  }
+
+  private static final String NODE =
+      """
+      sync:
+        role: node
+        main: sail@main
+        handle: node
+      """;
+
+  private static final String MAIN =
+      """
+      sync:
+        role: main
+        handle: ada
+      """;
+
   private void runIsolated(String scenario) throws Exception {
+    runIsolated(scenario, NODE);
+  }
+
+  private void runIsolated(String scenario, String hostYaml) throws Exception {
     var data = Files.createDirectories(home.resolve(".sail"));
-    Files.writeString(
-        data.resolve("host.yaml"),
-        """
-        sync:
-          role: node
-          main: sail@main
-          handle: node
-        """);
+    Files.writeString(data.resolve("host.yaml"), hostYaml);
     var bin = Files.createDirectories(home.resolve("bin"));
     var ssh = bin.resolve("ssh");
     Files.writeString(ssh, "#!/bin/sh\nread -r request\nexit 255\n");
@@ -130,6 +174,10 @@ class SyncCliTest {
       schema.migrate();
       if (args[0].startsWith("upgrade-")) {
         verifyPreHealthUpgrade(args[0], db, operations);
+        return;
+      }
+      if (args[0].startsWith("scope-")) {
+        verifyScopeOffNode(args[0], db);
         return;
       }
       if ("sudo-round".equals(args[0])) {
@@ -195,6 +243,56 @@ class SyncCliTest {
         }
       }
     }
+  }
+
+  /**
+   * A box main scoped as a node holds the projects {@code acme} and {@code beta} and was granted
+   * only {@code acme}; {@code sail migrate} or the start of sail-api, which converge the database
+   * the same way, then leave a node that scope and give any other box every project.
+   */
+  private static void verifyScopeOffNode(String scenario, Sqlite db) {
+    HeldProjects.hold(db, "acme", "beta");
+    var granted = ProjectScope.of(List.of("acme"));
+    new SyncScope(db).record(granted);
+
+    if (scenario.startsWith("scope-migrate-")) {
+      MigrateCommand.runMigrations(true, true, OperatorCommand.PLAIN);
+    } else {
+      MigrationRunner.applyAll(
+          db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+    }
+
+    var projects = new ProjectStore(db);
+    var push = projects.refusesInto(Actor.sync("nia", Role.MEMBER), null, "beta", true);
+    if (scenario.endsWith("-node")) {
+      assertEquals(granted, new SyncScope(db).held());
+      assertTrue(push.isPresent());
+      return;
+    }
+    assertEquals(ProjectScope.all(), new SyncScope(db).held());
+    assertEquals(Optional.empty(), push);
+    Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
+    assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
+  }
+
+  private static SpecStore.SpecRow spec(String id, String project) {
+    return new SpecStore.SpecRow(
+        id,
+        project,
+        "the " + id + " spec",
+        SpecStatus.PENDING,
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        "ada",
+        "",
+        "",
+        "ada",
+        List.of(),
+        List.of());
   }
 
   private static void verifyScheduledRoundWording() throws Exception {

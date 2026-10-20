@@ -13,6 +13,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
@@ -21,7 +22,10 @@ import java.util.concurrent.TimeoutException;
  * Incus, creates the base profile, caches the container image, and writes {@code
  * /etc/sail/host.yaml}.
  *
- * <p>Every step is idempotent — safe to run again on an already-provisioned host.
+ * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
+ * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
+ * passkeys, limits and retention. A box that lost its sync identity would turn standalone and
+ * orphan every checkpoint its peers hold for its box id.
  */
 public final class HostProvisioner {
 
@@ -58,6 +62,7 @@ public final class HostProvisioner {
       Path hostYamlPath)
       throws IOException, InterruptedException, TimeoutException {
     var isDir = HostYaml.BACKEND_DIR.equals(storageBackend);
+    var kept = configured(hostYamlPath);
 
     updatePackages();
     installIncus();
@@ -78,10 +83,29 @@ public final class HostProvisioner {
             HostYaml.DEFAULT_IMAGE,
             incusVersion,
             serverIp,
-            DateTimeUtils.now().toString());
+            DateTimeUtils.now().toString(),
+            kept.webauthn(),
+            kept.sync(),
+            kept.limits(),
+            kept.retention());
 
     writeHostYaml(hostYaml, hostYamlPath);
     return hostYaml;
+  }
+
+  private static HostYaml configured(Path hostYamlPath) {
+    try {
+      return HostYaml.fromMap(
+          Files.exists(hostYamlPath) ? YamlUtil.parseFile(hostYamlPath) : Map.of());
+    } catch (IOException | RuntimeException e) {
+      throw new IllegalStateException(
+          "Cannot read "
+              + hostYamlPath
+              + " to keep this box's sync identity and settings: "
+              + e.getMessage()
+              + ". Fix the file, or move it aside to provision this box as new, then rerun.",
+          e);
+    }
   }
 
   private void updatePackages() throws IOException, InterruptedException, TimeoutException {

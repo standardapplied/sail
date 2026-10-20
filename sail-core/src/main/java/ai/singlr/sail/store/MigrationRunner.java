@@ -6,6 +6,8 @@
 package ai.singlr.sail.store;
 
 import ai.singlr.sail.config.ProjectRegistry;
+import ai.singlr.sail.engine.NodeIdentity;
+import ai.singlr.sail.identity.ProjectScope;
 import java.util.List;
 
 /**
@@ -16,6 +18,11 @@ import java.util.List;
  * <p>The {@code sail upgrade} flow also spawns the freshly-installed binary's {@code sail migrate}
  * as a sub-process, which lands in this same code path — that's how a binary upgrade picks up the
  * NEW release's migrations without the OLD binary needing to know they exist.
+ *
+ * <p>Once the schema is current, a box that is not a node forgets the scope main last named it
+ * ({@link SyncScope}): a box promoted before a role change cleared it, or whose role change died
+ * between writing {@code host.yaml} and clearing it, would otherwise keep refusing its own writes
+ * and its nodes' pushes into every project outside that scope.
  */
 public final class MigrationRunner {
 
@@ -28,6 +35,9 @@ public final class MigrationRunner {
     var before = schema.currentVersion();
     schema.migrate();
     var after = schema.currentVersion();
+    if (NodeIdentity.authoritative()) {
+      new SyncScope(db).record(ProjectScope.all());
+    }
     var projects = ProjectRegistry.loadFromDisk();
     var runs = new DataMigrator(db, dataMigrations).run(projects, prompter);
     return new Result(before, after, runs);

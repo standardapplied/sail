@@ -8,16 +8,24 @@ package ai.singlr.sail.engine;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.config.RetentionConfig;
+import ai.singlr.sail.config.SyncConfig;
+import ai.singlr.sail.config.WebauthnConfig;
+import ai.singlr.sail.config.YamlUtil;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -440,6 +448,108 @@ class HostProvisionerTest {
     provisioner.provision("dir", null, "devpool", "incusbr0", null, tempDir.resolve("host.yaml"));
 
     assertTrue(steps.stream().anyMatch(s -> s.contains("done:8/8:some rules failed")));
+  }
+
+  @Test
+  void reInitializingANodeKeepsItsSyncIdentityAndPasskeysAndRefreshesProvisioning()
+      throws Exception {
+    var path = tempDir.resolve("host.yaml");
+    var node = new SyncConfig(SyncConfig.ROLE_NODE, "sail@main", "ada", "box-7");
+    var passkeys =
+        new WebauthnConfig("sail.example.dev", "Sail", List.of("https://sail.example.dev"));
+    var limits = new FileLimits(2048);
+    var retention = RetentionConfig.fromMap(Map.of("messages", "30d"));
+    var before =
+        new HostYaml(
+            "zfs",
+            "oldpool",
+            "/dev/sdz",
+            "oldbr0",
+            "old-profile",
+            "ubuntu/22.04",
+            "6.0",
+            "10.0.0.1",
+            "2026-01-01T00:00:00Z",
+            passkeys,
+            node,
+            limits,
+            retention);
+    YamlUtil.dumpToFile(before.toMap(), path);
+
+    var after = reProvision(path);
+
+    assertEquals(after, HostYaml.fromMap(YamlUtil.parseFile(path)));
+    assertEquals(node, after.sync());
+    assertEquals("box-7", BoxIdentity.resolved(after.sync()).boxId());
+    assertEquals(passkeys, after.webauthn());
+    assertEquals(limits, after.limits());
+    assertEquals(retention, after.retention());
+    assertEquals(
+        List.of("dir", "devpool", "incusbr0", "singlr-base", "ubuntu/24.04", "6.3", "192.0.2.4"),
+        List.of(
+            after.storageBackend(),
+            after.pool(),
+            after.bridge(),
+            after.baseProfile(),
+            after.image(),
+            after.incusVersion(),
+            after.serverIp()));
+    assertNull(after.poolDisk());
+    assertNotEquals(before.initializedAt(), after.initializedAt());
+  }
+
+  @Test
+  void reInitializingMainKeepsItsRoleAndHandle() throws Exception {
+    var path = tempDir.resolve("host.yaml");
+    var main = new SyncConfig(SyncConfig.ROLE_MAIN, null, "ada", "main-box");
+    YamlUtil.dumpToFile(
+        HostYaml.fromMap(Map.of("storage_backend", "dir")).withSync(main).toMap(), path);
+
+    assertEquals(main, reProvision(path).sync());
+    assertEquals(main, HostYaml.fromMap(YamlUtil.parseFile(path)).sync());
+  }
+
+  @Test
+  void reInitializingAStandaloneBoxLeavesSyncUnset() throws Exception {
+    var path = tempDir.resolve("host.yaml");
+    YamlUtil.dumpToFile(HostYaml.fromMap(Map.of("storage_backend", "dir")).toMap(), path);
+
+    assertEquals(SyncConfig.unset(), reProvision(path).sync());
+    assertFalse(Files.readString(path).contains("sync"), Files.readString(path));
+  }
+
+  @Test
+  void anUnreadableHostYamlStopsReInitializingBeforeAnyStep() throws Exception {
+    var path = tempDir.resolve("host.yaml");
+    Files.writeString(path, "limits:\n  file_max: -1\n");
+    var steps = new ArrayList<String>();
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    var refused =
+        assertThrows(
+            IllegalStateException.class,
+            () ->
+                new HostProvisioner(shell, new RecordingListener(steps))
+                    .provision("dir", null, "devpool", "incusbr0", null, path));
+
+    assertEquals(
+        "Cannot read "
+            + path
+            + " to keep this box's sync identity and settings: limits.file_max must be between 1"
+            + " byte and 8 GiB: a blob manifest must fit one sync frame. Fix the file, or move it"
+            + " aside to provision this box as new, then rerun.",
+        refused.getMessage());
+    assertEquals(List.of(), steps);
+    assertEquals("limits:\n  file_max: -1\n", Files.readString(path));
+  }
+
+  private static HostYaml reProvision(Path path) throws Exception {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onOk("incus version", "6.3")
+            .on("ufw status", new ShellExec.Result(0, "Status: inactive\n", ""));
+    return new HostProvisioner(shell, null)
+        .provision("dir", null, "devpool", "incusbr0", "192.0.2.4", path);
   }
 
   private static int indexOfContaining(List<String> list, String substring) {
