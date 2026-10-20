@@ -140,10 +140,9 @@ public record HostYaml(
   /**
    * Rewrites the host config at {@code path} to what {@code change} makes of it, reading and
    * writing under the round lock of the box's database {@code database} ({@link
-   * FileMutex#holdRounds}), which every write of the box's identity holds. A change computed from a
-   * copy read before the lock would put back an identity replaced since, and a write outside it
-   * would let a reader under it take the half-written file for a standalone box. Writes nothing
-   * when {@code change} returns empty; returns what it wrote.
+   * FileMutex#holdRounds}), which every write of the box's identity holds: a change computed from a
+   * copy read before the lock would put back an identity replaced since. Writes nothing when {@code
+   * change} returns empty; returns what it wrote.
    */
   public static Optional<HostYaml> rewrite(
       Path path, Path database, Function<HostYaml, Optional<HostYaml>> change) throws IOException {

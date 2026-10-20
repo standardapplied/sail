@@ -52,6 +52,22 @@ public final class NodeIdentity {
     }
   }
 
+  /**
+   * Whether {@code host.yaml}, read whole, declares this box main or standalone: the reading on
+   * which a box forgets the scope main last named it ({@code MigrationRunner}). Unlike {@link
+   * #authoritative()}, a file absent, empty or unreadable answers no — one being moved into the
+   * shared data directory, truncated by a writer or half written would otherwise pass for a
+   * standalone box's, and a node would lose its grant until its next round.
+   */
+  public static boolean declaresNotNode() {
+    try {
+      var declared = YamlUtil.parseFile(SailPaths.hostConfigPath());
+      return !declared.isEmpty() && !HostYaml.fromMap(declared).sync().isNode();
+    } catch (IOException | RuntimeException e) {
+      return false;
+    }
+  }
+
   /** This box's FDE handle — the assignee dispatch matches a spec against — or null when unset. */
   public static String handle() {
     return config().handle();

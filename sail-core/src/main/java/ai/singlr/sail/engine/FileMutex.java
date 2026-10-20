@@ -71,11 +71,11 @@ public final class FileMutex implements AutoCloseable {
    * Holds off every other sync round of the box whose database is {@code database}, and every other
    * write of its identity, until closed. Each round runs under it, from reading the box's identity
    * to its last answer; a handle change holds it from asking main which runs it took until they are
-   * re-stamped, so no run can be offered, or its answer lost, between the two; and a migration or
-   * {@code host init} holds it from reading the identity to the write that follows, so none acts on
-   * an identity half written. It is a lock file beside the database, so a round in the API server
-   * and a command in the CLI exclude each other. Null for an in-memory database ({@code null}) or
-   * one not created yet: neither has a round or a migration to exclude.
+   * re-stamped, so no run can be offered, or its answer lost, between the two; and every other
+   * writer of {@code host.yaml} holds it from reading the file to writing it back, so none puts
+   * back an identity another replaced meanwhile. It is a lock file beside the database, so a round
+   * in the API server and a command in the CLI exclude each other. Null for an in-memory database
+   * ({@code null}) or one not created yet: neither has a round or a migration to exclude.
    */
   public static FileMutex holdRounds(Path database) throws IOException {
     return database == null || !Files.exists(database)

@@ -20,7 +20,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.DemoProject;
 import ai.singlr.sail.engine.DemoSeeder;
-import ai.singlr.sail.engine.FileMutexTest;
 import ai.singlr.sail.engine.HandleChange;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -118,7 +117,17 @@ class SyncCliTest {
 
   @Test
   void aStandaloneBoxForgetsAnyScopeOnTheNextStart() throws Exception {
-    runIsolated("scope-start-standalone", "{}\n");
+    runIsolated("scope-start-standalone", "storage_backend: dir\n");
+  }
+
+  @Test
+  void aStartWhileHostYamlIsBeingMovedKeepsANodesScope() throws Exception {
+    runIsolated("scope-start-gone");
+  }
+
+  @Test
+  void aStartThatFindsHostYamlTruncatedKeepsANodesScope() throws Exception {
+    runIsolated("scope-start-torn");
   }
 
   private static final String NODE =
@@ -265,12 +274,20 @@ class SyncCliTest {
   /**
    * A box main scoped as a node holds the projects {@code acme} and {@code beta} and was granted
    * only {@code acme}; {@code sail migrate} or the start of sail-api, which converge the database
-   * the same way, then leave a node that scope and give any other box every project.
+   * the same way, then leave a node that scope and give any other box every project. A node whose
+   * {@code host.yaml} is gone or empty at that moment — being moved into {@code /var/lib/sail}, or
+   * truncated by a writer that holds no lock — is left its scope too: nothing whole said it is not
+   * a node.
    */
-  private static void verifyScopeOffNode(String scenario, Sqlite db) {
+  private static void verifyScopeOffNode(String scenario, Sqlite db) throws IOException {
     HeldProjects.hold(db, "acme", "beta");
     var granted = ProjectScope.of(List.of("acme"));
     new SyncScope(db).record(granted);
+    switch (scenario) {
+      case "scope-start-gone" -> Files.delete(SailPaths.hostConfigPath());
+      case "scope-start-torn" -> Files.writeString(SailPaths.hostConfigPath(), "");
+      default -> {}
+    }
 
     if (scenario.startsWith("scope-migrate-")) {
       MigrateCommand.runMigrations(true, true, OperatorCommand.PLAIN);
@@ -281,21 +298,22 @@ class SyncCliTest {
 
     var projects = new ProjectStore(db);
     var push = projects.refusesInto(Actor.sync("nia", Role.MEMBER), null, "beta", true);
-    if (scenario.endsWith("-node")) {
-      assertEquals(granted, new SyncScope(db).held());
-      assertTrue(push.isPresent());
+    if (scenario.endsWith("-main") || scenario.endsWith("-standalone")) {
+      assertEquals(ProjectScope.all(), new SyncScope(db).held());
+      assertEquals(Optional.empty(), push);
+      Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
+      assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
       return;
     }
-    assertEquals(ProjectScope.all(), new SyncScope(db).held());
-    assertEquals(Optional.empty(), push);
-    Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
-    assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
+    assertEquals(granted, new SyncScope(db).held());
+    assertTrue(push.isPresent());
   }
 
   /**
    * A node rewrites its identity, unchanged, while sail-api starts: {@code host.yaml} is empty
-   * between the truncation and the write, and a start that read it then would take the node for a
-   * standalone box and forget the scope main granted it. The start waits for the write instead.
+   * between the truncation and the write, and a start that read it as a standalone box's would
+   * forget the scope main granted it. The start runs to its end on the empty file and leaves the
+   * scope: nothing whole said the box is not a node.
    */
   private static void verifyScopeDuringIdentityWrite(Sqlite db) throws Exception {
     var granted = ProjectScope.of(List.of("acme"));
@@ -324,17 +342,11 @@ class SyncCliTest {
                     }));
     Thread.ofPlatform().start(rewrite);
     assertTrue(truncated.await(10, TimeUnit.SECONDS), "the rewrite never truncated host.yaml");
-    var start =
-        new FutureTask<>(
-            () ->
-                MigrationRunner.applyAll(
-                    db,
-                    DataMigrations.all(OperatorCommand.PLAIN),
-                    DataMigration.Prompter.NON_INTERACTIVE));
-    FileMutexTest.awaitParked(Thread.ofPlatform().start(start));
+    MigrationRunner.applyAll(
+        db, DataMigrations.all(OperatorCommand.PLAIN), DataMigration.Prompter.NON_INTERACTIVE);
+    assertEquals(granted, new SyncScope(db).held(), "the empty file decided nothing");
     resume.countDown();
     rewrite.get();
-    start.get();
 
     assertEquals(node, NodeIdentity.config());
     assertEquals(granted, new SyncScope(db).held());
