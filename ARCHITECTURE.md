@@ -83,7 +83,7 @@ syncs with and refuses any other before anything moves (`NodeRound.admit`): "Mai
 not the database this box synced with (catalog <old>, now <new>). Restore main's database
 (/var/lib/sail/sail.db) from a copy, then sync again." A main older than catalogs names none and
 could be any database, so it is refused too, before anything moves: "Main at <target> names no
-database catalog, so this box cannot tell whether it is the database it synced with. Upgrade main
+database catalog, so this box cannot tell whether it is the database it synced with: upgrade main
 first, then sync again." So a main set up again from a copy (`sudo
 sail init --as-main`, the copy put in place of its new database, then `sudo sail migrate`, which
 also restores the sail user's keys from it) is the same main to every node, which then pushes

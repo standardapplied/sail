@@ -58,7 +58,7 @@ public final class NodeRound {
           "Main at "
               + target
               + " names no database catalog, so this box cannot tell whether it is the database"
-              + " it synced with. Upgrade main first, then sync again.",
+              + " it synced with: upgrade main first, then sync again.",
           null);
     }
     if (synced.equals(offered)) {

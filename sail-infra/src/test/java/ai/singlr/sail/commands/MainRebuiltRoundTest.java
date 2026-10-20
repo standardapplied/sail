@@ -316,7 +316,7 @@ class MainRebuiltRoundTest {
     assertEquals("refused", refused.kind());
     assertEquals(
         "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
-            + " database it synced with. Upgrade main first, then sync again.",
+            + " database it synced with: upgrade main first, then sync again.",
         refused.getMessage());
     assertEquals(before, held(nodeDb));
   }
