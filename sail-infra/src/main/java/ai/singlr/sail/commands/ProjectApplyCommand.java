@@ -53,7 +53,6 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.TimeoutException;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -282,7 +281,7 @@ public final class ProjectApplyCommand implements Runnable {
       var project = target.name();
       var definition = definitionFor(project);
       try {
-        if (!sailManaged(project, devices)) {
+        if (!devices.sailManaged(project)) {
           var warning = unmanagedSkipWarning(project, definition.isPresent(), operator);
           if (warning != null) {
             if (json) {
@@ -360,20 +359,6 @@ public final class ProjectApplyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string(allSummaryLine(applied, failed)));
     }
     requireAllApplied(failed);
-  }
-
-  /**
-   * The trust gate for {@code --all}: a container is Sail-managed only when it carries the
-   * API-socket device Sail itself attached — instance-level provenance. A catalog row is name-level
-   * intent, never provenance: {@code destroy} without {@code --purge} retains the row, and a
-   * foreign container later created under the same name must not inherit the API mount and box
-   * credential from a stale entry. An unmarked container the operator does own is claimed through
-   * explicit single-project apply, where naming it is the authorization.
-   */
-  static boolean sailManaged(String project, IncusDeviceManager devices)
-      throws IOException, InterruptedException, TimeoutException {
-    return NameValidator.isValidProjectName(project)
-        && devices.currentEventSocketSource(project) != null;
   }
 
   /**

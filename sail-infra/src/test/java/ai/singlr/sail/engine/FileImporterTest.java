@@ -14,6 +14,7 @@ import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.DataMigration;
@@ -54,7 +55,7 @@ class FileImporterTest {
     new SchemaManager(db).migrate();
     files = new FileStore(db);
     projectsDir = tempDir.resolve("projects");
-    importer = new FileImporter(projectsDir, files);
+    importer = new FileImporter(projectsDir, files, ProjectScope.all());
   }
 
   @AfterEach
@@ -82,6 +83,18 @@ class FileImporterTest {
     assertEquals(2, report.imported());
     assertEquals(b64("hello"), ContentFixtures.encoded(files, "acme", "scripts/deploy.sh"));
     assertEquals(b64("docs"), ContentFixtures.encoded(files, "acme", "README.md"));
+  }
+
+  @Test
+  void aProjectTheBoxsScopeDoesNotAdmitIsNeverRead() throws Exception {
+    writeOnDisk("acme", "README.md", "acme's");
+    writeOnDisk("beta", "README.md", "beta's, left by a release before this one");
+
+    var report = new FileImporter(projectsDir, files, ProjectScope.of(List.of("acme"))).importAll();
+
+    assertEquals(new FileImporter.Report(1, List.of()), report);
+    assertEquals(b64("acme's"), ContentFixtures.encoded(files, "acme", "README.md"));
+    assertTrue(files.find("beta", "README.md").isEmpty());
   }
 
   @Test
@@ -396,6 +409,7 @@ class FileImporterTest {
         new FileImporter(
             projectsDir,
             files,
+            ProjectScope.all(),
             () -> {
               loads.incrementAndGet();
               return FileLimits.defaults();
@@ -413,6 +427,7 @@ class FileImporterTest {
         new FileImporter(
             projectsDir,
             files,
+            ProjectScope.all(),
             () -> {
               throw new IllegalArgumentException(
                   "limits.file_max must be an integer number of bytes");
@@ -428,7 +443,7 @@ class FileImporterTest {
   void mainsLowerFileCapRefusesAnOversizedFileAtImport() throws Exception {
     new SyncLimits(db).recordMainFileMax(1);
     writeOnDisk("acme", "big.txt", "too big");
-    var bounded = new FileImporter(projectsDir, files, FileLimits::defaults);
+    var bounded = new FileImporter(projectsDir, files, ProjectScope.all(), FileLimits::defaults);
 
     var failure = assertThrows(IllegalArgumentException.class, bounded::importAll);
 

@@ -179,4 +179,33 @@ class IncusDeviceManagerTest {
 
     assertThrows(IOException.class, () -> new IncusDeviceManager(shell).listDevices(CONTAINER));
   }
+
+  @Test
+  void allOnlyTargetsSailManagedContainers() throws Exception {
+    var probe =
+        new ScriptedShellExecutor()
+            .onOk("incus config device get legacy sail-api-sock source", "/run/sail/api");
+    var devices = new IncusDeviceManager(probe);
+
+    assertTrue(
+        devices.sailManaged("legacy"),
+        "the API-socket device is the instance-level provenance Sail itself attached");
+    assertFalse(
+        devices.sailManaged("web"),
+        "a catalog row is name-level intent, never instance provenance: a stale entry left by"
+            + " destroy-without-purge must not hand a foreign container with a colliding name"
+            + " the API mount and box credential");
+    assertFalse(
+        devices.sailManaged("foreign"),
+        "an unrelated Incus instance must never receive the API mount and box credential");
+  }
+
+  @Test
+  void anInvalidInstanceNameIsForeignBeforeAnyProbeRuns() throws Exception {
+    var probe = new ScriptedShellExecutor();
+    var devices = new IncusDeviceManager(probe);
+
+    assertFalse(devices.sailManaged("Not_A_Project"));
+    assertTrue(probe.invocations().isEmpty(), "an invalid name must never reach incus");
+  }
 }

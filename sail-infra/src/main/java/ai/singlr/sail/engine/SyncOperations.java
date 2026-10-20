@@ -14,6 +14,9 @@ import ai.singlr.sail.api.SyncTransitionEvents;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
+import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MaterializedFiles;
@@ -21,6 +24,7 @@ import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.sync.NodeRound;
 import ai.singlr.sail.sync.Settlement;
 import ai.singlr.sail.sync.StoreReplica;
@@ -42,8 +46,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.TimeoutException;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import picocli.CommandLine.Help.Ansi;
 
 /**
@@ -85,6 +92,7 @@ public final class SyncOperations {
   private final Channels channels;
   private final Consumer<Event> events;
   private final OperatorCommand operator;
+  private final ShellExec shell;
   private SailEventPublisher publisher;
 
   public SyncOperations(
@@ -109,6 +117,20 @@ public final class SyncOperations {
       Channels channels,
       Consumer<Event> events,
       OperatorCommand operator) {
+    this(
+        db, host, projectsDir, configuration, channels, events, operator, new ShellExecutor(false));
+  }
+
+  /** As above, asking Incus through {@code shell}. */
+  public SyncOperations(
+      Sqlite db,
+      String host,
+      Path projectsDir,
+      Supplier<SyncConfig> configuration,
+      Channels channels,
+      Consumer<Event> events,
+      OperatorCommand operator,
+      ShellExec shell) {
     this.db = db;
     this.host = host;
     this.projectsDir = projectsDir;
@@ -116,6 +138,7 @@ public final class SyncOperations {
     this.channels = channels;
     this.events = events == null ? this::publishQuietly : events;
     this.operator = Objects.requireNonNull(operator, "operator");
+    this.shell = Objects.requireNonNull(shell, "shell");
   }
 
   public SyncConfig configuration() {
@@ -200,13 +223,15 @@ public final class SyncOperations {
     settled.forEach(settlement -> notice(settlement.describe()));
     var pulledMessages = pulledMessageEvents(messages, specs, knownMessages, host);
     try {
-      reportRejectedFdes(applyFdes(new FdeStore(db), session.fetchFdes()));
+      reportRejectedFdes(
+          applyFdes(new FdeStore(db), session.fetchFdes(), new SyncScope(db).held(), handle));
     } catch (RuntimeException e) {
       failures.add(transportFailure("fde", e));
     }
     materialize(files);
     materializeProjects(projects);
     reconcileLiveResources(projects, reportFor(types, "project"));
+    tearDownOutOfScope(dropped(settled));
     var summed =
         types.stream()
             .map(SyncSession.TypeReport::report)
@@ -404,7 +429,7 @@ public final class SyncOperations {
     if (projectReport.pulled() + projectReport.merged() == 0) {
       return;
     }
-    var reconciler = new ProjectResourceReconciler(new ContainerManager(new ShellExecutor(false)));
+    var reconciler = new ProjectResourceReconciler(new ContainerManager(shell));
     var outcome = reconciler.reconcileCatalog(projects.list());
     for (var skipped : outcome.diskSkipped()) {
       System.err.println(Banner.errorLine("Kept disk size for " + skipped, Ansi.AUTO));
@@ -413,6 +438,124 @@ public final class SyncOperations {
       System.err.println(
           Ansi.AUTO.string(
               "  @|faint resized to match main: " + String.join(", ", outcome.resized()) + "|@"));
+    }
+  }
+
+  private static Set<String> dropped(List<Settlement.Settled> settled) {
+    return settled.stream()
+        .filter(
+            each ->
+                Erasure.PROJECT.equals(each.type()) && each.how() instanceof Settlement.How.Dropped)
+        .map(Settlement.Settled::id)
+        .collect(Collectors.toUnmodifiableSet());
+  }
+
+  /**
+   * Takes off this box each project the scope main named does not admit and the box holds nothing
+   * of: its {@code ~/.sail/projects/<name>} directory, and its container when Sail provisioned it
+   * ({@link IncusDeviceManager#sailManaged}), as {@code project destroy} without {@code --purge}
+   * would. It is decided from what the box holds, not from what this round {@code dropped}, so a
+   * directory or container an earlier release, a failed round or an unreachable Incus left behind
+   * goes in the first round that can take it. A project kept for a run still under way here is
+   * still held, and keeps both. An unscoped box is never asked, nor is Incus of a project in scope.
+   */
+  private void tearDownOutOfScope(Set<String> dropped) {
+    var scope = new SyncScope(db).held();
+    if (scope.unrestricted()) {
+      return;
+    }
+    var held = Set.copyOf(new ChangeLog(db).heldProjects());
+    Predicate<String> leaving =
+        name ->
+            NameValidator.isValidProjectName(name) && !scope.admits(name) && !held.contains(name);
+    var teardown = new ProjectTeardown(shell, projectsDir);
+    try {
+      for (var name : directoriesUnder(projectsDir)) {
+        if (leaving.test(name)) {
+          takeOff(teardown, name, false);
+        }
+      }
+      List<ContainerManager.ContainerInfo> containers;
+      try {
+        containers = new ContainerManager(shell).listAll();
+      } catch (IOException | TimeoutException unreachable) {
+        dropped.forEach(
+            project ->
+                notice(
+                    "project "
+                        + project
+                        + ": its container, if any, is deleted by the next round that can reach"
+                        + " Incus (sail-api within a minute, or '"
+                        + operator.root("sync")
+                        + "')"));
+        return;
+      }
+      var devices = new IncusDeviceManager(shell);
+      for (var container : containers) {
+        var name = container.name();
+        if (!leaving.test(name)) {
+          continue;
+        }
+        if (devices.sailManaged(name)) {
+          if (takeOff(teardown, name, true)) {
+            notice(
+                "project "
+                    + name
+                    + ": its container deleted, workspace and uncommitted work included — main"
+                    + " no longer grants this box the project");
+          }
+        } else if (dropped.contains(name)) {
+          notice(
+              "project "
+                  + name
+                  + ": container '"
+                  + name
+                  + "' kept — Sail did not provision it; remove it yourself if it holds the"
+                  + " project's work");
+        }
+      }
+    } catch (IOException | TimeoutException e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not list what this box holds of projects main no longer grants it: "
+                  + e.getMessage(),
+              Ansi.AUTO));
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+    }
+  }
+
+  /**
+   * Tears {@code name} down, saying so when it cannot: the next round finds it still held on disk
+   * or in Incus and tries again. Returns whether it went.
+   */
+  private static boolean takeOff(ProjectTeardown teardown, String name, boolean container)
+      throws InterruptedException {
+    try {
+      teardown.tearDown(name, container);
+      return true;
+    } catch (IOException | UncheckedIOException | TimeoutException e) {
+      System.err.println(
+          Banner.errorLine(
+              "Could not take project "
+                  + name
+                  + " off this box (the next sync tries again): "
+                  + e.getMessage(),
+              Ansi.AUTO));
+      return false;
+    }
+  }
+
+  private static List<String> directoriesUnder(Path dir) throws IOException {
+    if (!Files.isDirectory(dir)) {
+      return List.of();
+    }
+    try (var children = Files.list(dir)) {
+      return children
+          .filter(Files::isDirectory)
+          .map(child -> child.getFileName().toString())
+          .sorted()
+          .toList();
     }
   }
 
@@ -498,10 +641,26 @@ public final class SyncOperations {
   /**
    * Mirrors main's roster into the local FDE store, returning the handles of any entries rejected
    * for a malformed role or status — dropped, never written with a bad authorization. An FDE main
-   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}).
+   * no longer lists is disabled here ({@link FdeStore#disableUnlisted}), unless main scoped this
+   * box to {@code scope}: then it is removed with its credentials, as is anyone main lists to this
+   * box no more, so the box keeps no name or email outside its projects. This box's own FDE, {@code
+   * own}, is never removed.
    */
-  public static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
-    fdes.disableUnlisted(roster.stream().map(entry -> str(entry, "handle")).toList());
+  public static List<String> applyFdes(
+      FdeStore fdes, List<Map<String, Object>> roster, ProjectScope scope, String own) {
+    var listed = roster.stream().map(entry -> str(entry, "handle")).toList();
+    if (scope.unrestricted()) {
+      fdes.disableUnlisted(listed);
+    } else {
+      var removed = fdes.removeUnlisted(listed, own);
+      if (removed > 0) {
+        System.err.println(
+            Ansi.AUTO.string(
+                "  @|faint roster: removed "
+                    + removed
+                    + " FDE(s) main no longer lists to this box|@"));
+      }
+    }
     var rejected = new ArrayList<String>();
     for (var entry : roster) {
       try {

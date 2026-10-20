@@ -102,6 +102,25 @@ class ProjectScopeTest {
   }
 
   @Test
+  void aWideningSeesEveryProjectAndForgetsTheGrants() {
+    fdes.add("bob", null, null, "member");
+    fdes.add("cy", null, null, "member");
+    for (var scoped : List.of("bob", "cy")) {
+      fdes.restrict(scoped);
+      fdes.grant(scoped, "alpha", OperatorCommand.PLAIN);
+    }
+
+    assertTrue(fdes.unrestrict("bob"));
+    assertTrue(fdes.unrestrict("bob"), "a widening repeated changes nothing and still finds bob");
+    assertFalse(fdes.unrestrict("unknown"));
+
+    assertEquals(ProjectScope.all(), fdes.scopeOf("bob"));
+    fdes.restrict("bob");
+    assertEquals(ProjectScope.none(), fdes.scopeOf("bob"));
+    assertEquals(ProjectScope.of(List.of("alpha")), fdes.scopeOf("cy"));
+  }
+
+  @Test
   void onlyAScopedFdeIsGrantedAndItsGrantsLeaveWithIt() {
     fdes.add("ada", null, null, "admin");
     var bob = fdes.add("bob", null, null, "member");
@@ -109,8 +128,8 @@ class ProjectScopeTest {
     fdes.grant("bob", "alpha", OperatorCommand.PLAIN);
 
     assertEquals(
-        "FDE 'ada' sees every project, so there is nothing to grant or revoke. Only an FDE added"
-            + " with 'sail fde add <handle> --scoped' is granted projects.",
+        "FDE 'ada' sees every project, so there is nothing to grant or revoke. Scope it first"
+            + " with 'sail fde update ada --scoped'.",
         assertThrows(
                 IllegalArgumentException.class,
                 () -> fdes.grant("ada", "alpha", OperatorCommand.PLAIN))

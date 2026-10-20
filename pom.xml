@@ -74,6 +74,8 @@
                     <argLine>
                         @{argLine}
                         -Duser.timezone=UTC
+                        <!-- the release runs on JDK 25, whose exchanges share their context's attributes -->
+                        -Djdk.httpserver.attributes=context
                         --add-opens java.base/java.util=ALL-UNNAMED
                         --add-opens java.base/java.lang=ALL-UNNAMED
                     </argLine>

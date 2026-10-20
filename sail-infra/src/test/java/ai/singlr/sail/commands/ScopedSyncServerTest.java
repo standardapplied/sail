@@ -22,15 +22,21 @@ import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.TokenStore;
+import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.sync.SyncDatabase;
 import ai.singlr.sail.sync.SyncSession;
 import ai.singlr.sail.sync.SyncWire;
 import ai.singlr.sail.sync.SyncedEntities;
+import ai.singlr.sail.webauthn.RegisteredCredential;
 import java.io.BufferedInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PipedInputStream;
 import java.io.PipedOutputStream;
+import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -109,14 +115,76 @@ class ScopedSyncServerTest {
             entry("uma", "Uma", "", "member")),
         round.roster().stream().map(ScopedSyncServerTest::withoutCreatedAt).toList());
 
-    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster()));
+    assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), "nia"));
 
     assertTrue(node.byHandle("sam").orElseThrow().active(), "an assignee in alpha stays enabled");
     assertTrue(node.byHandle("ada").orElseThrow().active());
-    assertEquals("disabled", node.byHandle("zed").orElseThrow().status());
+    assertTrue(node.byHandle("zed").isEmpty(), "no one outside alpha stays on a scoped box");
     assertEquals("", node.byHandle("sam").orElseThrow().email());
     assertEquals("nia@x.dev", node.byHandle("nia").orElseThrow().email());
     assertEquals(ProjectScope.all(), node.scopeOf("nia"), "a node scopes no one");
+  }
+
+  @Test
+  void aScopedNodeRemovesEveryoneMainNoLongerListsWithTheirCredentialsButItsOwnFde()
+      throws Exception {
+    var node = new FdeStore(nodeDb);
+    var own = node.add("nia", "Nia", "nia@old.dev", "member");
+    var zed = node.add("zed", "Zed", "zed@x.dev", "member");
+    node.add("eng", "Eng", "eng@x.dev", "member");
+    node.add("sam", "Sam", "sam@x.dev", "member");
+    new TokenStore(nodeDb).create("mast-zed", "member", zed.id(), null);
+    new WebauthnCredentialStore(nodeDb)
+        .save(
+            new RegisteredCredential(new byte[] {7}, new byte[] {1}, -7, 0, null, false, false),
+            zed.id(),
+            "laptop");
+    new TokenStore(nodeDb).create("mast-nia", "member", own.id(), null);
+    node.disableUnlisted(List.of("nia", "sam"));
+    var round = roundAs(tokenOf("nia"));
+    var err = new ByteArrayOutputStream();
+    var originalErr = System.err;
+    System.setErr(new PrintStream(err, true, StandardCharsets.UTF_8));
+    try {
+      assertEquals(List.of(), SyncOperations.applyFdes(node, round.roster(), round.scope(), "nia"));
+    } finally {
+      System.setErr(originalErr);
+    }
+
+    assertEquals(
+        "  roster: removed 2 FDE(s) main no longer lists to this box\n",
+        err.toString(StandardCharsets.UTF_8));
+    assertEquals(
+        round.roster().stream().map(fde -> fde.get("handle")).toList(),
+        node.list().stream().map(FdeStore.Fde::handle).toList(),
+        "the node's roster, which its GET /v1/fdes lists whole, is main's list to it");
+    assertEquals(own.id(), node.byHandle("nia").orElseThrow().id());
+    assertEquals(
+        List.of("mast-nia"),
+        nodeDb.query("SELECT name FROM api_tokens", row -> row.text(0)),
+        "a removed FDE's token goes with it, and the box's own stays");
+    assertEquals(0L, count("SELECT count(*) FROM webauthn_credentials"));
+
+    var withoutItsOwn =
+        round.roster().stream().filter(fde -> !"nia".equals(fde.get("handle"))).toList();
+    SyncOperations.applyFdes(node, withoutItsOwn, round.scope(), "nia");
+    assertEquals(own.id(), node.byHandle("nia").orElseThrow().id(), "its own FDE is never removed");
+    assertEquals(
+        List.of("ada", "nia", "sam", "uma"),
+        node.list().stream().map(FdeStore.Fde::handle).toList());
+  }
+
+  @Test
+  void anUnscopedNodeDisablesAnFdeMainRemovedAndKeepsItsRow() throws Exception {
+    var node = new FdeStore(nodeDb);
+    node.add("gone", "Gone", "gone@x.dev", "member");
+    var round = roundAs(tokenOf("uma"));
+
+    SyncOperations.applyFdes(node, round.roster(), round.scope(), "uma");
+
+    var gone = node.byHandle("gone").orElseThrow();
+    assertEquals("disabled", gone.status());
+    assertEquals("gone@x.dev", gone.email());
   }
 
   @Test

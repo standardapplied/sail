@@ -17,7 +17,6 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SyncOperations;
-import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.MessageStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.sync.SyncDatabase;
@@ -257,10 +256,6 @@ public final class SyncCommand implements Callable<Integer> {
   static List<Event> pulledMessageEvents(
       MessageStore messages, SpecStore specs, Set<String> known, String host) {
     return SyncOperations.pulledMessageEvents(messages, specs, known, host);
-  }
-
-  static List<String> applyFdes(FdeStore fdes, List<Map<String, Object>> roster) {
-    return SyncOperations.applyFdes(fdes, roster);
   }
 
   static boolean shouldNotify(SyncEngine.Report report) {

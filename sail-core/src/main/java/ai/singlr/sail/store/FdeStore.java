@@ -191,6 +191,21 @@ public final class FdeStore {
   }
 
   /**
+   * Widens {@code handle} to every project and forgets its grants, so a later narrowing grants only
+   * what it names. Returns whether the roster holds the handle.
+   */
+  public boolean unrestrict(String handle) {
+    return db.transaction(
+        () -> {
+          db.execute(
+              "DELETE FROM project_grants WHERE fde_id = (SELECT id FROM fdes WHERE handle = ?)",
+              handle);
+          db.execute("UPDATE fdes SET scope = 'all' WHERE handle = ?", handle);
+          return db.changes() > 0;
+        });
+  }
+
+  /**
    * An admin edits the roster, so one scoped to its grants could grant itself any project: a scope
    * that held no one would be worse than none.
    */
@@ -248,10 +263,10 @@ public final class FdeStore {
       throw new IllegalArgumentException(
           "FDE '"
               + handle
-              + "' sees every project, so there is nothing to grant or revoke. Only an FDE"
-              + " added with '"
-              + operator.sail("fde add <handle> --scoped")
-              + "' is granted projects.");
+              + "' sees every project, so there is nothing to grant or revoke. Scope it first"
+              + " with '"
+              + operator.sail("fde update " + handle + " --scoped")
+              + "'.");
     }
     return scope;
   }
@@ -378,10 +393,33 @@ public final class FdeStore {
               byId(fdeId)
                   .orElseThrow(() -> new IllegalArgumentException("No FDE with id " + fdeId + "."));
           requireRemovable(fde, operator);
-          db.execute("DELETE FROM api_tokens WHERE fde_id = ?", fdeId);
-          new FdeBoxes(db).release(fde.handle());
-          db.execute("DELETE FROM fdes WHERE id = ?", fdeId);
+          delete(fde);
         });
+  }
+
+  /**
+   * Removes every FDE this box holds that main's roster, naming {@code listed}, does not, but this
+   * box's own {@code own}, as {@link #remove} does: how a scoped node holds exactly the roster main
+   * lists to it, and so neither the name nor the email of anyone outside its projects. An admin is
+   * never scoped, so main lists every admin to every node and the last-admin guard has nothing to
+   * guard here. Returns how many it removed.
+   */
+  public int removeUnlisted(Collection<String> listed, String own) {
+    return db.transaction(
+        () -> {
+          var unlisted =
+              list().stream()
+                  .filter(fde -> !listed.contains(fde.handle()) && !fde.handle().equals(own))
+                  .toList();
+          unlisted.forEach(this::delete);
+          return unlisted.size();
+        });
+  }
+
+  private void delete(Fde fde) {
+    db.execute("DELETE FROM api_tokens WHERE fde_id = ?", fde.id());
+    new FdeBoxes(db).release(fde.handle());
+    db.execute("DELETE FROM fdes WHERE id = ?", fde.id());
   }
 
   /**

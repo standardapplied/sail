@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.engine;
 
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ProjectStore;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -18,16 +19,20 @@ import java.util.stream.Stream;
  * ~/.sail/projects/<name>/sail.yaml}). Retained in the explicit migrate lane to recover a current
  * project creation whose best-effort catalog write failed. It imports a name <em>only when it has
  * never been journaled</em> — an already-known project or tombstone is left untouched, never
- * re-read from disk (which would overwrite a synced definition or resurrect a deletion).
+ * re-read from disk (which would overwrite a synced definition or resurrect a deletion), and never
+ * a name the box's scope does not admit: a scoped node's leftover descriptor of a project main no
+ * longer grants it is not work to import, and its next round takes it off the box.
  */
 public final class ProjectImporter {
 
   private final Path projectsDir;
   private final ProjectStore store;
+  private final ProjectScope scope;
 
-  public ProjectImporter(Path projectsDir, ProjectStore store) {
+  public ProjectImporter(Path projectsDir, ProjectStore store, ProjectScope scope) {
     this.projectsDir = projectsDir;
     this.store = store;
+    this.scope = scope;
   }
 
   public record Report(int imported, int skipped, List<String> notes) {
@@ -51,7 +56,7 @@ public final class ProjectImporter {
           continue;
         }
         var name = dir.getFileName().toString();
-        if (knownProjectIds.contains(name)) {
+        if (knownProjectIds.contains(name) || !scope.admits(name)) {
           skipped++;
           continue;
         }

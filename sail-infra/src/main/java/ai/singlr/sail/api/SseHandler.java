@@ -14,9 +14,12 @@ import java.io.OutputStream;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
+import java.time.InstantSource;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Semaphore;
@@ -55,8 +58,6 @@ public final class SseHandler implements HttpHandler {
   /** Heartbeat interval. SSE comments keep idle connections alive through proxies. */
   public static final long HEARTBEAT_MILLIS = 15_000L;
 
-  private static final long HEARTBEAT_NANOS = HEARTBEAT_MILLIS * 1_000_000L;
-
   /** Poll timeout when draining the per-connection queue. */
   static final long POLL_MILLIS = 1_000L;
 
@@ -64,6 +65,7 @@ public final class SseHandler implements HttpHandler {
   private final ApiAuth auth;
   private final Semaphore connectionPermits;
   private final int maxConnections;
+  private final InstantSource clock;
   private final LongAdder rejected = new LongAdder();
 
   public SseHandler(EventBus bus, ApiAuth auth) {
@@ -71,8 +73,14 @@ public final class SseHandler implements HttpHandler {
   }
 
   public SseHandler(EventBus bus, ApiAuth auth, int maxConnections) {
+    this(bus, auth, maxConnections, InstantSource.system());
+  }
+
+  /** As above, timing heartbeats and re-checks by {@code clock}. */
+  SseHandler(EventBus bus, ApiAuth auth, int maxConnections, InstantSource clock) {
     this.bus = Objects.requireNonNull(bus, "bus");
     this.auth = Objects.requireNonNull(auth, "auth");
+    this.clock = Objects.requireNonNull(clock, "clock");
     if (maxConnections <= 0) {
       throw new IllegalArgumentException("maxConnections must be positive");
     }
@@ -118,9 +126,15 @@ public final class SseHandler implements HttpHandler {
     }
   }
 
+  /**
+   * Streams until the client goes or its caller no longer authenticates. The bus queues the events
+   * the query asks for; which of them the caller's scope admits is decided here, as each is sent,
+   * by the filter the last check built ({@link StreamRecheck}), so a grant or a revoke made while
+   * the stream is open holds from the next event on.
+   */
   private void runStream(HttpExchange exchange) throws IOException {
-    var filter = parseFilter(exchange.getRequestURI(), ApiRouter.actorOf(exchange));
-    var streamSubscriber = new StreamSubscriber(filter);
+    var uri = exchange.getRequestURI();
+    var streamSubscriber = new StreamSubscriber(queryFilter(uri));
     var subscription = bus.subscribe(streamSubscriber, DEFAULT_PER_CONNECTION_CAPACITY);
     if (subscription == null) {
       sendRetryLater(exchange);
@@ -132,29 +146,53 @@ public final class SseHandler implements HttpHandler {
     headers.set("Connection", "keep-alive");
     headers.set("X-Accel-Buffering", "no");
     exchange.sendResponseHeaders(200, 0);
+    var recheck = new StreamRecheck(() -> refusal(exchange), clock);
+    var filter = parseFilter(uri, ApiRouter.actorOf(exchange));
     try (var out = exchange.getResponseBody()) {
       writeComment(out, "subscribed");
-      var lastHeartbeat = System.nanoTime();
-      while (true) {
-        Event event;
-        try {
-          event = streamSubscriber.queue.poll(POLL_MILLIS, TimeUnit.MILLISECONDS);
-        } catch (InterruptedException e) {
-          Thread.currentThread().interrupt();
-          break;
+      var lastHeartbeat = clock.instant();
+      try {
+        while (true) {
+          Event event;
+          try {
+            event = streamSubscriber.queue.poll(POLL_MILLIS, TimeUnit.MILLISECONDS);
+          } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            break;
+          }
+          if (event != null) {
+            if (recheck.recheck()) {
+              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+            }
+            if (filter.test(event)) {
+              writeEvent(out, event);
+            }
+          }
+          if (Duration.between(lastHeartbeat, clock.instant()).toMillis() > HEARTBEAT_MILLIS) {
+            if (recheck.recheck()) {
+              filter = parseFilter(uri, ApiRouter.actorOf(exchange));
+            }
+            writeComment(out, "keepalive");
+            lastHeartbeat = clock.instant();
+          }
         }
-        if (event != null) {
-          writeEvent(out, event);
-        }
-        if (System.nanoTime() - lastHeartbeat > HEARTBEAT_NANOS) {
-          writeComment(out, "keepalive");
-          lastHeartbeat = System.nanoTime();
-        }
+      } catch (StreamRecheck.Ended ended) {
+        StreamRecheck.writeEnded(out, ended);
       }
     } catch (IOException disconnected) {
       // client closed connection; that's the normal exit path
     } finally {
       subscription.close();
+    }
+  }
+
+  /** Why {@code exchange}'s caller may no longer stream, asked through the door it opened with. */
+  private Optional<ApiError> refusal(HttpExchange exchange) {
+    try {
+      auth.require(exchange);
+      return Optional.empty();
+    } catch (ApiException e) {
+      return Optional.of(e.error());
     }
   }
 
@@ -198,7 +236,13 @@ public final class SseHandler implements HttpHandler {
    * ({@link Event#SAIL_AGENT} stands in for one), so it reaches an unrestricted subscriber alone.
    */
   static Predicate<Event> parseFilter(URI uri, Actor actor) {
-    Predicate<Event> result = event -> actor.scope().admits(event.project());
+    Predicate<Event> scoped = event -> actor.scope().admits(event.project());
+    return scoped.and(queryFilter(uri));
+  }
+
+  /** The events the query asks for, whoever asks. */
+  private static Predicate<Event> queryFilter(URI uri) {
+    Predicate<Event> result = event -> true;
     var query = uri.getRawQuery();
     if (Strings.isBlank(query)) {
       return result;

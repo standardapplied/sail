@@ -13,13 +13,10 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.ProjectTeardown;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.LinkedHashMap;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -99,20 +96,11 @@ public final class ProjectDestroyCommand implements Runnable {
       return;
     }
 
-    if (containerPresent) {
-      if (!json) {
-        System.out.println();
-        System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + name + "..."));
-      }
-      mgr.forceDelete(name);
+    if (containerPresent && !json) {
+      System.out.println();
+      System.out.println(Ansi.AUTO.string("  @|bold Deleting container|@ " + name + "..."));
     }
-    if (dirPresent) {
-      if (dryRun) {
-        System.out.println("[dry-run] rm -rf " + projectDir);
-      } else {
-        deleteDirectory(projectDir);
-      }
-    }
+    new ProjectTeardown(shell, SailPaths.projectsDir()).tearDown(name, containerPresent);
     var destroyed = purge ? purgeFromCatalog(erases, operator) : null;
 
     emitResult(containerPresent, dirPresent, destroyed);
@@ -210,20 +198,6 @@ public final class ProjectDestroyCommand implements Runnable {
                   + name
                   + "' with its specs, rooms, runs, files and history — other boxes follow on"
                   + " their next sync."));
-    }
-  }
-
-  private static void deleteDirectory(Path dir) throws IOException {
-    try (var walk = Files.walk(dir)) {
-      walk.sorted(Comparator.reverseOrder())
-          .forEach(
-              path -> {
-                try {
-                  Files.delete(path);
-                } catch (IOException e) {
-                  throw new UncheckedIOException(e);
-                }
-              });
     }
   }
 }

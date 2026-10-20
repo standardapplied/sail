@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.config.ProjectRegistry;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ContentFixtures;
 import ai.singlr.sail.store.DataMigration;
@@ -185,7 +186,7 @@ class FilesAuditTest {
     SyncBox.round(mainDb, nodeDb, "file");
     nodePushes("v2");
 
-    var imported = new FileImporter(projectsDir, main).importAll();
+    var imported = new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
 
     assertEquals(0, imported.imported(), "the import took main's own stale copy as an edit");
     assertEquals("v2", ContentFixtures.text(main, "acme", "app.conf"));
@@ -203,7 +204,7 @@ class FilesAuditTest {
     SyncBox.round(mainDb, nodeDb, "file");
     assertTrue(main.find("acme", "app.conf").isEmpty());
 
-    new FileImporter(projectsDir, main).importAll();
+    new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
 
     assertTrue(main.find("acme", "app.conf").isEmpty(), "the import resurrected the deleted file");
     assertEquals(1, materialize().deleted(), "left for the materializer to remove");
@@ -256,7 +257,7 @@ class FilesAuditTest {
                 ProjectRegistry.loadFromDisk(tempDir.resolve("no-projects")),
                 DataMigration.Prompter.NON_INTERACTIVE)
             .getFirst();
-    var imported = new FileImporter(projectsDir, main).importAll();
+    var imported = new FileImporter(projectsDir, main, ProjectScope.all()).importAll();
     var report = materialize();
 
     assertEquals(2, seed.report().ambiguous(), "neither copy matches what compaction left");

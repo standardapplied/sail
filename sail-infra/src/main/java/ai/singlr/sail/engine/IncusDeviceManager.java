@@ -127,6 +127,20 @@ public final class IncusDeviceManager {
   }
 
   /**
+   * The trust gate: a container is Sail-managed only when it carries the API-socket device Sail
+   * itself attached — instance-level provenance. A catalog row is name-level intent, never
+   * provenance: {@code destroy} without {@code --purge} retains the row, and a foreign container
+   * later created under the same name must neither inherit the API mount and box credential from a
+   * stale entry ({@code apply --all}) nor be deleted for a project main stopped granting this box.
+   * An unmarked container the operator does own is claimed through explicit single-project apply,
+   * where naming it is the authorization.
+   */
+  public boolean sailManaged(String project)
+      throws IOException, InterruptedException, TimeoutException {
+    return NameValidator.isValidProjectName(project) && currentEventSocketSource(project) != null;
+  }
+
+  /**
    * Returns the host path that the existing {@code sail-api-sock} device points to, or {@code null}
    * if the device is not configured.
    */

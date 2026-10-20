@@ -6,6 +6,7 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.config.FileLimits;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.FileStore;
 import ai.singlr.sail.store.MaterializedFiles;
@@ -26,23 +27,27 @@ import java.util.stream.Stream;
  * is never published or resurrected over the fleet's newer state; a deleted file's copy is left for
  * the materializer to remove; a copy the upgrade's seed could not tell is left for the person to
  * publish or discard. A person's copy is published unless the store already holds it, and is this
- * box's from then on, so no later upgrade publishes it again. Idempotent: re-running on every
- * upgrade neither churns revisions nor re-imports.
+ * box's from then on, so no later upgrade publishes it again. A project the box's scope does not
+ * admit is never read: its files are a leftover of a project main no longer grants a scoped node.
+ * Idempotent: re-running on every upgrade neither churns revisions nor re-imports.
  */
 public final class FileImporter {
 
   private final Path projectsDir;
   private final FileStore files;
+  private final ProjectScope scope;
   private final Supplier<FileLimits> limits;
 
-  public FileImporter(Path projectsDir, FileStore files) {
-    this(projectsDir, files, FileLimits::load);
+  public FileImporter(Path projectsDir, FileStore files, ProjectScope scope) {
+    this(projectsDir, files, scope, FileLimits::load);
   }
 
   /** With the size cap read by {@code limits}, once per import, before any file is opened. */
-  public FileImporter(Path projectsDir, FileStore files, Supplier<FileLimits> limits) {
+  public FileImporter(
+      Path projectsDir, FileStore files, ProjectScope scope, Supplier<FileLimits> limits) {
     this.projectsDir = projectsDir;
     this.files = files;
+    this.scope = scope;
     this.limits = limits;
   }
 
@@ -57,6 +62,9 @@ public final class FileImporter {
     var notes = new ArrayList<String>();
     try (Stream<Path> projects = Files.list(projectsDir)) {
       for (var projectDir : projects.filter(Files::isDirectory).toList()) {
+        if (!scope.admits(projectDir.getFileName().toString())) {
+          continue;
+        }
         if (files.projectPruned(projectDir.getFileName().toString())) {
           notes.add(
               "Skipped '"
