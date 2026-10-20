@@ -60,7 +60,7 @@ public final class SpecCliHelper {
       if [ -z "$CREDENTIAL" ] && [ -r "$BOX_CREDENTIAL_FILE" ]; then
         CREDENTIAL="$(tr -d '[:space:]' < "$BOX_CREDENTIAL_FILE")"
       fi
-      [ -n "$CREDENTIAL" ] || die "no credential: SAIL_RUN_CREDENTIAL is unset and $BOX_CREDENTIAL_FILE is unreadable (upgrade sail on the host and restart the server)"
+      [ -n "$CREDENTIAL" ] || die "no credential: SAIL_RUN_CREDENTIAL is unset and $BOX_CREDENTIAL_FILE is unreadable: this box has no sync handle. Give it one on the host: __SAIL_SET_HANDLE__"
 
       api() {
         curl --silent --show-error --fail-with-body --max-time 20 --unix-socket "$SOCKET" \\
@@ -195,7 +195,11 @@ public final class SpecCliHelper {
 
   /** Returns the script content that {@link #install(String)} writes. Pure function. */
   public static String scriptContent() {
-    return SCRIPT.replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString());
+    return SCRIPT
+        .replace("__SAIL_API_SOCKET__", SailPaths.apiSocketContainerPath().toString())
+        .replace(
+            "__SAIL_SET_HANDLE__",
+            OperatorCommand.elsewhere("host config set sync-handle <handle>"));
   }
 
   /** Returns the PATH line that {@link #install(String)} appends to {@link #PROFILE_PATH}. */

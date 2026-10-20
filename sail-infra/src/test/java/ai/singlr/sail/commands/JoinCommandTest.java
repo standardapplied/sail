@@ -16,9 +16,11 @@ import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.BoxCredentialFile;
 import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.PipedSyncChannel;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.SyncIdentity;
 import ai.singlr.sail.engine.SyncOperations;
@@ -27,6 +29,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.ssh.TestSshKeys;
+import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -37,6 +40,7 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -250,6 +254,23 @@ class JoinCommandTest {
                 .reserveDispatch(
                     id, "p", null, handle, "adhoc", List.of(), "claude-code", "b", "t", "/l", "u"));
     return id;
+  }
+
+  @Test
+  void aNodeJoiningWhileSailApiServesHoldsTheBoxCredentialOfItsHandle() throws Exception {
+    var dbPath = dir.resolve("sail.db");
+    try (var db = Sqlite.open(dbPath)) {
+      new SchemaManager(db).migrate();
+    }
+
+    join(writeHostConfig());
+
+    var credential =
+        Files.readString(SailPaths.apiSocketHostDir(dir).resolve(BoxCredentialFile.FILE_NAME))
+            .strip();
+    try (var db = Sqlite.open(dbPath)) {
+      assertEquals(Optional.of("mady"), new BoxCredentialStore(db).resolve(credential));
+    }
   }
 
   @Test

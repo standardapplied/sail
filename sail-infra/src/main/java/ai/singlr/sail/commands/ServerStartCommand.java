@@ -48,6 +48,7 @@ import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.engine.SyncOperations;
 import ai.singlr.sail.engine.WatcherSpawner;
 import ai.singlr.sail.identity.RoleRule;
 import ai.singlr.sail.store.AuthSessionStore;
@@ -201,7 +202,9 @@ public final class ServerStartCommand implements Runnable {
     var messageStore = new MessageStore(db);
     var projectStore = new ProjectStore(db);
     var boxCredentialStore = new BoxCredentialStore(db);
-    provisionBoxCredential(boxCredentialStore, operator);
+    try (var rounds = SyncOperations.holdRounds(db)) {
+      provisionBoxCredential(boxCredentialStore, operator);
+    }
     var operations =
         OperationsFactory.create(
             db,
@@ -407,8 +410,10 @@ public final class ServerStartCommand implements Runnable {
   /**
    * The eager half of credential enforcement: the ambient file every container reads through the
    * shared socket mount must exist before the first interactive request, not after the next
-   * sail-launched session. Skipped with a loud note when the box has no sync handle — the socket
-   * then keeps refusing interactive callers, which is fail-closed, not broken.
+   * sail-launched session. Read and issued under the box's round lock, so a handle written by the
+   * CLI meanwhile ({@link ai.singlr.sail.engine.HandleChange}) is the one the credential names.
+   * Skipped with a loud note when the box has no sync handle — the socket then keeps refusing
+   * interactive callers, which is fail-closed, not broken.
    */
   private static void provisionBoxCredential(BoxCredentialStore store, OperatorCommand operator) {
     var handle = NodeIdentity.handle();
