@@ -26,6 +26,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @ActingAs
 class MessageStoreTest {
@@ -73,6 +75,17 @@ class MessageStoreTest {
     assertEquals(List.of(first.id()), ids(messages.list("room", second.id(), 2)));
     assertEquals(List.of(first.id(), second.id(), third.id()), ids(messages.list("room", null, 3)));
     assertTrue(messages.list("missing", null, 10).isEmpty());
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void messagesMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(
+      String earlier, String later) {
+    var first = FixedInstants.at(earlier, () -> messages.append("room", "ada", "one", null));
+    var second = FixedInstants.at(later, () -> messages.append("room", "ada", "two", null));
+
+    assertEquals(List.of(first.id(), second.id()), ids(messages.list("room", null, 2)));
+    assertEquals(List.of(second.id()), ids(messages.listAfter("room", first.id(), 2)));
   }
 
   @Test

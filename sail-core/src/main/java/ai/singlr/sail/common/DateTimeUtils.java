@@ -46,9 +46,8 @@ public final class DateTimeUtils {
   }
 
   /**
-   * The clock {@link #now()} reads. A test pins it: rows written together under a clock that ticks
-   * whole seconds tie on their instant and order by id, as minted, whatever the platform's clock
-   * resolution makes of an instant's text.
+   * The clock {@link #now()} reads. A test pins it to write rows at the instants it names; the
+   * stores order rows by their UUIDv7 id, as minted, whatever the clock makes of an instant's text.
    */
   public static volatile Clock clock = Clock.systemUTC();
 
