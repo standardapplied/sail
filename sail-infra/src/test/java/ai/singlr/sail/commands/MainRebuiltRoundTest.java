@@ -293,6 +293,34 @@ class MainRebuiltRoundTest {
     assertEquals(1, refused.getSuppressed().length);
   }
 
+  @Test
+  void aMainThatNamesNoCatalogIsRefusedBeforeAnythingMovesEvenBeforeOneIsRecorded()
+      throws Exception {
+    round();
+    nodeDb.execute("UPDATE catalog SET main = NULL");
+    write("g2");
+    var before = held(nodeDb);
+    var older =
+        new SyncWire.Welcome(
+            SyncWire.PROTOCOL, "0.53.0", "main", "nia", 0, ProjectScope.all(), null);
+    answering =
+        (in, out) -> {
+          SyncWire.readFramed(in);
+          in.close();
+          out.write((SyncWire.encode(older) + "\n").getBytes(StandardCharsets.UTF_8));
+          out.flush();
+        };
+
+    var refused = assertThrows(SyncTransportException.class, this::round);
+
+    assertEquals("refused", refused.kind());
+    assertEquals(
+        "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
+            + " database it synced with. Upgrade main first, then sync again.",
+        refused.getMessage());
+    assertEquals(before, held(nodeDb));
+  }
+
   private static SpecStore.SpecRow spec(String id) {
     return new SpecStore.SpecRow(
         id,

@@ -61,9 +61,14 @@ class NodeRoundAdmitTest {
   }
 
   @Test
-  void aMainThatNamesNoCatalogIsNotAskedUntilTheNodeHasRecordedOne() {
-    admit(null);
+  void aMainThatNamesNoCatalogIsAskedToUpgradeBeforeTheNodeHasRecordedOne() {
+    var refused = assertThrows(SyncTransportException.class, () -> admit(null));
 
+    assertEquals("refused", refused.kind());
+    assertEquals(
+        "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
+            + " database it synced with. Upgrade main first, then sync again.",
+        refused.getMessage());
     assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
   }
 
