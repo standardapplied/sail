@@ -75,7 +75,7 @@ public final class FileMutex implements AutoCloseable {
    * writer of {@code host.yaml} holds it from reading the file to writing it back, so none puts
    * back an identity another replaced meanwhile. It is a lock file beside the database, so a round
    * in the API server and a command in the CLI exclude each other. Null for an in-memory database
-   * ({@code null}) or one not created yet: neither has a round or a migration to exclude.
+   * ({@code null}) or one not created yet: neither has a round to exclude.
    */
   public static FileMutex holdRounds(Path database) throws IOException {
     return database == null || !Files.exists(database)

@@ -19,14 +19,15 @@ import java.util.List;
  * as a sub-process, which lands in this same code path — that's how a binary upgrade picks up the
  * NEW release's migrations without the OLD binary needing to know they exist.
  *
- * <p>Once the schema is current, a box that is not a node forgets the scope main last named it
- * ({@link SyncScope}): a box promoted before a role change cleared it, or whose role change died
- * between writing {@code host.yaml} and clearing it, would otherwise keep refusing its own writes
- * and its nodes' pushes into every project outside that scope. Only a whole {@code host.yaml}
- * decides it ({@link NodeIdentity#declaresNotNode}): one absent, empty or unreadable at that moment
- * keeps the scope for the next start to decide, so no node loses its grant to a file being moved or
- * rewritten. It takes no lock: a whole file is the box's identity when read, and a box just joined
- * as a node is without a scope until its first round records one, repair or not.
+ * <p>Once the schema is current — at {@code sail migrate}, every start of sail-api, and a sync
+ * round that finds a data migration pending — a box that is not a node forgets the scope main last
+ * named it ({@link SyncScope}): a box promoted before a role change cleared it, or whose role
+ * change died between writing {@code host.yaml} and clearing it, would otherwise keep refusing its
+ * own writes and its nodes' pushes into every project outside that scope. Only a whole {@code
+ * host.yaml} decides it ({@link NodeIdentity#declaresNotNode}): one absent, empty or unreadable at
+ * that moment keeps the scope for the next start to decide, so no node loses its grant to a file
+ * being moved or rewritten. It takes no lock: a whole file is the box's identity when read, and a
+ * box just joined as a node is without a scope until its first round records one, repair or not.
  */
 public final class MigrationRunner {
 

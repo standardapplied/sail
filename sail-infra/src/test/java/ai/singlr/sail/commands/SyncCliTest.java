@@ -116,6 +116,11 @@ class SyncCliTest {
   }
 
   @Test
+  void aStandaloneBoxForgetsAnyScopeOnMigrate() throws Exception {
+    runIsolated("scope-migrate-standalone", "storage_backend: dir\n");
+  }
+
+  @Test
   void aStandaloneBoxForgetsAnyScopeOnTheNextStart() throws Exception {
     runIsolated("scope-start-standalone", "storage_backend: dir\n");
   }
