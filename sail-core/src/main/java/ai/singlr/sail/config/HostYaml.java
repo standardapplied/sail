@@ -245,7 +245,7 @@ public record HostYaml(
     if (webauthn != null && !webauthn.equals(WebauthnConfig.disabled())) {
       map.put("webauthn", webauthn.toMap());
     }
-    if (sync != null && sync.role() != null) {
+    if (sync != null && !sync.equals(SyncConfig.unset())) {
       map.put("sync", sync.toMap());
     }
     if (!limits.equals(FileLimits.defaults()))

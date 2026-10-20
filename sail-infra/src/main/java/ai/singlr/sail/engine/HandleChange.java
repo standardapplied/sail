@@ -40,14 +40,48 @@ public final class HandleChange {
   @FunctionalInterface
   public interface Write {
     void run() throws Exception;
+
+    /**
+     * Refuses this write, first under the lock, when the identity it was computed from is no longer
+     * the box's: a write that read the identity before another write replaced it would put the old
+     * one back, taking the handle with it while the credential still named the new one.
+     */
+    default void requireCurrent() throws Exception {}
+  }
+
+  private record HostYamlWrite(Path path, SyncConfig read, HostYaml updated) implements Write {
+
+    @Override
+    public void requireCurrent() throws IOException {
+      var now =
+          Files.exists(path)
+              ? HostYaml.fromMap(YamlUtil.parseFile(path)).sync()
+              : SyncConfig.unset();
+      if (!now.equals(read)) {
+        throw new IllegalStateException(
+            "Cannot write this box's sync identity: "
+                + path
+                + " changed while this command ran. It read the box as "
+                + described(read)
+                + "; the box is now "
+                + described(now)
+                + ". Rerun the command against what the box is now.");
+      }
+    }
+
+    @Override
+    public void run() throws IOException {
+      YamlUtil.dumpToFile(updated.toMap(), path);
+    }
   }
 
   private HandleChange() {}
 
   /**
    * Writes {@code updated} over {@code current} at {@code hostYamlPath} as a change of this box's
-   * identity in its database at {@code dbPath} ({@link #apply}). Returns the runs stamped for the
-   * new identity.
+   * identity in its database at {@code dbPath} ({@link #apply}); refused when the file no longer
+   * holds the identity {@code current} was read as ({@link Write#requireCurrent}). Returns the runs
+   * stamped for the new identity.
    */
   public static List<String> write(
       Path hostYamlPath,
@@ -63,7 +97,7 @@ public final class HandleChange {
         updated.sync(),
         channels,
         operator,
-        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
+        new HostYamlWrite(hostYamlPath, current.sync(), updated));
   }
 
   /**
@@ -76,10 +110,12 @@ public final class HandleChange {
    * it is refused too. Every sync round of the box, and every other write of its identity, is held
    * off from the ask until the credential is issued ({@link SyncOperations#holdRounds}), so none
    * can offer a run main would then hold under the old handle, and two overlapping writes cannot
-   * leave the credential naming a handle other than the one written last. A box that stops being a
-   * node forgets the scope main last named it ({@link SyncScope}): as main or standalone it holds
-   * every project. A box with no database yet has no sail-api to read a credential: its first start
-   * issues it ({@code sail server start}). Returns the runs stamped for the new identity.
+   * leave the credential naming a handle other than the one written last: the write that waits is
+   * refused when the identity it read is no longer the box's ({@link Write#requireCurrent}), so it
+   * cannot put the old one back. A box that stops being a node forgets the scope main last named it
+   * ({@link SyncScope}): as main or standalone it holds every project. A box with no database yet
+   * has no sail-api to read a credential: its first start issues it ({@code sail server start}).
+   * Returns the runs stamped for the new identity.
    */
   public static List<String> apply(
       Path dbPath,
@@ -95,6 +131,7 @@ public final class HandleChange {
     }
     try (var db = Sqlite.open(dbPath);
         var rounds = SyncOperations.holdRounds(db)) {
+      write.requireCurrent();
       var stamped = change(db, before, after, channels, operator, write);
       issueBoxCredential(db, dbPath.getParent(), after.handle());
       return stamped;
@@ -219,5 +256,10 @@ public final class HandleChange {
 
   private static String named(String handle) {
     return Objects.toString(handle, "");
+  }
+
+  private static String described(SyncConfig sync) {
+    var role = sync.isMain() ? "main" : sync.isNode() ? "a node of " + sync.main() : "standalone";
+    return role + (sync.handle() == null ? " with no handle" : " as '" + sync.handle() + "'");
   }
 }

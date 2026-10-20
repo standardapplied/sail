@@ -171,11 +171,11 @@ class HandleChangeTest {
   }
 
   @Test
-  void anIdentityWriteOverlappingAHandleChangeLeavesTheCredentialNamingTheHandleWritten()
-      throws Exception {
+  void anIdentityWriteOverlappingAHandleChangeWaitsForItAndIsRefusedAsStale() throws Exception {
     var hostYaml = dir.resolve("host.yaml");
     write(STANDALONE, main("ada"));
     var rewrite = new AtomicReference<Thread>();
+    var refused = new AtomicReference<Throwable>();
 
     HandleChange.apply(
         dbPath,
@@ -191,8 +191,8 @@ class HandleChangeTest {
                       () -> {
                         try {
                           write(main("ada"), main("ada"));
-                        } catch (Exception e) {
-                          throw new IllegalStateException(e);
+                        } catch (Throwable e) {
+                          refused.set(e);
                         }
                       }));
           FileMutexTest.awaitParked(rewrite.get());
@@ -200,8 +200,32 @@ class HandleChangeTest {
         });
     rewrite.get().join();
 
-    assertEquals("ada", handleInHostYaml(), "the write that waited is the last written");
-    assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
+    assertNotNull(refused.get(), "the write that read 'ada' is refused");
+    var message = refused.get().getMessage();
+    assertTrue(message.contains("changed while this command ran"), message);
+    assertTrue(message.contains("read the box as main as 'ada'"), message);
+    assertTrue(message.contains("the box is now main as 'grace'"), message);
+    assertEquals("grace", handleInHostYaml(), "the change that won the lock is what stands");
+    assertEquals(Optional.of("grace"), new BoxCredentialStore(db).resolve(boxCredential()));
+  }
+
+  @Test
+  void anIdentityReadBeforeTheBoxTookItsHandleCannotWriteTheHandleAway() throws Exception {
+    write(STANDALONE, main("ada"));
+    var ada = boxCredential();
+
+    var stale =
+        assertThrows(
+            IllegalStateException.class,
+            () -> write(STANDALONE, new SyncConfig(SyncConfig.ROLE_MAIN, null, null, "box")));
+
+    assertTrue(
+        stale.getMessage().contains("read the box as standalone with no handle"),
+        stale.getMessage());
+    assertTrue(stale.getMessage().contains("the box is now main as 'ada'"), stale.getMessage());
+    assertEquals("ada", handleInHostYaml());
+    assertEquals(ada, boxCredential(), "the credential still names the handle host.yaml holds");
+    assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(ada));
   }
 
   private String handleInHostYaml() throws IOException {

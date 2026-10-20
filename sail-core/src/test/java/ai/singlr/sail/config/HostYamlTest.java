@@ -237,4 +237,17 @@ class HostYamlTest {
     var unset = HostYaml.fromMap(YamlUtil.parseMap("storage_backend: dir\n"));
     assertFalse(unset.toMap().containsKey("sync"));
   }
+
+  @Test
+  void aStandaloneBoxKeepsTheHandleAndIdItTookWithNoRole() throws Exception {
+    var standalone =
+        HostYaml.fromMap(YamlUtil.parseMap("storage_backend: dir\n"))
+            .withSync(new SyncConfig(null, null, "ada", "devbox"));
+
+    var reparsed = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(standalone.toMap())));
+
+    assertEquals(standalone.sync(), reparsed.sync());
+    assertEquals("ada", reparsed.sync().handle());
+    assertEquals("devbox", reparsed.sync().boxId());
+  }
 }
