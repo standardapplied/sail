@@ -442,7 +442,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
                   "SELECT "
                       + COLUMNS
                       + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
-                      + " AND IFNULL(node, '') = ? ORDER BY started_at LIMIT 1",
+                      + " AND IFNULL(node, '') = ? ORDER BY id LIMIT 1",
                   this::mapRow,
                   project,
                   ownerKey(localHandle));
@@ -1277,7 +1277,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
         "SELECT "
             + COLUMNS
             + " FROM runs WHERE project = ? AND IFNULL(node, '') = ?"
-            + " ORDER BY started_at DESC, id DESC"
+            + " ORDER BY id DESC"
             + " LIMIT 1",
         this::mapRow,
         project,
@@ -1295,7 +1295,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             + COLUMNS
             + " FROM runs WHERE project = ? AND status IN ('running', 'stopping')"
             + " AND IFNULL(node, '') = ?"
-            + " ORDER BY started_at DESC, id DESC LIMIT 1",
+            + " ORDER BY id DESC LIMIT 1",
         this::mapRow,
         project,
         ownerKey(localHandle));
@@ -1322,7 +1322,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /** The runs that serve {@code reviewId} — its reviewers and its fix agent — newest first. */
   public List<RunRow> forReview(String reviewId) {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE review_id = ? ORDER BY started_at DESC, id DESC",
+        "SELECT " + COLUMNS + " FROM runs WHERE review_id = ? ORDER BY id DESC",
         this::mapRow,
         reviewId);
   }
@@ -1333,7 +1333,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
 
   public List<RunRow> listForProject(String project) {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE project = ? ORDER BY started_at DESC",
+        "SELECT " + COLUMNS + " FROM runs WHERE project = ? ORDER BY id DESC",
         this::mapRow,
         project);
   }
@@ -1341,14 +1341,14 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   /** Chat runs of a room — spec-less rooms track their turns here. */
   public List<RunRow> listForRoom(String roomId) {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE room_id = ? ORDER BY started_at DESC, id DESC",
+        "SELECT " + COLUMNS + " FROM runs WHERE room_id = ? ORDER BY id DESC",
         this::mapRow,
         roomId);
   }
 
   public List<RunRow> listForSpec(String specId) {
     return db.query(
-        "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY started_at DESC, id DESC",
+        "SELECT " + COLUMNS + " FROM runs WHERE spec_id = ? ORDER BY id DESC",
         this::mapRow,
         specId);
   }
@@ -1371,8 +1371,9 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   }
 
   /**
-   * The newest run of {@code specId} among {@code lanes}, or empty when it has none. Ties on {@code
-   * started_at} break on the UUIDv7 id, which orders by mint time.
+   * The newest run of {@code specId} among {@code lanes}, or empty when it has none. Runs order by
+   * their UUIDv7 id, as minted, never by {@code started_at}: an instant's text drops trailing
+   * zeros, so {@code …51.123Z} sorts after the later {@code …51.123400Z}.
    */
   private Optional<RunRow> latestInLanes(String specId, Lane... lanes) {
     var parameters = new ArrayList<Object>();
@@ -1383,7 +1384,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
             + COLUMNS
             + " FROM runs WHERE spec_id = ? AND role IN ("
             + String.join(", ", Arrays.stream(lanes).map(lane -> "?").toList())
-            + ") ORDER BY started_at DESC, id DESC LIMIT 1",
+            + ") ORDER BY id DESC LIMIT 1",
         this::mapRow,
         parameters.toArray());
   }
@@ -1392,9 +1393,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
   public List<RunRow> list(String project, String specId) {
     if (project != null && specId != null) {
       return db.query(
-          "SELECT "
-              + COLUMNS
-              + " FROM runs WHERE project = ? AND spec_id = ? ORDER BY started_at DESC",
+          "SELECT " + COLUMNS + " FROM runs WHERE project = ? AND spec_id = ? ORDER BY id DESC",
           this::mapRow,
           project,
           specId);
@@ -1405,7 +1404,7 @@ public final class RunStore implements ConflictResolver, SyncedStore {
     if (project != null) {
       return listForProject(project);
     }
-    return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY started_at DESC", this::mapRow);
+    return db.query("SELECT " + COLUMNS + " FROM runs ORDER BY id DESC", this::mapRow);
   }
 
   /**
@@ -1540,8 +1539,8 @@ public final class RunStore implements ConflictResolver, SyncedStore {
    * newer attempt either lands before this (the check fails, nothing runs) or waits until after
    * (the newer row sees whatever {@code work} committed) — a check-then-write split across
    * transactions could let a stop aimed at an old run cancel the spec out from under the newer
-   * attempt. Ties on {@code started_at} break on the UUIDv7 id, which orders by mint time. Returns
-   * whether {@code work} ran; {@code work} throwing rolls the whole transaction back.
+   * attempt. Returns whether {@code work} ran; {@code work} throwing rolls the whole transaction
+   * back.
    */
   public boolean runIfLatestAttempt(String id, String specId, Runnable work) {
     return db.transaction(

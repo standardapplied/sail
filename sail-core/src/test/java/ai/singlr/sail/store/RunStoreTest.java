@@ -38,6 +38,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @ActingAs
 class RunStoreTest {
@@ -879,6 +881,100 @@ class RunStoreTest {
     store.complete(id, "completed", 0);
 
     assertTrue(store.runningForProjectOnNode("backend", "node-a").isEmpty());
+  }
+
+  private static List<String> ids(List<RunStore.RunRow> runs) {
+    return runs.stream().map(RunStore.RunRow::id).toList();
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void runsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(String earlier, String later) {
+    var first = FixedInstants.at(earlier, () -> newRun("backend", "auth"));
+    var second = FixedInstants.at(later, () -> newRun("backend", "auth"));
+
+    assertEquals(List.of(second, first), ids(store.listForSpec("auth")));
+    assertEquals(List.of(second, first), ids(store.listForProject("backend")));
+    assertEquals(List.of(second, first), ids(store.list("backend", "auth")));
+    assertEquals(List.of(second, first), ids(store.list(null, null)));
+    assertEquals(second, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(second, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
+    assertEquals(second, store.latestBuildAttempt("auth").orElseThrow().id());
+    assertEquals(second, store.latestLoopRun("auth").orElseThrow().id());
+    assertEquals(
+        new RunStore.ContainerLease.BlockedByRun(store.findById(first).orElseThrow()),
+        store.acquireContainerLease("backend", "node-a", "restore"),
+        "the oldest live run is the one a restore names");
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void aReviewerLaunchedAfterAFixAgentIsTheLoopsNewestRun(String earlier, String later) {
+    var review = DateTimeUtils.newId().toString();
+    var fix = DateTimeUtils.newId().toString();
+    var reviewer = DateTimeUtils.newId().toString();
+    FixedInstants.at(
+        earlier,
+        () ->
+            ReviewRuns.reserve(
+                store,
+                fix,
+                review,
+                "backend",
+                "auth",
+                "node-a",
+                Lane.FIX,
+                "claude-code",
+                List.of()));
+    store.complete(fix, "completed", 0);
+    FixedInstants.at(
+        later,
+        () ->
+            ReviewRuns.reserve(
+                store,
+                reviewer,
+                review,
+                "backend",
+                "auth",
+                "node-a",
+                Lane.REVIEW,
+                "codex",
+                List.of()));
+
+    assertEquals(reviewer, store.latestLoopRun("auth").orElseThrow().id());
+    assertEquals(List.of(reviewer, fix), ids(store.forReview(review)));
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void runsSyncedFromMainReadAsMainMintedThemWhicheverArrivesFirst(String earlier, String later) {
+    var main = freshStore("main.db");
+    var first = DateTimeUtils.newId().toString();
+    var second = DateTimeUtils.newId().toString();
+    FixedInstants.at(earlier, () -> mainRun(main, first));
+    FixedInstants.at(later, () -> mainRun(main, second));
+
+    for (var id : List.of(second, first)) {
+      store.applyRevision(id, main.comparableSnapshot(id), main.latestRev(id));
+    }
+
+    assertEquals(List.of(second, first), ids(store.listForSpec("auth")));
+  }
+
+  private static String mainRun(RunStore main, String id) {
+    return main.create(
+        id,
+        "backend",
+        "auth",
+        "main",
+        "build",
+        "claude-code",
+        "feat/x",
+        "do it",
+        1234,
+        5678,
+        "/home/dev/.sail/runs/" + id + "/agent.log",
+        "sail-agent-" + id);
   }
 
   @Test

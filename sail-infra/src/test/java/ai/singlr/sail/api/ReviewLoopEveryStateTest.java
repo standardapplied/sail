@@ -19,7 +19,6 @@ import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
 import ai.singlr.sail.store.ReviewStore;
 import java.nio.file.Path;
-import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -28,7 +27,6 @@ import java.util.Optional;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -392,20 +390,6 @@ class ReviewLoopEveryStateTest {
    * instant's text drops trailing zeros and sorts after a longer one of the same millisecond, which
    * a microsecond clock produces one time in a thousand, so the fixture's clock never lands there.
    */
-  @Test
-  void everyInstantTheLoopWritesIsSixDigitsWide() {
-    loop = ReviewLoop.of(tempDir, AN_AGENT_THEN_A_PERSON);
-
-    for (var read = 0; read < 10_000; read++) {
-      var text = DateTimeUtils.now().toString();
-      assertTrue(text.matches(".*\\.\\d{6}Z"), text);
-    }
-
-    loop.close();
-    loop = null;
-    assertEquals(Clock.systemUTC(), DateTimeUtils.clock);
-  }
-
   @ParameterizedTest(name = "review {0}, spec {1}")
   @MethodSource("reviewAndSpecStates")
   void theWalkEndsWhereTheRealStoresDoAcrossTheSpace(ReviewShape shape, SpecStatus specStatus) {

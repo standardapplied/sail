@@ -175,7 +175,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         """
         SELECT %s
         FROM reviews WHERE spec_id = ? AND superseded_at IS NULL
-        ORDER BY created_at DESC, rowid DESC LIMIT 1"""
+        ORDER BY id DESC LIMIT 1"""
             .formatted(REVIEW_COLUMNS),
         this::mapReview,
         specId);
@@ -186,7 +186,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
     return db.query(
         """
         SELECT %s
-        FROM reviews WHERE spec_id = ? ORDER BY created_at ASC, rowid ASC"""
+        FROM reviews WHERE spec_id = ? ORDER BY id ASC"""
             .formatted(REVIEW_COLUMNS),
         this::mapReview,
         specId);
@@ -549,7 +549,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
                 AND r.id != ?
                 AND prior.name = ? AND prior.status IN ('passed', 'failed')
                 AND prior.error IS NULL
-            ORDER BY r.created_at DESC, r.rowid DESC LIMIT 1)
+            ORDER BY r.id DESC LIMIT 1)
         AND s.name = ?
         AND %s
         AND f.id NOT IN (
@@ -579,7 +579,7 @@ public final class ReviewStore implements ConflictResolver, SyncedStore {
         JOIN review_stages s ON s.id = f.stage_id
         JOIN reviews r ON r.id = s.review_id
         WHERE r.spec_id = ? AND r.superseded_at IS NULL AND f.resolution = 'DISPUTED'
-        ORDER BY r.created_at DESC, %s"""
+        ORDER BY r.id DESC, %s"""
             .formatted(FINDING_COLUMNS, SEVERITY_ORDER),
         this::mapFinding,
         specId);

@@ -32,6 +32,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @ActingAs
 class ReviewStoreTest {
@@ -421,6 +423,44 @@ class ReviewStoreTest {
     assertEquals(3, reviews.size());
     assertEquals(1, reviews.get(0).iteration());
     assertEquals(3, reviews.get(2).iteration());
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void reviewsAndStagesMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(
+      String earlier, String later) {
+    var first = FixedInstants.at(earlier, () -> failedReviewDisputing(1));
+    FixedInstants.at(earlier, () -> store.createStage(first, "human", "human"));
+    var second = FixedInstants.at(later, () -> failedReviewDisputing(2));
+    FixedInstants.at(later, () -> store.createStage(first, "build", "build"));
+    var current = FixedInstants.at(later, () -> store.createReview("auth", 3));
+
+    assertEquals(current, store.latestReviewForSpec("auth").orElseThrow().id());
+    assertEquals(
+        List.of(first, second, current),
+        store.reviewsForSpec("auth").stream().map(ReviewStore.ReviewRow::id).toList());
+    assertEquals(
+        List.of("Dispute 2", "Dispute 1"),
+        store.disputedFindings("auth").stream().map(Finding::title).toList());
+    assertEquals(
+        List.of("Open 2"),
+        store.carryForwardFindings("auth", current, "security").stream()
+            .map(Finding::title)
+            .toList());
+    assertEquals(
+        List.of("security", "human", "build"),
+        store.stagesForReview(first).stream().map(ReviewStore.StageRow::name).toList());
+  }
+
+  private String failedReviewDisputing(int iteration) {
+    var review = store.createReview("auth", iteration);
+    var stage = store.createStage(review, "security", "agent");
+    var disputed = addOpenFinding(stage, Finding.Severity.HIGH, "Dispute " + iteration);
+    store.resolveFinding(disputed.id(), Finding.Resolution.DISPUTED, "argued");
+    addOpenFinding(stage, Finding.Severity.HIGH, "Open " + iteration);
+    store.completeStage(stage, "failed");
+    store.updateReviewStatus(review, "failed");
+    return review;
   }
 
   @Test
