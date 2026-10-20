@@ -141,8 +141,7 @@ class HandleChangeTest {
   void aBoxThatTakesAHandleWhileSailApiServesHoldsItsCredentialAtOnce() throws Exception {
     write(STANDALONE, node("ada"));
 
-    assertEquals(
-        "ada", HostYaml.fromMap(YamlUtil.parseFile(dir.resolve("host.yaml"))).sync().handle());
+    assertEquals("ada", handleInHostYaml());
     assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
   }
 
@@ -169,6 +168,44 @@ class HandleChangeTest {
     Files.delete(SailPaths.apiSocketHostDir(dir).resolve(BoxCredentialFile.FILE_NAME));
     write(main("ada"), main("ada"));
     assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
+  }
+
+  @Test
+  void anIdentityWriteOverlappingAHandleChangeLeavesTheCredentialNamingTheHandleWritten()
+      throws Exception {
+    var hostYaml = dir.resolve("host.yaml");
+    write(STANDALONE, main("ada"));
+    var rewrite = new AtomicReference<Thread>();
+
+    HandleChange.apply(
+        dbPath,
+        main("ada"),
+        main("grace"),
+        UNREACHABLE,
+        OperatorCommand.PLAIN,
+        () -> {
+          YamlUtil.dumpToFile(host(main("grace")).toMap(), hostYaml);
+          rewrite.set(
+              Thread.ofVirtual()
+                  .start(
+                      () -> {
+                        try {
+                          write(main("ada"), main("ada"));
+                        } catch (Exception e) {
+                          throw new IllegalStateException(e);
+                        }
+                      }));
+          FileMutexTest.awaitParked(rewrite.get());
+          assertEquals("grace", handleInHostYaml(), "a write that read 'ada' waits for the change");
+        });
+    rewrite.get().join();
+
+    assertEquals("ada", handleInHostYaml(), "the write that waited is the last written");
+    assertEquals(Optional.of("ada"), new BoxCredentialStore(db).resolve(boxCredential()));
+  }
+
+  private String handleInHostYaml() throws IOException {
+    return HostYaml.fromMap(YamlUtil.parseFile(dir.resolve("host.yaml"))).sync().handle();
   }
 
   @Test

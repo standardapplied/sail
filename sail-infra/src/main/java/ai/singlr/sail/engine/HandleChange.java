@@ -46,9 +46,8 @@ public final class HandleChange {
 
   /**
    * Writes {@code updated} over {@code current} at {@code hostYamlPath} as a change of this box's
-   * identity in its database at {@code dbPath} ({@link #apply}), then issues the box credential of
-   * its handle next to the API socket, replacing one another handle held. Returns the runs stamped
-   * for the new identity.
+   * identity in its database at {@code dbPath} ({@link #apply}). Returns the runs stamped for the
+   * new identity.
    */
   public static List<String> write(
       Path hostYamlPath,
@@ -58,42 +57,29 @@ public final class HandleChange {
       SyncOperations.Channels channels,
       OperatorCommand operator)
       throws Exception {
-    var stamped =
-        apply(
-            dbPath,
-            current.sync(),
-            updated.sync(),
-            channels,
-            operator,
-            () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
-    issueBoxCredential(dbPath, updated.sync().handle());
-    return stamped;
-  }
-
-  /**
-   * A box with no database yet has no sail-api to read a credential: its first start issues it
-   * ({@code sail server start}).
-   */
-  private static void issueBoxCredential(Path dbPath, String handle) throws IOException {
-    if (Strings.isBlank(handle) || !Files.exists(dbPath)) {
-      return;
-    }
-    try (var db = Sqlite.open(dbPath)) {
-      BoxCredentialFile.ensure(
-          new BoxCredentialStore(db), handle, SailPaths.apiSocketHostDir(dbPath.getParent()));
-    }
+    return apply(
+        dbPath,
+        current.sync(),
+        updated.sync(),
+        channels,
+        operator,
+        () -> YamlUtil.dumpToFile(updated.toMap(), hostYamlPath));
   }
 
   /**
    * Moves this box, whose database is {@code dbPath}, from {@code before} to {@code after} through
-   * {@code write}. Refused, before anything is written, while a run main holds under the old handle
-   * is live here or carries a change main has not taken — on main, while any run this box executed
-   * is live — naming each and the fix. A node first asks its main, over {@code channels}, which of
-   * the runs it never heard acknowledged main holds; when main cannot be asked, it is refused too.
-   * Every sync round of the box is held off from the ask until the stamps are written ({@link
-   * SyncOperations#holdRounds}), so none can offer a run main would then hold under the old handle.
-   * A box that stops being a node forgets the scope main last named it ({@link SyncScope}): as main
-   * or standalone it holds every project. Returns the runs stamped for the new identity.
+   * {@code write}, then issues the box credential of its handle next to the API socket, replacing
+   * one another handle held. Refused, before anything is written, while a run main holds under the
+   * old handle is live here or carries a change main has not taken — on main, while any run this
+   * box executed is live — naming each and the fix. A node first asks its main, over {@code
+   * channels}, which of the runs it never heard acknowledged main holds; when main cannot be asked,
+   * it is refused too. Every sync round of the box, and every other write of its identity, is held
+   * off from the ask until the credential is issued ({@link SyncOperations#holdRounds}), so none
+   * can offer a run main would then hold under the old handle, and two overlapping writes cannot
+   * leave the credential naming a handle other than the one written last. A box that stops being a
+   * node forgets the scope main last named it ({@link SyncScope}): as main or standalone it holds
+   * every project. A box with no database yet has no sail-api to read a credential: its first start
+   * issues it ({@code sail server start}). Returns the runs stamped for the new identity.
    */
   public static List<String> apply(
       Path dbPath,
@@ -103,34 +89,57 @@ public final class HandleChange {
       OperatorCommand operator,
       Write write)
       throws Exception {
-    var renamed = !Objects.equals(before.handle(), after.handle());
-    var promoted = after.isMain() && !before.isMain();
-    var leftNode = before.isNode() && !after.isNode();
-    if (!(renamed || promoted || leftNode) || !Files.exists(dbPath)) {
+    if (!Files.exists(dbPath)) {
       write.run();
       return List.of();
     }
     try (var db = Sqlite.open(dbPath);
         var rounds = SyncOperations.holdRounds(db)) {
-      var runs = new RunStore(db);
-      var held = renamed ? heldByMain(db, before, after, channels, operator) : Set.<String>of();
-      if (renamed) {
-        var stranded =
-            before.isMain()
-                ? runs.liveUnder(before.handle())
-                : runs.heldUnder(before.handle(), held);
-        if (!stranded.isEmpty()) {
-          throw new IllegalStateException(refusal(before, after, stranded, operator));
-        }
-      }
-      write.run();
-      if (leftNode) {
-        new SyncScope(db).record(ProjectScope.all());
-      }
-      return after.isMain()
-          ? runs.stampUnstamped(after.handle())
-          : NodeRound.stampUnheld(db, after.handle(), held);
+      var stamped = change(db, before, after, channels, operator, write);
+      issueBoxCredential(db, dbPath.getParent(), after.handle());
+      return stamped;
     }
+  }
+
+  private static void issueBoxCredential(Sqlite db, Path dataDir, String handle)
+      throws IOException {
+    if (!Strings.isBlank(handle)) {
+      BoxCredentialFile.ensure(
+          new BoxCredentialStore(db), handle, SailPaths.apiSocketHostDir(dataDir));
+    }
+  }
+
+  private static List<String> change(
+      Sqlite db,
+      SyncConfig before,
+      SyncConfig after,
+      SyncOperations.Channels channels,
+      OperatorCommand operator,
+      Write write)
+      throws Exception {
+    var renamed = !Objects.equals(before.handle(), after.handle());
+    var promoted = after.isMain() && !before.isMain();
+    var leftNode = before.isNode() && !after.isNode();
+    if (!(renamed || promoted || leftNode)) {
+      write.run();
+      return List.of();
+    }
+    var runs = new RunStore(db);
+    var held = renamed ? heldByMain(db, before, after, channels, operator) : Set.<String>of();
+    if (renamed) {
+      var stranded =
+          before.isMain() ? runs.liveUnder(before.handle()) : runs.heldUnder(before.handle(), held);
+      if (!stranded.isEmpty()) {
+        throw new IllegalStateException(refusal(before, after, stranded, operator));
+      }
+    }
+    write.run();
+    if (leftNode) {
+      new SyncScope(db).record(ProjectScope.all());
+    }
+    return after.isMain()
+        ? runs.stampUnstamped(after.handle())
+        : NodeRound.stampUnheld(db, after.handle(), held);
   }
 
   /**
