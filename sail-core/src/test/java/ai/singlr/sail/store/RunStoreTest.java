@@ -65,12 +65,16 @@ class RunStoreTest {
   }
 
   private String newRun(String project, String specId) {
-    var id = DateTimeUtils.newId().toString();
-    return store.create(
+    return createRun(store, DateTimeUtils.newId().toString(), project, specId, "node-a");
+  }
+
+  private static String createRun(
+      RunStore runs, String id, String project, String specId, String node) {
+    return runs.create(
         id,
         project,
         specId,
-        "node-a",
+        node,
         "build",
         "claude-code",
         "feat/x",
@@ -79,6 +83,31 @@ class RunStoreTest {
         5678,
         "/home/dev/.sail/runs/" + id + "/agent.log",
         "sail-agent-" + id);
+  }
+
+  private String roomTurn(String roomId) {
+    var id = DateTimeUtils.newId().toString();
+    var reserved =
+        store.reserveDispatch(
+            id,
+            "acme",
+            null,
+            roomId,
+            "node-a",
+            "room",
+            List.of(),
+            "claude-code",
+            null,
+            "t",
+            "l",
+            "u",
+            null);
+    assertInstanceOf(RunStore.Reservation.Reserved.class, reserved);
+    return id;
+  }
+
+  private static List<String> ids(List<RunStore.RunRow> runs) {
+    return runs.stream().map(RunStore.RunRow::id).toList();
   }
 
   @Test
@@ -156,7 +185,7 @@ class RunStoreTest {
     store.complete(finished, "completed", 0);
     newRunOn("r", "s", "bob");
 
-    assertEquals(List.of(live), store.liveUnder("ada").stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(live), ids(store.liveUnder("ada")));
     assertEquals(
         List.of(),
         store.heldUnder("ada", Set.of()),
@@ -799,7 +828,7 @@ class RunStoreTest {
     assertTrue(fixRow.servesReview());
     assertEquals(
         List.of(fix, reviewer),
-        store.forReview(review).stream().map(RunStore.RunRow::id).toList(),
+        ids(store.forReview(review)),
         "newest first: the run a review waits on is the first");
     assertEquals(review, store.comparableSnapshot(fix).get("review_id"), "the link replicates");
     assertEquals(fix, store.latestLoopRun("auth").orElseThrow().id());
@@ -883,10 +912,6 @@ class RunStoreTest {
     assertTrue(store.runningForProjectOnNode("backend", "node-a").isEmpty());
   }
 
-  private static List<String> ids(List<RunStore.RunRow> runs) {
-    return runs.stream().map(RunStore.RunRow::id).toList();
-  }
-
   @ParameterizedTest
   @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
   void runsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(String earlier, String later) {
@@ -905,6 +930,17 @@ class RunStoreTest {
         new RunStore.ContainerLease.BlockedByRun(store.findById(first).orElseThrow()),
         store.acquireContainerLease("backend", "node-a", "restore"),
         "the oldest live run is the one a restore names");
+  }
+
+  @ParameterizedTest
+  @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
+  void roomTurnsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(
+      String earlier, String later) {
+    var first = FixedInstants.at(earlier, () -> roomTurn("chat-room"));
+    store.complete(first, "completed", 0);
+    var second = FixedInstants.at(later, () -> roomTurn("chat-room"));
+
+    assertEquals(List.of(second, first), ids(store.listForRoom("chat-room")));
   }
 
   @ParameterizedTest
@@ -951,30 +987,14 @@ class RunStoreTest {
     var main = freshStore("main.db");
     var first = DateTimeUtils.newId().toString();
     var second = DateTimeUtils.newId().toString();
-    FixedInstants.at(earlier, () -> mainRun(main, first));
-    FixedInstants.at(later, () -> mainRun(main, second));
+    FixedInstants.at(earlier, () -> createRun(main, first, "backend", "auth", "main"));
+    FixedInstants.at(later, () -> createRun(main, second, "backend", "auth", "main"));
 
     for (var id : List.of(second, first)) {
       store.applyRevision(id, main.comparableSnapshot(id), main.latestRev(id));
     }
 
     assertEquals(List.of(second, first), ids(store.listForSpec("auth")));
-  }
-
-  private static String mainRun(RunStore main, String id) {
-    return main.create(
-        id,
-        "backend",
-        "auth",
-        "main",
-        "build",
-        "claude-code",
-        "feat/x",
-        "do it",
-        1234,
-        5678,
-        "/home/dev/.sail/runs/" + id + "/agent.log",
-        "sail-agent-" + id);
   }
 
   @Test
@@ -1431,10 +1451,9 @@ class RunStoreTest {
     assertFalse(row.readOnlyLane(), "a full invite held a member-tier credential");
     assertFalse(row.triggersReview(), "a retired invite's stop never enters the review loop");
     assertTrue(
-        store.running().stream().map(RunStore.RunRow::id).toList().contains(historical),
+        ids(store.running()).contains(historical),
         "the session queries still see a historical invite row");
-    assertTrue(
-        store.listForSpec("auth").stream().map(RunStore.RunRow::id).toList().contains(historical));
+    assertTrue(ids(store.listForSpec("auth")).contains(historical));
     assertEquals(
         historical,
         store.latestForProjectOnNode("backend", "node-a").orElseThrow().id(),
@@ -1506,9 +1525,9 @@ class RunStoreTest {
 
     assertEquals(id, store.runningForProjectOnNode("backend", "node-a").orElseThrow().id());
     assertEquals(id, store.latestForProjectOnNode("backend", "node-a").orElseThrow().id());
-    assertEquals(List.of(id), store.running().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(id), ids(store.running()));
     assertTrue(store.transition(id, "running", "stopping"));
-    assertEquals(List.of(id), store.stopping().stream().map(RunStore.RunRow::id).toList());
+    assertEquals(List.of(id), ids(store.stopping()));
   }
 
   @Test

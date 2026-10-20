@@ -427,12 +427,9 @@ class ReviewStoreTest {
 
   @ParameterizedTest
   @MethodSource("ai.singlr.sail.store.FixedInstants#textSortsBackwards")
-  void reviewsAndStagesMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(
-      String earlier, String later) {
+  void reviewsMintedInOrderReadInOrderWhateverTheTextOfTheirInstants(String earlier, String later) {
     var first = FixedInstants.at(earlier, () -> failedReviewDisputing(1));
-    FixedInstants.at(earlier, () -> store.createStage(first, "human", "human"));
     var second = FixedInstants.at(later, () -> failedReviewDisputing(2));
-    FixedInstants.at(later, () -> store.createStage(first, "build", "build"));
     var current = FixedInstants.at(later, () -> store.createReview("auth", 3));
 
     assertEquals(current, store.latestReviewForSpec("auth").orElseThrow().id());
@@ -447,9 +444,6 @@ class ReviewStoreTest {
         store.carryForwardFindings("auth", current, "security").stream()
             .map(Finding::title)
             .toList());
-    assertEquals(
-        List.of("security", "human", "build"),
-        store.stagesForReview(first).stream().map(ReviewStore.StageRow::name).toList());
   }
 
   private String failedReviewDisputing(int iteration) {

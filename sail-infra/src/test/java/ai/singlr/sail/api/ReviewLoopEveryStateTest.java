@@ -385,11 +385,6 @@ class ReviewLoopEveryStateTest {
    * of a spec it never acts over, starting a place further for each review and status so that
    * between them they try every combination of stages, pipeline, run and wait.
    */
-  /**
-   * Every instant the loop writes, its own launches included, prints six fraction digits: an
-   * instant's text drops trailing zeros and sorts after a longer one of the same millisecond, which
-   * a microsecond clock produces one time in a thousand, so the fixture's clock never lands there.
-   */
   @ParameterizedTest(name = "review {0}, spec {1}")
   @MethodSource("reviewAndSpecStates")
   void theWalkEndsWhereTheRealStoresDoAcrossTheSpace(ReviewShape shape, SpecStatus specStatus) {
