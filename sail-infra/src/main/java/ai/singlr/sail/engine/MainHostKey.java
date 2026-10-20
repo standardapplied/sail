@@ -27,6 +27,10 @@ public final class MainHostKey {
   private static final String TYPE = "ssh-ed25519";
   private static final String REVOKED = "@revoked";
 
+  /** How main's operator reads the fingerprint of the host key a node pins. */
+  private static final String FINGERPRINT_ON_MAIN =
+      "sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub";
+
   private final ShellExec shell;
   private final Path knownHosts;
   private final OperatorCommand operator;
@@ -50,14 +54,21 @@ public final class MainHostKey {
 
   /**
    * How a node recovers from main's host key no longer being the one it pinned for {@code target}:
-   * drop the old pin, then join again, which pins the new one.
+   * drop the old pin, then join again, which pins the new one and prints it to check against main.
    */
   public static String rebuiltRecovery(String target, OperatorCommand operator) {
-    return "If main was rebuilt, remove the old key with '"
+    return "If main was rebuilt from a copy of its database, remove the old key with '"
         + operator.asThisProcess("ssh-keygen -R " + hostOf(target))
-        + "' and re-run '"
+        + "', re-run '"
         + operator.sail("init --main " + target)
-        + "'; otherwise something between this box and main is answering for it.";
+        + "' and compare the fingerprint it prints with main's ('"
+        + FINGERPRINT_ON_MAIN
+        + "' on main); otherwise something between this box and main is answering for it.";
+  }
+
+  /** The line a join prints for the key it pinned, {@code fingerprint}, to check against main. */
+  public static String pinnedLine(String fingerprint) {
+    return "Pinned main's host key " + fingerprint + ". Check it on main: " + FINGERPRINT_ON_MAIN;
   }
 
   /** The bare host of a sync target, whose SSH host key is pinned: no {@code user@}, no port. */

@@ -65,10 +65,12 @@ class SyncDiagnosticTest {
   @Test
   void anUnpinnedOrChangedHostKeyNamesTheRemedy() throws Exception {
     assertEquals(
-        "hello: Sync channel closed before main replied. ssh said: Host key verification failed."
-            + " If main was rebuilt, remove the old key with 'sudo ssh-keygen -R main' and re-run"
-            + " 'sudo sail init --main sail@main'; otherwise something between this box and main"
-            + " is answering for it.",
+        "hello: Sync channel closed before main replied. ssh said: Host key verification failed. If"
+            + " main was rebuilt from a copy of its database, remove the old key with 'sudo"
+            + " ssh-keygen -R main', re-run 'sudo sail init --main sail@main' and compare the"
+            + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
+            + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
+            + " and main is answering for it.",
         syncFailure("Host key verification failed."));
   }
 

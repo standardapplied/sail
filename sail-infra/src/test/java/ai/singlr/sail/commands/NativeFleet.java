@@ -68,6 +68,16 @@ public final class NativeFleet implements AutoCloseable {
       chmod 640 /var/lib/sail/host.yaml
       ssh-keygen -A >/dev/null
       """;
+  private static final String REBUILD_MAIN =
+      """
+      set -e
+      rm -rf /var/lib/sail/* /etc/ssh/ssh_host_*
+      install -m 600 -o sail -g sail /dev/null /home/sail/.ssh/authorized_keys
+      echo 'storage_backend: dir' > /var/lib/sail/host.yaml
+      chgrp sail /var/lib/sail/host.yaml
+      chmod 640 /var/lib/sail/host.yaml
+      ssh-keygen -A >/dev/null
+      """;
   private static final String SHARE_DATABASE_WITH_GATEWAY =
       "cd /var/lib/sail && chgrp sail sail.db* && chmod 660 sail.db*";
   private static final String PROVISION_NODE =
@@ -133,14 +143,44 @@ public final class NativeFleet implements AutoCloseable {
     var box = launch(handle, true, "/var/lib/sail/sail.db");
     box.shOk(PROVISION_MAIN);
     box.install(binary);
-    box.shOk(SHARE_DATABASE_WITH_GATEWAY);
-    box.sailOk("host", "sync", "--as-main");
-    box.sailOk("host", "config", "set", "sync-handle", handle);
-    box.sailOk("server", "init");
-    box.sailOk("fde", "add", handle, "--role", "admin", "--email", handle + "@example.dev");
+    setUpMain(box);
     main = box;
     sshd = box.sshd();
     return box;
+  }
+
+  private static void setUpMain(Box box) throws Exception {
+    box.shOk(SHARE_DATABASE_WITH_GATEWAY);
+    box.sailOk("host", "sync", "--as-main");
+    box.sailOk("host", "config", "set", "sync-handle", box.name);
+    box.sailOk("server", "init");
+    box.sailOk("fde", "add", box.name, "--role", "admin", "--email", box.name + "@example.dev");
+  }
+
+  /**
+   * Sets main up again at its address, as a VM deleted and set up with {@code sudo sail init
+   * --as-main} comes back: a new host key, {@code host.yaml}, {@code authorized_keys} and database.
+   * Given {@code copy}, the path in main's box of a copy of its database, that copy is then put in
+   * place of the new database and migrated, which restores the sail user's keys from it: the
+   * README's restore, but for stopping and starting sail-api, which no box here runs.
+   */
+  public void rebuildMain(String copy) throws Exception {
+    sshd.close();
+    try {
+      main.shOk(REBUILD_MAIN);
+      main.sailOk("migrate");
+      setUpMain(main);
+      if (copy != null) {
+        main.shOk(
+            "install -m 660 -g sail "
+                + copy
+                + " /var/lib/sail/sail.db && rm -f /var/lib/sail/sail.db-wal"
+                + " /var/lib/sail/sail.db-shm");
+        main.sailOk("migrate");
+      }
+    } finally {
+      sshd = main.sshd();
+    }
   }
 
   public Box node(String handle, Path binary) throws Exception {

@@ -34,7 +34,10 @@ import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.sync.SyncBox;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -157,9 +160,11 @@ class JoinCommandTest {
             + IMPOSTOR.fingerprint()
             + ", but this box pinned "
             + MAIN.fingerprint()
-            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
-            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
-            + " box and main is answering for it.",
+            + ". If main was rebuilt from a copy of its database, remove the old key with 'sudo"
+            + " ssh-keygen -R maindevbox', re-run 'sudo sail init --main sail@maindevbox' and"
+            + " compare the fingerprint it prints with main's ('sudo ssh-keygen -lf"
+            + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
+            + " and main is answering for it.",
         refused.getMessage());
     assertEquals(before, Files.readString(hostConfig));
     assertEquals(hashed(MAIN) + "\n", Files.readString(knownHosts()));
@@ -527,13 +532,17 @@ class JoinCommandTest {
 
             ✓ This box is now a node syncing to sail@maindevbox.
 
+            Pinned main's host key %s. Check it on main: sudo ssh-keygen -lf \
+        /etc/ssh/ssh_host_ed25519_key.pub
+
             Send this to the operator of sail@maindevbox — they run it once:
 
               sudo sail fde add mady --role member --key "%s" --main-host-key %s
 
             Once they have, finish here with sudo sail sync. Only a public key leaves this box — \
-        never a secret."""
-            .formatted(PUB, MAIN.fingerprint()),
+        never a secret.\
+        """
+            .formatted(MAIN.fingerprint(), PUB, MAIN.fingerprint()),
         human(plan));
   }
 
@@ -570,8 +579,12 @@ class JoinCommandTest {
 
             ✓ This box is now a node syncing to sail@maindevbox.
 
+            Pinned main's host key %s. Check it on main: sudo ssh-keygen -lf \
+        /etc/ssh/ssh_host_ed25519_key.pub
+
             Main already has this box's key. Finish with sudo sail sync.\
-        """,
+        """
+            .formatted(MAIN.fingerprint()),
         human(plan));
     assertEquals(
         "sudo sail fde add mady --role member --key \""
@@ -579,6 +592,50 @@ class JoinCommandTest {
             + "\" --main-host-key "
             + MAIN.fingerprint(),
         YamlUtil.parseMap(json(plan)).get("authorize_command"));
+  }
+
+  @Test
+  void aReJoinAfterMainsHostKeyRotatedShowsTheNewKeyToCheckBeforeSayingMainHasThisBox()
+      throws Exception {
+    var hostConfig = writeHostConfig();
+    answering = IMPOSTOR;
+    join(hostConfig);
+    Files.delete(knownHosts());
+    answering = MAIN;
+
+    var plan = join(hostConfig, "mady", mainServing(MADY));
+
+    assertEquals(
+        """
+
+            ✓ This box is now a node syncing to sail@maindevbox.
+
+            Pinned main's host key %s. Check it on main: sudo ssh-keygen -lf \
+        /etc/ssh/ssh_host_ed25519_key.pub
+
+            Main already has this box's key. Finish with sudo sail sync.\
+        """
+            .formatted(MAIN.fingerprint()),
+        human(plan));
+  }
+
+  @Test
+  void aReJoinWhoseProbeMainNeverAnswersPrintsNothingOfItsOwn() throws Exception {
+    var hostConfig = writeHostConfig();
+    join(hostConfig);
+    var err = System.err;
+    var said = new ByteArrayOutputStream();
+    System.setErr(new PrintStream(said, true, StandardCharsets.UTF_8));
+    JoinCommand.Plan plan;
+    try {
+      plan = join(hostConfig, "mady", target -> PipedSyncChannel.to((in, out) -> {}));
+    } finally {
+      System.setErr(err);
+    }
+
+    assertFalse(plan.mainHasKey());
+    assertEquals("", said.toString(StandardCharsets.UTF_8));
+    assertTrue(human(plan).contains("sudo sail fde add mady"), human(plan));
   }
 
   @Test

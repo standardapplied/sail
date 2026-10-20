@@ -8,8 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.identity.Actor;
+import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
+import ai.singlr.sail.store.DatabaseCatalog;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -147,15 +149,21 @@ class UploadFailureRepliesTest {
     request.writeBytes(line(SyncWire.encode(new SyncWire.Announce(List.of(HASH)))));
     for (var content : afterAnnounce) request.writeBytes(line(SyncWire.encode(content)));
     request.writeBytes(trailing);
-    var expected = new StringBuilder();
-    expected.append(
-        SyncWire.encode(
-            new SyncWire.Welcome(
-                SyncWire.PROTOCOL, SyncWire.UPGRADE_FLOOR, "main", "node", limits.fileMax())));
-    expected.append('\n');
-    expected.append(SyncWire.encode(new SyncWire.Lack(List.of(HASH)))).append('\n');
-    for (var reply : replies) expected.append(SyncWire.encode(reply)).append('\n');
     try (var main = new SyncBox("main")) {
+      var expected = new StringBuilder();
+      expected.append(
+          SyncWire.encode(
+              new SyncWire.Welcome(
+                  SyncWire.PROTOCOL,
+                  SyncWire.UPGRADE_FLOOR,
+                  "main",
+                  "node",
+                  limits.fileMax(),
+                  ProjectScope.all(),
+                  new DatabaseCatalog(main.db).id())));
+      expected.append('\n');
+      expected.append(SyncWire.encode(new SyncWire.Lack(List.of(HASH)))).append('\n');
+      for (var reply : replies) expected.append(SyncWire.encode(reply)).append('\n');
       var output = new ByteStreams.Output();
       main.server(Actor.sync("node", Role.MEMBER))
           .content(main.db, limits)

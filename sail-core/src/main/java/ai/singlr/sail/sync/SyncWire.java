@@ -99,6 +99,7 @@ public final class SyncWire {
   private static final String HANDLE = "handle";
   private static final String FILE_MAX = "file_max";
   private static final String SCOPE = "scope";
+  private static final String CATALOG = "catalog";
   private static final String TIPS = "tips";
   private static final String FDES = "fdes";
   private static final String MESSAGE = "message";
@@ -361,13 +362,31 @@ public final class SyncWire {
    * Main accepted the hello: its protocol, build, the box id the node checkpoints against, and the
    * {@code handle} it authenticated the session as — blank for a session that names no FDE, and
    * null from an older main, which never says — and the {@code scope} of projects that FDE may see:
-   * every project unless main scoped it, which is also what an older main, naming none, means.
+   * every project unless main scoped it, which is also what an older main, naming none, means. The
+   * {@code catalog} names main's database ({@code DatabaseCatalog}), null from a main that never
+   * says.
    */
   public record Welcome(
-      int protocol, String version, String mainId, String handle, long fileMax, ProjectScope scope)
+      int protocol,
+      String version,
+      String mainId,
+      String handle,
+      long fileMax,
+      ProjectScope scope,
+      String catalog)
       implements Response {
     public Welcome {
       Objects.requireNonNull(scope, "scope");
+    }
+
+    public Welcome(
+        int protocol,
+        String version,
+        String mainId,
+        String handle,
+        long fileMax,
+        ProjectScope scope) {
+      this(protocol, version, mainId, handle, fileMax, scope, null);
     }
 
     public Welcome(int protocol, String version, String mainId, String handle, long fileMax) {
@@ -701,6 +720,9 @@ public final class SyncWire {
         if (!welcome.scope().unrestricted()) {
           map.put(SCOPE, List.copyOf(welcome.scope().projects()));
         }
+        if (welcome.catalog() != null) {
+          map.put(CATALOG, welcome.catalog());
+        }
       }
       case Refuse refuse -> {
         map.put(OP, OP_REFUSE);
@@ -790,7 +812,8 @@ public final class SyncWire {
               string(map, MAIN_ID),
               string(map, HANDLE),
               longValue(map, FILE_MAX),
-              map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all());
+              map.containsKey(SCOPE) ? ProjectScope.of(strings(map, SCOPE)) : ProjectScope.all(),
+              string(map, CATALOG));
       case OP_REFUSE -> new Refuse(string(map, REASON));
       case OP_TIPS -> new Tips(tips(map));
       case OP_PAGE ->

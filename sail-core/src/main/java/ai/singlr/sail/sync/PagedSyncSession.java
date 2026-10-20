@@ -93,6 +93,7 @@ public final class PagedSyncSession implements SyncSession {
   private Consumer<SyncSession.Denial> onDenial = ignored -> {};
   private String broken;
   private String handle;
+  private String catalog;
   private long mainFileMax;
   private ProjectScope scope = ProjectScope.all();
   private Set<String> kept = Set.of();
@@ -130,6 +131,7 @@ public final class PagedSyncSession implements SyncSession {
     copy.notice = notice;
     copy.onDenial = onDenial;
     copy.handle = handle;
+    copy.catalog = catalog;
     copy.mainFileMax = mainFileMax;
     copy.scope = scope;
     copy.kept = kept;
@@ -174,6 +176,7 @@ public final class PagedSyncSession implements SyncSession {
     session.notice = notice;
     session.onDenial = onDenial;
     session.handle = welcome.handle();
+    session.catalog = welcome.catalog();
     session.mainFileMax = welcome.fileMax();
     session.scope = welcome.scope();
     return session;
@@ -797,6 +800,11 @@ public final class PagedSyncSession implements SyncSession {
   @Override
   public long mainFileMax() {
     return mainFileMax;
+  }
+
+  @Override
+  public Optional<String> catalog() {
+    return Optional.ofNullable(catalog);
   }
 
   @Override

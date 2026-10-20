@@ -348,14 +348,18 @@ public final class JoinCommand implements Runnable {
 
               @|bold,green ✓|@ This box is now a @|bold node|@ syncing to @|bold %s|@.
 
+              %s
+
               Main already has this box's key. Finish with @|bold %s|@.\
           """
-              .formatted(plan.target(), sync));
+              .formatted(plan.target(), MainHostKey.pinnedLine(plan.mainHostKey()), sync));
     }
     return Ansi.AUTO.string(
         """
 
             @|bold,green ✓|@ This box is now a @|bold node|@ syncing to @|bold %s|@.
+
+            %s
 
             Send this to the operator of %s — they run it once:
 
@@ -363,7 +367,12 @@ public final class JoinCommand implements Runnable {
 
             Once they have, finish here with @|bold %s|@. Only a public key leaves this box — \
         never a secret."""
-            .formatted(plan.target(), plan.target(), authorize, sync));
+            .formatted(
+                plan.target(),
+                MainHostKey.pinnedLine(plan.mainHostKey()),
+                plan.target(),
+                authorize,
+                sync));
   }
 
   /**

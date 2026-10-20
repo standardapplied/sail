@@ -10,6 +10,7 @@ import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
@@ -34,7 +35,39 @@ import java.util.stream.Collectors;
  */
 public final class NodeRound {
 
+  /** Where main keeps its database: the org, which every node's catalog names. */
+  private static final String MAIN_DATABASE = "/var/lib/sail/sail.db";
+
   private NodeRound() {}
+
+  /**
+   * Refuses {@code session}, before anything is offered, adopted or recorded, unless main at {@code
+   * target} serves the database this node, whose database is {@code db}, synced with: main set up
+   * empty at the same address welcomes the node as readily as the main it replaced. The first
+   * welcome that names a catalog is recorded as main's ({@link DatabaseCatalog#recordMain}). A main
+   * that names none predates catalogs and is not asked, unless this node recorded one: a database
+   * that has named its catalog always does.
+   */
+  public static void admit(SyncSession session, Sqlite db, String target) {
+    var catalog = new DatabaseCatalog(db);
+    var offered = session.catalog();
+    var synced = offered.map(catalog::recordMain).or(catalog::main);
+    if (synced.isEmpty() || synced.equals(offered)) {
+      return;
+    }
+    throw new SyncTransportException(
+        "refused",
+        "Main at "
+            + target
+            + " is not the database this box synced with (catalog "
+            + synced.get()
+            + ", now "
+            + offered.orElse("none")
+            + "). Restore main's database ("
+            + MAIN_DATABASE
+            + ") from a copy, then sync again.",
+        null);
+  }
 
   /**
    * Begins a round over {@code session} for the node whose database is {@code db} and whose

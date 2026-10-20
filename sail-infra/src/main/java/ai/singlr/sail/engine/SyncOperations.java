@@ -249,7 +249,8 @@ public final class SyncOperations {
   /**
    * Whether main holds this box's sync key as {@code handle}: one session opened through {@code
    * channels} as the box {@code config} names is welcomed as that handle. Anything short of that,
-   * main unreachable included, is no evidence that it does.
+   * main unreachable included, is no evidence that it does. The probe says nothing of its own: the
+   * answer it gives is what the caller shows.
    */
   public static boolean welcomedAs(
       SyncConfig config, Channels channels, String handle, OperatorCommand operator) {
@@ -259,20 +260,37 @@ public final class SyncOperations {
                 channel.reader(),
                 channel.writer(),
                 hello(config, operator),
-                SyncOperations::notice,
-                denial -> notice(denial.describe(operator)),
+                unsaid -> {},
+                unsaid -> {},
                 operator)) {
       return session.handle().filter(handle::equals).isPresent();
     } catch (Exception notWelcomed) {
-      notice(Objects.toString(notWelcomed.getMessage(), notWelcomed.getClass().getSimpleName()));
       return false;
     }
   }
 
   /**
-   * Opens a sync session to main over {@code channel} as the box whose config is {@code config}.
+   * Opens a sync session to main at {@code target} over {@code channel} as the box whose config is
+   * {@code config}, refused unless main serves the database this box synced with ({@link
+   * NodeRound#admit}).
    */
   private static SyncSession open(
+      Channel channel, SyncConfig config, Sqlite db, String target, OperatorCommand operator) {
+    var session = welcome(channel, config, db, target, operator);
+    try {
+      NodeRound.admit(session, db, target);
+      return session;
+    } catch (RuntimeException refused) {
+      try {
+        session.close();
+      } catch (RuntimeException closing) {
+        refused.addSuppressed(closing);
+      }
+      throw refused;
+    }
+  }
+
+  private static SyncSession welcome(
       Channel channel, SyncConfig config, Sqlite db, String target, OperatorCommand operator) {
     try {
       return SyncSession.open(
