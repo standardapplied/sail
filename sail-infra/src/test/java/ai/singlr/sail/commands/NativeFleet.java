@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import ai.singlr.sail.config.YamlUtil;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.SemVer;
+import ai.singlr.sail.engine.SpecCliHelper;
 import ai.singlr.sail.sync.SyncWire;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -50,7 +52,7 @@ public final class NativeFleet implements AutoCloseable {
       FROM docker.io/library/ubuntu:24.04
       RUN apt-get update -qq \\
           && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \\
-              libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates \\
+              libsqlite3-0 sqlite3 openssh-server openssh-client ca-certificates curl \\
           && mkdir -p /run/sshd
       """;
   private static final String PROVISION_MAIN =
@@ -503,6 +505,53 @@ public final class NativeFleet implements AutoCloseable {
       var command = new ArrayList<>(List.of(args));
       command.addAll(List.of("--server", server()));
       return command.toArray(String[]::new);
+    }
+
+    /**
+     * Runs the {@code spec} CLI a project container gets, as an engineer's shell or an IDE agent
+     * runs it: with no run credential, so it presents the box credential next to this box's API
+     * socket. Only inside {@link #serving}.
+     */
+    public Result interactiveSpec(String... args) throws Exception {
+      var script = Files.createTempFile("spec", ".sh");
+      try {
+        Files.writeString(
+            script,
+            SpecCliHelper.scriptContent()
+                .replace(SailPaths.apiSocketContainerPath().toString(), apiSocket()));
+        ok(
+            run(
+                COMMAND_DEADLINE,
+                List.of("podman", "cp", script.toString(), container + ":/usr/local/bin/spec")));
+      } finally {
+        Files.delete(script);
+      }
+      var command = new ArrayList<>(exec());
+      command.addAll(List.of("bash", "/usr/local/bin/spec"));
+      command.addAll(List.of(args));
+      return run(COMMAND_DEADLINE, command);
+    }
+
+    /** The box credential this box's containers read, as its socket directory holds it now. */
+    public String boxCredential() throws Exception {
+      return shOk("cat " + SailPaths.apiSocketHostDir(Path.of(db).getParent()) + "/box.credential")
+          .strip();
+    }
+
+    /**
+     * The HTTP status this box's API socket answers {@code GET /v1/whoami} with for {@code bearer}.
+     */
+    public String whoamiStatus(String bearer) throws Exception {
+      return shOk("curl -s -o /dev/null -w '%{http_code}' --unix-socket "
+              + apiSocket()
+              + " -H 'Authorization: Bearer "
+              + bearer
+              + "' http://sail/v1/whoami")
+          .strip();
+    }
+
+    private String apiSocket() {
+      return SailPaths.apiSocketHostDir(Path.of(db).getParent()).resolve("api.sock").toString();
     }
 
     /** Runs {@code sql} on this box's database, fed on stdin so it may quote freely. */

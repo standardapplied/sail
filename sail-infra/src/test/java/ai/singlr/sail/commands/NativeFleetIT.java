@@ -92,6 +92,37 @@ class NativeFleetIT {
   }
 
   @Test
+  void aBoxAnswersAnInteractiveSpecSessionAsItsHandleFromTheMomentItTakesOne() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      var mady = fleet.node("mady", fleet.candidate());
+      var joined = mady.boxCredential();
+
+      main.serving(
+          () -> {
+            assertEquals(
+                "uday", NativeFleet.json(main.interactiveSpec("whoami").output()).get("handle"));
+            main.sailOk("fde", "add", "grace", "--role", "admin", "--email", "grace@example.dev");
+            var uday = main.boxCredential();
+
+            main.sailOk("host", "config", "set", "sync-handle", "grace");
+
+            assertEquals(
+                "grace", NativeFleet.json(main.interactiveSpec("whoami").output()).get("handle"));
+            assertEquals("401", main.whoamiStatus(uday), "the old handle's credential is revoked");
+          });
+      mady.sailOk("sync");
+      fleet.offline(
+          mady,
+          () -> {
+            assertEquals(joined, mady.boxCredential(), "join issued it; the start kept it");
+            assertEquals(
+                "mady", NativeFleet.json(mady.interactiveSpec("whoami").output()).get("handle"));
+          });
+    }
+  }
+
+  @Test
   void aFreshNodePullsPastOneFrameAndACutTransportLosesNothing() throws Exception {
     try (var fleet = NativeFleet.openOrSkip()) {
       var main = fleet.main("uday", fleet.candidate());
