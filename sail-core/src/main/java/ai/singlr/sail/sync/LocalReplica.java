@@ -158,6 +158,14 @@ public interface LocalReplica {
   void advanceCheckpoint(String peerId, long seq);
 
   /**
+   * Forgets every checkpoint this node keeps for {@code peerId}, so the round walks main's heads
+   * from the first again: main's log sits below what this node read, which is main restored in
+   * place from an older copy of its database, and what it wrote since the copy would otherwise stay
+   * unread below the checkpoint. What the node already holds re-adopts at the same rev.
+   */
+  void forgetCheckpoints(String peerId);
+
+  /**
    * This replica narrowed to {@code ids}: {@link #entityIds} answers exactly them and every other
    * operation reaches through to this replica. How one page of main's change log is reconciled as
    * its own round without scanning the whole local table.

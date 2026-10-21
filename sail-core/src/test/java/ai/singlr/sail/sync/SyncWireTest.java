@@ -116,6 +116,21 @@ class SyncWireTest {
   }
 
   @Test
+  void aWelcomeNamesMainsCatalogOnlyWhenMainHasOne() {
+    var catalogued =
+        new SyncWire.Welcome(4, "0.53.0", "main-box", "ada", 0, ProjectScope.all(), "c0ffee");
+    var older = new SyncWire.Welcome(4, "0.52.0", "main-box", "ada", 0);
+
+    assertEquals(
+        "{\"op\": \"welcome\", \"protocol\": 4, \"version\": \"0.53.0\", \"mainId\":"
+            + " \"main-box\", \"handle\": \"ada\", \"catalog\": \"c0ffee\"}",
+        SyncWire.encode(catalogued));
+    assertEquals(catalogued, SyncWire.decodeResponse(SyncWire.encode(catalogued)));
+    assertFalse(SyncWire.encode(older).contains("catalog"));
+    assertNull(((SyncWire.Welcome) SyncWire.decodeResponse(SyncWire.encode(older))).catalog());
+  }
+
+  @Test
   void aWelcomeNamesAScopeOnlyForAScopedFdeAndAMissingKeyIsNeverAnEmptyGrant() {
     var unscoped = new SyncWire.Welcome(4, "0.48.0", "main-box", "ada", 0);
     var scoped =

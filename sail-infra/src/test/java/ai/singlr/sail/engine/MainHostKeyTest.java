@@ -94,9 +94,11 @@ class MainHostKeyTest {
             + IMPOSTOR.fingerprint()
             + ", but this box pinned "
             + MAIN.fingerprint()
-            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
-            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
-            + " box and main is answering for it.",
+            + ". If main was rebuilt from a copy of its database, remove the old key with 'sudo"
+            + " ssh-keygen -R maindevbox', re-run 'sudo sail init --main sail@maindevbox' and"
+            + " compare the fingerprint it prints with main's ('sudo ssh-keygen -lf"
+            + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
+            + " and main is answering for it.",
         refused.getMessage());
     assertEquals(pinned, Files.readString(knownHosts()));
   }
@@ -104,8 +106,10 @@ class MainHostKeyTest {
   @Test
   void theRecoveryIsOneSentenceWhereverAChangedKeyIsMet() {
     assertEquals(
-        "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R 10.128.0.7' and re-run"
-            + " 'sudo sail init --main sail@10.128.0.7:2222'; otherwise something between this box"
+        "If main was rebuilt from a copy of its database, remove the old key with 'sudo ssh-keygen"
+            + " -R 10.128.0.7', re-run 'sudo sail init --main sail@10.128.0.7:2222' and compare the"
+            + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
+            + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
             + " and main is answering for it.",
         MainHostKey.rebuiltRecovery("sail@10.128.0.7:2222", OperatorCommand.SUDO));
   }
@@ -124,23 +128,27 @@ class MainHostKeyTest {
             + IMPOSTOR.fingerprint()
             + ", but this box pinned "
             + MAIN.fingerprint()
-            + ". If main was rebuilt, remove the old key with 'sudo ssh-keygen -R maindevbox' and"
-            + " re-run 'sudo sail init --main sail@maindevbox'; otherwise something between this"
-            + " box and main is answering for it.",
+            + ". If main was rebuilt from a copy of its database, remove the old key with 'sudo"
+            + " ssh-keygen -R maindevbox', re-run 'sudo sail init --main sail@maindevbox' and"
+            + " compare the fingerprint it prints with main's ('sudo ssh-keygen -lf"
+            + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this box"
+            + " and main is answering for it.",
         refused.getMessage());
   }
 
   @Test
   void anAccountsOwnPinIsRemovedWithoutSudo() {
     assertEquals(
-        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sudo sail"
-            + " init --main sail@main'; otherwise something between this box and main is answering"
-            + " for it.",
+        "If main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen -R"
+            + " main', re-run 'sudo sail init --main sail@main' and compare the fingerprint it"
+            + " prints with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on"
+            + " main); otherwise something between this box and main is answering for it.",
         MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.UNPRIVILEGED));
     assertEquals(
-        "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail init"
-            + " --main sail@main'; otherwise something between this box and main is answering for"
-            + " it.",
+        "If main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen -R"
+            + " main', re-run 'sail init --main sail@main' and compare the fingerprint it prints"
+            + " with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main);"
+            + " otherwise something between this box and main is answering for it.",
         MainHostKey.rebuiltRecovery("sail@main", OperatorCommand.PLAIN));
   }
 

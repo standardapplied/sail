@@ -15,6 +15,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BlobStore;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FdeBoxes;
 import ai.singlr.sail.store.Sqlite;
@@ -545,7 +546,8 @@ public final class SyncRpcServer {
         mainId(),
         Objects.toString(principal.handle(), ""),
         limits.fileMax(),
-        principal.scope());
+        principal.scope(),
+        db == null ? null : new DatabaseCatalog(db).id());
   }
 
   /**

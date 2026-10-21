@@ -49,6 +49,7 @@ public final class MigrationRunner {
   private static void forgetNodeScope(Sqlite db) {
     if (NodeIdentity.declaresNotNode()) {
       new SyncScope(db).record(ProjectScope.all());
+      new DatabaseCatalog(db).forgetMain();
     }
   }
 

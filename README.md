@@ -41,6 +41,31 @@ keeps everything, **delete** keeps history so `sail spec restore` brings it back
 erases a spec everywhere, leaving one audit row. Retention is opt-in through a `retention` block
 in main's `host.yaml`.
 
+Main's database is the org. Back it up on main, and keep the copy off the box:
+
+```bash
+sudo apt-get install -y sqlite3
+sudo sqlite3 /var/lib/sail/sail.db ".backup /root/sail.db.copy"
+```
+
+A main set up again from that copy is the same main to every node. On the new main, run `sudo
+sail init --as-main`, then put the copy in place:
+
+```bash
+sudo systemctl stop sail-api
+sudo install -m 660 -g sail /root/sail.db.copy /var/lib/sail/sail.db
+sudo rm -f /var/lib/sail/sail.db-wal /var/lib/sail/sail.db-shm
+sudo sail migrate
+sudo systemctl start sail-api
+```
+
+Each node then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sail init
+--main <main-ip>`; compare the fingerprint it prints with `sudo ssh-keygen -lf
+/etc/ssh/ssh_host_ed25519_key.pub` on main), and its next `sudo sail sync` pushes whatever it has
+not pushed yet; work main took after the copy and lost with it is not rebuilt from the node. A main
+set up empty is a new org: every node refuses to sync with it. A copy taken before 0.54.0 counts as
+a new org too, so take a fresh one after upgrading.
+
 Mast, the desktop client, is a thin client of a box: specs, rooms and reviews over its API and
 event stream, terminals and files over its pty host.
 

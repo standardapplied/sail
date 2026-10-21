@@ -381,6 +381,11 @@ class SyncTransportTest {
     public void advanceCheckpoint(String peer, long seq) {
       inner.advanceCheckpoint(peer, seq);
     }
+
+    @Override
+    public void forgetCheckpoints(String peer) {
+      inner.forgetCheckpoints(peer);
+    }
   }
 
   @Test

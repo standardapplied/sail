@@ -1384,6 +1384,26 @@ class SchemaManagerTest {
     assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
   }
 
+  @Test
+  void aDatabaseFromTheReleaseBeforeCatalogsIsMintedOneOnUpgradeAndNamesNoMainYet() {
+    stageAtBaseline();
+    var prior = migrationIndex("CREATE TABLE catalog");
+    db.execute("PRAGMA foreign_keys = OFF");
+    SchemaManager.MIGRATIONS.subList(0, prior).forEach(db::execute);
+    db.execute("PRAGMA foreign_keys = ON");
+    db.execute(
+        "INSERT INTO schema_version (version, applied_at) VALUES (?, 'staged')",
+        SchemaManager.V1_VERSION + prior);
+    assertFalse(tables().contains("catalog"));
+
+    new SchemaManager(db).migrate();
+
+    var catalog = new DatabaseCatalog(db);
+    assertTrue(catalog.id().matches("[0-9a-f]{32}"), catalog.id());
+    assertEquals(Optional.empty(), catalog.main());
+    assertEquals(SchemaManager.CURRENT_VERSION, new SchemaManager(db).currentVersion());
+  }
+
   private List<String> tables() {
     return db.query("SELECT name FROM sqlite_master WHERE type = 'table'", row -> row.text(0));
   }

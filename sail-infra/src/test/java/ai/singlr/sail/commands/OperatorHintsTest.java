@@ -96,9 +96,11 @@ class OperatorHintsTest {
                 + " connect with, then apply the project to put it in the container:\n"
                 + "    sudo sail host config set ssh-public-key\n"
                 + "    sudo sail project apply gamma",
-            "If main was rebuilt, remove the old key with 'sudo ssh-keygen -R main' and re-run"
-                + " 'sudo sail init --main sail@main'; otherwise something between this box and"
-                + " main is answering for it."),
+            "If main was rebuilt from a copy of its database, remove the old key with 'sudo"
+                + " ssh-keygen -R main', re-run 'sudo sail init --main sail@main' and compare the"
+                + " fingerprint it prints with main's ('sudo ssh-keygen -lf"
+                + " /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise something between this"
+                + " box and main is answering for it."),
         hints(SUDO));
   }
 
@@ -133,9 +135,10 @@ class OperatorHintsTest {
                 + " connect with, then apply the project to put it in the container:\n"
                 + "    sail host config set ssh-public-key\n"
                 + "    sail project apply gamma",
-            "If main was rebuilt, remove the old key with 'ssh-keygen -R main' and re-run 'sail"
-                + " init --main sail@main'; otherwise something between this box and main is"
-                + " answering for it."),
+            "If main was rebuilt from a copy of its database, remove the old key with 'ssh-keygen"
+                + " -R main', re-run 'sail init --main sail@main' and compare the fingerprint it"
+                + " prints with main's ('sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on"
+                + " main); otherwise something between this box and main is answering for it."),
         hints(PLAIN));
   }
 

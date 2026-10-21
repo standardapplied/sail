@@ -75,6 +75,25 @@ node` with `main: <ssh-target>`, or unset for standalone. `sail host sync --as-m
 `sail host sync --main <target>` set it. Main never initiates. Nodes pull from and push to
 main. Main failover is manual and out of scope for v1.
 
+Main's database is the org. Back up `/var/lib/sail/sail.db` (`sqlite3 /var/lib/sail/sail.db ".backup
+<copy>"`, or the file with sail-api stopped). Every database carries a catalog id
+(`DatabaseCatalog`), random, minted with the database and kept by every upgrade and every copy of
+the file, and main's welcome names it. A node records the catalog of the first main database that
+welcomes it and refuses any other before anything moves (`NodeRound.admit`): "Main at <target> is
+not the database this box synced with (catalog <old>, now <new>). Restore main's database
+(/var/lib/sail/sail.db) from a copy, then sync again." A main older than catalogs names none and
+could be any database, so it is refused too, before anything moves: "Main at <target> names no
+database catalog, so this box cannot tell whether it is the database it synced with: upgrade main
+('sudo sail upgrade' on main), then sync again." So a main set up again from a copy (`sudo sail init
+--as-main`, the copy put in place of its new database, then `sudo sail migrate`, which also restores
+the sail user's keys from it) is the same main to every node, which then pushes whatever it has not
+pushed yet (work main took after the copy is lost with it); a main set up empty is a new org, and
+its nodes refuse it. A main restored in place from an older copy keeps its box id, so its log sits
+below the node's checkpoint: the node then walks every head again from the copy instead of reading
+nothing and saying it is in sync. A box that stops being a node forgets main's catalog as it forgets
+its scope. A copy taken before the release that mints catalog ids is minted a new one when restored,
+so take a fresh copy after upgrading. Main is never rebuilt from its nodes.
+
 ## Module layout
 
 Three Maven modules, Java 25, one native binary.
@@ -188,6 +207,7 @@ and the spec that closes it.
 | I2 | On a node only the box's FDE, its runs and FDE-less credentials write; any other credential reads. | `RoleRuleTest`, `NodeWritesTest`, `DeniedSyncTest` |
 | I3 | Main and the node agree who the node is, and one box syncs as each FDE. | `NodeIdentitySyncTest`, `SyncServerCommandTest` (main's own FDE), `FdeCommandTest` (`release-box`) |
 | I4 | Every run a box executes carries that box's handle as `node` and `owner`. | `BoxRunsSyncTest`, `RunAuthorityTest`, `RunStoreTest` (stamps; never another box's run), `SyncConfigTest` (one handle), `HandleChangeTest`, `JoinCommandTest`, `HostConfigSetCommandTest`, `HostSyncCommandTest`, `RoomWakeLaunchTest` |
+| I5 | A node syncs only with the main database it first synced with: a welcome naming another catalog, or none at all, ends the round before any row moves, "Already in sync" is said only after a round with the recorded one, and a log below the node's checkpoint is walked again from its first head. | `DatabaseCatalogTest` (minted per database, kept by upgrades and copies, the first main recorded), `SchemaManagerTest` (a database from before catalogs), `SyncWireTest`, `NodeRoundAdmitTest`, `MainRebuiltRoundTest` (an empty main under a new or the same box id refused with nothing moved either way; a main that names no catalog refused with nothing moved before the node recorded one; a main restored from a copy takes the node's newer work; one restored in place from an older copy is paged from the copy; a node from before catalogs records main's), `HandleChangeTest` and `SyncCliTest` (a box that stops being a node forgets main's catalog), `NativeFleetIT` (an empty main set up again at the node's address; one restored from a copy) |
 | A1 | Who may write a synced row is one rule per type in sail-core; the same write gets the same refusal kind and code at every door and on main. | the rules: `SpecAuthorityTest`, `RoomAuthorityTest`, `ReviewAuthorityTest`, `RunAuthorityTest` (a run is created only for the owner of the spec or room it names, on every lane), `MessageAuthorityTest`, `WriterAuthorityTest`, `ProjectAuthorityTest` (a rename is an admin's); the doors: `NodeWritesTest` (one refusal — kind, code, message and fix — through an API token, a passkey session, a gateway session, the box credential, a run and a room run; the terminal keeps its own text), `AuthorityAuditTest` (a viewer's edit over HTTP as on the host CLI; a room's delete and its membership; a spec born over its owner's room at the door as on main; a merged resolve), `SailOperationsSeamTest` (a resolve: adopting main's side decides nothing, keeping or merging is an edit, on the socket and both web lanes), `CatalogAuthorityAuditTest` (the host CLI's catalog edit, project files and rename), `AdhocDispatchTest` (ad-hoc runs), `OneDecisionTest` (spec edits, posts); main: `PushAuthoritySyncTest` (a pushed run on another FDE's spec is denied, and so is one naming its own spec and another member's room; one ahead of a spec its box made lands), `DeniedSyncTest` |
 | A2 | No code path writes a synced row without its rule deciding it: a pushed revision at main's commit, every other write at the journal, each exactly once. | `JournalDecidesEveryWriteTest` (every public store method that reaches the journal, read from the stores' bytecode, is refused on the CLI, API, agent and room lanes and leaves nothing; a revision never admits itself; a refusal swallowed inside a transaction still rolls it back; a pushed revision is not decided twice), `OneDecisionPointTest` (in every module's classes only the journal and the message store append a revision, only they ask a write rule, and only main's commit takes a store's rule), `RevisionJournalTest`, `SqliteTest` (a doomed transaction); an operation's rows commit together or not at all: `GlobalSpecOperationsTest` (an update with its wake; the move to done; a delete), `ReviewOperationsTest` (a follow-up with its links), `BuildDispatchCoverageTest` (a dispatch and a restart: reservation, reset, claim, supersede), `SpecPruneTest` (a restore with its room) |
 | A3 | An event, hook or reactor never makes the machinery do what its sender could not. | the rule: `EventAuthorityTest` (every listed type and rule; every unlisted type refused; a run decides what its event is about and its spec whose it is; only this box's FDE reports what this box observed); both doors with the real subscribers behind them: `EventDoorTest` (a member's stop, completion, failure and review evidence for another member's spec, run or room never reach the bus, so the spec stays, the run stays and the reconciler still rescues; a run a member pushed is no key to another member's spec; an owner is not taken at their word for what this box observed; an owner's retelling and an admin's report land; a run publishes only its hooks; the server's clock, publisher and stored message replace the sender's); every real publisher through its own code path: `EventPublishersTest` (the host CLI's dispatch, restart, ad-hoc run and stop, the watcher's stop, a node's sync announcement, main's sync bridge relaying as the FDE who pushed, and refusing a pushed run on another member's spec); the socket's scoping to the credential's run: `LocalApiRouterTest`, `AgentPrincipalLifecycleTest` |
@@ -492,7 +512,9 @@ A session opens with `hello` (protocol, build, fleet floor, box id) and is `welc
 `refuse`d once; floors compare as versions. The `welcome` names the handle main authenticated the
 session as and main's `limits.file_max`, so the node enforces the lower of its own limit and
 main's before a file ever reaches a sync; a node whose configured sync handle is blank or another
-does nothing that round (`NodeRound.begin`); an older main names neither and is not asked. Main records the first box that
+does nothing that round (`NodeRound.begin`); an older main names neither and is not asked. It
+names main's database catalog too, which the node checks before anything else
+(`NodeRound.admit`, see Topology). Main records the first box that
 syncs as each FDE (`fde_boxes`, never synced; main's own FDE's box is main) and refuses a session
 from any other until an admin runs `sail fde release-box`; removing an FDE releases its box. A
 node's answer to an offer main took can be lost on the way back. Main records the box each
@@ -741,8 +763,10 @@ join` generated, so a missing key fails fast. Host keys are checked in batch mod
 account's `known_hosts`, where join pinned main's ed25519 key (see Onboarding); a round that
 fails on it quotes ssh's own last stderr line ("ssh said: Host key verification failed.") and
 names the whole recovery in `MainHostKey.rebuiltRecovery`'s words, the same sentence join's
-refusal of a changed key carries: remove the old pin with `sudo ssh-keygen -R <host>`, then
-re-run `sudo sail init --main <target>`. On main, that key sits on the locked `sail`
+refusal of a changed key carries: if main was rebuilt from a copy of its database, remove the
+old pin with `sudo ssh-keygen -R <host>`, re-run `sudo sail init --main <target>` and compare
+the fingerprint it prints with main's (`sudo ssh-keygen -lf
+/etc/ssh/ssh_host_ed25519_key.pub` on main). On main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`
@@ -866,12 +890,14 @@ handle is refused before any step): `host sync --as-main --handle` writes the ro
 sync handle in one identity change and adds that FDE as admin when the roster lacks it. On a node it means `join`, which
 first pins main's ed25519 host key into the invoking account's `known_hosts` (`MainHostKey`:
 `ssh-keyscan -H` on port 22, appended when absent, kept when equal, refused when it differs or
-cannot be read, all before the host config is written), then generates the box's sync key and
-prints the `sudo sail fde add … --key … --main-host-key SHA256:…` line for the operator to run
-on main. A re-join with the sync key the box already had opens one sync session to main as the
+cannot be read, all before the host config is written), prints "Pinned main's host key
+SHA256:…. Check it on main: sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub", then
+generates the box's sync key and prints the `sudo sail fde add … --key … --main-host-key
+SHA256:…` line for the operator to run on main. A re-join with the sync key the box already had opens one sync session to main as the
 joined handle (`SyncOperations.welcomedAs`): a welcome as that handle means main holds the key,
 and the join says so instead of printing the line (`--json` still carries it); anything else,
-main unreachable included, is no evidence, and the line is printed.
+main unreachable included, is no evidence, and the line is printed. The probe prints nothing of
+its own.
 Each step runs through `Main.report`, so a refusal inside init is printed once with no trace,
 then "Setup stopped" once. Main's `fde add` compares that fingerprint to its own host key before its
 transaction and refuses a mismatch, so a join that something else answered is never

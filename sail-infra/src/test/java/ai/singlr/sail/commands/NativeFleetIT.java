@@ -38,7 +38,8 @@ class NativeFleetIT {
           () -> {
             main.createSpecs("seed", 5, BODY_BYTES);
             main.shOk(
-                "dd if=/dev/urandom of=/tmp/shared.bin bs=1M count=3 status=none && chmod 644 /tmp/shared.bin");
+                "dd if=/dev/urandom of=/tmp/shared.bin bs=1M count=3 status=none && chmod 644"
+                    + " /tmp/shared.bin");
             main.sailOk(
                 "project", "files", "add", "-p", "demo", "/tmp/shared.bin", "--as", "shared.bin");
             main.apiOk("spec", "update", "seed-1", "--assignee", "mady");
@@ -129,7 +130,8 @@ class NativeFleetIT {
       main.serving(
           () -> {
             main.shOk(
-                "dd if=/dev/urandom of=/tmp/large.bin bs=1M count=40 status=none && chmod 750 /tmp/large.bin");
+                "dd if=/dev/urandom of=/tmp/large.bin bs=1M count=40 status=none && chmod 750"
+                    + " /tmp/large.bin");
             main.sailOk(
                 "project", "files", "add", "-p", "demo", "/tmp/large.bin", "--as", "large.bin");
           });
@@ -194,8 +196,10 @@ class NativeFleetIT {
               .output()
               .contains(
                   "hello: Sync channel closed before main replied. ssh said: Host key verification"
-                      + " failed. If main was rebuilt, remove the old key with 'ssh-keygen -R"
-                      + " localhost' and re-run 'sail init --main sail@localhost'; otherwise"
+                      + " failed. If main was rebuilt from a copy of its database, remove the old"
+                      + " key with 'ssh-keygen -R localhost', re-run 'sail init --main"
+                      + " sail@localhost' and compare the fingerprint it prints with main's ('sudo"
+                      + " ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub' on main); otherwise"
                       + " something between this box and main is answering for it."),
           refused::output);
 
@@ -207,6 +211,86 @@ class NativeFleetIT {
       assertFalse(rejoined.contains("fde add"), rejoined);
       mady.sailOk("sync");
       fleet.assertConverged(mady);
+    }
+  }
+
+  @Test
+  void aNodeRefusesAnEmptyMainSetUpAgainAtItsAddressAndMovesNothing() throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.serving(() -> main.createSpecs("seed", 2, 1_000));
+      var mady = fleet.node("mady", fleet.candidate());
+      mady.sailOk("sync");
+      fleet.assertConverged(mady);
+      fleet.offline(mady, () -> mady.createSpecs("node-new", 1, 1_000));
+      var synced = main.query("SELECT id FROM catalog").strip();
+      var nodeBefore = mady.replicated();
+
+      fleet.rebuildMain(null);
+      mady.shOk("ssh-keygen -R localhost");
+      var joined = NativeFleet.json(mady.sailOk("join", "localhost", "--handle", "mady", "--json"));
+      main.sailOk(
+          "fde",
+          "add",
+          "mady",
+          "--role",
+          "member",
+          "--email",
+          "mady@example.dev",
+          "--key",
+          (String) joined.get("public_key"),
+          "--main-host-key",
+          (String) joined.get("main_host_key"));
+      var mainBefore = main.replicated();
+      var refused = mady.sail("sync");
+
+      assertEquals(1, refused.exit(), refused::output);
+      assertTrue(
+          refused
+              .output()
+              .contains(
+                  "Main at sail@localhost is not the database this box synced with (catalog "
+                      + synced
+                      + ", now "
+                      + main.query("SELECT id FROM catalog").strip()
+                      + "). Restore main's database (/var/lib/sail/sail.db) from a copy, then"
+                      + " sync again."),
+          refused::output);
+      assertFalse(refused.output().contains("Already in sync"), refused::output);
+      assertEquals(mainBefore, main.replicated());
+      assertEquals(nodeBefore, mady.replicated());
+    }
+  }
+
+  @Test
+  void aMainSetUpAgainFromACopyOfItsDatabaseIsTheSameMainAndTakesTheNodesNewerWork()
+      throws Exception {
+    try (var fleet = NativeFleet.openOrSkip()) {
+      var main = fleet.main("uday", fleet.candidate());
+      main.serving(() -> main.createSpecs("seed", 2, 1_000));
+      var mady = fleet.node("mady", fleet.candidate());
+      mady.sailOk("sync");
+      fleet.assertConverged(mady);
+      main.shOk("sqlite3 /var/lib/sail/sail.db \".backup /root/sail.db.copy\"");
+      fleet.offline(mady, () -> mady.createSpecs("node-new", 1, 1_000));
+
+      fleet.rebuildMain("/root/sail.db.copy");
+      mady.shOk("ssh-keygen -R localhost");
+      var rejoined = mady.sailOk("join", "localhost", "--handle", "mady");
+      var fingerprint = main.shOk("ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub").split(" ")[1];
+
+      assertTrue(
+          rejoined.contains(
+              "Pinned main's host key "
+                  + fingerprint
+                  + ". Check it on main: sudo ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub"),
+          rejoined);
+      assertTrue(rejoined.contains("Main already has this box's key."), rejoined);
+      mady.sailOk("sync");
+      assertEquals("1", main.query("SELECT count(*) FROM specs WHERE id = 'node-new-1'").strip());
+      fleet.assertConverged(mady);
+      var again = mady.sailOk("sync");
+      assertTrue(again.contains("Already in sync with main."), again);
     }
   }
 
@@ -282,7 +366,9 @@ class NativeFleetIT {
             main.apiOk("spec", "prune", "doomed-1", "--apply");
           });
       main.shOk(
-          "printf '#!/bin/sh\\necho \"[]\"\\n' > /usr/local/bin/incus && chmod 755 /usr/local/bin/incus");
+          "printf '#!/bin/sh\\n"
+              + "echo \"[]\"\\n"
+              + "' > /usr/local/bin/incus && chmod 755 /usr/local/bin/incus");
       main.sailOk("project", "destroy", "scratch", "--purge", "--yes", "--json");
       mady.sailOk("sync");
 
@@ -371,7 +457,8 @@ class NativeFleetIT {
             var listed =
                 nia.shOk(
                     "ssh -o BatchMode=yes -o IdentitiesOnly=yes -i /root/.sail/sync_ed25519"
-                        + " sail@localhost spec list --all-projects --json --server http://127.0.0.1:7171");
+                        + " sail@localhost spec list --all-projects --json --server"
+                        + " http://127.0.0.1:7171");
             assertTrue(listed.contains("\"a-1\"") && listed.contains("\"a-2\""), listed);
             assertFalse(listed.contains("b-1") || listed.contains("beta"), listed);
           });
@@ -575,7 +662,8 @@ class NativeFleetIT {
             "role": "build", "agent": "claude", "status": "completed",
             "started_at": "2026-09-01T00:00:00Z", "repos": [], "principals": []}');
       INSERT INTO change_heads (entity_type, entity_id, seq)
-      VALUES ('run', '%1$s', last_insert_rowid());"""
+      VALUES ('run', '%1$s', last_insert_rowid());\
+      """
           .formatted(DOOMED_RUN);
 
   /**

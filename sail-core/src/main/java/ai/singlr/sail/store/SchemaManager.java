@@ -91,8 +91,9 @@ public final class SchemaManager {
    * record of the one box each FDE syncs from), {@code materialized_files} (the versions of each
    * shared file this box wrote to disk or published), {@code fde_pairings} (the key and token this
    * box made for each FDE's Mast), {@code project_grants} (the projects main granted each scoped
-   * FDE) and {@code sync_scope} (the scope main last named for this node) are local-only as well —
-   * none of the nine ever joins a sync snapshot.
+   * FDE), {@code sync_scope} (the scope main last named for this node) and {@code catalog} (which
+   * database this is, and which of main's a node syncs with) are local-only as well — none of the
+   * ten ever joins a sync snapshot.
    */
   /**
    * One-time sweep of the review-loop convergence gap: findings a spec shipped below the gate were
@@ -250,6 +251,14 @@ public final class SchemaManager {
           granted_at TEXT NOT NULL,
           PRIMARY KEY (fde_id, project)
       )""";
+
+  /**
+   * Which database this is: a random id minted with the database and kept by every upgrade and
+   * every copy of its file, and, on a node, the catalog of the main database it syncs with,
+   * recorded from the first welcome that names one ({@link DatabaseCatalog}).
+   */
+  static final String CATALOG =
+      "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";
 
   /**
    * The project each change head belongs to, null when unknown, so a page is scoped from the head
@@ -797,7 +806,8 @@ public final class SchemaManager {
           "DROP TRIGGER specs_status_since_insert",
           STATUS_SINCE_REVISION_ON_INSERT,
           "DROP TRIGGER specs_status_since_update",
-          STATUS_SINCE_REVISION_ON_UPDATE);
+          STATUS_SINCE_REVISION_ON_UPDATE,
+          CATALOG);
 
   /** The schema version this binary converges every database to. */
   static final int CURRENT_VERSION = V1_VERSION + MIGRATIONS.size();

@@ -202,6 +202,9 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    */
   void keep(Set<String> projects);
 
+  /** The catalog of main's database as its welcome named it; empty from a main that never says. */
+  Optional<String> catalog();
+
   /** The box id main welcomed this session as: the peer this node's checkpoints are kept for. */
   String mainId();
 

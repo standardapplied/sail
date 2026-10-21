@@ -138,4 +138,9 @@ record ScopedLocalReplica(LocalReplica inner, Set<String> ids, Set<String> unsee
   public void advanceCheckpoint(String peerId, long seq) {
     inner.advanceCheckpoint(peerId, seq);
   }
+
+  @Override
+  public void forgetCheckpoints(String peerId) {
+    inner.forgetCheckpoints(peerId);
+  }
 }

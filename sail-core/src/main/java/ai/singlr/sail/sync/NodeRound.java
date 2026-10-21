@@ -7,9 +7,11 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.Decidability;
 import ai.singlr.sail.store.Erasure;
 import ai.singlr.sail.store.FileStore;
@@ -18,6 +20,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.SyncState;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -34,7 +37,50 @@ import java.util.stream.Collectors;
  */
 public final class NodeRound {
 
+  /** Where main keeps its database: the org, which every node's catalog names. */
+  private static final Path MAIN_DATABASE = SailPaths.systemDataDir().resolve("sail.db");
+
   private NodeRound() {}
+
+  /**
+   * Refuses {@code session}, before anything is offered, adopted or recorded, unless main at {@code
+   * target} serves the database this node, whose database is {@code db}, synced with: main set up
+   * empty at the same address welcomes the node as readily as the main it replaced. The first
+   * welcome that names a catalog is recorded as main's ({@link DatabaseCatalog#recordMain}). A main
+   * that names none predates catalogs, and could be any database at all, so it is refused too:
+   * asked to upgrade before this node has recorded a catalog, told it is another database after.
+   */
+  public static void admit(SyncSession session, Sqlite db, String target) {
+    var catalog = new DatabaseCatalog(db);
+    var offered = session.catalog();
+    var synced = offered.map(catalog::recordMain).or(catalog::main);
+    if (synced.isEmpty()) {
+      throw new SyncTransportException(
+          "refused",
+          "Main at "
+              + target
+              + " names no database catalog, so this box cannot tell whether it is the database"
+              + " it synced with: upgrade main ('"
+              + OperatorCommand.elsewhere("upgrade")
+              + "' on main), then sync again.",
+          null);
+    }
+    if (synced.equals(offered)) {
+      return;
+    }
+    throw new SyncTransportException(
+        "refused",
+        "Main at "
+            + target
+            + " is not the database this box synced with (catalog "
+            + synced.get()
+            + ", now "
+            + offered.orElse("none")
+            + "). Restore main's database ("
+            + MAIN_DATABASE
+            + ") from a copy, then sync again.",
+        null);
+  }
 
   /**
    * Begins a round over {@code session} for the node whose database is {@code db} and whose
