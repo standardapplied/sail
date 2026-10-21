@@ -255,7 +255,7 @@ public final class SchemaManager {
   /**
    * Which database this is: a random id minted with the database and kept by every upgrade and
    * every copy of its file, and, on a node, the catalog of the main database it syncs with,
-   * recorded by its first round ({@link DatabaseCatalog}).
+   * recorded from the first welcome that names one ({@link DatabaseCatalog}).
    */
   static final String CATALOG =
       "CREATE TABLE catalog AS SELECT lower(hex(randomblob(16))) AS id, NULL AS main";

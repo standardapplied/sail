@@ -7,6 +7,7 @@ package ai.singlr.sail.store;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
@@ -55,6 +56,30 @@ class DatabaseCatalogTest {
 
       assertEquals(Optional.of("aaaa"), catalog.main());
       assertEquals(List.of(1L), db.query("SELECT count(*) FROM catalog", row -> row.integer(0)));
+    }
+  }
+
+  @Test
+  void aBoxThatIsNoLongerANodeForgetsMainsCatalogAndRecordsTheNextItIsOffered() {
+    try (var db = migrated(dir.resolve("node.db"))) {
+      var catalog = new DatabaseCatalog(db);
+      catalog.recordMain("aaaa");
+
+      catalog.forgetMain();
+
+      assertEquals(Optional.empty(), catalog.main());
+      assertEquals("bbbb", catalog.recordMain("bbbb"));
+    }
+  }
+
+  @Test
+  void aBlankCatalogIsNeverRecorded() {
+    try (var db = migrated(dir.resolve("node.db"))) {
+      var catalog = new DatabaseCatalog(db);
+
+      assertThrows(IllegalArgumentException.class, () -> catalog.recordMain(" "));
+
+      assertEquals(Optional.empty(), catalog.main());
     }
   }
 }

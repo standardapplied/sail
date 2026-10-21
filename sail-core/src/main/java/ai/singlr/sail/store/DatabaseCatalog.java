@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.store;
 
+import ai.singlr.sail.common.Strings;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -39,8 +40,13 @@ public final class DatabaseCatalog {
    * recorded: {@code offered} itself only when it is the database this node synced with.
    */
   public String recordMain(String offered) {
-    Objects.requireNonNull(offered, "offered");
+    Strings.requireNonBlank(offered, "catalog");
     db.execute("UPDATE catalog SET main = ? WHERE main IS NULL", offered);
     return main().orElseThrow();
+  }
+
+  /** Forgets main's catalog: a box that is no longer a node synced with no main database. */
+  public void forgetMain() {
+    db.execute("UPDATE catalog SET main = NULL");
   }
 }

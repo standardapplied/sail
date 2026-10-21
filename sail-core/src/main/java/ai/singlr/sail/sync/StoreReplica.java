@@ -320,6 +320,11 @@ public final class StoreReplica implements LocalReplica, MainReplica {
     syncState.advance(peerId, store.entityType(), seq);
   }
 
+  @Override
+  public void forgetCheckpoints(String peerId) {
+    syncState.reset(peerId);
+  }
+
   private Optional<ChangeLog.Entry> erasure(String entityId) {
     return changeLog.erasure(store.entityType(), entityId);
   }

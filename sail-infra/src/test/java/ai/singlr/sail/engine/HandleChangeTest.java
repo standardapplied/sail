@@ -24,6 +24,7 @@ import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
@@ -477,23 +478,27 @@ class HandleChangeTest {
   }
 
   @Test
-  void aBoxThatStopsBeingANodeForgetsTheScopeMainNamedIt() throws Exception {
+  void aBoxThatStopsBeingANodeForgetsTheScopeAndTheCatalogMainNamedIt() throws Exception {
     new SyncScope(db).record(ProjectScope.of(List.of("acme")));
+    new DatabaseCatalog(db).recordMain("cat-a");
 
     apply(node("ada"), main("ada"));
 
     assertTrue(new SyncScope(db).held().unrestricted());
+    assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
     assertTrue(written.get());
   }
 
   @Test
-  void aNodeRenamedStaysANodeAndKeepsTheScopeMainNamedIt() throws Exception {
+  void aNodeRenamedStaysANodeAndKeepsTheScopeAndTheCatalogMainNamedIt() throws Exception {
     var granted = ProjectScope.of(List.of("acme"));
     new SyncScope(db).record(granted);
+    new DatabaseCatalog(db).recordMain("cat-a");
 
     apply(node("ada"), node("uday"));
 
     assertEquals(granted, new SyncScope(db).held());
+    assertEquals(Optional.of("cat-a"), new DatabaseCatalog(db).main());
     assertTrue(written.get());
   }
 

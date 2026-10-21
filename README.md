@@ -61,9 +61,10 @@ sudo systemctl start sail-api
 
 Each node then re-pins main's new host key (`sudo ssh-keygen -R <main-ip>`, then `sudo sail init
 --main <main-ip>`; compare the fingerprint it prints with `sudo ssh-keygen -lf
-/etc/ssh/ssh_host_ed25519_key.pub` on main), and its next `sudo sail sync` pushes whatever it wrote
-since the copy. A main set up empty is a new org: every node refuses to sync with it. A copy taken
-before 0.54.0 counts as a new org too, so take a fresh one after upgrading.
+/etc/ssh/ssh_host_ed25519_key.pub` on main), and its next `sudo sail sync` pushes whatever it has
+not pushed yet; work main took after the copy and lost with it is not rebuilt from the node. A main
+set up empty is a new org: every node refuses to sync with it. A copy taken before 0.54.0 counts as
+a new org too, so take a fresh one after upgrading.
 
 Mast, the desktop client, is a thin client of a box: specs, rooms and reviews over its API and
 event stream, terminals and files over its pty host.

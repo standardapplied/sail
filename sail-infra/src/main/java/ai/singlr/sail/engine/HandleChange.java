@@ -11,6 +11,7 @@ import ai.singlr.sail.config.SyncConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BoxCredentialStore;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.MigrationRunner;
 import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.Sqlite;
@@ -175,6 +176,7 @@ public final class HandleChange {
     write.run();
     if (leftNode) {
       new SyncScope(db).record(ProjectScope.all());
+      new DatabaseCatalog(db).forgetMain();
     }
     return after.isMain()
         ? runs.stampUnstamped(after.handle())

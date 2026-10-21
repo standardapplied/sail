@@ -31,6 +31,7 @@ import ai.singlr.sail.identity.Role;
 import ai.singlr.sail.store.ContentMigration;
 import ai.singlr.sail.store.DataMigration;
 import ai.singlr.sail.store.DataMigrations;
+import ai.singlr.sail.store.DatabaseCatalog;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.MaterializedFilesMigration;
@@ -288,6 +289,7 @@ class SyncCliTest {
     HeldProjects.hold(db, "acme", "beta");
     var granted = ProjectScope.of(List.of("acme"));
     new SyncScope(db).record(granted);
+    new DatabaseCatalog(db).recordMain("cat-a");
     switch (scenario) {
       case "scope-start-gone" -> Files.delete(SailPaths.hostConfigPath());
       case "scope-start-torn" -> Files.writeString(SailPaths.hostConfigPath(), "");
@@ -305,12 +307,14 @@ class SyncCliTest {
     var push = projects.refusesInto(Actor.sync("nia", Role.MEMBER), null, "beta", true);
     if (scenario.endsWith("-main") || scenario.endsWith("-standalone")) {
       assertEquals(ProjectScope.all(), new SyncScope(db).held());
+      assertEquals(Optional.empty(), new DatabaseCatalog(db).main());
       assertEquals(Optional.empty(), push);
       Acting.as("ada", () -> new SpecStore(db).create(spec("b1", "beta")));
       assertEquals("beta", new SpecStore(db).findById("b1").orElseThrow().project());
       return;
     }
     assertEquals(granted, new SyncScope(db).held());
+    assertEquals(Optional.of("cat-a"), new DatabaseCatalog(db).main());
     assertTrue(push.isPresent());
   }
 

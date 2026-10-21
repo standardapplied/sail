@@ -7,6 +7,7 @@ package ai.singlr.sail.sync;
 
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.ChangeLog;
@@ -19,6 +20,7 @@ import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SyncLimits;
 import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.SyncState;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -36,7 +38,7 @@ import java.util.stream.Collectors;
 public final class NodeRound {
 
   /** Where main keeps its database: the org, which every node's catalog names. */
-  private static final String MAIN_DATABASE = "/var/lib/sail/sail.db";
+  private static final Path MAIN_DATABASE = SailPaths.systemDataDir().resolve("sail.db");
 
   private NodeRound() {}
 
@@ -58,7 +60,9 @@ public final class NodeRound {
           "Main at "
               + target
               + " names no database catalog, so this box cannot tell whether it is the database"
-              + " it synced with: upgrade main first, then sync again.",
+              + " it synced with: upgrade main ('"
+              + OperatorCommand.elsewhere("upgrade")
+              + "' on main), then sync again.",
           null);
     }
     if (synced.equals(offered)) {

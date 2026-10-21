@@ -159,6 +159,14 @@ class MainRebuiltRoundTest {
     Acting.as("nia", () -> new SpecStore(nodeDb).create(spec(id)));
   }
 
+  private static void mainWrite(Main main, String id) {
+    Acting.as("nia", () -> new SpecStore(main.db()).create(spec(id)));
+  }
+
+  /**
+   * The synced rows a database holds, its log and its checkpoints. Main's own record of the box
+   * that said hello ({@code fde_boxes}) is local to main and never synced, so it is not here.
+   */
   private static List<String> held(Sqlite db) {
     var held = new ArrayList<String>();
     held.addAll(db.query("SELECT 'project ' || name FROM projects ORDER BY name", r -> r.text(0)));
@@ -258,6 +266,28 @@ class MainRebuiltRoundTest {
   }
 
   @Test
+  void aMainRestoredInPlaceFromAnOlderCopyIsPagedFromTheCopyNotFromTheNodesOldCheckpoint()
+      throws Exception {
+    round();
+    var restored = copyOf(serving, "copy.db", serving.id());
+    for (var id : List.of("m1", "m2", "m3")) {
+      mainWrite(serving, id);
+    }
+    round();
+    serving = restored;
+    mainWrite(restored, "m4");
+
+    var round = round();
+
+    assertNotEquals("  ✓ Already in sync with main.", rendered(round));
+    assertEquals(
+        List.of("m4"),
+        nodeDb.query("SELECT id FROM specs WHERE id = 'm4'", r -> r.text(0)),
+        "main's write after the restore reaches the node");
+    assertEquals("  ✓ Already in sync with main.", rendered(round()));
+  }
+
+  @Test
   void aNodeThatSyncedBeforeCatalogsRecordsMainsOnItsNextRound() throws Exception {
     round();
     nodeDb.execute("UPDATE catalog SET main = NULL");
@@ -316,7 +346,8 @@ class MainRebuiltRoundTest {
     assertEquals("refused", refused.kind());
     assertEquals(
         "Main at sail@main names no database catalog, so this box cannot tell whether it is the"
-            + " database it synced with: upgrade main first, then sync again.",
+            + " database it synced with: upgrade main ('sudo sail upgrade' on main), then sync"
+            + " again.",
         refused.getMessage());
     assertEquals(before, held(nodeDb));
   }

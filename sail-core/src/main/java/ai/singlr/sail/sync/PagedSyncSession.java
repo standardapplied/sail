@@ -280,6 +280,10 @@ public final class PagedSyncSession implements SyncSession {
     }
     acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
+    if (tip < since) {
+      local.forgetCheckpoints(mainId);
+      since = 0;
+    }
     var report = SyncEngine.Report.NONE;
     var pages = 0;
     var entries = 0;
