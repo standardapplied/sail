@@ -5,17 +5,45 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.Sail;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
 class ProjectRenameCommandTest {
+
+  @AfterEach
+  void restoreConsole() {
+    ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
+    ConsoleHelper.resetStdin();
+  }
+
+  @Test
+  void aRenameNobodyCanConfirmIsRefusedNamingYes() {
+    ConsoleHelper.terminal = () -> false;
+
+    var refused =
+        assertThrows(
+            CliCommand.Refused.class, () -> ProjectRenameCommand.confirm(false, "acme", "beta"));
+
+    assertEquals(
+        "Not renamed: no terminal to confirm on. Re-run with --yes.", refused.getMessage());
+  }
+
+  @Test
+  void yesOrJsonAsksNothing() {
+    ConsoleHelper.terminal = () -> false;
+
+    assertDoesNotThrow(() -> ProjectRenameCommand.confirm(true, "acme", "beta"));
+  }
 
   @Test
   void registeredUnderProject() {

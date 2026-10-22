@@ -6,6 +6,8 @@
 package ai.singlr.sail.engine;
 
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.ChangeLog;
 import ai.singlr.sail.store.Erasure;
@@ -16,6 +18,7 @@ import ai.singlr.sail.store.SyncScope;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.function.Supplier;
 
 /**
  * Records a project's definition into the control-plane catalog (the {@code projects} table), the
@@ -73,7 +76,7 @@ public final class ProjectCatalog {
     }
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      requireInScope(db, name);
+      requireInScope(db, operator::actingFde, name);
       Actor.call(operator, () -> new ProjectStore(db).decide(name, Map.of()))
           .ifPresent(
               refused -> {
@@ -88,28 +91,28 @@ public final class ProjectCatalog {
    * box no welcome has scoped, and one with no catalog yet, refuses nothing.
    */
   public static void requireInScope(String name) {
-    requireInScope(SailPaths.controlPlaneDb(), name);
+    requireInScope(SailPaths.controlPlaneDb(), () -> BoxIdentity.config().handle(), name);
   }
 
-  static void requireInScope(Path catalog, String name) {
+  /** As {@link #requireInScope(String)}, naming in its refusal the box's FDE {@code handle}. */
+  static void requireInScope(Path catalog, Supplier<String> handle, String name) {
     if (!Files.isRegularFile(catalog)) {
       return;
     }
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
-      requireInScope(db, name);
+      requireInScope(db, handle, name);
     }
   }
 
-  private static void requireInScope(Sqlite db, String name) {
+  private static void requireInScope(Sqlite db, Supplier<String> handle, String name) {
     if (!new SyncScope(db).held().admits(name)) {
-      throw new IllegalStateException(
+      var fde = handle.get();
+      throw Remedied.state(
           "Project '"
               + name
-              + "' is outside the projects main grants this box, so main would take nothing of it."
-              + " Ask an admin to grant it on main: "
-              + OperatorCommand.SUDO.sail("fde grant <handle> " + name)
-              + ".");
+              + "' is outside the projects main grants this box, so main would take nothing of it.",
+          ProjectStore.ungranted(Strings.isBlank(fde) ? "<handle>" : fde, name));
     }
   }
 

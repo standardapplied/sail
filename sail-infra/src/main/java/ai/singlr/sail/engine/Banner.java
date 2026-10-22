@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -646,9 +647,12 @@ public final class Banner {
     table.render(out, ansi);
   }
 
-  /** Prints a bordered FDE list table. */
+  /** Prints a bordered FDE list table, {@code -} for a scope this box does not hold. */
   public static void printFdeTable(
-      List<FdeStore.Fde> fdes, Function<String, ProjectScope> scopeOf, PrintStream out, Ansi ansi) {
+      List<FdeStore.Fde> fdes,
+      Function<String, Optional<ProjectScope>> scopeOf,
+      PrintStream out,
+      Ansi ansi) {
     var table =
         new TableFormatter(" FDEs ", List.of("HANDLE", "NAME", "EMAIL", "ROLE", "STATUS", "SCOPE"));
     for (var fde : fdes) {
@@ -658,7 +662,7 @@ public final class Banner {
           orDash(fde.email()),
           fde.role(),
           fde.status(),
-          scopeLabel(scopeOf.apply(fde.handle())));
+          scopeOf.apply(fde.handle()).map(Banner::scopeLabel).orElse("-"));
     }
     table.render(out, ansi);
   }
@@ -1013,7 +1017,7 @@ public final class Banner {
         amber(
             ansi,
             "    @|faint Use '"
-                + operator.sail("project stop <name>")
+                + operator.sail("project stop <project>")
                 + "' to stop projects and free resources.|@"));
   }
 

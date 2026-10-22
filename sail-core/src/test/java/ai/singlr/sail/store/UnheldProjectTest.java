@@ -74,11 +74,12 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'beta' isn't on this box. Projects here: acme.",
-            Remedy.of(
-                "Ask an admin to grant it on main: ",
-                Remedy.sail("fde grant", "ada", "beta"),
-                ".")),
+            ProjectStore.ungranted("ada", "beta")),
         refused.refusal());
+    assertEquals(
+        "If an admin granted it since your last sync, run: sail sync. Otherwise ask an admin to"
+            + " grant it on main: sail fde grant ada beta.",
+        refused.refusal().fix().plain());
     assertEquals(0, count("SELECT count(*) FROM specs"));
   }
 
@@ -94,10 +95,7 @@ class UnheldProjectTest {
         new Refusal(
             Refusal.Kind.UNHELD_PROJECT,
             "Project 'beta' isn't on this box. Projects here: acme.",
-            Remedy.of(
-                "Ask an admin to grant it on main: ",
-                Remedy.sail("fde grant", "ada", "beta"),
-                ".")),
+            ProjectStore.ungranted("ada", "beta")),
         refused.refusal());
     assertEquals(0, count("SELECT count(*) FROM specs"));
   }

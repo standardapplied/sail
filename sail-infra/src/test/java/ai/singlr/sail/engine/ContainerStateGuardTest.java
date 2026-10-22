@@ -37,7 +37,8 @@ class ContainerStateGuardTest {
             IllegalStateException.class,
             () -> ContainerStateGuard.requireRunning(new ContainerState.NotCreated(), "demo"));
     assertEquals(
-        "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
+        "Project 'demo' has no container on this box. Create it: sail project apply demo",
+        ex.getMessage());
   }
 
   @Test
@@ -53,7 +54,7 @@ class ContainerStateGuardTest {
                     () ->
                         ContainerStateGuard.requireRunning(new ContainerState.Stopped(), "demo"))));
     assertEquals(
-        "Project 'demo' does not exist. Run 'sudo sail project apply <name>' first.",
+        "Project 'demo' has no container on this box. Create it: sudo sail project apply demo",
         sudo.render(
             (Remedied)
                 assertThrows(
@@ -91,7 +92,8 @@ class ContainerStateGuardTest {
             IllegalStateException.class,
             () -> ContainerStateGuard.requireCreated(new ContainerState.NotCreated(), "demo"));
     assertEquals(
-        "Project 'demo' does not exist. Run 'sail project apply <name>' first.", ex.getMessage());
+        "Project 'demo' has no container on this box. Create it: sail project apply demo",
+        ex.getMessage());
   }
 
   @Test

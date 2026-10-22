@@ -107,12 +107,7 @@ public final class MainHostKey {
               Remedy.sail("init", "--main", target),
               "."));
     }
-    var pinned =
-        entries.stream()
-            .filter(entry -> !entry.startsWith("@"))
-            .map(MainHostKey::keyOf)
-            .flatMap(Optional::stream)
-            .toList();
+    var pinned = pinnedKeys(entries);
     if (pinned.isEmpty()) {
       append(line);
       return key.fingerprint();
@@ -128,6 +123,20 @@ public final class MainHostKey {
           rebuiltRecovery(target));
     }
     return key.fingerprint();
+  }
+
+  /** The fingerprint of the key this box pinned for {@code target}'s host, when it pinned one. */
+  public Optional<String> pinned(String target)
+      throws IOException, InterruptedException, TimeoutException {
+    return pinnedKeys(entries(hostOf(target))).stream().map(SshPublicKey::fingerprint).findFirst();
+  }
+
+  private static List<SshPublicKey> pinnedKeys(List<String> entries) {
+    return entries.stream()
+        .filter(entry -> !entry.startsWith("@"))
+        .map(MainHostKey::keyOf)
+        .flatMap(Optional::stream)
+        .toList();
   }
 
   /**

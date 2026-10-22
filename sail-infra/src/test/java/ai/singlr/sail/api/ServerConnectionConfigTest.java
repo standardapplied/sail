@@ -36,17 +36,25 @@ class ServerConnectionConfigTest {
   }
 
   @Test
-  void missingTokenWithoutConfigThrows() {
+  void missingTokenBeforeInitNamesInit() {
     var error =
         assertThrows(
             IOException.class,
             () -> ServerConnectionConfig.resolve("http://localhost:7070", null, missingConfig()));
     assertEquals(
         "No API token configured — sail-api may not be installed or started on this box. On a dev"
-            + " box: sudo sail host service install (installs and starts the control plane).\n"
+            + " box: sudo sail init --as-main --handle <you>, or sudo sail init --main <main>"
+            + " (installs and starts the control plane).\n"
             + "  On a thin client: sail login.\n"
             + "  Or set SAIL_TOKEN, or pass --token-file.",
         OperatorCommand.SUDO.render((Remedied) error));
+    assertEquals(
+        "No API token configured — sail-api may not be installed or started on this box. On a dev"
+            + " box: sail init --as-main --handle <you>, or sail init --main <main> (installs and"
+            + " starts the control plane).\n"
+            + "  On a thin client: sail login.\n"
+            + "  Or set SAIL_TOKEN, or pass --token-file.",
+        OperatorCommand.PLAIN.render((Remedied) error));
   }
 
   @Test

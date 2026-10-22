@@ -305,28 +305,10 @@ public final class JoinCommand implements Runnable {
     return line == null || line.isBlank() ? gitDefault : line.strip();
   }
 
-  /**
-   * The {@code sail fde add} line main's operator runs to authorise this node, carrying the host
-   * key this node pinned for main so main refuses it when another box answered the join.
-   */
-  static String authorizeLine(
-      String handle, String name, String email, String publicKey, String mainHostKey) {
-    var line = new StringBuilder(OperatorCommand.SUDO.sail("fde add " + handle + " --role member"));
-    if (Strings.isNotBlank(name)) {
-      line.append(" --name \"").append(name).append('"');
-    }
-    if (Strings.isNotBlank(email)) {
-      line.append(" --email \"").append(email).append('"');
-    }
-    line.append(" --key \"").append(publicKey).append('"');
-    line.append(" --main-host-key ").append(mainHostKey);
-    return line.toString();
-  }
-
   /** Renders the join result — machine JSON or the human next-steps block. Pure for testing. */
   static String render(Plan plan, boolean json, OperatorCommand operator) {
     var authorize =
-        authorizeLine(
+        SshSyncChannel.authorizeLine(
             plan.handle(), plan.name(), plan.email(), plan.publicKey(), plan.mainHostKey());
     if (json) {
       var map = new LinkedHashMap<String, Object>();

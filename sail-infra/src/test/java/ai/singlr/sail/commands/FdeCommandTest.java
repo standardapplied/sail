@@ -36,6 +36,7 @@ import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import ai.singlr.sail.webauthn.RegisteredCredential;
@@ -1567,15 +1568,14 @@ class FdeCommandTest {
   }
 
   @Test
-  void aRemovalAnsweredWithAnEmptyLineOnATerminalIsCancelled() {
+  void aRemovalAnsweredWithAnEmptyLineOnATerminalIsAbortedAndExitsNonZero() {
     inDb(db -> new FdeStore(db).add("bob", null, null, "member"));
     answering("\n", true);
 
-    assertEquals(0, fde("rm", "bob"), refusal);
+    assertEquals(1, fde("rm", "bob"));
 
-    assertEquals(
-        List.of("  Remove FDE 'bob' and revoke all its credentials? [y/N]   Cancelled."),
-        printed());
+    assertEquals("Aborted.", refusal);
+    assertEquals(List.of("  Remove FDE 'bob' and revoke all its credentials? [y/N] "), printed());
     assertTrue(inDb(db -> new FdeStore(db).byHandle("bob")).isPresent());
   }
 
@@ -2023,7 +2023,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ client would see every project again. Its box holds them after its next sync;"
-                + " provision a container with 'sudo sail project apply <name>'."),
+                + " provision a container with 'sudo sail project apply <project>'."),
         printed());
     assertEquals(List.of("client acme"), grantRows());
 
@@ -2031,7 +2031,7 @@ class FdeCommandTest {
     assertEquals(
         List.of(
             "  ✓ client sees every project again. Its box holds them after its next sync;"
-                + " provision a container with 'sudo sail project apply <name>'."),
+                + " provision a container with 'sudo sail project apply <project>'."),
         printed());
     assertEquals("all", scopeColumnOf("client"));
     assertEquals(List.of(), grantRows());
@@ -2056,7 +2056,7 @@ class FdeCommandTest {
         List.of(
             "  ✓ Updated client (admin)",
             "  ✓ client sees every project again. Its box holds them after its next sync;"
-                + " provision a container with 'sudo sail project apply <name>'."),
+                + " provision a container with 'sudo sail project apply <project>'."),
         printed());
     assertEquals(0, fde("update", "client", "--role", "member", "--scoped", "--grant", "beta"));
     assertEquals(
@@ -2082,6 +2082,35 @@ class FdeCommandTest {
     main = "sail@main";
     assertEquals(1, fde("update", "client", "--scoped"));
     assertEquals(FdeCommand.rosterEditOnNodeMessage("Updating an FDE"), refusal);
+  }
+
+  @Test
+  void aNodeListsOnlyItsOwnScopeTheOneMainLastNamed() {
+    inDb(db -> new FdeStore(db).add("ada", null, null, "member"));
+    inDb(db -> new FdeStore(db).add("bob", null, null, "member"));
+    inDb(
+        db -> {
+          new SyncScope(db).record(ProjectScope.of(List.of("acme")));
+          return null;
+        });
+
+    main = "sail@main";
+    assertEquals(0, fde("list"));
+    var node = printed();
+    main = null;
+    assertEquals(0, fde("list"));
+    var onMain = printed();
+
+    assertEquals(List.of("1: acme", "-"), scopeColumn(node));
+    assertEquals(List.of("all", "all"), scopeColumn(onMain));
+  }
+
+  private static List<String> scopeColumn(List<String> table) {
+    return table.stream()
+        .filter(line -> line.contains("member"))
+        .map(line -> line.substring(line.indexOf("active") + "active".length()))
+        .map(cell -> cell.replace("│", "").strip())
+        .toList();
   }
 
   @Test

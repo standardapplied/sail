@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.ProjectScope;
@@ -59,31 +60,43 @@ class ProjectCatalogTest {
   void aNodeRefusesAProjectOutsideTheScopeMainNamedBeforeAnythingIsWritten() {
     var catalog = dir.resolve("sail.db");
     var nia = new Actor("nia", Role.ADMIN, Actor.Lane.CLI);
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "any"));
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "any"));
     assertFalse(Files.exists(catalog), "a check must not create the catalog");
     try (var db = Sqlite.open(catalog)) {
       new SchemaManager(db).migrate();
     }
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "beta"));
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "beta"));
     try (var db = Sqlite.open(catalog)) {
       new SyncScope(db).record(ProjectScope.of(List.of("alpha")));
     }
 
     var refused =
         assertThrows(
-            IllegalStateException.class, () -> ProjectCatalog.requireInScope(catalog, "beta"));
+            IllegalStateException.class,
+            () -> ProjectCatalog.requireInScope(catalog, () -> "client2", "beta"));
 
     assertEquals(
         "Project 'beta' is outside the projects main grants this box, so main would take nothing"
-            + " of it. Ask an admin to grant it on main: sudo sail fde grant <handle> beta.",
-        refused.getMessage());
+            + " of it. If an admin granted it since your last sync, run: sudo sail sync. Otherwise"
+            + " ask an admin to grant it on main: sudo sail fde grant client2 beta.",
+        OperatorCommand.SUDO.render((Remedied) refused));
     assertEquals(
-        refused.getMessage(),
+        "Project 'beta' is outside the projects main grants this box, so main would take nothing"
+            + " of it. If an admin granted it since your last sync, run: sail sync. Otherwise ask"
+            + " an admin to grant it on main: sail fde grant nia beta.",
         assertThrows(
                 IllegalStateException.class,
                 () -> ProjectCatalog.requireRecordable(catalog, "beta", nia))
             .getMessage());
-    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, "alpha"));
+    assertEquals(
+        "Project 'beta' is outside the projects main grants this box, so main would take nothing"
+            + " of it. If an admin granted it since your last sync, run: sail sync. Otherwise ask"
+            + " an admin to grant it on main: sail fde grant <handle> beta.",
+        assertThrows(
+                IllegalStateException.class,
+                () -> ProjectCatalog.requireInScope(catalog, () -> null, "beta"))
+            .getMessage());
+    assertDoesNotThrow(() -> ProjectCatalog.requireInScope(catalog, () -> "client2", "alpha"));
     assertDoesNotThrow(() -> ProjectCatalog.requireRecordable(catalog, "alpha", nia));
   }
 

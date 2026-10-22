@@ -381,27 +381,6 @@ class JoinCommandTest {
   }
 
   @Test
-  void authorizeLineCarriesNameAndEmailWhenPresent() {
-    assertEquals(
-        "sudo sail fde add mady --role member --name \"Mady M\" --email \"mady@example.com\""
-            + " --key \""
-            + PUB
-            + "\" --main-host-key "
-            + MAIN.fingerprint(),
-        JoinCommand.authorizeLine("mady", "Mady M", "mady@example.com", PUB, MAIN.fingerprint()));
-  }
-
-  @Test
-  void authorizeLineOmitsBlankNameAndEmail() {
-    assertEquals(
-        "sudo sail fde add mady --role member --key \""
-            + PUB
-            + "\" --main-host-key "
-            + MAIN.fingerprint(),
-        JoinCommand.authorizeLine("mady", null, "  ", PUB, MAIN.fingerprint()));
-  }
-
-  @Test
   void normalizeTargetPrependsTheImpliedSailUserForABareHost() {
     assertEquals("sail@maindevbox", JoinCommand.normalizeTarget("maindevbox"));
     assertEquals("sail@10.0.0.1", JoinCommand.normalizeTarget("  10.0.0.1 "));

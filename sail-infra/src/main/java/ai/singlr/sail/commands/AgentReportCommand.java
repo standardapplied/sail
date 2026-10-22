@@ -13,7 +13,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.AgentReporter;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
-import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.NodeIdentity;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -73,15 +73,7 @@ public final class AgentReportCommand implements Runnable {
     var shell = new ShellExecutor(false);
     var mgr = new ContainerManager(shell);
 
-    var state = mgr.queryState(name);
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored -> {}
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException("Project '" + name + "' does not exist.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
-    }
+    ContainerStateGuard.requireCreated(mgr.queryState(name), name);
 
     var reporter = new AgentReporter(shell);
     var report =

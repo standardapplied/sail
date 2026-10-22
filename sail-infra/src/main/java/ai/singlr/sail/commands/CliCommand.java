@@ -17,11 +17,16 @@ import java.util.Objects;
 import picocli.CommandLine.Help.Ansi;
 
 /**
- * Runs a command body and prints its failure once: the message, a refusal's fix, then any hint,
- * each command in them rendered for the account reading this terminal. The top-level handler
- * ({@link ai.singlr.sail.Main#report}) prints only what was not printed here.
+ * Runs a command body and prints its failure once: the message, a refusal's fix, then, for a
+ * failure sail did not decide ({@link Refused}), any hint, each command in them rendered for the
+ * account reading this terminal. The top-level handler ({@link ai.singlr.sail.Main#report}) prints
+ * only what was not printed here.
  */
 public final class CliCommand {
+
+  /** What a command that can rehearse itself says after a failure sail did not decide. */
+  static final String DRY_RUN_HINT =
+      "  If this is unexpected, re-run with --dry-run to see what would execute.";
 
   private CliCommand() {}
 
@@ -44,10 +49,20 @@ public final class CliCommand {
       var lines = lines(e, reader());
       err.println(Banner.errorLine(lines.getFirst(), Ansi.AUTO));
       lines.stream().skip(1).forEach(err::println);
-      if (Strings.isNotBlank(failureHint)) {
+      if (Strings.isNotBlank(failureHint) && !(e instanceof Refused)) {
         err.println(failureHint);
       }
       throw new Printed(lines.getFirst(), e);
+    }
+  }
+
+  /**
+   * A refusal sail raised on purpose, before acting: nothing failed, so {@link #run} follows it
+   * with no hint about what would have executed.
+   */
+  static final class Refused extends IllegalStateException {
+    Refused(String message) {
+      super(message);
     }
   }
 

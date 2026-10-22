@@ -69,12 +69,7 @@ public final class ProjectInitCommand implements Runnable {
 
     var outputPath = output != null ? Path.of(output) : defaultOutputPath(config.name());
 
-    if (Files.exists(outputPath)) {
-      if (!ConsoleHelper.confirm(outputPath + " already exists. Overwrite?")) {
-        out.println("  Aborted.");
-        return;
-      }
-    }
+    confirmOverwrite(outputPath);
 
     var yamlContent = SailYamlGenerator.generate(config);
     ProjectDefinitions.write(outputPath, yamlContent);
@@ -86,6 +81,14 @@ public final class ProjectInitCommand implements Runnable {
             "    @|faint Next:|@ review the file, then run @|bold "
                 + nextApplyCommand(config.name(), outputPath, operator)
                 + "|@"));
+  }
+
+  /** Returns when nothing is at {@code outputPath}, or overwriting it was confirmed. */
+  static void confirmOverwrite(Path outputPath) {
+    if (Files.exists(outputPath)) {
+      ConsoleHelper.proceed(
+          outputPath + " already exists. Overwrite?", "Not written", "--output <another path>");
+    }
   }
 
   /**

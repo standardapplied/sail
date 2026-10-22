@@ -76,6 +76,14 @@ public final class SyncOperations {
       return "";
     }
 
+    /**
+     * The line main's operator runs to authorise the key this channel presented as {@code handle},
+     * or empty when it cannot say it.
+     */
+    default Optional<String> authorisation(String handle) {
+      return Optional.empty();
+    }
+
     @Override
     void close() throws IOException;
   }
@@ -86,6 +94,7 @@ public final class SyncOperations {
   }
 
   private static final String HOST_KEY_FAILED = "Host key verification failed.";
+  private static final String KEY_REFUSED = "Permission denied (publickey";
 
   private final Sqlite db;
   private final String host;
@@ -314,9 +323,32 @@ public final class SyncOperations {
       if (Strings.isBlank(said)) {
         throw e;
       }
-      throw new SyncTransportException(
+      throw closed(e, said, channel, config.handle(), target);
+    }
+  }
+
+  /**
+   * A channel ssh closed saying {@code said}: a key main refused, with the line that authorises it
+   * before ssh's words, else ssh's words and {@link #explained}'s remedy.
+   */
+  private static SyncTransportException closed(
+      SyncTransportException e, String said, Channel channel, String handle, String target) {
+    var authorise =
+        said.contains(KEY_REFUSED) ? channel.authorisation(handle) : Optional.<String>empty();
+    if (authorise.isEmpty()) {
+      return new SyncTransportException(
           "unreachable", e.getMessage() + " ssh said: " + said, explained(said, target), e);
     }
+    return new SyncTransportException(
+        "unreachable",
+        e.getMessage(),
+        Remedy.of(
+            "Main has not authorised this box's key yet. Send its operator this line, then sync"
+                + " again:\n  "
+                + authorise.get()
+                + "\n  ssh said: "
+                + said),
+        e);
   }
 
   /** The remedy for a channel ssh closed saying {@code said}, when it names one. */
@@ -397,10 +429,9 @@ public final class SyncOperations {
     }
     return new MainTarget(
         null,
-        Remedy.of(
-            "Single devbox — nothing to sync. Add a second box with: ",
-            Remedy.sail("host sync", "--main", "<user@host>"),
-            "."));
+        Remedy.of("Single devbox — nothing to sync. Set up sync with: ")
+            .then(Remedy.setUp())
+            .then("."));
   }
 
   public static List<Event> pulledMessageEvents(
@@ -599,14 +630,17 @@ public final class SyncOperations {
       }
     }
     if (!created.isEmpty()) {
+      var applies =
+          created.stream()
+              .map(name -> Remedy.of("\n    ", Remedy.sail("project apply", name)))
+              .toArray();
       notice.accept(
           Remedy.of(
-              created.size()
-                  + " new project(s) synced from main: "
-                  + String.join(", ", created)
-                  + ". Provision with '",
-              Remedy.sail("project apply", "<name>"),
-              "'."));
+                  created.size()
+                      + " new project(s) synced from main: "
+                      + String.join(", ", created)
+                      + ". Provision each with:")
+              .then(applies));
     }
     return created;
   }

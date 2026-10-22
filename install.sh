@@ -126,7 +126,9 @@ if [ "$OS" = "Darwin" ]; then
   info "  sail client <host>  # point the CLI at your box (IP or SSH alias)"
   info "  sail spec list <project>"
 else
+  SUDO="sudo "
+  [ "$(id -u)" -ne 0 ] || SUDO=""
   info "Get started:"
-  info "  sudo sail init --as-main --handle <you>   # make this box the org's main"
-  info "  sudo sail init --main <main>              # or join an existing main"
+  info "  ${SUDO}sail init --as-main --handle <you>   # make this box the org's main"
+  info "  ${SUDO}sail init --main <main>              # or join an existing main"
 fi

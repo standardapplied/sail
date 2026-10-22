@@ -9,6 +9,7 @@ import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.ShellExecutor;
 import java.util.ArrayList;
@@ -78,10 +79,8 @@ public final class DownCommand implements Runnable {
         System.out.println();
         Banner.printContainerStatus(projectName, state, System.out, Ansi.AUTO);
       }
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException("Project '" + projectName + "' does not exist.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
+      case ContainerState.NotCreated _, ContainerState.Error _ ->
+          ContainerStateGuard.requireCreated(state, projectName);
     }
   }
 

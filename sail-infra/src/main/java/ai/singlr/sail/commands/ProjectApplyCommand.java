@@ -666,8 +666,8 @@ public final class ProjectApplyCommand implements Runnable {
       if (!json) {
         Banner.printResumeInfo(tracker.currentState(), System.out, Ansi.AUTO);
       }
-      if (!yes && !json && !ConsoleHelper.confirm("Resume provisioning?")) {
-        throw new IllegalStateException("Aborted.");
+      if (!yes && !json) {
+        ConsoleHelper.proceed("Resume provisioning?", "Not provisioned", "--yes");
       }
     }
 
@@ -675,9 +675,7 @@ public final class ProjectApplyCommand implements Runnable {
       Banner.printProjectSummary(config, System.out, Ansi.AUTO);
     }
     if (!yes && !dryRun && !json && fresh) {
-      if (!ConsoleHelper.confirm("Create project " + config.name() + "?")) {
-        throw new IllegalStateException("Aborted.");
-      }
+      ConsoleHelper.proceed("Create project " + config.name() + "?", "Not provisioned", "--yes");
     }
 
     var gitTokens = resolveGitTokens(config, operator);
@@ -775,7 +773,7 @@ public final class ProjectApplyCommand implements Runnable {
                 + "  --git-token <token>\n"
                 + "  GITHUB_TOKEN environment variable\n\n"
                 + "Then re-run: "
-                + operator.sail("project apply <name>"));
+                + operator.sail("project apply " + config.name()));
       }
     }
     return Map.copyOf(tokens);

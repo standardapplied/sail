@@ -766,7 +766,12 @@ names the whole recovery in `MainHostKey.rebuiltRecovery`'s words, the same sent
 refusal of a changed key carries: if main was rebuilt from a copy of its database, remove the
 old pin with `sudo ssh-keygen -R <host>`, re-run `sudo sail init --main <target>` and compare
 the fingerprint it prints with main's (`sudo ssh-keygen -lf
-/etc/ssh/ssh_host_ed25519_key.pub` on main). On main, that key sits on the locked `sail`
+/etc/ssh/ssh_host_ed25519_key.pub` on main). A round ssh closes on "Permission denied
+(publickey)" with the box's own sync key is a node main has not authorised yet: the channel
+names the `fde add` line join printed (`SshSyncChannel.authorizeLine`: the handle, the roster
+name and email the box's git identity holds, the key and the pinned fingerprint), and the
+failure tells the node to send it to main's operator, then sync again, before ssh's words. On
+main, that key sits on the locked `sail`
 user's `authorized_keys` as a forced command,
 `command="…/sail _gateway --fde <handle>",restrict …`. The gateway resolves the FDE and
 admits the `_sync` session. The write gate lives next to the write: every commit of a `_sync`

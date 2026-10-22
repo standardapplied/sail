@@ -118,7 +118,8 @@ public final class SessionCommand {
           return 0;
         }
         if (sessions.isEmpty()) {
-          System.out.println("No sessions. Start one with: " + operator.sail("session new <name>"));
+          System.out.println(
+              "No sessions. Start one with: " + operator.sail("session new <session>"));
           return 0;
         }
         for (var session : sessions) {

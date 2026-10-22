@@ -164,7 +164,10 @@ class RunCommandTest {
 
     assertNotEquals(0, exitCode);
     var errOutput = capturedErr.toString(StandardCharsets.UTF_8);
-    assertTrue(errOutput.contains("does not exist"), errOutput);
+    assertEquals(
+        "  ✗ Project 'test-proj' has no container on this box. Create it: sudo sail project apply"
+            + " test-proj\n",
+        errOutput);
   }
 
   /** The command against a host whose {@code incus} has no container of any name. */

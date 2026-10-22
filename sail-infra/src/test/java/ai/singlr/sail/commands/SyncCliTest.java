@@ -390,10 +390,9 @@ class SyncCliTest {
     } finally {
       System.setOut(original);
     }
-    assertTrue(
-        output
-            .toString(StandardCharsets.UTF_8)
-            .contains("Add a second box with: sudo sail host sync --main <user@host>."),
+    assertEquals(
+        "  Single devbox — nothing to sync. Set up sync with: sudo sail init --as-main --handle"
+            + " <you>, or sudo sail init --main <main>.\n",
         output.toString(StandardCharsets.UTF_8));
   }
 

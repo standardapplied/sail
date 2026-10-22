@@ -23,6 +23,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine.Help.Ansi;
 
@@ -58,7 +59,10 @@ class BannerTest {
     Banner.printFdeTable(
         fdes,
         handle ->
-            "mady".equals(handle) ? ProjectScope.of(List.of("beta", "alpha")) : ProjectScope.all(),
+            Optional.of(
+                "mady".equals(handle)
+                    ? ProjectScope.of(List.of("beta", "alpha"))
+                    : ProjectScope.all()),
         new PrintStream(out, true, StandardCharsets.UTF_8),
         Ansi.OFF);
     var text = out.toString(StandardCharsets.UTF_8);
@@ -1144,7 +1148,7 @@ class BannerTest {
 
       assertEquals(
           List.of(
-              "    Use '" + sail + "project stop <name>' to stop projects and free resources.",
+              "    Use '" + sail + "project stop <project>' to stop projects and free resources.",
               "    Tail output: " + sail + "agent log gamma --follow",
               "    " + sail + "agent log gamma --tail 50    # see agent output",
               "    " + sail + "spec dispatch --project gamma   # continue 1 remaining specs"),

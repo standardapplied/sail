@@ -158,12 +158,21 @@ public final class ProjectStore implements ConflictResolver, SyncedStore {
                 : "' isn't on this box. Projects here: ")
             + (visible.isEmpty() ? "none" : String.join(", ", visible))
             + ".",
-        scoped
-            ? Remedy.of(
-                "Ask an admin to grant it on main: ",
-                Remedy.sail("fde grant", handle, nextProject),
-                ".")
-            : Remedy.NONE);
+        scoped ? ungranted(handle, nextProject) : Remedy.NONE);
+  }
+
+  /**
+   * What a node main scoped does about {@code project}, beyond what main last granted {@code
+   * handle}: a grant made since reaches it with the next sync, which only main knows of, so both
+   * are named.
+   */
+  public static Remedy ungranted(String handle, String project) {
+    return Remedy.of(
+        "If an admin granted it since your last sync, run: ",
+        Remedy.sail("sync"),
+        ". Otherwise ask an admin to grant it on main: ",
+        Remedy.sail("fde grant", handle, project),
+        ".");
   }
 
   @Override

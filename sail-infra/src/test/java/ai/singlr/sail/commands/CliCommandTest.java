@@ -14,6 +14,7 @@ import ai.singlr.sail.Main;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -54,6 +55,49 @@ class CliCommandTest {
 
     assertEquals("boom", error.getMessage());
     assertTrue(capturedErr.toString(StandardCharsets.UTF_8).contains("boom"));
+  }
+
+  @Test
+  void aDestroyNobodyCanConfirmIsRefusedWithNoDryRunHint() {
+    ConsoleHelper.terminal = () -> false;
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  CliCommand.DRY_RUN_HINT,
+                  () -> ProjectDestroyCommand.confirm(false, false, false, "gamma", false)));
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  CliCommand.DRY_RUN_HINT,
+                  () -> ProjectDestroyCommand.confirm(false, false, true, "gamma", false)));
+    } finally {
+      ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
+    }
+
+    assertEquals(
+        "  ✗ Not destroyed: no terminal to confirm on. Re-run with --yes.\n"
+            + "  ✗ --json requires --yes (nobody answers a prompt through JSON).\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aFailureSailDidNotDecideIsFollowedByTheDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new IOException("incus delete gamma failed: device busy");
+                }));
+
+    assertEquals(
+        "  ✗ incus delete gamma failed: device busy\n"
+            + "  If this is unexpected, re-run with --dry-run to see what would execute.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @Test

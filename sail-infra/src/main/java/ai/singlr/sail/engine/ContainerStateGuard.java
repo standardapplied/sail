@@ -41,7 +41,7 @@ public final class ContainerStateGuard {
   /** What a command told of a project with no container says. */
   public static IllegalStateException notCreated(String name) {
     return Remedied.state(
-        "Project '" + name + "' does not exist.",
-        Remedy.of("Run '", Remedy.sail("project apply", "<name>"), "' first."));
+        "Project '" + name + "' has no container on this box.",
+        Remedy.of("Create it: ", Remedy.sail("project apply", name)));
   }
 }

@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -20,6 +21,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -38,9 +40,11 @@ class ConsoleHelperTest {
     System.setOut(originalOut);
   }
 
+  private final ByteArrayOutputStream out = new ByteArrayOutputStream();
+
   private void answering(String stdin, boolean terminal) {
     System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
-    System.setOut(new PrintStream(new ByteArrayOutputStream(), true, StandardCharsets.UTF_8));
+    System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
     ConsoleHelper.resetStdin();
     ConsoleHelper.terminal = () -> terminal;
   }
@@ -51,25 +55,88 @@ class ConsoleHelperTest {
 
     var refused =
         assertThrows(
-            IllegalStateException.class,
+            CliCommand.Refused.class,
             () -> ConsoleHelper.confirmDestructive("Destroy acme?", "Not destroyed", "--yes"));
 
     assertEquals(
         "Not destroyed: no terminal to confirm on. Re-run with --yes.", refused.getMessage());
+    assertEquals("", out.toString(StandardCharsets.UTF_8));
   }
 
   @Test
-  void aDestructiveQuestionOnATerminalDefaultsToNo() {
+  void aDestructiveQuestionOnATerminalDefaultsToNoAndRefuses() {
     answering("\n", true);
 
-    assertFalse(ConsoleHelper.confirmDestructive("Destroy acme?", "Not destroyed", "--yes"));
+    var refused =
+        assertThrows(
+            CliCommand.Refused.class,
+            () -> ConsoleHelper.confirmDestructive("Destroy acme?", "Not destroyed", "--yes"));
+
+    assertEquals("Aborted.", refused.getMessage());
+    assertEquals("  Destroy acme? [y/N] ", out.toString(StandardCharsets.UTF_8));
   }
 
   @Test
   void aDestructiveQuestionOnATerminalTakesYes() {
     answering("y\n", true);
 
-    assertTrue(ConsoleHelper.confirmDestructive("Destroy acme?", "Not destroyed", "--yes"));
+    assertDoesNotThrow(
+        () -> ConsoleHelper.confirmDestructive("Destroy acme?", "Not destroyed", "--yes"));
+  }
+
+  @Test
+  void aGoAheadNobodyCanAnswerIsRefusedBeforeAnythingIsAsked() {
+    answering("y\n", false);
+
+    var refused =
+        assertThrows(
+            CliCommand.Refused.class,
+            () -> ConsoleHelper.proceed("Proceed with provisioning?", "Not provisioned", "--yes"));
+
+    assertEquals(
+        "Not provisioned: no terminal to confirm on. Re-run with --yes.", refused.getMessage());
+    assertEquals("", out.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aGoAheadDeclinedOnATerminalIsAborted() {
+    answering("n\n", true);
+
+    var refused =
+        assertThrows(
+            CliCommand.Refused.class,
+            () -> ConsoleHelper.proceed("Proceed with provisioning?", "Not provisioned", "--yes"));
+
+    assertEquals("Aborted.", refused.getMessage());
+    assertEquals("  Proceed with provisioning? [Y/n] ", out.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aGoAheadOnATerminalDefaultsToYes() {
+    answering("\n", true);
+
+    assertDoesNotThrow(
+        () -> ConsoleHelper.proceed("Proceed with provisioning?", "Not provisioned", "--yes"));
+  }
+
+  private static final Pattern DECLINED = Pattern.compile("\"[^\"\n]*(Aborted|Cancelled)\\.");
+
+  /**
+   * A prompt nobody answered yes refuses through {@link ConsoleHelper}, so the command exits 1: no
+   * door prints its own "Aborted." or "Cancelled." and returns as if it had done what was asked.
+   */
+  @Test
+  void noDeclinedPromptEndsACommandAsIfItSucceeded() {
+    var declinedHere =
+        Stream.of("sail-core", "sail-harness", "sail-infra")
+            .map(module -> Path.of("..", module, "src", "main"))
+            .flatMap(ConsoleHelperTest::sources)
+            .filter(file -> !file.endsWith(Path.of("commands", "ConsoleHelper.java")))
+            .filter(file -> DECLINED.matcher(read(file)).find())
+            .map(Path::toString)
+            .toList();
+
+    assertEquals(List.of(), declinedHere, "a declined prompt that returns normally exits 0");
   }
 
   @Test
