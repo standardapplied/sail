@@ -71,25 +71,35 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
    * offers it again next round. One that repeats round after round is the sign of a dependency that
    * will never arrive.
    */
-  record Refusal(String type, String id, String reason) {
+  record Refusal(String type, String id, Remedy reason) {
     public Refusal {
       Objects.requireNonNull(type, "type");
       Objects.requireNonNull(id, "id");
-      reason = Objects.requireNonNullElse(reason, "");
+      reason = Objects.requireNonNullElse(reason, Remedy.NONE);
     }
 
-    /** The refusal as {@code sail sync --json} and the API report it. */
+    public Refusal(String type, String id, String reason) {
+      this(type, id, Remedy.of(Objects.requireNonNullElse(reason, "")));
+    }
+
+    /**
+     * The refusal as {@code sail sync --json} and the API report it: its plain reason, and the
+     * reason as data when it names a command.
+     */
     public Map<String, Object> toMap() {
       var map = new LinkedHashMap<String, Object>();
       map.put("type", type);
       map.put("id", id);
-      map.put("reason", reason);
+      map.put("reason", reason.plain());
+      if (!reason.commands().isEmpty()) {
+        map.put("remedy", reason.toMaps());
+      }
       return map;
     }
 
     /** The refusal as the FDE reads it: what main did not take yet, and why. */
-    public String describe() {
-      return type + " " + id + ": main did not take this yet — " + reason;
+    public Remedy describe() {
+      return Remedy.of(type + " " + id + ": main did not take this yet — ", reason);
     }
   }
 
@@ -293,7 +303,7 @@ public sealed interface SyncSession extends AutoCloseable permits PagedSyncSessi
       case SyncWire.Refuse refuse ->
           throw new SyncTransportException("refused", context + ":", refuse.reason(), null);
       case SyncWire.Failed failed ->
-          throw new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
+          throw new SyncTransportException(failed.kind(), context + ":", failed.detail(), null);
       default ->
           throw new SyncTransportException(context + ": Expected a welcome, got: " + response);
     };

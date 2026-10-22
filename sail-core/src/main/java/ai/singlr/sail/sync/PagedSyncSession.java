@@ -267,8 +267,7 @@ public final class PagedSyncSession implements SyncSession {
       throw new SyncTransportException("refused", type + ": main does not sync this type", null);
     }
     if (!ask.refusals().isEmpty()) {
-      throw new SyncTransportException(
-          "refused", type + ": main refused to prune " + String.join("; ", ask.refusals()), null);
+      throw pruneRefused(type, ask.refusals());
     }
     acknowledgeLostAnswers(type, local);
     var since = local.checkpoint(mainId);
@@ -324,7 +323,15 @@ public final class PagedSyncSession implements SyncSession {
   }
 
   /** What asking main to erase one type's pending prunes came to. */
-  private record Asked(int count, int adopted, List<String> refusals) {
+  private static SyncTransportException pruneRefused(String type, List<Remedy> refusals) {
+    var joined = Remedy.NONE;
+    for (var refusal : refusals) {
+      joined = joined.isEmpty() ? refusal : joined.then("; ", refusal);
+    }
+    return new SyncTransportException("refused", type + ": main refused to prune", joined, null);
+  }
+
+  private record Asked(int count, int adopted, List<Remedy> refusals) {
     static final Asked NONE = new Asked(0, 0, List.of());
   }
 
@@ -369,8 +376,7 @@ public final class PagedSyncSession implements SyncSession {
     tips = null;
     adopted += late.adopted();
     if (!late.refusals().isEmpty()) {
-      throw new SyncTransportException(
-          "refused", type + ": main refused to prune " + String.join("; ", late.refusals()), null);
+      throw pruneRefused(type, late.refusals());
     }
     return late;
   }
@@ -382,7 +388,7 @@ public final class PagedSyncSession implements SyncSession {
    */
   private Asked askErasures(String type, List<String> ids) {
     var asks = ids.stream().map(MainReplica.Offer::erasure).toList();
-    var refusals = new ArrayList<String>();
+    var refusals = new ArrayList<Remedy>();
     var applied = 0;
     for (var offset = 0; offset < asks.size(); ) {
       var offers = fitting(asks, offset, SyncWire::encodedLength);
@@ -401,7 +407,7 @@ public final class PagedSyncSession implements SyncSession {
           }
           case SyncWire.Refused refused when refused.id().equals(id) -> {
             eraseRequests.drop(type, id);
-            refusals.add(id + ": " + refused.reason());
+            refusals.add(Remedy.of(id + ": ", refused.reason()));
           }
           default ->
               throw new SyncTransportException(
@@ -780,7 +786,7 @@ public final class PagedSyncSession implements SyncSession {
   private static SyncTransportException unexpected(
       String context, String expected, SyncWire.Response response) {
     if (response instanceof SyncWire.Failed failed) {
-      return new SyncTransportException(failed.kind(), context + ": " + failed.message(), null);
+      return new SyncTransportException(failed.kind(), context + ":", failed.detail(), null);
     }
     if (response instanceof SyncWire.Refuse refuse) {
       return new SyncTransportException("refused", context + ":", refuse.reason(), null);
@@ -1097,8 +1103,8 @@ public final class PagedSyncSession implements SyncSession {
         case SyncWire.Refused refused -> {
           var refusal = new SyncSession.Refusal(type, refused.id(), refused.reason());
           refusals.add(refusal);
-          notice.accept(Remedy.of(refusal.describe()));
-          yield new CommitOutcome.Refused(refused.reason());
+          notice.accept(refusal.describe());
+          yield new CommitOutcome.Refused(refused.reason().plain());
         }
       };
     }

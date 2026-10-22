@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.identity.ProjectScope;
 import ai.singlr.sail.store.BlobStore;
@@ -330,6 +331,49 @@ class SyncWireTest {
   }
 
   @Test
+  void aFailureCarriesItsRemedyAsDataBesideThePlainMessage() {
+    var detail = Remedy.of("spec: no content hash. Run '", Remedy.sail("migrate"), "'.");
+    var failed = new SyncWire.Failed(detail, "store");
+
+    var line = SyncWire.encode(failed);
+
+    assertEquals(
+        Map.of(
+            "op",
+            "failed",
+            "message",
+            "spec: no content hash. Run 'sail migrate'.",
+            "kind",
+            "store",
+            "remedy",
+            detail.toMaps()),
+        YamlUtil.parseMap(line));
+    assertEquals(failed, SyncWire.decodeResponse(line));
+  }
+
+  @Test
+  void aFailureFromAMainThatPredatesRemediesReadsAsWords() {
+    assertEquals(
+        new SyncWire.Failed(Remedy.of("spec: broke"), "store"),
+        SyncWire.decodeResponse(
+            "{\"op\": \"failed\", \"message\": \"spec: broke\", \"kind\": \"store\"}"));
+  }
+
+  @Test
+  void aRefusedOfferCarriesItsRemedyAsDataBesideThePlainReason() {
+    var reason = Remedy.of("Run '", Remedy.sail("migrate"), "'.");
+    var results = new SyncWire.Results(List.of(new SyncWire.Refused("taken", reason)), 3);
+
+    var line = SyncWire.encode(results);
+
+    assertEquals(
+        Map.of("reason", "Run 'sail migrate'.", "remedy", reason.toMaps()),
+        ((List<?>) YamlUtil.parseMap(line).get("results"))
+            .stream().map(Map.class::cast).findFirst().orElseThrow().get("refused"));
+    assertEquals(results, SyncWire.decodeResponse(line));
+  }
+
+  @Test
   void entriesAcceptancesAndDenialsDecodeWithoutTheAuthorAnOlderMainNeverSends() {
     var page =
         (SyncWire.Page)
@@ -497,7 +541,7 @@ class SyncWireTest {
     var need = (SyncWire.Need) SyncWire.decodeRequest("{\"op\": \"need\", \"type\": \"spec\"}");
     assertTrue(need.ids().isEmpty());
     var failed = (SyncWire.Failed) SyncWire.decodeResponse("{\"op\": \"failed\"}");
-    assertNull(failed.message());
+    assertEquals("", failed.message());
   }
 
   @Test

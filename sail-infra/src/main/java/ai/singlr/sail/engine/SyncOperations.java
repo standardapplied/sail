@@ -343,7 +343,8 @@ public final class SyncOperations {
     }
     return new SyncTransportException(
         e instanceof UncheckedIOException ? "unreachable" : "store",
-        context + ": " + e.getMessage(),
+        context + ":",
+        Remedied.whole(e),
         e);
   }
 

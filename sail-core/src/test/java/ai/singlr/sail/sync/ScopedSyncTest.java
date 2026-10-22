@@ -1097,7 +1097,7 @@ class ScopedSyncTest {
                 .getLast());
     return switch (result) {
       case SyncWire.Denied denied -> denied.reason();
-      case SyncWire.Refused refused -> refused.reason();
+      case SyncWire.Refused refused -> refused.reason().plain();
       default -> accepted(result);
     };
   }

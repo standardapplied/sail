@@ -909,7 +909,7 @@ class SyncRpcServerTest {
             SyncWire.Refused.class,
             serveRun(null, new MainReplica.Offer("r1", Map.of("node", "ada"), null)));
     assertEquals("r1", refused.id());
-    assertTrue(refused.reason().contains("handle"), refused.reason());
+    assertTrue(refused.reason().plain().contains("handle"), refused.reason().plain());
   }
 
   private static FakeMain remembering() {

@@ -59,7 +59,7 @@ class EraseRequestTest {
   }
 
   private String refusal(Actor as, String type, String id) throws Exception {
-    return assertInstanceOf(SyncWire.Refused.class, ask(as, type, id)).reason();
+    return assertInstanceOf(SyncWire.Refused.class, ask(as, type, id)).reason().plain();
   }
 
   private void create(String id, String assignee, String creator, SpecStatus status) {

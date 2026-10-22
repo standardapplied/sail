@@ -8,6 +8,7 @@ package ai.singlr.sail.commands;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.api.Event;
@@ -64,6 +65,32 @@ import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
 class SyncCommandTest {
+
+  @Test
+  void aStoreFailureMainServesKeepsItsRemedyForTheNodesReader() throws Exception {
+    try (var main = new SyncBox("main");
+        var node = new SyncBox("node")) {
+      main.create(SyncBox.spec("taken", "Taken", "pending"));
+      main.db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
+      SyncTransportException failed;
+      try (var link = SyncBox.connect(main.server(node.session()), node)) {
+        failed =
+            assertThrows(
+                SyncTransportException.class,
+                () -> link.reconcile("spec", node.replicas().get("spec")));
+      }
+
+      assertEquals("store", failed.kind());
+      assertEquals(List.of(Remedy.sail("migrate")), failed.remedy().commands());
+      var reason =
+          "spec: spec: Spec taken has no content hash: this database's content migration never"
+              + " finished.";
+      assertEquals(
+          reason + " Run 'sudo sail migrate'.", SyncCommand.reason(failed, OperatorCommand.SUDO));
+      assertEquals(
+          reason + " Run 'sail migrate'.", SyncCommand.reason(failed, OperatorCommand.PLAIN));
+    }
+  }
 
   @Test
   void gcUsesTheHostLaneAndReportsFreedContent() throws Exception {

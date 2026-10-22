@@ -8,6 +8,7 @@ package ai.singlr.sail.sync;
 import ai.singlr.sail.authority.EraseAuthority;
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.ScopeRule;
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.FileLimits;
 import ai.singlr.sail.engine.SemVer;
@@ -227,13 +228,7 @@ public final class SyncRpcServer {
         request = SyncWire.decodeRequest(line);
         context = SyncWire.context(request);
       } catch (RuntimeException e) {
-        reply(
-            out,
-            welcomed
-                ? new SyncWire.Failed(
-                    context + ": " + e.getMessage(),
-                    e instanceof SyncTransportException transport ? transport.kind() : "protocol")
-                : new SyncWire.Refuse(upgradeRemedy()));
+        reply(out, welcomed ? failed(context, e) : new SyncWire.Refuse(upgradeRemedy()));
         return;
       }
       if (request instanceof SyncWire.Bye) return;
@@ -241,11 +236,7 @@ public final class SyncRpcServer {
         try {
           serveContent(content, in, out, frame);
         } catch (RuntimeException e) {
-          reply(
-              out,
-              new SyncWire.Failed(
-                  context + ": " + e.getMessage(),
-                  e instanceof SyncTransportException transport ? transport.kind() : "protocol"));
+          reply(out, failed(context, e));
           return;
         }
       } else reply(out, respondTo(request, frame));
@@ -469,20 +460,35 @@ public final class SyncRpcServer {
             case SyncWire.Bye ignored -> throw new IllegalStateException("Bye ends the session");
           };
       return response instanceof SyncWire.Failed failure
-          ? new SyncWire.Failed(context + ": " + failure.message(), failure.kind())
+          ? new SyncWire.Failed(Remedy.of(context + ": ", failure.detail()), failure.kind())
           : response;
     } catch (RuntimeException e) {
-      System.err.println("  [sync] " + context + ": " + rootMessage(e));
-      return new SyncWire.Failed(context + ": " + rootMessage(e), "store");
+      var detail = rootDetail(e);
+      System.err.println("  [sync] " + context + ": " + detail.plain());
+      return new SyncWire.Failed(Remedy.of(context + ": ", detail), "store");
     }
   }
 
+  private static SyncWire.Failed failed(String context, RuntimeException e) {
+    return new SyncWire.Failed(
+        Remedy.of(context + ": ", Remedied.whole(e)),
+        e instanceof SyncTransportException transport ? transport.kind() : "protocol");
+  }
+
   private static String rootMessage(Throwable t) {
+    return rootDetail(t).plain();
+  }
+
+  /**
+   * What a failure says, read at the first cause that names a remedy as data, else at its root, the
+   * store's own words beneath whatever wrapped them.
+   */
+  private static Remedy rootDetail(Throwable t) {
     var root = t;
-    while (root.getCause() != null && root.getCause() != root) {
+    while (!(root instanceof Remedied) && root.getCause() != null && root.getCause() != root) {
       root = root.getCause();
     }
-    return Objects.toString(root.getMessage(), root.getClass().getSimpleName());
+    return Remedied.whole(root);
   }
 
   private static void reply(OutputStream out, SyncWire.Response response) throws IOException {
@@ -827,8 +833,9 @@ public final class SyncRpcServer {
           Actor.call(
               principal, () -> main.commit(offer.id(), offer.snapshot(), offer.expectedRev()));
     } catch (RuntimeException e) {
-      System.err.println("  [sync] " + type + " " + offer.id() + ": " + rootMessage(e));
-      return new SyncWire.Refused(offer.id(), rootMessage(e));
+      var detail = rootDetail(e);
+      System.err.println("  [sync] " + type + " " + offer.id() + ": " + detail.plain());
+      return new SyncWire.Refused(offer.id(), detail);
     }
     return switch (outcome) {
       case CommitOutcome.Accepted accepted -> {
