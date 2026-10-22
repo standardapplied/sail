@@ -296,7 +296,7 @@ public final class MigrateCommand implements Runnable {
           Ansi.AUTO.string(
               "  @|yellow ⚠|@ pty host restarted: the host could not be asked which sessions were"
                   + " live ("
-                  + unreachable.getMessage()
+                  + CliCommand.describe(unreachable)
                   + "); this host predates live handoff; from the next upgrade on, sessions"
                   + " survive"));
     }

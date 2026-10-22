@@ -181,7 +181,14 @@ public final class PtyWire {
     var count = bounded(in);
     var parts = new ArrayList<Remedy.Part>(count);
     for (var i = 0; i < count; i++) {
-      parts.add(in.get() == 1 ? command(in) : new Remedy.Words(string(in)));
+      var kind = in.get();
+      parts.add(
+          switch (kind) {
+            case 0 -> new Remedy.Words(string(in));
+            case 1 -> command(in);
+            default ->
+                throw new IOException("Corrupt pty frame: a refusal part of kind " + kind + ".");
+          });
     }
     return new PtyMessage.Err(new Remedy(parts));
   }

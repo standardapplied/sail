@@ -58,20 +58,41 @@ class PtyWireTest {
 
   @Test
   void anOlderHostsRefusalIsReadAsWords() throws Exception {
-    var message = "No live session 'x' to attach.".getBytes(StandardCharsets.UTF_8);
-    var frame =
-        ByteBuffer.allocate(4 + 1 + 4 + message.length)
-            .putInt(1 + 4 + message.length)
-            .put((byte) 31)
-            .putInt(message.length)
-            .put(message)
-            .flip();
-
     assertEquals(
-        new PtyMessage.Err(Remedy.of("No live session 'x' to attach.")),
-        PtyWire.read(
-            java.nio.channels.Channels.newChannel(
-                new java.io.ByteArrayInputStream(frame.array()))));
+        new PtyMessage.Err(Remedy.of("No live session.")), readPayload(err("No live session.")));
+  }
+
+  @Test
+  void aRefusalWhoseRemedyIsCorruptIsRefusedLoudly() {
+    var unknownKind = err("m").putInt(1).put((byte) 7);
+    var unknownRunner =
+        err("m")
+            .putInt(1)
+            .put((byte) 1)
+            .putInt(1)
+            .put((byte) 'X')
+            .putInt(1)
+            .put((byte) 'v')
+            .putInt(0);
+
+    for (var payload : List.of(unknownKind, unknownRunner)) {
+      var refused = assertThrows(IOException.class, () -> readPayload(payload));
+      assertTrue(
+          refused.getMessage().startsWith("Corrupt pty frame: a refusal"), refused.getMessage());
+    }
+  }
+
+  private static ByteBuffer err(String message) {
+    var text = message.getBytes(StandardCharsets.UTF_8);
+    return ByteBuffer.allocate(64).put((byte) 31).putInt(text.length).put(text);
+  }
+
+  private static PtyMessage readPayload(ByteBuffer payload) throws IOException {
+    var body = new byte[payload.flip().remaining()];
+    payload.get(body);
+    var frame = ByteBuffer.allocate(4 + body.length).putInt(body.length).put(body).array();
+    return PtyWire.read(
+        java.nio.channels.Channels.newChannel(new java.io.ByteArrayInputStream(frame)));
   }
 
   @Test
