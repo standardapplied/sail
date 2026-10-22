@@ -194,7 +194,7 @@ class SyncRpcServerTest {
       var results = assertInstanceOf(SyncWire.Results.class, response);
       assertEquals(
           "blob " + hash + " not held",
-          assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason());
+          assertInstanceOf(SyncWire.Refused.class, results.results().getFirst()).reason().plain());
       assertTrue(new FileStore(main.db).list("project").isEmpty());
       assertANodeConverges(main, Actor.sync("node", Role.MEMBER));
     }
@@ -772,7 +772,7 @@ class SyncRpcServerTest {
 
     var refused = assertInstanceOf(SyncWire.Refused.class, results.results().get(0));
     assertEquals("bad", refused.id());
-    assertEquals("disk full", refused.reason());
+    assertEquals("disk full", refused.reason().plain());
     assertEquals("good", assertInstanceOf(SyncWire.Accepted.class, results.results().get(1)).id());
     assertTrue(
         captured.toString(StandardCharsets.UTF_8).contains("disk full"),
