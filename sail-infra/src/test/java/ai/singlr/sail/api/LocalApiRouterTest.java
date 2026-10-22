@@ -14,11 +14,15 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.authority.Refusal;
 import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.ConflictOperations;
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.store.RunStore;
 import ai.singlr.sail.store.SpecStore;
 import ai.singlr.sail.store.SyncConflicts;
 import ai.singlr.sail.sync.ConflictMerge;
@@ -856,6 +860,72 @@ class LocalApiRouterTest {
   void unknownRouteAndUnknownSubResourceAre404() {
     assertEquals(404, router.handle(get("/v1/widgets", Map.of())).status());
     assertEquals(404, router.handle(get("/v1/specs/oauth/history", Map.of())).status());
+  }
+
+  @Test
+  void aRunWhoseFdeTheBoxCannotPlaceIsRefusedWithItsRemedyAsData() {
+    var lane =
+        new LocalApiRouter(
+            new TestOperations() {
+              @Override
+              public Optional<Actor> runActor(RunStore.RunRow run) {
+                return Optional.empty();
+              }
+            });
+
+    var refused = lane.handle(get("/v1/specs", Map.of()));
+
+    assertEquals(403, refused.status());
+    var reason =
+        "This run acts for FDE '"
+            + TestOperations.OWNER
+            + "', whom this box cannot place: its roster has disabled that FDE or does not know it"
+            + " yet, or this box names no FDE of its own.";
+    var error = (Map<?, ?>) refused.body().get("error");
+    assertEquals(reason, error.get("message"));
+    assertEquals(
+        List.of(
+            Map.of("text", "Ask an admin to re-enable the FDE, run '"),
+            Map.of("run", "sail", "verb", "sync", "args", List.of()),
+            Map.of(
+                "text",
+                "' on a node that has not pulled main's roster, or name this box's FDE with '"),
+            Map.of("run", "sail", "verb", "host config set sync-handle", "args", List.of("<you>")),
+            Map.of("text", "'.")),
+        error.get("remedy"));
+    var remedy = Remedy.fromMaps((List<?>) error.get("remedy"));
+    assertEquals(
+        "Ask an admin to re-enable the FDE, run 'sudo sail sync' on a node that has not pulled"
+            + " main's roster, or name this box's FDE with 'sudo sail host config set sync-handle"
+            + " <you>'.",
+        OperatorCommand.SUDO.render(remedy));
+    assertEquals(
+        "Ask an admin to re-enable the FDE, run 'sail sync' on a node that has not pulled main's"
+            + " roster, or name this box's FDE with 'sail host config set sync-handle <you>'.",
+        OperatorCommand.PLAIN.render(remedy));
+  }
+
+  @Test
+  void aRemediedFailureBelowTheLaneKeepsItsRemedyAsData() {
+    var lane =
+        new LocalApiRouter(
+            new TestOperations() {
+              @Override
+              public Result<GlobalSpecDetailResponse> globalSpec(String id) {
+                throw Remedied.argument(
+                    "Spec " + id + " is unreadable.",
+                    Remedy.of("Run '", Remedy.sail("migrate"), "'."));
+              }
+            });
+
+    var refused = lane.handle(get("/v1/specs/taken", Map.of()));
+
+    assertEquals(400, refused.status());
+    var error = (Map<?, ?>) refused.body().get("error");
+    assertEquals("Spec taken is unreadable.", error.get("message"));
+    assertEquals(
+        "Run 'sudo sail migrate'.",
+        OperatorCommand.SUDO.render(Remedy.fromMaps((List<?>) error.get("remedy"))));
   }
 
   @Test
