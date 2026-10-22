@@ -470,8 +470,9 @@ class MigrateCommandTest {
     var out = captureStdout(() -> MigrateCommand.ensureHostDropIns(true, shell, fsRoot, false));
 
     assertEquals(
-        "  ⚠ sshd keepalive drop-in not written: read-only file system\n"
-            + "  ✓ needrestart policy written\n",
+        "  ⚠ Failed to install "
+            + fsRoot.resolve("etc/ssh/sshd_config.d/10-sail.conf")
+            + ": read-only file system\n  ✓ needrestart policy written\n",
         out);
     assertEquals(2, shell.arguments().size());
   }

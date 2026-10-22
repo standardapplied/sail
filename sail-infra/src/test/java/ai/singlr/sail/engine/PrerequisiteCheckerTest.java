@@ -81,7 +81,7 @@ class PrerequisiteCheckerTest {
                     List.of(new PrerequisiteChecker.Prerequisite("curl", "curl", "Downloading"))));
 
     assertEquals(
-        "Failed to write /etc/needrestart/conf.d/50-sail.conf: read-only file system",
+        "Failed to install /etc/needrestart/conf.d/50-sail.conf: read-only file system",
         error.getMessage());
     assertEquals(1, shell.invocations().size());
   }

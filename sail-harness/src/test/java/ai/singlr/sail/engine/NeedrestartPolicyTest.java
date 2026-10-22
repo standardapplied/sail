@@ -77,7 +77,9 @@ class NeedrestartPolicyTest {
       installs.add(new ProcessBuilder(command).redirectErrorStream(true).start());
     }
 
+    var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
     while (installs.stream().anyMatch(Process::isAlive)) {
+      assertTrue(System.nanoTime() < deadline, "an install script hung");
       if (Files.exists(snippet)) {
         assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
       }

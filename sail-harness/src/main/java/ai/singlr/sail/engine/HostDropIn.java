@@ -44,9 +44,15 @@ public record HostDropIn(String name, String path, String content, String reload
 
   /** Installs this file at its own path on the machine {@code shell} runs on, or throws. */
   public void install(ShellExec shell) throws IOException, InterruptedException, TimeoutException {
-    var result = shell.exec(installCommand(path));
+    install(shell, path);
+  }
+
+  /** Installs this file at {@code target}, written and taken in, or throws naming the target. */
+  public void install(ShellExec shell, String target)
+      throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(installCommand(target));
     if (!result.ok()) {
-      throw new IOException("Failed to write " + path + ": " + result.stderr());
+      throw new IOException("Failed to install " + target + ": " + result.stderr());
     }
   }
 }

@@ -465,18 +465,13 @@ public final class MigrateCommand implements Runnable {
       if (Files.exists(path) && Files.readString(path).equals(dropIn.content())) {
         return;
       }
-      var result = shell.exec(dropIn.installCommand(path.toString()));
-      if (!result.ok()) {
-        throw new IOException(result.stderr());
-      }
+      dropIn.install(shell, path.toString());
       if (!jsonOutput) {
         System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + dropIn.name() + " written"));
       }
     } catch (IOException | TimeoutException e) {
       if (!jsonOutput) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|yellow ⚠|@ " + dropIn.name() + " not written: " + e.getMessage()));
+        System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + e.getMessage()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
