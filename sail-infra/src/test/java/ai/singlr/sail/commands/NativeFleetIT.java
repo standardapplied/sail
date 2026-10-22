@@ -624,7 +624,7 @@ class NativeFleetIT {
                     .output()
                     .contains(
                         "Project 'beta' isn't on this box. Projects here: alpha. Ask an admin to"
-                            + " grant it on main: sudo sail fde grant nia beta."),
+                            + " grant it on main: sail fde grant nia beta."),
                 refused::output);
           });
       nia.sailOk("sync");
