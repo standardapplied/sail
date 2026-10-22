@@ -51,6 +51,7 @@ import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -436,6 +437,23 @@ public final class MigrateCommand implements Runnable {
     return Optional.of(host.withSync(host.sync().withBoxId(boxId)));
   }
 
+  /** A file sail owns under the host's {@code /etc}: its content and the command that writes it. */
+  private record HostDropIn(
+      String name, String path, String content, Function<String, List<String>> install) {}
+
+  private static final List<HostDropIn> HOST_DROP_INS =
+      List.of(
+          new HostDropIn(
+              "sshd keepalive drop-in",
+              SshdKeepalive.DROP_IN_PATH,
+              SshdKeepalive.content(),
+              SshdKeepalive::installCommand),
+          new HostDropIn(
+              "needrestart policy",
+              NeedrestartPolicy.DROP_IN_PATH,
+              NeedrestartPolicy.content(),
+              NeedrestartPolicy::installCommand));
+
   /**
    * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}. Lives here for
    * the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD binary,
@@ -443,51 +461,36 @@ public final class MigrateCommand implements Runnable {
    * runs with new-binary code. Needs root; quiet and never fatal otherwise.
    */
   private static void ensureHostDropIns(boolean jsonOutput) {
-    var root = SailPaths.isRoot();
-    var shell = new ShellExecutor(false);
-    ensureSshdKeepalive(root, shell, Path.of(SshdKeepalive.DROP_IN_PATH), jsonOutput);
-    ensureNeedrestartPolicy(root, shell, Path.of(NeedrestartPolicy.DROP_IN_PATH), jsonOutput);
+    ensureHostDropIns(SailPaths.isRoot(), new ShellExecutor(false), Path.of("/"), jsonOutput);
   }
 
-  static void ensureSshdKeepalive(boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
-    ensureDropIn(
-        "sshd keepalive drop-in",
-        SshdKeepalive.content(),
-        SshdKeepalive.installCommand(dropIn.toString()),
-        new DropInTarget(root, shell, dropIn, jsonOutput));
-  }
-
-  static void ensureNeedrestartPolicy(
-      boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
-    ensureDropIn(
-        "needrestart policy",
-        NeedrestartPolicy.content(),
-        NeedrestartPolicy.installCommand(dropIn.toString()),
-        new DropInTarget(root, shell, dropIn, jsonOutput));
-  }
-
-  private record DropInTarget(boolean root, ShellExec shell, Path path, boolean jsonOutput) {}
-
-  private static void ensureDropIn(
-      String name, String content, List<String> install, DropInTarget target) {
-    if (!target.root()) {
+  static void ensureHostDropIns(boolean root, ShellExec shell, Path fsRoot, boolean jsonOutput) {
+    if (!root) {
       return;
     }
+    for (var dropIn : HOST_DROP_INS) {
+      ensureDropIn(dropIn, shell, fsRoot.resolve(dropIn.path().substring(1)), jsonOutput);
+    }
+  }
+
+  private static void ensureDropIn(
+      HostDropIn dropIn, ShellExec shell, Path path, boolean jsonOutput) {
     try {
-      if (Files.exists(target.path()) && Files.readString(target.path()).equals(content)) {
+      if (Files.exists(path) && Files.readString(path).equals(dropIn.content())) {
         return;
       }
-      var result = target.shell().exec(install);
+      var result = shell.exec(dropIn.install().apply(path.toString()));
       if (!result.ok()) {
         throw new IOException(result.stderr());
       }
-      if (!target.jsonOutput()) {
-        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + name + " written"));
+      if (!jsonOutput) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + dropIn.name() + " written"));
       }
     } catch (IOException | TimeoutException e) {
-      if (!target.jsonOutput()) {
+      if (!jsonOutput) {
         System.out.println(
-            Ansi.AUTO.string("  @|yellow ⚠|@ " + name + " not written: " + e.getMessage()));
+            Ansi.AUTO.string(
+                "  @|yellow ⚠|@ " + dropIn.name() + " not written: " + e.getMessage()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

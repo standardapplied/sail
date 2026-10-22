@@ -156,6 +156,7 @@ class HostProvisionerTest {
   void freshZfsInstallRunsAllInstallCommands() throws Exception {
     var shell =
         new ScriptedShellExecutor()
+            .onOk("needrestart")
             .onOk("apt-get")
             .onFail("which incus", "")
             .onFail("which zpool", "")
@@ -226,6 +227,7 @@ class HostProvisionerTest {
   void zpoolCreateFailureThrowsIOException() {
     var shell =
         new ScriptedShellExecutor()
+            .onOk("needrestart")
             .onOk("apt-get")
             .onOk("which incus")
             .onOk("which zpool")
@@ -255,6 +257,7 @@ class HostProvisionerTest {
   void incusInitFailureThrowsIOException() {
     var shell =
         new ScriptedShellExecutor()
+            .onOk("needrestart")
             .onOk("apt-get")
             .onOk("which incus")
             .onOk("which zpool")

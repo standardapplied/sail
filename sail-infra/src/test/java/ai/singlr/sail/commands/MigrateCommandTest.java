@@ -436,61 +436,44 @@ class MigrateCommandTest {
   }
 
   @Test
-  void ensureSshdKeepaliveWritesTheDropInAsRootAndLeavesACurrentOneAlone(@TempDir Path etc)
+  void migrateWritesEveryHostDropInAsRootAndLeavesACurrentOneAlone(@TempDir Path fsRoot)
       throws Exception {
-    var dropIn = etc.resolve("sshd_config.d/10-sail.conf");
+    var sshd = fsRoot.resolve("etc/ssh/sshd_config.d/10-sail.conf");
+    var needrestart = fsRoot.resolve("etc/needrestart/conf.d/50-sail.conf");
     var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
 
-    MigrateCommand.ensureSshdKeepalive(false, shell, dropIn, true);
-    assertTrue(shell.invocations().isEmpty(), "a non-root migrate never touches sshd");
+    MigrateCommand.ensureHostDropIns(false, shell, fsRoot, false);
+    assertEquals(List.of(), shell.arguments(), "a non-root migrate never touches /etc");
 
-    MigrateCommand.ensureSshdKeepalive(true, shell, dropIn, true);
-    assertEquals(1, shell.invocations().size(), "root writes the drop-in and reloads sshd");
-    var install = shell.invocations().getFirst();
-    assertTrue(install.contains("ClientAliveInterval 15"), install);
-    assertTrue(install.contains("ClientAliveCountMax 3"), install);
-    assertTrue(install.contains(dropIn.toString()), install);
-    assertTrue(install.contains("systemctl reload ssh"), install);
-
-    Files.createDirectories(dropIn.getParent());
-    Files.writeString(dropIn, SshdKeepalive.content());
-    MigrateCommand.ensureSshdKeepalive(true, shell, dropIn, true);
-    assertEquals(1, shell.invocations().size(), "a drop-in already current is left alone");
-  }
-
-  @Test
-  void ensureNeedrestartPolicyWritesTheSnippetAsRootAndLeavesACurrentOneAlone(@TempDir Path etc)
-      throws Exception {
-    var snippet = etc.resolve("needrestart/conf.d/50-sail.conf");
-    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-
-    MigrateCommand.ensureNeedrestartPolicy(false, shell, snippet, true);
-    assertEquals(List.of(), shell.arguments(), "a non-root migrate never touches needrestart");
-
-    var out =
-        captureStdout(() -> MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false));
+    var out = captureStdout(() -> MigrateCommand.ensureHostDropIns(true, shell, fsRoot, false));
     assertEquals(
-        List.of(NeedrestartPolicy.installCommand(snippet.toString())),
-        shell.arguments(),
-        "root writes the snippet");
-    assertEquals("  ✓ needrestart policy written\n", out);
+        List.of(
+            SshdKeepalive.installCommand(sshd.toString()),
+            NeedrestartPolicy.installCommand(needrestart.toString())),
+        shell.arguments());
+    assertEquals("  ✓ sshd keepalive drop-in written\n  ✓ needrestart policy written\n", out);
 
-    Files.createDirectories(snippet.getParent());
-    Files.writeString(snippet, NeedrestartPolicy.content());
-    MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false);
-    assertEquals(1, shell.arguments().size(), "a snippet already current is left alone");
+    Files.createDirectories(sshd.getParent());
+    Files.writeString(sshd, SshdKeepalive.content());
+    Files.createDirectories(needrestart.getParent());
+    Files.writeString(needrestart, NeedrestartPolicy.content());
+    MigrateCommand.ensureHostDropIns(true, shell, fsRoot, true);
+    assertEquals(2, shell.arguments().size(), "drop-ins already current are left alone");
   }
 
   @Test
-  void ensureNeedrestartPolicyWarnsAndCarriesOnWhenTheWriteFails(@TempDir Path etc) {
-    var snippet = etc.resolve("50-sail.conf");
-    var shell = new ScriptedShellExecutor().onFail("bash", "read-only file system");
+  void aDropInThatCannotBeWrittenWarnsAndTheNextIsStillWritten(@TempDir Path fsRoot) {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("sshd_config.d", "read-only file system");
 
-    var out =
-        captureStdout(() -> MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false));
+    var out = captureStdout(() -> MigrateCommand.ensureHostDropIns(true, shell, fsRoot, false));
 
-    assertEquals("  ⚠ needrestart policy not written: read-only file system\n", out);
-    assertFalse(Files.exists(snippet));
+    assertEquals(
+        "  ⚠ sshd keepalive drop-in not written: read-only file system\n"
+            + "  ✓ needrestart policy written\n",
+        out);
+    assertEquals(2, shell.arguments().size());
   }
 
   @Test
@@ -500,14 +483,14 @@ class MigrateCommandTest {
         .provision(
             "dir", null, "devpool", "incusbr0", null, dir.resolve("host.yaml"), dir.resolve("db"));
     var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
-    var snippet = dir.resolve("50-sail.conf");
-    MigrateCommand.ensureNeedrestartPolicy(true, migrating, snippet, true);
+    MigrateCommand.ensureHostDropIns(true, migrating, dir, true);
 
     var byInit = NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH);
     assertTrue(provisioning.arguments().contains(byInit), provisioning.invocations().toString());
-    var byMigrate = migrating.arguments().getFirst();
-    assertEquals(NeedrestartPolicy.installCommand(snippet.toString()), byMigrate);
+    var byMigrate = migrating.arguments().getLast();
     assertEquals(byInit.subList(0, 5), byMigrate.subList(0, 5), "the same script and bytes");
+    assertEquals(
+        dir.resolve(NeedrestartPolicy.DROP_IN_PATH.substring(1)).toString(), byMigrate.get(5));
   }
 
   @Test

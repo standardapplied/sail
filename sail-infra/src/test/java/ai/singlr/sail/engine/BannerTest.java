@@ -722,7 +722,7 @@ class BannerTest {
     assertTrue(output.contains("960G"));
     assertTrue(output.contains("150G (15%)"));
     assertTrue(output.contains("810G"));
-    assertTrue(output.contains("│  Incus:        6.22"), output);
+    assertTrue(output.contains("│  Incus:       6.22 "), output);
     assertFalse(output.contains("6.21"), "the version running now, not the one init recorded");
     assertTrue(output.contains("2026-02-18 01:00:00"));
     assertTrue(output.contains("2 total (1 running, 1 stopped)"));
