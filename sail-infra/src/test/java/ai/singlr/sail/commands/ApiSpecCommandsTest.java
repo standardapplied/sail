@@ -37,7 +37,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
-import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +50,6 @@ class ApiSpecCommandsTest {
   private SailApiServer server;
   private String token;
   private ReviewStore reviewStore;
-  private final BooleanSupplier originalTerminal = ConsoleHelper.terminal;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -84,8 +82,7 @@ class ApiSpecCommandsTest {
 
   @AfterEach
   void tearDown() {
-    ConsoleHelper.terminal = originalTerminal;
-    ConsoleHelper.resetStdin();
+    ConsoleStub.restore();
     if (server != null) server.close();
     if (db != null) db.close();
   }
@@ -124,14 +121,11 @@ class ApiSpecCommandsTest {
   }
 
   private Ran answering(String stdin, boolean terminal, String... args) {
-    var original = System.in;
-    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
-    ConsoleHelper.resetStdin();
-    ConsoleHelper.terminal = () -> terminal;
+    ConsoleStub.answering(stdin, terminal);
     try {
       return execute(args);
     } finally {
-      System.setIn(original);
+      ConsoleStub.restore();
     }
   }
 

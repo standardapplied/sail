@@ -11,10 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -28,25 +26,20 @@ import org.junit.jupiter.api.Test;
 
 class ConsoleHelperTest {
 
-  private final InputStream originalIn = System.in;
   private final PrintStream originalOut = System.out;
 
   @AfterEach
   void restoreConsoleSupplier() {
     ConsoleHelper.consoleSupplier = System::console;
-    ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
-    ConsoleHelper.resetStdin();
-    System.setIn(originalIn);
+    ConsoleStub.restore();
     System.setOut(originalOut);
   }
 
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
   private void answering(String stdin, boolean terminal) {
-    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
+    ConsoleStub.answering(stdin, terminal);
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-    ConsoleHelper.resetStdin();
-    ConsoleHelper.terminal = () -> terminal;
   }
 
   @Test

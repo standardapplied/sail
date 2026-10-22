@@ -11,9 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterEach;
@@ -21,23 +19,18 @@ import org.junit.jupiter.api.Test;
 
 class ProjectDestroyCommandTest {
 
-  private final InputStream originalIn = System.in;
   private final PrintStream originalOut = System.out;
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
   @AfterEach
   void restoreConsole() {
-    ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
-    ConsoleHelper.resetStdin();
-    System.setIn(originalIn);
+    ConsoleStub.restore();
     System.setOut(originalOut);
   }
 
   private void answering(String stdin, boolean terminal) {
-    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
+    ConsoleStub.answering(stdin, terminal);
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-    ConsoleHelper.resetStdin();
-    ConsoleHelper.terminal = () -> terminal;
   }
 
   @Test

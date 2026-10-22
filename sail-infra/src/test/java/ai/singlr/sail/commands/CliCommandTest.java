@@ -63,7 +63,7 @@ class CliCommandTest {
 
   @Test
   void aDestroyNobodyCanConfirmIsRefusedWithNoDryRunHint() {
-    ConsoleHelper.terminal = () -> false;
+    ConsoleStub.answering("", false);
     try {
       assertThrows(
           CliCommand.Printed.class,
@@ -78,7 +78,7 @@ class CliCommandTest {
                   CliCommand.DRY_RUN_HINT,
                   () -> ProjectDestroyCommand.confirm(false, false, true, "gamma", false)));
     } finally {
-      ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
+      ConsoleStub.restore();
     }
 
     assertEquals(

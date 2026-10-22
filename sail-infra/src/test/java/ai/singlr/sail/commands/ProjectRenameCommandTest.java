@@ -22,13 +22,12 @@ class ProjectRenameCommandTest {
 
   @AfterEach
   void restoreConsole() {
-    ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
-    ConsoleHelper.resetStdin();
+    ConsoleStub.restore();
   }
 
   @Test
   void aRenameNobodyCanConfirmIsRefusedNamingYes() {
-    ConsoleHelper.terminal = () -> false;
+    ConsoleStub.answering("", false);
 
     var refused =
         assertThrows(
@@ -40,7 +39,7 @@ class ProjectRenameCommandTest {
 
   @Test
   void yesOrJsonAsksNothing() {
-    ConsoleHelper.terminal = () -> false;
+    ConsoleStub.answering("", false);
 
     assertDoesNotThrow(() -> ProjectRenameCommand.confirm(true, "acme", "beta"));
   }
