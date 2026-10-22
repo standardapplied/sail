@@ -88,10 +88,7 @@ public final class ProjectRenameCommand implements Runnable {
         printDryRun();
         return;
       }
-      if (!json && !confirm()) {
-        System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
-        return;
-      }
+      confirm(yes || json, name, newName);
 
       var renamer =
           new ProjectRenamer(operations, new ShellExecutor(false), SailPaths.projectsDir());
@@ -100,9 +97,17 @@ public final class ProjectRenameCommand implements Runnable {
     }
   }
 
-  private boolean confirm() {
-    return ConsoleHelper.confirm(
-        "Rename '" + name + "' to '" + newName + "'? This stops and restarts the container.");
+  /**
+   * Returns when the rename may go on: {@code skip} ({@code --yes} or {@code --json}) asks nothing,
+   * and otherwise only yes on a terminal does ({@link ConsoleHelper#proceed}).
+   */
+  static void confirm(boolean skip, String name, String newName) {
+    if (!skip) {
+      ConsoleHelper.proceed(
+          "Rename '" + name + "' to '" + newName + "'? This stops and restarts the container.",
+          "Not renamed",
+          "--yes");
+    }
   }
 
   private void printDryRun() throws Exception {

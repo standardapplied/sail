@@ -36,9 +36,9 @@ final class ConsoleHelper {
   private ConsoleHelper() {}
 
   /**
-   * Prompts the user for confirmation. Returns {@code true} on empty input, 'y', or 'Y'. Returns
-   * {@code false} on EOF (null) to prevent destructive operations from proceeding on piped empty
-   * stdin.
+   * Asks a question whose answer shapes what is made, not whether to act. Returns {@code true} on
+   * empty input, 'y', or 'Y', and {@code false} on EOF (null). A go-ahead asks through {@link
+   * #proceed}.
    */
   static boolean confirm(String prompt) {
     System.out.print("  " + prompt + " [Y/n] ");
@@ -99,16 +99,28 @@ final class ConsoleHelper {
   }
 
   /**
-   * Asks before an action that cannot be undone, defaulting to no. Nobody can answer without a
+   * Asks before acting, defaulting to yes, and returns only on yes. Nobody can answer without a
    * terminal, so it refuses there rather than act on an answer nobody gave, naming {@code notDone}
-   * (e.g. "Not deleted") and {@code flag}, the one that skips the question.
+   * (e.g. "Not provisioned") and {@code flag}, the one that skips the question; any other answer
+   * refuses too, so a command nobody told to go on never exits 0.
    */
-  static boolean confirmDestructive(String prompt, String notDone, String flag) {
+  static void proceed(String prompt, String notDone, String flag) {
+    ask(() -> confirm(prompt), notDone, flag);
+  }
+
+  /** As {@link #proceed}, for an action that cannot be undone: it defaults to no. */
+  static void confirmDestructive(String prompt, String notDone, String flag) {
+    ask(() -> confirmNo(prompt), notDone, flag);
+  }
+
+  private static void ask(BooleanSupplier answeredYes, String notDone, String flag) {
     if (!hasConsole()) {
-      throw new IllegalStateException(
+      throw new CliCommand.Refused(
           notDone + ": no terminal to confirm on. Re-run with " + flag + ".");
     }
-    return confirmNo(prompt);
+    if (!answeredYes.getAsBoolean()) {
+      throw new CliCommand.Refused("Aborted.");
+    }
   }
 
   /** Returns {@code true} if the current process is running as root. */

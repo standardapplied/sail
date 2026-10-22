@@ -16,6 +16,7 @@ import ai.singlr.sail.engine.CliOperator;
 import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.MainHostKey;
 import ai.singlr.sail.engine.OperatorCommand;
+import ai.singlr.sail.engine.SshSyncChannel;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -29,6 +30,8 @@ import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import picocli.CommandLine;
 import picocli.CommandLine.Help.Ansi;
 
@@ -86,7 +89,7 @@ class OperatorHintsTest {
                 + "  Run 'sudo sail project init' to author one, sync it from main with 'sudo sail"
                 + " sync', or specify one with --file.",
             "Server not initialized. Run 'sudo sail host init' first.",
-            "Project 'gamma' does not exist. Run 'sudo sail project apply <name>' first.",
+            "Project 'gamma' has no container on this box. Create it: sudo sail project apply gamma",
             "  ✓ Agent launched in background\n"
                 + "    Log:     sudo sail agent log gamma --follow\n"
                 + "    Stop:    sudo sail agent stop gamma\n",
@@ -126,7 +129,7 @@ class OperatorHintsTest {
                 + "  Run 'sail project init' to author one, sync it from main with 'sail sync', or"
                 + " specify one with --file.",
             "Server not initialized. Run 'sail host init' first.",
-            "Project 'gamma' does not exist. Run 'sail project apply <name>' first.",
+            "Project 'gamma' has no container on this box. Create it: sail project apply gamma",
             "  ✓ Agent launched in background\n"
                 + "    Log:     sail agent log gamma --follow\n"
                 + "    Stop:    sail agent stop gamma\n",
@@ -404,9 +407,9 @@ class OperatorHintsTest {
   @Test
   void anotherBoxsOperatorIsToldTheReadmesFormAndAThinClientPlainSail() {
     assertEquals(
-        "sudo sail fde add ada --role member --email \"ada@example.com\" --key \"ssh-ed25519"
-            + " AAAA\" --main-host-key SHA256:abc",
-        JoinCommand.authorizeLine(
+        "sudo sail fde add ada --role member --email ada@example.com --key 'ssh-ed25519"
+            + " AAAA' --main-host-key SHA256:abc",
+        SshSyncChannel.authorizeLine(
             "ada", null, "ada@example.com", "ssh-ed25519 AAAA", "SHA256:abc"));
     assertEquals("sail login", OperatorCommand.client("login"));
   }
@@ -563,18 +566,65 @@ class OperatorHintsTest {
   }
 
   @Test
-  void theInstallerEndsWithTheReadmesTwoSetupLines() throws Exception {
-    var installer = Files.readString(Path.of("..", "install.sh"));
-    var linux = installer.substring(installer.lastIndexOf("else\n"));
-
+  @EnabledOnOs(OS.LINUX)
+  void theInstallerEndsWithTheReadmesTwoSetupLinesTypedAsItsReaderTypesThem() throws Exception {
     assertEquals(
         """
-        else
-          info "Get started:"
-          info "  sudo sail init --as-main --handle <you>   # make this box the org's main"
-          info "  sudo sail init --main <main>              # or join an existing main"
-        fi
+        Get started:
+          sudo sail init --as-main --handle <you>   # make this box the org's main
+          sudo sail init --main <main>              # or join an existing main
         """,
-        linux);
+        installerEnding(1000));
+    assertEquals(
+        """
+        Get started:
+          sail init --as-main --handle <you>   # make this box the org's main
+          sail init --main <main>              # or join an existing main
+        """,
+        installerEnding(0));
+  }
+
+  /** What the installer prints after installing on Linux, run as the account {@code uid}. */
+  private static String installerEnding(int uid) throws Exception {
+    var installer = Files.readString(Path.of("..", "install.sh"));
+    var ending = installer.substring(installer.lastIndexOf("if [ \"$OS\" = \"Darwin\" ]"));
+    var script = "info() { echo \"$1\"; }\nid() { echo \"$UID_UNDER_TEST\"; }\nOS=Linux\n" + ending;
+    var process = new ProcessBuilder("bash", "-c", script).redirectErrorStream(true);
+    process.environment().put("UID_UNDER_TEST", String.valueOf(uid));
+    var running = process.start();
+    var printed = new String(running.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+    assertEquals(0, running.waitFor(), printed);
+    return printed;
+  }
+
+  /**
+   * A command sail renders with the value in hand names it: {@code <name>} is a placeholder for a
+   * project or session the reader picks, never for one the code holds, so no command renders it.
+   */
+  @Test
+  void noRenderedCommandLeavesTheNameAsAPlaceholder() throws Exception {
+    var rendered = Pattern.compile("\\.(?:sail|root|client)\\(");
+    var placeholders = new ArrayList<String>();
+    for (var root :
+        List.of(
+            Path.of("..", "sail-core", "src", "main"),
+            Path.of("..", "sail-harness", "src", "main"),
+            Path.of("src", "main"))) {
+      try (var sources = Files.walk(root)) {
+        for (var file :
+            sources.filter(path -> path.toString().endsWith(".java")).sorted().toList()) {
+          var source = read(file);
+          var matcher = rendered.matcher(source);
+          while (matcher.find()) {
+            var call = source.substring(matcher.end(), closingParen(source, matcher.end()));
+            if (call.contains("<name>")) {
+              placeholders.add(file.getFileName() + ": " + call);
+            }
+          }
+        }
+      }
+    }
+
+    assertEquals(List.of(), placeholders, "a rendered command leaves <name> for the reader");
   }
 }

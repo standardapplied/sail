@@ -68,18 +68,17 @@ public record ServerConnectionConfig(String serverUrl, String token) {
   }
 
   /**
-   * Why there is no token, and the fix for each kind of box. A dev box gets its token when sail-api
-   * first starts, so an old box that never installed the service needs {@code host service install}
-   * — not {@code sail login}, which is the thin-client path. Naming both (and the env/file
-   * overrides) keeps the message honest wherever it surfaces.
+   * Why there is no token, and the fix for each kind of box. A dev box gets its token when {@code
+   * sail init} installs and starts sail-api — not {@code sail login}, which is the thin-client
+   * path. Naming both (and the env/file overrides) keeps the message honest wherever it surfaces.
    */
   static Remedy noTokenRemedy() {
-    return Remedy.of(
-        "On a dev box: ",
-        Remedy.sail("host service install"),
-        " (installs and starts the control plane).\n  On a thin client: ",
-        Remedy.client("login"),
-        ".\n  Or set SAIL_TOKEN, or pass --token-file.");
+    return Remedy.of("On a dev box: ")
+        .then(Remedy.setUp())
+        .then(
+            " (installs and starts the control plane).\n  On a thin client: ",
+            Remedy.client("login"),
+            ".\n  Or set SAIL_TOKEN, or pass --token-file.");
   }
 
   /** Reads a token from a file, trimming surrounding whitespace; {@code null} path yields null. */

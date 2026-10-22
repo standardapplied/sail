@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.config.YamlUtil;
@@ -22,6 +23,7 @@ import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.ssh.SshPublicKey;
 import java.nio.file.Files;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -100,8 +102,7 @@ public final class HostInitCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(
-        "  If this is unexpected, re-run with --dry-run to see what would execute.", this::execute);
+    CliCommand.run(CliCommand.DRY_RUN_HINT, this::execute);
   }
 
   private void execute() throws Exception {
@@ -146,7 +147,7 @@ public final class HostInitCommand implements Runnable {
       if (!json) {
         Banner.printUnsupported(hostInfo, System.err, Ansi.AUTO);
       }
-      throw new IllegalStateException("Unsupported operating system: " + hostInfo.osPrettyName());
+      throw new CliCommand.Refused("Unsupported operating system: " + hostInfo.osPrettyName());
     }
 
     if (Files.exists(hostYamlPath) && !dryRun) {
@@ -156,22 +157,12 @@ public final class HostInitCommand implements Runnable {
                 "  @|yellow Host already initialized|@ (" + hostYamlPath + " exists)."));
         System.out.println("  Re-running will update the installation (all steps are idempotent).");
       }
-      if (!yes && !json && !ConsoleHelper.confirm("Continue?")) {
-        System.out.println("  Aborted.");
-        return;
+      if (!yes && !json) {
+        ask("Continue?");
       }
     }
 
-    String selectedDisk = null;
-    if (isZfs) {
-      selectedDisk = disk;
-      if (selectedDisk == null) {
-        selectedDisk = detectAndSelectDisk(shell);
-        if (selectedDisk == null) {
-          return;
-        }
-      }
-    }
+    var selectedDisk = isZfs && disk == null ? detectAndSelectDisk(new ShellExecutor(false)) : disk;
 
     var resolvedServerIp = serverIp;
     if (resolvedServerIp == null) {
@@ -211,9 +202,8 @@ public final class HostInitCommand implements Runnable {
       System.out.println();
     }
 
-    if (!yes && !dryRun && !json && !ConsoleHelper.confirm("Proceed with provisioning?")) {
-      System.out.println("  Aborted.");
-      return;
+    if (!yes && !dryRun && !json) {
+      ask("Proceed with provisioning?");
     }
 
     var listener = json ? ProvisionListener.NOOP : ConsoleProvisionListener.INSTANCE;
@@ -258,6 +248,14 @@ public final class HostInitCommand implements Runnable {
             });
   }
 
+  /**
+   * Asks {@code prompt} before provisioning goes on, refused unless answered yes on a terminal
+   * ({@link ConsoleHelper#proceed}).
+   */
+  static void ask(String prompt) {
+    ConsoleHelper.proceed(prompt, "Not provisioned", "--yes");
+  }
+
   /** The refusal of a command that needs this box provisioned, on a box that is not. */
   static IllegalStateException notInitialized(OperatorCommand operator) {
     return new IllegalStateException(
@@ -279,9 +277,7 @@ public final class HostInitCommand implements Runnable {
                 + operator.sail("upgrade")
                 + "' keeps it current."
             : "  @|bold Next step:|@ "
-                + operator.sail("init --as-main --handle <you>")
-                + ", or "
-                + operator.sail("init --main <main>")
+                + operator.render(Remedy.setUp())
                 + ", installs sail-api and connects this box.");
   }
 
@@ -290,10 +286,9 @@ public final class HostInitCommand implements Runnable {
     var candidates = detector.detect();
 
     if (candidates.isEmpty()) {
-      System.err.println(Banner.errorLine("No candidate disks found.", Ansi.AUTO));
-      System.err.println(
-          "    Options: add a second disk, or specify one manually with --disk /dev/sdX");
-      return null;
+      throw new CliCommand.Refused(
+          "Not provisioned: no candidate disks found. Add a second disk, or name one with --disk"
+              + " /dev/sdX.");
     }
 
     System.out.println(Ansi.AUTO.string("  @|bold Disks found:|@"));
@@ -314,33 +309,44 @@ public final class HostInitCommand implements Runnable {
 
     if (candidates.size() == 1) {
       var c = candidates.getFirst();
-      if (yes) {
-        return c.device();
+      if (!yes && !dryRun) {
+        ask("Use " + c.device() + " (" + c.size() + ") for ZFS pool \"" + pool + "\"?");
       }
-      if (ConsoleHelper.confirm(
-          "Use " + c.device() + " (" + c.size() + ") for ZFS pool \"" + pool + "\"?")) {
-        return c.device();
-      }
-      return null;
+      return c.device();
     }
 
+    if (!ConsoleHelper.hasConsole()) {
+      throw unchosen("no terminal to choose a disk on", candidates);
+    }
     System.out.print("  Select disk [1-" + candidates.size() + "]: ");
     System.out.flush();
-    var line = ConsoleHelper.readLine();
-    if (Strings.isBlank(line)) {
-      System.out.println("  Aborted.");
-      return null;
+    return chosenDisk(ConsoleHelper.readLine(), candidates);
+  }
+
+  /** The disk {@code line} picks of {@code candidates}, numbered from 1; refused otherwise. */
+  static String chosenDisk(String line, List<DiskDetector.Candidate> candidates) {
+    var choice = Strings.isBlank(line) ? 0 : parseChoice(line.strip());
+    if (choice < 1 || choice > candidates.size()) {
+      throw unchosen("no disk chosen", candidates);
     }
+    return candidates.get(choice - 1).device();
+  }
+
+  private static CliCommand.Refused unchosen(String why, List<DiskDetector.Candidate> candidates) {
+    var devices = candidates.stream().map(DiskDetector.Candidate::device).toList();
+    return new CliCommand.Refused(
+        "Not provisioned: "
+            + why
+            + ". Re-run with --disk and one of: "
+            + String.join(", ", devices)
+            + ".");
+  }
+
+  private static int parseChoice(String typed) {
     try {
-      var choice = Integer.parseInt(line.strip());
-      if (choice < 1 || choice > candidates.size()) {
-        System.out.println("  Invalid selection.");
-        return null;
-      }
-      return candidates.get(choice - 1).device();
+      return Integer.parseInt(typed);
     } catch (NumberFormatException e) {
-      System.out.println("  Invalid selection.");
-      return null;
+      return 0;
     }
   }
 
@@ -356,13 +362,13 @@ public final class HostInitCommand implements Runnable {
       if (!fatal.isEmpty()) {
         Banner.printMissingPrerequisites(fatal, System.err, Ansi.AUTO);
         var names = fatal.stream().map(PrerequisiteChecker.Prerequisite::command).toList();
-        throw new IllegalStateException(
+        throw new CliCommand.Refused(
             "Missing commands that cannot be auto-installed: " + String.join(", ", names));
       }
 
       Banner.printMissingPrerequisites(installable, System.out, Ansi.AUTO);
-      if (!yes && !ConsoleHelper.confirm("Install missing prerequisites?")) {
-        throw new IllegalStateException("Missing prerequisites. Aborting.");
+      if (!yes && !dryRun) {
+        ask("Install missing prerequisites?");
       }
       new PrerequisiteChecker(installShell).installMissing(installable);
     }

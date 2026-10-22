@@ -176,8 +176,9 @@ class ScopeChangeRoundTest {
       throws Exception {
     assertEquals(
         List.of(
-            "  ⚠ 2 new project(s) synced from main: acme, beta. Provision with 'sail project"
-                + " apply <name>'."),
+            "  ⚠ 2 new project(s) synced from main: acme, beta. Provision each with:",
+            "    sail project apply acme",
+            "    sail project apply beta"),
         round());
     filesOf("beta");
     incus.sail("acme");
@@ -334,8 +335,8 @@ class ScopeChangeRoundTest {
     fdes.unrestrict("nia");
     assertEquals(
         List.of(
-            "  ⚠ 1 new project(s) synced from main: beta. Provision with 'sail project apply"
-                + " <name>'."),
+            "  ⚠ 1 new project(s) synced from main: beta. Provision each with:",
+            "    sail project apply beta"),
         round());
 
     assertEquals(List.of("a1", "b1"), nodeSpecs());

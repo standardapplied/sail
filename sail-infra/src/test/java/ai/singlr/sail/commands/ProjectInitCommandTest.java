@@ -5,50 +5,72 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.gen.SailYamlGenerator;
 import ai.singlr.sail.harness.Harnesses;
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import picocli.CommandLine.Help.Ansi;
 
 class ProjectInitCommandTest {
 
-  private InputStream originalIn;
   private PrintStream originalOut;
   private final ByteArrayOutputStream asked = new ByteArrayOutputStream();
 
   @BeforeEach
   void captureTheConsole() {
-    originalIn = System.in;
     originalOut = System.out;
     System.setOut(new PrintStream(asked, true, StandardCharsets.UTF_8));
   }
 
   @AfterEach
   void restoreTheConsole() {
-    System.setIn(originalIn);
+    ConsoleStub.restore();
     System.setOut(originalOut);
-    ConsoleHelper.resetStdin();
   }
 
   private SailYaml.Agent answering(String answers) {
-    System.setIn(new ByteArrayInputStream(answers.getBytes(StandardCharsets.UTF_8)));
-    ConsoleHelper.resetStdin();
+    ConsoleStub.answering(answers, true);
     return ProjectInitCommand.promptAgent(
         new PrintStream(asked, true, StandardCharsets.UTF_8), Ansi.OFF);
+  }
+
+  @Test
+  void anOverwriteNobodyCanConfirmIsRefusedAndWritesNothing(@TempDir Path dir) throws Exception {
+    var existing = Files.writeString(dir.resolve("sail.yaml"), "name: acme\n");
+    ConsoleStub.answering("y\n", false);
+    try {
+      var refused =
+          assertThrows(
+              CliCommand.Refused.class, () -> ProjectInitCommand.confirmOverwrite(existing));
+
+      assertEquals(
+          "Not written: no terminal to confirm on. Re-run with --output <another path>.",
+          refused.getMessage());
+      assertEquals("", asked.toString(StandardCharsets.UTF_8));
+    } finally {
+      ConsoleStub.restore();
+    }
+  }
+
+  @Test
+  void aNewFileNeedsNoConfirming(@TempDir Path dir) {
+    assertDoesNotThrow(() -> ProjectInitCommand.confirmOverwrite(dir.resolve("sail.yaml")));
   }
 
   @Test
@@ -91,10 +113,7 @@ class ProjectInitCommandTest {
 
   @Test
   void sshAccessAsksOnlyForKeysAndWritesDev() {
-    System.setIn(
-        new ByteArrayInputStream(
-            "y\nssh-ed25519 AAAA alice@laptop\nn\n".getBytes(StandardCharsets.UTF_8)));
-    ConsoleHelper.resetStdin();
+    ConsoleStub.answering("y\nssh-ed25519 AAAA alice@laptop\nn\n", true);
 
     var ssh =
         ProjectInitCommand.promptSsh(

@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Mixin;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
@@ -33,6 +34,9 @@ public final class ApiSpecCommentCommand implements Runnable {
 
   @Option(names = "--question", description = "Mark this message as a question that needs a reply.")
   private boolean question;
+
+  @Option(names = "--json", description = "Print the posted message as JSON.")
+  private boolean json;
 
   @Mixin private SyncOptions syncOptions;
   @Mixin private ConnectionOptions connection;
@@ -57,7 +61,11 @@ public final class ApiSpecCommentCommand implements Runnable {
     var config = connection.resolve();
     try (var client = new SailApiClient(config.serverUrl(), config.token(), syncOptions.noSync())) {
       Map<String, Object> result = client.post("/v1/rooms/" + specId + "/messages", request);
-      System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
+      if (json) {
+        System.out.println(YamlUtil.dumpJson(new LinkedHashMap<>(result)));
+      } else {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ Comment posted on " + specId + "."));
+      }
     }
   }
 }

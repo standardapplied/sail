@@ -13,7 +13,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import ai.singlr.sail.Main;
 import ai.singlr.sail.api.ApiException;
 import ai.singlr.sail.api.ErrorCode;
+import ai.singlr.sail.authority.Refusal;
+import ai.singlr.sail.authority.WriteRefused;
+import ai.singlr.sail.engine.CliOperator;
+import ai.singlr.sail.engine.OperatorCommand;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
@@ -57,24 +62,106 @@ class CliCommandTest {
   }
 
   @Test
-  void aRefusalIsPrintedOnceWithItsFixThenTheHintAndThrownAsPrinted() {
-    var refusal =
-        new ApiException(ErrorCode.CONFLICT, "The roster is unsynced.", "Run 'sail sync'.");
+  void aDestroyNobodyCanConfirmIsRefusedWithNoDryRunHint() {
+    ConsoleStub.answering("", false);
+    try {
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  CliCommand.DRY_RUN_HINT,
+                  () -> ProjectDestroyCommand.confirm(false, false, false, "gamma", false)));
+      assertThrows(
+          CliCommand.Printed.class,
+          () ->
+              CliCommand.run(
+                  CliCommand.DRY_RUN_HINT,
+                  () -> ProjectDestroyCommand.confirm(false, false, true, "gamma", false)));
+    } finally {
+      ConsoleStub.restore();
+    }
+
+    assertEquals(
+        "  ✗ Not destroyed: no terminal to confirm on. Re-run with --yes.\n"
+            + "  ✗ --json requires --yes (nobody answers a prompt through JSON).\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aFailureSailDidNotDecideIsFollowedByTheDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new IOException("incus delete gamma failed: device busy");
+                }));
+
+    assertEquals(
+        "  ✗ incus delete gamma failed: device busy\n"
+            + "  If this is unexpected, re-run with --dry-run to see what would execute.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aRefusalIsPrintedOnceWithItsFixWithNoDryRunHintAndThrownAsPrinted() {
+    var refusal = CliOperator.unplaced(null);
 
     var error =
         assertThrows(
             CliCommand.Printed.class,
             () ->
                 CliCommand.run(
-                    "  try --dry-run",
+                    CliCommand.DRY_RUN_HINT,
                     () -> {
                       throw refusal;
                     }));
 
     assertEquals(
-        "  ✗ The roster is unsynced.\nRun 'sail sync'.\n  try --dry-run\n",
+        "  ✗ This box syncs with main but names no FDE of its own, so it cannot tell what you may"
+            + " do.\n"
+            + OperatorCommand.here().render(refusal.remedy())
+            + "\n",
         capturedErr.toString(StandardCharsets.UTF_8));
     assertEquals(refusal, error.getCause());
+  }
+
+  @Test
+  void aWriteTheJournalRefusedGetsNoDryRunHint() {
+    var refused =
+        new WriteRefused(
+            new Refusal(
+                Refusal.Kind.ADMIN_ONLY, "Purging project 'acme' is admin-only.", "Ask an admin."));
+
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw refused;
+                }));
+
+    assertEquals(
+        "  ✗ Purging project 'acme' is admin-only.\nAsk an admin.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
+  }
+
+  @Test
+  void aServerErrorIsFollowedByTheDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new ApiException(ErrorCode.CONTAINER_ERROR, "incus delete acme failed.");
+                }));
+
+    assertEquals(
+        "  ✗ incus delete acme failed.\n" + CliCommand.DRY_RUN_HINT + "\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
   }
 
   @Test
@@ -201,5 +288,22 @@ class CliCommandTest {
   private static final class TestCommand implements Runnable {
     @Override
     public void run() {}
+  }
+
+  @Test
+  void anArgumentSailRejectedGetsNoDryRunHint() {
+    assertThrows(
+        CliCommand.Printed.class,
+        () ->
+            CliCommand.run(
+                CliCommand.DRY_RUN_HINT,
+                () -> {
+                  throw new IllegalArgumentException(
+                      "Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.");
+                }));
+
+    assertEquals(
+        "  ✗ Invalid storage backend: 'btrfs'. Must be 'dir' or 'zfs'.\n",
+        capturedErr.toString(StandardCharsets.UTF_8));
   }
 }

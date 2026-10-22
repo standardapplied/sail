@@ -5,14 +5,13 @@
 
 package ai.singlr.sail.commands;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import org.junit.jupiter.api.AfterEach;
@@ -20,23 +19,18 @@ import org.junit.jupiter.api.Test;
 
 class ProjectDestroyCommandTest {
 
-  private final InputStream originalIn = System.in;
   private final PrintStream originalOut = System.out;
   private final ByteArrayOutputStream out = new ByteArrayOutputStream();
 
   @AfterEach
   void restoreConsole() {
-    ConsoleHelper.terminal = () -> ConsoleHelper.consoleSupplier.get() != null;
-    ConsoleHelper.resetStdin();
-    System.setIn(originalIn);
+    ConsoleStub.restore();
     System.setOut(originalOut);
   }
 
   private void answering(String stdin, boolean terminal) {
-    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
+    ConsoleStub.answering(stdin, terminal);
     System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
-    ConsoleHelper.resetStdin();
-    ConsoleHelper.terminal = () -> terminal;
   }
 
   @Test
@@ -45,18 +39,23 @@ class ProjectDestroyCommandTest {
 
     var refused =
         assertThrows(
-            IllegalStateException.class,
-            () -> ProjectDestroyCommand.confirmed(false, false, false, "acme", true));
+            CliCommand.Refused.class,
+            () -> ProjectDestroyCommand.confirm(false, false, false, "acme", true));
 
     assertEquals(
         "Not destroyed: no terminal to confirm on. Re-run with --yes.", refused.getMessage());
   }
 
   @Test
-  void aDestroyAnsweredWithAnEmptyLineOnATerminalIsNotConfirmed() {
+  void aDestroyAnsweredWithAnEmptyLineOnATerminalIsAborted() {
     answering("\n", true);
 
-    assertFalse(ProjectDestroyCommand.confirmed(false, false, false, "acme", false));
+    var refused =
+        assertThrows(
+            CliCommand.Refused.class,
+            () -> ProjectDestroyCommand.confirm(false, false, false, "acme", false));
+
+    assertEquals("Aborted.", refused.getMessage());
 
     assertEquals(
         "  Destroy project acme? This cannot be undone. [y/N] ",
@@ -69,8 +68,8 @@ class ProjectDestroyCommandTest {
 
     var refused =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> ProjectDestroyCommand.confirmed(false, false, true, "acme", true));
+            CliCommand.Refused.class,
+            () -> ProjectDestroyCommand.confirm(false, false, true, "acme", true));
 
     assertEquals(
         "--json requires --yes (nobody answers a prompt through JSON).", refused.getMessage());
@@ -81,8 +80,8 @@ class ProjectDestroyCommandTest {
   void yesOrADryRunAsksNothing() {
     answering("", false);
 
-    assertTrue(ProjectDestroyCommand.confirmed(true, false, false, "acme", true));
-    assertTrue(ProjectDestroyCommand.confirmed(false, true, false, "acme", true));
+    assertDoesNotThrow(() -> ProjectDestroyCommand.confirm(true, false, false, "acme", true));
+    assertDoesNotThrow(() -> ProjectDestroyCommand.confirm(false, true, false, "acme", true));
     assertEquals("", out.toString(StandardCharsets.UTF_8));
   }
 

@@ -383,15 +383,17 @@ class SyncCommandTest {
   }
 
   @Test
-  void resolveMainHasNoTargetAndGuidesWhenStandalone() {
+  void aBoxWithNoMainIsToldTheInitThatSetsUpSync() {
     var resolved = SyncCommand.resolveMain("  ", SyncConfig.unset(), OperatorCommand.PLAIN);
     assertNull(resolved.target());
     assertEquals(
-        Remedy.of(
-            "Single devbox — nothing to sync. Add a second box with: ",
-            Remedy.sail("host sync", "--main", "<user@host>"),
-            "."),
-        resolved.message());
+        "Single devbox — nothing to sync. Set up sync with: sudo sail init --as-main --handle"
+            + " <you>, or sudo sail init --main <main>.",
+        OperatorCommand.SUDO.render(resolved.message()));
+    assertEquals(
+        "Single devbox — nothing to sync. Set up sync with: sail init --as-main --handle <you>, or"
+            + " sail init --main <main>.",
+        OperatorCommand.PLAIN.render(resolved.message()));
   }
 
   @Test

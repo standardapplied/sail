@@ -24,15 +24,15 @@ public final class RootRequired {
   private RootRequired() {}
 
   /** "Root privileges required." and the caller's command, re-run with sudo. */
-  static IllegalStateException refusal(CommandSpec spec) {
+  static CliCommand.Refused refusal(CommandSpec spec) {
     return refusal("Root privileges required.", spec);
   }
 
   /** {@code what} needs root, and the caller's command, re-run with sudo. */
-  static IllegalStateException refusal(String what, CommandSpec spec) {
+  static CliCommand.Refused refusal(String what, CommandSpec spec) {
     var words = new ArrayList<>(verbOf(spec));
     words.addAll(spec.commandLine().getParseResult().expandedArgs());
-    return new IllegalStateException(what + " Run with: " + rerun(words));
+    return new CliCommand.Refused(what + " Run with: " + rerun(words));
   }
 
   /** {@code args}, the words after {@code sail}, as root runs them for a caller who is not root. */

@@ -96,7 +96,7 @@ fingerprint of main's host key that their box pinned, and main refuses the line 
 its own key:
 
 ```bash
-sudo sail fde add mady --role member --key "ssh-ed25519 AAAA... sail-sync@madybox" \
+sudo sail fde add mady --role member --key 'ssh-ed25519 AAAA... sail-sync@madybox' \
   --main-host-key SHA256:...
 ```
 

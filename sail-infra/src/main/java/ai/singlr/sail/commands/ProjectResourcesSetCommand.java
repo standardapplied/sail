@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.Banner;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerManager.ResourceLimits;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.NameValidator;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectDefinitions;
@@ -113,7 +114,7 @@ public final class ProjectResourcesSetCommand implements Runnable {
 
     var queryManager = new ContainerManager(queryShell());
     var info = queryManager.queryInfo(name);
-    requireExistingProject(info.state(), operator);
+    ContainerStateGuard.requireCreated(info.state(), name);
 
     var cpuOrMemoryRequested = cpu != null || memory != null;
     var liveLimitsChanged = cpuOrMemoryRequested && limitsDiffer(info.limits(), desiredResources);
@@ -173,22 +174,6 @@ public final class ProjectResourcesSetCommand implements Runnable {
   private void requireRequestedChange() {
     if (cpu == null && memory == null && disk == null) {
       throw new IllegalArgumentException("Specify at least one of --cpu, --memory, or --disk.");
-    }
-  }
-
-  private void requireExistingProject(ContainerState state, OperatorCommand operator) {
-    switch (state) {
-      case ContainerState.Running ignored -> {}
-      case ContainerState.Stopped ignored -> {}
-      case ContainerState.NotCreated ignored ->
-          throw new IllegalStateException(
-              "Project '"
-                  + name
-                  + "' does not exist. Run '"
-                  + operator.sail("project apply " + name)
-                  + "' first.");
-      case ContainerState.Error e ->
-          throw new IllegalStateException("Container error: " + e.message());
     }
   }
 

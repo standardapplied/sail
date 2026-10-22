@@ -37,7 +37,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Set;
-import java.util.function.BooleanSupplier;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,7 +50,6 @@ class ApiSpecCommandsTest {
   private SailApiServer server;
   private String token;
   private ReviewStore reviewStore;
-  private final BooleanSupplier originalTerminal = ConsoleHelper.terminal;
 
   @BeforeEach
   void setUp() throws Exception {
@@ -84,8 +82,7 @@ class ApiSpecCommandsTest {
 
   @AfterEach
   void tearDown() {
-    ConsoleHelper.terminal = originalTerminal;
-    ConsoleHelper.resetStdin();
+    ConsoleStub.restore();
     if (server != null) server.close();
     if (db != null) db.close();
   }
@@ -124,14 +121,11 @@ class ApiSpecCommandsTest {
   }
 
   private Ran answering(String stdin, boolean terminal, String... args) {
-    var original = System.in;
-    System.setIn(new ByteArrayInputStream(stdin.getBytes(StandardCharsets.UTF_8)));
-    ConsoleHelper.resetStdin();
-    ConsoleHelper.terminal = () -> terminal;
+    ConsoleStub.answering(stdin, terminal);
     try {
       return execute(args);
     } finally {
-      System.setIn(original);
+      ConsoleStub.restore();
     }
   }
 
@@ -261,10 +255,20 @@ class ApiSpecCommandsTest {
   }
 
   @Test
+  void aCommentSaysItWasPostedAndPrintsItsJsonOnlyWhenAsked() {
+    run("create", "--id", "x", "--title", "X");
+
+    assertEquals(
+        new Ran(0, "  ✓ Comment posted on x.\n", ""), execute("comment", "x", "--body", "hi"));
+    var json = run("comment", "x", "--body", "again", "--json");
+    assertTrue(json.contains("\"body\": \"again\""), json);
+  }
+
+  @Test
   void commentAndCommentsRoundTripAsJson() {
     run("create", "--id", "room", "--title", "Room");
 
-    var posted = run("comment", "room", "--body", "Progress update");
+    var posted = run("comment", "room", "--body", "Progress update", "--json");
     assertTrue(posted.contains("\"author\": \"test\""));
     assertTrue(posted.contains("\"body\": \"Progress update\""));
 
@@ -277,7 +281,7 @@ class ApiSpecCommandsTest {
   void commentQuestionFlagRidesTheRequestAndReturnsOnTheMessage() {
     run("create", "--id", "asking", "--title", "Asking");
 
-    var posted = run("comment", "asking", "--body", "Which flow?", "--question");
+    var posted = run("comment", "asking", "--body", "Which flow?", "--question", "--json");
     assertTrue(posted.contains("\"question\": true"));
 
     var listed = run("comments", "asking");
@@ -292,7 +296,7 @@ class ApiSpecCommandsTest {
       System.setIn(
           new ByteArrayInputStream("Question from stdin".getBytes(StandardCharsets.UTF_8)));
       assertTrue(
-          run("comment", "stdin-room", "--body", "-")
+          run("comment", "stdin-room", "--body", "-", "--json")
               .contains("\"body\": \"Question from stdin\""));
     } finally {
       System.setIn(original);
@@ -372,12 +376,12 @@ class ApiSpecCommandsTest {
   }
 
   @Test
-  void aDeleteAnsweredWithAnEmptyLineOnATerminalIsCancelled() {
+  void aDeleteAnsweredWithAnEmptyLineOnATerminalIsAbortedAndExitsNonZero() {
     run("create", "--id", "kept", "--title", "Kept");
 
-    var cancelled = answering("\n", true, "delete", "kept");
+    var aborted = answering("\n", true, "delete", "kept");
 
-    assertEquals(new Ran(0, "  Delete spec 'kept'? [y/N]   Cancelled.\n", ""), cancelled);
+    assertEquals(new Ran(1, "  Delete spec 'kept'? [y/N] ", "  ✗ Aborted.\n"), aborted);
     assertTrue(run("show", "kept", "--json").contains("\"id\": \"kept\""));
   }
 

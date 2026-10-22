@@ -82,6 +82,15 @@ public record Remedy(List<Part> parts) {
   }
 
   /**
+   * The README's step that makes a box a main or joins it to one, which installs sail-api and sets
+   * up sync: what a box that has not run it yet is told.
+   */
+  public static Remedy setUp() {
+    return of(
+        sail("init", "--as-main", "--handle", "<you>"), ", or ", sail("init", "--main", "<main>"));
+  }
+
+  /**
    * A remedy read in the order given: a {@link String} is words, a {@link Command} a command and a
    * {@link Remedy} its parts.
    */

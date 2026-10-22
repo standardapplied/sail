@@ -9,6 +9,7 @@ import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
+import ai.singlr.sail.engine.ContainerStateGuard;
 import ai.singlr.sail.engine.ShellExec;
 import java.util.Objects;
 
@@ -54,9 +55,7 @@ final class ProjectLoader {
         return loaded;
       }
       case ContainerState.Stopped ignored -> throw stopped(project);
-      case ContainerState.NotCreated ignored ->
-          throw new ApiException(
-              ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
+      case ContainerState.NotCreated ignored -> throw notCreated(project);
       case ContainerState.Error error ->
           throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());
     }
@@ -69,6 +68,10 @@ final class ProjectLoader {
         Remedy.of("Start it with ", Remedy.sail("project start", project), "."));
   }
 
+  private static ApiException notCreated(String project) {
+    return ApiException.of(ErrorCode.PROJECT_NOT_CREATED, ContainerStateGuard.notCreated(project));
+  }
+
   void requireExists(String project) {
     loadCreated(project);
   }
@@ -76,8 +79,7 @@ final class ProjectLoader {
   LoadedProject loadCreated(String project) {
     var loaded = load(project);
     if (loaded.state() instanceof ContainerState.NotCreated) {
-      throw new ApiException(
-          ErrorCode.PROJECT_NOT_CREATED, "Project '" + project + "' does not exist.");
+      throw notCreated(project);
     }
     if (loaded.state() instanceof ContainerState.Error error) {
       throw new ApiException(ErrorCode.CONTAINER_ERROR, error.message());

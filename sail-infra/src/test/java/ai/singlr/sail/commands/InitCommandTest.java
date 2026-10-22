@@ -191,7 +191,7 @@ class InitCommandTest {
                     + nl
                     + "    "
                     + here
-                    + " fde add mady --role member --key \"…\" --main-host-key SHA256:…"
+                    + " fde add mady --role member --key '…' --main-host-key SHA256:…"
                     + nl),
         printed.toString(StandardCharsets.UTF_8));
   }
@@ -212,7 +212,7 @@ class InitCommandTest {
         printed
             .toString(StandardCharsets.UTF_8)
             .endsWith(
-                "    sudo sail fde add mady --role member --key \"…\" --main-host-key SHA256:…"
+                "    sudo sail fde add mady --role member --key '…' --main-host-key SHA256:…"
                     + System.lineSeparator()),
         printed.toString(StandardCharsets.UTF_8));
   }

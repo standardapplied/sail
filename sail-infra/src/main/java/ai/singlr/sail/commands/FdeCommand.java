@@ -35,6 +35,7 @@ import ai.singlr.sail.store.ProjectStore;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
 import ai.singlr.sail.store.SqliteException;
+import ai.singlr.sail.store.SyncScope;
 import ai.singlr.sail.store.TokenStore;
 import ai.singlr.sail.store.WebauthnCredentialStore;
 import java.io.IOException;
@@ -50,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -700,7 +702,7 @@ public final class FdeCommand implements Runnable {
             + (dryRun ? " would see" : " sees")
             + " every project again. Its box holds them after its next sync; provision a"
             + " container with '"
-            + OperatorCommand.SUDO.sail("project apply <name>")
+            + OperatorCommand.SUDO.sail("project apply <project>")
             + "'.";
       }
       var to =
@@ -945,9 +947,11 @@ public final class FdeCommand implements Runnable {
             var operator = operator();
             var box = command.box.get();
             requireMainForRosterEdit(box.node(), "Removing an FDE");
-            if (!confirmed()) {
-              System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
-              return;
+            if (!force) {
+              ConsoleHelper.confirmDestructive(
+                  "Remove FDE '" + handle + "' and revoke all its credentials?",
+                  "Not removed",
+                  "--force");
             }
             try (var held = PairingTrust.hold(box.database());
                 var db = Sqlite.open(box.database())) {
@@ -983,14 +987,6 @@ public final class FdeCommand implements Runnable {
               }
             }
           });
-    }
-
-    private boolean confirmed() {
-      return force
-          || ConsoleHelper.confirmDestructive(
-              "Remove FDE '" + handle + "' and revoke all its credentials?",
-              "Not removed",
-              "--force");
     }
   }
 
@@ -1313,17 +1309,30 @@ public final class FdeCommand implements Runnable {
       CliCommand.run(
           () -> {
             var operator = operator();
-            try (var db = Sqlite.open(command.box.get().database())) {
+            var box = command.box.get();
+            try (var db = Sqlite.open(box.database())) {
               var fdeStore = new FdeStore(db);
               var fdes = fdeStore.list();
               if (fdes.isEmpty()) {
                 System.out.println(noFdes(operator));
                 return;
               }
-              Banner.printFdeTable(fdes, fdeStore::scopeOf, System.out, Ansi.AUTO);
+              Banner.printFdeTable(fdes, scopes(box, db, fdeStore), System.out, Ansi.AUTO);
             }
           });
     }
+  }
+
+  /**
+   * The scope each FDE's row shows: main holds every FDE's own; a node holds only its own FDE's,
+   * the one main last named for it ({@link SyncScope}), since main syncs no FDE's scope to a node.
+   */
+  static Function<String, Optional<ProjectScope>> scopes(Box box, Sqlite db, FdeStore fdeStore) {
+    if (!box.node()) {
+      return handle -> Optional.of(fdeStore.scopeOf(handle));
+    }
+    var own = new SyncScope(db).held();
+    return handle -> handle.equals(box.handle()) ? Optional.of(own) : Optional.empty();
   }
 
   @Command(

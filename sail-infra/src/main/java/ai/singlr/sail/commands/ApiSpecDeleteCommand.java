@@ -40,14 +40,11 @@ public final class ApiSpecDeleteCommand implements Runnable {
     NameValidator.requireValidSpecId(specId);
 
     if (json && !force) {
-      throw new IllegalArgumentException(
+      throw new CliCommand.Refused(
           "--json requires --force (nobody answers a prompt through JSON).");
     }
-    if (!force
-        && !ConsoleHelper.confirmDestructive(
-            "Delete spec '" + specId + "'?", "Not deleted", "--force")) {
-      System.out.println(Ansi.AUTO.string("  @|faint Cancelled.|@"));
-      return;
+    if (!force) {
+      ConsoleHelper.confirmDestructive("Delete spec '" + specId + "'?", "Not deleted", "--force");
     }
 
     var config = connection.resolve();

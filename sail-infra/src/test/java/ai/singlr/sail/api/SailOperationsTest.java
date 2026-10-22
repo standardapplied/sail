@@ -11,6 +11,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.Lane;
 import ai.singlr.sail.config.SpecStatus;
 import ai.singlr.sail.engine.AgentUnit;
@@ -313,10 +314,13 @@ class SailOperationsTest {
         ErrorCode.PROJECT_STOPPED,
         operationsWith(shell().on("incus list ^acme$", STOPPED_JSON), store -> {}, environment())
             .connect("acme"));
-    assertError(
-        ErrorCode.PROJECT_NOT_CREATED,
+    var uncreated =
         operationsWith(shell().on("incus list ^acme$", EMPTY_JSON), store -> {}, environment())
-            .connect("acme"));
+            .connect("acme");
+    assertError(ErrorCode.PROJECT_NOT_CREATED, uncreated);
+    assertEquals("Project 'acme' has no container on this box.", uncreated.errorMessage());
+    assertEquals(
+        Remedy.of("Create it: ", Remedy.sail("project apply", "acme")), uncreated.remedy());
     assertError(
         ErrorCode.CONTAINER_ERROR,
         operationsWith(

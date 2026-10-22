@@ -56,8 +56,7 @@ public final class ProjectDestroyCommand implements Runnable {
 
   @Override
   public void run() {
-    CliCommand.run(
-        "  If this is unexpected, re-run with --dry-run to see what would execute.", this::execute);
+    CliCommand.run(CliCommand.DRY_RUN_HINT, this::execute);
   }
 
   private void execute() throws Exception {
@@ -93,9 +92,8 @@ public final class ProjectDestroyCommand implements Runnable {
       System.out.println(Ansi.AUTO.string("  @|bold Purging erases everywhere:|@ " + erases));
     }
 
-    if ((containerPresent || purge) && !confirmed(yes, dryRun, json, name, purge)) {
-      System.out.println("  Aborted.");
-      return;
+    if (containerPresent || purge) {
+      confirm(yes, dryRun, json, name, purge);
     }
 
     if (containerPresent && !json) {
@@ -109,18 +107,18 @@ public final class ProjectDestroyCommand implements Runnable {
   }
 
   /**
-   * Whether to go on: asked, defaulting to no and refused where nobody can answer ({@link
-   * ConsoleHelper#confirmDestructive}) or under {@code --json}, unless {@code --yes} or a dry run.
+   * Returns when destroy may go on: asked, defaulting to no and refused unless answered yes, where
+   * nobody can answer ({@link ConsoleHelper#confirmDestructive}) and under {@code --json}; {@code
+   * --yes} or a dry run asks nothing.
    */
-  static boolean confirmed(boolean yes, boolean dryRun, boolean json, String name, boolean purge) {
+  static void confirm(boolean yes, boolean dryRun, boolean json, String name, boolean purge) {
     if (yes || dryRun) {
-      return true;
+      return;
     }
     if (json) {
-      throw new IllegalArgumentException(
-          "--json requires --yes (nobody answers a prompt through JSON).");
+      throw new CliCommand.Refused("--json requires --yes (nobody answers a prompt through JSON).");
     }
-    return ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
+    ConsoleHelper.confirmDestructive(confirmPrompt(name, purge), "Not destroyed", "--yes");
   }
 
   static String confirmPrompt(String name, boolean purge) {
