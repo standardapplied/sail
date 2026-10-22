@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
@@ -20,29 +19,18 @@ import java.util.concurrent.TimeoutException;
  */
 public final class SshdKeepalive {
 
-  /** Where the drop-in lives; sshd's stock config includes {@code sshd_config.d/*.conf}. */
-  public static final String DROP_IN_PATH = "/etc/ssh/sshd_config.d/10-sail.conf";
-
-  private static final String CONTENT =
-      """
-      # Managed by sail. Notice a peer that vanished (a laptop that slept, a network that
-      # changed) within a minute, so no session keeps a keyboard for a connection that died.
-      ClientAliveInterval 15
-      ClientAliveCountMax 3
-      """;
-
-  /**
-   * The shell that installs the drop-in and reloads a running sshd: {@code $1} is the content,
-   * {@code $2} the path. A box without sshd running keeps the file for when it starts.
-   */
-  static final String INSTALL_SCRIPT =
-      """
-      set -eu
-      mkdir -p "$(dirname -- "$2")"
-      printf '%s' "$1" > "$2"
-      chmod 0644 "$2"
-      if systemctl is-active --quiet ssh; then systemctl reload ssh; fi
-      """;
+  /** The drop-in; sshd's stock config includes {@code sshd_config.d/*.conf}. */
+  public static final HostDropIn DROP_IN =
+      new HostDropIn(
+          "sshd keepalive drop-in",
+          "/etc/ssh/sshd_config.d/10-sail.conf",
+          """
+          # Managed by sail. Notice a peer that vanished (a laptop that slept, a network that
+          # changed) within a minute, so no session keeps a keyboard for a connection that died.
+          ClientAliveInterval 15
+          ClientAliveCountMax 3
+          """,
+          "if systemctl is-active --quiet ssh; then systemctl reload ssh; fi\n");
 
   private final ShellExec shell;
 
@@ -50,23 +38,14 @@ public final class SshdKeepalive {
     this.shell = Objects.requireNonNull(shell, "shell");
   }
 
-  /** The drop-in's content. Pure function. */
-  public static String content() {
-    return CONTENT;
-  }
-
-  /** The command that installs the drop-in at {@code path} on the machine it runs on. */
-  public static List<String> installCommand(String path) {
-    return List.of("bash", "-c", INSTALL_SCRIPT, "bash", CONTENT, path);
-  }
-
   /** Idempotently installs the drop-in inside {@code container} as root and reloads its sshd. */
   public void install(String container) throws IOException, InterruptedException, TimeoutException {
     NameValidator.requireValidProjectName(container);
-    var result = shell.exec(ContainerExec.asRoot(container, installCommand(DROP_IN_PATH)));
+    var result =
+        shell.exec(ContainerExec.asRoot(container, DROP_IN.installCommand(DROP_IN.path())));
     if (!result.ok()) {
       throw new IOException(
-          "Failed to install " + DROP_IN_PATH + " in " + container + ": " + result.stderr());
+          "Failed to install " + DROP_IN.path() + " in " + container + ": " + result.stderr());
     }
   }
 }

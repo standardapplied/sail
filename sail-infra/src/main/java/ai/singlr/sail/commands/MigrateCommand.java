@@ -15,6 +15,7 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.NeedrestartPolicy;
@@ -51,7 +52,6 @@ import java.util.Optional;
 import java.util.concurrent.TimeoutException;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
@@ -437,22 +437,8 @@ public final class MigrateCommand implements Runnable {
     return Optional.of(host.withSync(host.sync().withBoxId(boxId)));
   }
 
-  /** A file sail owns under the host's {@code /etc}: its content and the command that writes it. */
-  private record HostDropIn(
-      String name, String path, String content, Function<String, List<String>> install) {}
-
   private static final List<HostDropIn> HOST_DROP_INS =
-      List.of(
-          new HostDropIn(
-              "sshd keepalive drop-in",
-              SshdKeepalive.DROP_IN_PATH,
-              SshdKeepalive.content(),
-              SshdKeepalive::installCommand),
-          new HostDropIn(
-              "needrestart policy",
-              NeedrestartPolicy.DROP_IN_PATH,
-              NeedrestartPolicy.content(),
-              NeedrestartPolicy::installCommand));
+      List.of(SshdKeepalive.DROP_IN, NeedrestartPolicy.DROP_IN);
 
   /**
    * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}. Lives here for
@@ -479,7 +465,7 @@ public final class MigrateCommand implements Runnable {
       if (Files.exists(path) && Files.readString(path).equals(dropIn.content())) {
         return;
       }
-      var result = shell.exec(dropIn.install().apply(path.toString()));
+      var result = shell.exec(dropIn.installCommand(path.toString()));
       if (!result.ok()) {
         throw new IOException(result.stderr());
       }

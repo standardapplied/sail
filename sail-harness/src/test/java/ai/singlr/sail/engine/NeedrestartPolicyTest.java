@@ -6,7 +6,6 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Files;
@@ -27,7 +26,7 @@ class NeedrestartPolicyTest {
   @Test
   void thePolicyDefersEveryIncusRestartAndNoSailOne() {
     var directives =
-        NeedrestartPolicy.content().lines().filter(line -> !line.startsWith("#")).toList();
+        NeedrestartPolicy.DROP_IN.content().lines().filter(line -> !line.startsWith("#")).toList();
 
     assertEquals(List.of("$nrconf{override_rc}{qr(^incus)} = 0;"), directives);
   }
@@ -36,9 +35,9 @@ class NeedrestartPolicyTest {
   void installingWritesTheSnippetWithMode0644IntoADirectoryItCreates() throws Exception {
     var snippet = dir.resolve("etc/needrestart/conf.d/50-sail.conf");
 
-    assertEquals(0, run(NeedrestartPolicy.installCommand(snippet.toString())));
+    assertEquals(0, run(NeedrestartPolicy.DROP_IN.installCommand(snippet.toString())));
 
-    assertEquals(NeedrestartPolicy.content(), Files.readString(snippet));
+    assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
     assertEquals(
         "rw-r--r--", PosixFilePermissions.toString(Files.getPosixFilePermissions(snippet)));
   }
@@ -47,10 +46,10 @@ class NeedrestartPolicyTest {
   void installingTwiceLeavesOneIdenticalFile() throws Exception {
     var snippet = dir.resolve("50-sail.conf");
 
-    assertEquals(0, run(NeedrestartPolicy.installCommand(snippet.toString())));
-    assertEquals(0, run(NeedrestartPolicy.installCommand(snippet.toString())));
+    assertEquals(0, run(NeedrestartPolicy.DROP_IN.installCommand(snippet.toString())));
+    assertEquals(0, run(NeedrestartPolicy.DROP_IN.installCommand(snippet.toString())));
 
-    assertEquals(NeedrestartPolicy.content(), Files.readString(snippet));
+    assertEquals(NeedrestartPolicy.DROP_IN.content(), Files.readString(snippet));
     try (var files = Files.list(dir)) {
       assertEquals(List.of(snippet), files.toList());
     }
@@ -58,18 +57,17 @@ class NeedrestartPolicyTest {
 
   @Test
   void theContentReachesBashAsAnArgumentNeverAsScript() {
-    var command = NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH);
+    var policy = NeedrestartPolicy.DROP_IN;
 
     assertEquals(
         List.of(
             "bash",
             "-c",
-            NeedrestartPolicy.INSTALL_SCRIPT,
+            HostDropIn.WRITE_SCRIPT,
             "bash",
-            NeedrestartPolicy.content(),
-            NeedrestartPolicy.DROP_IN_PATH),
-        command);
-    assertFalse(NeedrestartPolicy.INSTALL_SCRIPT.contains("nrconf"), command.get(2));
+            policy.content(),
+            "/etc/needrestart/conf.d/50-sail.conf"),
+        policy.installCommand(policy.path()));
   }
 
   private int run(List<String> command) throws Exception {

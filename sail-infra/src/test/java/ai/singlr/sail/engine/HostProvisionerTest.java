@@ -759,10 +759,12 @@ class HostProvisionerTest {
             tempDir.resolve("sail.db"));
 
     var commands = shell.arguments();
-    var policy = commands.indexOf(NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH));
+    var policy =
+        commands.indexOf(
+            NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()));
     var upgrade = commands.indexOf(List.of("apt-get", "upgrade", "-y", "-qq"));
     assertEquals(0, policy, shell.invocations().toString());
-    assertTrue(policy < upgrade, "a re-run's apt-get upgrade must not restart incusd");
+    assertTrue(policy < upgrade, "a library the upgrade replaces must not restart incusd");
   }
 
   @Test
@@ -812,7 +814,8 @@ class HostProvisionerTest {
 
     var printed =
         "[dry-run] "
-            + String.join(" ", NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH))
+            + String.join(
+                " ", NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()))
             + "\n";
     assertTrue(out.toString(StandardCharsets.UTF_8).startsWith(printed), out.toString());
     assertFalse(Files.exists(tempDir.resolve("host.yaml")));
@@ -828,6 +831,8 @@ class HostProvisionerTest {
     assertEquals(
         "6.21",
         HostProvisioner.incusVersion(new ScriptedShellExecutor().onOk("incus version", "6.21\n")));
+    assertEquals(
+        "unknown", HostProvisioner.incusVersion(new ScriptedShellExecutor().onOk("incus version")));
     assertEquals(
         "unknown",
         HostProvisioner.incusVersion(

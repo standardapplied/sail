@@ -15,11 +15,15 @@ import ai.singlr.sail.engine.HostDetector;
 import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.ZfsQuery;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -54,11 +58,16 @@ public final class HostStatusCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
-    var hostDetector = new HostDetector();
-    var hostInfo = hostDetector.detect();
+    report(hostYaml, new HostDetector().detect(), new ShellExecutor(false), json, System.out);
+  }
 
-    var shell = new ShellExecutor(false);
-
+  static void report(
+      HostYaml hostYaml,
+      HostDetector.HostInfo hostInfo,
+      ShellExec shell,
+      boolean json,
+      PrintStream out)
+      throws IOException, InterruptedException, TimeoutException {
     ZfsQuery.PoolUsage poolUsage = null;
     DirQuery.FsUsage fsUsage = null;
     if (hostYaml.isZfs()) {
@@ -67,18 +76,17 @@ public final class HostStatusCommand implements Runnable {
       fsUsage = DirQuery.queryFilesystem(shell);
     }
 
-    var mgr = new ContainerManager(shell);
-    var containers = mgr.listAll();
+    var containers = new ContainerManager(shell).listAll();
     var incusVersion = HostProvisioner.incusVersion(shell);
 
     if (json) {
-      printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers);
+      printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out);
       return;
     }
 
-    Banner.printBranding(System.out, Ansi.AUTO);
+    Banner.printBranding(out, Ansi.AUTO);
     Banner.printHostStatus(
-        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, System.out, Ansi.AUTO);
+        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out, Ansi.AUTO);
   }
 
   private static void printJson(
@@ -87,7 +95,8 @@ public final class HostStatusCommand implements Runnable {
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
-      List<ContainerManager.ContainerInfo> containers) {
+      List<ContainerManager.ContainerInfo> containers,
+      PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
     map.put("os", hostInfo.osPrettyName());
@@ -121,6 +130,6 @@ public final class HostStatusCommand implements Runnable {
     map.put("containers_total", containers.size());
     map.put("containers_running", running);
     map.put("containers_stopped", stopped);
-    System.out.println(YamlUtil.dumpJson(map));
+    out.println(YamlUtil.dumpJson(map));
   }
 }

@@ -109,8 +109,8 @@ class ContainerSailSetupTest {
   @Test
   void theSshdKeepaliveDropInIsMachineryInstalledAsRootAndVerifiedLikeTheRest() throws Exception {
     assertEquals(
-        SshdKeepalive.content(),
-        ContainerSailSetup.installedFiles().get(SshdKeepalive.DROP_IN_PATH),
+        SshdKeepalive.DROP_IN.content(),
+        ContainerSailSetup.installedFiles().get(SshdKeepalive.DROP_IN.path()),
         "the drop-in is a fingerprinted payload: a stale container heals it on the next probe");
     var shell =
         new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
@@ -121,7 +121,7 @@ class ContainerSailSetupTest {
 
     var install =
         shell.invocations().stream()
-            .filter(c -> c.contains(SshdKeepalive.DROP_IN_PATH) && !c.contains(PROBE))
+            .filter(c -> c.contains(SshdKeepalive.DROP_IN.path()) && !c.contains(PROBE))
             .findFirst()
             .orElseThrow();
     assertTrue(install.startsWith("incus exec " + CONTAINER + " -- bash"), install);
@@ -218,7 +218,7 @@ class ContainerSailSetupTest {
             Harnesses.of("claude-code").hooks().path(),
             "/home/dev/.sail/claude-live.json",
             Harnesses.of("codex").hooks().path(),
-            SshdKeepalive.DROP_IN_PATH),
+            SshdKeepalive.DROP_IN.path()),
         java.util.List.copyOf(files.keySet()),
         "the fingerprint must cover every sail-owned in-container file, in stable order — a"
             + " script riding in this list IS its rollout: the fingerprint changes and every"

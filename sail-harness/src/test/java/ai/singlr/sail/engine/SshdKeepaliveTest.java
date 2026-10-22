@@ -26,7 +26,7 @@ class SshdKeepaliveTest {
 
   @Test
   void theDropInTellsSshdToDropAVanishedPeerWithinAMinute() {
-    var content = SshdKeepalive.content();
+    var content = SshdKeepalive.DROP_IN.content();
     assertTrue(content.contains("ClientAliveInterval 15\n"), content);
     assertTrue(content.contains("ClientAliveCountMax 3\n"), content);
   }
@@ -36,9 +36,9 @@ class SshdKeepaliveTest {
     var systemctlLog = fakeSystemctl(0);
     var dropIn = dir.resolve("etc/ssh/sshd_config.d/10-sail.conf");
 
-    assertEquals(0, run(SshdKeepalive.installCommand(dropIn.toString())));
+    assertEquals(0, run(SshdKeepalive.DROP_IN.installCommand(dropIn.toString())));
 
-    assertEquals(SshdKeepalive.content(), Files.readString(dropIn));
+    assertEquals(SshdKeepalive.DROP_IN.content(), Files.readString(dropIn));
     assertEquals("rw-r--r--", PosixFilePermissions.toString(Files.getPosixFilePermissions(dropIn)));
     var calls = Files.readAllLines(systemctlLog);
     assertEquals(List.of("is-active --quiet ssh", "reload ssh"), calls);
@@ -49,9 +49,9 @@ class SshdKeepaliveTest {
     var systemctlLog = fakeSystemctl(3);
     var dropIn = dir.resolve("10-sail.conf");
 
-    assertEquals(0, run(SshdKeepalive.installCommand(dropIn.toString())));
+    assertEquals(0, run(SshdKeepalive.DROP_IN.installCommand(dropIn.toString())));
 
-    assertEquals(SshdKeepalive.content(), Files.readString(dropIn));
+    assertEquals(SshdKeepalive.DROP_IN.content(), Files.readString(dropIn));
     assertEquals(List.of("is-active --quiet ssh"), Files.readAllLines(systemctlLog));
   }
 
@@ -64,7 +64,7 @@ class SshdKeepaliveTest {
     var invocation = shell.invocations().getFirst();
     assertTrue(invocation.startsWith("incus exec light-grid -- bash"), invocation);
     assertFalse(invocation.contains("--user"), "sshd's config is root's: " + invocation);
-    assertTrue(invocation.contains(SshdKeepalive.DROP_IN_PATH), invocation);
+    assertTrue(invocation.contains(SshdKeepalive.DROP_IN.path()), invocation);
   }
 
   private Path fakeSystemctl(int isActiveExit) throws Exception {

@@ -773,7 +773,7 @@ public final class Banner {
 
   /**
    * Prints a bordered host status box showing server info, pool usage, and container summary. The
-   * Incus version is the one running now, not the one {@code host.yaml} recorded at init.
+   * Incus version is the one installed now, not the one {@code host.yaml} recorded at init.
    */
   public static void printHostStatus(
       HostYaml hostYaml,

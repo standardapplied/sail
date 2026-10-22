@@ -121,10 +121,10 @@ public final class HostProvisioner {
 
   private void updatePackages() throws IOException, InterruptedException, TimeoutException {
     step(1, "Updating system packages...");
-    var policy = shell.exec(NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH));
-    if (!policy.ok()) {
-      throw new IOException(
-          "Failed to write " + NeedrestartPolicy.DROP_IN_PATH + ": " + policy.stderr());
+    var policy = NeedrestartPolicy.DROP_IN;
+    var written = shell.exec(policy.installCommand(policy.path()));
+    if (!written.ok()) {
+      throw new IOException("Failed to write " + policy.path() + ": " + written.stderr());
     }
     var update = shell.exec(List.of("apt-get", "update", "-qq"), null, INSTALL_TIMEOUT);
     if (!update.ok()) {
@@ -260,8 +260,8 @@ public final class HostProvisioner {
   }
 
   /**
-   * The Incus version running now, as {@code incus version} reports it: the first line, after its
-   * colon. {@code "unknown"} when incus does not answer.
+   * The installed Incus version, as {@code incus version} reports it: its first line (the client),
+   * after the colon. {@code "unknown"} when incus does not answer.
    */
   public static String incusVersion(ShellExec shell) throws InterruptedException {
     try {
@@ -270,7 +270,8 @@ public final class HostProvisioner {
         return "unknown";
       }
       var firstLine = result.stdout().lines().findFirst().orElse("");
-      return firstLine.substring(firstLine.indexOf(':') + 1).strip();
+      var version = firstLine.substring(firstLine.indexOf(':') + 1).strip();
+      return version.isEmpty() ? "unknown" : version;
     } catch (IOException | TimeoutException e) {
       return "unknown";
     }

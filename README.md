@@ -23,12 +23,11 @@ curl -fsSL https://raw.githubusercontent.com/standardapplied/sail/main/install.s
 (arm64) runs as a thin client that drives a remote host over SSH. Upgrade main first, then
 nodes: sync refuses a peer behind the fleet floor before any data moves and names the remedy.
 
-Sail does not upgrade the host's packages: `sudo sail host init` brings them up to date once,
-and from then on the operator upgrades Ubuntu and Incus with apt. Restarting Incus ends every
-terminal into a container, so sail installs a needrestart policy
-(`/etc/needrestart/conf.d/50-sail.conf`) that keeps an unattended library update from
-restarting it. Upgrading the incus package itself still does: run `sudo sail session ls` first
-and pick a moment with no live session.
+Sail does not keep the host's packages up to date; the operator upgrades Ubuntu and Incus with
+apt. Restarting Incus ends every terminal into a container, so sail installs a needrestart
+policy (`/etc/needrestart/conf.d/50-sail.conf`) that keeps an unattended library update from
+restarting it. Upgrading the incus package still restarts it, whether by apt or by re-running
+`sudo sail host init`: run `sudo sail session ls` first and pick a moment with no live session.
 
 ## The model: one main, many nodes
 

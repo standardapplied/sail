@@ -448,15 +448,15 @@ class MigrateCommandTest {
     var out = captureStdout(() -> MigrateCommand.ensureHostDropIns(true, shell, fsRoot, false));
     assertEquals(
         List.of(
-            SshdKeepalive.installCommand(sshd.toString()),
-            NeedrestartPolicy.installCommand(needrestart.toString())),
+            SshdKeepalive.DROP_IN.installCommand(sshd.toString()),
+            NeedrestartPolicy.DROP_IN.installCommand(needrestart.toString())),
         shell.arguments());
     assertEquals("  ✓ sshd keepalive drop-in written\n  ✓ needrestart policy written\n", out);
 
     Files.createDirectories(sshd.getParent());
-    Files.writeString(sshd, SshdKeepalive.content());
+    Files.writeString(sshd, SshdKeepalive.DROP_IN.content());
     Files.createDirectories(needrestart.getParent());
-    Files.writeString(needrestart, NeedrestartPolicy.content());
+    Files.writeString(needrestart, NeedrestartPolicy.DROP_IN.content());
     MigrateCommand.ensureHostDropIns(true, shell, fsRoot, true);
     assertEquals(2, shell.arguments().size(), "drop-ins already current are left alone");
   }
@@ -485,12 +485,12 @@ class MigrateCommandTest {
     var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
     MigrateCommand.ensureHostDropIns(true, migrating, dir, true);
 
-    var byInit = NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH);
+    var byInit = NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path());
     assertTrue(provisioning.arguments().contains(byInit), provisioning.invocations().toString());
     var byMigrate = migrating.arguments().getLast();
     assertEquals(byInit.subList(0, 5), byMigrate.subList(0, 5), "the same script and bytes");
     assertEquals(
-        dir.resolve(NeedrestartPolicy.DROP_IN_PATH.substring(1)).toString(), byMigrate.get(5));
+        dir.resolve(NeedrestartPolicy.DROP_IN.path().substring(1)).toString(), byMigrate.get(5));
   }
 
   @Test
