@@ -929,6 +929,29 @@ class LocalApiRouterTest {
   }
 
   @Test
+  void aRemediedStateFailureIsAnInternalErrorThatKeepsItsRemedy() {
+    var lane =
+        new LocalApiRouter(
+            new TestOperations() {
+              @Override
+              public Result<GlobalSpecDetailResponse> globalSpec(String id) {
+                throw Remedied.state(
+                    "Spec " + id + " has no content hash.",
+                    Remedy.of("Run '", Remedy.sail("migrate"), "'."));
+              }
+            });
+
+    var refused = lane.handle(get("/v1/specs/taken", Map.of()));
+
+    assertEquals(500, refused.status());
+    var error = (Map<?, ?>) refused.body().get("error");
+    assertEquals("Spec taken has no content hash.", error.get("message"));
+    assertEquals(
+        "Run 'sail migrate'.",
+        OperatorCommand.PLAIN.render(Remedy.fromMaps((List<?>) error.get("remedy"))));
+  }
+
+  @Test
   void operationExceptionsBecome400And500() {
     assertEquals(400, router.handle(get("/v1/specs/bad", Map.of())).status());
     assertEquals(500, router.handle(get("/v1/specs/boom", Map.of())).status());
