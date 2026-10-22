@@ -122,6 +122,19 @@ class RemedyTest {
   }
 
   @Test
+  void aWrappedFailureKeepsItsReasonAndItsRemedyApart() {
+    var remedied = Remedied.state("Gone.", Remedy.of("Run '", Remedy.sail("migrate"), "'."));
+    assertEquals("Gone.", Remedied.reasonOf(remedied));
+    assertEquals(Remedy.of("Run '", Remedy.sail("migrate"), "'."), Remedied.remedyOf(remedied));
+    assertEquals("boom", Remedied.reasonOf(new IllegalStateException("boom")));
+    assertEquals(Remedy.NONE, Remedied.remedyOf(new IllegalStateException("boom")));
+    assertEquals("IOException", Remedied.reasonOf(new IOException()));
+    assertEquals("Not valid: Gone.", Remedied.joined("Not valid:", "Gone."));
+    assertEquals("Not valid:", Remedied.joined("Not valid:", ""));
+    assertEquals("Gone.", Remedied.joined("", "Gone."));
+  }
+
+  @Test
   void aFailureIsOneRemedyWhetherItNamesOneOrNot() {
     assertEquals(
         Remedy.of("Gone. Run '", Remedy.sail("migrate"), "'."),

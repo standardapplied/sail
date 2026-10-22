@@ -7,7 +7,6 @@ package ai.singlr.sail.api;
 
 import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
-import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ProjectStore;
@@ -70,17 +69,11 @@ public interface ProjectReader {
 
     Unreadable(String project, Throwable cause) {
       this(
-          "The definition of project '"
-              + project
-              + "' in the catalog could not be read:"
-              + why(cause),
-          cause instanceof Remedied remedied ? remedied.remedy() : Remedy.NONE,
+          Remedied.joined(
+              "The definition of project '" + project + "' in the catalog could not be read:",
+              Remedied.reasonOf(cause)),
+          Remedied.remedyOf(cause),
           cause);
-    }
-
-    private static String why(Throwable cause) {
-      var why = cause instanceof Remedied remedied ? remedied.reason() : cause.getMessage();
-      return Strings.isBlank(why) ? "" : " " + why;
     }
 
     private Unreadable(String reason, Remedy remedy, Throwable cause) {

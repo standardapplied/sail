@@ -29,14 +29,28 @@ public interface Remedied {
 
   /** The reason and remedy of {@code failure} as one remedy, or its message as words. */
   static Remedy whole(Throwable failure) {
-    if (failure instanceof Remedied remedied) {
-      return Strings.isBlank(remedied.reason())
-          ? remedied.remedy()
-          : Remedy.of(remedied.reason(), remedied.remedy().isEmpty() ? "" : " ")
-              .then(remedied.remedy());
+    var reason = reasonOf(failure);
+    var remedy = remedyOf(failure);
+    if (Strings.isBlank(reason)) {
+      return remedy;
     }
-    return Remedy.of(
-        Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName()));
+    return Remedy.of(reason, remedy.isEmpty() ? "" : " ").then(remedy);
+  }
+
+  /**
+   * What {@code failure} says happened: its reason when it names a remedy apart, else its message,
+   * else its type. A failure wrapped by another keeps saying it through this, never through {@link
+   * Throwable#getMessage()}, which has a remedy's plain form in it.
+   */
+  static String reasonOf(Throwable failure) {
+    return failure instanceof Remedied remedied
+        ? remedied.reason()
+        : Objects.requireNonNullElse(failure.getMessage(), failure.getClass().getSimpleName());
+  }
+
+  /** What {@code failure} says to do about it; {@link Remedy#NONE} when it names nothing. */
+  static Remedy remedyOf(Throwable failure) {
+    return failure instanceof Remedied remedied ? remedied.remedy() : Remedy.NONE;
   }
 
   /** An {@link IllegalStateException} that says what happened and what to do about it. */
@@ -59,11 +73,12 @@ public interface Remedied {
     return new Io(reason, remedy);
   }
 
-  private static String joined(String reason, String remedy) {
-    if (Strings.isBlank(remedy)) {
-      return reason;
+  /** {@code first} and {@code second} with one space between, whichever of them are not blank. */
+  static String joined(String first, String second) {
+    if (Strings.isBlank(second)) {
+      return first;
     }
-    return Strings.isBlank(reason) ? remedy : reason + " " + remedy;
+    return Strings.isBlank(first) ? second : first + " " + second;
   }
 
   /** The message a {@link Remedied} failure carries for a path that prints it as it is. */

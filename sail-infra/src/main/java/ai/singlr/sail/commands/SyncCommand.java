@@ -240,7 +240,6 @@ public final class SyncCommand implements Callable<Integer> {
     }
   }
 
-  /** A human-readable reason for a failed round, falling back to the exception type. */
   /** Why a round failed, as {@code operator} reads it. */
   static String reason(Exception e, OperatorCommand operator) {
     if (!(e instanceof Remedied) && Strings.isBlank(e.getMessage())) {

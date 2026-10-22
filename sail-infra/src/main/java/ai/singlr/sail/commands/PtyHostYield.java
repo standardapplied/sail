@@ -6,6 +6,8 @@
 package ai.singlr.sail.commands;
 
 import ai.singlr.sail.api.SessionYield;
+import ai.singlr.sail.common.Remedied;
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.pty.PtySessionHost;
@@ -13,7 +15,6 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -54,18 +55,19 @@ final class PtyHostYield implements SessionYield {
     if (!Files.exists(socket)) {
       return;
     }
-    var failures = new ArrayList<String>();
+    var failures = Remedy.NONE;
     try (var client = SessionClient.connect(socket, dispatchCredential())) {
       for (var name : sessions) {
         try {
           client.yieldSession(name, reason);
         } catch (IOException refused) {
-          failures.add(name + ": " + refused.getMessage());
+          failures =
+              failures.then(failures.isEmpty() ? "" : "; ", name + ": ", Remedied.whole(refused));
         }
       }
     }
     if (!failures.isEmpty()) {
-      throw new IOException(String.join("; ", failures));
+      throw Remedied.io("", failures);
     }
   }
 

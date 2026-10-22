@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.sync;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.engine.SemVer;
 import ai.singlr.sail.identity.Actor;
@@ -90,7 +91,7 @@ public final class PagedSyncSession implements SyncSession {
   private List<SyncSession.Refusal> refusals = new ArrayList<>();
   private Consumer<Remedy> notice = ignored -> {};
   private Consumer<SyncSession.Denial> onDenial = ignored -> {};
-  private String broken;
+  private Remedy broken;
   private String handle;
   private String catalog;
   private long mainFileMax;
@@ -231,8 +232,8 @@ public final class PagedSyncSession implements SyncSession {
     if (broken != null) {
       throw new SyncTransportException(
           "unreachable",
-          "channel unusable after an earlier failure (" + broken + ");",
-          Remedy.of("run ", Remedy.sail("sync"), " again"),
+          "channel unusable after an earlier failure",
+          Remedy.of("(", broken, "); run ", Remedy.sail("sync"), " again"),
           null);
     }
     return exchange.get();
@@ -242,7 +243,7 @@ public final class PagedSyncSession implements SyncSession {
     try {
       return reply.get();
     } catch (RuntimeException e) {
-      broken = e.getMessage();
+      broken = Remedied.whole(e);
       throw e;
     }
   }
