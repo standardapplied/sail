@@ -236,24 +236,6 @@ public record HostYaml(
         retention);
   }
 
-  /** This host with its recorded Incus version replaced and everything else kept. */
-  public HostYaml withIncusVersion(String incusVersion) {
-    return new HostYaml(
-        storageBackend,
-        pool,
-        poolDisk,
-        bridge,
-        baseProfile,
-        image,
-        incusVersion,
-        serverIp,
-        initializedAt,
-        webauthn,
-        sync,
-        limits,
-        retention);
-  }
-
   public Map<String, Object> toMap() {
     var map = new LinkedHashMap<String, Object>();
     map.put("storage_backend", storageBackend);

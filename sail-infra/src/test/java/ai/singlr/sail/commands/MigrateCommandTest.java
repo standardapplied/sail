@@ -14,7 +14,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
+import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
@@ -454,6 +456,58 @@ class MigrateCommandTest {
     Files.writeString(dropIn, SshdKeepalive.content());
     MigrateCommand.ensureSshdKeepalive(true, shell, dropIn, true);
     assertEquals(1, shell.invocations().size(), "a drop-in already current is left alone");
+  }
+
+  @Test
+  void ensureNeedrestartPolicyWritesTheSnippetAsRootAndLeavesACurrentOneAlone(@TempDir Path etc)
+      throws Exception {
+    var snippet = etc.resolve("needrestart/conf.d/50-sail.conf");
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    MigrateCommand.ensureNeedrestartPolicy(false, shell, snippet, true);
+    assertEquals(List.of(), shell.arguments(), "a non-root migrate never touches needrestart");
+
+    var out =
+        captureStdout(() -> MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false));
+    assertEquals(
+        List.of(NeedrestartPolicy.installCommand(snippet.toString())),
+        shell.arguments(),
+        "root writes the snippet");
+    assertEquals("  ✓ needrestart policy written\n", out);
+
+    Files.createDirectories(snippet.getParent());
+    Files.writeString(snippet, NeedrestartPolicy.content());
+    MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false);
+    assertEquals(1, shell.arguments().size(), "a snippet already current is left alone");
+  }
+
+  @Test
+  void ensureNeedrestartPolicyWarnsAndCarriesOnWhenTheWriteFails(@TempDir Path etc) {
+    var snippet = etc.resolve("50-sail.conf");
+    var shell = new ScriptedShellExecutor().onFail("bash", "read-only file system");
+
+    var out =
+        captureStdout(() -> MigrateCommand.ensureNeedrestartPolicy(true, shell, snippet, false));
+
+    assertEquals("  ⚠ needrestart policy not written: read-only file system\n", out);
+    assertFalse(Files.exists(snippet));
+  }
+
+  @Test
+  void initAndMigrateWriteTheSameNeedrestartPolicy(@TempDir Path dir) throws Exception {
+    var provisioning = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    new HostProvisioner(provisioning, null)
+        .provision(
+            "dir", null, "devpool", "incusbr0", null, dir.resolve("host.yaml"), dir.resolve("db"));
+    var migrating = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var snippet = dir.resolve("50-sail.conf");
+    MigrateCommand.ensureNeedrestartPolicy(true, migrating, snippet, true);
+
+    var byInit = NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH);
+    assertTrue(provisioning.arguments().contains(byInit), provisioning.invocations().toString());
+    var byMigrate = migrating.arguments().getFirst();
+    assertEquals(NeedrestartPolicy.installCommand(snippet.toString()), byMigrate);
+    assertEquals(byInit.subList(0, 5), byMigrate.subList(0, 5), "the same script and bytes");
   }
 
   @Test

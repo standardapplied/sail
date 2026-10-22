@@ -771,9 +771,13 @@ public final class Banner {
             ansi, "  @|bold,green \u2713 Restored|@ " + containerName + " to snapshot: " + label));
   }
 
-  /** Prints a bordered host status box showing server info, pool usage, and container summary. */
+  /**
+   * Prints a bordered host status box showing server info, pool usage, and container summary. The
+   * Incus version is the one running now, not the one {@code host.yaml} recorded at init.
+   */
   public static void printHostStatus(
       HostYaml hostYaml,
+      String incusVersion,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
@@ -799,9 +803,7 @@ public final class Banner {
     w = Math.max(w, rowWidth("CPU:", cpu));
     w = Math.max(w, rowWidth("RAM:", mem));
     w = Math.max(w, rowWidth("Containers:", summary));
-    w =
-        Math.max(
-            w, rowWidth("Incus:", Objects.requireNonNullElse(hostYaml.incusVersion(), "unknown")));
+    w = Math.max(w, rowWidth("Incus:", incusVersion));
     w = Math.max(w, rowWidth("Initialized:", formatTimestamp(hostYaml.initializedAt())));
 
     if (hostYaml.isZfs()) {
@@ -867,14 +869,7 @@ public final class Banner {
     }
     emptyRow(out, ansi, w);
 
-    labelRow(
-        out,
-        ansi,
-        w,
-        "Incus:",
-        Objects.requireNonNullElse(hostYaml.incusVersion(), "unknown"),
-        null,
-        null);
+    labelRow(out, ansi, w, "Incus:", incusVersion, null, null);
     labelRow(out, ansi, w, "Initialized:", formatTimestamp(hostYaml.initializedAt()), null, null);
     emptyRow(out, ansi, w);
 

@@ -703,7 +703,14 @@ class BannerTest {
             new ContainerManager.ContainerInfo("fintech", new ContainerState.Stopped(), null));
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
-        SAMPLE_HOST_YAML, SUPPORTED, poolUsage, null, containers, new PrintStream(out), Ansi.OFF);
+        SAMPLE_HOST_YAML,
+        "6.22",
+        SUPPORTED,
+        poolUsage,
+        null,
+        containers,
+        new PrintStream(out),
+        Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("Host Status"));
@@ -715,7 +722,8 @@ class BannerTest {
     assertTrue(output.contains("960G"));
     assertTrue(output.contains("150G (15%)"));
     assertTrue(output.contains("810G"));
-    assertTrue(output.contains("6.21"));
+    assertTrue(output.contains("│  Incus:        6.22"), output);
+    assertFalse(output.contains("6.21"), "the version running now, not the one init recorded");
     assertTrue(output.contains("2026-02-18 01:00:00"));
     assertTrue(output.contains("2 total (1 running, 1 stopped)"));
   }
@@ -726,7 +734,14 @@ class BannerTest {
     var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
-        SAMPLE_HOST_YAML, SUPPORTED, poolUsage, null, containers, new PrintStream(out), Ansi.OFF);
+        SAMPLE_HOST_YAML,
+        "6.21",
+        SUPPORTED,
+        poolUsage,
+        null,
+        containers,
+        new PrintStream(out),
+        Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     for (var line : output.split("\n")) {
@@ -742,7 +757,14 @@ class BannerTest {
     var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
-        SAMPLE_HOST_YAML, SUPPORTED, null, null, containers, new PrintStream(out), Ansi.OFF);
+        SAMPLE_HOST_YAML,
+        "6.21",
+        SUPPORTED,
+        null,
+        null,
+        containers,
+        new PrintStream(out),
+        Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("devpool on /dev/sdb"));
@@ -766,7 +788,14 @@ class BannerTest {
     var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
-        dirHostYaml, SUPPORTED, null, fsUsage, containers, new PrintStream(out), Ansi.OFF);
+        dirHostYaml,
+        "unknown",
+        SUPPORTED,
+        null,
+        fsUsage,
+        containers,
+        new PrintStream(out),
+        Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
 
     assertTrue(output.contains("devpool (dir)"));

@@ -12,6 +12,7 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DirQuery;
 import ai.singlr.sail.engine.HostDetector;
+import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
 import ai.singlr.sail.engine.ShellExecutor;
@@ -68,19 +69,21 @@ public final class HostStatusCommand implements Runnable {
 
     var mgr = new ContainerManager(shell);
     var containers = mgr.listAll();
+    var incusVersion = HostProvisioner.incusVersion(shell);
 
     if (json) {
-      printJson(hostYaml, hostInfo, poolUsage, fsUsage, containers);
+      printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers);
       return;
     }
 
     Banner.printBranding(System.out, Ansi.AUTO);
     Banner.printHostStatus(
-        hostYaml, hostInfo, poolUsage, fsUsage, containers, System.out, Ansi.AUTO);
+        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, System.out, Ansi.AUTO);
   }
 
   private static void printJson(
       HostYaml hostYaml,
+      String incusVersion,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
@@ -109,7 +112,7 @@ public final class HostStatusCommand implements Runnable {
         map.put("disk_use_percent", fsUsage.usePercent());
       }
     }
-    map.put("incus_version", hostYaml.incusVersion());
+    map.put("incus_version", incusVersion);
     map.put("initialized_at", hostYaml.initializedAt());
     var running =
         containers.stream().filter(c -> c.state() instanceof ContainerState.Running).count();

@@ -55,7 +55,6 @@ class RootRequiredTest {
           Map.entry("host keys sync", List.of()),
           Map.entry("host ssh-identity", List.of()),
           Map.entry("host status", List.of("--json")),
-          Map.entry("host update", List.of("--json")),
           Map.entry("host config set", List.of("sync-handle", "ada", "--json")),
           Map.entry(
               "host sync",

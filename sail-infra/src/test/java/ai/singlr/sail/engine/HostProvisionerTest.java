@@ -22,7 +22,10 @@ import ai.singlr.sail.config.WebauthnConfig;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.Sqlite;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -736,6 +739,101 @@ class HostProvisionerTest {
     return new HostProvisioner(shell, listener)
         .provision(
             "dir", null, "devpool", "incusbr0", "192.0.2.4", path, path.resolveSibling("sail.db"));
+  }
+
+  @Test
+  void provisioningDefersIncusRestartsBeforeItUpgradesAPackage() throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+
+    new HostProvisioner(shell, null)
+        .provision(
+            "dir",
+            null,
+            "devpool",
+            "incusbr0",
+            null,
+            tempDir.resolve("host.yaml"),
+            tempDir.resolve("sail.db"));
+
+    var commands = shell.arguments();
+    var policy = commands.indexOf(NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH));
+    var upgrade = commands.indexOf(List.of("apt-get", "upgrade", "-y", "-qq"));
+    assertEquals(0, policy, shell.invocations().toString());
+    assertTrue(policy < upgrade, "a re-run's apt-get upgrade must not restart incusd");
+  }
+
+  @Test
+  void aPolicyThatCannotBeWrittenStopsProvisioningBeforeAnyPackage() {
+    var shell =
+        new ScriptedShellExecutor(new ShellExec.Result(0, "", ""))
+            .onFail("needrestart", "read-only file system");
+
+    var error =
+        assertThrows(
+            IOException.class,
+            () ->
+                new HostProvisioner(shell, null)
+                    .provision(
+                        "dir",
+                        null,
+                        "devpool",
+                        "incusbr0",
+                        null,
+                        tempDir.resolve("host.yaml"),
+                        tempDir.resolve("sail.db")));
+
+    assertEquals(
+        "Failed to write /etc/needrestart/conf.d/50-sail.conf: read-only file system",
+        error.getMessage());
+    assertEquals(1, shell.invocations().size());
+  }
+
+  @Test
+  void aDryRunPrintsThePolicyInstallAndWritesNothing() throws Exception {
+    var out = new ByteArrayOutputStream();
+    var original = System.out;
+    System.setOut(new PrintStream(out, true, StandardCharsets.UTF_8));
+    try {
+      new HostProvisioner(new ShellExecutor(true), null)
+          .provision(
+              "dir",
+              null,
+              "devpool",
+              "incusbr0",
+              null,
+              tempDir.resolve("host.yaml"),
+              tempDir.resolve("sail.db"));
+    } finally {
+      System.setOut(original);
+    }
+
+    var printed =
+        "[dry-run] "
+            + String.join(" ", NeedrestartPolicy.installCommand(NeedrestartPolicy.DROP_IN_PATH))
+            + "\n";
+    assertTrue(out.toString(StandardCharsets.UTF_8).startsWith(printed), out.toString());
+    assertFalse(Files.exists(tempDir.resolve("host.yaml")));
+  }
+
+  @Test
+  void theIncusVersionIsWhatIncusAnswersNowOrUnknown() throws Exception {
+    assertEquals(
+        "6.21",
+        HostProvisioner.incusVersion(
+            new ScriptedShellExecutor()
+                .onOk("incus version", "Client version: 6.21\nServer version: 6.21\n")));
+    assertEquals(
+        "6.21",
+        HostProvisioner.incusVersion(new ScriptedShellExecutor().onOk("incus version", "6.21\n")));
+    assertEquals(
+        "unknown",
+        HostProvisioner.incusVersion(
+            new ScriptedShellExecutor().onFail("incus version", "cannot connect")));
+    assertEquals(
+        "unknown",
+        HostProvisioner.incusVersion(
+            new ScriptedShellExecutor()
+                .onThrow("incus version", new IOException("No such file or directory"))));
   }
 
   private static int indexOfContaining(List<String> list, String substring) {

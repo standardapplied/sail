@@ -17,6 +17,7 @@ import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.FileMutex;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
@@ -213,7 +214,7 @@ public final class MigrateCommand implements Runnable {
     assignBoxId(db, jsonOutput, operator);
     syncAuthorizedKeys(db, jsonOutput, operator);
     revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
-    ensureSshdKeepalive(jsonOutput);
+    ensureHostDropIns(jsonOutput);
     convergeContainers(jsonOutput, operator);
     ensurePtyHostService(jsonOutput);
   }
@@ -436,39 +437,57 @@ public final class MigrateCommand implements Runnable {
   }
 
   /**
-   * Writes the {@link SshdKeepalive} drop-in on the host and reloads sshd when it changed. Lives
-   * here for the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD
-   * binary, which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade
-   * path runs with new-binary code. Needs root; quiet and never fatal otherwise.
+   * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}. Lives here for
+   * the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD binary,
+   * which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade path
+   * runs with new-binary code. Needs root; quiet and never fatal otherwise.
    */
-  private static void ensureSshdKeepalive(boolean jsonOutput) {
-    ensureSshdKeepalive(
-        SailPaths.isRoot(),
-        new ShellExecutor(false),
-        Path.of(SshdKeepalive.DROP_IN_PATH),
-        jsonOutput);
+  private static void ensureHostDropIns(boolean jsonOutput) {
+    var root = SailPaths.isRoot();
+    var shell = new ShellExecutor(false);
+    ensureSshdKeepalive(root, shell, Path.of(SshdKeepalive.DROP_IN_PATH), jsonOutput);
+    ensureNeedrestartPolicy(root, shell, Path.of(NeedrestartPolicy.DROP_IN_PATH), jsonOutput);
   }
 
   static void ensureSshdKeepalive(boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
-    if (!root) {
+    ensureDropIn(
+        "sshd keepalive drop-in",
+        SshdKeepalive.content(),
+        SshdKeepalive.installCommand(dropIn.toString()),
+        new DropInTarget(root, shell, dropIn, jsonOutput));
+  }
+
+  static void ensureNeedrestartPolicy(
+      boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
+    ensureDropIn(
+        "needrestart policy",
+        NeedrestartPolicy.content(),
+        NeedrestartPolicy.installCommand(dropIn.toString()),
+        new DropInTarget(root, shell, dropIn, jsonOutput));
+  }
+
+  private record DropInTarget(boolean root, ShellExec shell, Path path, boolean jsonOutput) {}
+
+  private static void ensureDropIn(
+      String name, String content, List<String> install, DropInTarget target) {
+    if (!target.root()) {
       return;
     }
     try {
-      if (Files.exists(dropIn) && Files.readString(dropIn).equals(SshdKeepalive.content())) {
+      if (Files.exists(target.path()) && Files.readString(target.path()).equals(content)) {
         return;
       }
-      var result = shell.exec(SshdKeepalive.installCommand(dropIn.toString()));
+      var result = target.shell().exec(install);
       if (!result.ok()) {
         throw new IOException(result.stderr());
       }
-      if (!jsonOutput) {
-        System.out.println(Ansi.AUTO.string("  @|green ✓|@ sshd keepalive drop-in written"));
+      if (!target.jsonOutput()) {
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + name + " written"));
       }
     } catch (IOException | TimeoutException e) {
-      if (!jsonOutput) {
+      if (!target.jsonOutput()) {
         System.out.println(
-            Ansi.AUTO.string(
-                "  @|yellow ⚠|@ sshd keepalive drop-in not written: " + e.getMessage()));
+            Ansi.AUTO.string("  @|yellow ⚠|@ " + name + " not written: " + e.getMessage()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

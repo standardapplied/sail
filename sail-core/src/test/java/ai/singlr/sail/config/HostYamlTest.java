@@ -42,7 +42,7 @@ class HostYamlTest {
         new FutureTask<>(
             () ->
                 HostYaml.rewrite(
-                    path, database, host -> Optional.of(host.withIncusVersion("6.9"))));
+                    path, database, host -> Optional.of(host.withServerIp("192.0.2.9"))));
 
     try (var identityWrite = FileMutex.holdRounds(database)) {
       Files.writeString(path, "");
@@ -52,7 +52,7 @@ class HostYamlTest {
     rewrite.get();
 
     var written = HostYaml.fromMap(YamlUtil.parseFile(path));
-    assertEquals("6.9", written.incusVersion());
+    assertEquals("192.0.2.9", written.serverIp());
     assertEquals("node", written.sync().role());
     assertEquals("sail@main", written.sync().main());
   }
@@ -67,7 +67,7 @@ class HostYamlTest {
 
   @ParameterizedTest
   @ValueSource(longs = {10485760, 2147483648L})
-  void incusVersionChangePreservesConfigurationThroughSerialization(long fileMax) {
+  void serverIpChangePreservesConfigurationThroughSerialization(long fileMax) {
     var host =
         HostYaml.fromMap(
             YamlUtil.parseMap(
@@ -90,9 +90,9 @@ class HostYamlTest {
         """
                     .formatted(fileMax)));
     var expected = new LinkedHashMap<>(host.toMap());
-    expected.put("incus_version", "6.9");
+    expected.put("server_ip", "192.0.2.9");
 
-    var updated = host.withIncusVersion("6.9");
+    var updated = host.withServerIp("192.0.2.9");
     var reloaded = HostYaml.fromMap(YamlUtil.parseMap(YamlUtil.dumpToString(updated.toMap())));
 
     assertEquals(expected, reloaded.toMap());
