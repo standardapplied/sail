@@ -27,6 +27,39 @@ and contracts: `ARCHITECTURE.md`. Build, gates, migrations, releases: `CONTRIBUT
 - Branch `agent/<spec-id>`, one pull request, squash-merged. Post progress and the final
   summary in the spec's room.
 - No AI attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines.
+- The pull request body names what the change deleted, with the `git diff --shortstat` count. A
+  change that only adds is read twice.
+
+## Shape of a change
+
+The bar is the same for the agent that builds, the agent that reviews, the agent that fixes
+findings and the person who merges: a change is judged on what it leaves behind, not only on
+whether it works. Each of these is a finding at review and a reason not to merge:
+
+- A gap in an existing mechanism fixed beside it instead of inside it: a second reconciler,
+  probe, sweep or branch next to the one that already owns the case. Fold the case into the
+  owner; if the owner cannot take it, the spec says why.
+- A verb added to a facade that already has one of everything (`SailOperations`, `FdeCommand`,
+  `ServerStartCommand.execute`, `SyncOperations`). New behaviour lands in the lane class for its
+  domain; the facade delegates.
+- A state compared or written as a string literal where an enum exists (`RunStatus`,
+  `SpecStatus`); a stringly `kind` where an enum would do.
+- A field set after construction (`use*` setters, `volatile` wiring) and the null guard it needs.
+  One constructor, built whole.
+- An overload, constructor or record copied with one more parameter. One parameter record, one
+  constructor, static factories.
+- Forwarding methods, hand-written `toMap()` bodies, a second parser for the same request, a
+  second catch ladder. One seam, used from both sides.
+- A test fake that re-implements a support class (`ScriptedShellExecutor`, `ManualClock`,
+  `SyncBox`, `Fleet`), a private row builder, a copied preamble.
+- Compatibility with an older release added anywhere but the places that already hold it; the
+  fleet is upgraded to latest and the migration code deleted before v1, so a new tolerance is
+  debt with a known end date.
+
+A refactor spec is behaviour-preserving and its bar is the net deletion it names; a feature spec
+names the mechanism its behaviour folds into. Before merge: a full verify logged to a file, an
+independent review of the delta against the spec's bar, the fix-reverting mutants that prove the
+tests bite, and the deletion count in the body.
 
 ## Code
 
