@@ -486,6 +486,21 @@ class SystemdServiceInstallerTest {
   }
 
   @Test
+  void aSigtermStopIsACleanExitAndReconcileCarriesItToAnInstalledUnit(@TempDir Path home)
+      throws Exception {
+    var shell = new ScriptedShellExecutor(new ShellExec.Result(0, "", ""));
+    var installer = userInstaller(home, shell);
+    var unit = installer.renderUnit();
+    assertTrue(unit.contains("RestartSec=2\nSuccessExitStatus=143\n"), unit);
+    Files.createDirectories(installer.serviceFilePath().getParent());
+    Files.writeString(installer.serviceFilePath(), unit.replace("SuccessExitStatus=143\n", ""));
+
+    assertTrue(installer.reconcile(), "a unit without it predates this binary and is rewritten");
+
+    assertEquals(unit, Files.readString(installer.serviceFilePath()));
+  }
+
+  @Test
   void reconcileNoOpsWhenUnitMatchesTemplate(@TempDir Path home) throws Exception {
     var shell = new ScriptedShellExecutor();
     var installer = userInstaller(home, shell);

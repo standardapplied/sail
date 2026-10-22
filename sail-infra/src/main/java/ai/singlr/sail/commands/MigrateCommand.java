@@ -15,8 +15,10 @@ import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DemoSeeder;
 import ai.singlr.sail.engine.FileImporter;
 import ai.singlr.sail.engine.FileMutex;
+import ai.singlr.sail.engine.HostDropIn;
 import ai.singlr.sail.engine.HostInfo;
 import ai.singlr.sail.engine.IncusDeviceManager;
+import ai.singlr.sail.engine.NeedrestartPolicy;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ProjectImporter;
 import ai.singlr.sail.engine.PtyHostUnit;
@@ -213,7 +215,7 @@ public final class MigrateCommand implements Runnable {
     assignBoxId(db, jsonOutput, operator);
     syncAuthorizedKeys(db, jsonOutput, operator);
     revokeOtherFdesPairings(db, FdeCommand.Box::here, jsonOutput, operator);
-    ensureSshdKeepalive(jsonOutput);
+    ensureHostDropIns(jsonOutput);
     convergeContainers(jsonOutput, operator);
     ensurePtyHostService(jsonOutput);
   }
@@ -435,40 +437,41 @@ public final class MigrateCommand implements Runnable {
     return Optional.of(host.withSync(host.sync().withBoxId(boxId)));
   }
 
+  private static final List<HostDropIn> HOST_DROP_INS =
+      List.of(SshdKeepalive.DROP_IN, NeedrestartPolicy.DROP_IN);
+
   /**
-   * Writes the {@link SshdKeepalive} drop-in on the host and reloads sshd when it changed. Lives
-   * here for the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD
-   * binary, which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade
-   * path runs with new-binary code. Needs root; quiet and never fatal otherwise.
+   * Writes the host's drop-ins, {@link SshdKeepalive} and {@link NeedrestartPolicy}. Lives here for
+   * the same reason {@link #syncAuthorizedKeys} does: an upgrade is executed by the OLD binary,
+   * which re-execs the NEW binary's {@code migrate}, so this is the one step every upgrade path
+   * runs with new-binary code. Needs root; quiet and never fatal otherwise.
    */
-  private static void ensureSshdKeepalive(boolean jsonOutput) {
-    ensureSshdKeepalive(
-        SailPaths.isRoot(),
-        new ShellExecutor(false),
-        Path.of(SshdKeepalive.DROP_IN_PATH),
-        jsonOutput);
+  private static void ensureHostDropIns(boolean jsonOutput) {
+    ensureHostDropIns(SailPaths.isRoot(), new ShellExecutor(false), Path.of("/"), jsonOutput);
   }
 
-  static void ensureSshdKeepalive(boolean root, ShellExec shell, Path dropIn, boolean jsonOutput) {
+  static void ensureHostDropIns(boolean root, ShellExec shell, Path fsRoot, boolean jsonOutput) {
     if (!root) {
       return;
     }
+    for (var dropIn : HOST_DROP_INS) {
+      ensureDropIn(dropIn, shell, fsRoot.resolve(dropIn.path().substring(1)), jsonOutput);
+    }
+  }
+
+  private static void ensureDropIn(
+      HostDropIn dropIn, ShellExec shell, Path path, boolean jsonOutput) {
     try {
-      if (Files.exists(dropIn) && Files.readString(dropIn).equals(SshdKeepalive.content())) {
+      if (Files.exists(path) && Files.readString(path).equals(dropIn.content())) {
         return;
       }
-      var result = shell.exec(SshdKeepalive.installCommand(dropIn.toString()));
-      if (!result.ok()) {
-        throw new IOException(result.stderr());
-      }
+      dropIn.install(shell, path.toString());
       if (!jsonOutput) {
-        System.out.println(Ansi.AUTO.string("  @|green ✓|@ sshd keepalive drop-in written"));
+        System.out.println(Ansi.AUTO.string("  @|green ✓|@ " + dropIn.name() + " written"));
       }
     } catch (IOException | TimeoutException e) {
       if (!jsonOutput) {
-        System.out.println(
-            Ansi.AUTO.string(
-                "  @|yellow ⚠|@ sshd keepalive drop-in not written: " + e.getMessage()));
+        System.out.println(Ansi.AUTO.string("  @|yellow ⚠|@ " + e.getMessage()));
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();

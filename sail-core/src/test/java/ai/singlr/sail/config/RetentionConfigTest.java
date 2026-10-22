@@ -41,8 +41,7 @@ class RetentionConfigTest {
     assertEquals(
         new RetentionConfig(Duration.ofDays(90), Duration.ofHours(36), Duration.ofMinutes(45)),
         host.retention());
-    var rewritten =
-        host.withServerIp("192.0.2.9").withIncusVersion("6.9").withSync(SyncConfig.unset());
+    var rewritten = host.withServerIp("192.0.2.9").withSync(SyncConfig.unset());
     assertEquals(host.retention(), rewritten.retention(), "no rewrite drops the policy");
     assertEquals(
         Map.of("prune_archived_after", "90d", "messages", "36h", "runs_after_finished", "45m"),

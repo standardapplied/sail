@@ -6,10 +6,10 @@
 package ai.singlr.sail.engine;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.IOException;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -49,8 +49,8 @@ class PrerequisiteCheckerTest {
   }
 
   @Test
-  void installMissingRunsAptGetInstall() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("apt-get");
+  void installMissingWritesTheNeedrestartPolicyThenRunsAptGetInstall() throws Exception {
+    var shell = new ScriptedShellExecutor().onOk("needrestart").onOk("apt-get");
     var checker = new PrerequisiteChecker(shell);
 
     var missing =
@@ -60,9 +60,30 @@ class PrerequisiteCheckerTest {
 
     checker.installMissing(missing);
 
-    var cmds = shell.invocations();
-    assertEquals(1, cmds.size());
-    assertTrue(cmds.getFirst().contains("apt-get install -y -qq curl gnupg"));
+    assertEquals(
+        List.of(
+            NeedrestartPolicy.DROP_IN.installCommand(NeedrestartPolicy.DROP_IN.path()),
+            List.of("apt-get", "install", "-y", "-qq", "curl", "gnupg")),
+        shell.arguments());
+  }
+
+  @Test
+  void aPolicyThatCannotBeWrittenInstallsNoPackage() {
+    var shell =
+        new ScriptedShellExecutor().onFail("needrestart", "read-only file system").onOk("apt-get");
+    var checker = new PrerequisiteChecker(shell);
+
+    var error =
+        assertThrows(
+            IOException.class,
+            () ->
+                checker.installMissing(
+                    List.of(new PrerequisiteChecker.Prerequisite("curl", "curl", "Downloading"))));
+
+    assertEquals(
+        "Failed to install /etc/needrestart/conf.d/50-sail.conf: read-only file system",
+        error.getMessage());
+    assertEquals(1, shell.invocations().size());
   }
 
   @Test
@@ -79,7 +100,7 @@ class PrerequisiteCheckerTest {
 
   @Test
   void installMissingFiltersNullPackages() throws Exception {
-    var shell = new ScriptedShellExecutor().onOk("apt-get");
+    var shell = new ScriptedShellExecutor().onOk("needrestart").onOk("apt-get");
     var checker = new PrerequisiteChecker(shell);
 
     var missing =
@@ -89,10 +110,7 @@ class PrerequisiteCheckerTest {
 
     checker.installMissing(missing);
 
-    var cmds = shell.invocations();
-    assertEquals(1, cmds.size());
-    assertTrue(cmds.getFirst().contains("apt-get install -y -qq curl"));
-    assertFalse(cmds.getFirst().contains("bash"));
+    assertEquals(List.of("apt-get", "install", "-y", "-qq", "curl"), shell.arguments().getLast());
   }
 
   @Test

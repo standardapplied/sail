@@ -84,7 +84,7 @@ class UpgradeE2EIT extends AbstractIncusIT {
           "/etc/systemd/system/sail-pty-host.service",
           "/var/lib/sail/host.yaml",
           SshIdentityProvisioner.DROP_IN,
-          SshdKeepalive.DROP_IN_PATH);
+          SshdKeepalive.DROP_IN.path());
   private static final String PERSONAL_ROOM = "fde-uday-demo-b67a43c29afbe133";
   private static final String MINT_PERSONAL_ROOM =
       """

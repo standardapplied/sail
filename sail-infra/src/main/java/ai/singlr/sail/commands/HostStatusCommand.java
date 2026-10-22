@@ -12,13 +12,18 @@ import ai.singlr.sail.engine.ContainerManager;
 import ai.singlr.sail.engine.ContainerState;
 import ai.singlr.sail.engine.DirQuery;
 import ai.singlr.sail.engine.HostDetector;
+import ai.singlr.sail.engine.HostProvisioner;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.SailPaths;
+import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.ShellExecutor;
 import ai.singlr.sail.engine.ZfsQuery;
+import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.TimeoutException;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Help.Ansi;
 import picocli.CommandLine.Model.CommandSpec;
@@ -53,11 +58,16 @@ public final class HostStatusCommand implements Runnable {
     }
     var hostYaml = HostYaml.fromMap(YamlUtil.parseFile(hostYamlPath));
 
-    var hostDetector = new HostDetector();
-    var hostInfo = hostDetector.detect();
+    report(hostYaml, new HostDetector().detect(), new ShellExecutor(false), json, System.out);
+  }
 
-    var shell = new ShellExecutor(false);
-
+  static void report(
+      HostYaml hostYaml,
+      HostDetector.HostInfo hostInfo,
+      ShellExec shell,
+      boolean json,
+      PrintStream out)
+      throws IOException, InterruptedException, TimeoutException {
     ZfsQuery.PoolUsage poolUsage = null;
     DirQuery.FsUsage fsUsage = null;
     if (hostYaml.isZfs()) {
@@ -66,25 +76,27 @@ public final class HostStatusCommand implements Runnable {
       fsUsage = DirQuery.queryFilesystem(shell);
     }
 
-    var mgr = new ContainerManager(shell);
-    var containers = mgr.listAll();
+    var incusVersion = HostProvisioner.incusVersion(shell);
+    var containers = Containers.of(shell);
 
     if (json) {
-      printJson(hostYaml, hostInfo, poolUsage, fsUsage, containers);
+      printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out);
       return;
     }
 
-    Banner.printBranding(System.out, Ansi.AUTO);
+    Banner.printBranding(out, Ansi.AUTO);
     Banner.printHostStatus(
-        hostYaml, hostInfo, poolUsage, fsUsage, containers, System.out, Ansi.AUTO);
+        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers.summary(), out, Ansi.AUTO);
   }
 
   private static void printJson(
       HostYaml hostYaml,
+      String incusVersion,
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
-      List<ContainerManager.ContainerInfo> containers) {
+      Containers containers,
+      PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
     map.put("os", hostInfo.osPrettyName());
@@ -109,15 +121,45 @@ public final class HostStatusCommand implements Runnable {
         map.put("disk_use_percent", fsUsage.usePercent());
       }
     }
-    map.put("incus_version", hostYaml.incusVersion());
+    map.put("incus_version", incusVersion);
     map.put("initialized_at", hostYaml.initializedAt());
-    var running =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
-    var stopped =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
-    map.put("containers_total", containers.size());
-    map.put("containers_running", running);
-    map.put("containers_stopped", stopped);
-    System.out.println(YamlUtil.dumpJson(map));
+    if (containers.error() != null) {
+      map.put("containers_error", containers.error());
+    } else {
+      map.put("containers_total", containers.listed().size());
+      map.put("containers_running", containers.running());
+      map.put("containers_stopped", containers.stopped());
+    }
+    out.println(YamlUtil.dumpJson(map));
+  }
+
+  /**
+   * This box's containers as Incus lists them, or why it could not: a daemon that does not answer
+   * leaves the rest of the status worth reading, and is never reported as zero containers.
+   */
+  private record Containers(List<ContainerManager.ContainerInfo> listed, String error) {
+
+    static Containers of(ShellExec shell) throws InterruptedException {
+      try {
+        return new Containers(new ContainerManager(shell).listAll(), null);
+      } catch (IOException | TimeoutException e) {
+        return new Containers(List.of(), e.getMessage());
+      }
+    }
+
+    long running() {
+      return listed.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
+    }
+
+    long stopped() {
+      return listed.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
+    }
+
+    String summary() {
+      if (error != null) {
+        return "unavailable (" + error + ")";
+      }
+      return listed.size() + " total (" + running() + " running, " + stopped() + " stopped)";
+    }
   }
 }

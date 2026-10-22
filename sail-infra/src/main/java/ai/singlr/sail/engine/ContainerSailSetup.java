@@ -133,7 +133,7 @@ public final class ContainerSailSetup {
           .ifPresent(
               live -> files.put(live.path(), HarnessHooks.renderLive(harness).orElseThrow()));
     }
-    files.put(SshdKeepalive.DROP_IN_PATH, SshdKeepalive.content());
+    files.put(SshdKeepalive.DROP_IN.path(), SshdKeepalive.DROP_IN.content());
     return files;
   }
 

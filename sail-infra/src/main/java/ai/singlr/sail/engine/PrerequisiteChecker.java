@@ -56,7 +56,10 @@ public final class PrerequisiteChecker {
     return new CheckResult(List.copyOf(present), List.copyOf(missing));
   }
 
-  /** Installs missing prerequisites that have a known package name. */
+  /**
+   * Installs missing prerequisites that have a known package name, after the {@link
+   * NeedrestartPolicy}: apt's needrestart hook would otherwise restart incusd on a box that has it.
+   */
   public void installMissing(List<Prerequisite> missing)
       throws IOException, InterruptedException, TimeoutException {
     var packages = missing.stream().filter(p -> p.pkg() != null).map(Prerequisite::pkg).toList();
@@ -65,6 +68,7 @@ public final class PrerequisiteChecker {
       return;
     }
 
+    NeedrestartPolicy.DROP_IN.install(shell);
     var command = new ArrayList<>(List.of("apt-get", "install", "-y", "-qq"));
     command.addAll(packages);
     var result = shell.exec(command, null, Duration.ofMinutes(3));

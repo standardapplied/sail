@@ -34,7 +34,6 @@ public record OperatorCommand(boolean sudo, boolean rootLogin) {
           "host keys sync",
           "host ssh-identity",
           "host status",
-          "host update",
           "host config set",
           "host sync",
           "project apply",

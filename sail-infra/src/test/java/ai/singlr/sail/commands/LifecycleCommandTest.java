@@ -443,22 +443,9 @@ class LifecycleCommandTest {
     var output = sw.toString();
     assertTrue(output.contains("init"), "Should list 'init' subcommand");
     assertTrue(output.contains("status"), "Should list 'status' subcommand");
-    assertTrue(output.contains("update"), "Should list 'update' subcommand");
-  }
-
-  @Test
-  void hostUpdateHelpShowsOptions() {
-    var cmd = new CommandLine(new Sail());
-    var sw = new StringWriter();
-    cmd.setOut(new PrintWriter(sw));
-
-    var exitCode = cmd.execute("host", "update", "--help");
-
-    assertEquals(0, exitCode);
-    var output = sw.toString();
-    assertTrue(output.contains("--dry-run"));
-    assertTrue(output.contains("--json"));
-    assertTrue(output.contains("Update system packages"));
+    assertFalse(
+        output.lines().anyMatch(line -> line.strip().startsWith("update ")),
+        "host packages are the operator's: " + output);
   }
 
   @Test

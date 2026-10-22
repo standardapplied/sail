@@ -186,6 +186,7 @@ public final class SystemdServiceInstaller {
         %sExecStart=%s server start --host %s --port %d%s
         Restart=on-failure
         RestartSec=2
+        SuccessExitStatus=143
         LimitNOFILE=4096
 
         [Install]

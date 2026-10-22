@@ -18,9 +18,9 @@ import java.util.Objects;
 import java.util.concurrent.TimeoutException;
 
 /**
- * Provisions a bare-metal host: installs Incus, creates the storage pool (dir or ZFS), initializes
- * Incus, creates the base profile, caches the container image, and writes {@code
- * /etc/sail/host.yaml}.
+ * Provisions a bare-metal host: keeps a library update from restarting Incus ({@link
+ * NeedrestartPolicy}), installs Incus, creates the storage pool (dir or ZFS), initializes Incus,
+ * creates the base profile, caches the container image, and writes {@code /etc/sail/host.yaml}.
  *
  * <p>Every step is idempotent — safe to run again on an already-provisioned host. A re-run
  * refreshes only the fields it provisions and keeps the rest of {@code host.yaml}: sync identity,
@@ -121,6 +121,7 @@ public final class HostProvisioner {
 
   private void updatePackages() throws IOException, InterruptedException, TimeoutException {
     step(1, "Updating system packages...");
+    NeedrestartPolicy.DROP_IN.install(shell);
     var update = shell.exec(List.of("apt-get", "update", "-qq"), null, INSTALL_TIMEOUT);
     if (!update.ok()) {
       throw new IOException("apt-get update failed: " + update.stderr());
@@ -249,16 +250,27 @@ public final class HostProvisioner {
       throw new IOException("Incus init failed: " + result.stderr());
     }
 
-    var version = "unknown";
-    var vResult = shell.exec(List.of("incus", "version"));
-    if (vResult.ok()) {
-      var firstLine = vResult.stdout().lines().findFirst().orElse("");
-      var colonIdx = firstLine.indexOf(':');
-      version = colonIdx >= 0 ? firstLine.substring(colonIdx + 1).strip() : firstLine.strip();
-    }
-
+    var version = incusVersion(shell);
     stepDone(4, "bridge: " + bridge);
     return version;
+  }
+
+  /**
+   * The installed Incus version, as {@code incus version} reports it: its first line (the client),
+   * after the colon. {@code "unknown"} when incus does not answer.
+   */
+  public static String incusVersion(ShellExec shell) throws InterruptedException {
+    try {
+      var result = shell.exec(List.of("incus", "version"));
+      if (!result.ok()) {
+        return "unknown";
+      }
+      var firstLine = result.stdout().lines().findFirst().orElse("");
+      var version = firstLine.substring(firstLine.indexOf(':') + 1).strip();
+      return version.isEmpty() ? "unknown" : version;
+    } catch (IOException | TimeoutException e) {
+      return "unknown";
+    }
   }
 
   private void createStoragePool(boolean isDir, String pool, String disk)
