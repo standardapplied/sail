@@ -14,6 +14,7 @@ import ai.singlr.sail.commands.CliCommand;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.engine.ShellExecutor;
+import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.store.FdeStore;
 import ai.singlr.sail.store.HeldProjects;
 import ai.singlr.sail.store.ProjectStore;
@@ -149,6 +150,64 @@ class RemedyOverHttpTest {
             "Spec 'taken' already exists. Pick another spec id, or edit it with: sail spec update"
                 + " taken (HTTP 409)"),
         CliCommand.lines(refusedCreate(), OperatorCommand.PLAIN));
+  }
+
+  @Test
+  void aStoreRefusalReachesTheReaderWithItsRemedyAsData() throws Exception {
+    db.execute("UPDATE specs SET body_hash = NULL WHERE id = 'taken'");
+    var response =
+        HttpClient.newHttpClient()
+            .send(
+                HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/specs/taken/content"))
+                    .header("Authorization", "Bearer " + token)
+                    .GET()
+                    .build(),
+                HttpResponse.BodyHandlers.ofString());
+
+    assertEquals(500, response.statusCode());
+    assertEquals(
+        List.of(
+            Map.of("text", "Run '"),
+            Map.of("run", "sail", "verb", "migrate", "args", List.of()),
+            Map.of("text", "'.")),
+        ((Map<?, ?>) YamlUtil.parseMap(response.body()).get("error")).get("remedy"));
+    SailApiClient.Refused refused;
+    try (var client = client()) {
+      refused =
+          assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/specs/taken/content"));
+    }
+    var reason =
+        "Spec taken has no content hash: this database's content migration never finished.";
+    assertEquals(
+        List.of(reason + " Run 'sudo sail migrate'. (HTTP 500)"),
+        CliCommand.lines(refused, OperatorCommand.SUDO));
+    assertEquals(
+        List.of(reason + " Run 'sail migrate'. (HTTP 500)"),
+        CliCommand.lines(refused, OperatorCommand.PLAIN));
+  }
+
+  @Test
+  void aCatalogDefinitionRefusedByItsReaderKeepsItsRemedy() {
+    Actor.run(
+        Actor.system(),
+        () -> new ProjectStore(db).upsert("beta", "name: beta\nagent_context: old\n"));
+    SailApiClient.Refused refused;
+    try (var client = client()) {
+      refused = assertThrows(SailApiClient.Refused.class, () -> client.get("/v1/projects/beta"));
+    }
+
+    assertEquals(
+        List.of(catalogRefusal("sudo sail")), CliCommand.lines(refused, OperatorCommand.SUDO));
+    assertEquals(List.of(catalogRefusal("sail")), CliCommand.lines(refused, OperatorCommand.PLAIN));
+  }
+
+  private static String catalogRefusal(String sail) {
+    return "The definition of project 'beta' in the catalog could not be read: agent_context is no"
+        + " longer read: sail writes no context file. Put what it said in the repo's AGENTS.md,"
+        + " and a rule in a project skill ("
+        + sail
+        + " project skills add). Then remove `agent_context` from beta/sail.yaml. (HTTP 500)";
   }
 
   @Test

@@ -5,7 +5,9 @@
 
 package ai.singlr.sail.api;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.common.Remedy;
+import ai.singlr.sail.common.Strings;
 import ai.singlr.sail.config.SailYaml;
 import ai.singlr.sail.config.YamlUtil;
 import ai.singlr.sail.store.ProjectStore;
@@ -61,15 +63,41 @@ public interface ProjectReader {
     }
   }
 
-  /** A catalog row that holds a definition which cannot be read as one. */
-  final class Unreadable extends RuntimeException {
+  /** A catalog row that holds a definition which cannot be read as one, with its cause's remedy. */
+  final class Unreadable extends RuntimeException implements Remedied {
+    private final String reason;
+    private final transient Remedy remedy;
+
     Unreadable(String project, Throwable cause) {
-      super(
-          "The definition of project '"
-              + project
-              + "' in the catalog could not be read: "
-              + cause.getMessage(),
+      this(
+          "The definition of project '" + project + "' in the catalog could not be read:",
+          cause instanceof Remedied remedied ? remedied : null,
           cause);
+    }
+
+    private Unreadable(String unread, Remedied remedied, Throwable cause) {
+      this(
+          remedied == null
+              ? unread + " " + cause.getMessage()
+              : Strings.isBlank(remedied.reason()) ? unread : unread + " " + remedied.reason(),
+          remedied == null ? Remedy.NONE : remedied.remedy(),
+          cause);
+    }
+
+    private Unreadable(String reason, Remedy remedy, Throwable cause) {
+      super(Remedied.message(reason, remedy), cause);
+      this.reason = reason;
+      this.remedy = remedy;
+    }
+
+    @Override
+    public String reason() {
+      return reason;
+    }
+
+    @Override
+    public Remedy remedy() {
+      return remedy;
     }
   }
 }

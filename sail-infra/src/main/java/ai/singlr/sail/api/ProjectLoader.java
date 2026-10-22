@@ -43,7 +43,7 @@ final class ProjectLoader {
     try {
       return definitions.require(project);
     } catch (ProjectReader.Unreadable e) {
-      throw new ApiException(ErrorCode.PROJECT_LOAD_FAILED, e.getMessage(), e);
+      throw ApiException.of(ErrorCode.PROJECT_LOAD_FAILED, e);
     }
   }
 

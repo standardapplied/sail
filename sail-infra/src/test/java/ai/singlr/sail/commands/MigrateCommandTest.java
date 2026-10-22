@@ -12,6 +12,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ai.singlr.sail.common.Remedy;
 import ai.singlr.sail.config.HostYaml;
 import ai.singlr.sail.engine.IncusDeviceManager;
 import ai.singlr.sail.engine.OperatorCommand;
@@ -25,6 +26,7 @@ import ai.singlr.sail.pty.PtyIdentity;
 import ai.singlr.sail.pty.PtyRooms;
 import ai.singlr.sail.pty.PtySessionHost;
 import ai.singlr.sail.store.DataMigration;
+import ai.singlr.sail.store.DataMigrator;
 import ai.singlr.sail.store.LegacyDataMigration;
 import ai.singlr.sail.store.SchemaManager;
 import ai.singlr.sail.store.SpecStore;
@@ -76,6 +78,33 @@ class MigrateCommandTest {
     assertEquals("devbox", assigned.sync().boxId());
     assertEquals("sail@maindevbox", assigned.sync().main());
     assertTrue(MigrateCommand.assignBoxId(assigned, "renamed").isEmpty(), "an id is kept");
+  }
+
+  @Test
+  void aMigrationNoteNamesItsCommandAsItsReaderTypesIt() {
+    var runs =
+        List.of(
+            new DataMigrator.Run(
+                "materialized-files",
+                false,
+                new DataMigration.Report(
+                    1,
+                    0,
+                    1,
+                    List.of(Remedy.of("restore access and rerun ", Remedy.sail("migrate"))))));
+
+    assertTrue(
+        summaryLines(runs, OperatorCommand.SUDO)
+            .contains("restore access and rerun sudo sail migrate"));
+    assertTrue(
+        summaryLines(runs, OperatorCommand.PLAIN)
+            .contains("restore access and rerun sail migrate"));
+  }
+
+  private static List<String> summaryLines(List<DataMigrator.Run> runs, OperatorCommand reader) {
+    return captureStdout(() -> MigrateCommand.printSummary("test.db", 1, 1, runs, reader))
+        .lines()
+        .toList();
   }
 
   @Test

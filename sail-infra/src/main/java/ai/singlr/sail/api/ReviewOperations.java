@@ -166,7 +166,7 @@ final class ReviewOperations {
     try {
       NameValidator.requireValidSpecId(followupId);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
     return followupId;
   }

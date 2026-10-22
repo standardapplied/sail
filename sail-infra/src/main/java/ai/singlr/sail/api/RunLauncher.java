@@ -363,7 +363,7 @@ public final class RunLauncher {
           ProjectSkillInstaller.installProject(
               shell, s.project(), Harnesses.of(s.agentType()), projectSkills.get());
     } catch (IllegalStateException changed) {
-      throw new ApiException(ErrorCode.AGENT_LAUNCH_FAILED, changed.getMessage());
+      throw ApiException.of(ErrorCode.AGENT_LAUNCH_FAILED, changed);
     } catch (Exception e) {
       throw new ApiException(
           ErrorCode.AGENT_LAUNCH_FAILED,

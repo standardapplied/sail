@@ -8,6 +8,7 @@ package ai.singlr.sail.api;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import ai.singlr.sail.config.Lane;
@@ -20,11 +21,13 @@ import ai.singlr.sail.engine.ScriptedShellExecutor;
 import ai.singlr.sail.engine.ShellExec;
 import ai.singlr.sail.engine.StageSkill;
 import ai.singlr.sail.engine.WatcherSpawner;
+import ai.singlr.sail.engine.WorkstationIdentity;
 import ai.singlr.sail.gen.SpecSkillGenerator;
 import ai.singlr.sail.identity.Acting;
 import ai.singlr.sail.identity.ActingAs;
 import ai.singlr.sail.identity.Actor;
 import ai.singlr.sail.identity.Role;
+import ai.singlr.sail.ssh.SshPublicKey;
 import ai.singlr.sail.store.BoxCredentialStore;
 import ai.singlr.sail.store.EventStore;
 import ai.singlr.sail.store.FdeStore;
@@ -333,25 +336,32 @@ class SailOperationsTest {
   }
 
   @Test
-  void connectRefusesADamagedWorkstationKeyFileWithItsOwnSentence() throws Exception {
+  void connectRefusesADamagedWorkstationKeyFileWithItsRemedyAsData() throws Exception {
+    var key = Files.writeString(tempDir.resolve("workstation_key.pub"), "not a key\n");
     var operations =
         operationsWith(
             shell().on("incus list ^acme$", RUNNING_JSON),
             store -> {},
-            () -> {
-              throw new IllegalStateException(
-                  "This box's workstation key (/root/.sail/workstation_key.pub) is not an SSH"
-                      + " public key: Unsupported SSH key type 'not'. Register the key you connect"
-                      + " with: sudo sail host config set ssh-public-key");
-            });
+            () ->
+                new ConnectEnvironment(
+                    "203.0.113.7", "uday", WorkstationIdentity.registeredAt(key).isPresent()));
 
     var result = operations.connect("acme");
 
     assertError(ErrorCode.PRECONDITION_FAILED, result);
-    assertTrue(
-        fullError(result).contains("workstation_key.pub) is not an SSH public key"),
-        fullError(result));
-    assertTrue(fullError(result).contains("sudo sail host config set ssh-public-key"));
+    var error = ApiError.from((Result.Failure<?>) result).toMap();
+    assertEquals(
+        "This box's workstation key ("
+            + key
+            + ") is not an SSH public key: "
+            + assertThrows(IllegalArgumentException.class, () -> SshPublicKey.parse("not a key"))
+                .getMessage(),
+        error.get("message"));
+    assertEquals(
+        List.of(
+            Map.of("text", "Register the key you connect with: "),
+            Map.of("run", "sail", "verb", "host config set ssh-public-key", "args", List.of())),
+        error.get("remedy"));
   }
 
   @Test

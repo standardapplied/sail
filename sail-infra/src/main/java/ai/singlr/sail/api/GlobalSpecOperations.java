@@ -93,7 +93,7 @@ final class GlobalSpecOperations {
       var specs = readable(filter).stream().map(this::viewOf).toList();
       return new GlobalSpecsListResponse(specs, specs.size());
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
   }
 
@@ -646,7 +646,7 @@ final class GlobalSpecOperations {
     try {
       return Spec.validatedModel(model);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
   }
 
@@ -654,7 +654,7 @@ final class GlobalSpecOperations {
     try {
       return Spec.validatedReasoningEffort(reasoningEffort);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
   }
 
@@ -680,7 +680,7 @@ final class GlobalSpecOperations {
     try {
       return SpecStatus.fromWire(value);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
   }
 }

@@ -222,7 +222,7 @@ public final class MembershipService {
               LaunchAdmission.validateModel(model),
               DateTimeUtils.now().toString());
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.BAD_REQUEST, e);
     }
     var refusal = harness.readOnlyRefusal();
     if (!member.full() && refusal.isPresent()) {

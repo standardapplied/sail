@@ -135,7 +135,7 @@ public final class LaunchAdmission {
     try {
       return Harnesses.of(agentYamlName);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.BAD_REQUEST, e);
     }
   }
 
@@ -148,7 +148,7 @@ public final class LaunchAdmission {
     try {
       return Spec.validatedModel(model);
     } catch (IllegalArgumentException e) {
-      throw new ApiException(ErrorCode.INVALID_REQUEST, e.getMessage());
+      throw ApiException.of(ErrorCode.INVALID_REQUEST, e);
     }
   }
 

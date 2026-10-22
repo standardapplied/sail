@@ -174,7 +174,7 @@ public final class ServerStartCommand implements Runnable {
                     + " ambiguous, "
                     + run.report().skipped()
                     + " skipped"));
-        run.report().notes().forEach(note -> System.out.println("    " + note));
+        run.report().notes().forEach(note -> System.out.println("    " + note.plain()));
       }
     }
 

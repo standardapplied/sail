@@ -886,7 +886,7 @@ public final class SailOperations implements HostOperations {
                     : store.list(room.id(), before, limit);
             messages = rows.stream().map(SpecMessageView::from).toList();
           } catch (IllegalArgumentException invalid) {
-            throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+            throw ApiException.of(ErrorCode.BAD_REQUEST, invalid);
           }
           return new SpecMessagesResponse(room.id(), messages);
         });
@@ -915,7 +915,7 @@ public final class SailOperations implements HostOperations {
     try {
       row = store.append(roomId, author, request.body(), request.replyTo(), request.question());
     } catch (IllegalArgumentException invalid) {
-      throw new ApiException(ErrorCode.BAD_REQUEST, invalid.getMessage());
+      throw ApiException.of(ErrorCode.BAD_REQUEST, invalid);
     }
     var data = new LinkedHashMap<String, Object>();
     data.put(Event.WellKnownData.MESSAGE_ID, row.id());
@@ -1494,7 +1494,7 @@ public final class SailOperations implements HostOperations {
     try {
       environment = connectEnvironment.get();
     } catch (IllegalStateException damagedKey) {
-      throw new ApiException(ErrorCode.PRECONDITION_FAILED, damagedKey.getMessage());
+      throw ApiException.of(ErrorCode.PRECONDITION_FAILED, damagedKey);
     }
     if (Strings.isBlank(environment.serverIp())) {
       throw new ApiException(
@@ -1832,8 +1832,11 @@ public final class SailOperations implements HostOperations {
     } catch (WriteRefused e) {
       return Refusals.failure(e.refusal());
     } catch (IllegalArgumentException e) {
-      return Result.failure(ErrorCode.INVALID_REQUEST, e.getMessage(), e);
+      return ApiException.of(ErrorCode.INVALID_REQUEST, e).failure().asFailure();
     } catch (Exception e) {
+      if (e instanceof Remedied) {
+        return ApiException.of(ErrorCode.INTERNAL, e).failure().asFailure();
+      }
       ApiLog.unexpected("an API operation", e);
       return Result.failure(ErrorCode.INTERNAL, "sail API operation failed.", e);
     }
