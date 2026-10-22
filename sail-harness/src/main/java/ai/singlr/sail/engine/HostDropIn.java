@@ -5,13 +5,16 @@
 
 package ai.singlr.sail.engine;
 
+import java.io.IOException;
 import java.util.List;
 import java.util.Objects;
+import java.util.concurrent.TimeoutException;
 
 /**
  * A config file sail owns under {@code /etc}, and what takes it in once written: {@code reload} is
  * shell that runs after the write, empty when the reader reads the file on its own. The content
- * reaches bash as an argument, never as script text, and lands atomically with mode 0644.
+ * reaches bash as an argument, never as script text, and lands atomically with mode 0644: each
+ * writer renames its own temporary file, so concurrent installs never publish a partial one.
  */
 public record HostDropIn(String name, String path, String content, String reload) {
 
@@ -20,9 +23,11 @@ public record HostDropIn(String name, String path, String content, String reload
       """
       set -eu
       mkdir -p "$(dirname -- "$2")"
-      printf '%s' "$1" > "$2.tmp"
-      chmod 0644 "$2.tmp"
-      mv -f -- "$2.tmp" "$2"
+      tmp=$(mktemp -- "$2.tmp.XXXXXX")
+      trap 'rm -f -- "$tmp"' EXIT
+      printf '%s' "$1" > "$tmp"
+      chmod 0644 "$tmp"
+      mv -f -- "$tmp" "$2"
       """;
 
   public HostDropIn {
@@ -35,5 +40,13 @@ public record HostDropIn(String name, String path, String content, String reload
   /** The command that installs this file at {@code target} on the machine it runs on. */
   public List<String> installCommand(String target) {
     return List.of("bash", "-c", WRITE_SCRIPT + reload, "bash", content, target);
+  }
+
+  /** Installs this file at its own path on the machine {@code shell} runs on, or throws. */
+  public void install(ShellExec shell) throws IOException, InterruptedException, TimeoutException {
+    var result = shell.exec(installCommand(path));
+    if (!result.ok()) {
+      throw new IOException("Failed to write " + path + ": " + result.stderr());
+    }
   }
 }

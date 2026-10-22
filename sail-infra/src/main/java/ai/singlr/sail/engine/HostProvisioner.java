@@ -121,11 +121,7 @@ public final class HostProvisioner {
 
   private void updatePackages() throws IOException, InterruptedException, TimeoutException {
     step(1, "Updating system packages...");
-    var policy = NeedrestartPolicy.DROP_IN;
-    var written = shell.exec(policy.installCommand(policy.path()));
-    if (!written.ok()) {
-      throw new IOException("Failed to write " + policy.path() + ": " + written.stderr());
-    }
+    NeedrestartPolicy.DROP_IN.install(shell);
     var update = shell.exec(List.of("apt-get", "update", "-qq"), null, INSTALL_TIMEOUT);
     if (!update.ok()) {
       throw new IOException("apt-get update failed: " + update.stderr());

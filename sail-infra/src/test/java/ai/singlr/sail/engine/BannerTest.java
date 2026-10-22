@@ -696,11 +696,6 @@ class BannerTest {
   @Test
   void hostStatusShowsAllFields() {
     var poolUsage = new ZfsQuery.PoolUsage("960G", "150G", "810G", "15%");
-    var containers =
-        List.of(
-            new ContainerManager.ContainerInfo(
-                "acme", new ContainerState.Running("10.0.0.42"), null),
-            new ContainerManager.ContainerInfo("fintech", new ContainerState.Stopped(), null));
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
@@ -708,7 +703,7 @@ class BannerTest {
         SUPPORTED,
         poolUsage,
         null,
-        containers,
+        "2 total (1 running, 1 stopped)",
         new PrintStream(out),
         Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -731,7 +726,6 @@ class BannerTest {
   @Test
   void hostStatusBordersAlign() {
     var poolUsage = new ZfsQuery.PoolUsage("960G", "150G", "810G", "15%");
-    var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
@@ -739,7 +733,7 @@ class BannerTest {
         SUPPORTED,
         poolUsage,
         null,
-        containers,
+        "0 total (0 running, 0 stopped)",
         new PrintStream(out),
         Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -754,7 +748,6 @@ class BannerTest {
 
   @Test
   void hostStatusWithNullPoolUsage() {
-    var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         SAMPLE_HOST_YAML,
@@ -762,7 +755,7 @@ class BannerTest {
         SUPPORTED,
         null,
         null,
-        containers,
+        "0 total (0 running, 0 stopped)",
         new PrintStream(out),
         Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);
@@ -785,7 +778,6 @@ class BannerTest {
             null,
             "2026-02-18T01:00:00Z");
     var fsUsage = new DirQuery.FsUsage("894G", "120G", "774G", "14%");
-    var containers = List.<ContainerManager.ContainerInfo>of();
     var out = new ByteArrayOutputStream();
     Banner.printHostStatus(
         dirHostYaml,
@@ -793,7 +785,7 @@ class BannerTest {
         SUPPORTED,
         null,
         fsUsage,
-        containers,
+        "0 total (0 running, 0 stopped)",
         new PrintStream(out),
         Ansi.OFF);
     var output = out.toString(StandardCharsets.UTF_8);

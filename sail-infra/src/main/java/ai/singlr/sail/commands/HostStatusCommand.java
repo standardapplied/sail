@@ -76,8 +76,8 @@ public final class HostStatusCommand implements Runnable {
       fsUsage = DirQuery.queryFilesystem(shell);
     }
 
-    var containers = new ContainerManager(shell).listAll();
     var incusVersion = HostProvisioner.incusVersion(shell);
+    var containers = Containers.of(shell);
 
     if (json) {
       printJson(hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out);
@@ -86,7 +86,7 @@ public final class HostStatusCommand implements Runnable {
 
     Banner.printBranding(out, Ansi.AUTO);
     Banner.printHostStatus(
-        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers, out, Ansi.AUTO);
+        hostYaml, incusVersion, hostInfo, poolUsage, fsUsage, containers.summary(), out, Ansi.AUTO);
   }
 
   private static void printJson(
@@ -95,7 +95,7 @@ public final class HostStatusCommand implements Runnable {
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
-      List<ContainerManager.ContainerInfo> containers,
+      Containers containers,
       PrintStream out) {
     var map = new LinkedHashMap<String, Object>();
     map.put("hostname", hostInfo.hostname());
@@ -123,13 +123,43 @@ public final class HostStatusCommand implements Runnable {
     }
     map.put("incus_version", incusVersion);
     map.put("initialized_at", hostYaml.initializedAt());
-    var running =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
-    var stopped =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
-    map.put("containers_total", containers.size());
-    map.put("containers_running", running);
-    map.put("containers_stopped", stopped);
+    if (containers.error() != null) {
+      map.put("containers_error", containers.error());
+    } else {
+      map.put("containers_total", containers.listed().size());
+      map.put("containers_running", containers.running());
+      map.put("containers_stopped", containers.stopped());
+    }
     out.println(YamlUtil.dumpJson(map));
+  }
+
+  /**
+   * This box's containers as Incus lists them, or why it could not: a daemon that does not answer
+   * leaves the rest of the status worth reading, and is never reported as zero containers.
+   */
+  private record Containers(List<ContainerManager.ContainerInfo> listed, String error) {
+
+    static Containers of(ShellExec shell) throws InterruptedException {
+      try {
+        return new Containers(new ContainerManager(shell).listAll(), null);
+      } catch (IOException | TimeoutException e) {
+        return new Containers(List.of(), e.getMessage());
+      }
+    }
+
+    long running() {
+      return listed.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
+    }
+
+    long stopped() {
+      return listed.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
+    }
+
+    String summary() {
+      if (error != null) {
+        return "unavailable (" + error + ")";
+      }
+      return listed.size() + " total (" + running() + " running, " + stopped() + " stopped)";
+    }
   }
 }

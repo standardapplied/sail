@@ -781,7 +781,7 @@ public final class Banner {
       HostDetector.HostInfo hostInfo,
       ZfsQuery.PoolUsage poolUsage,
       DirQuery.FsUsage fsUsage,
-      List<ContainerManager.ContainerInfo> containers,
+      String containers,
       PrintStream out,
       Ansi ansi) {
     var hostname = Objects.requireNonNullElse(hostInfo.hostname(), "");
@@ -791,18 +791,13 @@ public final class Banner {
             ? hostInfo.threads() + " cores"
             : hostInfo.cores() + " cores / " + hostInfo.threads() + " threads";
     var mem = NumberFormat.getNumberInstance(Locale.US).format(hostInfo.memoryMb()) + " MB";
-    var running =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Running).count();
-    var stopped =
-        containers.stream().filter(c -> c.state() instanceof ContainerState.Stopped).count();
-    var summary = containers.size() + " total (" + running + " running, " + stopped + " stopped)";
 
     var w = W;
     w = Math.max(w, rowWidth("Hostname:", hostname));
     w = Math.max(w, rowWidth("OS:", osName));
     w = Math.max(w, rowWidth("CPU:", cpu));
     w = Math.max(w, rowWidth("RAM:", mem));
-    w = Math.max(w, rowWidth("Containers:", summary));
+    w = Math.max(w, rowWidth("Containers:", containers));
     w = Math.max(w, rowWidth("Incus:", incusVersion));
     w = Math.max(w, rowWidth("Initialized:", formatTimestamp(hostYaml.initializedAt())));
 
@@ -873,7 +868,7 @@ public final class Banner {
     labelRow(out, ansi, w, "Initialized:", formatTimestamp(hostYaml.initializedAt()), null, null);
     emptyRow(out, ansi, w);
 
-    labelRow(out, ansi, w, "Containers:", summary, null, null);
+    labelRow(out, ansi, w, "Containers:", containers, null, null);
     emptyRow(out, ansi, w);
 
     out.println(amber(ansi, "  @|bold,cyan \u2570" + "\u2500".repeat(w) + "\u256f|@"));
