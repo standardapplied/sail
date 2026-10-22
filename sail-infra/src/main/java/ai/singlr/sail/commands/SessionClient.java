@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.common.Remedied;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import java.io.IOException;
@@ -53,8 +54,8 @@ public final class SessionClient implements AutoCloseable {
 
   private String expectWelcome() throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var message)) {
-      throw new IOException(message);
+    if (reply instanceof PtyMessage.Err(var detail)) {
+      throw Remedied.io("", detail);
     }
     if (!(reply instanceof PtyMessage.Welcome(var bootId))) {
       throw new IOException("Unexpected host reply to hello: " + reply.getClass());
@@ -116,8 +117,8 @@ public final class SessionClient implements AutoCloseable {
 
   private void expectOk(String verb) throws IOException {
     var reply = PtyWire.read(channel);
-    if (reply instanceof PtyMessage.Err(var message)) {
-      throw new IOException(message);
+    if (reply instanceof PtyMessage.Err(var detail)) {
+      throw Remedied.io("", detail);
     }
     if (!(reply instanceof PtyMessage.Ok)) {
       throw new IOException("Unexpected host reply to " + verb + ": " + reply.getClass());

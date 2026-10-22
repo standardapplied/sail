@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.pty;
 
+import ai.singlr.sail.common.Remedy;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -135,7 +136,7 @@ public final class PtyWire {
         out.string(m.next());
       }
       case PtyMessage.Ok m -> out.type(30);
-      case PtyMessage.Err m -> out.type(31).string(m.message());
+      case PtyMessage.Err m -> encodeRemedy(out.type(31).string(m.message()), m.detail());
       case PtyMessage.Welcome m -> out.type(32).string(m.hostBootId());
     }
     return out.finish();
@@ -150,9 +151,51 @@ public final class PtyWire {
     return switch (message) {
       case PtyMessage.Output(var seq, var bytes) -> bytes.length + 16;
       case PtyMessage.SessionEnded(var reason) -> reason.length() + 16;
-      case PtyMessage.Err(var text) -> text.length() + 16;
       default -> 512;
     };
+  }
+
+  /**
+   * A refusal's remedy, after the plain message an older peer reads alone and stops at: each part
+   * as words ({@code 0, text}) or a command ({@code 1, runs, verb, args}).
+   */
+  private static void encodeRemedy(Writer out, Remedy remedy) {
+    out.i32(remedy.parts().size());
+    for (var part : remedy.parts()) {
+      switch (part) {
+        case Remedy.Words words -> out.bool(false).string(words.text());
+        case Remedy.Command command ->
+            out.bool(true)
+                .string(command.runs().name())
+                .string(command.verb())
+                .stringList(command.args());
+      }
+    }
+  }
+
+  private static PtyMessage.Err decodeErr(ByteBuffer in) throws IOException {
+    var message = string(in);
+    if (!in.hasRemaining()) {
+      return new PtyMessage.Err(message);
+    }
+    var count = bounded(in);
+    var parts = new ArrayList<Remedy.Part>(count);
+    for (var i = 0; i < count; i++) {
+      parts.add(in.get() == 1 ? command(in) : new Remedy.Words(string(in)));
+    }
+    return new PtyMessage.Err(new Remedy(parts));
+  }
+
+  private static Remedy.Command command(ByteBuffer in) throws IOException {
+    var runs = string(in);
+    var verb = string(in);
+    var args = stringList(in);
+    try {
+      return new Remedy.Command(Remedy.Runs.valueOf(runs), verb, args);
+    } catch (IllegalArgumentException corrupt) {
+      throw new IOException(
+          "Corrupt pty frame: a refusal names a command '" + verb + "' run by '" + runs + "'.");
+    }
   }
 
   private static Writer encodeInfo(Writer out, PtyMessage.SessionInfo info) {
@@ -200,7 +243,7 @@ public final class PtyWire {
         yield new PtyMessage.Sessions(List.copyOf(sessions), string(in));
       }
       case 30 -> new PtyMessage.Ok();
-      case 31 -> new PtyMessage.Err(string(in));
+      case 31 -> decodeErr(in);
       case 32 -> new PtyMessage.Welcome(string(in));
       default -> throw new IOException("Unknown pty frame type " + type + ".");
     };

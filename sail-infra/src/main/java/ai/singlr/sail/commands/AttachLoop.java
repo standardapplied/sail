@@ -5,6 +5,7 @@
 
 package ai.singlr.sail.commands;
 
+import ai.singlr.sail.engine.OperatorCommand;
 import ai.singlr.sail.pty.PtyMessage;
 import ai.singlr.sail.pty.PtyWire;
 import java.io.IOException;
@@ -120,7 +121,8 @@ public final class AttachLoop {
                   stdout, "history resumes mid-sequence; the screen settles on the next redraw");
             }
           }
-          case PtyMessage.Err(var refusal) -> narrate(stdout, refusal);
+          case PtyMessage.Err(var refusal) ->
+              narrate(stdout, OperatorCommand.here().render(refusal));
           default -> {}
         }
       }
