@@ -70,18 +70,17 @@ public interface ProjectReader {
 
     Unreadable(String project, Throwable cause) {
       this(
-          "The definition of project '" + project + "' in the catalog could not be read:",
-          cause instanceof Remedied remedied ? remedied : null,
+          "The definition of project '"
+              + project
+              + "' in the catalog could not be read:"
+              + why(cause),
+          cause instanceof Remedied remedied ? remedied.remedy() : Remedy.NONE,
           cause);
     }
 
-    private Unreadable(String unread, Remedied remedied, Throwable cause) {
-      this(
-          remedied == null
-              ? unread + " " + cause.getMessage()
-              : Strings.isBlank(remedied.reason()) ? unread : unread + " " + remedied.reason(),
-          remedied == null ? Remedy.NONE : remedied.remedy(),
-          cause);
+    private static String why(Throwable cause) {
+      var why = cause instanceof Remedied remedied ? remedied.reason() : cause.getMessage();
+      return Strings.isBlank(why) ? "" : " " + why;
     }
 
     private Unreadable(String reason, Remedy remedy, Throwable cause) {
